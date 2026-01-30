@@ -791,4 +791,15 @@ mod tests {
         let err = pool.get(4).expect_err("missing");
         assert_eq!(err.kind(), ErrorKind::NotFound);
     }
+
+    #[test]
+    fn bounds_empty_pool_returns_none() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let pool = Pool::create(&path, PoolOptions::new(4096 + 1024)).expect("create");
+
+        let bounds = pool.bounds().expect("bounds");
+        assert_eq!(bounds.oldest_seq, None);
+        assert_eq!(bounds.newest_seq, None);
+    }
 }
