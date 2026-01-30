@@ -170,16 +170,41 @@ fn run() -> Result<(), Error> {
             data_json,
             data_file,
             durability,
+            print,
         } => {
             let path = resolve_poolref(&pool, &pool_dir)?;
-            let data = read_data(data_json, data_file)?;
-            let payload = lite3::encode_message(&descrip, &data)?;
             let mut pool_handle = Pool::open(&path)?;
-            let timestamp_ns = now_ns()?;
             let durability = parse_durability(&durability)?;
-            let options = AppendOptions::new(timestamp_ns, durability);
-            let seq = pool_handle.append_with_options(payload.as_slice(), options)?;
-            emit_json(message_json(&pool, seq, timestamp_ns, &descrip, &data)?);
+            if data_json.is_some() && data_file.is_some() {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("multiple data inputs provided (use only one of --data-json, --data, or stdin)"));
+            }
+
+            if data_json.is_some() || data_file.is_some() || io::stdin().is_terminal() {
+                let data = read_data_single(data_json, data_file)?;
+                let payload = lite3::encode_message(&descrip, &data)?;
+                let timestamp_ns = now_ns()?;
+                let options = AppendOptions::new(timestamp_ns, durability);
+                let seq = pool_handle.append_with_options(payload.as_slice(), options)?;
+                if print {
+                    emit_json(message_json(&pool, seq, timestamp_ns, &descrip, &data)?);
+                }
+            } else {
+                let count = read_json_stream(io::stdin().lock(), |data| {
+                    let payload = lite3::encode_message(&descrip, &data)?;
+                    let timestamp_ns = now_ns()?;
+                    let options = AppendOptions::new(timestamp_ns, durability);
+                    let seq = pool_handle.append_with_options(payload.as_slice(), options)?;
+                    if print {
+                        emit_message(message_json(&pool, seq, timestamp_ns, &descrip, &data)?, false);
+                    }
+                    Ok(())
+                })?;
+                if count == 0 {
+                    return Err(Error::new(ErrorKind::Usage)
+                        .with_message("missing data input (stdin had no JSON values)"));
+                }
+            }
             Ok(())
         }
         Command::Get { pool, seq } => {
@@ -314,7 +339,11 @@ Examples:\n\
 Data input precedence:\n\
   1) --data-json\n\
   2) --data (file path, use @- for stdin)\n\
-  3) stdin (only if not a TTY)\n\
+  3) stdin stream (when not a TTY; multiple JSON values allowed)\n\
+\n\
+Output:\n\
+  - Silent by default\n\
+  - Use --print to emit committed message JSON (JSONL for streams)\n\
 \n\
 Durability modes:\n\
   - fast (default): best-effort, no explicit flush\n\
@@ -325,6 +354,7 @@ Examples:\n\
   plasmite poke demo --data-json '{\"x\":1}' --durability flush\n\
   plasmite poke demo --data @payload.json\n\
   echo '{\"x\":1}' | plasmite poke demo\n\
+  printf '%s\\n' '{\"x\":1}' '{\"x\":2}' | plasmite poke demo --print\n\
 ",
     )]
     Poke {
@@ -338,6 +368,8 @@ Examples:\n\
         data_file: Option<String>,
         #[arg(long, default_value = "fast", help = "Durability mode: fast|flush")]
         durability: String,
+        #[arg(long, help = "Print committed message(s) as JSON/JSONL")]
+        print: bool,
     },
     #[command(
         about = "Fetch one message by seq",
@@ -541,7 +573,9 @@ fn parse_durability(input: &str) -> Result<Durability, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_size;
+    use super::{parse_size, read_json_stream};
+    use serde_json::json;
+    use std::io::Cursor;
 
     #[test]
     fn parse_size_accepts_bytes_and_kmg() {
@@ -557,6 +591,19 @@ mod tests {
         assert!(parse_size("1MiB").is_err());
         assert!(parse_size("2Gi").is_err());
         assert!(parse_size("3KiB").is_err());
+    }
+
+    #[test]
+    fn read_json_stream_accepts_multiple_values() {
+        let input = b"{\"a\":1}\n {\"b\":2} {\"c\":3}";
+        let mut values = Vec::new();
+        let count = read_json_stream(Cursor::new(input), |value| {
+            values.push(value);
+            Ok(())
+        })
+        .expect("stream parse");
+        assert_eq!(count, 3);
+        assert_eq!(values, vec![json!({"a":1}), json!({"b":2}), json!({"c":3})]);
     }
 }
 
@@ -627,13 +674,7 @@ fn emit_error(err: &Error) {
     eprintln!("{json}");
 }
 
-fn read_data(data_json: Option<String>, data_file: Option<String>) -> Result<Value, Error> {
-    let provided = data_json.is_some() as u8 + data_file.is_some() as u8;
-    if provided > 1 {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("multiple data inputs provided (use only one of --data-json, --data, or stdin)"));
-    }
-
+fn read_data_single(data_json: Option<String>, data_file: Option<String>) -> Result<Value, Error> {
     let json_str = if let Some(data) = data_json {
         data
     } else if let Some(data) = data_file {
@@ -644,8 +685,6 @@ fn read_data(data_json: Option<String>, data_file: Option<String>) -> Result<Val
             std::fs::read_to_string(path)
                 .map_err(|err| Error::new(ErrorKind::Io).with_message("failed to read data file").with_source(err))?
         }
-    } else if !io::stdin().is_terminal() {
-        read_stdin()?
     } else {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("missing data input (use --data-json, --data @FILE, or pipe JSON to stdin)"));
@@ -665,6 +704,25 @@ fn read_stdin() -> Result<String, Error> {
         .read_to_string(&mut buf)
         .map_err(|err| Error::new(ErrorKind::Io).with_message("failed to read stdin").with_source(err))?;
     Ok(buf)
+}
+
+fn read_json_stream<R, F>(reader: R, mut on_value: F) -> Result<usize, Error>
+where
+    R: Read,
+    F: FnMut(Value) -> Result<(), Error>,
+{
+    let stream = serde_json::Deserializer::from_reader(reader).into_iter::<Value>();
+    let mut count = 0usize;
+    for item in stream {
+        let value = item.map_err(|err| {
+            Error::new(ErrorKind::Usage)
+                .with_message("invalid json (expected JSON values)")
+                .with_source(err)
+        })?;
+        on_value(value)?;
+        count += 1;
+    }
+    Ok(count)
 }
 
 fn now_ns() -> Result<u64, Error> {

@@ -34,14 +34,14 @@ Minimal, explicit flag set for v0.0.1:
 
 * Global: `--dir`
 * `pool create`: `--size`
-* `poke`: `--descrip`, `--data-json`, `--data @FILE` (plus stdin-as-data fallback), `--durability fast|flush`
+* `poke`: `--descrip`, `--data-json`, `--data @FILE` (plus stdin stream fallback), `--durability fast|flush`, `--print`
 * `peek`: `--tail`, `--follow`, `--idle-timeout`
 
-JSON output is always the default.
+JSON output is the default for commands that print; `poke` is silent unless `--print` is provided.
 
 ### Output formats
 
-* Non-streaming: JSON only.
+* Non-streaming: JSON only (when output is enabled).
 * Streaming: default is pretty JSON on TTY for non-follow reads; JSONL for `--follow` or non-TTY.
 * `--pretty` or `--jsonl` override the default.
 * Errors are JSON objects written to stderr.
@@ -440,7 +440,7 @@ plasmite poke POOLREF [OPTIONS]
 
 * `--data-json JSON` (inline)
 * `--data @FILE.json` (read JSON from file; `@-` means stdin)
-* If stdin is not a TTY and no `--data*` is provided: treat stdin as JSON data.
+* If stdin is not a TTY and no `--data*` is provided: treat stdin as a stream of JSON values (jq-style). Each JSON value becomes one message.
 
 **Options (durability)**
 
@@ -448,14 +448,20 @@ plasmite poke POOLREF [OPTIONS]
   * `fast`: best-effort (no explicit flush)
   * `flush`: flush frame + header to storage after append
 
+**Options (output)**
+
+* `--print` : print committed message object(s) to stdout
+
 **Output**
 
-* Default: prints the committed message object as JSON to stdout (pretty if TTY, compact otherwise).
+* Default: no stdout output (errors still go to stderr).
+* With `--print`: prints committed message object(s) as JSON to stdout (pretty if TTY, compact otherwise).
+* With `--print` and stdin streaming: output is JSONL (one committed message per line).
 
 This gives you the classic pattern:
 
 ```bash
-seq=$(plasmite poke mypool --descrip event --data-json '{"x":1}')
+seq=$(plasmite poke mypool --descrip event --data-json '{"x":1}' --print | jq -r '.seq')
 plasmite get mypool "$seq" | jq .
 ```
 
@@ -609,7 +615,7 @@ echo '{"type":"ping","t":123,"source":"cli"}' | plasmite poke mypool --descrip p
 ### 4) Fetch by seq
 
 ```bash
-seq=$(plasmite poke mypool --data-json '{"x":1}')
+seq=$(plasmite poke mypool --data-json '{"x":1}' --print | jq -r '.seq')
 plasmite get mypool "$seq" | jq .
 ```
 

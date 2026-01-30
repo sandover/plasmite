@@ -77,6 +77,10 @@ Tip: `peek` is designed to compose with Unix tools:
 plasmite --dir .scratch/pools peek demo --follow | jq -c '.data'
 ```
 
+## Performance baselines
+
+Use a release build for baseline numbers. See `docs/perf.md` for the full guide.
+
 ## Concepts
 
 ### Pools
@@ -107,7 +111,7 @@ Canonical CLI JSON shape:
 ```
 
 On disk, each message payload is stored as **Lite³ bytes for `{meta,data}`**; the CLI remains
-**JSON-in/JSON-out** (`poke` encodes JSON to Lite³; `get`/`peek` decode Lite³ to JSON).
+**JSON-in/JSON-out** (`poke` encodes JSON to Lite³; `get`/`peek` decode Lite³ to JSON. Use `poke --print` to emit JSON acks).
 
 ### Pool references
 
