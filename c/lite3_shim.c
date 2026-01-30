@@ -47,6 +47,51 @@ uint8_t plasmite_lite3_get_type(
         return (uint8_t)lite3_get_type(buf, buf_len, ofs, key);
 }
 
+int plasmite_lite3_get_val_ofs(
+        const unsigned char *buf,
+        size_t buf_len,
+        size_t ofs,
+        const char *key,
+        size_t *out_ofs)
+{
+        lite3_val *val = NULL;
+        lite3_key_data key_data = lite3_get_key_data(key);
+        int ret = lite3_get_impl(buf, buf_len, ofs, key, key_data, &val);
+        if (ret < 0) {
+                return ret;
+        }
+        if (out_ofs) {
+                *out_ofs = (size_t)((const unsigned char *)val - buf);
+        }
+        return 0;
+}
+
+int plasmite_lite3_count(
+        const unsigned char *buf,
+        size_t buf_len,
+        size_t ofs,
+        uint32_t *out)
+{
+        return lite3_count((unsigned char *)buf, buf_len, ofs, out);
+}
+
+int plasmite_lite3_arr_get_type(
+        const unsigned char *buf,
+        size_t buf_len,
+        size_t ofs,
+        uint32_t index,
+        uint8_t *out_type)
+{
+        enum lite3_type type = lite3_arr_get_type(buf, buf_len, ofs, index);
+        if (type == LITE3_TYPE_INVALID) {
+                return -1;
+        }
+        if (out_type) {
+                *out_type = (uint8_t)type;
+        }
+        return 0;
+}
+
 void plasmite_lite3_free(void *ptr)
 {
         free(ptr);

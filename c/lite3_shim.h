@@ -38,6 +38,26 @@ uint8_t plasmite_lite3_get_type(
         size_t ofs,
         const char *key);
 
+int plasmite_lite3_get_val_ofs(
+        const unsigned char *buf,
+        size_t buf_len,
+        size_t ofs,
+        const char *key,
+        size_t *out_ofs);
+
+int plasmite_lite3_count(
+        const unsigned char *buf,
+        size_t buf_len,
+        size_t ofs,
+        uint32_t *out);
+
+int plasmite_lite3_arr_get_type(
+        const unsigned char *buf,
+        size_t buf_len,
+        size_t ofs,
+        uint32_t index,
+        uint8_t *out_type);
+
 void plasmite_lite3_free(void *ptr);
 
 #ifdef __cplusplus

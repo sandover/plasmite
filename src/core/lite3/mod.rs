@@ -120,47 +120,57 @@ impl<'a> Lite3DocRef<'a> {
             return Err(Error::new(ErrorKind::Corrupt).with_message("root is not object"));
         }
 
-        let json = self.to_json(false)?;
-        let value: Value = serde_json::from_str(&json)
-            .map_err(|err| Error::new(ErrorKind::Corrupt).with_message("invalid json").with_source(err))?;
-
-        let obj = match value {
-            Value::Object(map) => map,
-            _ => return Err(Error::new(ErrorKind::Corrupt).with_message("root is not object")),
+        let meta_type = unsafe {
+            sys::plasmite_lite3_get_type(
+                self.bytes.as_ptr(),
+                self.bytes.len(),
+                0,
+                c_key("meta").as_ptr(),
+            )
         };
-
-        let meta = obj
-            .get("meta")
-            .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("missing meta"))?;
-        let data = obj
-            .get("data")
-            .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("missing data"))?;
-
-        let meta_obj = match meta {
-            Value::Object(map) => map,
-            _ => return Err(Error::new(ErrorKind::Corrupt).with_message("meta is not object")),
-        };
-
-        let descrips = meta_obj
-            .get("descrips")
-            .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("missing meta.descrips"))?;
-
-        match descrips {
-            Value::Array(items) => {
-                if items.iter().any(|item| !matches!(item, Value::String(_))) {
-                    return Err(Error::new(ErrorKind::Corrupt)
-                        .with_message("meta.descrips must be string array"));
-                }
-            }
-            _ => {
-                return Err(
-                    Error::new(ErrorKind::Corrupt).with_message("meta.descrips must be array")
-                );
-            }
+        if meta_type != sys::LITE3_TYPE_OBJECT {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("meta is not object"));
         }
 
-        if !matches!(data, Value::Object(_)) {
+        let data_type = unsafe {
+            sys::plasmite_lite3_get_type(
+                self.bytes.as_ptr(),
+                self.bytes.len(),
+                0,
+                c_key("data").as_ptr(),
+            )
+        };
+        if data_type != sys::LITE3_TYPE_OBJECT {
             return Err(Error::new(ErrorKind::Corrupt).with_message("data is not object"));
+        }
+
+        let meta_ofs = match get_key_offset(self.bytes, "meta") {
+            Ok(ofs) => ofs,
+            Err(err) => return Err(err.with_message("missing meta")),
+        };
+
+        let descrips_type = unsafe {
+            sys::plasmite_lite3_get_type(
+                self.bytes.as_ptr(),
+                self.bytes.len(),
+                meta_ofs,
+                c_key("descrips").as_ptr(),
+            )
+        };
+        if descrips_type != sys::LITE3_TYPE_ARRAY {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("meta.descrips must be array"));
+        }
+
+        let descrips_ofs = get_key_offset_at(self.bytes, meta_ofs, "descrips")
+            .map_err(|err| err.with_message("missing meta.descrips"))?;
+
+        let count = array_count(self.bytes, descrips_ofs)?;
+        for index in 0..count {
+            let item_type = array_item_type(self.bytes, descrips_ofs, index)?;
+            if item_type != sys::LITE3_TYPE_STRING {
+                return Err(Error::new(ErrorKind::Corrupt)
+                    .with_message("meta.descrips must be string array"));
+            }
         }
 
         Ok(())
@@ -194,6 +204,64 @@ pub fn encode_message(meta_descrips: &[String], data: &Value) -> Result<Lite3Buf
 
 pub fn validate_bytes(buf: &[u8]) -> Result<(), Error> {
     Lite3DocRef { bytes: buf }.validate()
+}
+
+fn c_key(key: &str) -> CString {
+    CString::new(key).expect("c key")
+}
+
+fn get_key_offset(bytes: &[u8], key: &str) -> Result<usize, Error> {
+    get_key_offset_at(bytes, 0, key)
+}
+
+fn get_key_offset_at(bytes: &[u8], ofs: usize, key: &str) -> Result<usize, Error> {
+    let mut out_ofs: usize = 0;
+    let ret = unsafe {
+        sys::plasmite_lite3_get_val_ofs(
+            bytes.as_ptr(),
+            bytes.len(),
+            ofs,
+            c_key(key).as_ptr(),
+            &mut out_ofs as *mut usize,
+        )
+    };
+    if ret < 0 {
+        return Err(Error::new(ErrorKind::Corrupt).with_message("missing key"));
+    }
+    Ok(out_ofs)
+}
+
+fn array_count(bytes: &[u8], ofs: usize) -> Result<u32, Error> {
+    let mut out: u32 = 0;
+    let ret = unsafe {
+        sys::plasmite_lite3_count(
+            bytes.as_ptr(),
+            bytes.len(),
+            ofs,
+            &mut out as *mut u32,
+        )
+    };
+    if ret < 0 {
+        return Err(Error::new(ErrorKind::Corrupt).with_message("invalid array"));
+    }
+    Ok(out)
+}
+
+fn array_item_type(bytes: &[u8], ofs: usize, index: u32) -> Result<u8, Error> {
+    let mut out_type: u8 = 0;
+    let ret = unsafe {
+        sys::plasmite_lite3_arr_get_type(
+            bytes.as_ptr(),
+            bytes.len(),
+            ofs,
+            index,
+            &mut out_type as *mut u8,
+        )
+    };
+    if ret < 0 {
+        return Err(Error::new(ErrorKind::Corrupt).with_message("invalid array index"));
+    }
+    Ok(out_type)
 }
 
 #[cfg(test)]

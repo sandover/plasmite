@@ -43,5 +43,28 @@ unsafe extern "C" {
         key: *const c_char,
     ) -> c_uchar;
 
+    pub fn plasmite_lite3_get_val_ofs(
+        buf: *const c_uchar,
+        buf_len: usize,
+        ofs: usize,
+        key: *const c_char,
+        out_ofs: *mut usize,
+    ) -> c_int;
+
+    pub fn plasmite_lite3_count(
+        buf: *const c_uchar,
+        buf_len: usize,
+        ofs: usize,
+        out: *mut u32,
+    ) -> c_int;
+
+    pub fn plasmite_lite3_arr_get_type(
+        buf: *const c_uchar,
+        buf_len: usize,
+        ofs: usize,
+        index: u32,
+        out_type: *mut c_uchar,
+    ) -> c_int;
+
     pub fn plasmite_lite3_free(ptr: *mut c_void);
 }
