@@ -2,7 +2,7 @@
 use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
-use clap::{Parser, Subcommand};
+use clap::{error::ErrorKind as ClapErrorKind, Parser, Subcommand};
 use serde_json::{json, Map, Value};
 use std::collections::VecDeque;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -24,10 +24,25 @@ fn main() {
 }
 
 fn run() -> Result<(), Error> {
-    let cli = Cli::try_parse().map_err(|err| {
-        Error::new(ErrorKind::Usage)
-            .with_message(err.to_string())
-    })?;
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(err) => {
+            match err.kind() {
+                ClapErrorKind::DisplayHelp | ClapErrorKind::DisplayVersion => {
+                    err.print().map_err(|io_err| {
+                        Error::new(ErrorKind::Io)
+                            .with_message("failed to write help")
+                            .with_source(io_err)
+                    })?;
+                    return Ok(());
+                }
+                _ => {
+                    return Err(Error::new(ErrorKind::Usage)
+                        .with_message(err.to_string()));
+                }
+            }
+        }
+    };
 
     let pool_dir = cli.dir.unwrap_or_else(default_pool_dir);
 
