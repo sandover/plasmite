@@ -216,7 +216,7 @@ impl Pool {
             .read(true)
             .write(true)
             .open(&path)
-            .map_err(|err| Error::new(ErrorKind::Io).with_path(&path).with_source(err))?;
+            .map_err(|err| Error::new(map_io_error_kind(&err)).with_path(&path).with_source(err))?;
 
         let actual_size = file
             .metadata()
@@ -243,7 +243,7 @@ impl Pool {
         self.header
     }
 
-    pub(crate) fn header_from_mmap(&self) -> Result<PoolHeader, Error> {
+    pub fn header_from_mmap(&self) -> Result<PoolHeader, Error> {
         PoolHeader::decode(&self.mmap[0..HEADER_SIZE])
     }
 
@@ -325,11 +325,15 @@ impl Pool {
     }
 
     pub fn append(&mut self, payload: &[u8]) -> Result<u64, Error> {
-        let _lock = self.append_lock()?;
-        self.append_locked(payload)
+        self.append_with_timestamp(payload, 0)
     }
 
-    fn append_locked(&mut self, payload: &[u8]) -> Result<u64, Error> {
+    pub fn append_with_timestamp(&mut self, payload: &[u8], timestamp_ns: u64) -> Result<u64, Error> {
+        let _lock = self.append_lock()?;
+        self.append_locked(payload, timestamp_ns)
+    }
+
+    fn append_locked(&mut self, payload: &[u8], timestamp_ns: u64) -> Result<u64, Error> {
         if payload.len() > u32::MAX as usize {
             return Err(Error::new(ErrorKind::Usage).with_message("payload too large"));
         }
@@ -392,7 +396,7 @@ impl Pool {
             FrameState::Writing,
             0,
             seq,
-            0,
+            timestamp_ns,
             payload.len() as u32,
             0,
         );
@@ -434,6 +438,14 @@ fn lock_error_kind(err: &io::Error) -> ErrorKind {
     }
     match err.kind() {
         io::ErrorKind::WouldBlock => ErrorKind::Busy,
+        io::ErrorKind::PermissionDenied => ErrorKind::Permission,
+        _ => ErrorKind::Io,
+    }
+}
+
+fn map_io_error_kind(err: &io::Error) -> ErrorKind {
+    match err.kind() {
+        io::ErrorKind::NotFound => ErrorKind::NotFound,
         io::ErrorKind::PermissionDenied => ErrorKind::Permission,
         _ => ErrorKind::Io,
     }

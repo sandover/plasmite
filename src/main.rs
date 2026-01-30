@@ -1,11 +1,15 @@
 // CLI entry point for v0.0.1 commands with JSON output.
-use std::io::{self, IsTerminal};
+use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 use serde_json::{json, Map, Value};
+use std::collections::VecDeque;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use plasmite::core::error::{to_exit_code, Error, ErrorKind};
+use plasmite::core::cursor::{Cursor, CursorResult, FrameRef};
+use plasmite::core::lite3::{self, Lite3DocRef};
 use plasmite::core::pool::{Pool, PoolOptions};
 
 fn main() {
@@ -74,17 +78,47 @@ fn run() -> Result<(), Error> {
                 Ok(())
             }
         },
-        Command::Poke { pool, .. } => {
-            let _path = resolve_poolref(&pool, &pool_dir)?;
-            Err(Error::new(ErrorKind::Usage).with_message("poke not implemented"))
+        Command::Poke {
+            pool,
+            descrip,
+            data_json,
+            data_file,
+        } => {
+            let path = resolve_poolref(&pool, &pool_dir)?;
+            let data = read_data(data_json, data_file)?;
+            let payload = lite3::encode_message(&descrip, &data)?;
+            let mut pool_handle = Pool::open(&path)?;
+            let timestamp_ns = now_ns()?;
+            let seq = pool_handle.append_with_timestamp(payload.as_slice(), timestamp_ns)?;
+            emit_json(message_json(&pool, seq, timestamp_ns, &descrip, &data)?);
+            Ok(())
         }
-        Command::Get { pool, .. } => {
-            let _path = resolve_poolref(&pool, &pool_dir)?;
-            Err(Error::new(ErrorKind::Usage).with_message("get not implemented"))
+        Command::Get { pool, seq } => {
+            let path = resolve_poolref(&pool, &pool_dir)?;
+            let pool_handle = Pool::open(&path)?;
+            let frame = pool_handle.get(seq)?;
+            emit_json(message_from_frame(&pool, &frame)?);
+            Ok(())
         }
-        Command::Peek { pool, .. } => {
-            let _path = resolve_poolref(&pool, &pool_dir)?;
-            Err(Error::new(ErrorKind::Usage).with_message("peek not implemented"))
+        Command::Peek {
+            pool,
+            tail,
+            follow,
+            idle_timeout,
+        } => {
+            let path = resolve_poolref(&pool, &pool_dir)?;
+            let pool_handle = Pool::open(&path)?;
+            let timeout = idle_timeout
+                .as_deref()
+                .map(parse_duration)
+                .transpose()?;
+            peek(
+                &pool_handle,
+                &pool,
+                tail,
+                follow,
+                timeout,
+            )
         }
     }
 }
@@ -232,6 +266,16 @@ fn emit_json(value: serde_json::Value) {
     println!("{json}");
 }
 
+fn emit_message(value: serde_json::Value, pretty: bool) {
+    let json = if pretty {
+        serde_json::to_string_pretty(&value)
+    } else {
+        serde_json::to_string(&value)
+    }
+    .unwrap_or_else(|_| "{\"error\":\"json encode failed\"}".to_string());
+    println!("{json}");
+}
+
 fn emit_error(err: &Error) {
     let value = json!({
         "error": {
@@ -246,4 +290,208 @@ fn emit_error(err: &Error) {
     }
     .unwrap_or_else(|_| "{\"error\":\"json encode failed\"}".to_string());
     eprintln!("{json}");
+}
+
+fn read_data(data_json: Option<String>, data_file: Option<String>) -> Result<Value, Error> {
+    let provided = data_json.is_some() as u8 + data_file.is_some() as u8;
+    if provided > 1 {
+        return Err(Error::new(ErrorKind::Usage).with_message("multiple data inputs provided"));
+    }
+
+    let json_str = if let Some(data) = data_json {
+        data
+    } else if let Some(data) = data_file {
+        let path = data.strip_prefix('@').unwrap_or(&data);
+        if path == "-" {
+            read_stdin()?
+        } else {
+            std::fs::read_to_string(path)
+                .map_err(|err| Error::new(ErrorKind::Io).with_message("failed to read data file").with_source(err))?
+        }
+    } else if !io::stdin().is_terminal() {
+        read_stdin()?
+    } else {
+        return Err(Error::new(ErrorKind::Usage).with_message("missing data input"));
+    };
+
+    serde_json::from_str(&json_str)
+        .map_err(|err| Error::new(ErrorKind::Usage).with_message("invalid json").with_source(err))
+}
+
+fn read_stdin() -> Result<String, Error> {
+    let mut buf = String::new();
+    io::stdin()
+        .read_to_string(&mut buf)
+        .map_err(|err| Error::new(ErrorKind::Io).with_message("failed to read stdin").with_source(err))?;
+    Ok(buf)
+}
+
+fn now_ns() -> Result<u64, Error> {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| Error::new(ErrorKind::Internal).with_message("time went backwards").with_source(err))?;
+    Ok(duration.as_nanos() as u64)
+}
+
+fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
+    use time::format_description::well_known::Rfc3339;
+    let ts = time::OffsetDateTime::from_unix_timestamp_nanos(timestamp_ns as i128)
+        .map_err(|err| Error::new(ErrorKind::Internal).with_message("invalid timestamp").with_source(err))?;
+    ts.format(&Rfc3339)
+        .map_err(|err| Error::new(ErrorKind::Internal).with_message("timestamp format failed").with_source(err))
+}
+
+fn message_json(
+    pool_ref: &str,
+    seq: u64,
+    timestamp_ns: u64,
+    descrips: &[String],
+    data: &Value,
+) -> Result<Value, Error> {
+    let meta = json!({ "descrips": descrips });
+    Ok(json!({
+        "pool": pool_ref,
+        "seq": seq,
+        "ts": format_ts(timestamp_ns)?,
+        "meta": meta,
+        "data": data,
+    }))
+}
+
+fn message_from_frame(pool_ref: &str, frame: &FrameRef<'_>) -> Result<Value, Error> {
+    let (meta, data) = decode_payload(frame.payload)?;
+    Ok(json!({
+        "pool": pool_ref,
+        "seq": frame.seq,
+        "ts": format_ts(frame.timestamp_ns)?,
+        "meta": meta,
+        "data": data,
+    }))
+}
+
+fn decode_payload(payload: &[u8]) -> Result<(Value, Value), Error> {
+    let json_str = Lite3DocRef::new(payload).to_json(false)?;
+    let value: Value = serde_json::from_str(&json_str)
+        .map_err(|err| Error::new(ErrorKind::Corrupt).with_message("invalid payload json").with_source(err))?;
+    let obj = value.as_object().ok_or_else(|| {
+        Error::new(ErrorKind::Corrupt).with_message("payload is not object")
+    })?;
+    let meta = obj
+        .get("meta")
+        .cloned()
+        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("missing meta"))?;
+    let data = obj
+        .get("data")
+        .cloned()
+        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("missing data"))?;
+    Ok((meta, data))
+}
+
+fn peek(
+    pool: &Pool,
+    pool_ref: &str,
+    tail: Option<u64>,
+    follow: bool,
+    idle_timeout: Option<Duration>,
+) -> Result<(), Error> {
+    let pretty = io::stdout().is_terminal();
+    let mut cursor = Cursor::new();
+    let mut header = pool.header_from_mmap()?;
+    let mut emit = VecDeque::new();
+
+    if let Some(tail_count) = tail {
+        cursor.seek_to(header.tail_off as usize);
+        loop {
+            match cursor.next(pool)? {
+                CursorResult::Message(frame) => {
+                    emit.push_back(message_from_frame(pool_ref, &frame)?);
+                    while emit.len() > tail_count as usize {
+                        emit.pop_front();
+                    }
+                }
+                CursorResult::WouldBlock => break,
+                CursorResult::FellBehind => {
+                    header = pool.header_from_mmap()?;
+                    cursor.seek_to(header.tail_off as usize);
+                }
+            }
+        }
+        for value in emit.drain(..) {
+            emit_message(value, pretty);
+        }
+    } else if !follow {
+        return Ok(());
+    }
+
+    if !follow {
+        return Ok(());
+    }
+
+    if tail.is_none() {
+        cursor.seek_to(header.head_off as usize);
+    }
+
+    let mut backoff = Duration::from_millis(1);
+    let max_backoff = Duration::from_millis(50);
+    let mut last_activity = SystemTime::now();
+
+    loop {
+        match cursor.next(pool)? {
+            CursorResult::Message(frame) => {
+                emit_message(message_from_frame(pool_ref, &frame)?, pretty);
+                backoff = Duration::from_millis(1);
+                last_activity = SystemTime::now();
+            }
+            CursorResult::WouldBlock => {
+                if let Some(timeout) = idle_timeout {
+                    if SystemTime::now()
+                        .duration_since(last_activity)
+                        .unwrap_or_default()
+                        >= timeout
+                    {
+                        break;
+                    }
+                }
+                std::thread::sleep(backoff);
+                backoff = std::cmp::min(backoff * 2, max_backoff);
+            }
+            CursorResult::FellBehind => {
+                header = pool.header_from_mmap()?;
+                if tail.is_some() {
+                    cursor.seek_to(header.tail_off as usize);
+                } else {
+                    cursor.seek_to(header.head_off as usize);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_duration(input: &str) -> Result<Duration, Error> {
+    let trimmed = input.trim();
+    let split = trimmed
+        .char_indices()
+        .find(|(_, ch)| !ch.is_ascii_digit())
+        .map(|(idx, _)| idx)
+        .unwrap_or_else(|| trimmed.len());
+    let digits = trimmed[..split].trim();
+    let suffix = trimmed[split..].trim();
+    let value: u64 = digits.parse().map_err(|err| {
+        Error::new(ErrorKind::Usage)
+            .with_message("invalid duration")
+            .with_source(err)
+    })?;
+    let duration = match suffix {
+        "ms" => Duration::from_millis(value),
+        "s" => Duration::from_secs(value),
+        "m" => Duration::from_secs(value * 60),
+        "h" => Duration::from_secs(value * 60 * 60),
+        _ => {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("invalid duration suffix"));
+        }
+    };
+    Ok(duration)
 }
