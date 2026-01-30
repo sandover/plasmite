@@ -158,6 +158,21 @@ impl PoolOptions {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Bounds {
+    pub oldest_seq: Option<u64>,
+    pub newest_seq: Option<u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PoolInfo {
+    pub path: PathBuf,
+    pub file_size: u64,
+    pub ring_offset: u64,
+    pub ring_size: u64,
+    pub bounds: Bounds,
+}
+
 pub struct Pool {
     path: PathBuf,
     file: File,
@@ -238,6 +253,61 @@ impl Pool {
 
     pub(crate) fn mmap(&self) -> &MmapMut {
         &self.mmap
+    }
+
+    pub fn bounds(&self) -> Result<Bounds, Error> {
+        let header = self.header_from_mmap()?;
+        Ok(bounds_from_header(header))
+    }
+
+    pub fn info(&self) -> Result<PoolInfo, Error> {
+        let header = self.header_from_mmap()?;
+        Ok(PoolInfo {
+            path: self.path.clone(),
+            file_size: header.file_size,
+            ring_offset: header.ring_offset,
+            ring_size: header.ring_size,
+            bounds: bounds_from_header(header),
+        })
+    }
+
+    pub fn get(&self, seq: u64) -> Result<crate::core::cursor::FrameRef<'_>, Error> {
+        let mut header = self.header_from_mmap()?;
+        let bounds = bounds_from_header(header);
+        let (oldest, newest) = match (bounds.oldest_seq, bounds.newest_seq) {
+            (Some(oldest), Some(newest)) => (oldest, newest),
+            _ => return Err(Error::new(ErrorKind::NotFound).with_message("empty pool")),
+        };
+
+        if seq < oldest || seq > newest {
+            return Err(Error::new(ErrorKind::NotFound).with_message("seq out of bounds"));
+        }
+
+        let mut cursor = crate::core::cursor::Cursor::new();
+        cursor.seek_to(header.tail_off as usize);
+
+        loop {
+            match cursor.next(self)? {
+                crate::core::cursor::CursorResult::Message(frame) => {
+                    if frame.seq == seq {
+                        return Ok(frame);
+                    }
+                    if frame.seq > seq {
+                        return Err(Error::new(ErrorKind::NotFound).with_message("seq not found"));
+                    }
+                }
+                crate::core::cursor::CursorResult::WouldBlock => {
+                    return Err(Error::new(ErrorKind::NotFound).with_message("seq not found"));
+                }
+                crate::core::cursor::CursorResult::FellBehind => {
+                    header = self.header_from_mmap()?;
+                    if header.oldest_seq != 0 && seq < header.oldest_seq {
+                        return Err(Error::new(ErrorKind::NotFound).with_message("seq overwritten"));
+                    }
+                    cursor.seek_to(header.tail_off as usize);
+                }
+            }
+        }
     }
 
     pub fn append_lock(&self) -> Result<AppendLock, Error> {
@@ -394,6 +464,20 @@ fn write_pool_header(mmap: &mut MmapMut, header: &PoolHeader) {
     mmap[0..HEADER_SIZE].copy_from_slice(&buf);
 }
 
+fn bounds_from_header(header: PoolHeader) -> Bounds {
+    if header.oldest_seq == 0 {
+        Bounds {
+            oldest_seq: None,
+            newest_seq: None,
+        }
+    } else {
+        Bounds {
+            oldest_seq: Some(header.oldest_seq),
+            newest_seq: Some(header.newest_seq),
+        }
+    }
+}
+
 fn read_frame_header(mmap: &MmapMut, ring_offset: usize, head: usize) -> Result<FrameHeader, Error> {
     let start = ring_offset + head;
     let end = start + FRAME_HEADER_LEN;
@@ -504,6 +588,7 @@ mod tests {
     use crate::core::error::ErrorKind;
     use crate::core::frame::{self, FrameState, FRAME_HEADER_LEN};
     use crate::core::lite3;
+    use crate::core::lite3::Lite3DocRef;
     use std::fs::OpenOptions;
     use std::io::{Seek, SeekFrom, Write};
 
@@ -667,5 +752,31 @@ mod tests {
         assert_eq!(seqs, vec![2, 3]);
         assert_eq!(pool.header().oldest_seq, 2);
         assert_eq!(pool.header().newest_seq, 3);
+    }
+
+    #[test]
+    fn bounds_and_get_scan_by_seq() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 2048)).expect("create");
+
+        for value in 1..=3 {
+            let payload = lite3::encode_message(&[], &serde_json::json!({"x": value}))
+                .expect("payload");
+            pool.append(payload.as_slice()).expect("append");
+        }
+
+        let bounds = pool.bounds().expect("bounds");
+        assert_eq!(bounds.oldest_seq, Some(1));
+        assert_eq!(bounds.newest_seq, Some(3));
+
+        let frame = pool.get(2).expect("get");
+        let doc = Lite3DocRef::new(frame.payload);
+        let json = doc.to_json(false).expect("json");
+        let value: serde_json::Value = serde_json::from_str(&json).expect("parse");
+        assert_eq!(value["data"]["x"], 2);
+
+        let err = pool.get(4).expect_err("missing");
+        assert_eq!(err.kind(), ErrorKind::NotFound);
     }
 }

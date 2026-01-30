@@ -75,6 +75,10 @@ pub struct Lite3DocRef<'a> {
 }
 
 impl<'a> Lite3DocRef<'a> {
+    pub fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes }
+    }
+
     pub fn bytes(&self) -> &'a [u8] {
         self.bytes
     }
@@ -203,7 +207,7 @@ pub fn encode_message(meta_descrips: &[String], data: &Value) -> Result<Lite3Buf
 }
 
 pub fn validate_bytes(buf: &[u8]) -> Result<(), Error> {
-    Lite3DocRef { bytes: buf }.validate()
+    Lite3DocRef::new(buf).validate()
 }
 
 fn c_key(key: &str) -> CString {

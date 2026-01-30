@@ -28,6 +28,10 @@ impl Cursor {
         Self { next_off: 0 }
     }
 
+    pub fn seek_to(&mut self, offset: usize) {
+        self.next_off = offset;
+    }
+
     pub fn next<'a>(&mut self, pool: &'a Pool) -> Result<CursorResult<'a>, Error> {
         let header = pool.header_from_mmap()?;
         if header.oldest_seq == 0 {
