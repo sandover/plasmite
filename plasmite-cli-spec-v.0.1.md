@@ -41,7 +41,8 @@ JSON output is always the default.
 ### Output formats
 
 * Non-streaming: JSON only.
-* Streaming: if stdout is a TTY, pretty JSON; otherwise JSONL.
+* Streaming: default is pretty JSON on TTY for non-follow reads; JSONL for `--follow` or non-TTY.
+* `--pretty` or `--jsonl` override the default.
 * Errors are JSON objects written to stderr.
 * Exit codes are stable and match the core error kinds (see `docs/exit-codes.md`).
 
@@ -380,7 +381,7 @@ plasmite peek POOLREF [OPTIONS]
 * Formatting:
 
   * `--jsonl` (default when not TTY)
-  * `--pretty` (default when TTY)
+  * `--pretty` (default when TTY and not `--follow`)
   * `--data-only` (emit just `.data`)
   * `--meta-only` (emit just `.meta`)
 * Filtering (lightweight, not a query language):

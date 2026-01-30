@@ -29,7 +29,13 @@ fn create_poke_get_peek_flow() {
         .expect("create");
     assert!(create.status.success());
     let create_json = parse_json(std::str::from_utf8(&create.stdout).expect("utf8"));
-    let created = create_json.as_array().expect("array").first().expect("first");
+    let created = create_json
+        .get("created")
+        .and_then(|value| value.as_array())
+        .expect("created array")
+        .first()
+        .expect("first");
+    assert_eq!(created.get("pool").unwrap().as_str().unwrap(), "testpool");
     assert!(created.get("path").unwrap().as_str().unwrap().ends_with("testpool.plasmite"));
     assert!(created.get("bounds").unwrap().get("oldest").is_none());
 

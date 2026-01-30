@@ -330,6 +330,8 @@ impl Pool {
 
     pub fn append_with_timestamp(&mut self, payload: &[u8], timestamp_ns: u64) -> Result<u64, Error> {
         let _lock = self.append_lock()?;
+        // Refresh header after acquiring the lock to avoid stale state across processes.
+        self.header = self.header_from_mmap()?;
         self.append_locked(payload, timestamp_ns)
     }
 
