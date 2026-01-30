@@ -3,9 +3,10 @@ use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
-use serde_json::json;
+use serde_json::{json, Map, Value};
 
 use plasmite::core::error::{to_exit_code, Error, ErrorKind};
+use plasmite::core::pool::{Pool, PoolOptions};
 
 fn main() {
     let exit_code = match run() {
@@ -36,17 +37,41 @@ fn run() -> Result<(), Error> {
             Ok(())
         }
         Command::Pool { command } => match command {
-            PoolCommand::Create { name, .. } => {
-                let _path = resolve_poolref(&name, &pool_dir)?;
-                Err(Error::new(ErrorKind::Usage).with_message("pool create not implemented"))
+            PoolCommand::Create { names, size } => {
+                let size = size
+                    .as_deref()
+                    .map(parse_size)
+                    .transpose()?
+                    .unwrap_or(DEFAULT_POOL_SIZE);
+                ensure_pool_dir(&pool_dir)?;
+                let mut results = Vec::new();
+                for name in names {
+                    let path = resolve_poolref(&name, &pool_dir)?;
+                    if path.exists() {
+                        return Err(Error::new(ErrorKind::AlreadyExists)
+                            .with_message("pool already exists")
+                            .with_path(&path));
+                    }
+                    let pool = Pool::create(&path, PoolOptions::new(size))?;
+                    let info = pool.info()?;
+                    results.push(pool_info_json(&info));
+                }
+                emit_json(Value::Array(results));
+                Ok(())
             }
             PoolCommand::Info { name } => {
-                let _path = resolve_poolref(&name, &pool_dir)?;
-                Err(Error::new(ErrorKind::Usage).with_message("pool info not implemented"))
+                let path = resolve_poolref(&name, &pool_dir)?;
+                let pool = Pool::open(&path)?;
+                let info = pool.info()?;
+                emit_json(pool_info_json(&info));
+                Ok(())
             }
             PoolCommand::Bounds { name } => {
-                let _path = resolve_poolref(&name, &pool_dir)?;
-                Err(Error::new(ErrorKind::Usage).with_message("pool bounds not implemented"))
+                let path = resolve_poolref(&name, &pool_dir)?;
+                let pool = Pool::open(&path)?;
+                let bounds = pool.bounds()?;
+                emit_json(bounds_json(bounds));
+                Ok(())
             }
         },
         Command::Poke { pool, .. } => {
@@ -109,7 +134,8 @@ enum Command {
 #[derive(Subcommand)]
 enum PoolCommand {
     Create {
-        name: String,
+        #[arg(required = true)]
+        names: Vec<String>,
         #[arg(long)]
         size: Option<String>,
     },
@@ -134,6 +160,66 @@ fn resolve_poolref(input: &str, pool_dir: &Path) -> Result<PathBuf, Error> {
         return Ok(pool_dir.join(input));
     }
     Ok(pool_dir.join(format!("{input}.plasmite")))
+}
+
+const DEFAULT_POOL_SIZE: u64 = 1024 * 1024;
+
+fn ensure_pool_dir(dir: &Path) -> Result<(), Error> {
+    std::fs::create_dir_all(dir)
+        .map_err(|err| Error::new(ErrorKind::Io).with_path(dir).with_source(err))
+}
+
+fn parse_size(input: &str) -> Result<u64, Error> {
+    let trimmed = input.trim();
+    let split = trimmed
+        .char_indices()
+        .find(|(_, ch)| !ch.is_ascii_digit())
+        .map(|(idx, _)| idx)
+        .unwrap_or_else(|| trimmed.len());
+    let digits = trimmed[..split].trim();
+    let suffix = trimmed[split..].trim();
+
+    let value: u64 = digits.trim().parse().map_err(|err| {
+        Error::new(ErrorKind::Usage)
+            .with_message("invalid size")
+            .with_source(err)
+    })?;
+
+    let multiplier = match suffix {
+        "" => 1,
+        "K" | "k" | "KiB" | "Ki" => 1024,
+        "M" | "m" | "MiB" | "Mi" => 1024 * 1024,
+        "G" | "g" | "GiB" | "Gi" => 1024 * 1024 * 1024,
+        _ => {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("invalid size suffix"));
+        }
+    };
+
+    value
+        .checked_mul(multiplier)
+        .ok_or_else(|| Error::new(ErrorKind::Usage).with_message("size overflow"))
+}
+
+fn bounds_json(bounds: plasmite::core::pool::Bounds) -> Value {
+    let mut map = Map::new();
+    if let Some(oldest) = bounds.oldest_seq {
+        map.insert("oldest".to_string(), json!(oldest));
+    }
+    if let Some(newest) = bounds.newest_seq {
+        map.insert("newest".to_string(), json!(newest));
+    }
+    Value::Object(map)
+}
+
+fn pool_info_json(info: &plasmite::core::pool::PoolInfo) -> Value {
+    let mut map = Map::new();
+    map.insert("path".to_string(), json!(info.path.display().to_string()));
+    map.insert("file_size".to_string(), json!(info.file_size));
+    map.insert("ring_offset".to_string(), json!(info.ring_offset));
+    map.insert("ring_size".to_string(), json!(info.ring_size));
+    map.insert("bounds".to_string(), bounds_json(info.bounds));
+    Value::Object(map)
 }
 
 fn emit_json(value: serde_json::Value) {
