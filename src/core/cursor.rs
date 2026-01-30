@@ -45,6 +45,11 @@ impl Cursor {
 
         let tail = header.tail_off as usize;
         let head = header.head_off as usize;
+        let is_full = head == tail && header.oldest_seq != 0;
+        if !is_full && self.next_off == head {
+            return Ok(CursorResult::WouldBlock);
+        }
+
         if !offset_in_range(self.next_off, tail, head, header.oldest_seq) {
             self.next_off = tail;
             return Ok(CursorResult::FellBehind);
