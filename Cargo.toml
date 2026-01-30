@@ -6,6 +6,7 @@ license = "MIT"
 description = "Plasmite CLI and library."
 repository = "https://github.com/YOUR_GITHUB/plasmite"
 readme = "README.md"
+build = "build.rs"
 
 [lib]
 path = "src/lib.rs"
@@ -17,6 +18,11 @@ path = "src/main.rs"
 [dependencies]
 fs2 = "0.4"
 memmap2 = "0.9"
+libc = "0.2"
+serde_json = "1"
 
 [dev-dependencies]
 tempfile = "3"
+
+[build-dependencies]
+cc = "1"

@@ -31,3 +31,7 @@ See `docs/exit-codes.md` for the stable exit code mapping.
 ```bash
 cargo test
 ```
+
+## Third-party
+
+See `THIRD_PARTY_NOTICES.md` for vendored dependencies and licenses.

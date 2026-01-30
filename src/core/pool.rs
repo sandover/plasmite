@@ -1,3 +1,4 @@
+// Pool file creation/opening with header validation, mmap, and append locking.
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};

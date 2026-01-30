@@ -1,3 +1,4 @@
+// Stable error kinds with contextual data and CLI exit code mapping.
 use std::error::Error as StdError;
 use std::fmt;
 use std::path::PathBuf;
