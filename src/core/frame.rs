@@ -112,16 +112,19 @@ impl FrameHeader {
         if self.payload_len as usize > max_payload {
             return Err(Error::new(ErrorKind::Corrupt).with_message("payload length exceeds max"));
         }
+        if frame_total_len(self.header_len as usize, self.payload_len as usize).is_none() {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("frame length overflow"));
+        }
         Ok(())
     }
 }
 
-pub fn align8(value: usize) -> usize {
-    (value + 7) & !7
+pub fn align8(value: usize) -> Option<usize> {
+    value.checked_add(7).map(|sum| sum & !7)
 }
 
-pub fn frame_total_len(header_len: usize, payload_len: usize) -> usize {
-    align8(header_len + payload_len)
+pub fn frame_total_len(header_len: usize, payload_len: usize) -> Option<usize> {
+    header_len.checked_add(payload_len).and_then(align8)
 }
 
 pub fn max_payload(ring_size: usize, header_len: usize) -> usize {
@@ -174,16 +177,16 @@ mod tests {
 
     #[test]
     fn alignment_is_8_bytes() {
-        assert_eq!(align8(0), 0);
-        assert_eq!(align8(1), 8);
-        assert_eq!(align8(8), 8);
-        assert_eq!(align8(9), 16);
+        assert_eq!(align8(0), Some(0));
+        assert_eq!(align8(1), Some(8));
+        assert_eq!(align8(8), Some(8));
+        assert_eq!(align8(9), Some(16));
     }
 
     #[test]
     fn frame_total_len_is_aligned() {
         let total = frame_total_len(64, 1);
-        assert_eq!(total, 72);
+        assert_eq!(total, Some(72));
     }
 
     #[test]
@@ -220,5 +223,18 @@ mod tests {
         let data = json!({"ok": true});
         let buf = encode_message(&["event".to_string()], &data).expect("encode");
         validate_payload(buf.as_slice()).expect("valid payload");
+    }
+
+    #[test]
+    fn align_overflow_is_detected() {
+        let max = usize::MAX & !7;
+        assert_eq!(align8(max), Some(max));
+        assert_eq!(align8(usize::MAX), None);
+    }
+
+    #[test]
+    fn frame_total_len_overflow_is_detected() {
+        let total = frame_total_len(usize::MAX, 1);
+        assert!(total.is_none());
     }
 }
