@@ -32,7 +32,8 @@ fn main() {
         .file(lite3_dir.join("lib").join("yyjson").join("yyjson.c"))
         .file(lite3_dir.join("lib").join("nibble_base64").join("base64.c"))
         .file(manifest_dir.join("c").join("lite3_shim.c"))
-        .flag_if_supported("-std=c11");
+        .flag_if_supported("-std=c11")
+        .flag_if_supported("-Wno-c23-extensions");
 
     build.compile("lite3");
 }

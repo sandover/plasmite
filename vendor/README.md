@@ -13,5 +13,6 @@ directly, rather than fetching at build time.
 
 1. Fetch latest upstream commit.
 2. Replace the contents of `vendor/lite3/` with the new snapshot.
+   - Remove non-essential assets (examples/tests/img/pc/Makefile) after updating.
 3. Update the pinned commit hash above.
 4. Run `cargo test` to verify.
