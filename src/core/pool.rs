@@ -1,10 +1,11 @@
 // Pool file creation/opening with header validation, mmap, and append locking.
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
 use memmap2::MmapMut;
+use libc::{EACCES, EPERM};
 
 use crate::core::error::{Error, ErrorKind};
 
@@ -214,7 +215,11 @@ impl Pool {
     pub fn append_lock(&self) -> Result<AppendLock<'_>, Error> {
         self.file
             .lock_exclusive()
-            .map_err(|err| Error::new(ErrorKind::Busy).with_path(&self.path).with_source(err))?;
+            .map_err(|err| {
+                Error::new(lock_error_kind(&err))
+                    .with_path(&self.path)
+                    .with_source(err)
+            })?;
         Ok(AppendLock { file: &self.file })
     }
 }
@@ -226,6 +231,18 @@ pub struct AppendLock<'a> {
 impl<'a> Drop for AppendLock<'a> {
     fn drop(&mut self) {
         let _ = self.file.unlock();
+    }
+}
+
+fn lock_error_kind(err: &io::Error) -> ErrorKind {
+    let errno = err.raw_os_error().unwrap_or_default();
+    if errno == EACCES || errno == EPERM {
+        return ErrorKind::Permission;
+    }
+    match err.kind() {
+        io::ErrorKind::WouldBlock => ErrorKind::Busy,
+        io::ErrorKind::PermissionDenied => ErrorKind::Permission,
+        _ => ErrorKind::Io,
     }
 }
 
@@ -288,5 +305,23 @@ mod tests {
             Ok(_) => panic!("expected corrupt header error"),
             Err(err) => assert_eq!(err.kind(), ErrorKind::Corrupt),
         }
+    }
+
+    #[test]
+    fn lock_errors_map_to_expected_kinds() {
+        let err = std::io::Error::from_raw_os_error(libc::EAGAIN);
+        assert_eq!(super::lock_error_kind(&err), ErrorKind::Busy);
+
+        let err = std::io::Error::from_raw_os_error(libc::EWOULDBLOCK);
+        assert_eq!(super::lock_error_kind(&err), ErrorKind::Busy);
+
+        let err = std::io::Error::from_raw_os_error(libc::EACCES);
+        assert_eq!(super::lock_error_kind(&err), ErrorKind::Permission);
+
+        let err = std::io::Error::from_raw_os_error(libc::EPERM);
+        assert_eq!(super::lock_error_kind(&err), ErrorKind::Permission);
+
+        let err = std::io::Error::from_raw_os_error(libc::EBADF);
+        assert_eq!(super::lock_error_kind(&err), ErrorKind::Io);
     }
 }
