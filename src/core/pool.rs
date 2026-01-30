@@ -228,8 +228,16 @@ impl Pool {
         self.header
     }
 
+    pub(crate) fn header_from_mmap(&self) -> Result<PoolHeader, Error> {
+        PoolHeader::decode(&self.mmap[0..HEADER_SIZE])
+    }
+
     pub fn mmap_len(&self) -> usize {
         self.mmap.len()
+    }
+
+    pub(crate) fn mmap(&self) -> &MmapMut {
+        &self.mmap
     }
 
     pub fn append_lock(&self) -> Result<AppendLock, Error> {
@@ -280,13 +288,17 @@ impl Pool {
                 &mut self.mmap,
                 self.header.ring_offset as usize,
                 ring_size,
+                head,
                 &mut tail,
                 &mut oldest_seq,
             )?;
             if !dropped {
                 return Err(Error::new(ErrorKind::Busy).with_message("unable to make space"));
             }
-            if oldest_seq == 0 {
+            if tail == head {
+                oldest_seq = 0;
+                newest_seq = 0;
+            } else if oldest_seq == 0 {
                 newest_seq = 0;
             }
             required = required_space(head, frame_len, ring_size);
@@ -450,11 +462,19 @@ fn drop_oldest(
     mmap: &mut MmapMut,
     ring_offset: usize,
     ring_size: usize,
+    head: usize,
     tail: &mut usize,
     oldest_seq: &mut u64,
 ) -> Result<bool, Error> {
     if *oldest_seq == 0 {
         return Ok(false);
+    }
+    if ring_size - *tail < FRAME_HEADER_LEN {
+        *tail = 0;
+        if *tail == head {
+            *oldest_seq = 0;
+        }
+        return Ok(true);
     }
     let header = read_frame_header(mmap, ring_offset, *tail)?;
     header.validate(ring_size)?;
