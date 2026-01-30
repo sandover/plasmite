@@ -21,20 +21,29 @@ pub struct FrameRef<'a> {
 #[derive(Debug)]
 pub struct Cursor {
     next_off: usize,
+    last_seq: u64,
 }
 
 impl Cursor {
     pub fn new() -> Self {
-        Self { next_off: 0 }
+        Self {
+            next_off: 0,
+            last_seq: 0,
+        }
     }
 
     pub fn seek_to(&mut self, offset: usize) {
         self.next_off = offset;
+        self.last_seq = 0;
     }
 
     pub fn next<'a>(&mut self, pool: &'a Pool) -> Result<CursorResult<'a>, Error> {
         let header = pool.header_from_mmap()?;
         if header.oldest_seq == 0 {
+            return Ok(CursorResult::WouldBlock);
+        }
+
+        if self.last_seq != 0 && self.last_seq >= header.newest_seq {
             return Ok(CursorResult::WouldBlock);
         }
 
@@ -50,8 +59,11 @@ impl Cursor {
             return Ok(CursorResult::WouldBlock);
         }
 
-        if !offset_in_range(self.next_off, tail, head, header.oldest_seq) {
+        if self.next_off >= ring_size
+            || !offset_in_range(self.next_off, tail, head, ring_size, header.oldest_seq)
+        {
             self.next_off = tail;
+            self.last_seq = 0;
             return Ok(CursorResult::FellBehind);
         }
 
@@ -70,10 +82,12 @@ impl Cursor {
                 ReadResult::WouldBlock => return Ok(CursorResult::WouldBlock),
                 ReadResult::FellBehind => {
                     self.next_off = tail;
+                    self.last_seq = 0;
                     return Ok(CursorResult::FellBehind);
                 }
                 ReadResult::Message { frame, next_off } => {
                     self.next_off = next_off;
+                    self.last_seq = frame.seq;
                     return Ok(CursorResult::Message(frame));
                 }
             }
@@ -162,12 +176,17 @@ fn headers_match(a: &FrameHeader, b: &FrameHeader) -> bool {
         && a.crc32c == b.crc32c
 }
 
-fn offset_in_range(offset: usize, tail: usize, head: usize, oldest_seq: u64) -> bool {
+fn offset_in_range(offset: usize, tail: usize, head: usize, ring_size: usize, oldest_seq: u64) -> bool {
     if oldest_seq == 0 {
         return false;
     }
+    if offset >= ring_size {
+        return false;
+    }
     if head == tail {
-        return offset == tail;
+        // Full-ring case: there is no empty "head" boundary to exclude.
+        // We rely on seq-based stopping (`last_seq >= newest_seq`) to avoid cycling forever.
+        return true;
     }
     if tail < head {
         offset >= tail && offset < head
@@ -237,7 +256,7 @@ mod tests {
         assert!(matches!(result, CursorResult::Message(_)));
 
         pool.append(payload.as_slice()).expect("append 2");
-        cursor.next_off = 0;
+        cursor.next_off = ring_size + 8;
         let result = cursor.next(&pool).expect("next");
         assert!(matches!(result, CursorResult::FellBehind));
         let result = cursor.next(&pool).expect("next");

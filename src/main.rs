@@ -5,6 +5,8 @@
 use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
+mod bench;
+
 use clap::{error::ErrorKind as ClapErrorKind, Parser, Subcommand};
 use serde_json::{json, Map, Value};
 use std::collections::VecDeque;
@@ -50,6 +52,67 @@ fn run() -> Result<(), Error> {
     let pool_dir = cli.dir.unwrap_or_else(default_pool_dir);
 
     match cli.command {
+        Command::Bench {
+            work_dir,
+            pool_size,
+            payload_bytes,
+            messages,
+            writers,
+            format,
+        } => {
+            let pool_sizes = if pool_size.is_empty() {
+                vec![parse_size("1MiB")?, parse_size("64MiB")?]
+            } else {
+                pool_size
+                    .iter()
+                    .map(|value| parse_size(value))
+                    .collect::<Result<Vec<_>, _>>()?
+            };
+
+            let payload_sizes = if payload_bytes.is_empty() {
+                vec![128usize, 1024usize, 16 * 1024usize]
+            } else {
+                payload_bytes
+                    .iter()
+                    .map(|value| parse_usize(value, "payload-bytes"))
+                    .collect::<Result<Vec<_>, _>>()?
+            };
+
+            let writer_counts = if writers.is_empty() {
+                vec![1usize, 2usize, 4usize, 8usize]
+            } else {
+                writers
+                    .iter()
+                    .map(|value| parse_usize(value, "writers"))
+                    .collect::<Result<Vec<_>, _>>()?
+            };
+
+            let format = bench::BenchFormat::parse(&format)?;
+            bench::run_bench(
+                bench::BenchArgs {
+                    work_dir,
+                    pool_sizes,
+                    payload_sizes,
+                    messages,
+                    writers: writer_counts,
+                    format,
+                },
+                env!("CARGO_PKG_VERSION"),
+            )
+        }
+        Command::BenchWorker {
+            role,
+            pool,
+            messages,
+            payload_bytes,
+            out_json,
+        } => bench::run_worker(bench::WorkerArgs {
+            pool_path: pool,
+            role: bench::WorkerRole::parse(&role)?,
+            messages,
+            payload_bytes: payload_bytes as usize,
+            out_json,
+        }),
         Command::Version => {
             let output = json!({
                 "name": "plasmite",
@@ -183,6 +246,51 @@ enum Command {
     Pool {
         #[command(subcommand)]
         command: PoolCommand,
+    },
+    #[command(
+        about = "Run a local performance benchmark suite (JSON stdout, table stderr)",
+        long_about = "Run a local performance benchmark suite.\n\
+\n\
+Outputs:\n\
+  - JSON to stdout (easy to archive/compare)\n\
+  - Table to stderr (human scan)\n\
+\n\
+Notes:\n\
+  - Benchmarks are intended for trend tracking, not lab-grade profiling.\n\
+  - Some scenarios spawn child processes to exercise cross-process locking.\n\
+\n\
+Examples:\n\
+  plasmite bench\n\
+  plasmite bench --format json > bench.json\n\
+  plasmite bench --payload-bytes 128 --payload-bytes 1024 --messages 20000\n\
+",
+    )]
+    Bench {
+        #[arg(long, help = "Directory for temporary pools/artifacts (default: OS temp dir)")]
+        work_dir: Option<PathBuf>,
+        #[arg(long = "pool-size", help = "Repeatable pool size (bytes or K/M/G, KiB/MiB/GiB)")]
+        pool_size: Vec<String>,
+        #[arg(long = "payload-bytes", help = "Repeatable payload target size (bytes)")]
+        payload_bytes: Vec<String>,
+        #[arg(long, default_value_t = 20_000, help = "Messages per scenario")]
+        messages: u64,
+        #[arg(long, help = "Repeatable writer counts for contention scenarios (default: 1,2,4,8)")]
+        writers: Vec<String>,
+        #[arg(long, default_value = "both", help = "Output format: json|table|both")]
+        format: String,
+    },
+    #[command(hide = true)]
+    BenchWorker {
+        #[arg(help = "worker role: writer|follower")]
+        role: String,
+        #[arg(long = "pool", help = "Pool file path")]
+        pool: PathBuf,
+        #[arg(long, help = "Message count (writer) or upper bound (follower)")]
+        messages: u64,
+        #[arg(long = "payload-bytes", help = "Approximate payload size in bytes")]
+        payload_bytes: u64,
+        #[arg(long = "out-json", help = "Write worker result JSON to this path")]
+        out_json: PathBuf,
     },
     #[command(
         about = "Append a JSON message to a pool",
@@ -358,6 +466,14 @@ fn parse_size(input: &str) -> Result<u64, Error> {
     value
         .checked_mul(multiplier)
         .ok_or_else(|| Error::new(ErrorKind::Usage).with_message("size overflow"))
+}
+
+fn parse_usize(input: &str, label: &str) -> Result<usize, Error> {
+    input.trim().parse::<usize>().map_err(|err| {
+        Error::new(ErrorKind::Usage)
+            .with_message(format!("invalid {label}"))
+            .with_source(err)
+    })
 }
 
 fn bounds_json(bounds: plasmite::core::pool::Bounds) -> Value {

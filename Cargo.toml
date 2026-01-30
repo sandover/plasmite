@@ -4,9 +4,10 @@ version = "0.0.1"
 edition = "2024"
 license = "MIT"
 description = "Plasmite CLI."
-repository = "https://github.com/YOUR_GITHUB/plasmite"
+repository = "https://github.com/sandover/plasmite"
 readme = "README.md"
 build = "build.rs"
+rust-version = "1.88"
 
 [lib]
 path = "src/lib.rs"

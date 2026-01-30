@@ -27,6 +27,7 @@ The intentionally small CLI for the initial release is:
 - `plasmite poke`
 - `plasmite get`
 - `plasmite peek`
+- `plasmite bench`
 - `plasmite version`
 
 The contract is documented in `plasmite-cli-spec-v.0.1.md`.
@@ -140,6 +141,7 @@ to avoid network fetches at build time. See `vendor/README.md`.
 - Storage + concurrency design: `plasmite-tdd-v.0.0.1.md`
 - Exit codes: `docs/exit-codes.md`
 - Homebrew packaging: `docs/homebrew.md`
+- Performance baselines: `docs/perf.md`
 
 ## Development
 

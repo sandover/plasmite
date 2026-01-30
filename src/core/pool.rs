@@ -117,10 +117,9 @@ impl PoolHeader {
         if self.ring_size == 0 {
             return Err(Error::new(ErrorKind::Corrupt).with_message("ring size is zero"));
         }
-        if (self.oldest_seq == 0) != (self.newest_seq == 0) {
-            return Err(Error::new(ErrorKind::Corrupt).with_message("invalid seq bounds"));
-        }
-        if self.oldest_seq > self.newest_seq && self.oldest_seq != 0 {
+        // Empty pool is indicated by oldest_seq == 0. newest_seq is monotonic and may be non-zero
+        // even when the pool is empty (e.g. after overwriting all messages).
+        if self.oldest_seq != 0 && self.oldest_seq > self.newest_seq {
             return Err(Error::new(ErrorKind::Corrupt).with_message("seq bounds inverted"));
         }
         Ok(())
@@ -373,9 +372,6 @@ impl Pool {
             }
             if tail == head {
                 oldest_seq = 0;
-                newest_seq = 0;
-            } else if oldest_seq == 0 {
-                newest_seq = 0;
             }
             required = required_space(head, frame_len, ring_size);
         }
@@ -429,7 +425,7 @@ pub struct AppendLock {
 
 impl Drop for AppendLock {
     fn drop(&mut self) {
-        let _ = self.file.unlock();
+        let _ = FileExt::unlock(&self.file);
     }
 }
 

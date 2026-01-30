@@ -25,6 +25,7 @@ Only these commands are in-scope for v0.0.1:
 * `plasmite poke`
 * `plasmite get`
 * `plasmite peek`
+* `plasmite bench`
 * `plasmite version`
 
 ### Flags in scope
@@ -390,6 +391,32 @@ plasmite peek POOLREF [OPTIONS]
 
 * Without range flags, starts at **newest+1** if `--follow`, else prints nothing and exits with code 0 (modern “tail -f” semantics).
 * With `--tail N`, prints last N currently available then (if `--follow`) continues.
+
+---
+
+## `plasmite bench`
+
+Run a local performance benchmark suite (CLI-only; intended for trend tracking).
+
+**Synopsis**
+
+```bash
+plasmite bench [OPTIONS]
+```
+
+**Options**
+
+* `--work-dir PATH` : directory for temporary pools/artifacts (default: `.scratch/…`)
+* `--pool-size SIZE` : repeatable (bytes or K/M/G, KiB/MiB/GiB)
+* `--payload-bytes N` : repeatable payload sizes (bytes)
+* `--messages N` : messages per scenario (default: `20000`)
+* `--writers N` : repeatable writer counts for contention scenarios (default: `1,2,4,8`)
+* `--format json|table|both` : output format (default: `both`)
+
+**Output**
+
+* JSON to stdout (for archiving/comparison)
+* Human-readable table to stderr
 
 ---
 
