@@ -23,7 +23,7 @@ Customize the parameter grid:
 
 ```bash
 ./target/release/plasmite bench \
-  --pool-size 1MiB --pool-size 64MiB \
+  --pool-size 1M --pool-size 64M \
   --payload-bytes 128 --payload-bytes 1024 --payload-bytes 16384 \
   --writers 1 --writers 2 --writers 4 --writers 8 \
   --messages 20000

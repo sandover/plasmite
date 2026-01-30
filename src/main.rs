@@ -62,7 +62,7 @@ fn run() -> Result<(), Error> {
             format,
         } => {
             let pool_sizes = if pool_size.is_empty() {
-                vec![parse_size("1MiB")?, parse_size("64MiB")?]
+                vec![parse_size("1M")?, parse_size("64M")?]
             } else {
                 pool_size
                     .iter()
@@ -279,7 +279,7 @@ Examples:\n\
     Bench {
         #[arg(long, help = "Directory for temporary pools/artifacts (default: .scratch/plasmite-bench-<pid>-<ts>)")]
         work_dir: Option<PathBuf>,
-        #[arg(long = "pool-size", help = "Repeatable pool size (bytes or K/M/G, KiB/MiB/GiB)")]
+        #[arg(long = "pool-size", help = "Repeatable pool size (bytes or K/M/G)")]
         pool_size: Vec<String>,
         #[arg(long = "payload-bytes", help = "Repeatable payload target size (bytes)")]
         payload_bytes: Vec<String>,
@@ -401,13 +401,13 @@ enum PoolCommand {
 \n\
 Examples:\n\
   plasmite pool create demo\n\
-  plasmite pool create --size 8MiB demo-1 demo-2\n\
+  plasmite pool create --size 8M demo-1 demo-2\n\
 ",
     )]
     Create {
         #[arg(required = true, help = "Pool names (resolved under the pool dir)")]
         names: Vec<String>,
-        #[arg(long, help = "Pool size (bytes or K/M/G, KiB/MiB/GiB)")]
+        #[arg(long, help = "Pool size (bytes or K/M/G)")]
         size: Option<String>,
     },
     #[command(
@@ -470,18 +470,18 @@ fn parse_size(input: &str) -> Result<u64, Error> {
 
     let value: u64 = digits.trim().parse().map_err(|err| {
         Error::new(ErrorKind::Usage)
-            .with_message("invalid size (expected number like 1MiB)")
+            .with_message("invalid size (expected number like 1M)")
             .with_source(err)
     })?;
 
     let multiplier = match suffix {
         "" => 1,
-        "K" | "k" | "KiB" | "Ki" => 1024,
-        "M" | "m" | "MiB" | "Mi" => 1024 * 1024,
-        "G" | "g" | "GiB" | "Gi" => 1024 * 1024 * 1024,
+        "K" | "k" => 1024,
+        "M" | "m" => 1024 * 1024,
+        "G" | "g" => 1024 * 1024 * 1024,
         _ => {
             return Err(Error::new(ErrorKind::Usage)
-                .with_message("invalid size suffix (use K/M/G or KiB/MiB/GiB)"));
+                .with_message("invalid size suffix (use K/M/G)"));
         }
     };
 
@@ -536,6 +536,27 @@ fn parse_durability(input: &str) -> Result<Durability, Error> {
         "flush" => Ok(Durability::Flush),
         _ => Err(Error::new(ErrorKind::Usage)
             .with_message("invalid --durability (use fast|flush)")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_size;
+
+    #[test]
+    fn parse_size_accepts_bytes_and_kmg() {
+        assert_eq!(parse_size("42").unwrap(), 42);
+        assert_eq!(parse_size("1K").unwrap(), 1024);
+        assert_eq!(parse_size("2k").unwrap(), 2048);
+        assert_eq!(parse_size("3M").unwrap(), 3 * 1024 * 1024);
+        assert_eq!(parse_size("4g").unwrap(), 4 * 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn parse_size_rejects_iec_suffixes() {
+        assert!(parse_size("1MiB").is_err());
+        assert!(parse_size("2Gi").is_err());
+        assert!(parse_size("3KiB").is_err());
     }
 }
 

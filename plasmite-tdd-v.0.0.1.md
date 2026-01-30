@@ -97,7 +97,7 @@ Keep the variants coarse; attach rich context for logs/debug output, not for the
 
 ## PoolHeader
 
-`PoolHeader` is a fixed-size struct at offset 0 (e.g. 4–8 KiB, padded).
+`PoolHeader` is a fixed-size struct at offset 0 (e.g. 4–8 K, padded).
 
 Fields (conceptual; exact sizing TBD):
 
@@ -241,8 +241,9 @@ In an mmap-backed design, newly appended bytes typically land in the OS page cac
 
 v0.1 position:
 
-* We do **not** force durability per message by default (no `fsync`/`msync` on every append).
-* We rely on the crash-safety protocol + conservative validation/recovery to avoid interpreting torn data as valid.
+* We do **not** force durability per message by default (no automatic `msync`/`fsync` on every append).
+* We provide an **opt-in per-append flush** path (CLI: `poke --durability flush`) that flushes the committed frame bytes and header bytes.
+* We rely on the crash-safety protocol + conservative validation/recovery to avoid interpreting torn data as valid when running in `fast` mode.
 
 Possible future durability modes (intentionally not part of v0.1 behavior yet):
 
@@ -489,7 +490,7 @@ Given `O = cursor.next_off`:
 
 1. Hard cap payload length.
 
-   Define `MAX_PAYLOAD` as `min(ring_size - header_len, MAX_PAYLOAD_ABS)` where `MAX_PAYLOAD_ABS` is an absolute cap (e.g. `256MiB`). This prevents a torn header from causing out-of-bounds reads.
+   Define `MAX_PAYLOAD` as `min(ring_size - header_len, MAX_PAYLOAD_ABS)` where `MAX_PAYLOAD_ABS` is an absolute cap (e.g. `256M`). This prevents a torn header from causing out-of-bounds reads.
 
 2. Publish gate ordering.
 

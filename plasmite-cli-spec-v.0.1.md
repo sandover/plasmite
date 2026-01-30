@@ -138,8 +138,7 @@ All pool/message commands emit JSON by default. The `completion` subcommand emit
 
 Accept:
 
-* `64KiB`, `256MiB`, `2GiB` (preferred)
-* `64K`, `256M`, `2G` (legacy; treated as 1024-based)
+* `64K`, `256M`, `2G` (K/M/G are 1024-based)
 * raw bytes: `1048576`
 
 ### Time/ranges (for peek/export)
@@ -225,7 +224,7 @@ plasmite pool create [OPTIONS] NAME [NAME...]
 
 **Options**
 
-* `--size SIZE` (default: `1MiB`)
+* `--size SIZE` (default: `1M`)
 * `--force` : if exists, delete and recreate (legacy `-z`)
 * `--if-missing` : don’t error if exists (legacy `-q`)
 * `--checksum` : enable per-message checksum/CRC (debuggability; default: off)
@@ -407,7 +406,7 @@ plasmite bench [OPTIONS]
 **Options**
 
 * `--work-dir PATH` : directory for temporary pools/artifacts (default: `.scratch/…`)
-* `--pool-size SIZE` : repeatable (bytes or K/M/G, KiB/MiB/GiB)
+* `--pool-size SIZE` : repeatable (bytes or K/M/G)
 * `--payload-bytes N` : repeatable payload sizes (bytes)
 * `--messages N` : messages per scenario (default: `20000`)
 * `--writers N` : repeatable writer counts for contention scenarios (default: `1,2,4,8`)

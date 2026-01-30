@@ -949,11 +949,11 @@ fn format_bytes(value: u64) -> String {
 
     let v = value as f64;
     if v >= GB {
-        format!("{:.1}GiB", v / GB)
+        format!("{:.1}G", v / GB)
     } else if v >= MB {
-        format!("{:.1}MiB", v / MB)
+        format!("{:.1}M", v / MB)
     } else if v >= KB {
-        format!("{:.1}KiB", v / KB)
+        format!("{:.1}K", v / KB)
     } else {
         format!("{value}B")
     }
