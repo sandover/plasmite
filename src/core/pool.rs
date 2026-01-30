@@ -91,7 +91,10 @@ impl PoolHeader {
     }
 
     fn validate(&self, actual_file_size: u64) -> Result<(), Error> {
-        if self.file_size == 0 || self.file_size > actual_file_size {
+        if self.file_size == 0 {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("invalid file size"));
+        }
+        if self.file_size != actual_file_size {
             return Err(Error::new(ErrorKind::Corrupt).with_message("invalid file size"));
         }
         if self.ring_offset < HEADER_SIZE as u64 {
@@ -303,6 +306,31 @@ mod tests {
         let result = Pool::open(&path);
         match result {
             Ok(_) => panic!("expected corrupt header error"),
+            Err(err) => assert_eq!(err.kind(), ErrorKind::Corrupt),
+        }
+    }
+
+    #[test]
+    fn mismatched_file_size_is_rejected() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .read(true)
+            .open(&path)
+            .expect("create");
+        file.set_len(1024 * 1024).expect("len");
+        file.seek(SeekFrom::Start(0)).expect("seek");
+
+        let header = super::PoolHeader::new(512 * 1024).expect("header");
+        let buf = header.encode();
+        file.write_all(&buf).expect("write");
+        file.flush().expect("flush");
+
+        let result = Pool::open(&path);
+        match result {
+            Ok(_) => panic!("expected mismatch error"),
             Err(err) => assert_eq!(err.kind(), ErrorKind::Corrupt),
         }
     }
