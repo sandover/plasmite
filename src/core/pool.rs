@@ -158,6 +158,36 @@ impl PoolOptions {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Durability {
+    Fast,
+    Flush,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct AppendOptions {
+    pub timestamp_ns: u64,
+    pub durability: Durability,
+}
+
+impl AppendOptions {
+    pub fn new(timestamp_ns: u64, durability: Durability) -> Self {
+        Self {
+            timestamp_ns,
+            durability,
+        }
+    }
+}
+
+impl Default for AppendOptions {
+    fn default() -> Self {
+        Self {
+            timestamp_ns: 0,
+            durability: Durability::Fast,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Bounds {
     pub oldest_seq: Option<u64>,
     pub newest_seq: Option<u64>,
@@ -275,11 +305,17 @@ impl Pool {
         let bounds = bounds_from_header(header);
         let (oldest, newest) = match (bounds.oldest_seq, bounds.newest_seq) {
             (Some(oldest), Some(newest)) => (oldest, newest),
-            _ => return Err(Error::new(ErrorKind::NotFound).with_message("empty pool")),
+            _ => {
+                return Err(Error::new(ErrorKind::NotFound)
+                    .with_message("message not found")
+                    .with_seq(seq))
+            }
         };
 
         if seq < oldest || seq > newest {
-            return Err(Error::new(ErrorKind::NotFound).with_message("seq out of bounds"));
+            return Err(Error::new(ErrorKind::NotFound)
+                .with_message("message not found")
+                .with_seq(seq));
         }
 
         let mut cursor = crate::core::cursor::Cursor::new();
@@ -292,16 +328,22 @@ impl Pool {
                         return Ok(frame);
                     }
                     if frame.seq > seq {
-                        return Err(Error::new(ErrorKind::NotFound).with_message("seq not found"));
+                        return Err(Error::new(ErrorKind::NotFound)
+                            .with_message("message not found")
+                            .with_seq(seq));
                     }
                 }
                 crate::core::cursor::CursorResult::WouldBlock => {
-                    return Err(Error::new(ErrorKind::NotFound).with_message("seq not found"));
+                    return Err(Error::new(ErrorKind::NotFound)
+                        .with_message("message not found")
+                        .with_seq(seq));
                 }
                 crate::core::cursor::CursorResult::FellBehind => {
                     header = self.header_from_mmap()?;
                     if header.oldest_seq != 0 && seq < header.oldest_seq {
-                        return Err(Error::new(ErrorKind::NotFound).with_message("seq overwritten"));
+                        return Err(Error::new(ErrorKind::NotFound)
+                            .with_message("message not found")
+                            .with_seq(seq));
                     }
                     cursor.seek_to(header.tail_off as usize);
                 }
@@ -324,17 +366,21 @@ impl Pool {
     }
 
     pub fn append(&mut self, payload: &[u8]) -> Result<u64, Error> {
-        self.append_with_timestamp(payload, 0)
+        self.append_with_options(payload, AppendOptions::default())
     }
 
     pub fn append_with_timestamp(&mut self, payload: &[u8], timestamp_ns: u64) -> Result<u64, Error> {
+        self.append_with_options(payload, AppendOptions::new(timestamp_ns, Durability::Fast))
+    }
+
+    pub fn append_with_options(&mut self, payload: &[u8], options: AppendOptions) -> Result<u64, Error> {
         let _lock = self.append_lock()?;
         // Refresh header after acquiring the lock to avoid stale state across processes.
         self.header = self.header_from_mmap()?;
-        self.append_locked(payload, timestamp_ns)
+        self.append_locked(payload, options)
     }
 
-    fn append_locked(&mut self, payload: &[u8], timestamp_ns: u64) -> Result<u64, Error> {
+    fn append_locked(&mut self, payload: &[u8], options: AppendOptions) -> Result<u64, Error> {
         if payload.len() > u32::MAX as usize {
             return Err(Error::new(ErrorKind::Usage).with_message("payload too large"));
         }
@@ -377,9 +423,11 @@ impl Pool {
         }
 
         let remaining = ring_size - head;
+        let mut wrap_offset = None;
         if remaining < frame_len {
             if remaining >= FRAME_HEADER_LEN {
                 write_wrap(&mut self.mmap, self.header.ring_offset as usize, head)?;
+                wrap_offset = Some(head);
             }
             head = 0;
         }
@@ -394,10 +442,12 @@ impl Pool {
             FrameState::Writing,
             0,
             seq,
-            timestamp_ns,
+            options.timestamp_ns,
             payload.len() as u32,
             0,
         );
+        let ring_offset = self.header.ring_offset as usize;
+        let frame_offset = ring_offset + head;
         write_frame(&mut self.mmap, self.header.ring_offset as usize, head, &header, payload)?;
 
         let mut committed = header;
@@ -414,6 +464,21 @@ impl Pool {
         self.header.oldest_seq = oldest_seq;
         self.header.newest_seq = newest_seq;
         write_pool_header(&mut self.mmap, &self.header);
+
+        if options.durability == Durability::Flush {
+            flush_mmap_range(&self.mmap, frame_offset, frame_len, &self.path, "failed to flush frame")?;
+            if let Some(wrap_head) = wrap_offset {
+                let wrap_start = ring_offset + wrap_head;
+                flush_mmap_range(
+                    &self.mmap,
+                    wrap_start,
+                    FRAME_HEADER_LEN,
+                    &self.path,
+                    "failed to flush wrap marker",
+                )?;
+            }
+            flush_mmap_range(&self.mmap, 0, HEADER_SIZE, &self.path, "failed to flush header")?;
+        }
 
         Ok(seq)
     }
@@ -453,8 +518,14 @@ fn read_header(file: &mut File, path: &Path) -> Result<PoolHeader, Error> {
     let mut buf = [0u8; HEADER_SIZE];
     file.seek(SeekFrom::Start(0))
         .map_err(|err| Error::new(ErrorKind::Io).with_path(path).with_source(err))?;
-    file.read_exact(&mut buf)
-        .map_err(|err| Error::new(ErrorKind::Io).with_path(path).with_source(err))?;
+    file.read_exact(&mut buf).map_err(|err| {
+        let kind = if err.kind() == io::ErrorKind::UnexpectedEof {
+            ErrorKind::Corrupt
+        } else {
+            ErrorKind::Io
+        };
+        Error::new(kind).with_path(path).with_source(err)
+    })?;
     PoolHeader::decode(&buf)
 }
 
@@ -472,6 +543,21 @@ fn write_header(file: &mut File, header: &PoolHeader, path: &Path) -> Result<(),
 fn write_pool_header(mmap: &mut MmapMut, header: &PoolHeader) {
     let buf = header.encode();
     mmap[0..HEADER_SIZE].copy_from_slice(&buf);
+}
+
+fn flush_mmap_range(
+    mmap: &MmapMut,
+    offset: usize,
+    len: usize,
+    path: &Path,
+    message: &str,
+) -> Result<(), Error> {
+    mmap.flush_range(offset, len).map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message(message)
+            .with_path(path)
+            .with_source(err)
+    })
 }
 
 fn bounds_from_header(header: PoolHeader) -> Bounds {

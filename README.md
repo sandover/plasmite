@@ -113,6 +113,21 @@ Canonical CLI JSON shape:
 On disk, each message payload is stored as **Lite³ bytes for `{meta,data}`**; the CLI remains
 **JSON-in/JSON-out** (`poke` encodes JSON to Lite³; `get`/`peek` decode Lite³ to JSON. Use `poke --print` to emit JSON acks).
 
+Errors:
+- On TTY, errors are concise human text (one line + hint).
+- When stderr is not a TTY (piped/redirected), errors are JSON objects on stderr for easy parsing.
+
+Example (non-TTY JSON error):
+```json
+{"error":{"kind":"NotFound","message":"pool not found","path":"/Users/me/.plasmite/pools/demo.plasmite","hint":"Create it first: plasmite pool create demo (or pass --dir for a different pool directory)."}}
+```
+
+Example (TTY text error):
+```
+error: invalid duration
+hint: Use a number plus ms|s|m|h (e.g. 10s).
+```
+
 ### Pool references
 
 Most commands take a pool reference:

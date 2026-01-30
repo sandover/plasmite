@@ -10,6 +10,7 @@ mod bench;
 use clap::{error::ErrorKind as ClapErrorKind, Parser, Subcommand};
 use serde_json::{json, Map, Value};
 use std::collections::VecDeque;
+use std::error::Error as StdError;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use plasmite::core::error::{to_exit_code, Error, ErrorKind};
@@ -42,8 +43,11 @@ fn run() -> Result<(), Error> {
                     return Ok(());
                 }
                 _ => {
+                    let message = clap_error_summary(&err);
+                    let hint = clap_error_hint(&err);
                     return Err(Error::new(ErrorKind::Usage)
-                        .with_message(err.to_string()));
+                        .with_message(message)
+                        .with_hint(hint));
                 }
             }
         }
@@ -51,7 +55,7 @@ fn run() -> Result<(), Error> {
 
     let pool_dir = cli.dir.unwrap_or_else(default_pool_dir);
 
-    match cli.command {
+    let result = (|| match cli.command {
         Command::Bench {
             work_dir,
             pool_size,
@@ -140,7 +144,8 @@ fn run() -> Result<(), Error> {
                     if path.exists() {
                         return Err(Error::new(ErrorKind::AlreadyExists)
                             .with_message("pool already exists")
-                            .with_path(&path));
+                            .with_path(&path)
+                            .with_hint("Choose a different name or remove the existing pool file."));
                     }
                     let pool = Pool::create(&path, PoolOptions::new(size))?;
                     let info = pool.info()?;
@@ -151,14 +156,16 @@ fn run() -> Result<(), Error> {
             }
             PoolCommand::Info { name } => {
                 let path = resolve_poolref(&name, &pool_dir)?;
-                let pool = Pool::open(&path)?;
+                let pool = Pool::open(&path)
+                    .map_err(|err| add_missing_pool_hint(err, &name, &name))?;
                 let info = pool.info()?;
                 emit_json(pool_info_json(&name, &info));
                 Ok(())
             }
             PoolCommand::Bounds { name } => {
                 let path = resolve_poolref(&name, &pool_dir)?;
-                let pool = Pool::open(&path)?;
+                let pool = Pool::open(&path)
+                    .map_err(|err| add_missing_pool_hint(err, &name, &name))?;
                 let bounds = pool.bounds()?;
                 emit_json(bounds_with_pool_json(&name, bounds));
                 Ok(())
@@ -173,11 +180,13 @@ fn run() -> Result<(), Error> {
             print,
         } => {
             let path = resolve_poolref(&pool, &pool_dir)?;
-            let mut pool_handle = Pool::open(&path)?;
+            let mut pool_handle = Pool::open(&path)
+                .map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
             let durability = parse_durability(&durability)?;
             if data_json.is_some() && data_file.is_some() {
                 return Err(Error::new(ErrorKind::Usage)
-                    .with_message("multiple data inputs provided (use only one of --data-json, --data, or stdin)"));
+                    .with_message("multiple data inputs provided")
+                    .with_hint("Use only one of --data-json, --data @FILE, or stdin."));
             }
 
             if data_json.is_some() || data_file.is_some() || io::stdin().is_terminal() {
@@ -202,15 +211,19 @@ fn run() -> Result<(), Error> {
                 })?;
                 if count == 0 {
                     return Err(Error::new(ErrorKind::Usage)
-                        .with_message("missing data input (stdin had no JSON values)"));
+                        .with_message("missing data input")
+                        .with_hint("Provide JSON via --data-json, --data @FILE, or pipe JSON to stdin."));
                 }
             }
             Ok(())
         }
         Command::Get { pool, seq } => {
             let path = resolve_poolref(&pool, &pool_dir)?;
-            let pool_handle = Pool::open(&path)?;
-            let frame = pool_handle.get(seq)?;
+            let pool_handle = Pool::open(&path)
+                .map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
+            let frame = pool_handle
+                .get(seq)
+                .map_err(|err| add_missing_seq_hint(err, &pool))?;
             emit_json(message_from_frame(&pool, &frame)?);
             Ok(())
         }
@@ -223,7 +236,8 @@ fn run() -> Result<(), Error> {
             jsonl,
         } => {
             let path = resolve_poolref(&pool, &pool_dir)?;
-            let pool_handle = Pool::open(&path)?;
+            let pool_handle = Pool::open(&path)
+                .map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
             let timeout = idle_timeout
                 .as_deref()
                 .map(parse_duration)
@@ -246,7 +260,11 @@ fn run() -> Result<(), Error> {
                 pretty,
             )
         }
-    }
+    })();
+
+    result
+        .map_err(add_corrupt_hint)
+        .map_err(add_io_hint)
 }
 
 #[derive(Parser)]
@@ -485,6 +503,52 @@ fn resolve_poolref(input: &str, pool_dir: &Path) -> Result<PathBuf, Error> {
 
 const DEFAULT_POOL_SIZE: u64 = 1024 * 1024;
 
+fn add_missing_pool_hint(err: Error, pool_ref: &str, input: &str) -> Error {
+    if err.kind() != ErrorKind::NotFound || err.hint().is_some() {
+        return err;
+    }
+    if input.contains('/') {
+        return err.with_hint("Pool path not found. Check the path or pass --dir for a different pool directory.");
+    }
+    err.with_hint(format!(
+        "Create it first: plasmite pool create {pool_ref} (or pass --dir for a different pool directory)."
+    ))
+}
+
+fn add_missing_seq_hint(err: Error, pool_ref: &str) -> Error {
+    if err.kind() != ErrorKind::NotFound || err.seq().is_none() || err.hint().is_some() {
+        return err;
+    }
+    err.with_hint(format!(
+        "Check available messages: plasmite pool bounds {pool_ref} (or plasmite peek {pool_ref} --tail 10)."
+    ))
+}
+
+fn add_io_hint(err: Error) -> Error {
+    if err.hint().is_some() {
+        return err;
+    }
+    match err.kind() {
+        ErrorKind::Permission => err.with_hint(
+            "Permission denied. Check directory permissions or use --dir to a writable location.",
+        ),
+        ErrorKind::Busy => err.with_hint(
+            "Pool is busy (another writer holds the lock). Retry with backoff.",
+        ),
+        ErrorKind::Io => err.with_hint(
+            "I/O error. Check the path, filesystem, and disk space.",
+        ),
+        _ => err,
+    }
+}
+
+fn add_corrupt_hint(err: Error) -> Error {
+    if err.kind() != ErrorKind::Corrupt || err.hint().is_some() {
+        return err;
+    }
+    err.with_hint("Pool appears corrupt. Recreate it or investigate with validation tooling.")
+}
+
 fn ensure_pool_dir(dir: &Path) -> Result<(), Error> {
     std::fs::create_dir_all(dir)
         .map_err(|err| Error::new(ErrorKind::Io).with_path(dir).with_source(err))
@@ -502,7 +566,8 @@ fn parse_size(input: &str) -> Result<u64, Error> {
 
     let value: u64 = digits.trim().parse().map_err(|err| {
         Error::new(ErrorKind::Usage)
-            .with_message("invalid size (expected number like 1M)")
+            .with_message("invalid size")
+            .with_hint("Use bytes or K/M/G (e.g. 64M).")
             .with_source(err)
     })?;
 
@@ -513,19 +578,23 @@ fn parse_size(input: &str) -> Result<u64, Error> {
         "G" | "g" => 1024 * 1024 * 1024,
         _ => {
             return Err(Error::new(ErrorKind::Usage)
-                .with_message("invalid size suffix (use K/M/G)"));
+                .with_message("invalid size suffix")
+                .with_hint("Use K/M/G (e.g. 64M)."));
         }
     };
 
     value
         .checked_mul(multiplier)
-        .ok_or_else(|| Error::new(ErrorKind::Usage).with_message("size overflow"))
+        .ok_or_else(|| Error::new(ErrorKind::Usage)
+            .with_message("size overflow")
+            .with_hint("Use a smaller size value."))
 }
 
 fn parse_usize(input: &str, label: &str) -> Result<usize, Error> {
     input.trim().parse::<usize>().map_err(|err| {
         Error::new(ErrorKind::Usage)
             .with_message(format!("invalid {label}"))
+            .with_hint(format!("Use a numeric value for {label}."))
             .with_source(err)
     })
 }
@@ -567,7 +636,8 @@ fn parse_durability(input: &str) -> Result<Durability, Error> {
         "fast" => Ok(Durability::Fast),
         "flush" => Ok(Durability::Flush),
         _ => Err(Error::new(ErrorKind::Usage)
-            .with_message("invalid --durability (use fast|flush)")),
+            .with_message("invalid durability")
+            .with_hint("Use fast or flush.")),
     }
 }
 
@@ -659,19 +729,137 @@ fn emit_message(value: serde_json::Value, pretty: bool) {
 }
 
 fn emit_error(err: &Error) {
-    let value = json!({
-        "error": {
-            "kind": format!("{:?}", err.kind()),
-            "message": err.to_string(),
-        }
-    });
-    let json = if io::stderr().is_terminal() {
-        serde_json::to_string_pretty(&value)
-    } else {
-        serde_json::to_string(&value)
+    if io::stderr().is_terminal() {
+        eprintln!("{}", error_text(err));
+        return;
     }
-    .unwrap_or_else(|_| "{\"error\":\"json encode failed\"}".to_string());
+
+    let value = error_json(err);
+    let json = serde_json::to_string(&value)
+        .unwrap_or_else(|_| "{\"error\":{\"kind\":\"Internal\",\"message\":\"json encode failed\"}}".to_string());
     eprintln!("{json}");
+}
+
+fn error_message(err: &Error) -> String {
+    if let Some(message) = err.message() {
+        return message.to_string();
+    }
+    match err.kind() {
+        ErrorKind::Internal => "internal error".to_string(),
+        ErrorKind::Usage => "usage error".to_string(),
+        ErrorKind::NotFound => "not found".to_string(),
+        ErrorKind::AlreadyExists => "already exists".to_string(),
+        ErrorKind::Busy => "resource is busy".to_string(),
+        ErrorKind::Permission => "permission denied".to_string(),
+        ErrorKind::Corrupt => "corrupt data".to_string(),
+        ErrorKind::Io => "i/o error".to_string(),
+    }
+}
+
+fn error_causes(err: &Error) -> Vec<String> {
+    let mut causes = Vec::new();
+    let mut cur = err.source();
+    while let Some(source) = cur {
+        causes.push(source.to_string());
+        cur = source.source();
+    }
+    causes
+}
+
+fn error_json(err: &Error) -> Value {
+    let mut inner = Map::new();
+    inner.insert("kind".to_string(), json!(format!("{:?}", err.kind())));
+    inner.insert("message".to_string(), json!(error_message(err)));
+    if let Some(hint) = err.hint() {
+        inner.insert("hint".to_string(), json!(hint));
+    }
+    if let Some(path) = err.path() {
+        inner.insert("path".to_string(), json!(path.display().to_string()));
+    }
+    if let Some(seq) = err.seq() {
+        inner.insert("seq".to_string(), json!(seq));
+    }
+    if let Some(offset) = err.offset() {
+        inner.insert("offset".to_string(), json!(offset));
+    }
+    let causes = error_causes(err);
+    if !causes.is_empty() {
+        inner.insert("causes".to_string(), json!(causes));
+    }
+
+    let mut outer = Map::new();
+    outer.insert("error".to_string(), Value::Object(inner));
+    Value::Object(outer)
+}
+
+fn error_text(err: &Error) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!("error: {}", error_message(err)));
+
+    if let Some(hint) = err.hint() {
+        lines.push(format!("hint: {hint}"));
+    }
+    if let Some(path) = err.path() {
+        lines.push(format!("path: {}", path.display()));
+    }
+    if let Some(seq) = err.seq() {
+        lines.push(format!("seq: {seq}"));
+    }
+    if let Some(offset) = err.offset() {
+        lines.push(format!("offset: {offset}"));
+    }
+
+    let causes = error_causes(err);
+    if let Some(cause) = causes.first() {
+        lines.push(format!("caused by: {cause}"));
+    }
+
+    lines.join("\n")
+}
+
+fn clap_error_summary(err: &clap::Error) -> String {
+    for line in err.to_string().lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("error:") {
+            return rest.trim().to_string();
+        }
+        return trimmed.to_string();
+    }
+    "invalid arguments".to_string()
+}
+
+fn clap_error_hint(err: &clap::Error) -> String {
+    let rendered = err.to_string();
+    let usage = rendered
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("Usage: "))
+        .map(str::trim);
+
+    let Some(usage) = usage else {
+        return "Try `plasmite --help`.".to_string();
+    };
+
+    let tokens: Vec<&str> = usage.split_whitespace().collect();
+    let Some(pos) = tokens.iter().position(|t| *t == "plasmite") else {
+        return "Try `plasmite --help`.".to_string();
+    };
+
+    let mut parts = Vec::new();
+    for token in tokens.iter().skip(pos + 1) {
+        if token.starts_with('-') || token.starts_with('<') || token.starts_with('[') {
+            break;
+        }
+        parts.push(*token);
+    }
+
+    if parts.is_empty() {
+        return "Try `plasmite --help`.".to_string();
+    }
+
+    format!("Try `plasmite {} --help`.", parts.join(" "))
 }
 
 fn read_data_single(data_json: Option<String>, data_file: Option<String>) -> Result<Value, Error> {
@@ -687,13 +875,15 @@ fn read_data_single(data_json: Option<String>, data_file: Option<String>) -> Res
         }
     } else {
         return Err(Error::new(ErrorKind::Usage)
-            .with_message("missing data input (use --data-json, --data @FILE, or pipe JSON to stdin)"));
+            .with_message("missing data input")
+            .with_hint("Provide JSON via --data-json, --data @FILE, or pipe JSON to stdin."));
     };
 
     serde_json::from_str(&json_str)
         .map_err(|err| {
             Error::new(ErrorKind::Usage)
-                .with_message("invalid json (expected a JSON value)")
+                .with_message("invalid json")
+                .with_hint("Provide a single JSON value (e.g. '{\"x\":1}').")
                 .with_source(err)
         })
 }
@@ -716,7 +906,8 @@ where
     for item in stream {
         let value = item.map_err(|err| {
             Error::new(ErrorKind::Usage)
-                .with_message("invalid json (expected JSON values)")
+                .with_message("invalid json stream")
+                .with_hint("Provide JSON values separated by whitespace or newlines.")
                 .with_source(err)
         })?;
         on_value(value)?;
@@ -879,7 +1070,8 @@ fn parse_duration(input: &str) -> Result<Duration, Error> {
     let suffix = trimmed[split..].trim();
     let value: u64 = digits.parse().map_err(|err| {
         Error::new(ErrorKind::Usage)
-            .with_message("invalid duration (expected number like 10s)")
+            .with_message("invalid duration")
+            .with_hint("Use a number plus ms|s|m|h (e.g. 10s).")
             .with_source(err)
     })?;
     let duration = match suffix {
@@ -889,7 +1081,8 @@ fn parse_duration(input: &str) -> Result<Duration, Error> {
         "h" => Duration::from_secs(value * 60 * 60),
         _ => {
             return Err(Error::new(ErrorKind::Usage)
-                .with_message("invalid duration suffix (use ms|s|m|h)"));
+                .with_message("invalid duration suffix")
+                .with_hint("Use ms, s, m, or h (e.g. 10s)."));
         }
     };
     Ok(duration)

@@ -19,6 +19,7 @@ pub enum ErrorKind {
 pub struct Error {
     kind: ErrorKind,
     message: Option<String>,
+    hint: Option<String>,
     path: Option<PathBuf>,
     seq: Option<u64>,
     offset: Option<u64>,
@@ -30,6 +31,7 @@ impl Error {
         Self {
             kind,
             message: None,
+            hint: None,
             path: None,
             seq: None,
             offset: None,
@@ -41,8 +43,33 @@ impl Error {
         self.kind
     }
 
+    pub fn message(&self) -> Option<&str> {
+        self.message.as_deref()
+    }
+
+    pub fn hint(&self) -> Option<&str> {
+        self.hint.as_deref()
+    }
+
+    pub fn path(&self) -> Option<&std::path::Path> {
+        self.path.as_deref()
+    }
+
+    pub fn seq(&self) -> Option<u64> {
+        self.seq
+    }
+
+    pub fn offset(&self) -> Option<u64> {
+        self.offset
+    }
+
     pub fn with_message(mut self, message: impl Into<String>) -> Self {
         self.message = Some(message.into());
+        self
+    }
+
+    pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(hint.into());
         self
     }
 

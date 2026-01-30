@@ -39,12 +39,22 @@ Minimal, explicit flag set for v0.0.1:
 
 JSON output is the default for commands that print; `poke` is silent unless `--print` is provided.
 
+Errors:
+- On TTY, emit concise human text (single summary line + hint).
+- When stderr is not a TTY (piped/redirected), emit a JSON object to stderr:
+  - `error.kind` (string)
+  - `error.message` (short summary)
+  - `error.hint` (optional)
+  - `error.path` / `error.seq` / `error.offset` (optional)
+  - `error.causes` (optional array; omitted if empty)
+  - Omit fields when unknown.
+
 ### Output formats
 
 * Non-streaming: JSON only (when output is enabled).
 * Streaming: default is pretty JSON on TTY for non-follow reads; JSONL for `--follow` or non-TTY.
 * `--pretty` or `--jsonl` override the default.
-* Errors are JSON objects written to stderr.
+* Errors are JSON objects on stderr when stderr is not a TTY; otherwise concise text is used.
 * Exit codes are stable and match the core error kinds (see `docs/exit-codes.md`).
 
 ### Message schema (fixed)
