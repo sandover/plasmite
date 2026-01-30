@@ -34,7 +34,7 @@ Minimal, explicit flag set for v0.0.1:
 
 * Global: `--dir`
 * `pool create`: `--size`
-* `poke`: `--descrip`, `--data-json`, `--data @FILE` (plus stdin-as-data fallback)
+* `poke`: `--descrip`, `--data-json`, `--data @FILE` (plus stdin-as-data fallback), `--durability fast|flush`
 * `peek`: `--tail`, `--follow`, `--idle-timeout`
 
 JSON output is always the default.
@@ -411,6 +411,7 @@ plasmite bench [OPTIONS]
 * `--payload-bytes N` : repeatable payload sizes (bytes)
 * `--messages N` : messages per scenario (default: `20000`)
 * `--writers N` : repeatable writer counts for contention scenarios (default: `1,2,4,8`)
+* `--durability fast|flush|both` : repeatable; controls append durability modes (default: `fast`)
 * `--format json|table|both` : output format (default: `both`)
 
 **Output**
@@ -441,6 +442,12 @@ plasmite poke POOLREF [OPTIONS]
 * `--data-json JSON` (inline)
 * `--data @FILE.json` (read JSON from file; `@-` means stdin)
 * If stdin is not a TTY and no `--data*` is provided: treat stdin as JSON data.
+
+**Options (durability)**
+
+* `--durability fast|flush` (default: `fast`)
+  * `fast`: best-effort (no explicit flush)
+  * `flush`: flush frame + header to storage after append
 
 **Output**
 

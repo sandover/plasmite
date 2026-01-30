@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 use plasmite::core::cursor::{Cursor, CursorResult};
 use plasmite::core::error::{Error, ErrorKind};
 use plasmite::core::lite3;
-use plasmite::core::pool::{Pool, PoolOptions};
+use plasmite::core::pool::{AppendOptions, Durability, Pool, PoolOptions};
 
 #[derive(Clone, Debug)]
 pub struct BenchArgs {
@@ -30,6 +30,7 @@ pub struct BenchArgs {
     pub messages: u64,
     pub writers: Vec<usize>,
     pub format: BenchFormat,
+    pub durabilities: Vec<Durability>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -58,6 +59,7 @@ pub struct WorkerArgs {
     pub messages: u64,
     pub payload_bytes: usize,
     pub out_json: PathBuf,
+    pub durability: Durability,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -79,6 +81,7 @@ impl WorkerRole {
 
 pub fn run_bench(args: BenchArgs, program_version: &str) -> Result<(), Error> {
     let start = SystemTime::now();
+    warn_if_debug_build()?;
     let work_dir = args
         .work_dir
         .clone()
@@ -86,34 +89,82 @@ pub fn run_bench(args: BenchArgs, program_version: &str) -> Result<(), Error> {
     std::fs::create_dir_all(&work_dir)
         .map_err(|err| Error::new(ErrorKind::Io).with_path(&work_dir).with_source(err))?;
 
+    let rep_pool = *args
+        .pool_sizes
+        .last()
+        .ok_or_else(|| Error::new(ErrorKind::Usage).with_message("no pool sizes provided"))?;
+    let rep_payload = *args
+        .payload_sizes
+        .get(args.payload_sizes.len() / 2)
+        .ok_or_else(|| Error::new(ErrorKind::Usage).with_message("no payload sizes provided"))?;
+    let rep_writers = args
+        .writers
+        .iter()
+        .copied()
+        .find(|value| *value == 4)
+        .or_else(|| args.writers.iter().copied().find(|value| *value > 1));
+
     let mut results = Vec::new();
     for pool_size in &args.pool_sizes {
         for payload_bytes in &args.payload_sizes {
-            let base_name = format!("bench-{}-{}", pool_size, payload_bytes);
-            let pool_path = work_dir.join(format!("{base_name}.plasmite"));
-
-            let append = bench_append(&pool_path, *pool_size, *payload_bytes, args.messages)?;
-            results.extend(append);
-
-            let follow = bench_follow(&work_dir, &pool_path, *pool_size, *payload_bytes, args.messages)?;
-            results.push(follow);
-
-            let get_scan = bench_get_scan(&pool_path, *pool_size, *payload_bytes, args.messages)?;
-            results.extend(get_scan);
-
-            for writers in &args.writers {
-                if *writers <= 1 {
+            for durability in &args.durabilities {
+                if *durability == Durability::Flush
+                    && (*pool_size != rep_pool || *payload_bytes != rep_payload)
+                {
                     continue;
                 }
-                let contention = bench_multi_writer(
+                let durability_label = durability_label(*durability);
+                let base_name = format!("bench-{}-{}-{}", pool_size, payload_bytes, durability_label);
+                let pool_path = work_dir.join(format!("{base_name}.plasmite"));
+
+                let append = bench_append(
+                    &pool_path,
+                    *pool_size,
+                    *payload_bytes,
+                    args.messages,
+                    *durability,
+                )?;
+                results.extend(append);
+
+                let follow = bench_follow(
                     &work_dir,
                     &pool_path,
                     *pool_size,
                     *payload_bytes,
                     args.messages,
-                    *writers,
+                    *durability,
                 )?;
-                results.push(contention);
+                results.push(follow);
+
+                let get_scan = bench_get_scan(
+                    &pool_path,
+                    *pool_size,
+                    *payload_bytes,
+                    args.messages,
+                    *durability,
+                )?;
+                results.extend(get_scan);
+
+                for writers in &args.writers {
+                    if *writers <= 1 {
+                        continue;
+                    }
+                    if *durability == Durability::Flush {
+                        if rep_writers.map_or(true, |value| *writers != value) {
+                            continue;
+                        }
+                    }
+                    let contention = bench_multi_writer(
+                        &work_dir,
+                        &pool_path,
+                        *pool_size,
+                        *payload_bytes,
+                        args.messages,
+                        *writers,
+                        *durability,
+                    )?;
+                    results.push(contention);
+                }
             }
         }
     }
@@ -128,13 +179,47 @@ pub fn run_bench(args: BenchArgs, program_version: &str) -> Result<(), Error> {
             "payload_sizes": args.payload_sizes,
             "messages": args.messages,
             "writers": args.writers,
+            "durabilities": args
+                .durabilities
+                .iter()
+                .map(|d| durability_label(*d).to_string())
+                .collect::<Vec<_>>(),
+            "flush_sample": {
+                "pool_size": rep_pool,
+                "payload_bytes": rep_payload,
+                "multi_writer_writers": rep_writers.map(|value| value as u64),
+            },
             "work_dir": work_dir.display().to_string(),
             "debug_build": cfg!(debug_assertions),
+            "build_profile": if cfg!(debug_assertions) { "debug" } else { "release" },
         },
         "results": results,
     });
 
     emit_bench_output(output, args.format)
+}
+
+fn warn_if_debug_build() -> Result<(), Error> {
+    if !cfg!(debug_assertions) {
+        return Ok(());
+    }
+
+    let mut stderr = io::stderr().lock();
+    writeln!(
+        stderr,
+        "plasmite bench: debug build detected; for baseline numbers, run a release build"
+    )
+    .map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message("failed to write debug build warning")
+            .with_source(err)
+    })?;
+    writeln!(stderr, "  cargo build --release && ./target/release/plasmite bench").map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message("failed to write debug build hint")
+            .with_source(err)
+    })?;
+    Ok(())
 }
 
 pub fn run_worker(args: WorkerArgs) -> Result<(), Error> {
@@ -175,39 +260,88 @@ fn emit_table(value: &Value) -> Result<(), Error> {
         .and_then(|v| v.as_array())
         .ok_or_else(|| Error::new(ErrorKind::Internal).with_message("bench results missing"))?;
 
-    writeln!(
-        stderr,
-        "{:>10}  {:>10}  {:>10}  {:>8}  {:>9}  {:>10}  {}",
-        "bench", "pool", "payload", "msgs", "writers", "ms/msg", "notes"
-    )
-    .map_err(|err| {
-        Error::new(ErrorKind::Io)
-            .with_message("failed to write bench table header")
-            .with_source(err)
-    })?;
-
+    let mut rows = Vec::new();
     for item in results {
-        let bench = item.get("bench").and_then(|v| v.as_str()).unwrap_or("?");
-        let pool = item.get("pool_size").and_then(|v| v.as_u64()).unwrap_or(0);
-        let payload = item.get("payload_bytes").and_then(|v| v.as_u64()).unwrap_or(0);
-        let msgs = item.get("messages").and_then(|v| v.as_u64()).unwrap_or(0);
-        let writers = item.get("writers").and_then(|v| v.as_u64()).unwrap_or(1);
-        let ms_per_msg = item
-            .get("ms_per_msg")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(f64::NAN);
-        let notes = item.get("notes").and_then(|v| v.as_str()).unwrap_or("");
+        if let Some(row) = BenchRow::from_value(item) {
+            rows.push(row);
+        }
+    }
 
+    rows.sort_by(|a, b| {
+        a.pool_size
+            .cmp(&b.pool_size)
+            .then(a.payload_bytes.cmp(&b.payload_bytes))
+            .then(a.bench.cmp(&b.bench))
+            .then(a.notes.cmp(&b.notes))
+            .then(a.writers.cmp(&b.writers))
+            .then(durability_rank(&a.durability).cmp(&durability_rank(&b.durability)))
+    });
+
+    let mut fast_baseline = BTreeMap::new();
+    for row in &rows {
+        if row.durability == "fast" {
+            fast_baseline.insert(row.baseline_key(), row.ms_per_msg);
+        }
+    }
+
+    let mut last_group: Option<(u64, u64)> = None;
+    for row in &rows {
+        let group_key = (row.pool_size, row.payload_bytes);
+        if last_group != Some(group_key) {
+            if last_group.is_some() {
+                writeln!(stderr).map_err(|err| {
+                    Error::new(ErrorKind::Io)
+                        .with_message("failed to write bench table spacer")
+                        .with_source(err)
+                })?;
+            }
+            writeln!(
+                stderr,
+                "pool={} payload={}",
+                format_bytes(row.pool_size),
+                format_bytes(row.payload_bytes)
+            )
+            .map_err(|err| {
+                Error::new(ErrorKind::Io)
+                    .with_message("failed to write bench table group header")
+                    .with_source(err)
+            })?;
+            writeln!(
+                stderr,
+                "{:>16}  {:>6}  {:>7}  {:>10}  {:>10}  {:>8}  {}",
+                "scenario", "dur", "writers", "ms/msg", "msgs/s", "x_fast", "notes"
+            )
+            .map_err(|err| {
+                Error::new(ErrorKind::Io)
+                    .with_message("failed to write bench table header")
+                    .with_source(err)
+            })?;
+            last_group = Some(group_key);
+        }
+
+        let rel = fast_baseline
+            .get(&row.baseline_key())
+            .and_then(|fast_ms| {
+                if row.durability == "fast" || *fast_ms == 0.0 || fast_ms.is_nan() {
+                    None
+                } else {
+                    Some(row.ms_per_msg / fast_ms)
+                }
+            })
+            .map(|ratio| format!("{ratio:.2}x"))
+            .unwrap_or_else(|| "-".to_string());
+
+        let (ms_display, msgs_display) = format_rate(row.ms_per_msg, row.msgs_per_sec);
         writeln!(
             stderr,
-            "{:>10}  {:>10}  {:>10}  {:>8}  {:>9}  {:>10.3}  {}",
-            bench,
-            format_bytes(pool),
-            format_bytes(payload),
-            msgs,
-            writers,
-            ms_per_msg,
-            notes
+            "{:>16}  {:>6}  {:>7}  {:>10}  {:>10}  {:>8}  {}",
+            row.scenario(),
+            row.durability,
+            row.writers,
+            ms_display,
+            msgs_display,
+            rel,
+            row.notes_label()
         )
         .map_err(|err| {
             Error::new(ErrorKind::Io)
@@ -219,11 +353,112 @@ fn emit_table(value: &Value) -> Result<(), Error> {
     Ok(())
 }
 
+#[derive(Clone, Debug)]
+struct BenchRow {
+    bench: String,
+    pool_size: u64,
+    payload_bytes: u64,
+    writers: u64,
+    durability: String,
+    ms_per_msg: f64,
+    msgs_per_sec: f64,
+    notes: String,
+}
+
+impl BenchRow {
+    fn from_value(value: &Value) -> Option<Self> {
+        Some(Self {
+            bench: value.get("bench")?.as_str()?.to_string(),
+            pool_size: value.get("pool_size")?.as_u64()?,
+            payload_bytes: value.get("payload_bytes")?.as_u64()?,
+            writers: value.get("writers")?.as_u64()?,
+            durability: value.get("durability")?.as_str()?.to_string(),
+            ms_per_msg: value.get("ms_per_msg")?.as_f64()?,
+            msgs_per_sec: value.get("msgs_per_sec")?.as_f64()?,
+            notes: value.get("notes").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        })
+    }
+
+    fn scenario(&self) -> String {
+        match self.bench.as_str() {
+            "append" => {
+                if self.notes.contains("Lite3 encode") {
+                    "append+enc".to_string()
+                } else {
+                    "append".to_string()
+                }
+            }
+            "get_scan" => {
+                if self.notes.is_empty() {
+                    "get_scan".to_string()
+                } else {
+                    match self.notes.as_str() {
+                        "near_newest" => "get_scan:newest".to_string(),
+                        "near_oldest" => "get_scan:oldest".to_string(),
+                        "mid" => "get_scan:mid".to_string(),
+                        other => format!("get_scan:{other}"),
+                    }
+                }
+            }
+            "multi_writer" => "multi_writer".to_string(),
+            "follow" => "follow".to_string(),
+            other => other.to_string(),
+        }
+    }
+
+    fn notes_label(&self) -> String {
+        match self.bench.as_str() {
+            "append" => {
+                if self.notes.contains("Lite3 encode") {
+                    "Lite3 encode/msg".to_string()
+                } else if self.notes.contains("core payload reused") {
+                    "payload reused".to_string()
+                } else {
+                    self.notes.clone()
+                }
+            }
+            "get_scan" => String::new(),
+            "multi_writer" => "cross-process".to_string(),
+            "follow" => "writer+follower".to_string(),
+            _ => self.notes.clone(),
+        }
+    }
+
+    fn baseline_key(&self) -> (u64, u64, String, u64, String) {
+        (
+            self.pool_size,
+            self.payload_bytes,
+            self.bench.clone(),
+            self.writers,
+            self.notes.clone(),
+        )
+    }
+}
+
+fn durability_rank(durability: &str) -> u8 {
+    match durability {
+        "fast" => 0,
+        "flush" => 1,
+        _ => 2,
+    }
+}
+
+fn format_rate(ms_per_msg: f64, msgs_per_sec: f64) -> (String, String) {
+    if ms_per_msg.is_nan() {
+        return ("nan".to_string(), "-".to_string());
+    }
+    if ms_per_msg < 0.0005 {
+        return ("<0.001".to_string(), "-".to_string());
+    }
+    (format!("{ms_per_msg:.3}"), format!("{msgs_per_sec:.0}"))
+}
+
 fn bench_append(
     pool_path: &Path,
     pool_size: u64,
     payload_bytes: usize,
     messages: u64,
+    durability: Durability,
 ) -> Result<Vec<Value>, Error> {
     let _ = std::fs::remove_file(pool_path);
     let mut pool = Pool::create(pool_path, PoolOptions::new(pool_size))?;
@@ -231,7 +466,7 @@ fn bench_append(
     let payload_once = payload_for_bytes(payload_bytes, None, false)?;
     let start = Instant::now();
     for _ in 0..messages {
-        pool.append(payload_once.as_slice())?;
+        append_with_durability(&mut pool, payload_once.as_slice(), durability)?;
     }
     let dur = start.elapsed();
     let core = result_entry(
@@ -241,6 +476,7 @@ fn bench_append(
         messages,
         1,
         dur,
+        durability,
         Some("core payload reused"),
     );
 
@@ -251,7 +487,7 @@ fn bench_append(
     for i in 0..messages {
         let is_done = i + 1 == messages;
         let payload = payload_for_bytes(payload_bytes, Some(i), is_done)?;
-        pool.append(payload.as_slice())?;
+        append_with_durability(&mut pool, payload.as_slice(), durability)?;
     }
     let dur = start.elapsed();
     let end_to_end = result_entry(
@@ -261,6 +497,7 @@ fn bench_append(
         messages,
         1,
         dur,
+        durability,
         Some("includes Lite3 encode per msg"),
     );
 
@@ -273,12 +510,14 @@ fn bench_follow(
     pool_size: u64,
     payload_bytes: usize,
     messages: u64,
+    durability: Durability,
 ) -> Result<Value, Error> {
     let _ = std::fs::remove_file(pool_path);
     Pool::create(pool_path, PoolOptions::new(pool_size))?;
 
-    let follower_out = work_dir.join("follow-follower.json");
-    let writer_out = work_dir.join("follow-writer.json");
+    let durability_tag = durability_label(durability);
+    let follower_out = work_dir.join(format!("follow-follower-{durability_tag}.json"));
+    let writer_out = work_dir.join(format!("follow-writer-{durability_tag}.json"));
 
     let mut follower = spawn_worker(WorkerArgs {
         pool_path: pool_path.to_path_buf(),
@@ -286,6 +525,7 @@ fn bench_follow(
         messages,
         payload_bytes,
         out_json: follower_out.clone(),
+        durability,
     })?;
 
     let mut writer = spawn_worker(WorkerArgs {
@@ -294,6 +534,7 @@ fn bench_follow(
         messages,
         payload_bytes,
         out_json: writer_out.clone(),
+        durability,
     })?;
 
     let writer_status = writer
@@ -335,6 +576,7 @@ fn bench_follow(
     entry.insert("payload_bytes".to_string(), json!(payload_bytes));
     entry.insert("messages".to_string(), json!(seen));
     entry.insert("writers".to_string(), json!(1));
+    entry.insert("durability".to_string(), json!(durability_label(durability)));
     entry.insert("duration_ms".to_string(), json!(dur_ms));
     entry.insert("ms_per_msg".to_string(), json!(ms_per_msg));
     entry.insert(
@@ -352,13 +594,14 @@ fn bench_get_scan(
     pool_size: u64,
     payload_bytes: usize,
     messages: u64,
+    durability: Durability,
 ) -> Result<Vec<Value>, Error> {
     let _ = std::fs::remove_file(pool_path);
     let mut pool = Pool::create(pool_path, PoolOptions::new(pool_size))?;
 
     let payload_once = payload_for_bytes(payload_bytes, None, false)?;
     for _ in 0..messages {
-        pool.append(payload_once.as_slice())?;
+        append_with_durability(&mut pool, payload_once.as_slice(), durability)?;
     }
 
     let bounds = pool.bounds()?;
@@ -388,6 +631,7 @@ fn bench_get_scan(
             1,
             1,
             dur,
+            durability,
             Some(label),
         ));
     }
@@ -401,6 +645,7 @@ fn bench_multi_writer(
     payload_bytes: usize,
     messages: u64,
     writers: usize,
+    durability: Durability,
 ) -> Result<Value, Error> {
     let _ = std::fs::remove_file(pool_path);
     Pool::create(pool_path, PoolOptions::new(pool_size))?;
@@ -409,13 +654,15 @@ fn bench_multi_writer(
     let suite_start = Instant::now();
 
     for idx in 0..writers {
-        let out_json = work_dir.join(format!("writer-{writers}-{idx}.json"));
+        let durability_tag = durability_label(durability);
+        let out_json = work_dir.join(format!("writer-{writers}-{idx}-{durability_tag}.json"));
         children.push(spawn_worker(WorkerArgs {
             pool_path: pool_path.to_path_buf(),
             role: WorkerRole::Writer,
             messages,
             payload_bytes,
             out_json,
+            durability,
         })?);
     }
 
@@ -438,6 +685,7 @@ fn bench_multi_writer(
         messages,
         writers as u64,
         dur,
+        durability,
         Some("cross-process writers"),
     ))
 }
@@ -449,7 +697,7 @@ fn run_writer_worker(args: WorkerArgs) -> Result<(), Error> {
     for i in 0..args.messages {
         let is_done = i + 1 == args.messages;
         let payload = payload_for_bytes(args.payload_bytes, Some(now_ns()? ^ (i as u64)), is_done)?;
-        pool.append(payload.as_slice())?;
+        append_with_durability(&mut pool, payload.as_slice(), args.durability)?;
     }
     let dur = start.elapsed();
 
@@ -458,6 +706,7 @@ fn run_writer_worker(args: WorkerArgs) -> Result<(), Error> {
         "messages": args.messages,
         "payload_bytes": args.payload_bytes,
         "duration_ms": dur.as_millis() as u64,
+        "durability": durability_label(args.durability),
     });
     write_json_file(&args.out_json, &output)?;
     Ok(())
@@ -565,6 +814,8 @@ fn spawn_worker(args: WorkerArgs) -> Result<std::process::Child, Error> {
         .arg(args.messages.to_string())
         .arg("--payload-bytes")
         .arg(args.payload_bytes.to_string())
+        .arg("--durability")
+        .arg(durability_label(args.durability))
         .arg("--out-json")
         .arg(&args.out_json)
         .stdin(Stdio::null())
@@ -607,6 +858,7 @@ fn result_entry(
     messages: u64,
     writers: u64,
     duration: Duration,
+    durability: Durability,
     notes: Option<&str>,
 ) -> Value {
     let dur_ms = duration.as_secs_f64() * 1000.0;
@@ -623,6 +875,7 @@ fn result_entry(
     map.insert("payload_bytes".to_string(), json!(payload_bytes));
     map.insert("messages".to_string(), json!(messages));
     map.insert("writers".to_string(), json!(writers));
+    map.insert("durability".to_string(), json!(durability_label(durability)));
     map.insert("duration_ms".to_string(), json!(dur_ms));
     map.insert("ms_per_msg".to_string(), json!(ms_per_msg));
     map.insert("msgs_per_sec".to_string(), json!(msgs_per_sec));
@@ -703,6 +956,17 @@ fn format_bytes(value: u64) -> String {
         format!("{:.1}KiB", v / KB)
     } else {
         format!("{value}B")
+    }
+}
+
+fn append_with_durability(pool: &mut Pool, payload: &[u8], durability: Durability) -> Result<u64, Error> {
+    pool.append_with_options(payload, AppendOptions::new(0, durability))
+}
+
+fn durability_label(durability: Durability) -> &'static str {
+    match durability {
+        Durability::Fast => "fast",
+        Durability::Flush => "flush",
     }
 }
 

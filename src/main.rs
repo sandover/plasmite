@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use plasmite::core::error::{to_exit_code, Error, ErrorKind};
 use plasmite::core::cursor::{Cursor, CursorResult, FrameRef};
 use plasmite::core::lite3::{self, Lite3DocRef};
-use plasmite::core::pool::{Pool, PoolOptions};
+use plasmite::core::pool::{AppendOptions, Durability, Pool, PoolOptions};
 
 fn main() {
     let exit_code = match run() {
@@ -58,6 +58,7 @@ fn run() -> Result<(), Error> {
             payload_bytes,
             messages,
             writers,
+            durability,
             format,
         } => {
             let pool_sizes = if pool_size.is_empty() {
@@ -87,6 +88,7 @@ fn run() -> Result<(), Error> {
                     .collect::<Result<Vec<_>, _>>()?
             };
 
+            let durabilities = parse_bench_durabilities(&durability)?;
             let format = bench::BenchFormat::parse(&format)?;
             bench::run_bench(
                 bench::BenchArgs {
@@ -96,6 +98,7 @@ fn run() -> Result<(), Error> {
                     messages,
                     writers: writer_counts,
                     format,
+                    durabilities,
                 },
                 env!("CARGO_PKG_VERSION"),
             )
@@ -105,6 +108,7 @@ fn run() -> Result<(), Error> {
             pool,
             messages,
             payload_bytes,
+            durability,
             out_json,
         } => bench::run_worker(bench::WorkerArgs {
             pool_path: pool,
@@ -112,6 +116,7 @@ fn run() -> Result<(), Error> {
             messages,
             payload_bytes: payload_bytes as usize,
             out_json,
+            durability: parse_durability(&durability)?,
         }),
         Command::Version => {
             let output = json!({
@@ -164,13 +169,16 @@ fn run() -> Result<(), Error> {
             descrip,
             data_json,
             data_file,
+            durability,
         } => {
             let path = resolve_poolref(&pool, &pool_dir)?;
             let data = read_data(data_json, data_file)?;
             let payload = lite3::encode_message(&descrip, &data)?;
             let mut pool_handle = Pool::open(&path)?;
             let timestamp_ns = now_ns()?;
-            let seq = pool_handle.append_with_timestamp(payload.as_slice(), timestamp_ns)?;
+            let durability = parse_durability(&durability)?;
+            let options = AppendOptions::new(timestamp_ns, durability);
+            let seq = pool_handle.append_with_options(payload.as_slice(), options)?;
             emit_json(message_json(&pool, seq, timestamp_ns, &descrip, &data)?);
             Ok(())
         }
@@ -258,15 +266,18 @@ Outputs:\n\
 Notes:\n\
   - Benchmarks are intended for trend tracking, not lab-grade profiling.\n\
   - Some scenarios spawn child processes to exercise cross-process locking.\n\
+  - For baseline numbers, run a release build.\n\
+  - Use --durability fast|flush (repeatable) to compare flush impact.\n\
 \n\
 Examples:\n\
-  plasmite bench\n\
-  plasmite bench --format json > bench.json\n\
+  cargo build --release && ./target/release/plasmite bench\n\
+  ./target/release/plasmite bench --format json > bench.json\n\
   plasmite bench --payload-bytes 128 --payload-bytes 1024 --messages 20000\n\
+  plasmite bench --durability fast --durability flush\n\
 ",
     )]
     Bench {
-        #[arg(long, help = "Directory for temporary pools/artifacts (default: OS temp dir)")]
+        #[arg(long, help = "Directory for temporary pools/artifacts (default: .scratch/plasmite-bench-<pid>-<ts>)")]
         work_dir: Option<PathBuf>,
         #[arg(long = "pool-size", help = "Repeatable pool size (bytes or K/M/G, KiB/MiB/GiB)")]
         pool_size: Vec<String>,
@@ -276,6 +287,8 @@ Examples:\n\
         messages: u64,
         #[arg(long, help = "Repeatable writer counts for contention scenarios (default: 1,2,4,8)")]
         writers: Vec<String>,
+        #[arg(long, help = "Durability mode(s): fast|flush|both (repeatable; default: fast)")]
+        durability: Vec<String>,
         #[arg(long, default_value = "both", help = "Output format: json|table|both")]
         format: String,
     },
@@ -289,6 +302,8 @@ Examples:\n\
         messages: u64,
         #[arg(long = "payload-bytes", help = "Approximate payload size in bytes")]
         payload_bytes: u64,
+        #[arg(long, default_value = "fast", help = "Durability mode: fast|flush")]
+        durability: String,
         #[arg(long = "out-json", help = "Write worker result JSON to this path")]
         out_json: PathBuf,
     },
@@ -301,8 +316,13 @@ Data input precedence:\n\
   2) --data (file path, use @- for stdin)\n\
   3) stdin (only if not a TTY)\n\
 \n\
+Durability modes:\n\
+  - fast (default): best-effort, no explicit flush\n\
+  - flush: flush frame + header to storage after append\n\
+\n\
 Examples:\n\
   plasmite poke demo --descrip ping --data-json '{\"x\":1}'\n\
+  plasmite poke demo --data-json '{\"x\":1}' --durability flush\n\
   plasmite poke demo --data @payload.json\n\
   echo '{\"x\":1}' | plasmite poke demo\n\
 ",
@@ -316,6 +336,8 @@ Examples:\n\
         data_json: Option<String>,
         #[arg(long = "data", help = "JSON file path (prefix with @, use @- for stdin)", conflicts_with = "data_json")]
         data_file: Option<String>,
+        #[arg(long, default_value = "fast", help = "Durability mode: fast|flush")]
+        durability: String,
     },
     #[command(
         about = "Fetch one message by seq",
@@ -474,6 +496,47 @@ fn parse_usize(input: &str, label: &str) -> Result<usize, Error> {
             .with_message(format!("invalid {label}"))
             .with_source(err)
     })
+}
+
+fn parse_bench_durabilities(values: &[String]) -> Result<Vec<Durability>, Error> {
+    if values.is_empty() {
+        return Ok(vec![Durability::Fast]);
+    }
+
+    let mut out = Vec::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.eq_ignore_ascii_case("both") {
+            push_durability(&mut out, Durability::Fast);
+            push_durability(&mut out, Durability::Flush);
+            continue;
+        }
+        let durability = parse_durability(trimmed)?;
+        push_durability(&mut out, durability);
+    }
+
+    if out.is_empty() {
+        out.push(Durability::Fast);
+    }
+    Ok(out)
+}
+
+fn push_durability(out: &mut Vec<Durability>, durability: Durability) {
+    if !out.contains(&durability) {
+        out.push(durability);
+    }
+}
+
+fn parse_durability(input: &str) -> Result<Durability, Error> {
+    match input.trim() {
+        "fast" => Ok(Durability::Fast),
+        "flush" => Ok(Durability::Flush),
+        _ => Err(Error::new(ErrorKind::Usage)
+            .with_message("invalid --durability (use fast|flush)")),
+    }
 }
 
 fn bounds_json(bounds: plasmite::core::pool::Bounds) -> Value {

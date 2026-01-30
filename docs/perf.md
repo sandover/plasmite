@@ -9,29 +9,36 @@ over time.
 Default suite (JSON to stdout, table to stderr):
 
 ```bash
-plasmite bench
+cargo build --release
+./target/release/plasmite bench
 ```
 
 JSON only (easy to archive/compare):
 
 ```bash
-plasmite bench --format json > bench.json
+./target/release/plasmite bench --format json > bench.json
 ```
 
 Customize the parameter grid:
 
 ```bash
-plasmite bench \
+./target/release/plasmite bench \
   --pool-size 1MiB --pool-size 64MiB \
   --payload-bytes 128 --payload-bytes 1024 --payload-bytes 16384 \
   --writers 1 --writers 2 --writers 4 --writers 8 \
   --messages 20000
 ```
 
+Compare durability modes (flush vs best-effort):
+
+```bash
+./target/release/plasmite bench --durability fast --durability flush
+```
+
 Use a specific work directory (keeps pool files/artifacts around):
 
 ```bash
-plasmite bench --work-dir .scratch/bench
+./target/release/plasmite bench --work-dir .scratch/bench
 ```
 
 ## What it measures (current)
@@ -42,6 +49,9 @@ plasmite bench --work-dir .scratch/bench
 - `follow`: follow-style read throughput/latency (spawns a writer + follower process)
 - `get_scan`: scan-based `get` cost for `seq` near newest / middle / oldest
 - `multi_writer`: contention overhead with multiple writer processes appending concurrently
+- Each result includes a `durability` field to distinguish `fast` vs `flush`.
+- The table groups by pool/payload and includes an `x_fast` ratio when a fast baseline exists.
+- Flush benchmarks are sampled by default (one representative pool/payload and a single multi-writer count).
 
 ## Caveats
 
