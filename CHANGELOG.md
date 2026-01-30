@@ -4,4 +4,5 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Initial scaffold.
+- Align versioning and release targets for v0.0.1.
+- Improve CLI UX and output consistency.

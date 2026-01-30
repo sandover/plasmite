@@ -3,6 +3,7 @@
 .DS_Store
 .scratch/
 tmp/
+.ergo/lock
 .idea/
 .vscode/
 *.swp

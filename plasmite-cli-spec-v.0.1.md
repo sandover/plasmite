@@ -73,7 +73,7 @@ The CLI message schema is fixed and versioned by convention:
 
 ### Platforms
 
-Supported in v0.0.1: **macOS** and **Linux**. Windows is out of scope.
+Supported in v0.0.1: **macOS** and **Linux**.
 
 ### Out of scope
 
@@ -225,13 +225,9 @@ plasmite pool create [OPTIONS] NAME [NAME...]
 **Options**
 
 * `--size SIZE` (default: `1MiB`)
-* `--mode OCTAL` (e.g. `700`, `770`; default respects umask)
-* `--owner USER|UID` (optional; best-effort)
-* `--group GROUP|GID` (optional; best-effort)
 * `--force` : if exists, delete and recreate (legacy `-z`)
 * `--if-missing` : don’t error if exists (legacy `-q`)
-* `--checksum` : enable per-message checksum/CRC (debuggability)
-* `--lock auto|flock|futex|semaphore` (advanced; default `auto`)
+* `--checksum` : enable per-message checksum/CRC (debuggability; default: off)
 * `--dir PATH` (override pool directory)
 
 **Behavior**
@@ -239,6 +235,7 @@ plasmite pool create [OPTIONS] NAME [NAME...]
 * If both `--force` and `--if-missing` are specified, `--force` wins.
 * Creates “single-file pools” by default (no pool format variants exposed).
 * Under the default resolution rule, `plasmite pool create NAME` creates `POOL_DIR/NAME.plasmite`.
+* Pool file permissions are determined by the pool directory + process umask (use `--dir` to target a shared location if desired).
 
 **Output**
 

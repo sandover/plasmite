@@ -1,6 +1,6 @@
-# Plasmite Technical Design Document (Implementation) v0.1
+# Plasmite Technical Design Document (Implementation) v0.0.1
 
-This TDD describes the **storage + concurrency + recovery** design for a Plasma-like (https://github.com/plasma-hamper/plasma) pool system implemented in Rust, using **Option A** (serialized writer append via OS/file lock). The CLI is treated as a consumer of this core.
+This TDD describes the **storage + concurrency + recovery** design for a Plasma-like (https://github.com/plasma-hamper/plasma) pool system implemented in Rust, using **Option A** (serialized writer append via OS/file lock). The v0.0.1 release is CLI-only; the core is an internal implementation detail.
 
 ---
 
@@ -20,7 +20,7 @@ This TDD describes the **storage + concurrency + recovery** design for a Plasma-
   * Optional checksums
   * A validator can scan the file and report corruption/last-good.
 
-## Non-goals (v0.1)
+## Non-goals (v0.0.1)
 
 * Full behavioral compatibility with legacy Plasma formats/protocols.
 * Hard real-time wakeups for followers (we’ll start with polling; futex/notify later).
@@ -228,6 +228,35 @@ Reader:
   * header fields are stable across the read (see Read path)
 
 This directly prevents readers from treating torn writes as real messages.
+
+### Durability semantics (power-loss) (future)
+
+Crash-safety (above) is about **not mis-reading torn writes** when a writer crashes or is killed.
+Durability is about **how much survives an OS crash or power loss**.
+
+In an mmap-backed design, newly appended bytes typically land in the OS page cache first. That means:
+
+* A message can be **committed** (visible to other processes reading the mmap) but not yet **durable** (guaranteed on storage).
+* “Durability” therefore requires an explicit flush policy (or a separate WAL), not just the in-memory commit protocol.
+
+v0.1 position:
+
+* We do **not** force durability per message by default (no `fsync`/`msync` on every append).
+* We rely on the crash-safety protocol + conservative validation/recovery to avoid interpreting torn data as valid.
+
+Possible future durability modes (intentionally not part of v0.1 behavior yet):
+
+* **Best-effort (default)**: no explicit flush; fastest; may lose the most recent messages on power loss.
+* **Per-append flush**: after committing a frame (and updating the global header), flush the touched ranges to disk.
+  * Expected to be significantly slower; good for “audit log” style pools.
+* **Periodic flush**: flush every N messages or every T seconds (amortize cost).
+* **On-demand flush**: a future `plasmite pool sync` / `plasmite flush` command that forces durability at a chosen time.
+
+Implementation notes when we decide to add this:
+
+* For mmap writes, durability typically means flushing the modified mmap pages (frame bytes + header bytes).
+* On Unix, this is usually `msync` (and optionally `fsync`/`fdatasync` for metadata depending on semantics).
+* The CLI/API should be explicit about what’s guaranteed (e.g. “durable on storage device” vs “durable in kernel cache”).
 
 ---
 
@@ -650,4 +679,4 @@ Spawn multiple OS processes (not threads):
    * Off by default for speed, but easy to enable per pool.
 4. **Durability “sync mode”**
 
-   * Provide `sync=true` option (msync on commit) vs omit in v0.1.
+   * Provide `sync=true` option (flush on commit) vs omit in v0.1 (see “Durability semantics” above).

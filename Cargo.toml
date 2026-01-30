@@ -1,9 +1,9 @@
 [package]
 name = "plasmite"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 license = "MIT"
-description = "Plasmite CLI and library."
+description = "Plasmite CLI."
 repository = "https://github.com/YOUR_GITHUB/plasmite"
 readme = "README.md"
 build = "build.rs"

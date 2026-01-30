@@ -23,9 +23,6 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             ext: ""
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            ext: ".exe"
 
     steps:
       - uses: actions/checkout@v4
@@ -39,11 +36,7 @@ jobs:
           bin_name=plasmite${{ matrix.ext }}
           release_dir=target/${{ matrix.target }}/release
           mkdir -p dist
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            7z a dist/plasmite-${{ matrix.target }}.zip "${release_dir}/${bin_name}"
-          else
-            tar -C "${release_dir}" -czf "dist/plasmite-${{ matrix.target }}.tar.gz" "${bin_name}"
-          fi
+          tar -C "${release_dir}" -czf "dist/plasmite-${{ matrix.target }}.tar.gz" "${bin_name}"
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*

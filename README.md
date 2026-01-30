@@ -1,8 +1,8 @@
 # Plasmite
 
-Plasmite is a **Unix-first CLI + Rust library** for working with **Plasma-style pools**: a
-single-file, mmap-backed ring buffer of immutable messages that multiple local processes can
-append to and read from concurrently.
+Plasmite is a **Unix-first CLI** for working with **Plasma-style pools**: a single-file,
+mmap-backed ring buffer of immutable messages that multiple local processes can append to and
+read from concurrently.
 
 It’s inspired by Oblong’s Plasma / libPlasma pool model (pools, descrips, rewindable streams),
 but focuses on a modern, script-stable CLI and a tight local storage story.
@@ -30,6 +30,8 @@ The intentionally small CLI for the initial release is:
 - `plasmite version`
 
 The contract is documented in `plasmite-cli-spec-v.0.1.md`.
+
+v0.0.1 focuses on the CLI only; a dedicated Rust library API will come later.
 
 ## Install
 
@@ -135,7 +137,7 @@ to avoid network fetches at build time. See `vendor/README.md`.
 ## Docs
 
 - CLI contract: `plasmite-cli-spec-v.0.1.md`
-- Storage + concurrency design: `plasmite-tdd-v.0.1.md`
+- Storage + concurrency design: `plasmite-tdd-v.0.0.1.md`
 - Exit codes: `docs/exit-codes.md`
 - Homebrew packaging: `docs/homebrew.md`
 
