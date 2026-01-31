@@ -1,19 +1,19 @@
-// Pool file IO, header/mmap lifecycle, and append orchestration.
-// Responsibilities:
-// - Create/open pools and validate header invariants.
-// - Manage mmap and append locking across processes.
-// - Execute append via pure planning (plan_append) and deterministic IO apply.
-// - Persist header updates last and surface durable flush errors.
+//! Purpose: Manage pool files (create/open), mmap access, locking, and append application.
+//! Exports: `Pool`, `PoolOptions`, `AppendOptions`, `Durability`, `PoolHeader`, `Bounds`, `PoolInfo`.
+//! Role: IO boundary for the core: owns file handles/mmap and delegates planning to `plan`.
+//! Invariants: All mutations hold an exclusive append lock across processes.
+//! Invariants: Append writes mark frames `Writing` -> payload -> `Committed`; header persists last.
+//! Invariants: Header size is fixed (4096) and validated strictly on open.
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
-use memmap2::MmapMut;
 use libc::{EACCES, EPERM};
+use memmap2::MmapMut;
 
 use crate::core::error::{Error, ErrorKind};
-use crate::core::frame::{self, FrameHeader, FrameState, FRAME_HEADER_LEN};
+use crate::core::frame::{self, FRAME_HEADER_LEN, FrameHeader, FrameState};
 use crate::core::plan;
 use crate::core::validate;
 
@@ -38,8 +38,9 @@ impl PoolHeader {
     fn new(file_size: u64) -> Result<Self, Error> {
         let ring_offset = HEADER_SIZE as u64;
         if file_size <= ring_offset {
-            return Err(Error::new(ErrorKind::Usage)
-                .with_message("file_size must exceed header size"));
+            return Err(
+                Error::new(ErrorKind::Usage).with_message("file_size must exceed header size")
+            );
         }
         let ring_size = file_size - ring_offset;
         Ok(Self {
@@ -252,7 +253,11 @@ impl Pool {
             .read(true)
             .write(true)
             .open(&path)
-            .map_err(|err| Error::new(map_io_error_kind(&err)).with_path(&path).with_source(err))?;
+            .map_err(|err| {
+                Error::new(map_io_error_kind(&err))
+                    .with_path(&path)
+                    .with_source(err)
+            })?;
 
         let actual_size = file
             .metadata()
@@ -315,7 +320,7 @@ impl Pool {
             _ => {
                 return Err(Error::new(ErrorKind::NotFound)
                     .with_message("message not found")
-                    .with_seq(seq))
+                    .with_seq(seq));
             }
         };
 
@@ -359,16 +364,16 @@ impl Pool {
     }
 
     pub fn append_lock(&self) -> Result<AppendLock, Error> {
-        let file = self
-            .file
-            .try_clone()
-            .map_err(|err| Error::new(ErrorKind::Io).with_path(&self.path).with_source(err))?;
-        file.lock_exclusive()
-            .map_err(|err| {
-                Error::new(lock_error_kind(&err))
-                    .with_path(&self.path)
-                    .with_source(err)
-            })?;
+        let file = self.file.try_clone().map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_path(&self.path)
+                .with_source(err)
+        })?;
+        file.lock_exclusive().map_err(|err| {
+            Error::new(lock_error_kind(&err))
+                .with_path(&self.path)
+                .with_source(err)
+        })?;
         Ok(AppendLock { file })
     }
 
@@ -376,11 +381,19 @@ impl Pool {
         self.append_with_options(payload, AppendOptions::default())
     }
 
-    pub fn append_with_timestamp(&mut self, payload: &[u8], timestamp_ns: u64) -> Result<u64, Error> {
+    pub fn append_with_timestamp(
+        &mut self,
+        payload: &[u8],
+        timestamp_ns: u64,
+    ) -> Result<u64, Error> {
         self.append_with_options(payload, AppendOptions::new(timestamp_ns, Durability::Fast))
     }
 
-    pub fn append_with_options(&mut self, payload: &[u8], options: AppendOptions) -> Result<u64, Error> {
+    pub fn append_with_options(
+        &mut self,
+        payload: &[u8],
+        options: AppendOptions,
+    ) -> Result<u64, Error> {
         let _lock = self.append_lock()?;
         // Refresh header after acquiring the lock to avoid stale state across processes.
         self.header = self.header_from_mmap()?;
@@ -421,7 +434,13 @@ impl Pool {
                     "failed to flush wrap marker",
                 )?;
             }
-            flush_mmap_range(&self.mmap, 0, HEADER_SIZE, &self.path, "failed to flush header")?;
+            flush_mmap_range(
+                &self.mmap,
+                0,
+                HEADER_SIZE,
+                &self.path,
+                "failed to flush header",
+            )?;
         }
 
         validate::debug_assert_tail_committed(
@@ -527,7 +546,11 @@ fn bounds_from_header(header: PoolHeader) -> Bounds {
 }
 
 #[cfg(test)]
-fn read_frame_header(mmap: &MmapMut, ring_offset: usize, head: usize) -> Result<FrameHeader, Error> {
+fn read_frame_header(
+    mmap: &MmapMut,
+    ring_offset: usize,
+    head: usize,
+) -> Result<FrameHeader, Error> {
     let start = ring_offset + head;
     let end = start + FRAME_HEADER_LEN;
     FrameHeader::decode(&mmap[start..end])
@@ -602,18 +625,18 @@ fn apply_append(
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_append, Pool, PoolHeader, PoolOptions, HEADER_SIZE};
+    use super::{HEADER_SIZE, Pool, PoolHeader, PoolOptions, apply_append};
     use crate::core::error::{Error, ErrorKind};
-    use crate::core::frame::{self, FrameHeader, FrameState, FRAME_HEADER_LEN};
+    use crate::core::frame::{self, FRAME_HEADER_LEN, FrameHeader, FrameState};
     use crate::core::lite3;
     use crate::core::lite3::Lite3DocRef;
     use crate::core::plan;
     use std::fs;
+    use std::fs::OpenOptions;
+    use std::io::{Seek, SeekFrom, Write};
     use std::process::Command;
     use std::thread;
     use std::time::Duration;
-    use std::fs::OpenOptions;
-    use std::io::{Seek, SeekFrom, Write};
 
     #[test]
     fn create_and_open_pool() {
@@ -656,7 +679,8 @@ mod tests {
         let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
         let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("len");
         let ring_size = frame_len * 4;
-        let mut pool = Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool =
+            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
 
         for _ in 0..20 {
             pool.append(payload.as_slice()).expect("append");
@@ -673,7 +697,8 @@ mod tests {
         let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
         let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("len");
         let ring_size = frame_len * 4;
-        let mut pool = Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool =
+            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
 
         for _ in 0..4 {
             pool.append(payload.as_slice()).expect("append");
@@ -683,7 +708,8 @@ mod tests {
         header.tail_off = (header.head_off + 8) % header.ring_size;
         super::write_pool_header(&mut pool.mmap, &header);
 
-        let err = crate::core::validate::validate_pool_state(header, &pool.mmap).expect_err("invalid");
+        let err =
+            crate::core::validate::validate_pool_state(header, &pool.mmap).expect_err("invalid");
         assert_eq!(err.kind(), ErrorKind::Corrupt);
     }
 
@@ -694,7 +720,8 @@ mod tests {
         let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
         let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("len");
         let ring_size = frame_len * 4;
-        let mut pool = Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool =
+            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
 
         for _ in 0..3 {
             pool.append(payload.as_slice()).expect("append");
@@ -706,8 +733,13 @@ mod tests {
         let mut second_header =
             super::read_frame_header(&pool.mmap, ring_offset, tail + frame_len).expect("frame");
         second_header.seq = header.oldest_seq + 2;
-        super::write_frame_header(&mut pool.mmap, ring_offset, tail + frame_len, &second_header)
-            .expect("write");
+        super::write_frame_header(
+            &mut pool.mmap,
+            ring_offset,
+            tail + frame_len,
+            &second_header,
+        )
+        .expect("write");
 
         let err =
             crate::core::validate::validate_pool_state(header, &pool.mmap).expect_err("invalid");
@@ -721,7 +753,8 @@ mod tests {
         let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
         let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("len");
         let ring_size = frame_len * 8;
-        let mut pool = Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool =
+            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
 
         for _ in 0..3 {
             pool.append(payload.as_slice()).expect("append");
@@ -733,8 +766,13 @@ mod tests {
         let mut second_header =
             super::read_frame_header(&pool.mmap, ring_offset, tail + frame_len).expect("frame");
         second_header.seq = header.oldest_seq + 2;
-        super::write_frame_header(&mut pool.mmap, ring_offset, tail + frame_len, &second_header)
-            .expect("write");
+        super::write_frame_header(
+            &mut pool.mmap,
+            ring_offset,
+            tail + frame_len,
+            &second_header,
+        )
+        .expect("write");
 
         let append_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             pool.append(payload.as_slice())
@@ -805,8 +843,9 @@ mod tests {
                 }
                 FrameState::Committed => {
                     seqs.push(frame.seq);
-                    let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, frame.payload_len as usize)
-                        .expect("frame len");
+                    let frame_len =
+                        frame::frame_total_len(FRAME_HEADER_LEN, frame.payload_len as usize)
+                            .expect("frame len");
                     offset += frame_len;
                     if offset == ring_size {
                         offset = 0;
@@ -827,15 +866,14 @@ mod tests {
             let wrap = FrameHeader::new(FrameState::Wrap, 0, 0, 0, 0, 0);
             write_frame_bytes(storage, ring_offset, wrap_offset, &wrap, 0);
         }
-        let header = FrameHeader::new(
-            FrameState::Committed,
-            0,
-            plan.seq,
-            0,
-            payload_len as u32,
-            0,
+        let header = FrameHeader::new(FrameState::Committed, 0, plan.seq, 0, payload_len as u32, 0);
+        write_frame_bytes(
+            storage,
+            ring_offset,
+            plan.frame_offset,
+            &header,
+            payload_len,
         );
-        write_frame_bytes(storage, ring_offset, plan.frame_offset, &header, payload_len);
         let encoded = plan.next_header.encode();
         storage[0..HEADER_SIZE].copy_from_slice(&encoded);
     }
@@ -902,13 +940,11 @@ mod tests {
     fn append_wraps_at_ring_end() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
-        let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1}))
-            .expect("payload");
-        let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len())
-            .expect("frame len");
+        let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
+        let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("frame len");
         let ring_size = frame_len * 3 + FRAME_HEADER_LEN;
-        let mut pool = Pool::create(&path, PoolOptions::new(4096 + ring_size as u64))
-            .expect("create");
+        let mut pool =
+            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
         pool.append(payload.as_slice()).expect("append 1");
         pool.append(payload.as_slice()).expect("append 2");
         pool.append(payload.as_slice()).expect("append 3");
@@ -918,12 +954,9 @@ mod tests {
         assert_eq!(seqs, vec![2, 3, 4]);
 
         let wrap_offset = frame_len * 3;
-        let frame = super::read_frame_header(
-            &pool.mmap,
-            pool.header().ring_offset as usize,
-            wrap_offset,
-        )
-        .expect("wrap frame");
+        let frame =
+            super::read_frame_header(&pool.mmap, pool.header().ring_offset as usize, wrap_offset)
+                .expect("wrap frame");
         assert_eq!(frame.state, FrameState::Wrap);
     }
 
@@ -931,13 +964,11 @@ mod tests {
     fn append_drops_oldest_when_full() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
-        let payload = lite3::encode_message(&[], &serde_json::json!({"x": 2}))
-            .expect("payload");
-        let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len())
-            .expect("frame len");
+        let payload = lite3::encode_message(&[], &serde_json::json!({"x": 2})).expect("payload");
+        let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("frame len");
         let ring_size = frame_len * 2 + FRAME_HEADER_LEN;
-        let mut pool = Pool::create(&path, PoolOptions::new(4096 + ring_size as u64))
-            .expect("create");
+        let mut pool =
+            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
         pool.append(payload.as_slice()).expect("append 1");
         pool.append(payload.as_slice()).expect("append 2");
         pool.append(payload.as_slice()).expect("append 3");
@@ -953,7 +984,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
         let ring_size = 512;
-        let mut pool = Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool =
+            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
 
         let payload_a = vec![1u8; 100];
         pool.append(payload_a.as_slice()).expect("append 1");
@@ -979,7 +1011,10 @@ mod tests {
         let model_header = super::PoolHeader::decode(&model[0..HEADER_SIZE]).expect("header");
         assert_eq!(actual_header, plan.next_header);
         assert_eq!(model_header, plan.next_header);
-        assert_eq!(scan_frames(&model, plan.next_header), scan_frames(&pool.mmap, plan.next_header));
+        assert_eq!(
+            scan_frames(&model, plan.next_header),
+            scan_frames(&pool.mmap, plan.next_header)
+        );
     }
 
     #[test]
@@ -987,7 +1022,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
         let ring_size = 512;
-        let mut pool = Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool =
+            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
 
         let payload_a = vec![1u8; 100];
         for _ in 0..3 {
@@ -1014,7 +1050,10 @@ mod tests {
         let model_header = super::PoolHeader::decode(&model[0..HEADER_SIZE]).expect("header");
         assert_eq!(actual_header, plan.next_header);
         assert_eq!(model_header, plan.next_header);
-        assert_eq!(scan_frames(&model, plan.next_header), scan_frames(&pool.mmap, plan.next_header));
+        assert_eq!(
+            scan_frames(&model, plan.next_header),
+            scan_frames(&pool.mmap, plan.next_header)
+        );
     }
 
     #[test]
@@ -1024,8 +1063,8 @@ mod tests {
         let mut pool = Pool::create(&path, PoolOptions::new(4096 + 2048)).expect("create");
 
         for value in 1..=3 {
-            let payload = lite3::encode_message(&[], &serde_json::json!({"x": value}))
-                .expect("payload");
+            let payload =
+                lite3::encode_message(&[], &serde_json::json!({"x": value})).expect("payload");
             pool.append(payload.as_slice()).expect("append");
         }
 
@@ -1057,8 +1096,8 @@ mod tests {
                     .parse()
                     .expect("parse count");
                 let mut pool = Pool::open(&path).expect("open");
-                let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1}))
-                    .expect("payload");
+                let payload =
+                    lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
                 for _ in 0..count {
                     pool.append(payload.as_slice()).expect("append");
                 }
@@ -1181,15 +1220,14 @@ mod tests {
             }
         }
 
-        let header = FrameHeader::new(
-            FrameState::Writing,
-            0,
-            plan.seq,
-            0,
-            payload.len() as u32,
-            0,
-        );
-        super::write_frame(&mut pool.mmap, ring_offset, plan.frame_offset, &header, payload)?;
+        let header = FrameHeader::new(FrameState::Writing, 0, plan.seq, 0, payload.len() as u32, 0);
+        super::write_frame(
+            &mut pool.mmap,
+            ring_offset,
+            plan.frame_offset,
+            &header,
+            payload,
+        )?;
         if matches!(phase, CrashPhase::AfterWrite) {
             return Ok(());
         }

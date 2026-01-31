@@ -1,8 +1,10 @@
-// Pool and ring validation helpers plus debug-only assertions.
-// Full scans are for explicit validation; hot paths use tail-only checks.
-// Snapshot output is opt-in and written to .scratch/ on failure.
+//! Purpose: Validate pool/ring invariants and provide debug-only assertions with snapshots.
+//! Exports: `validate_pool_state`, `validate_frame_header`, `SnapshotMode`, `debug_assert_*`.
+//! Role: Slow-path safety checks used at boundaries and in debug builds.
+//! Invariants: Full scans are explicit; hot paths use tail-only checks.
+//! Invariants: Snapshot output is opt-in and written under `.scratch/` only.
 use crate::core::error::{Error, ErrorKind};
-use crate::core::frame::{self, FrameHeader, FrameState, FRAME_HEADER_LEN};
+use crate::core::frame::{self, FRAME_HEADER_LEN, FrameHeader, FrameState};
 use crate::core::pool::PoolHeader;
 use std::fs::{self, File};
 use std::io::Write;
@@ -38,8 +40,9 @@ pub fn validate_pool_state(header: PoolHeader, mmap: &[u8]) -> Result<(), Error>
     }
     if header.oldest_seq == 0 {
         if header.head_off != header.tail_off {
-            return Err(Error::new(ErrorKind::Corrupt)
-                .with_message("empty pool head/tail mismatch"));
+            return Err(
+                Error::new(ErrorKind::Corrupt).with_message("empty pool head/tail mismatch")
+            );
         }
         return Ok(());
     }
@@ -54,8 +57,7 @@ pub fn validate_pool_state(header: PoolHeader, mmap: &[u8]) -> Result<(), Error>
 
     loop {
         if steps > max_frames {
-            return Err(Error::new(ErrorKind::Corrupt)
-                .with_message("scan exceeded ring capacity"));
+            return Err(Error::new(ErrorKind::Corrupt).with_message("scan exceeded ring capacity"));
         }
         if ring_size - offset < FRAME_HEADER_LEN {
             offset = 0;
@@ -72,8 +74,7 @@ pub fn validate_pool_state(header: PoolHeader, mmap: &[u8]) -> Result<(), Error>
             }
             FrameState::Committed => {}
             _ => {
-                return Err(Error::new(ErrorKind::Corrupt)
-                    .with_message("unexpected frame state"));
+                return Err(Error::new(ErrorKind::Corrupt).with_message("unexpected frame state"));
             }
         }
 
@@ -93,8 +94,7 @@ pub fn validate_pool_state(header: PoolHeader, mmap: &[u8]) -> Result<(), Error>
 
         if expected_seq == header.newest_seq {
             if next_off != head {
-                return Err(Error::new(ErrorKind::Corrupt)
-                    .with_message("head offset mismatch"));
+                return Err(Error::new(ErrorKind::Corrupt).with_message("head offset mismatch"));
             }
             break;
         }
@@ -126,7 +126,10 @@ pub fn debug_assert_pool_state_with_snapshot(
             None
         };
         if let Some(path) = snapshot_path {
-            panic!("pool state invariant failed: {err} (snapshot: {})", path.display());
+            panic!(
+                "pool state invariant failed: {err} (snapshot: {})",
+                path.display()
+            );
         }
         panic!("pool state invariant failed: {err}");
     }
@@ -167,7 +170,10 @@ fn read_frame_header(mmap: &[u8], ring_offset: usize, head: usize) -> Result<Fra
 }
 
 fn write_snapshot(header: PoolHeader, mmap: &[u8]) -> Option<PathBuf> {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_millis();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_millis();
     let dir = Path::new(SNAPSHOT_DIR);
     fs::create_dir_all(dir).ok()?;
     let filename = format!("{SNAPSHOT_PREFIX}{timestamp}-{}.txt", std::process::id());
@@ -189,8 +195,22 @@ fn write_snapshot(header: PoolHeader, mmap: &[u8]) -> Option<PathBuf> {
 
     let ring_offset = header.ring_offset as usize;
     let ring_size = header.ring_size as usize;
-    let _ = write_frame_snapshot(&mut file, "tail", mmap, ring_offset, ring_size, header.tail_off as usize);
-    let _ = write_frame_snapshot(&mut file, "head", mmap, ring_offset, ring_size, header.head_off as usize);
+    let _ = write_frame_snapshot(
+        &mut file,
+        "tail",
+        mmap,
+        ring_offset,
+        ring_size,
+        header.tail_off as usize,
+    );
+    let _ = write_frame_snapshot(
+        &mut file,
+        "head",
+        mmap,
+        ring_offset,
+        ring_size,
+        header.head_off as usize,
+    );
 
     Some(path)
 }
@@ -221,10 +241,7 @@ fn write_frame_snapshot(
             writeln!(
                 file,
                 "{label}: state={:?} seq={} payload_len={} frame_len={:?} magic={magic:?}",
-                header.state,
-                header.seq,
-                header.payload_len,
-                frame_len
+                header.state, header.seq, header.payload_len, frame_len
             )
         }
         Err(err) => writeln!(file, "{label}: decode_error={err} magic={magic:?}"),
@@ -233,7 +250,7 @@ fn write_frame_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use super::{debug_assert_pool_state_with_snapshot, SnapshotMode, SNAPSHOT_PREFIX};
+    use super::{SNAPSHOT_PREFIX, SnapshotMode, debug_assert_pool_state_with_snapshot};
     use crate::core::frame::FRAME_HEADER_LEN;
     use crate::core::pool::PoolHeader;
     use std::collections::HashSet;

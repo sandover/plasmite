@@ -1,4 +1,10 @@
-// C shim implementation for selected Lite3 APIs used by Rust.
+/*
+Purpose: Implement the C shim ABI that Rust binds to for selected Lite3 APIs.
+Exports: `plasmite_lite3_*` symbols declared in `c/lite3_shim.h`.
+Role: Thin adapter over the vendored Lite3 library to keep Rust FFI minimal and stable.
+Invariants: Returned heap pointers are owned by the caller and freed via `plasmite_lite3_free`.
+Invariants: This file should not contain business logic; it only forwards to Lite3.
+*/
 #include "lite3_shim.h"
 
 #include <stdlib.h>

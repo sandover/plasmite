@@ -1,10 +1,10 @@
-// Cursor iteration over the ring buffer with overwrite safety.
-// Behavior:
-// - Treats Writing/invalid frames as non-visible and never advances into them.
-// - Resynchronizes to tail if it falls behind due to overwrites.
-// - Uses a stable header re-read to avoid torn reads mid-append.
+//! Purpose: Iterate committed frames in the ring with overwrite safety and minimal scanning.
+//! Exports: `Cursor`, `CursorResult`, `FrameRef`.
+//! Role: Read-side API used by CLI commands (get/peek/follow) without exposing raw offsets.
+//! Invariants: Never returns `Writing` or invalid frames; treats them as non-visible.
+//! Invariants: Detects overwrite (fell-behind) and resynchronizes to the current tail.
 use crate::core::error::{Error, ErrorKind};
-use crate::core::frame::{self, FrameHeader, FrameState, FRAME_HEADER_LEN};
+use crate::core::frame::{self, FRAME_HEADER_LEN, FrameHeader, FrameState};
 use crate::core::pool::Pool;
 
 #[derive(Debug, PartialEq)]
@@ -100,7 +100,10 @@ impl Cursor {
 }
 
 enum ReadResult<'a> {
-    Message { frame: FrameRef<'a>, next_off: usize },
+    Message {
+        frame: FrameRef<'a>,
+        next_off: usize,
+    },
     Wrap,
     WouldBlock,
     FellBehind,
@@ -180,7 +183,13 @@ fn headers_match(a: &FrameHeader, b: &FrameHeader) -> bool {
         && a.crc32c == b.crc32c
 }
 
-fn offset_in_range(offset: usize, tail: usize, head: usize, ring_size: usize, oldest_seq: u64) -> bool {
+fn offset_in_range(
+    offset: usize,
+    tail: usize,
+    head: usize,
+    ring_size: usize,
+    oldest_seq: u64,
+) -> bool {
     if oldest_seq == 0 {
         return false;
     }
@@ -201,8 +210,8 @@ fn offset_in_range(offset: usize, tail: usize, head: usize, ring_size: usize, ol
 
 #[cfg(test)]
 mod tests {
-    use super::{read_frame_at, Cursor, CursorResult, ReadResult};
-    use crate::core::frame::{self, FrameHeader, FrameState, FRAME_HEADER_LEN};
+    use super::{Cursor, CursorResult, ReadResult, read_frame_at};
+    use crate::core::frame::{self, FRAME_HEADER_LEN, FrameHeader, FrameState};
     use crate::core::lite3;
     use crate::core::pool::{Pool, PoolOptions};
     use serde_json::json;
@@ -214,14 +223,7 @@ mod tests {
         let ring_size = frame_len + FRAME_HEADER_LEN;
         let mut buf = vec![0u8; ring_size];
 
-        let header = FrameHeader::new(
-            FrameState::Committed,
-            0,
-            1,
-            1,
-            payload.len() as u32,
-            0,
-        );
+        let header = FrameHeader::new(FrameState::Committed, 0, 1, 1, payload.len() as u32, 0);
         let start = 0;
         buf[start..start + FRAME_HEADER_LEN].copy_from_slice(&header.encode());
         buf[start + FRAME_HEADER_LEN..start + FRAME_HEADER_LEN + payload.len()]
@@ -260,14 +262,7 @@ mod tests {
         let payload = lite3::encode_message(&[], &json!({"x": 1})).expect("payload");
         let ring_size = FRAME_HEADER_LEN + payload.len();
         let mut buf = vec![0u8; ring_size];
-        let header = FrameHeader::new(
-            FrameState::Writing,
-            0,
-            1,
-            1,
-            payload.len() as u32,
-            0,
-        );
+        let header = FrameHeader::new(FrameState::Writing, 0, 1, 1, payload.len() as u32, 0);
         buf[0..FRAME_HEADER_LEN].copy_from_slice(&header.encode());
         buf[FRAME_HEADER_LEN..FRAME_HEADER_LEN + payload.len()].copy_from_slice(payload.as_slice());
 
@@ -280,14 +275,7 @@ mod tests {
         let payload = lite3::encode_message(&[], &json!({"x": 1})).expect("payload");
         let ring_size = FRAME_HEADER_LEN + payload.len();
         let mut buf = vec![0u8; ring_size];
-        let mut header = FrameHeader::new(
-            FrameState::Committed,
-            0,
-            1,
-            1,
-            payload.len() as u32,
-            0,
-        );
+        let mut header = FrameHeader::new(FrameState::Committed, 0, 1, 1, payload.len() as u32, 0);
         header.header_len = 0;
         buf[0..FRAME_HEADER_LEN].copy_from_slice(&header.encode());
         buf[FRAME_HEADER_LEN..FRAME_HEADER_LEN + payload.len()].copy_from_slice(payload.as_slice());
@@ -301,14 +289,7 @@ mod tests {
         let payload = lite3::encode_message(&[], &json!({"x": 1})).expect("payload");
         let ring_size = FRAME_HEADER_LEN + payload.len();
         let mut buf = vec![0u8; ring_size];
-        let mut header = FrameHeader::new(
-            FrameState::Committed,
-            0,
-            1,
-            1,
-            payload.len() as u32,
-            0,
-        );
+        let mut header = FrameHeader::new(FrameState::Committed, 0, 1, 1, payload.len() as u32, 0);
         header.payload_len_xor ^= 0xFF;
         buf[0..FRAME_HEADER_LEN].copy_from_slice(&header.encode());
         buf[FRAME_HEADER_LEN..FRAME_HEADER_LEN + payload.len()].copy_from_slice(payload.as_slice());
@@ -324,7 +305,8 @@ mod tests {
         let payload = lite3::encode_message(&[], &json!({"x": 2})).expect("payload");
         let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("len");
         let ring_size = frame_len + FRAME_HEADER_LEN;
-        let mut pool = Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool =
+            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
         pool.append(payload.as_slice()).expect("append 1");
         let mut cursor = Cursor::new();
         let result = cursor.next(&pool).expect("next");

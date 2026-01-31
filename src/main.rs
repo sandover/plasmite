@@ -1,20 +1,21 @@
-// CLI entry point for v0.0.1 commands with JSON output.
-// This file defines the clap surface (commands/flags), does JSON IO, and
-// translates CLI inputs into core pool operations and message encoding.
-// If you're looking for behavior, search for `run()` and the command handlers.
+//! Purpose: `plasmite` CLI entry point and v0.0.1 command dispatch.
+//! Role: Binary crate root; parses args, runs commands, emits JSON on stdout.
+//! Invariants: Successful command output is JSON on stdout; errors are JSON on stderr.
+//! Invariants: Process exit code is derived from `core::error::to_exit_code`.
+//! Invariants: All pool mutations go through `core::pool` (locks + mmap safety).
 use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
 mod bench;
 
-use clap::{error::ErrorKind as ClapErrorKind, Parser, Subcommand};
-use serde_json::{json, Map, Value};
+use clap::{Parser, Subcommand, error::ErrorKind as ClapErrorKind};
+use serde_json::{Map, Value, json};
 use std::collections::VecDeque;
 use std::error::Error as StdError;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use plasmite::core::error::{to_exit_code, Error, ErrorKind};
 use plasmite::core::cursor::{Cursor, CursorResult, FrameRef};
+use plasmite::core::error::{Error, ErrorKind, to_exit_code};
 use plasmite::core::lite3::{self, Lite3DocRef};
 use plasmite::core::pool::{AppendOptions, Durability, Pool, PoolOptions};
 
@@ -32,25 +33,23 @@ fn main() {
 fn run() -> Result<(), Error> {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
-        Err(err) => {
-            match err.kind() {
-                ClapErrorKind::DisplayHelp | ClapErrorKind::DisplayVersion => {
-                    err.print().map_err(|io_err| {
-                        Error::new(ErrorKind::Io)
-                            .with_message("failed to write help")
-                            .with_source(io_err)
-                    })?;
-                    return Ok(());
-                }
-                _ => {
-                    let message = clap_error_summary(&err);
-                    let hint = clap_error_hint(&err);
-                    return Err(Error::new(ErrorKind::Usage)
-                        .with_message(message)
-                        .with_hint(hint));
-                }
+        Err(err) => match err.kind() {
+            ClapErrorKind::DisplayHelp | ClapErrorKind::DisplayVersion => {
+                err.print().map_err(|io_err| {
+                    Error::new(ErrorKind::Io)
+                        .with_message("failed to write help")
+                        .with_source(io_err)
+                })?;
+                return Ok(());
             }
-        }
+            _ => {
+                let message = clap_error_summary(&err);
+                let hint = clap_error_hint(&err);
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message(message)
+                    .with_hint(hint));
+            }
+        },
     };
 
     let pool_dir = cli.dir.unwrap_or_else(default_pool_dir);
@@ -145,7 +144,9 @@ fn run() -> Result<(), Error> {
                         return Err(Error::new(ErrorKind::AlreadyExists)
                             .with_message("pool already exists")
                             .with_path(&path)
-                            .with_hint("Choose a different name or remove the existing pool file."));
+                            .with_hint(
+                                "Choose a different name or remove the existing pool file.",
+                            ));
                     }
                     let pool = Pool::create(&path, PoolOptions::new(size))?;
                     let info = pool.info()?;
@@ -156,16 +157,16 @@ fn run() -> Result<(), Error> {
             }
             PoolCommand::Info { name } => {
                 let path = resolve_poolref(&name, &pool_dir)?;
-                let pool = Pool::open(&path)
-                    .map_err(|err| add_missing_pool_hint(err, &name, &name))?;
+                let pool =
+                    Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &name, &name))?;
                 let info = pool.info()?;
                 emit_json(pool_info_json(&name, &info));
                 Ok(())
             }
             PoolCommand::Bounds { name } => {
                 let path = resolve_poolref(&name, &pool_dir)?;
-                let pool = Pool::open(&path)
-                    .map_err(|err| add_missing_pool_hint(err, &name, &name))?;
+                let pool =
+                    Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &name, &name))?;
                 let bounds = pool.bounds()?;
                 emit_json(bounds_with_pool_json(&name, bounds));
                 Ok(())
@@ -180,8 +181,8 @@ fn run() -> Result<(), Error> {
             print,
         } => {
             let path = resolve_poolref(&pool, &pool_dir)?;
-            let mut pool_handle = Pool::open(&path)
-                .map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
+            let mut pool_handle =
+                Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
             let durability = parse_durability(&durability)?;
             if data_json.is_some() && data_file.is_some() {
                 return Err(Error::new(ErrorKind::Usage)
@@ -205,22 +206,27 @@ fn run() -> Result<(), Error> {
                     let options = AppendOptions::new(timestamp_ns, durability);
                     let seq = pool_handle.append_with_options(payload.as_slice(), options)?;
                     if print {
-                        emit_message(message_json(&pool, seq, timestamp_ns, &descrip, &data)?, false);
+                        emit_message(
+                            message_json(&pool, seq, timestamp_ns, &descrip, &data)?,
+                            false,
+                        );
                     }
                     Ok(())
                 })?;
                 if count == 0 {
                     return Err(Error::new(ErrorKind::Usage)
                         .with_message("missing data input")
-                        .with_hint("Provide JSON via --data-json, --data @FILE, or pipe JSON to stdin."));
+                        .with_hint(
+                            "Provide JSON via --data-json, --data @FILE, or pipe JSON to stdin.",
+                        ));
                 }
             }
             Ok(())
         }
         Command::Get { pool, seq } => {
             let path = resolve_poolref(&pool, &pool_dir)?;
-            let pool_handle = Pool::open(&path)
-                .map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
+            let pool_handle =
+                Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
             let frame = pool_handle
                 .get(seq)
                 .map_err(|err| add_missing_seq_hint(err, &pool))?;
@@ -236,12 +242,9 @@ fn run() -> Result<(), Error> {
             jsonl,
         } => {
             let path = resolve_poolref(&pool, &pool_dir)?;
-            let pool_handle = Pool::open(&path)
-                .map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
-            let timeout = idle_timeout
-                .as_deref()
-                .map(parse_duration)
-                .transpose()?;
+            let pool_handle =
+                Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
+            let timeout = idle_timeout.as_deref().map(parse_duration).transpose()?;
             let pretty = if pretty {
                 true
             } else if jsonl {
@@ -251,20 +254,11 @@ fn run() -> Result<(), Error> {
             } else {
                 io::stdout().is_terminal()
             };
-            peek(
-                &pool_handle,
-                &pool,
-                tail,
-                follow,
-                timeout,
-                pretty,
-            )
+            peek(&pool_handle, &pool, tail, follow, timeout, pretty)
         }
     })();
 
-    result
-        .map_err(add_corrupt_hint)
-        .map_err(add_io_hint)
+    result.map_err(add_corrupt_hint).map_err(add_io_hint)
 }
 
 #[derive(Parser)]
@@ -280,11 +274,14 @@ Pool references:\n\
   - Else it's resolved as <POOL_DIR>/<name>.plasmite.\n\
 \n\
 JSON output is always default. For streams, pretty JSON is used on TTY and\n\
-compact JSON is used otherwise.",
+compact JSON is used otherwise."
 )]
 struct Cli {
     /// Override the pool directory.
-    #[arg(long, help = "Override the pool directory (default: ~/.plasmite/pools)")]
+    #[arg(
+        long,
+        help = "Override the pool directory (default: ~/.plasmite/pools)"
+    )]
     dir: Option<PathBuf>,
 
     #[command(subcommand)]
@@ -317,20 +314,32 @@ Examples:\n\
   ./target/release/plasmite bench --format json > bench.json\n\
   plasmite bench --payload-bytes 128 --payload-bytes 1024 --messages 20000\n\
   plasmite bench --durability fast --durability flush\n\
-",
+"
     )]
     Bench {
-        #[arg(long, help = "Directory for temporary pools/artifacts (default: .scratch/plasmite-bench-<pid>-<ts>)")]
+        #[arg(
+            long,
+            help = "Directory for temporary pools/artifacts (default: .scratch/plasmite-bench-<pid>-<ts>)"
+        )]
         work_dir: Option<PathBuf>,
         #[arg(long = "pool-size", help = "Repeatable pool size (bytes or K/M/G)")]
         pool_size: Vec<String>,
-        #[arg(long = "payload-bytes", help = "Repeatable payload target size (bytes)")]
+        #[arg(
+            long = "payload-bytes",
+            help = "Repeatable payload target size (bytes)"
+        )]
         payload_bytes: Vec<String>,
         #[arg(long, default_value_t = 20_000, help = "Messages per scenario")]
         messages: u64,
-        #[arg(long, help = "Repeatable writer counts for contention scenarios (default: 1,2,4,8)")]
+        #[arg(
+            long,
+            help = "Repeatable writer counts for contention scenarios (default: 1,2,4,8)"
+        )]
         writers: Vec<String>,
-        #[arg(long, help = "Durability mode(s): fast|flush|both (repeatable; default: fast)")]
+        #[arg(
+            long,
+            help = "Durability mode(s): fast|flush|both (repeatable; default: fast)"
+        )]
         durability: Vec<String>,
         #[arg(long, default_value = "both", help = "Output format: json|table|both")]
         format: String,
@@ -373,16 +382,24 @@ Examples:\n\
   plasmite poke demo --data @payload.json\n\
   echo '{\"x\":1}' | plasmite poke demo\n\
   printf '%s\\n' '{\"x\":1}' '{\"x\":2}' | plasmite poke demo --print\n\
-",
+"
     )]
     Poke {
         #[arg(help = "Pool name or path")]
         pool: String,
         #[arg(long, help = "Repeatable descriptor for meta.descrips")]
         descrip: Vec<String>,
-        #[arg(long = "data-json", help = "Inline JSON data", conflicts_with = "data_file")]
+        #[arg(
+            long = "data-json",
+            help = "Inline JSON data",
+            conflicts_with = "data_file"
+        )]
         data_json: Option<String>,
-        #[arg(long = "data", help = "JSON file path (prefix with @, use @- for stdin)", conflicts_with = "data_json")]
+        #[arg(
+            long = "data",
+            help = "JSON file path (prefix with @, use @- for stdin)",
+            conflicts_with = "data_json"
+        )]
         data_file: Option<String>,
         #[arg(long, default_value = "fast", help = "Durability mode: fast|flush")]
         durability: String,
@@ -395,7 +412,7 @@ Examples:\n\
 \n\
 Example:\n\
   plasmite get demo 42\n\
-",
+"
     )]
     Get {
         #[arg(help = "Pool name or path")]
@@ -423,7 +440,7 @@ Examples:\n\
   plasmite peek demo --tail 10\n\
   plasmite peek demo --follow\n\
   plasmite peek demo --follow --idle-timeout 30s\n\
-",
+"
     )]
     Peek {
         #[arg(help = "Pool name or path")]
@@ -432,11 +449,18 @@ Examples:\n\
         tail: Option<u64>,
         #[arg(long, help = "Block and continue streaming new messages")]
         follow: bool,
-        #[arg(long = "idle-timeout", help = "Exit after no activity for the duration (ms|s|m|h)")]
+        #[arg(
+            long = "idle-timeout",
+            help = "Exit after no activity for the duration (ms|s|m|h)"
+        )]
         idle_timeout: Option<String>,
         #[arg(long, help = "Pretty-print JSON output", conflicts_with = "jsonl")]
         pretty: bool,
-        #[arg(long, help = "Emit JSON Lines (one object per line)", conflicts_with = "pretty")]
+        #[arg(
+            long,
+            help = "Emit JSON Lines (one object per line)",
+            conflicts_with = "pretty"
+        )]
         jsonl: bool,
     },
     #[command(about = "Print version info as JSON")]
@@ -452,7 +476,7 @@ enum PoolCommand {
 Examples:\n\
   plasmite pool create demo\n\
   plasmite pool create --size 8M demo-1 demo-2\n\
-",
+"
     )]
     Create {
         #[arg(required = true, help = "Pool names (resolved under the pool dir)")]
@@ -466,7 +490,7 @@ Examples:\n\
 \n\
 Example:\n\
   plasmite pool info demo\n\
-",
+"
     )]
     Info {
         #[arg(help = "Pool name or path")]
@@ -478,7 +502,7 @@ Example:\n\
 \n\
 Example:\n\
   plasmite pool bounds demo\n\
-",
+"
     )]
     Bounds {
         #[arg(help = "Pool name or path")]
@@ -508,7 +532,9 @@ fn add_missing_pool_hint(err: Error, pool_ref: &str, input: &str) -> Error {
         return err;
     }
     if input.contains('/') {
-        return err.with_hint("Pool path not found. Check the path or pass --dir for a different pool directory.");
+        return err.with_hint(
+            "Pool path not found. Check the path or pass --dir for a different pool directory.",
+        );
     }
     err.with_hint(format!(
         "Create it first: plasmite pool create {pool_ref} (or pass --dir for a different pool directory)."
@@ -532,12 +558,10 @@ fn add_io_hint(err: Error) -> Error {
         ErrorKind::Permission => err.with_hint(
             "Permission denied. Check directory permissions or use --dir to a writable location.",
         ),
-        ErrorKind::Busy => err.with_hint(
-            "Pool is busy (another writer holds the lock). Retry with backoff.",
-        ),
-        ErrorKind::Io => err.with_hint(
-            "I/O error. Check the path, filesystem, and disk space.",
-        ),
+        ErrorKind::Busy => {
+            err.with_hint("Pool is busy (another writer holds the lock). Retry with backoff.")
+        }
+        ErrorKind::Io => err.with_hint("I/O error. Check the path, filesystem, and disk space."),
         _ => err,
     }
 }
@@ -583,11 +607,11 @@ fn parse_size(input: &str) -> Result<u64, Error> {
         }
     };
 
-    value
-        .checked_mul(multiplier)
-        .ok_or_else(|| Error::new(ErrorKind::Usage)
+    value.checked_mul(multiplier).ok_or_else(|| {
+        Error::new(ErrorKind::Usage)
             .with_message("size overflow")
-            .with_hint("Use a smaller size value."))
+            .with_hint("Use a smaller size value.")
+    })
 }
 
 fn parse_usize(input: &str, label: &str) -> Result<usize, Error> {
@@ -735,8 +759,9 @@ fn emit_error(err: &Error) {
     }
 
     let value = error_json(err);
-    let json = serde_json::to_string(&value)
-        .unwrap_or_else(|_| "{\"error\":{\"kind\":\"Internal\",\"message\":\"json encode failed\"}}".to_string());
+    let json = serde_json::to_string(&value).unwrap_or_else(|_| {
+        "{\"error\":{\"kind\":\"Internal\",\"message\":\"json encode failed\"}}".to_string()
+    });
     eprintln!("{json}");
 }
 
@@ -870,8 +895,11 @@ fn read_data_single(data_json: Option<String>, data_file: Option<String>) -> Res
         if path == "-" {
             read_stdin()?
         } else {
-            std::fs::read_to_string(path)
-                .map_err(|err| Error::new(ErrorKind::Io).with_message("failed to read data file").with_source(err))?
+            std::fs::read_to_string(path).map_err(|err| {
+                Error::new(ErrorKind::Io)
+                    .with_message("failed to read data file")
+                    .with_source(err)
+            })?
         }
     } else {
         return Err(Error::new(ErrorKind::Usage)
@@ -879,20 +907,21 @@ fn read_data_single(data_json: Option<String>, data_file: Option<String>) -> Res
             .with_hint("Provide JSON via --data-json, --data @FILE, or pipe JSON to stdin."));
     };
 
-    serde_json::from_str(&json_str)
-        .map_err(|err| {
-            Error::new(ErrorKind::Usage)
-                .with_message("invalid json")
-                .with_hint("Provide a single JSON value (e.g. '{\"x\":1}').")
-                .with_source(err)
-        })
+    serde_json::from_str(&json_str).map_err(|err| {
+        Error::new(ErrorKind::Usage)
+            .with_message("invalid json")
+            .with_hint("Provide a single JSON value (e.g. '{\"x\":1}').")
+            .with_source(err)
+    })
 }
 
 fn read_stdin() -> Result<String, Error> {
     let mut buf = String::new();
-    io::stdin()
-        .read_to_string(&mut buf)
-        .map_err(|err| Error::new(ErrorKind::Io).with_message("failed to read stdin").with_source(err))?;
+    io::stdin().read_to_string(&mut buf).map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message("failed to read stdin")
+            .with_source(err)
+    })?;
     Ok(buf)
 }
 
@@ -919,16 +948,27 @@ where
 fn now_ns() -> Result<u64, Error> {
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|err| Error::new(ErrorKind::Internal).with_message("time went backwards").with_source(err))?;
+        .map_err(|err| {
+            Error::new(ErrorKind::Internal)
+                .with_message("time went backwards")
+                .with_source(err)
+        })?;
     Ok(duration.as_nanos() as u64)
 }
 
 fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
     use time::format_description::well_known::Rfc3339;
-    let ts = time::OffsetDateTime::from_unix_timestamp_nanos(timestamp_ns as i128)
-        .map_err(|err| Error::new(ErrorKind::Internal).with_message("invalid timestamp").with_source(err))?;
-    ts.format(&Rfc3339)
-        .map_err(|err| Error::new(ErrorKind::Internal).with_message("timestamp format failed").with_source(err))
+    let ts =
+        time::OffsetDateTime::from_unix_timestamp_nanos(timestamp_ns as i128).map_err(|err| {
+            Error::new(ErrorKind::Internal)
+                .with_message("invalid timestamp")
+                .with_source(err)
+        })?;
+    ts.format(&Rfc3339).map_err(|err| {
+        Error::new(ErrorKind::Internal)
+            .with_message("timestamp format failed")
+            .with_source(err)
+    })
 }
 
 fn message_json(
@@ -961,11 +1001,14 @@ fn message_from_frame(pool_ref: &str, frame: &FrameRef<'_>) -> Result<Value, Err
 
 fn decode_payload(payload: &[u8]) -> Result<(Value, Value), Error> {
     let json_str = Lite3DocRef::new(payload).to_json(false)?;
-    let value: Value = serde_json::from_str(&json_str)
-        .map_err(|err| Error::new(ErrorKind::Corrupt).with_message("invalid payload json").with_source(err))?;
-    let obj = value.as_object().ok_or_else(|| {
-        Error::new(ErrorKind::Corrupt).with_message("payload is not object")
+    let value: Value = serde_json::from_str(&json_str).map_err(|err| {
+        Error::new(ErrorKind::Corrupt)
+            .with_message("invalid payload json")
+            .with_source(err)
     })?;
+    let obj = value
+        .as_object()
+        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("payload is not object"))?;
     let meta = obj
         .get("meta")
         .cloned()

@@ -1,4 +1,8 @@
-// Stable error kinds with contextual data and CLI exit code mapping.
+//! Purpose: Define stable error kinds and rich errors shared across core + CLI.
+//! Exports: `ErrorKind`, `Error`, `to_exit_code`.
+//! Role: Central error vocabulary for JSON stderr surfaces and exit code mapping.
+//! Invariants: `ErrorKind` names are part of the v0.0.1 contract; change with care.
+//! Invariants: `Error` may carry optional context (path/seq/offset) + a source error.
 use std::error::Error as StdError;
 use std::fmt;
 use std::path::PathBuf;
@@ -136,7 +140,7 @@ pub fn to_exit_code(kind: ErrorKind) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{to_exit_code, ErrorKind};
+    use super::{ErrorKind, to_exit_code};
 
     #[test]
     fn exit_code_mapping_is_stable() {

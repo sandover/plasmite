@@ -1,4 +1,8 @@
-// Lite3 safe wrappers for encoding/decoding and canonical message validation.
+//! Purpose: Safe wrappers around Lite3 encoding/decoding and canonical message validation.
+//! Exports: `Lite3Buf`, `Lite3DocRef`, `encode_message`, `validate_bytes`.
+//! Role: Canonical JSON <-> Lite3 boundary for payloads stored in pool frames.
+//! Invariants: Buffer growth is capped (`MAX_LITE3_BUF`) to avoid unbounded allocation.
+//! Invariants: All FFI interaction is confined to this module + `sys`.
 use std::ffi::CString;
 use std::io;
 
@@ -18,13 +22,17 @@ pub struct Lite3Buf {
 impl Lite3Buf {
     pub fn from_json_str(json: &str) -> Result<Self, Error> {
         let mut buf_len = json.len().saturating_mul(2).max(256);
-        let json_cstr = CString::new(json)
-            .map_err(|err| Error::new(ErrorKind::Usage).with_message("json contains null").with_source(err))?;
+        let json_cstr = CString::new(json).map_err(|err| {
+            Error::new(ErrorKind::Usage)
+                .with_message("json contains null")
+                .with_source(err)
+        })?;
 
         loop {
             if buf_len > MAX_LITE3_BUF {
-                return Err(Error::new(ErrorKind::Usage)
-                    .with_message("lite3 buffer exceeded max size"));
+                return Err(
+                    Error::new(ErrorKind::Usage).with_message("lite3 buffer exceeded max size")
+                );
             }
 
             let mut buf = vec![0u8; buf_len];
@@ -108,8 +116,11 @@ impl<'a> Lite3DocRef<'a> {
         }
 
         let slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, out_len) };
-        let json = String::from_utf8(slice.to_vec())
-            .map_err(|err| Error::new(ErrorKind::Corrupt).with_message("invalid utf-8").with_source(err));
+        let json = String::from_utf8(slice.to_vec()).map_err(|err| {
+            Error::new(ErrorKind::Corrupt)
+                .with_message("invalid utf-8")
+                .with_source(err)
+        });
 
         unsafe {
             sys::plasmite_lite3_free(ptr as *mut libc::c_void);
@@ -119,7 +130,8 @@ impl<'a> Lite3DocRef<'a> {
     }
 
     pub fn validate(&self) -> Result<(), Error> {
-        let root_type = unsafe { sys::plasmite_lite3_get_root_type(self.bytes.as_ptr(), self.bytes.len()) };
+        let root_type =
+            unsafe { sys::plasmite_lite3_get_root_type(self.bytes.as_ptr(), self.bytes.len()) };
         if root_type != sys::LITE3_TYPE_OBJECT {
             return Err(Error::new(ErrorKind::Corrupt).with_message("root is not object"));
         }
@@ -200,8 +212,11 @@ pub fn encode_message(meta_descrips: &[String], data: &Value) -> Result<Lite3Buf
     root.insert("data".to_string(), data.clone());
 
     let json = Value::Object(root);
-    let json_str = serde_json::to_string(&json)
-        .map_err(|err| Error::new(ErrorKind::Usage).with_message("failed to serialize json").with_source(err))?;
+    let json_str = serde_json::to_string(&json).map_err(|err| {
+        Error::new(ErrorKind::Usage)
+            .with_message("failed to serialize json")
+            .with_source(err)
+    })?;
 
     Lite3Buf::from_json_str(&json_str)
 }
@@ -238,12 +253,7 @@ fn get_key_offset_at(bytes: &[u8], ofs: usize, key: &str) -> Result<usize, Error
 fn array_count(bytes: &[u8], ofs: usize) -> Result<u32, Error> {
     let mut out: u32 = 0;
     let ret = unsafe {
-        sys::plasmite_lite3_count(
-            bytes.as_ptr(),
-            bytes.len(),
-            ofs,
-            &mut out as *mut u32,
-        )
+        sys::plasmite_lite3_count(bytes.as_ptr(), bytes.len(), ofs, &mut out as *mut u32)
     };
     if ret < 0 {
         return Err(Error::new(ErrorKind::Corrupt).with_message("invalid array"));
@@ -270,7 +280,7 @@ fn array_item_type(bytes: &[u8], ofs: usize, index: u32) -> Result<u8, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{encode_message, validate_bytes, Lite3Buf};
+    use super::{Lite3Buf, encode_message, validate_bytes};
     use serde_json::json;
 
     #[test]

@@ -1,4 +1,8 @@
-// Build script to compile vendored Lite3 C sources and shim.
+//! Purpose: Compile vendored Lite3 C sources plus the local shim for Rust FFI.
+//! Role: Cargo build-script; configures `cc` inputs/includes and rebuild triggers.
+//! Invariants: `cargo:rerun-if-changed` covers the shim + vendored sources we compile.
+//! Invariants: Produces a `lite3` object library linked into the Rust crate.
+//! Invariants: Uses only Cargo-provided env vars (e.g. `CARGO_MANIFEST_DIR`).
 use std::env;
 use std::path::PathBuf;
 

@@ -1,8 +1,10 @@
-// Pure planning of append/drop transitions without IO side effects.
-// Inputs/outputs are explicit and deterministic; planning never mutates storage.
-// Uses storage only to inspect existing tail frames for safe drop decisions.
+//! Purpose: Plan append/drop transitions for the ring without performing any I/O.
+//! Exports: `plan_append`, `AppendPlan`, `DropStep`, `DropKind`.
+//! Role: Pure planning layer used by `pool` to apply deterministic writes to storage.
+//! Invariants: No side effects; output depends only on `header`, `storage`, `payload_len`.
+//! Invariants: Reads storage only to validate/inspect existing frames when freeing space.
 use crate::core::error::{Error, ErrorKind};
-use crate::core::frame::{self, FrameHeader, FrameState, FRAME_HEADER_LEN};
+use crate::core::frame::{self, FRAME_HEADER_LEN, FrameHeader, FrameState};
 use crate::core::pool::PoolHeader;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -29,7 +31,11 @@ pub struct AppendPlan {
     pub seq: u64,
 }
 
-pub fn plan_append(header: PoolHeader, storage: &[u8], payload_len: usize) -> Result<AppendPlan, Error> {
+pub fn plan_append(
+    header: PoolHeader,
+    storage: &[u8],
+    payload_len: usize,
+) -> Result<AppendPlan, Error> {
     if payload_len > u32::MAX as usize {
         return Err(Error::new(ErrorKind::Usage).with_message("payload too large"));
     }
@@ -167,7 +173,9 @@ fn plan_drop_step(
         }
         FrameState::Committed => {
             let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, frame.payload_len as usize)
-                .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("frame length overflow"))?;
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::Corrupt).with_message("frame length overflow")
+                })?;
             let mut new_tail = tail + frame_len;
             if new_tail == ring_size {
                 new_tail = 0;
@@ -183,7 +191,11 @@ fn plan_drop_step(
     }
 }
 
-fn read_frame_header(storage: &[u8], ring_offset: usize, head: usize) -> Result<FrameHeader, Error> {
+fn read_frame_header(
+    storage: &[u8],
+    ring_offset: usize,
+    head: usize,
+) -> Result<FrameHeader, Error> {
     let start = ring_offset + head;
     let end = start + FRAME_HEADER_LEN;
     FrameHeader::decode(&storage[start..end])
@@ -218,8 +230,8 @@ fn required_space(head: usize, frame_len: usize, ring_size: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{plan_append, DropKind};
-    use crate::core::frame::{self, FrameHeader, FrameState, FRAME_HEADER_LEN};
+    use super::{DropKind, plan_append};
+    use crate::core::frame::{self, FRAME_HEADER_LEN, FrameHeader, FrameState};
     use crate::core::pool::PoolHeader;
     use crate::core::validate;
 
@@ -251,7 +263,13 @@ mod tests {
         }
     }
 
-    fn header_for(ring_size: usize, head: usize, tail: usize, oldest_seq: u64, newest_seq: u64) -> PoolHeader {
+    fn header_for(
+        ring_size: usize,
+        head: usize,
+        tail: usize,
+        oldest_seq: u64,
+        newest_seq: u64,
+    ) -> PoolHeader {
         PoolHeader {
             file_size: (RING_OFFSET + ring_size) as u64,
             ring_offset: RING_OFFSET as u64,
@@ -274,14 +292,7 @@ mod tests {
     }
 
     fn write_committed_frame(storage: &mut [u8], offset: usize, seq: u64, payload_len: usize) {
-        let header = FrameHeader::new(
-            FrameState::Committed,
-            0,
-            seq,
-            0,
-            payload_len as u32,
-            0,
-        );
+        let header = FrameHeader::new(FrameState::Committed, 0, seq, 0, payload_len as u32, 0);
         write_frame(storage, offset, &header, payload_len);
     }
 

@@ -1,4 +1,10 @@
-// C shim interface for selected Lite3 APIs used by Rust.
+/*
+Purpose: Expose a small, stable C ABI for Lite3 functionality used by Rust.
+Exports: `plasmite_lite3_json_dec`, `plasmite_lite3_json_enc(_pretty)`, `plasmite_lite3_get_*`, `plasmite_lite3_free`.
+Role: Thin boundary between the Rust crate and the vendored Lite3 implementation.
+Invariants: Function signatures are part of the Rust FFI contract; change with care.
+Invariants: Returned heap pointers are freed by calling `plasmite_lite3_free`.
+*/
 #ifndef PLASMITE_LITE3_SHIM_H
 #define PLASMITE_LITE3_SHIM_H
 

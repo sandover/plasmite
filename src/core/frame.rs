@@ -1,4 +1,8 @@
-// Frame header layout, alignment helpers, and payload validation utilities.
+//! Purpose: Define frame header layout plus helpers for sizing/alignment and validation.
+//! Exports: `FrameHeader`, `FrameState`, `FRAME_HEADER_LEN`, `frame_total_len`, `validate_payload`.
+//! Role: Shared encoding/validation primitives used by planner, pool, cursor, and validator.
+//! Invariants: Frame headers are fixed-size (64 bytes) and encoded little-endian.
+//! Invariants: Payload validation enforces canonical Lite3 encoding when required.
 use crate::core::error::{Error, ErrorKind};
 use crate::core::lite3;
 
@@ -133,8 +137,11 @@ pub fn max_payload(ring_size: usize, header_len: usize) -> usize {
 }
 
 pub fn validate_payload(payload: &[u8]) -> Result<(), Error> {
-    lite3::validate_bytes(payload)
-        .map_err(|err| Error::new(ErrorKind::Corrupt).with_message("invalid lite3 payload").with_source(err))
+    lite3::validate_bytes(payload).map_err(|err| {
+        Error::new(ErrorKind::Corrupt)
+            .with_message("invalid lite3 payload")
+            .with_source(err)
+    })
 }
 
 fn read_u32(buf: &[u8], offset: usize) -> u32 {
@@ -168,8 +175,8 @@ fn write_u64(buf: &mut [u8], offset: usize, value: u64) {
 #[cfg(test)]
 mod tests {
     use super::{
-        align8, frame_total_len, max_payload, validate_payload, FrameHeader, FrameState,
-        FRAME_HEADER_LEN, MAX_PAYLOAD_ABS,
+        FRAME_HEADER_LEN, FrameHeader, FrameState, MAX_PAYLOAD_ABS, align8, frame_total_len,
+        max_payload, validate_payload,
     };
     use crate::core::error::ErrorKind;
     use crate::core::lite3::encode_message;
@@ -207,8 +214,17 @@ mod tests {
 
     #[test]
     fn header_rejects_oversized_payload() {
-        let header = FrameHeader::new(FrameState::Committed, 0, 1, 1, (MAX_PAYLOAD_ABS as u32) + 1, 0);
-        let err = header.validate(MAX_PAYLOAD_ABS + FRAME_HEADER_LEN).expect_err("should fail");
+        let header = FrameHeader::new(
+            FrameState::Committed,
+            0,
+            1,
+            1,
+            (MAX_PAYLOAD_ABS as u32) + 1,
+            0,
+        );
+        let err = header
+            .validate(MAX_PAYLOAD_ABS + FRAME_HEADER_LEN)
+            .expect_err("should fail");
         assert_eq!(err.kind(), ErrorKind::Corrupt);
     }
 

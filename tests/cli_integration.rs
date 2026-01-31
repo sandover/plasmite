@@ -1,9 +1,13 @@
-// CLI integration tests for v0.0.1 minimal flows.
-use std::process::{Command, Stdio};
+//! Purpose: End-to-end CLI tests for v0.0.1 flows and JSON output shapes.
+//! Role: Integration tests invoking the built `plasmite` binary.
+//! Invariants: Parses stdout/stderr as JSON and asserts stable fields/behavior.
+//! Invariants: Uses temporary directories; never touches user home or project pools.
+//! Invariants: Timeouts are bounded to keep CI deterministic.
 use std::io::Write;
 use std::io::{BufRead, BufReader};
-use std::time::Duration;
+use std::process::{Command, Stdio};
 use std::thread;
+use std::time::Duration;
 
 use serde_json::Value;
 
@@ -38,7 +42,13 @@ fn create_poke_get_peek_flow() {
     let pool_dir = temp.path().join("pools");
 
     let create = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "testpool"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "testpool",
+        ])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -50,7 +60,14 @@ fn create_poke_get_peek_flow() {
         .first()
         .expect("first");
     assert_eq!(created.get("pool").unwrap().as_str().unwrap(), "testpool");
-    assert!(created.get("path").unwrap().as_str().unwrap().ends_with("testpool.plasmite"));
+    assert!(
+        created
+            .get("path")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .ends_with("testpool.plasmite")
+    );
     assert!(created.get("bounds").unwrap().get("oldest").is_none());
 
     let poke = cmd()
@@ -111,7 +128,13 @@ fn readme_quickstart_flow() {
     let pool_dir = temp.path().join("pools");
 
     let create = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "demo"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -170,7 +193,13 @@ fn peek_follow_emits_new_messages() {
     let pool_dir = temp.path().join("pools");
 
     let create = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "demo"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -226,7 +255,13 @@ fn not_found_exit_code() {
     let pool_dir = temp.path().join("pools");
 
     let create = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "testpool"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "testpool",
+        ])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -243,8 +278,14 @@ fn not_found_exit_code() {
         .expect("get");
     assert_eq!(get.status.code().unwrap(), 3);
     let err = parse_error_json(&get.stderr);
-    let inner = err.get("error").and_then(|v| v.as_object()).expect("error object");
-    assert_eq!(inner.get("kind").and_then(|v| v.as_str()).unwrap(), "NotFound");
+    let inner = err
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
+    assert_eq!(
+        inner.get("kind").and_then(|v| v.as_str()).unwrap(),
+        "NotFound"
+    );
     assert_eq!(inner.get("seq").and_then(|v| v.as_u64()).unwrap(), 999);
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
     assert!(hint.contains("pool bounds") || hint.contains("peek"));
@@ -256,7 +297,13 @@ fn usage_exit_code() {
     let pool_dir = temp.path().join("pools");
 
     let create = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "testpool"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "testpool",
+        ])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -267,7 +314,10 @@ fn usage_exit_code() {
         .expect("poke");
     assert_eq!(poke.status.code().unwrap(), 2);
     let err = parse_error_json(&poke.stderr);
-    let inner = err.get("error").and_then(|v| v.as_object()).expect("error object");
+    let inner = err
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
     assert_eq!(inner.get("kind").and_then(|v| v.as_str()).unwrap(), "Usage");
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
     assert!(hint.contains("--data-json") || hint.contains("pipe JSON"));
@@ -279,7 +329,13 @@ fn poke_is_silent_without_print() {
     let pool_dir = temp.path().join("pools");
 
     let create = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "testpool"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "testpool",
+        ])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -311,10 +367,22 @@ fn errors_are_json_on_non_tty_stderr() {
     assert_eq!(peek.status.code().unwrap(), 3);
 
     let err = parse_error_json(&peek.stderr);
-    let inner = err.get("error").and_then(|v| v.as_object()).expect("error object");
-    assert_eq!(inner.get("kind").and_then(|v| v.as_str()).unwrap(), "NotFound");
+    let inner = err
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
+    assert_eq!(
+        inner.get("kind").and_then(|v| v.as_str()).unwrap(),
+        "NotFound"
+    );
     assert!(inner.get("message").and_then(|v| v.as_str()).unwrap().len() > 0);
-    assert!(inner.get("path").and_then(|v| v.as_str()).unwrap().ends_with("missing.plasmite"));
+    assert!(
+        inner
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .ends_with("missing.plasmite")
+    );
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
     assert!(hint.contains("pool create") || hint.contains("--dir"));
 }
@@ -337,7 +405,10 @@ fn clap_errors_are_concise_in_json() {
     assert_eq!(bad.status.code().unwrap(), 2);
 
     let err = parse_error_json(&bad.stderr);
-    let inner = err.get("error").and_then(|v| v.as_object()).expect("error object");
+    let inner = err
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
     assert_eq!(inner.get("kind").and_then(|v| v.as_str()).unwrap(), "Usage");
     let message = inner.get("message").and_then(|v| v.as_str()).unwrap();
     assert!(!message.contains('\n'));
@@ -352,20 +423,44 @@ fn already_exists_has_hint_and_path() {
     let pool_dir = temp.path().join("pools");
 
     let create = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "testpool"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "testpool",
+        ])
         .output()
         .expect("create");
     assert!(create.status.success());
 
     let again = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "testpool"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "testpool",
+        ])
         .output()
         .expect("create again");
     assert_eq!(again.status.code().unwrap(), 4);
     let err = parse_error_json(&again.stderr);
-    let inner = err.get("error").and_then(|v| v.as_object()).expect("error object");
-    assert_eq!(inner.get("kind").and_then(|v| v.as_str()).unwrap(), "AlreadyExists");
-    assert!(inner.get("path").and_then(|v| v.as_str()).unwrap().ends_with("testpool.plasmite"));
+    let inner = err
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
+    assert_eq!(
+        inner.get("kind").and_then(|v| v.as_str()).unwrap(),
+        "AlreadyExists"
+    );
+    assert!(
+        inner
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .ends_with("testpool.plasmite")
+    );
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
     assert!(hint.contains("different name") || hint.contains("remove"));
 }
@@ -376,25 +471,51 @@ fn permission_error_has_hint_and_causes() {
     let pool_dir = temp.path().join("readonly");
     std::fs::create_dir_all(&pool_dir).expect("mkdir");
 
-    let mut perms = std::fs::metadata(&pool_dir).expect("metadata").permissions();
+    let mut perms = std::fs::metadata(&pool_dir)
+        .expect("metadata")
+        .permissions();
     perms.set_readonly(true);
     std::fs::set_permissions(&pool_dir, perms).expect("set perms");
 
     let create = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "testpool"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "testpool",
+        ])
         .output()
         .expect("create");
     assert_eq!(create.status.code().unwrap(), 8);
     let err = parse_error_json(&create.stderr);
-    let inner = err.get("error").and_then(|v| v.as_object()).expect("error object");
-    assert!(inner.get("hint").and_then(|v| v.as_str()).unwrap_or("").len() > 0);
+    let inner = err
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
+    assert!(
+        inner
+            .get("hint")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .len()
+            > 0
+    );
     let empty = Vec::new();
-    let causes = inner.get("causes").and_then(|v| v.as_array()).unwrap_or(&empty);
+    let causes = inner
+        .get("causes")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
     if causes.is_empty() {
-        eprintln!("warning: Permission/Io error had no causes; stderr={}", String::from_utf8_lossy(&create.stderr));
+        eprintln!(
+            "warning: Permission/Io error had no causes; stderr={}",
+            String::from_utf8_lossy(&create.stderr)
+        );
     }
 
-    let mut perms = std::fs::metadata(&pool_dir).expect("metadata").permissions();
+    let mut perms = std::fs::metadata(&pool_dir)
+        .expect("metadata")
+        .permissions();
     perms.set_readonly(false);
     std::fs::set_permissions(&pool_dir, perms).expect("unset perms");
 }
@@ -408,20 +529,26 @@ fn corrupt_pool_has_hint_and_path() {
     std::fs::write(&pool_path, b"NOPE").expect("write");
 
     let info = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "info",
-            "bad",
-        ])
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "info", "bad"])
         .output()
         .expect("info");
     assert_eq!(info.status.code().unwrap(), 7);
     let err = parse_error_json(&info.stderr);
-    let inner = err.get("error").and_then(|v| v.as_object()).expect("error object");
-    assert_eq!(inner.get("kind").and_then(|v| v.as_str()).unwrap(), "Corrupt");
-    assert!(inner.get("path").and_then(|v| v.as_str()).unwrap().ends_with("bad.plasmite"));
+    let inner = err
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
+    assert_eq!(
+        inner.get("kind").and_then(|v| v.as_str()).unwrap(),
+        "Corrupt"
+    );
+    assert!(
+        inner
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .ends_with("bad.plasmite")
+    );
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
     assert!(hint.contains("Recreate") || hint.contains("recreate"));
 }
@@ -432,13 +559,25 @@ fn poke_streams_json_values_from_stdin() {
     let pool_dir = temp.path().join("pools");
 
     let create = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "testpool"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "testpool",
+        ])
         .output()
         .expect("create");
     assert!(create.status.success());
 
     let mut poke = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "poke", "testpool", "--print"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "testpool",
+            "--print",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()

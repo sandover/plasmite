@@ -1,12 +1,8 @@
-// Benchmark harness for Plasmite.
-//
-// Purpose:
-// - Provide a simple, repeatable baseline for core operations (append, follow read, get scan, multi-writer contention).
-// - Emit machine-readable JSON to stdout and a human-readable table to stderr.
-//
-// Design notes:
-// - Uses child processes for contention/follow to exercise cross-process file locking.
-// - Avoids extra dependencies; keep benchmarks "good enough" for trend tracking, not lab-grade profiling.
+//! Purpose: Benchmark harness for core operations and multi-process contention scenarios.
+//! Exports: `run_bench`, `run_worker`, `BenchArgs`, `BenchFormat`, `WorkerArgs`, `WorkerRole`.
+//! Role: CLI subcommand implementation; emits JSON on stdout and/or a table on stderr.
+//! Invariants: Uses child processes to exercise cross-process file locking and follow semantics.
+//! Invariants: Intended for trend tracking; not lab-grade profiling.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -15,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use plasmite::core::cursor::{Cursor, CursorResult};
 use plasmite::core::error::{Error, ErrorKind};
@@ -46,8 +42,10 @@ impl BenchFormat {
             "json" => Ok(Self::Json),
             "table" => Ok(Self::Table),
             "both" => Ok(Self::Both),
-            _ => Err(Error::new(ErrorKind::Usage)
-                .with_message("invalid --format (use json|table|both)")),
+            _ => {
+                Err(Error::new(ErrorKind::Usage)
+                    .with_message("invalid --format (use json|table|both)"))
+            }
         }
     }
 }
@@ -82,12 +80,12 @@ impl WorkerRole {
 pub fn run_bench(args: BenchArgs, program_version: &str) -> Result<(), Error> {
     let start = SystemTime::now();
     warn_if_debug_build()?;
-    let work_dir = args
-        .work_dir
-        .clone()
-        .unwrap_or_else(default_work_dir);
-    std::fs::create_dir_all(&work_dir)
-        .map_err(|err| Error::new(ErrorKind::Io).with_path(&work_dir).with_source(err))?;
+    let work_dir = args.work_dir.clone().unwrap_or_else(default_work_dir);
+    std::fs::create_dir_all(&work_dir).map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_path(&work_dir)
+            .with_source(err)
+    })?;
 
     let rep_pool = *args
         .pool_sizes
@@ -114,7 +112,8 @@ pub fn run_bench(args: BenchArgs, program_version: &str) -> Result<(), Error> {
                     continue;
                 }
                 let durability_label = durability_label(*durability);
-                let base_name = format!("bench-{}-{}-{}", pool_size, payload_bytes, durability_label);
+                let base_name =
+                    format!("bench-{}-{}-{}", pool_size, payload_bytes, durability_label);
                 let pool_path = work_dir.join(format!("{base_name}.plasmite"));
 
                 let append = bench_append(
@@ -214,7 +213,11 @@ fn warn_if_debug_build() -> Result<(), Error> {
             .with_message("failed to write debug build warning")
             .with_source(err)
     })?;
-    writeln!(stderr, "  cargo build --release && ./target/release/plasmite bench").map_err(|err| {
+    writeln!(
+        stderr,
+        "  cargo build --release && ./target/release/plasmite bench"
+    )
+    .map_err(|err| {
         Error::new(ErrorKind::Io)
             .with_message("failed to write debug build hint")
             .with_source(err)
@@ -232,7 +235,10 @@ pub fn run_worker(args: WorkerArgs) -> Result<(), Error> {
 fn emit_bench_output(value: Value, format: BenchFormat) -> Result<(), Error> {
     match format {
         BenchFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".to_string()));
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".to_string())
+            );
             Ok(())
         }
         BenchFormat::Table => {
@@ -240,7 +246,10 @@ fn emit_bench_output(value: Value, format: BenchFormat) -> Result<(), Error> {
             Ok(())
         }
         BenchFormat::Both => {
-            println!("{}", serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".to_string()));
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".to_string())
+            );
             emit_table(&value)?;
             Ok(())
         }
@@ -375,7 +384,11 @@ impl BenchRow {
             durability: value.get("durability")?.as_str()?.to_string(),
             ms_per_msg: value.get("ms_per_msg")?.as_f64()?,
             msgs_per_sec: value.get("msgs_per_sec")?.as_f64()?,
-            notes: value.get("notes").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            notes: value
+                .get("notes")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
         })
     }
 
@@ -537,9 +550,11 @@ fn bench_follow(
         durability,
     })?;
 
-    let writer_status = writer
-        .wait()
-        .map_err(|err| Error::new(ErrorKind::Io).with_message("writer wait failed").with_source(err))?;
+    let writer_status = writer.wait().map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message("writer wait failed")
+            .with_source(err)
+    })?;
     if !writer_status.success() {
         return Err(Error::new(ErrorKind::Internal).with_message("writer worker failed"));
     }
@@ -576,12 +591,18 @@ fn bench_follow(
     entry.insert("payload_bytes".to_string(), json!(payload_bytes));
     entry.insert("messages".to_string(), json!(seen));
     entry.insert("writers".to_string(), json!(1));
-    entry.insert("durability".to_string(), json!(durability_label(durability)));
+    entry.insert(
+        "durability".to_string(),
+        json!(durability_label(durability)),
+    );
     entry.insert("duration_ms".to_string(), json!(dur_ms));
     entry.insert("ms_per_msg".to_string(), json!(ms_per_msg));
     entry.insert(
         "latency_ms".to_string(),
-        follower_json.get("latency_ms").cloned().unwrap_or(json!({})),
+        follower_json
+            .get("latency_ms")
+            .cloned()
+            .unwrap_or(json!({})),
     );
     entry.insert("notes".to_string(), json!("cross-process: writer+follower"));
     entry.insert("writer".to_string(), writer_json);
@@ -785,7 +806,11 @@ fn decode_payload_data(payload: &[u8]) -> Result<BTreeMap<String, Value>, Error>
     Ok(out)
 }
 
-fn payload_for_bytes(payload_bytes: usize, sent_ns: Option<u64>, done: bool) -> Result<lite3::Lite3Buf, Error> {
+fn payload_for_bytes(
+    payload_bytes: usize,
+    sent_ns: Option<u64>,
+    done: bool,
+) -> Result<lite3::Lite3Buf, Error> {
     let mut filler = "x".repeat(payload_bytes.saturating_sub(32));
     if filler.is_empty() {
         filler = "x".to_string();
@@ -841,8 +866,11 @@ fn read_json_file(path: &Path) -> Result<Value, Error> {
 }
 
 fn write_json_file(path: &Path, value: &Value) -> Result<(), Error> {
-    let bytes = serde_json::to_vec_pretty(value)
-        .map_err(|err| Error::new(ErrorKind::Internal).with_message("json encode failed").with_source(err))?;
+    let bytes = serde_json::to_vec_pretty(value).map_err(|err| {
+        Error::new(ErrorKind::Internal)
+            .with_message("json encode failed")
+            .with_source(err)
+    })?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|err| Error::new(ErrorKind::Io).with_path(parent).with_source(err))?;
@@ -875,7 +903,10 @@ fn result_entry(
     map.insert("payload_bytes".to_string(), json!(payload_bytes));
     map.insert("messages".to_string(), json!(messages));
     map.insert("writers".to_string(), json!(writers));
-    map.insert("durability".to_string(), json!(durability_label(durability)));
+    map.insert(
+        "durability".to_string(),
+        json!(durability_label(durability)),
+    );
     map.insert("duration_ms".to_string(), json!(dur_ms));
     map.insert("ms_per_msg".to_string(), json!(ms_per_msg));
     map.insert("msgs_per_sec".to_string(), json!(msgs_per_sec));
@@ -904,11 +935,16 @@ fn quantile(sorted: &[f64], q: f64) -> f64 {
     }
     let clamped = q.clamp(0.0, 1.0);
     let idx = ((sorted.len() - 1) as f64 * clamped).round() as usize;
-    sorted.get(idx).copied().unwrap_or_else(|| sorted[sorted.len() - 1])
+    sorted
+        .get(idx)
+        .copied()
+        .unwrap_or_else(|| sorted[sorted.len() - 1])
 }
 
 fn system_json() -> Value {
-    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    let cpus = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
     json!({
         "os": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
@@ -929,14 +965,19 @@ fn now_ns() -> Result<u64, Error> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|dur| dur.as_nanos() as u64)
-        .map_err(|err| Error::new(ErrorKind::Internal).with_message("clock went backwards").with_source(err))
+        .map_err(|err| {
+            Error::new(ErrorKind::Internal)
+                .with_message("clock went backwards")
+                .with_source(err)
+        })
 }
 
 fn rfc3339_now(ts: SystemTime) -> String {
     let dur = ts.duration_since(UNIX_EPOCH).unwrap_or_default();
     let secs = dur.as_secs() as i64;
     let nsec = dur.subsec_nanos();
-    let tm = time::OffsetDateTime::from_unix_timestamp(secs).unwrap_or_else(|_| time::OffsetDateTime::UNIX_EPOCH);
+    let tm = time::OffsetDateTime::from_unix_timestamp(secs)
+        .unwrap_or_else(|_| time::OffsetDateTime::UNIX_EPOCH);
     let tm = tm.replace_nanosecond(nsec).unwrap_or(tm);
     tm.format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
@@ -959,7 +1000,11 @@ fn format_bytes(value: u64) -> String {
     }
 }
 
-fn append_with_durability(pool: &mut Pool, payload: &[u8], durability: Durability) -> Result<u64, Error> {
+fn append_with_durability(
+    pool: &mut Pool,
+    payload: &[u8],
+    durability: Durability,
+) -> Result<u64, Error> {
     pool.append_with_options(payload, AppendOptions::new(0, durability))
 }
 

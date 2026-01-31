@@ -1,4 +1,8 @@
-// Multi-process lock smoke test for append serialization.
+//! Purpose: Smoke-test multi-process append locking serializes concurrent writers.
+//! Role: Integration test spawning multiple `plasmite poke` processes.
+//! Invariants: Each child must succeed; resulting pool bounds reflect all writes.
+//! Invariants: Uses temporary directories; avoids reliance on global state.
+//! Invariants: Fast regression coverage, not an exhaustive concurrency proof.
 use std::process::{Command, Stdio};
 
 use plasmite::core::pool::Pool;
@@ -14,7 +18,13 @@ fn concurrent_poke_is_serialized() {
     let pool_dir = temp.path().join("pools");
 
     let create = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "lockpool"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "lockpool",
+        ])
         .output()
         .expect("create");
     assert!(create.status.success());

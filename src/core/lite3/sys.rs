@@ -1,4 +1,8 @@
-// Raw FFI bindings to the Lite3 C shim.
+//! Purpose: Raw (unsafe) FFI bindings to the Lite3 C shim.
+//! Exports: `plasmite_lite3_*` functions and Lite3 type constants.
+//! Role: Unsafe boundary used only by `crate::core::lite3`; keep surface minimal.
+//! Invariants: Callers must pass valid pointers/lengths for the duration of the call.
+//! Invariants: Any heap pointer returned from the shim is freed via `plasmite_lite3_free`.
 use std::os::raw::{c_char, c_int, c_uchar, c_void};
 
 pub const LITE3_TYPE_NULL: u8 = 0;

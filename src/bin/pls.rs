@@ -1,5 +1,8 @@
-// Short alias binary for `plasmite`.
-// Resolves the sibling `plasmite` binary first; falls back to PATH.
+//! Purpose: Provide a short `pls` alias that execs the `plasmite` binary.
+//! Role: Convenience wrapper; resolves a sibling `plasmite` first, else uses PATH.
+//! Invariants: Forwards CLI args verbatim and propagates the child exit status.
+//! Invariants: Prefers `./plasmite` next to the current executable when present.
+//! Invariants: Emits only a plain stderr message on exec failure.
 use std::env;
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -9,9 +12,7 @@ fn main() {
     let args: Vec<OsString> = env::args_os().skip(1).collect();
     let target = resolve_plasmite_binary();
 
-    let status = Command::new(&target)
-        .args(args)
-        .status();
+    let status = Command::new(&target).args(args).status();
 
     match status {
         Ok(status) => std::process::exit(status.code().unwrap_or(1)),
