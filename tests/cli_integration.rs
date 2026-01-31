@@ -1,6 +1,9 @@
 // CLI integration tests for v0.0.1 minimal flows.
 use std::process::{Command, Stdio};
 use std::io::Write;
+use std::io::{BufRead, BufReader};
+use std::time::Duration;
+use std::thread;
 
 use serde_json::Value;
 
@@ -159,6 +162,62 @@ fn readme_quickstart_flow() {
     assert!(peek.status.success());
     let peek_json = parse_json_line(&peek.stdout);
     assert_eq!(peek_json.get("seq").unwrap().as_u64().unwrap(), seq);
+}
+
+#[test]
+fn peek_follow_emits_new_messages() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "demo"])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let mut peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--follow",
+            "--tail",
+            "0",
+            "--jsonl",
+            "--idle-timeout",
+            "2s",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("peek");
+
+    thread::sleep(Duration::from_millis(50));
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "--print",
+            "--data-json",
+            "{\"x\":42}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let stdout = peek.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let read = reader.read_line(&mut line).expect("read line");
+    assert!(read > 0, "expected a line from follow output");
+    let value = parse_json(line.trim());
+    assert_eq!(value.get("data").unwrap()["x"], 42);
+
+    let status = peek.wait().expect("wait");
+    assert!(status.success());
 }
 
 #[test]
