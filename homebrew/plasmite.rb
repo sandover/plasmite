@@ -21,6 +21,7 @@ class Plasmite < Formula
 
   def install
     bin.install "plasmite"
+    bin.install "pls"
   end
 
   test do

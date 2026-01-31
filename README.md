@@ -42,6 +42,8 @@ v0.0.1 focuses on the CLI only; a dedicated Rust library API will come later.
 cargo install --path . --locked
 ```
 
+Tip: a short alias binary, `pls`, is installed alongside `plasmite` when available.
+
 ### Homebrew (tap)
 
 Copy `homebrew/plasmite.rb` into your tap repository.

@@ -1,6 +1,7 @@
 # Homebrew tap setup
 
 This repo ships release artifacts. Use a separate tap repo (recommended name: `homebrew-tap`) to publish the formula.
+The formula installs both `plasmite` and the short alias `pls`.
 
 ## 1) Create the tap repo
 
