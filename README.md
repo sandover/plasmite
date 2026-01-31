@@ -1,5 +1,8 @@
 # Plasmite
 
+[![CI](https://github.com/sandover/plasmite/actions/workflows/ci.yml/badge.svg)](https://github.com/sandover/plasmite/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Plasmite is a **Unix-first CLI** for working with **Plasma-style pools**: a single-file,
 mmap-backed ring buffer of immutable messages that multiple local processes can append to and
 read from concurrently.
@@ -187,9 +190,12 @@ to avoid network fetches at build time. See `vendor/README.md`.
 
 - CLI contract: `plasmite-cli-spec-v.0.1.md`
 - Storage + concurrency design: `plasmite-tdd-v.0.0.1.md`
+- Testing: `TESTING.md`
+- Release checklist: `RELEASING.md`
 - Exit codes: `docs/exit-codes.md`
 - Homebrew packaging: `docs/homebrew.md`
 - Performance baselines: `docs/perf.md`
+- Changelog: `CHANGELOG.md`
 
 ## Development
 

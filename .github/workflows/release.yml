@@ -38,6 +38,11 @@ jobs:
           release_dir=target/${{ matrix.target }}/release
           mkdir -p dist
           tar -C "${release_dir}" -czf "dist/plasmite-${{ matrix.target }}.tar.gz" "${bin_name}"
+      - name: Checksums
+        shell: bash
+        run: |
+          cd dist
+          shasum -a 256 *.tar.gz > SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
