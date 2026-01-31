@@ -6,7 +6,7 @@ Short checklist for cutting a release and publishing GitHub artifacts.
 
 - Update version in `Cargo.toml` (and anywhere else it is surfaced).
 - Update `CHANGELOG.md` with the release notes.
-- Review docs for accuracy (`README.md`, `TESTING.md`, CLI spec).
+- Review docs for accuracy (`README.md`, `docs/TESTING.md`, CLI spec).
 
 ## 2) Validate locally
 
@@ -14,6 +14,8 @@ Short checklist for cutting a release and publishing GitHub artifacts.
 cargo fmt --all
 cargo clippy --all-targets -- -D warnings
 cargo test --all --locked
+cargo install cargo-audit --locked
+cargo audit
 ```
 
 ## 3) Tag and push

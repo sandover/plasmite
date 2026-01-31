@@ -60,6 +60,15 @@ What it covers:
 - Spawns multiple `plasmite poke` processes against one pool
 - Asserts writes are serialized (bounds reflect all writes)
 
+## Security/advisory checks
+
+The CI runs RustSec audits via `cargo audit`. To run locally:
+
+```bash
+cargo install cargo-audit --locked
+cargo audit
+```
+
 ## Notes
 
 - Toolchain: pinned in `rust-toolchain.toml` (includes `clippy` + `rustfmt`).

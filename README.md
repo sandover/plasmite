@@ -190,8 +190,8 @@ to avoid network fetches at build time. See `vendor/README.md`.
 
 - CLI contract: `plasmite-cli-spec-v.0.1.md`
 - Storage + concurrency design: `plasmite-tdd-v.0.0.1.md`
-- Testing: `TESTING.md`
-- Release checklist: `RELEASING.md`
+- Testing: `docs/TESTING.md`
+- Release checklist: `docs/RELEASING.md`
 - Exit codes: `docs/exit-codes.md`
 - Homebrew packaging: `docs/homebrew.md`
 - Performance baselines: `docs/perf.md`
@@ -203,7 +203,7 @@ to avoid network fetches at build time. See `vendor/README.md`.
 cargo test
 ```
 
-See `TESTING.md` for the full list of test suites and what they cover.
+See `docs/TESTING.md` for the full list of test suites and what they cover.
 
 ## Third-party / licenses
 
