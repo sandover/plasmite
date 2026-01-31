@@ -62,11 +62,18 @@ What it covers:
 
 ## Security/advisory checks
 
-The CI runs RustSec audits via `cargo audit`. To run locally:
+The CI runs RustSec audits via `cargo audit`. To run locally (keeping the
+advisory database under `.scratch/` to avoid `~/.cargo` write permissions):
 
 ```bash
 cargo install cargo-audit --locked
-cargo audit
+mkdir -p .scratch
+if [ -d .scratch/advisory-db/.git ]; then
+  git -C .scratch/advisory-db pull --ff-only
+else
+  git clone https://github.com/RustSec/advisory-db.git .scratch/advisory-db
+fi
+cargo audit --db .scratch/advisory-db --no-fetch
 ```
 
 ## Notes

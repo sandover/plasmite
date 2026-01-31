@@ -23,5 +23,14 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
-      - run: cargo audit
+      - name: Fetch RustSec advisory DB
+        shell: bash
+        run: |
+          mkdir -p .scratch
+          if [ -d .scratch/advisory-db/.git ]; then
+            git -C .scratch/advisory-db pull --ff-only
+          else
+            git clone https://github.com/RustSec/advisory-db.git .scratch/advisory-db
+          fi
+      - run: cargo audit --db .scratch/advisory-db --no-fetch
       - run: cargo test --all --locked

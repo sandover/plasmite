@@ -15,7 +15,13 @@ cargo fmt --all
 cargo clippy --all-targets -- -D warnings
 cargo test --all --locked
 cargo install cargo-audit --locked
-cargo audit
+mkdir -p .scratch
+if [ -d .scratch/advisory-db/.git ]; then
+  git -C .scratch/advisory-db pull --ff-only
+else
+  git clone https://github.com/RustSec/advisory-db.git .scratch/advisory-db
+fi
+cargo audit --db .scratch/advisory-db --no-fetch
 ```
 
 ## 3) Tag and push
