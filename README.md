@@ -197,6 +197,8 @@ to avoid network fetches at build time. See `vendor/README.md`.
 cargo test
 ```
 
+See `TESTING.md` for the full list of test suites and what they cover.
+
 ## Third-party / licenses
 
 See `THIRD_PARTY_NOTICES.md` for vendored dependencies and licenses.

@@ -332,3 +332,8 @@
 {"type":"claim","ts":"2026-01-31T16:41:51.183096Z","data":{"id":"J73LPL","agent_id":"gpt-5.2@bbook","ts":"2026-01-31T16:41:51.183096Z"}}
 {"type":"state","ts":"2026-01-31T16:41:51.183096Z","data":{"id":"J73LPL","state":"doing","ts":"2026-01-31T16:41:51.183096Z"}}
 {"type":"state","ts":"2026-01-31T16:45:10.684824Z","data":{"id":"J73LPL","state":"done","ts":"2026-01-31T16:45:10.684824Z"}}
+{"type":"new_task","ts":"2026-01-31T16:49:46.867263Z","data":{"id":"XF2RA4","uuid":"d9bb9250-26e4-43e6-bb7e-7cc3d0cd1d9c","epic_id":"","state":"todo","title":"Add TESTING.md","body":"Create a succinct TESTING.md documenting how to run unit/integration tests and what each suite covers. Keep docs internally coherent; run tests; commit.","created_at":"2026-01-31T16:49:46.867263Z"}}
+{"type":"claim","ts":"2026-01-31T16:49:46.869832Z","data":{"id":"XF2RA4","agent_id":"gpt-5.2@bbook","ts":"2026-01-31T16:49:46.869832Z"}}
+{"type":"state","ts":"2026-01-31T16:49:46.869832Z","data":{"id":"XF2RA4","state":"doing","ts":"2026-01-31T16:49:46.869832Z"}}
+{"type":"result","ts":"2026-01-31T16:50:36.633214Z","data":{"task_id":"XF2RA4","summary":"Document test commands and suite coverage","path":"TESTING.md","sha256_at_attach":"cefd46c3b727706676c643e14643eab2e2ec77703c019cd8cdb6c51b77de4943","mtime_at_attach":"2026-01-31T16:50:26.169825644Z","git_commit_at_attach":"f31913ce452e7e55fa50d89ed6de23e905dcf6bc","ts":"2026-01-31T16:50:36.633214Z"}}
+{"type":"state","ts":"2026-01-31T16:50:36.635223Z","data":{"id":"XF2RA4","state":"done","ts":"2026-01-31T16:50:36.635223Z"}}
