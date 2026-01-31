@@ -103,6 +103,65 @@ fn create_poke_get_peek_flow() {
 }
 
 #[test]
+fn readme_quickstart_flow() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "demo"])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "--print",
+            "--descrip",
+            "ping",
+            "--data-json",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+    let poke_json = parse_json(std::str::from_utf8(&poke.stdout).expect("utf8"));
+    let seq = poke_json.get("seq").unwrap().as_u64().unwrap();
+
+    let get = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "get",
+            "demo",
+            &seq.to_string(),
+        ])
+        .output()
+        .expect("get");
+    assert!(get.status.success());
+    let get_json = parse_json(std::str::from_utf8(&get.stdout).expect("utf8"));
+    assert_eq!(get_json.get("seq").unwrap().as_u64().unwrap(), seq);
+
+    let peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "1",
+        ])
+        .output()
+        .expect("peek");
+    assert!(peek.status.success());
+    let peek_json = parse_json_line(&peek.stdout);
+    assert_eq!(peek_json.get("seq").unwrap().as_u64().unwrap(), seq);
+}
+
+#[test]
 fn not_found_exit_code() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");

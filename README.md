@@ -61,7 +61,7 @@ brew install plasmite
 plasmite --dir .scratch/pools pool create demo
 
 # append a message (repeat --descrip to add more tags)
-plasmite --dir .scratch/pools poke demo --descrip ping --data-json '{"x":1}'
+plasmite --dir .scratch/pools poke demo --print --descrip ping --data-json '{"x":1}'
 
 # fetch by seq (replace <seq> with printed seq)
 plasmite --dir .scratch/pools get demo <seq>
