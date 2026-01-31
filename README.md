@@ -39,7 +39,7 @@ v0.0.1 focuses on the CLI only; a dedicated Rust library API will come later.
 ### From source (recommended while early)
 
 ```bash
-cargo install --path .
+cargo install --path . --locked
 ```
 
 ### Homebrew (tap)
@@ -76,6 +76,33 @@ Tip: `peek` is designed to compose with Unix tools:
 ```bash
 plasmite --dir .scratch/pools peek demo --follow | jq -c '.data'
 ```
+
+### Two-terminal live stream demo (macOS logs)
+
+This shows a real, high-frequency data source (macOS unified logging) being streamed into a pool
+in one terminal while another terminal follows it.
+
+Terminal 1 (writer):
+
+```bash
+plasmite pool create demo
+
+/usr/bin/log stream --style ndjson --level info \
+  | plasmite poke demo --descrip log
+```
+
+Terminal 2 (reader):
+
+```bash
+plasmite peek demo --follow --jsonl
+```
+
+Notes:
+- Use `/usr/bin/log` (in zsh, `log` can be a shell builtin).
+- Prefer `--style ndjson` for streaming; `--style json` is one big JSON value, so `jq` may appear to “hang”.
+- `poke` is silent by default; add `--print` if you want append acks.
+- If it’s too chatty, add a filter (but avoid filters so strict that nothing matches):
+  `--predicate 'subsystem == "com.apple.SkyLight"'` or `--process WindowServer`.
 
 ## Performance baselines
 

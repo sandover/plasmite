@@ -1,4 +1,8 @@
-// Cursor iteration with stable snapshot validation for overwriteable ring buffers.
+// Cursor iteration over the ring buffer with overwrite safety.
+// Behavior:
+// - Treats Writing/invalid frames as non-visible and never advances into them.
+// - Resynchronizes to tail if it falls behind due to overwrites.
+// - Uses a stable header re-read to avoid torn reads mid-append.
 use crate::core::error::{Error, ErrorKind};
 use crate::core::frame::{self, FrameHeader, FrameState, FRAME_HEADER_LEN};
 use crate::core::pool::Pool;
@@ -242,6 +246,78 @@ mod tests {
     }
 
     #[test]
+    fn invalid_magic_falls_behind() {
+        let ring_size = FRAME_HEADER_LEN * 2;
+        let mut buf = vec![0u8; ring_size];
+        buf[0..4].copy_from_slice(b"NOPE");
+
+        let result = read_frame_at(&buf, 0, ring_size, 0).expect("read");
+        assert!(matches!(result, ReadResult::FellBehind));
+    }
+
+    #[test]
+    fn writing_state_would_block() {
+        let payload = lite3::encode_message(&[], &json!({"x": 1})).expect("payload");
+        let ring_size = FRAME_HEADER_LEN + payload.len();
+        let mut buf = vec![0u8; ring_size];
+        let header = FrameHeader::new(
+            FrameState::Writing,
+            0,
+            1,
+            1,
+            payload.len() as u32,
+            0,
+        );
+        buf[0..FRAME_HEADER_LEN].copy_from_slice(&header.encode());
+        buf[FRAME_HEADER_LEN..FRAME_HEADER_LEN + payload.len()].copy_from_slice(payload.as_slice());
+
+        let result = read_frame_at(&buf, 0, ring_size, 0).expect("read");
+        assert!(matches!(result, ReadResult::WouldBlock));
+    }
+
+    #[test]
+    fn header_length_mismatch_falls_behind() {
+        let payload = lite3::encode_message(&[], &json!({"x": 1})).expect("payload");
+        let ring_size = FRAME_HEADER_LEN + payload.len();
+        let mut buf = vec![0u8; ring_size];
+        let mut header = FrameHeader::new(
+            FrameState::Committed,
+            0,
+            1,
+            1,
+            payload.len() as u32,
+            0,
+        );
+        header.header_len = 0;
+        buf[0..FRAME_HEADER_LEN].copy_from_slice(&header.encode());
+        buf[FRAME_HEADER_LEN..FRAME_HEADER_LEN + payload.len()].copy_from_slice(payload.as_slice());
+
+        let result = read_frame_at(&buf, 0, ring_size, 0).expect("read");
+        assert!(matches!(result, ReadResult::FellBehind));
+    }
+
+    #[test]
+    fn payload_length_xor_mismatch_falls_behind() {
+        let payload = lite3::encode_message(&[], &json!({"x": 1})).expect("payload");
+        let ring_size = FRAME_HEADER_LEN + payload.len();
+        let mut buf = vec![0u8; ring_size];
+        let mut header = FrameHeader::new(
+            FrameState::Committed,
+            0,
+            1,
+            1,
+            payload.len() as u32,
+            0,
+        );
+        header.payload_len_xor ^= 0xFF;
+        buf[0..FRAME_HEADER_LEN].copy_from_slice(&header.encode());
+        buf[FRAME_HEADER_LEN..FRAME_HEADER_LEN + payload.len()].copy_from_slice(payload.as_slice());
+
+        let result = read_frame_at(&buf, 0, ring_size, 0).expect("read");
+        assert!(matches!(result, ReadResult::FellBehind));
+    }
+
+    #[test]
     fn cursor_resyncs_on_overwrite() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
@@ -249,7 +325,6 @@ mod tests {
         let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("len");
         let ring_size = frame_len + FRAME_HEADER_LEN;
         let mut pool = Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
-
         pool.append(payload.as_slice()).expect("append 1");
         let mut cursor = Cursor::new();
         let result = cursor.next(&pool).expect("next");

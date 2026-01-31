@@ -1,4 +1,9 @@
-// Pool file creation/opening with header validation, mmap, and append locking.
+// Pool file IO, header/mmap lifecycle, and append orchestration.
+// Responsibilities:
+// - Create/open pools and validate header invariants.
+// - Manage mmap and append locking across processes.
+// - Execute append via pure planning (plan_append) and deterministic IO apply.
+// - Persist header updates last and surface durable flush errors.
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -9,6 +14,8 @@ use libc::{EACCES, EPERM};
 
 use crate::core::error::{Error, ErrorKind};
 use crate::core::frame::{self, FrameHeader, FrameState, FRAME_HEADER_LEN};
+use crate::core::plan;
+use crate::core::validate;
 
 const MAGIC: [u8; 4] = *b"PLSM";
 const VERSION: u32 = 1;
@@ -381,93 +388,30 @@ impl Pool {
     }
 
     fn append_locked(&mut self, payload: &[u8], options: AppendOptions) -> Result<u64, Error> {
-        if payload.len() > u32::MAX as usize {
-            return Err(Error::new(ErrorKind::Usage).with_message("payload too large"));
-        }
-
-        let ring_size = self.header.ring_size as usize;
-        let max_payload = frame::max_payload(ring_size, FRAME_HEADER_LEN);
-        if payload.len() > max_payload {
-            return Err(Error::new(ErrorKind::Usage).with_message("payload exceeds ring capacity"));
-        }
-
-        let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len())
-            .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("frame length overflow"))?;
-
-        if frame_len > ring_size {
-            return Err(Error::new(ErrorKind::Usage).with_message("frame larger than ring"));
-        }
-
-        let mut head = self.header.head_off as usize;
-        let mut tail = self.header.tail_off as usize;
-        let mut oldest_seq = self.header.oldest_seq;
-        let mut newest_seq = self.header.newest_seq;
-
-        let mut required = required_space(head, frame_len, ring_size);
-        while free_space(head, tail, ring_size, oldest_seq) < required {
-            let dropped = drop_oldest(
-                &mut self.mmap,
-                self.header.ring_offset as usize,
-                ring_size,
-                head,
-                &mut tail,
-                &mut oldest_seq,
-            )?;
-            if !dropped {
-                return Err(Error::new(ErrorKind::Busy).with_message("unable to make space"));
-            }
-            if tail == head {
-                oldest_seq = 0;
-            }
-            required = required_space(head, frame_len, ring_size);
-        }
-
-        let remaining = ring_size - head;
-        let mut wrap_offset = None;
-        if remaining < frame_len {
-            if remaining >= FRAME_HEADER_LEN {
-                write_wrap(&mut self.mmap, self.header.ring_offset as usize, head)?;
-                wrap_offset = Some(head);
-            }
-            head = 0;
-        }
-
-        let seq = if newest_seq == 0 { 1 } else { newest_seq + 1 };
-        if oldest_seq == 0 {
-            oldest_seq = seq;
-        }
-        newest_seq = seq;
-
-        let header = FrameHeader::new(
-            FrameState::Writing,
-            0,
-            seq,
-            options.timestamp_ns,
-            payload.len() as u32,
-            0,
-        );
         let ring_offset = self.header.ring_offset as usize;
-        let frame_offset = ring_offset + head;
-        write_frame(&mut self.mmap, self.header.ring_offset as usize, head, &header, payload)?;
+        let ring_size = self.header.ring_size as usize;
+        let plan = plan::plan_append(self.header, &self.mmap, payload.len())?;
 
-        let mut committed = header;
-        committed.state = FrameState::Committed;
-        write_frame_header(&mut self.mmap, self.header.ring_offset as usize, head, &committed)?;
+        apply_append(
+            &mut self.mmap,
+            ring_offset,
+            &plan,
+            payload,
+            options.timestamp_ns,
+        )?;
 
-        let mut new_head = head + frame_len;
-        if new_head == ring_size {
-            new_head = 0;
-        }
-
-        self.header.head_off = new_head as u64;
-        self.header.tail_off = tail as u64;
-        self.header.oldest_seq = oldest_seq;
-        self.header.newest_seq = newest_seq;
-        write_pool_header(&mut self.mmap, &self.header);
+        self.header = plan.next_header;
 
         if options.durability == Durability::Flush {
-            flush_mmap_range(&self.mmap, frame_offset, frame_len, &self.path, "failed to flush frame")?;
-            if let Some(wrap_head) = wrap_offset {
+            let frame_offset = ring_offset + plan.frame_offset;
+            flush_mmap_range(
+                &self.mmap,
+                frame_offset,
+                plan.frame_len,
+                &self.path,
+                "failed to flush frame",
+            )?;
+            if let Some(wrap_head) = plan.wrap_offset {
                 let wrap_start = ring_offset + wrap_head;
                 flush_mmap_range(
                     &self.mmap,
@@ -480,7 +424,15 @@ impl Pool {
             flush_mmap_range(&self.mmap, 0, HEADER_SIZE, &self.path, "failed to flush header")?;
         }
 
-        Ok(seq)
+        validate::debug_assert_tail_committed(
+            &self.mmap,
+            ring_offset,
+            ring_size,
+            self.header.tail_off as usize,
+            self.header.oldest_seq,
+        );
+
+        Ok(plan.seq)
     }
 }
 
@@ -574,6 +526,7 @@ fn bounds_from_header(header: PoolHeader) -> Bounds {
     }
 }
 
+#[cfg(test)]
 fn read_frame_header(mmap: &MmapMut, ring_offset: usize, head: usize) -> Result<FrameHeader, Error> {
     let start = ring_offset + head;
     let end = start + FRAME_HEADER_LEN;
@@ -611,80 +564,54 @@ fn write_wrap(mmap: &mut MmapMut, ring_offset: usize, head: usize) -> Result<(),
     write_frame_header(mmap, ring_offset, head, &header)
 }
 
-fn free_space(head: usize, tail: usize, ring_size: usize, oldest_seq: u64) -> usize {
-    let used = used_space(head, tail, ring_size, oldest_seq);
-    ring_size.saturating_sub(used)
-}
-
-fn used_space(head: usize, tail: usize, ring_size: usize, oldest_seq: u64) -> usize {
-    if head == tail {
-        return if oldest_seq == 0 { 0 } else { ring_size };
-    }
-    if head > tail {
-        head - tail
-    } else {
-        ring_size - (tail - head)
-    }
-}
-
-fn required_space(head: usize, frame_len: usize, ring_size: usize) -> usize {
-    let remaining = ring_size - head;
-    if remaining >= frame_len {
-        frame_len
-    } else if remaining >= FRAME_HEADER_LEN {
-        frame_len + FRAME_HEADER_LEN
-    } else {
-        frame_len + remaining
-    }
-}
-
-fn drop_oldest(
+fn apply_append(
     mmap: &mut MmapMut,
     ring_offset: usize,
-    ring_size: usize,
-    head: usize,
-    tail: &mut usize,
-    oldest_seq: &mut u64,
-) -> Result<bool, Error> {
-    if *oldest_seq == 0 {
-        return Ok(false);
+    plan: &plan::AppendPlan,
+    payload: &[u8],
+    timestamp_ns: u64,
+) -> Result<(), Error> {
+    let expected_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len())
+        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("frame length overflow"))?;
+    if expected_len != plan.frame_len {
+        return Err(Error::new(ErrorKind::Corrupt).with_message("append plan length mismatch"));
     }
-    if ring_size - *tail < FRAME_HEADER_LEN {
-        *tail = 0;
-        if *tail == head {
-            *oldest_seq = 0;
-        }
-        return Ok(true);
-    }
-    let header = read_frame_header(mmap, ring_offset, *tail)?;
-    header.validate(ring_size)?;
 
-    match header.state {
-        FrameState::Wrap => {
-            *tail = 0;
-            Ok(true)
-        }
-        FrameState::Committed => {
-            let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, header.payload_len as usize)
-                .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("frame length overflow"))?;
-            *tail += frame_len;
-            if *tail == ring_size {
-                *tail = 0;
-            }
-            *oldest_seq = header.seq + 1;
-            Ok(true)
-        }
-        _ => Err(Error::new(ErrorKind::Corrupt).with_message("invalid tail frame state")),
+    if let Some(wrap_offset) = plan.wrap_offset {
+        write_wrap(mmap, ring_offset, wrap_offset)?;
     }
+
+    let header = FrameHeader::new(
+        FrameState::Writing,
+        0,
+        plan.seq,
+        timestamp_ns,
+        payload.len() as u32,
+        0,
+    );
+    write_frame(mmap, ring_offset, plan.frame_offset, &header, payload)?;
+
+    let mut committed = header;
+    committed.state = FrameState::Committed;
+    write_frame_header(mmap, ring_offset, plan.frame_offset, &committed)?;
+
+    write_pool_header(mmap, &plan.next_header);
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Pool, PoolOptions};
-    use crate::core::error::ErrorKind;
-    use crate::core::frame::{self, FrameState, FRAME_HEADER_LEN};
+    use super::{apply_append, Pool, PoolHeader, PoolOptions, HEADER_SIZE};
+    use crate::core::error::{Error, ErrorKind};
+    use crate::core::frame::{self, FrameHeader, FrameState, FRAME_HEADER_LEN};
     use crate::core::lite3;
     use crate::core::lite3::Lite3DocRef;
+    use crate::core::plan;
+    use std::fs;
+    use std::process::Command;
+    use std::thread;
+    use std::time::Duration;
     use std::fs::OpenOptions;
     use std::io::{Seek, SeekFrom, Write};
 
@@ -720,6 +647,100 @@ mod tests {
             Ok(_) => panic!("expected corrupt header error"),
             Err(err) => assert_eq!(err.kind(), ErrorKind::Corrupt),
         }
+    }
+
+    #[test]
+    fn validator_accepts_wrap_and_seq_range() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
+        let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("len");
+        let ring_size = frame_len * 4;
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+
+        for _ in 0..20 {
+            pool.append(payload.as_slice()).expect("append");
+        }
+
+        let header = pool.header_from_mmap().expect("header");
+        crate::core::validate::validate_pool_state(header, &pool.mmap).expect("validate");
+    }
+
+    #[test]
+    fn validator_rejects_invalid_tail() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
+        let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("len");
+        let ring_size = frame_len * 4;
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+
+        for _ in 0..4 {
+            pool.append(payload.as_slice()).expect("append");
+        }
+
+        let mut header = pool.header_from_mmap().expect("header");
+        header.tail_off = (header.head_off + 8) % header.ring_size;
+        super::write_pool_header(&mut pool.mmap, &header);
+
+        let err = crate::core::validate::validate_pool_state(header, &pool.mmap).expect_err("invalid");
+        assert_eq!(err.kind(), ErrorKind::Corrupt);
+    }
+
+    #[test]
+    fn validator_rejects_seq_discontinuity() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
+        let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("len");
+        let ring_size = frame_len * 4;
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+
+        for _ in 0..3 {
+            pool.append(payload.as_slice()).expect("append");
+        }
+
+        let header = pool.header_from_mmap().expect("header");
+        let ring_offset = header.ring_offset as usize;
+        let tail = header.tail_off as usize;
+        let mut second_header =
+            super::read_frame_header(&pool.mmap, ring_offset, tail + frame_len).expect("frame");
+        second_header.seq = header.oldest_seq + 2;
+        super::write_frame_header(&mut pool.mmap, ring_offset, tail + frame_len, &second_header)
+            .expect("write");
+
+        let err =
+            crate::core::validate::validate_pool_state(header, &pool.mmap).expect_err("invalid");
+        assert_eq!(err.kind(), ErrorKind::Corrupt);
+    }
+
+    #[test]
+    fn append_uses_tail_only_validator() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
+        let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("len");
+        let ring_size = frame_len * 8;
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+
+        for _ in 0..3 {
+            pool.append(payload.as_slice()).expect("append");
+        }
+
+        let header = pool.header_from_mmap().expect("header");
+        let ring_offset = header.ring_offset as usize;
+        let tail = header.tail_off as usize;
+        let mut second_header =
+            super::read_frame_header(&pool.mmap, ring_offset, tail + frame_len).expect("frame");
+        second_header.seq = header.oldest_seq + 2;
+        super::write_frame_header(&mut pool.mmap, ring_offset, tail + frame_len, &second_header)
+            .expect("write");
+
+        let append_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            pool.append(payload.as_slice())
+        }));
+        assert!(append_result.is_ok());
+        assert!(append_result.unwrap().is_ok());
     }
 
     #[test]
@@ -800,6 +821,83 @@ mod tests {
         seqs
     }
 
+    fn apply_model(storage: &mut [u8], plan: &plan::AppendPlan, payload_len: usize) {
+        let ring_offset = plan.next_header.ring_offset as usize;
+        if let Some(wrap_offset) = plan.wrap_offset {
+            let wrap = FrameHeader::new(FrameState::Wrap, 0, 0, 0, 0, 0);
+            write_frame_bytes(storage, ring_offset, wrap_offset, &wrap, 0);
+        }
+        let header = FrameHeader::new(
+            FrameState::Committed,
+            0,
+            plan.seq,
+            0,
+            payload_len as u32,
+            0,
+        );
+        write_frame_bytes(storage, ring_offset, plan.frame_offset, &header, payload_len);
+        let encoded = plan.next_header.encode();
+        storage[0..HEADER_SIZE].copy_from_slice(&encoded);
+    }
+
+    fn write_frame_bytes(
+        storage: &mut [u8],
+        ring_offset: usize,
+        offset: usize,
+        header: &FrameHeader,
+        payload_len: usize,
+    ) {
+        let start = ring_offset + offset;
+        let end = start + FRAME_HEADER_LEN;
+        storage[start..end].copy_from_slice(&header.encode());
+        let payload_start = end;
+        let payload_end = payload_start + payload_len;
+        storage[payload_start..payload_end].fill(0u8);
+    }
+
+    fn scan_frames(mmap: &[u8], header: PoolHeader) -> Vec<(usize, u64, u32)> {
+        if header.oldest_seq == 0 {
+            return Vec::new();
+        }
+        let ring_offset = header.ring_offset as usize;
+        let ring_size = header.ring_size as usize;
+        let mut offset = header.tail_off as usize;
+        let mut expected_seq = header.oldest_seq;
+        let mut frames = Vec::new();
+
+        loop {
+            if ring_size - offset < FRAME_HEADER_LEN {
+                offset = 0;
+                continue;
+            }
+            let start = ring_offset + offset;
+            let end = start + FRAME_HEADER_LEN;
+            let frame = FrameHeader::decode(&mmap[start..end]).expect("frame");
+            match frame.state {
+                FrameState::Wrap => {
+                    offset = 0;
+                    continue;
+                }
+                FrameState::Committed => {}
+                _ => panic!("unexpected frame state"),
+            }
+            frames.push((offset, frame.seq, frame.payload_len));
+
+            let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, frame.payload_len as usize)
+                .expect("frame len");
+            offset += frame_len;
+            if offset == ring_size {
+                offset = 0;
+            }
+            if expected_seq == header.newest_seq {
+                break;
+            }
+            expected_seq += 1;
+        }
+
+        frames
+    }
+
     #[test]
     fn append_wraps_at_ring_end() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -851,6 +949,75 @@ mod tests {
     }
 
     #[test]
+    fn model_apply_matches_plan_on_wrap() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let ring_size = 512;
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+
+        let payload_a = vec![1u8; 100];
+        pool.append(payload_a.as_slice()).expect("append 1");
+        pool.append(payload_a.as_slice()).expect("append 2");
+
+        let payload_b = vec![2u8; 200];
+        let header = pool.header_from_mmap().expect("header");
+        let plan = plan::plan_append(header, &pool.mmap, payload_b.len()).expect("plan");
+
+        let mut model = pool.mmap.to_vec();
+        apply_model(&mut model, &plan, payload_b.len());
+
+        apply_append(
+            &mut pool.mmap,
+            header.ring_offset as usize,
+            &plan,
+            payload_b.as_slice(),
+            0,
+        )
+        .expect("apply");
+
+        let actual_header = super::PoolHeader::decode(&pool.mmap[0..HEADER_SIZE]).expect("header");
+        let model_header = super::PoolHeader::decode(&model[0..HEADER_SIZE]).expect("header");
+        assert_eq!(actual_header, plan.next_header);
+        assert_eq!(model_header, plan.next_header);
+        assert_eq!(scan_frames(&model, plan.next_header), scan_frames(&pool.mmap, plan.next_header));
+    }
+
+    #[test]
+    fn model_apply_matches_plan_on_overwrite() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let ring_size = 512;
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+
+        let payload_a = vec![1u8; 100];
+        for _ in 0..3 {
+            pool.append(payload_a.as_slice()).expect("append");
+        }
+
+        let payload_b = vec![3u8; 120];
+        let header = pool.header_from_mmap().expect("header");
+        let plan = plan::plan_append(header, &pool.mmap, payload_b.len()).expect("plan");
+
+        let mut model = pool.mmap.to_vec();
+        apply_model(&mut model, &plan, payload_b.len());
+
+        apply_append(
+            &mut pool.mmap,
+            header.ring_offset as usize,
+            &plan,
+            payload_b.as_slice(),
+            0,
+        )
+        .expect("apply");
+
+        let actual_header = super::PoolHeader::decode(&pool.mmap[0..HEADER_SIZE]).expect("header");
+        let model_header = super::PoolHeader::decode(&model[0..HEADER_SIZE]).expect("header");
+        assert_eq!(actual_header, plan.next_header);
+        assert_eq!(model_header, plan.next_header);
+        assert_eq!(scan_frames(&model, plan.next_header), scan_frames(&pool.mmap, plan.next_header));
+    }
+
+    #[test]
     fn bounds_and_get_scan_by_seq() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
@@ -874,6 +1041,168 @@ mod tests {
 
         let err = pool.get(4).expect_err("missing");
         assert_eq!(err.kind(), ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn multi_writer_child() {
+        let role = std::env::var("PLASMITE_TEST_ROLE").ok();
+        let Some(role) = role else {
+            return;
+        };
+        let path = std::env::var("PLASMITE_TEST_POOL").expect("pool path");
+        match role.as_str() {
+            "writer" => {
+                let count: usize = std::env::var("PLASMITE_TEST_COUNT")
+                    .expect("count")
+                    .parse()
+                    .expect("parse count");
+                let mut pool = Pool::open(&path).expect("open");
+                let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1}))
+                    .expect("payload");
+                for _ in 0..count {
+                    pool.append(payload.as_slice()).expect("append");
+                }
+            }
+            "reader" => {
+                let loops: usize = std::env::var("PLASMITE_TEST_LOOPS")
+                    .expect("loops")
+                    .parse()
+                    .expect("parse loops");
+                let pool = Pool::open(&path).expect("open");
+                let mut cursor = crate::core::cursor::Cursor::new();
+                for _ in 0..loops {
+                    match cursor.next(&pool) {
+                        Ok(crate::core::cursor::CursorResult::WouldBlock) => {
+                            thread::sleep(Duration::from_millis(1));
+                        }
+                        Ok(_) => {}
+                        Err(err) => panic!("cursor error: {err}"),
+                    }
+                }
+            }
+            _ => panic!("unknown role"),
+        }
+    }
+
+    #[test]
+    fn multi_writer_stress() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
+        drop(pool);
+
+        let exe = std::env::current_exe().expect("exe");
+        let path_str = path.to_string_lossy().to_string();
+        let mut children = Vec::new();
+
+        for _ in 0..3 {
+            let mut cmd = Command::new(&exe);
+            cmd.arg("--exact")
+                .arg("multi_writer_child")
+                .arg("--nocapture")
+                .env("PLASMITE_TEST_ROLE", "writer")
+                .env("PLASMITE_TEST_POOL", &path_str)
+                .env("PLASMITE_TEST_COUNT", "50");
+            children.push(cmd.spawn().expect("spawn writer"));
+        }
+
+        let mut reader = Command::new(&exe);
+        reader
+            .arg("--exact")
+            .arg("multi_writer_child")
+            .arg("--nocapture")
+            .env("PLASMITE_TEST_ROLE", "reader")
+            .env("PLASMITE_TEST_POOL", &path_str)
+            .env("PLASMITE_TEST_LOOPS", "200");
+        children.push(reader.spawn().expect("spawn reader"));
+
+        for mut child in children {
+            let status = child.wait().expect("wait");
+            assert!(status.success());
+        }
+
+        let pool = Pool::open(&path).expect("open");
+        let header = pool.header_from_mmap().expect("header");
+        crate::core::validate::validate_pool_state(header, &pool.mmap).expect("validate");
+    }
+
+    #[test]
+    fn crash_append_phases_preserve_invariants() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base_path = dir.path().join("base.plasmite");
+        let mut base = Pool::create(&base_path, PoolOptions::new(4096 + 1024)).expect("create");
+        let payload_a = vec![7u8; 100];
+        base.append(payload_a.as_slice()).expect("append 1");
+        base.append(payload_a.as_slice()).expect("append 2");
+        drop(base);
+
+        let payload_b = vec![9u8; 240];
+        let phases = [
+            CrashPhase::AfterWrap,
+            CrashPhase::AfterWrite,
+            CrashPhase::AfterCommit,
+            CrashPhase::AfterHeader,
+        ];
+
+        for phase in phases {
+            let path = dir.path().join(format!("phase-{:?}.plasmite", phase));
+            fs::copy(&base_path, &path).expect("copy");
+            let mut pool = Pool::open(&path).expect("open");
+            let header = pool.header_from_mmap().expect("header");
+            let plan = plan::plan_append(header, &pool.mmap, payload_b.len()).expect("plan");
+            simulate_append_phase(&mut pool, &plan, payload_b.as_slice(), phase).expect("phase");
+            drop(pool);
+
+            let reopened = Pool::open(&path).expect("reopen");
+            let header = reopened.header_from_mmap().expect("header");
+            crate::core::validate::validate_pool_state(header, &reopened.mmap).expect("validate");
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum CrashPhase {
+        AfterWrap,
+        AfterWrite,
+        AfterCommit,
+        AfterHeader,
+    }
+
+    fn simulate_append_phase(
+        pool: &mut Pool,
+        plan: &plan::AppendPlan,
+        payload: &[u8],
+        phase: CrashPhase,
+    ) -> Result<(), Error> {
+        let ring_offset = plan.next_header.ring_offset as usize;
+        if let Some(wrap_offset) = plan.wrap_offset {
+            super::write_wrap(&mut pool.mmap, ring_offset, wrap_offset)?;
+            if matches!(phase, CrashPhase::AfterWrap) {
+                return Ok(());
+            }
+        }
+
+        let header = FrameHeader::new(
+            FrameState::Writing,
+            0,
+            plan.seq,
+            0,
+            payload.len() as u32,
+            0,
+        );
+        super::write_frame(&mut pool.mmap, ring_offset, plan.frame_offset, &header, payload)?;
+        if matches!(phase, CrashPhase::AfterWrite) {
+            return Ok(());
+        }
+
+        let mut committed = header;
+        committed.state = FrameState::Committed;
+        super::write_frame_header(&mut pool.mmap, ring_offset, plan.frame_offset, &committed)?;
+        if matches!(phase, CrashPhase::AfterCommit) {
+            return Ok(());
+        }
+
+        super::write_pool_header(&mut pool.mmap, &plan.next_header);
+        Ok(())
     }
 
     #[test]
