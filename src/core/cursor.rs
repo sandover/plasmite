@@ -99,6 +99,12 @@ impl Cursor {
     }
 }
 
+impl Default for Cursor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 enum ReadResult<'a> {
     Message {
         frame: FrameRef<'a>,

@@ -5,6 +5,7 @@
 //! Invariants: Timeouts are bounded to keep CI deterministic.
 use std::io::Write;
 use std::io::{BufRead, BufReader};
+use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
@@ -431,7 +432,13 @@ fn errors_are_json_on_non_tty_stderr() {
         inner.get("kind").and_then(|v| v.as_str()).unwrap(),
         "NotFound"
     );
-    assert!(inner.get("message").and_then(|v| v.as_str()).unwrap().len() > 0);
+    assert!(
+        !inner
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .is_empty()
+    );
     assert!(
         inner
             .get("path")
@@ -530,6 +537,7 @@ fn permission_error_has_hint_and_causes() {
     let mut perms = std::fs::metadata(&pool_dir)
         .expect("metadata")
         .permissions();
+    let original_mode = perms.mode();
     perms.set_readonly(true);
     std::fs::set_permissions(&pool_dir, perms).expect("set perms");
 
@@ -550,12 +558,11 @@ fn permission_error_has_hint_and_causes() {
         .and_then(|v| v.as_object())
         .expect("error object");
     assert!(
-        inner
+        !inner
             .get("hint")
             .and_then(|v| v.as_str())
             .unwrap_or("")
-            .len()
-            > 0
+            .is_empty()
     );
     let empty = Vec::new();
     let causes = inner
@@ -572,7 +579,7 @@ fn permission_error_has_hint_and_causes() {
     let mut perms = std::fs::metadata(&pool_dir)
         .expect("metadata")
         .permissions();
-    perms.set_readonly(false);
+    perms.set_mode(original_mode);
     std::fs::set_permissions(&pool_dir, perms).expect("unset perms");
 }
 

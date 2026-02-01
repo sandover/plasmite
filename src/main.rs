@@ -3,6 +3,7 @@
 //! Invariants: Successful command output is JSON on stdout; errors are JSON on stderr.
 //! Invariants: Process exit code is derived from `core::error::to_exit_code`.
 //! Invariants: All pool mutations go through `core::pool` (locks + mmap safety).
+#![allow(clippy::result_large_err)]
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
@@ -533,42 +534,6 @@ fn parse_durability(input: &str) -> Result<Durability, Error> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{parse_size, read_json_stream};
-    use serde_json::json;
-    use std::io::Cursor;
-
-    #[test]
-    fn parse_size_accepts_bytes_and_kmg() {
-        assert_eq!(parse_size("42").unwrap(), 42);
-        assert_eq!(parse_size("1K").unwrap(), 1024);
-        assert_eq!(parse_size("2k").unwrap(), 2048);
-        assert_eq!(parse_size("3M").unwrap(), 3 * 1024 * 1024);
-        assert_eq!(parse_size("4g").unwrap(), 4 * 1024 * 1024 * 1024);
-    }
-
-    #[test]
-    fn parse_size_rejects_iec_suffixes() {
-        assert!(parse_size("1MiB").is_err());
-        assert!(parse_size("2Gi").is_err());
-        assert!(parse_size("3KiB").is_err());
-    }
-
-    #[test]
-    fn read_json_stream_accepts_multiple_values() {
-        let input = b"{\"a\":1}\n {\"b\":2} {\"c\":3}";
-        let mut values = Vec::new();
-        let count = read_json_stream(Cursor::new(input), |value| {
-            values.push(value);
-            Ok(())
-        })
-        .expect("stream parse");
-        assert_eq!(count, 3);
-        assert_eq!(values, vec![json!({"a":1}), json!({"b":2}), json!({"c":3})]);
-    }
-}
-
 fn bounds_json(bounds: plasmite::core::pool::Bounds) -> Value {
     let mut map = Map::new();
     if let Some(oldest) = bounds.oldest_seq {
@@ -929,5 +894,41 @@ fn peek(pool: &Pool, tail: u64, pretty: bool) -> Result<(), Error> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_size, read_json_stream};
+    use serde_json::json;
+    use std::io::Cursor;
+
+    #[test]
+    fn parse_size_accepts_bytes_and_kmg() {
+        assert_eq!(parse_size("42").unwrap(), 42);
+        assert_eq!(parse_size("1K").unwrap(), 1024);
+        assert_eq!(parse_size("2k").unwrap(), 2048);
+        assert_eq!(parse_size("3M").unwrap(), 3 * 1024 * 1024);
+        assert_eq!(parse_size("4g").unwrap(), 4 * 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn parse_size_rejects_iec_suffixes() {
+        assert!(parse_size("1MiB").is_err());
+        assert!(parse_size("2Gi").is_err());
+        assert!(parse_size("3KiB").is_err());
+    }
+
+    #[test]
+    fn read_json_stream_accepts_multiple_values() {
+        let input = b"{\"a\":1}\n {\"b\":2} {\"c\":3}";
+        let mut values = Vec::new();
+        let count = read_json_stream(Cursor::new(input), |value| {
+            values.push(value);
+            Ok(())
+        })
+        .expect("stream parse");
+        assert_eq!(count, 3);
+        assert_eq!(values, vec![json!({"a":1}), json!({"b":2}), json!({"c":3})]);
     }
 }

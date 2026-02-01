@@ -3,6 +3,7 @@
 //! Role: Internal core layer shared by CLI and tests; does not perform CLI I/O.
 //! Invariants: Public functions take explicit inputs and return explicit results/errors.
 //! Invariants: Full scans/expensive validation are opt-in and not on hot paths.
+#![allow(clippy::result_large_err)]
 pub mod cursor;
 pub mod error;
 pub mod frame;

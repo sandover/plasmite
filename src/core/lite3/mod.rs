@@ -72,6 +72,10 @@ impl Lite3Buf {
         self.bytes.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+
     pub fn as_doc(&self) -> Lite3DocRef<'_> {
         Lite3DocRef { bytes: &self.bytes }
     }

@@ -3,6 +3,7 @@
 //! Role: Internal CLI that invokes the bench harness and spawns workers.
 //! Invariants: Not part of the shipped user CLI; built via `cargo run --example`.
 //! Invariants: Bench workers are spawned via a hidden subcommand.
+#![allow(clippy::result_large_err)]
 use std::error::Error as StdError;
 use std::io::{self, IsTerminal};
 use std::path::PathBuf;

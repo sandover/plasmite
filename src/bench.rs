@@ -3,6 +3,7 @@
 //! Role: Dev-only runner used by the `plasmite-bench` binary (not shipped to end users).
 //! Invariants: Uses child processes to exercise cross-process file locking and follow semantics.
 //! Invariants: Intended for trend tracking; not lab-grade profiling.
+#![allow(clippy::result_large_err)]
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -112,8 +113,7 @@ pub fn run_bench(args: BenchArgs, program_version: &str) -> Result<(), Error> {
                     continue;
                 }
                 let durability_label = durability_label(*durability);
-                let base_name =
-                    format!("bench-{}-{}-{}", pool_size, payload_bytes, durability_label);
+                let base_name = format!("bench-{pool_size}-{payload_bytes}-{durability_label}");
                 let pool_path = work_dir.join(format!("{base_name}.plasmite"));
 
                 let append = bench_append(
@@ -148,10 +148,8 @@ pub fn run_bench(args: BenchArgs, program_version: &str) -> Result<(), Error> {
                     if *writers <= 1 {
                         continue;
                     }
-                    if *durability == Durability::Flush {
-                        if rep_writers.map_or(true, |value| *writers != value) {
-                            continue;
-                        }
+                    if *durability == Durability::Flush && rep_writers != Some(*writers) {
+                        continue;
                     }
                     let contention = bench_multi_writer(
                         &work_dir,
@@ -317,8 +315,8 @@ fn emit_table(value: &Value) -> Result<(), Error> {
             })?;
             writeln!(
                 stderr,
-                "{:>16}  {:>6}  {:>7}  {:>10}  {:>10}  {:>8}  {}",
-                "scenario", "dur", "writers", "ms/msg", "msgs/s", "x_fast", "notes"
+                "{:>16}  {:>6}  {:>7}  {:>10}  {:>10}  {:>8}  notes",
+                "scenario", "dur", "writers", "ms/msg", "msgs/s", "x_fast"
             )
             .map_err(|err| {
                 Error::new(ErrorKind::Io)
@@ -717,7 +715,7 @@ fn run_writer_worker(args: WorkerArgs) -> Result<(), Error> {
     let start = Instant::now();
     for i in 0..args.messages {
         let is_done = i + 1 == args.messages;
-        let payload = payload_for_bytes(args.payload_bytes, Some(now_ns()? ^ (i as u64)), is_done)?;
+        let payload = payload_for_bytes(args.payload_bytes, Some(now_ns()? ^ i), is_done)?;
         append_with_durability(&mut pool, payload.as_slice(), args.durability)?;
     }
     let dur = start.elapsed();
@@ -879,6 +877,7 @@ fn write_json_file(path: &Path, value: &Value) -> Result<(), Error> {
         .map_err(|err| Error::new(ErrorKind::Io).with_path(path).with_source(err))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn result_entry(
     bench: &str,
     pool_size: u64,
@@ -976,8 +975,8 @@ fn rfc3339_now(ts: SystemTime) -> String {
     let dur = ts.duration_since(UNIX_EPOCH).unwrap_or_default();
     let secs = dur.as_secs() as i64;
     let nsec = dur.subsec_nanos();
-    let tm = time::OffsetDateTime::from_unix_timestamp(secs)
-        .unwrap_or_else(|_| time::OffsetDateTime::UNIX_EPOCH);
+    let tm =
+        time::OffsetDateTime::from_unix_timestamp(secs).unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
     let tm = tm.replace_nanosecond(nsec).unwrap_or(tm);
     tm.format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())

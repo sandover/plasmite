@@ -656,6 +656,7 @@ mod tests {
         let path = dir.path().join("pool.plasmite");
         let mut file = OpenOptions::new()
             .create(true)
+            .truncate(true)
             .write(true)
             .read(true)
             .open(&path)
@@ -787,6 +788,7 @@ mod tests {
         let path = dir.path().join("pool.plasmite");
         let mut file = OpenOptions::new()
             .create(true)
+            .truncate(true)
             .write(true)
             .read(true)
             .open(&path)
@@ -1177,14 +1179,14 @@ mod tests {
 
         let payload_b = vec![9u8; 240];
         let phases = [
-            CrashPhase::AfterWrap,
-            CrashPhase::AfterWrite,
-            CrashPhase::AfterCommit,
-            CrashPhase::AfterHeader,
+            CrashPhase::Wrap,
+            CrashPhase::Write,
+            CrashPhase::Commit,
+            CrashPhase::Header,
         ];
 
         for phase in phases {
-            let path = dir.path().join(format!("phase-{:?}.plasmite", phase));
+            let path = dir.path().join(format!("phase-{phase:?}.plasmite"));
             fs::copy(&base_path, &path).expect("copy");
             let mut pool = Pool::open(&path).expect("open");
             let header = pool.header_from_mmap().expect("header");
@@ -1200,10 +1202,10 @@ mod tests {
 
     #[derive(Clone, Copy, Debug)]
     enum CrashPhase {
-        AfterWrap,
-        AfterWrite,
-        AfterCommit,
-        AfterHeader,
+        Wrap,
+        Write,
+        Commit,
+        Header,
     }
 
     fn simulate_append_phase(
@@ -1215,7 +1217,7 @@ mod tests {
         let ring_offset = plan.next_header.ring_offset as usize;
         if let Some(wrap_offset) = plan.wrap_offset {
             super::write_wrap(&mut pool.mmap, ring_offset, wrap_offset)?;
-            if matches!(phase, CrashPhase::AfterWrap) {
+            if matches!(phase, CrashPhase::Wrap) {
                 return Ok(());
             }
         }
@@ -1228,18 +1230,21 @@ mod tests {
             &header,
             payload,
         )?;
-        if matches!(phase, CrashPhase::AfterWrite) {
+        if matches!(phase, CrashPhase::Write) {
             return Ok(());
         }
 
         let mut committed = header;
         committed.state = FrameState::Committed;
         super::write_frame_header(&mut pool.mmap, ring_offset, plan.frame_offset, &committed)?;
-        if matches!(phase, CrashPhase::AfterCommit) {
+        if matches!(phase, CrashPhase::Commit) {
             return Ok(());
         }
 
         super::write_pool_header(&mut pool.mmap, &plan.next_header);
+        if matches!(phase, CrashPhase::Header) {
+            return Ok(());
+        }
         Ok(())
     }
 
