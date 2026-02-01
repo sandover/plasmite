@@ -38,10 +38,9 @@ fn concurrent_poke_is_serialized() {
                 pool_dir.to_str().unwrap(),
                 "poke",
                 "lockpool",
+                &format!("{{\"i\":{i}}}"),
                 "--descrip",
                 "lock",
-                "--data-json",
-                &format!("{{\"i\":{i}}}"),
             ])
             .stdout(Stdio::null())
             .stderr(Stdio::null())

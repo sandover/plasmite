@@ -1,6 +1,6 @@
 //! Purpose: Benchmark harness for core operations and multi-process contention scenarios.
 //! Exports: `run_bench`, `run_worker`, `BenchArgs`, `BenchFormat`, `WorkerArgs`, `WorkerRole`.
-//! Role: CLI subcommand implementation; emits JSON on stdout and/or a table on stderr.
+//! Role: Dev-only runner used by the `plasmite-bench` binary (not shipped to end users).
 //! Invariants: Uses child processes to exercise cross-process file locking and follow semantics.
 //! Invariants: Intended for trend tracking; not lab-grade profiling.
 
@@ -206,7 +206,7 @@ fn warn_if_debug_build() -> Result<(), Error> {
     let mut stderr = io::stderr().lock();
     writeln!(
         stderr,
-        "plasmite bench: debug build detected; for baseline numbers, run a release build"
+        "plasmite-bench: debug build detected; for baseline numbers, run a release build"
     )
     .map_err(|err| {
         Error::new(ErrorKind::Io)
@@ -215,7 +215,7 @@ fn warn_if_debug_build() -> Result<(), Error> {
     })?;
     writeln!(
         stderr,
-        "  cargo build --release && ./target/release/plasmite bench"
+        "  cargo build --release --example plasmite-bench && ./target/release/examples/plasmite-bench"
     )
     .map_err(|err| {
         Error::new(ErrorKind::Io)
@@ -258,7 +258,7 @@ fn emit_bench_output(value: Value, format: BenchFormat) -> Result<(), Error> {
 
 fn emit_table(value: &Value) -> Result<(), Error> {
     let mut stderr = io::stderr().lock();
-    writeln!(stderr, "plasmite bench (table)").map_err(|err| {
+    writeln!(stderr, "plasmite-bench (table)").map_err(|err| {
         Error::new(ErrorKind::Io)
             .with_message("failed to write bench table")
             .with_source(err)

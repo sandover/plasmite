@@ -51,7 +51,7 @@ Proposed module layout:
   * Lite³ (https://github.com/fastserial/lite3) FFI or native bindings
   * “document view” for zero-copy access
   * encode/decode helpers for CLI/tests
-* CLI binary (`plasmite`) calls `core` (CLI design is in the separate CLI spec).
+* CLI binary (`plasmite`) calls `core` (CLI design lives in `spec/v0/SPEC.md`).
 
 ### Error model (recommended)
 

@@ -48,7 +48,7 @@ What they cover (high level):
 - JSON-on-stdout success output shapes
 - JSON-on-stderr error output shapes + exit codes
 - Streaming JSON stdin behavior for `poke`
-- `peek --follow` behavior (bounded timeouts)
+- `peek` watch behavior (bounded waits)
 
 Run the multi-process lock smoke test:
 
@@ -85,8 +85,8 @@ cargo audit --db .scratch/advisory-db --no-fetch
 
 ## Benchmarks (not tests)
 
-The CLI includes a lightweight benchmark harness:
+The repo includes a lightweight benchmark harness:
 
 ```bash
-cargo run -- bench --help
+cargo run --example plasmite-bench -- --help
 ```

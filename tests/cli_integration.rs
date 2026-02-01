@@ -20,12 +20,6 @@ fn parse_json(value: &str) -> Value {
     serde_json::from_str(value).expect("valid json")
 }
 
-fn parse_json_line(output: &[u8]) -> Value {
-    let text = String::from_utf8_lossy(output);
-    let line = text.lines().next().expect("json line");
-    parse_json(line)
-}
-
 fn parse_json_lines(output: &[u8]) -> Vec<Value> {
     let text = String::from_utf8_lossy(output);
     text.lines().map(parse_json).collect()
@@ -76,18 +70,16 @@ fn create_poke_get_peek_flow() {
             pool_dir.to_str().unwrap(),
             "poke",
             "testpool",
-            "--print",
+            "{\"x\":1}",
             "--descrip",
             "ping",
-            "--data-json",
-            "{\"x\":1}",
         ])
         .output()
         .expect("poke");
     assert!(poke.status.success());
     let poke_json = parse_json(std::str::from_utf8(&poke.stdout).expect("utf8"));
-    assert_eq!(poke_json.get("pool").unwrap().as_str().unwrap(), "testpool");
     let seq = poke_json.get("seq").unwrap().as_u64().unwrap();
+    assert!(poke_json.get("time").is_some());
     assert_eq!(poke_json.get("meta").unwrap()["descrips"][0], "ping");
     assert_eq!(poke_json.get("data").unwrap()["x"], 1);
 
@@ -106,7 +98,7 @@ fn create_poke_get_peek_flow() {
     assert_eq!(get_json.get("seq").unwrap().as_u64().unwrap(), seq);
     assert_eq!(get_json.get("data").unwrap()["x"], 1);
 
-    let peek = cmd()
+    let mut peek = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
@@ -114,12 +106,20 @@ fn create_poke_get_peek_flow() {
             "testpool",
             "--tail",
             "1",
+            "--jsonl",
         ])
-        .output()
+        .stdout(Stdio::piped())
+        .spawn()
         .expect("peek");
-    assert!(peek.status.success());
-    let peek_json = parse_json_line(&peek.stdout);
+    let stdout = peek.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let read = reader.read_line(&mut line).expect("read line");
+    assert!(read > 0, "expected a line from peek output");
+    let peek_json = parse_json(line.trim());
     assert_eq!(peek_json.get("seq").unwrap().as_u64().unwrap(), seq);
+    let _ = peek.kill();
+    let _ = peek.wait();
 }
 
 #[test]
@@ -145,11 +145,9 @@ fn readme_quickstart_flow() {
             pool_dir.to_str().unwrap(),
             "poke",
             "demo",
-            "--print",
+            "{\"x\":1}",
             "--descrip",
             "ping",
-            "--data-json",
-            "{\"x\":1}",
         ])
         .output()
         .expect("poke");
@@ -171,7 +169,7 @@ fn readme_quickstart_flow() {
     let get_json = parse_json(std::str::from_utf8(&get.stdout).expect("utf8"));
     assert_eq!(get_json.get("seq").unwrap().as_u64().unwrap(), seq);
 
-    let peek = cmd()
+    let mut peek = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
@@ -179,16 +177,24 @@ fn readme_quickstart_flow() {
             "demo",
             "--tail",
             "1",
+            "--jsonl",
         ])
-        .output()
+        .stdout(Stdio::piped())
+        .spawn()
         .expect("peek");
-    assert!(peek.status.success());
-    let peek_json = parse_json_line(&peek.stdout);
+    let stdout = peek.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let read = reader.read_line(&mut line).expect("read line");
+    assert!(read > 0, "expected a line from peek output");
+    let peek_json = parse_json(line.trim());
     assert_eq!(peek_json.get("seq").unwrap().as_u64().unwrap(), seq);
+    let _ = peek.kill();
+    let _ = peek.wait();
 }
 
 #[test]
-fn peek_follow_emits_new_messages() {
+fn peek_emits_new_messages() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -210,12 +216,7 @@ fn peek_follow_emits_new_messages() {
             pool_dir.to_str().unwrap(),
             "peek",
             "demo",
-            "--follow",
-            "--tail",
-            "0",
             "--jsonl",
-            "--idle-timeout",
-            "2s",
         ])
         .stdout(Stdio::piped())
         .spawn()
@@ -229,8 +230,6 @@ fn peek_follow_emits_new_messages() {
             pool_dir.to_str().unwrap(),
             "poke",
             "demo",
-            "--print",
-            "--data-json",
             "{\"x\":42}",
         ])
         .output()
@@ -241,12 +240,12 @@ fn peek_follow_emits_new_messages() {
     let mut reader = BufReader::new(stdout);
     let mut line = String::new();
     let read = reader.read_line(&mut line).expect("read line");
-    assert!(read > 0, "expected a line from follow output");
+    assert!(read > 0, "expected a line from peek output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 42);
 
-    let status = peek.wait().expect("wait");
-    assert!(status.success());
+    let _ = peek.kill();
+    let _ = peek.wait();
 }
 
 #[test]
@@ -288,7 +287,7 @@ fn not_found_exit_code() {
     );
     assert_eq!(inner.get("seq").and_then(|v| v.as_u64()).unwrap(), 999);
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(hint.contains("pool bounds") || hint.contains("peek"));
+    assert!(hint.contains("pool info") || hint.contains("peek"));
 }
 
 #[test]
@@ -320,11 +319,11 @@ fn usage_exit_code() {
         .expect("error object");
     assert_eq!(inner.get("kind").and_then(|v| v.as_str()).unwrap(), "Usage");
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(hint.contains("--data-json") || hint.contains("pipe JSON"));
+    assert!(hint.contains("--file") || hint.contains("pipe JSON"));
 }
 
 #[test]
-fn poke_is_silent_without_print() {
+fn poke_emits_json_by_default() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -346,13 +345,70 @@ fn poke_is_silent_without_print() {
             pool_dir.to_str().unwrap(),
             "poke",
             "testpool",
-            "--data-json",
             "{\"x\":1}",
         ])
         .output()
         .expect("poke");
     assert!(poke.status.success());
-    assert!(poke.stdout.is_empty());
+    let value = parse_json(std::str::from_utf8(&poke.stdout).expect("utf8"));
+    assert!(value.get("seq").is_some());
+    assert!(value.get("time").is_some());
+}
+
+#[test]
+fn poke_create_flag_creates_missing_pool() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "autopool",
+            "{\"x\":1}",
+            "--create",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+    let value = parse_json(std::str::from_utf8(&poke.stdout).expect("utf8"));
+    assert!(value.get("seq").is_some());
+
+    let pool_path = pool_dir.join("autopool.plasmite");
+    assert!(pool_path.exists());
+}
+
+#[test]
+fn pool_delete_removes_pool_file() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "deleteme",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let delete = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "delete",
+            "deleteme",
+        ])
+        .output()
+        .expect("delete");
+    assert!(delete.status.success());
+    let pool_path = pool_dir.join("deleteme.plasmite");
+    assert!(!pool_path.exists());
 }
 
 #[test]
@@ -576,7 +632,6 @@ fn poke_streams_json_values_from_stdin() {
             pool_dir.to_str().unwrap(),
             "poke",
             "testpool",
-            "--print",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -595,7 +650,7 @@ fn poke_streams_json_values_from_stdin() {
     assert_eq!(lines[0].get("data").unwrap()["x"], 1);
     assert_eq!(lines[1].get("data").unwrap()["x"], 2);
 
-    let peek = cmd()
+    let mut peek = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
@@ -605,10 +660,20 @@ fn poke_streams_json_values_from_stdin() {
             "2",
             "--jsonl",
         ])
-        .output()
+        .stdout(Stdio::piped())
+        .spawn()
         .expect("peek");
-    assert!(peek.status.success());
-    let peek_lines = parse_json_lines(&peek.stdout);
+    let stdout = peek.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut peek_lines = Vec::new();
+    for _ in 0..2 {
+        let mut line = String::new();
+        let read = reader.read_line(&mut line).expect("read line");
+        assert!(read > 0, "expected a line from peek output");
+        peek_lines.push(parse_json(line.trim()));
+    }
+    let _ = peek.kill();
+    let _ = peek.wait();
     assert_eq!(peek_lines.len(), 2);
     assert_eq!(peek_lines[0].get("data").unwrap()["x"], 1);
     assert_eq!(peek_lines[1].get("data").unwrap()["x"], 2);

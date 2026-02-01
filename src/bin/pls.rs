@@ -9,7 +9,10 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
-    let args: Vec<OsString> = env::args_os().skip(1).collect();
+    let mut args: Vec<OsString> = env::args_os().skip(1).collect();
+    if args.is_empty() {
+        args.push(OsString::from("--help"));
+    }
     let target = resolve_plasmite_binary();
 
     let status = Command::new(&target).args(args).status();

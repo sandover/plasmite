@@ -26,14 +26,13 @@ The intentionally small CLI for the initial release is:
 
 - `plasmite pool create`
 - `plasmite pool info`
-- `plasmite pool bounds`
+- `plasmite pool delete`
 - `plasmite poke`
 - `plasmite get`
 - `plasmite peek`
-- `plasmite bench`
 - `plasmite version`
 
-The contract is documented in `plasmite-cli-spec-v.0.1.md`.
+The contract is documented in `spec/v0/SPEC.md`.
 
 v0.0.1 focuses on the CLI only; a dedicated Rust library API will come later.
 
@@ -61,25 +60,22 @@ brew install plasmite
 
 ```bash
 # create a pool
-plasmite --dir .scratch/pools pool create demo
+plasmite pool create foo
 
 # append a message (repeat --descrip to add more tags)
-plasmite --dir .scratch/pools poke demo --print --descrip ping --data-json '{"x":1}'
+plasmite poke foo --descrip greeting '{"hello":"world"}'
 
-# fetch by seq (replace <seq> with printed seq)
-plasmite --dir .scratch/pools get demo <seq>
+# fetch by index
+plasmite get foo 1
 
-# peek the last message
-plasmite --dir .scratch/pools peek demo --tail 1
-
-# follow (Ctrl-C to stop)
-plasmite --dir .scratch/pools peek demo --follow
+# watch for new messages (Ctrl-C to stop)
+plasmite peek foo
 ```
 
 Tip: `peek` is designed to compose with Unix tools:
 
 ```bash
-plasmite --dir .scratch/pools peek demo --follow | jq -c '.data'
+plasmite peek demo | jq -c '.data'
 ```
 
 ### Two-terminal live stream demo (macOS logs)
@@ -90,22 +86,22 @@ in one terminal while another terminal follows it.
 Terminal 1 (writer):
 
 ```bash
-plasmite pool create demo
+plasmite pool create foo
 
 /usr/bin/log stream --style ndjson --level info \
-  | plasmite poke demo --descrip log
+  | plasmite poke foo --descrip log
 ```
 
 Terminal 2 (reader):
 
 ```bash
-plasmite peek demo --follow --jsonl
+plasmite peek foo
 ```
 
 Notes:
 - Use `/usr/bin/log` (in zsh, `log` can be a shell builtin).
 - Prefer `--style ndjson` for streaming; `--style json` is one big JSON value, so `jq` may appear to “hang”.
-- `poke` is silent by default; add `--print` if you want append acks.
+- `poke` emits the committed message as JSON.
 - If it’s too chatty, add a filter (but avoid filters so strict that nothing matches):
   `--predicate 'subsystem == "com.apple.SkyLight"'` or `--process WindowServer`.
 
@@ -134,16 +130,15 @@ Canonical CLI JSON shape:
 
 ```json
 {
-  "pool": "demo",
   "seq": 12345,
-  "ts": "2026-01-28T18:06:00.123Z",
+  "time": "2026-01-28T18:06:00.123Z",
   "meta": { "descrips": ["event", "ping"] },
   "data": { "any": "thing" }
 }
 ```
 
 On disk, each message payload is stored as **Lite³ bytes for `{meta,data}`**; the CLI remains
-**JSON-in/JSON-out** (`poke` encodes JSON to Lite³; `get`/`peek` decode Lite³ to JSON. Use `poke --print` to emit JSON acks).
+**JSON-in/JSON-out** (`poke` encodes JSON to Lite³; `get`/`peek` decode Lite³ to JSON).
 
 Errors:
 - On TTY, errors are concise human text (one line + hint).
@@ -188,8 +183,12 @@ to avoid network fetches at build time. See `vendor/README.md`.
 
 ## Docs
 
-- CLI contract: `plasmite-cli-spec-v.0.1.md`
+- CLI contract: `spec/v0/SPEC.md`
 - Storage + concurrency design: `plasmite-tdd-v.0.0.1.md`
+- Vision: `docs/vision.md`
+- Architecture: `docs/architecture.md`
+- Roadmap: `docs/roadmap.md`
+- Decisions (ADRs): `docs/decisions/README.md`
 - Testing: `docs/TESTING.md`
 - Release checklist: `docs/RELEASING.md`
 - Exit codes: `docs/exit-codes.md`

@@ -9,20 +9,20 @@ over time.
 Default suite (JSON to stdout, table to stderr):
 
 ```bash
-cargo build --release
-./target/release/plasmite bench
+cargo build --release --example plasmite-bench
+./target/release/examples/plasmite-bench
 ```
 
 JSON only (easy to archive/compare):
 
 ```bash
-./target/release/plasmite bench --format json > bench.json
+./target/release/examples/plasmite-bench --format json > bench.json
 ```
 
 Customize the parameter grid:
 
 ```bash
-./target/release/plasmite bench \
+./target/release/examples/plasmite-bench \
   --pool-size 1M --pool-size 64M \
   --payload-bytes 128 --payload-bytes 1024 --payload-bytes 16384 \
   --writers 1 --writers 2 --writers 4 --writers 8 \
@@ -32,13 +32,13 @@ Customize the parameter grid:
 Compare durability modes (flush vs best-effort):
 
 ```bash
-./target/release/plasmite bench --durability fast --durability flush
+./target/release/examples/plasmite-bench --durability fast --durability flush
 ```
 
 Use a specific work directory (keeps pool files/artifacts around):
 
 ```bash
-./target/release/plasmite bench --work-dir .scratch/bench
+./target/release/examples/plasmite-bench --work-dir .scratch/bench
 ```
 
 ## What it measures (current)

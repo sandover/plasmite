@@ -6,7 +6,7 @@ Short checklist for cutting a release and publishing GitHub artifacts.
 
 - Update version in `Cargo.toml` (and anywhere else it is surfaced).
 - Update `CHANGELOG.md` with the release notes.
-- Review docs for accuracy (`README.md`, `docs/TESTING.md`, CLI spec).
+- Review docs for accuracy (`README.md`, `docs/TESTING.md`, `spec/v0/SPEC.md`).
 
 ## 2) Validate locally
 
