@@ -3,9 +3,9 @@
 [![CI](https://github.com/sandover/plasmite/actions/workflows/ci.yml/badge.svg)](https://github.com/sandover/plasmite/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Plasmite is a command line tool (and eventually library) for working with **pools**: a single-file,
-mmap-backed ring buffer of immutable messages that multiple local processes can append to and
-read from concurrently.
+Plasmite is a command line tool (and eventually library) for reading and writing messages into **pools**. Pools are persistent ring buffers of immutable messages that multiple local processes can append to and read from concurrently. They're a handy abstraction for coordinating small distributed systems such as spatial computing environments, installations, robotics setups, music & performances, etc. 
+
+Pools and their messages can fill a similar role to [OSC](https://ccrma.stanford.edu/groups/osc/index.html), but much more approachable. All data is just JSON.
 
 It’s inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma) but simplified, written in Rust, and with JSON semantics. 
 
