@@ -16,8 +16,12 @@ Use ergo for all planning, so that your plans can be stored in the repo. Run "er
 - **CI Stays Green**: Never tag a release without first verifying that the local code passes all linting & formatting checks and tests.
 - **Docs are Accurate**: When the code changes, docs (such as README, code comments, built-in help text, etc) must reflect it. Goal is perfect internal coherence in the project at all times.
 
+# CI hygiene (required before pushing code)
+- Run `cargo fmt --all`.
+- Run `cargo clippy --all-targets -- -D warnings`.
+- Do not add new `#[allow(clippy::...)]` without explicit justification in the commit body.
+
 # Other Guidance
 - For temporary work and experiments, use tmp/ or .scratch/, not /tmp, so that I am not prompted for permissions
 
 If you have read these instructions and are keeping them in mind, end each of your messages with this glpyh on its own line: ✠
-
