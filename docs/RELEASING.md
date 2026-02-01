@@ -44,8 +44,8 @@ Pushing a `v*` tag triggers the GitHub Actions release workflow.
 
 ## 4) Verify release artifacts
 
-- Check the GitHub Release for per-target tarballs.
-- Verify the `SHA256SUMS` file is present and matches the artifacts:
+- Check the GitHub Release for per-target tarballs (each includes `plasmite` and `pls`).
+- Verify the single `SHA256SUMS` file is present and matches the artifacts:
 
 ```bash
 shasum -a 256 plasmite-*.tar.gz
