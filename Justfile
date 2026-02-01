@@ -37,6 +37,9 @@ bench-json:
 	cargo build --release --example plasmite-bench
 	./target/release/examples/plasmite-bench --format json > bench.json
 
+install:
+	cargo install --path . --locked
+
 clean:
 	cargo clean
 
