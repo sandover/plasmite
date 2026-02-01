@@ -3,9 +3,9 @@
 //! Role: Internal CLI that invokes the bench harness and spawns workers.
 //! Invariants: Not part of the shipped user CLI; built via `cargo run --example`.
 //! Invariants: Bench workers are spawned via a hidden subcommand.
+use std::error::Error as StdError;
 use std::io::{self, IsTerminal};
 use std::path::PathBuf;
-use std::error::Error as StdError;
 
 use clap::{Args, Parser, Subcommand};
 use serde_json::{Map, Value, json};
@@ -119,7 +119,10 @@ struct BenchOptions {
     work_dir: Option<PathBuf>,
     #[arg(long = "pool-size", help = "Repeatable pool size (bytes or K/M/G)")]
     pool_size: Vec<String>,
-    #[arg(long = "payload-bytes", help = "Repeatable payload target size (bytes)")]
+    #[arg(
+        long = "payload-bytes",
+        help = "Repeatable payload target size (bytes)"
+    )]
     payload_bytes: Vec<String>,
     #[arg(long, default_value_t = 20_000, help = "Messages per scenario")]
     messages: u64,

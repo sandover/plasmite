@@ -176,9 +176,7 @@ fn run() -> Result<(), Error> {
                 if count == 0 {
                     return Err(Error::new(ErrorKind::Usage)
                         .with_message("missing data input")
-                        .with_hint(
-                            "Provide JSON via DATA, --file, or pipe JSON to stdin.",
-                        ));
+                        .with_hint("Provide JSON via DATA, --file, or pipe JSON to stdin."));
                 }
             }
             Ok(())
@@ -211,16 +209,12 @@ where
 {
     args.into_iter()
         .map(|arg| {
-            let replacement = arg
-                .to_str()
-                .and_then(|value| match value {
-                    "---help" => Some("--help"),
-                    "---version" => Some("--version"),
-                    _ => None,
-                });
-            replacement
-                .map(OsString::from)
-                .unwrap_or_else(|| arg)
+            let replacement = arg.to_str().and_then(|value| match value {
+                "---help" => Some("--help"),
+                "---version" => Some("--version"),
+                _ => None,
+            });
+            replacement.map(OsString::from).unwrap_or_else(|| arg)
         })
         .collect()
 }
@@ -327,7 +321,10 @@ NOTES
         durability: String,
         #[arg(long, help = "Create the pool if it is missing")]
         create: bool,
-        #[arg(long = "create-size", help = "Pool size when creating (bytes or K/M/G)")]
+        #[arg(
+            long = "create-size",
+            help = "Pool size when creating (bytes or K/M/G)"
+        )]
         create_size: Option<String>,
     },
     #[command(

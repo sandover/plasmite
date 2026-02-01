@@ -627,12 +627,7 @@ fn poke_streams_json_values_from_stdin() {
     assert!(create.status.success());
 
     let mut poke = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "poke",
-            "testpool",
-        ])
+        .args(["--dir", pool_dir.to_str().unwrap(), "poke", "testpool"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
