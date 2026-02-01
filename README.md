@@ -3,38 +3,31 @@
 [![CI](https://github.com/sandover/plasmite/actions/workflows/ci.yml/badge.svg)](https://github.com/sandover/plasmite/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Plasmite is a **Unix-first CLI** for working with **Plasma-style pools**: a single-file,
+Plasmite is a command line tool (and eventually library) for working with **pools**: a single-file,
 mmap-backed ring buffer of immutable messages that multiple local processes can append to and
 read from concurrently.
 
-It’s inspired by Oblong’s Plasma / libPlasma pool model (pools, descrips, rewindable streams),
-but focuses on a modern, script-stable CLI and a tight local storage story.
+It’s inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma) but simplified, written in Rust, and with JSON semantics. 
 
 ## What you get
 
-- **Single-file pools**: each pool is a `.plasmite` file (no daemon required).
+- **Single-file pools**: each pool is a `.plasmite` file
 - **Room-scale concurrency**: many readers + many writers (writers serialize at append time).
-- **JSON-first UX**: JSON by default; streaming commands emit JSONL when piped.
-- **Stable automation**: predictable exit codes and a versioned message schema.
-- **Zero-copy storage format**: payloads are stored as **Lite³** documents (see “Why Lite³”).
+- **JSON contract**: JSON in and out
+- **Zero-copy storage format**: payloads are stored as **[Lite³](https://github.com/fastserial/lite3)** messages (see “Why Lite³”).
 
 Supported platforms: **macOS** and **Linux**.
 
-## Status / CLI surface (v0.0.1 contract)
+## Interface
 
-The intentionally small CLI for the initial release is:
+- `plasmite pool create` -- make a pool file
+- `plasmite pool info` -- info about the pool
+- `plasmite pool delete` 
+- `plasmite poke` -- deposit messages into a pool
+- `plasmite get` -- read one message from a pool
+- `plasmite peek` -- stream all messages from a pool
 
-- `plasmite pool create`
-- `plasmite pool info`
-- `plasmite pool delete`
-- `plasmite poke`
-- `plasmite get`
-- `plasmite peek`
-- `plasmite version`
-
-The contract is documented in `spec/v0/SPEC.md`.
-
-v0.0.1 focuses on the CLI only; a dedicated Rust library API will come later.
+A dedicated Rust library API will come later.
 
 ## Install
 
