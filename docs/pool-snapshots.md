@@ -1,12 +1,11 @@
-# Pool validator snapshots
+<!--
+Purpose: Preserve a stable pointer for older links to this design note.
+Exports: N/A (documentation).
+Role: Redirect stub.
+Invariants: Canonical content lives in `docs/design/pool-snapshots.md`.
+-->
 
-Debug-only snapshot files are written to `.scratch/` when explicitly enabled and
-validator assertions fail.
+# Design note location
 
-Format (plain text)
-- `timestamp_ms=<ms>`
-- `header file_size=<...> ring_offset=<...> ring_size=<...> head_off=<...> tail_off=<...> oldest_seq=<...> newest_seq=<...>`
-- `tail: state=<...> seq=<...> payload_len=<...> frame_len=<...> magic=[..]` or `decode_error=<...> magic=[..]`
-- `head: state=<...> seq=<...> payload_len=<...> frame_len=<...> magic=[..]` or `decode_error=<...> magic=[..]`
+This document moved to `docs/design/pool-snapshots.md`.
 
-Snapshots are small by design and intended for post-mortem debugging.

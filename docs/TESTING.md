@@ -1,3 +1,10 @@
+<!--
+Purpose: Document the project’s test suites and how to run them locally.
+Exports: N/A (documentation).
+Role: Contributor guide for validation and confidence-building.
+Invariants: Commands in this doc must be runnable from a clean checkout.
+-->
+
 # Testing
 
 This repo uses Rust’s built-in test harness (`cargo test`) plus a small set of

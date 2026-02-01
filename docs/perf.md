@@ -1,3 +1,10 @@
+<!--
+Purpose: Provide a lightweight way to measure and compare Plasmite performance over time.
+Exports: N/A (documentation).
+Role: Developer guide for benchmarks (not shipped CLI UX).
+Invariants: Benchmark commands and paths must match what’s built in this repo.
+-->
+
 # Performance baselines
 
 Plasmite is intentionally simple and local-first, but we still want to know what things cost.

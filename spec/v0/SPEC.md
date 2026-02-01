@@ -1,3 +1,10 @@
+<!--
+Purpose: Define the normative v0 contract for Plasmite’s CLI, message schema, and compatibility promises.
+Exports: N/A (documentation).
+Role: Versioned spec (normative).
+Invariants: v0.0.1 “contract” section is frozen once released; future additions require explicit promotion.
+-->
+
 # Plasmite Spec (v0)
 
 > Normative v0 contract. Formerly `plasmite-cli-spec-v.0.1.md`.

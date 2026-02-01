@@ -1,3 +1,10 @@
+<!--
+Purpose: Provide a short, reproducible release checklist (build, test, audit, publish) for Plasmite.
+Exports: N/A (documentation).
+Role: Operational runbook for maintainers.
+Invariants: Release steps must reflect current CI expectations and published artifact layout.
+-->
+
 # Releasing Plasmite
 
 Short checklist for cutting a release and publishing GitHub artifacts.

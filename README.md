@@ -184,11 +184,12 @@ to avoid network fetches at build time. See `vendor/README.md`.
 ## Docs
 
 - CLI contract: `spec/v0/SPEC.md`
-- Storage + concurrency design: `plasmite-tdd-v.0.0.1.md`
+- Storage + concurrency design: `docs/design/tdd-v0.0.1.md`
 - Vision: `docs/vision.md`
 - Architecture: `docs/architecture.md`
 - Roadmap: `docs/roadmap.md`
 - Decisions (ADRs): `docs/decisions/README.md`
+- Docs index: `docs/README.md`
 - Testing: `docs/TESTING.md`
 - Release checklist: `docs/RELEASING.md`
 - Exit codes: `docs/exit-codes.md`
