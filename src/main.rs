@@ -12,12 +12,13 @@ use clap::{Parser, Subcommand, error::ErrorKind as ClapErrorKind};
 use serde_json::{Map, Value, json};
 use std::collections::VecDeque;
 use std::error::Error as StdError;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use plasmite::core::cursor::{Cursor, CursorResult, FrameRef};
 use plasmite::core::error::{Error, ErrorKind, to_exit_code};
 use plasmite::core::lite3::{self, Lite3DocRef};
 use plasmite::core::pool::{AppendOptions, Durability, Pool, PoolOptions};
+use plasmite::notice::{Notice, notice_json};
 
 fn main() {
     let exit_code = match run() {
@@ -192,12 +193,17 @@ fn run() -> Result<(), Error> {
             emit_json(message_from_frame(&frame)?);
             Ok(())
         }
-        Command::Peek { pool, jsonl, tail } => {
+        Command::Peek {
+            pool,
+            jsonl,
+            tail,
+            quiet_drops,
+        } => {
             let path = resolve_poolref(&pool, &pool_dir)?;
             let pool_handle =
                 Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
             let pretty = !jsonl;
-            peek(&pool_handle, tail, pretty)
+            peek(&pool_handle, &pool, &path, tail, pretty, quiet_drops)
         }
     })();
 
@@ -353,7 +359,8 @@ Use `--tail N` to print the last N messages first, then keep watching."#,
 
 NOTES
   - Default output is pretty-printed JSON per message.
-  - Use `--jsonl` for compact, one-object-per-line output (recommended for pipes/scripts)."#
+  - Use `--jsonl` for compact, one-object-per-line output (recommended for pipes/scripts).
+  - Drop notices are emitted on stderr when the reader falls behind; use --quiet-drops to suppress."#
     )]
     Peek {
         #[arg(help = "Pool name or path")]
@@ -367,6 +374,8 @@ NOTES
         tail: u64,
         #[arg(long, help = "Emit JSON Lines (one object per line)")]
         jsonl: bool,
+        #[arg(long = "quiet-drops", help = "Suppress drop notices on stderr")]
+        quiet_drops: bool,
     },
     #[command(
         about = "Print version info as JSON",
@@ -585,6 +594,26 @@ fn emit_error(err: &Error) {
     let value = error_json(err);
     let json = serde_json::to_string(&value).unwrap_or_else(|_| {
         "{\"error\":{\"kind\":\"Internal\",\"message\":\"json encode failed\"}}".to_string()
+    });
+    eprintln!("{json}");
+}
+
+fn notice_time_now() -> Option<String> {
+    use time::format_description::well_known::Rfc3339;
+    let duration = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
+    let ts = time::OffsetDateTime::from_unix_timestamp_nanos(duration.as_nanos() as i128).ok()?;
+    ts.format(&Rfc3339).ok()
+}
+
+fn emit_notice(notice: &Notice) {
+    if io::stderr().is_terminal() {
+        eprintln!("notice: {} (pool: {})", notice.message, notice.pool);
+        return;
+    }
+
+    let value = notice_json(notice);
+    let json = serde_json::to_string(&value).unwrap_or_else(|_| {
+        "{\"notice\":{\"kind\":\"Internal\",\"message\":\"json encode failed\"}}".to_string()
     });
     eprintln!("{json}");
 }
@@ -841,10 +870,33 @@ fn decode_payload(payload: &[u8]) -> Result<(Value, Value), Error> {
     Ok((meta, data))
 }
 
-fn peek(pool: &Pool, tail: u64, pretty: bool) -> Result<(), Error> {
+#[derive(Debug, Clone)]
+struct DropNotice {
+    last_seen_seq: u64,
+    next_seen_seq: u64,
+}
+
+impl DropNotice {
+    fn dropped_count(&self) -> u64 {
+        self.next_seen_seq.saturating_sub(self.last_seen_seq + 1)
+    }
+}
+
+fn peek(
+    pool: &Pool,
+    pool_ref: &str,
+    pool_path: &Path,
+    tail: u64,
+    pretty: bool,
+    quiet_drops: bool,
+) -> Result<(), Error> {
     let mut cursor = Cursor::new();
     let mut header = pool.header_from_mmap()?;
     let mut emit = VecDeque::new();
+    let mut last_seen_seq = None::<u64>;
+    let mut pending_drop: Option<DropNotice> = None;
+    let mut last_notice_at: Option<Instant> = None;
+    let notice_interval = Duration::from_secs(1);
 
     if tail > 0 {
         cursor.seek_to(header.tail_off as usize);
@@ -852,6 +904,7 @@ fn peek(pool: &Pool, tail: u64, pretty: bool) -> Result<(), Error> {
             match cursor.next(pool)? {
                 CursorResult::Message(frame) => {
                     emit.push_back(message_from_frame(&frame)?);
+                    last_seen_seq = Some(frame.seq);
                     while emit.len() > tail as usize {
                         emit.pop_front();
                     }
@@ -875,13 +928,89 @@ fn peek(pool: &Pool, tail: u64, pretty: bool) -> Result<(), Error> {
     let mut backoff = Duration::from_millis(1);
     let max_backoff = Duration::from_millis(50);
 
+    let pool_ref = pool_ref.to_string();
+    let pool_path = pool_path.display().to_string();
+
+    let maybe_emit_pending = |pending: &mut Option<DropNotice>,
+                              last_notice_at: &mut Option<Instant>| {
+        if quiet_drops {
+            pending.take();
+            return;
+        }
+        let Some(pending_notice) = pending.as_ref() else {
+            return;
+        };
+        let ready = last_notice_at
+            .map(|instant| instant.elapsed() >= notice_interval)
+            .unwrap_or(true);
+        if !ready {
+            return;
+        }
+        let time = match notice_time_now() {
+            Some(time) => time,
+            None => {
+                pending.take();
+                return;
+            }
+        };
+        let dropped_count = pending_notice.dropped_count();
+        let mut details = Map::new();
+        details.insert(
+            "last_seen_seq".to_string(),
+            json!(pending_notice.last_seen_seq),
+        );
+        details.insert(
+            "next_seen_seq".to_string(),
+            json!(pending_notice.next_seen_seq),
+        );
+        details.insert("dropped_count".to_string(), json!(dropped_count));
+        details.insert("pool_path".to_string(), json!(pool_path.as_str()));
+        let notice = Notice {
+            kind: "drop".to_string(),
+            time,
+            cmd: "peek".to_string(),
+            pool: pool_ref.clone(),
+            message: format!("dropped {dropped_count} messages"),
+            details,
+        };
+        emit_notice(&notice);
+        *last_notice_at = Some(Instant::now());
+        pending.take();
+    };
+
+    let queue_drop = |last_seen_seq: u64, next_seen_seq: u64, pending: &mut Option<DropNotice>| {
+        if quiet_drops {
+            return;
+        }
+        match pending {
+            Some(existing) => {
+                existing.next_seen_seq = next_seen_seq;
+            }
+            None => {
+                *pending = Some(DropNotice {
+                    last_seen_seq,
+                    next_seen_seq,
+                });
+            }
+        }
+    };
+
     loop {
         match cursor.next(pool)? {
             CursorResult::Message(frame) => {
+                if let Some(last_seen_seq) = last_seen_seq {
+                    if frame.seq > last_seen_seq + 1 {
+                        queue_drop(last_seen_seq, frame.seq, &mut pending_drop);
+                        maybe_emit_pending(&mut pending_drop, &mut last_notice_at);
+                    }
+                }
                 emit_message(message_from_frame(&frame)?, pretty);
+                last_seen_seq = Some(frame.seq);
+                maybe_emit_pending(&mut pending_drop, &mut last_notice_at);
                 backoff = Duration::from_millis(1);
             }
             CursorResult::WouldBlock => {
+                maybe_emit_pending(&mut pending_drop, &mut last_notice_at);
                 std::thread::sleep(backoff);
                 backoff = std::cmp::min(backoff * 2, max_backoff);
             }

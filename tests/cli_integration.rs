@@ -7,6 +7,7 @@ use std::io::Write;
 use std::io::{BufRead, BufReader};
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
@@ -29,6 +30,10 @@ fn parse_json_lines(output: &[u8]) -> Vec<Value> {
 fn parse_error_json(output: &[u8]) -> Value {
     let text = std::str::from_utf8(output).expect("utf8");
     parse_json(text)
+}
+
+fn parse_notice_json(line: &str) -> Value {
+    parse_json(line.trim())
 }
 
 #[test]
@@ -354,6 +359,115 @@ fn poke_emits_json_by_default() {
     let value = parse_json(std::str::from_utf8(&poke.stdout).expect("utf8"));
     assert!(value.get("seq").is_some());
     assert!(value.get("time").is_some());
+}
+
+#[test]
+fn peek_emits_drop_notice_on_stderr() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "--size",
+            "1M",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let mut peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--jsonl",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("peek");
+
+    let stdout = peek.stdout.take().expect("stdout");
+    let stderr = peek.stderr.take().expect("stderr");
+
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    });
+
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let read = reader.read_line(&mut line).unwrap_or(0);
+            if read == 0 {
+                break;
+            }
+            if !line.trim().is_empty() {
+                let _ = tx.send(line.clone());
+                break;
+            }
+        }
+    });
+
+    for i in 0..25u64 {
+        let payload = "a".repeat(65536);
+        let poke = cmd()
+            .args([
+                "--dir",
+                pool_dir.to_str().unwrap(),
+                "poke",
+                "demo",
+                &format!("{{\"x\":{i},\"pad\":\"{payload}\"}}"),
+            ])
+            .output()
+            .expect("poke");
+        if !poke.status.success() {
+            let stderr = String::from_utf8_lossy(&poke.stderr);
+            panic!("poke failed at {i}: {stderr}");
+        }
+    }
+
+    let notice_line = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("drop notice");
+    let notice_json = parse_notice_json(&notice_line);
+    let notice = notice_json
+        .get("notice")
+        .and_then(|v| v.as_object())
+        .expect("notice object");
+    assert_eq!(notice.get("kind").and_then(|v| v.as_str()), Some("drop"));
+    assert_eq!(notice.get("cmd").and_then(|v| v.as_str()), Some("peek"));
+    assert_eq!(notice.get("pool").and_then(|v| v.as_str()), Some("demo"));
+    let details = notice
+        .get("details")
+        .and_then(|v| v.as_object())
+        .expect("details");
+    let dropped = details
+        .get("dropped_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    assert!(dropped > 0);
+    assert!(details.get("last_seen_seq").is_some());
+    assert!(details.get("next_seen_seq").is_some());
+
+    let _ = peek.kill();
+    let _ = peek.wait();
 }
 
 #[test]

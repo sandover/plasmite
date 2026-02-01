@@ -99,6 +99,56 @@ Supported in v0.0.1: **macOS** and **Linux**.
 
 ---
 
+## Notices (non-fatal diagnostics)
+
+This section is **non-normative** until explicitly promoted into the v0.x contract.
+
+Plasmite may emit **notices** on stderr for non-fatal conditions (e.g., drops detected while
+streaming). Notices are distinct from errors:
+
+* Notices never change the exit code.
+* Notices never write to stdout (stdout remains pure JSON for command outputs).
+
+### TTY stderr (human)
+
+When stderr is a TTY, notices are short, human-readable lines (no JSON required).
+
+### Non-TTY stderr (machine)
+
+When stderr is **not** a TTY, notices are JSON objects with a stable envelope:
+
+```json
+{
+  "notice": {
+    "kind": "drop",
+    "time": "2026-02-01T00:00:00Z",
+    "cmd": "peek",
+    "pool": "demo",
+    "message": "dropped 3 messages",
+    "details": {
+      "dropped_count": 3
+    }
+  }
+}
+```
+
+Required fields:
+
+* `kind` (string): machine-friendly notice type (e.g., `drop`).
+* `time` (string): RFC 3339 timestamp.
+* `cmd` (string): CLI subcommand emitting the notice.
+* `pool` (string): pool ref or name (path may be included in `details`).
+* `message` (string): short human summary (not localized).
+* `details` (object): structured fields specific to the notice kind.
+
+Invariants:
+
+* JSON notices never include ANSI escapes, regardless of color policy.
+* Notice schemas are additive-only once promoted.
+* Implementations should coalesce high-frequency notices and rate-limit emissions.
+
+---
+
 ## Naming & compatibility
 
 ### Primary binary
@@ -371,11 +421,14 @@ plasmite peek POOLREF [OPTIONS]
 
 * `--tail N` (or `-n N`): print the last N messages first, then keep watching.
 * `--jsonl`: emit one JSON object per line (recommended for pipes).
+* `--quiet-drops`: suppress non-fatal drop notices on stderr.
 
 **Behavior**
 
 * Without `--tail`, starts at **newest+1** and waits for new messages.
 * With `--tail N`, prints the last N messages currently available, then waits for new ones.
+* If the reader falls behind and messages are overwritten, a non-fatal drop notice is emitted on
+  stderr (see “Notices”). Use `--quiet-drops` to suppress.
 
 ---
 

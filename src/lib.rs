@@ -4,3 +4,4 @@
 //! Invariants: Treat the crate API as internal until a dedicated library release.
 //! Invariants: Core modules prefer explicit inputs/outputs over hidden state.
 pub mod core;
+pub mod notice;
