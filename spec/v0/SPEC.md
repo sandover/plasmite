@@ -30,6 +30,7 @@ Only these commands are in-scope for v0.0.1:
 
 * `plasmite pool create`
 * `plasmite pool info`
+* `plasmite pool list`
 * `plasmite pool delete`
 * `plasmite poke`
 * `plasmite get`
@@ -42,6 +43,7 @@ Minimal, explicit flag set for v0.0.1:
 
 * Global: `--dir`
 * `pool create`: `--size`
+* `pool list`: no flags
 * `poke`: `DATA`, `--file FILE`, `--in`, `--errors`, `--descrip`, `--durability fast|flush`, `--create`, `--create-size`, `--retry`, `--retry-delay`
 * `peek`: `--tail`, `--format pretty|jsonl`, `--jsonl`
 
@@ -123,7 +125,7 @@ When stderr is **not** a TTY, notices are JSON objects with a stable envelope:
     "kind": "drop",
     "time": "2026-02-01T00:00:00Z",
     "cmd": "peek",
-    "pool": "demo",
+    "name": "demo",
     "message": "dropped 3 messages",
     "details": {
       "dropped_count": 3
@@ -369,24 +371,47 @@ plasmite pool resize NAME SIZE
 
 ---
 
-## `plasmite pool ls`
+## `plasmite pool list`
 
 List pools.
 
 **Synopsis**
 
 ```bash
-plasmite pool ls [OPTIONS]
+plasmite pool list
 ```
 
-**Options**
+**Behavior**
 
-* `--long` : include size, used, message count, oldest/newest seq, flags
-* `--dir PATH`
+* Output is JSON with a `pools` array.
+* Entries are sorted by `name` ascending.
+* Non-`.plasmite` files are ignored.
+* Unreadable pools are included with an `error` field instead of failing the command.
 
-**Defaults**
+**Pool entry fields**
 
-* Always JSON to stdout; pretty if TTY, compact otherwise.
+* `name` (string): pool name (file stem).
+* `path` (string): absolute path to the pool file.
+* `file_size` (number): size in bytes (when readable).
+* `bounds` (object): `oldest` and/or `newest` seq numbers (when readable).
+* `mtime` (string or null): RFC 3339 file modification time (null when unavailable).
+* `error` (object, optional): standard error envelope for unreadable pools.
+
+**Example**
+
+```json
+{
+  "pools": [
+    {
+      "name": "demo",
+      "path": "/Users/me/.plasmite/pools/demo.plasmite",
+      "file_size": 1048576,
+      "bounds": { "oldest": 1, "newest": 42 },
+      "mtime": "2026-02-02T23:40:00Z"
+    }
+  ]
+}
+```
 
 ---
 
@@ -626,7 +651,7 @@ Remote pool refs are explicitly out of scope for v0.1.
 When we add them, the CLI UX-level contract is:
 
 * Remote pool refs use `tcp(s)://host:port/POOL` (no trailing slash)
-* Subcommands that accept POOLREF should work remotely at least for: `peek`, `poke`, `get`, `export`, and `pool ls`.
+* Subcommands that accept POOLREF should work remotely at least for: `peek`, `poke`, `get`, `export`, and `pool list`.
 
 `plasmite serve` would expose local pools over TCP with options like:
 

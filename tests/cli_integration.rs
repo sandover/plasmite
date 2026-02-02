@@ -61,7 +61,7 @@ fn create_poke_get_peek_flow() {
         .expect("created array")
         .first()
         .expect("first");
-    assert_eq!(created.get("pool").unwrap().as_str().unwrap(), "testpool");
+    assert_eq!(created.get("name").unwrap().as_str().unwrap(), "testpool");
     assert!(
         created
             .get("path")
@@ -448,7 +448,7 @@ fn color_always_colorizes_pretty_stdout() {
         .expect("info");
     assert!(info.status.success());
     let stdout = String::from_utf8_lossy(&info.stdout);
-    assert!(stdout.contains("\u{1b}[36m\"pool\"\u{1b}[0m"));
+    assert!(stdout.contains("\u{1b}[36m\"name\"\u{1b}[0m"));
 }
 
 #[test]
@@ -954,6 +954,40 @@ fn poke_jq_mode_rejects_skip() {
         .and_then(|v| v.as_object())
         .expect("error object");
     assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Usage"));
+}
+
+#[test]
+fn pool_list_lists_pools_sorted_by_name() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "beta",
+            "alpha",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let list = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "list"])
+        .output()
+        .expect("list");
+    assert!(list.status.success());
+
+    let value = parse_json(std::str::from_utf8(&list.stdout).expect("utf8"));
+    let pools = value
+        .get("pools")
+        .and_then(|v| v.as_array())
+        .expect("pools array");
+    assert_eq!(pools.len(), 2);
+    assert_eq!(pools[0].get("name").and_then(|v| v.as_str()), Some("alpha"));
+    assert_eq!(pools[1].get("name").and_then(|v| v.as_str()), Some("beta"));
 }
 
 #[test]

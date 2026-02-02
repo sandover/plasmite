@@ -22,6 +22,7 @@ Supported platforms: **macOS** and **Linux**.
 
 - `plasmite pool create` -- make a pool file
 - `plasmite pool info` -- info about the pool
+- `plasmite pool list` -- list pools in the pool dir
 - `plasmite pool delete` 
 - `plasmite poke` -- deposit messages into a pool
 - `plasmite get` -- read one message from a pool

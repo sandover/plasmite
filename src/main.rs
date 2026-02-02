@@ -151,6 +151,11 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 );
                 Ok(RunOutcome::ok())
             }
+            PoolCommand::List => {
+                let pools = list_pools(&pool_dir);
+                emit_json(json!({ "pools": pools }), color_mode);
+                Ok(RunOutcome::ok())
+            }
         },
         Command::Poke {
             pool,
@@ -580,6 +585,18 @@ NOTES
         #[arg(help = "Pool name or path")]
         name: String,
     },
+    #[command(
+        about = "List pools in the pool directory",
+        long_about = r#"List pools in the pool directory as JSON."#,
+        after_help = r#"EXAMPLE
+  $ plasmite pool list
+
+NOTES
+  - Output is JSON (pretty on TTY, compact when piped).
+  - Non-.plasmite files are ignored.
+  - Pools that cannot be read include an error field."#
+    )]
+    List,
 }
 
 fn default_pool_dir() -> PathBuf {
@@ -648,6 +665,112 @@ fn add_corrupt_hint(err: Error) -> Error {
         return err;
     }
     err.with_hint("Pool appears corrupt. Recreate it or investigate with validation tooling.")
+}
+
+fn list_pools(pool_dir: &Path) -> Vec<Value> {
+    let mut pools = Vec::new();
+    let entries = match std::fs::read_dir(pool_dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return pools,
+        Err(err) => {
+            pools.push(pool_list_error(
+                "pools",
+                pool_dir,
+                Error::new(ErrorKind::Io)
+                    .with_message("failed to read pool directory")
+                    .with_path(pool_dir)
+                    .with_source(err),
+            ));
+            return pools;
+        }
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("plasmite") {
+            continue;
+        }
+        let name = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let meta = match std::fs::metadata(&path) {
+            Ok(meta) => meta,
+            Err(err) => {
+                pools.push(pool_list_error(
+                    &name,
+                    &path,
+                    Error::new(ErrorKind::Io)
+                        .with_message("failed to stat pool")
+                        .with_path(&path)
+                        .with_source(err),
+                ));
+                continue;
+            }
+        };
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(format_system_time)
+            .map(Value::String)
+            .unwrap_or(Value::Null);
+        match Pool::open(&path) {
+            Ok(pool) => {
+                let info = match pool.info() {
+                    Ok(info) => info,
+                    Err(err) => {
+                        pools.push(pool_list_error(
+                            &name,
+                            &path,
+                            add_corrupt_hint(add_io_hint(err)),
+                        ));
+                        continue;
+                    }
+                };
+                let mut map = Map::new();
+                map.insert("name".to_string(), json!(name));
+                map.insert("path".to_string(), json!(path.display().to_string()));
+                map.insert("file_size".to_string(), json!(info.file_size));
+                map.insert("bounds".to_string(), bounds_json(info.bounds));
+                map.insert("mtime".to_string(), mtime);
+                pools.push(Value::Object(map));
+            }
+            Err(err) => {
+                pools.push(pool_list_error(
+                    &name,
+                    &path,
+                    add_corrupt_hint(add_io_hint(err)),
+                ));
+            }
+        }
+    }
+
+    pools.sort_by_key(pool_list_name);
+    pools
+}
+
+fn pool_list_error(name: &str, path: &Path, err: Error) -> Value {
+    let mut map = Map::new();
+    map.insert("name".to_string(), json!(name));
+    map.insert("path".to_string(), json!(path.display().to_string()));
+    map.insert("error".to_string(), error_json(&err));
+    Value::Object(map)
+}
+
+fn pool_list_name(value: &Value) -> String {
+    value
+        .get("name")
+        .and_then(|name| name.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn format_system_time(time: std::time::SystemTime) -> Option<String> {
+    use time::format_description::well_known::Rfc3339;
+    let duration = time.duration_since(UNIX_EPOCH).ok()?;
+    let ts = time::OffsetDateTime::from_unix_timestamp_nanos(duration.as_nanos() as i128).ok()?;
+    ts.format(&Rfc3339).ok()
 }
 
 fn ensure_pool_dir(dir: &Path) -> Result<(), Error> {
@@ -828,7 +951,7 @@ fn bounds_json(bounds: plasmite::core::pool::Bounds) -> Value {
 
 fn pool_info_json(pool_ref: &str, info: &plasmite::core::pool::PoolInfo) -> Value {
     let mut map = Map::new();
-    map.insert("pool".to_string(), json!(pool_ref));
+    map.insert("name".to_string(), json!(pool_ref));
     map.insert("path".to_string(), json!(info.path.display().to_string()));
     map.insert("file_size".to_string(), json!(info.file_size));
     map.insert("ring_offset".to_string(), json!(info.ring_offset));

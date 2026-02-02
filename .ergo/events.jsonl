@@ -494,3 +494,7 @@
 {"type":"state","ts":"2026-02-02T23:26:57.621571Z","data":{"id":"Y7OLWF","state":"doing","ts":"2026-02-02T23:26:57.621571Z"}}
 {"type":"result","ts":"2026-02-02T23:28:09.363295Z","data":{"task_id":"Y7OLWF","summary":"Documented stdin modes, auto precedence/limits, skip semantics, and examples.","path":"spec/v0/SPEC.md","sha256_at_attach":"56571fbd289038d96cfd433814536c7ee40c6e63cbfb618c0ec41d59a392d341","mtime_at_attach":"2026-02-02T23:27:35.261085677Z","git_commit_at_attach":"0e09009c3e68fd7d7fd65f8c1af0472a3fd75ced","ts":"2026-02-02T23:28:09.363295Z"}}
 {"type":"state","ts":"2026-02-02T23:28:09.367789Z","data":{"id":"Y7OLWF","state":"done","ts":"2026-02-02T23:28:09.367789Z"}}
+{"type":"claim","ts":"2026-02-02T23:37:34.418685Z","data":{"id":"6N2BAH","agent_id":"gpt-5.2@codex","ts":"2026-02-02T23:37:34.418685Z"}}
+{"type":"state","ts":"2026-02-02T23:37:34.418685Z","data":{"id":"6N2BAH","state":"doing","ts":"2026-02-02T23:37:34.418685Z"}}
+{"type":"result","ts":"2026-02-02T23:41:42.75319Z","data":{"task_id":"6N2BAH","summary":"Defined pool list contract and example output.","path":"spec/v0/SPEC.md","sha256_at_attach":"1af81aa1df5020bb65d6e8fb4a791ec851b648df9add7653455673bee3a079da","mtime_at_attach":"2026-02-02T23:40:10.087975875Z","git_commit_at_attach":"3ef6246ac26268d22e69acf7bcf35cc7a4871e67","ts":"2026-02-02T23:41:42.75319Z"}}
+{"type":"state","ts":"2026-02-02T23:41:42.756486Z","data":{"id":"6N2BAH","state":"done","ts":"2026-02-02T23:41:42.756486Z"}}
