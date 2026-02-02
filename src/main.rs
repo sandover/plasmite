@@ -14,15 +14,33 @@ use std::collections::VecDeque;
 use std::error::Error as StdError;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+mod ingest;
+
+use ingest::{ErrorPolicy, IngestConfig, IngestFailure, IngestMode, IngestOutcome, ingest};
 use plasmite::core::cursor::{Cursor, CursorResult, FrameRef};
 use plasmite::core::error::{Error, ErrorKind, to_exit_code};
 use plasmite::core::lite3::{self, Lite3DocRef};
 use plasmite::core::pool::{AppendOptions, Durability, Pool, PoolOptions};
 use plasmite::notice::{Notice, notice_json};
 
+#[derive(Copy, Clone, Debug)]
+struct RunOutcome {
+    exit_code: i32,
+}
+
+impl RunOutcome {
+    fn ok() -> Self {
+        Self { exit_code: 0 }
+    }
+
+    fn with_code(exit_code: i32) -> Self {
+        Self { exit_code }
+    }
+}
+
 fn main() {
     let exit_code = match run() {
-        Ok(()) => 0,
+        Ok(outcome) => outcome.exit_code,
         Err((err, color_mode)) => {
             emit_error(&err, color_mode);
             to_exit_code(err.kind())
@@ -31,7 +49,7 @@ fn main() {
     std::process::exit(exit_code);
 }
 
-fn run() -> Result<(), (Error, ColorMode)> {
+fn run() -> Result<RunOutcome, (Error, ColorMode)> {
     let cli = match Cli::try_parse_from(normalize_args(std::env::args_os())) {
         Ok(cli) => cli,
         Err(err) => match err.kind() {
@@ -44,7 +62,7 @@ fn run() -> Result<(), (Error, ColorMode)> {
                         ColorMode::Auto,
                     )
                 })?;
-                return Ok(());
+                return Ok(RunOutcome::ok());
             }
             _ => {
                 let message = clap_error_summary(&err);
@@ -69,7 +87,7 @@ fn run() -> Result<(), (Error, ColorMode)> {
                 "version": env!("CARGO_PKG_VERSION"),
             });
             emit_json(output);
-            Ok(())
+            Ok(RunOutcome::ok())
         }
         Command::Pool { command } => match command {
             PoolCommand::Create { names, size } => {
@@ -95,7 +113,7 @@ fn run() -> Result<(), (Error, ColorMode)> {
                     results.push(pool_info_json(&name, &info));
                 }
                 emit_json(json!({ "created": results }));
-                Ok(())
+                Ok(RunOutcome::ok())
             }
             PoolCommand::Info { name } => {
                 let path = resolve_poolref(&name, &pool_dir)?;
@@ -103,7 +121,7 @@ fn run() -> Result<(), (Error, ColorMode)> {
                     Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &name, &name))?;
                 let info = pool.info()?;
                 emit_json(pool_info_json(&name, &info));
-                Ok(())
+                Ok(RunOutcome::ok())
             }
             PoolCommand::Delete { name } => {
                 let path = resolve_poolref(&name, &pool_dir)?;
@@ -126,7 +144,7 @@ fn run() -> Result<(), (Error, ColorMode)> {
                         "path": path.display().to_string(),
                     }
                 }));
-                Ok(())
+                Ok(RunOutcome::ok())
             }
         },
         Command::Poke {
@@ -139,6 +157,8 @@ fn run() -> Result<(), (Error, ColorMode)> {
             create_size,
             retry,
             retry_delay,
+            input,
+            errors,
         } => {
             let path = resolve_poolref(&pool, &pool_dir)?;
             if create_size.is_some() && !create {
@@ -185,24 +205,30 @@ fn run() -> Result<(), (Error, ColorMode)> {
                 })?;
                 emit_json(message_json(seq, timestamp_ns, &descrip, &data)?);
             } else {
-                let count = read_json_stream(io::stdin().lock(), |data| {
-                    let payload = lite3::encode_message(&descrip, &data)?;
-                    let (seq, timestamp_ns) = retry_with_config(retry_config, || {
-                        let timestamp_ns = now_ns()?;
-                        let options = AppendOptions::new(timestamp_ns, durability);
-                        let seq = pool_handle.append_with_options(payload.as_slice(), options)?;
-                        Ok((seq, timestamp_ns))
-                    })?;
-                    emit_message(message_json(seq, timestamp_ns, &descrip, &data)?, false);
-                    Ok(())
-                })?;
-                if count == 0 {
+                let outcome = ingest_from_stdin(
+                    io::stdin().lock(),
+                    PokeIngestContext {
+                        pool_ref: &pool,
+                        pool_path: &path,
+                        descrips: &descrip,
+                        durability,
+                        retry_config,
+                        pool_handle: &mut pool_handle,
+                        color_mode,
+                        input,
+                        errors,
+                    },
+                )?;
+                if outcome.records_total == 0 {
                     return Err(Error::new(ErrorKind::Usage)
                         .with_message("missing data input")
                         .with_hint("Provide JSON via DATA, --file, or pipe JSON to stdin."));
                 }
+                if outcome.failed > 0 {
+                    return Ok(RunOutcome::with_code(1));
+                }
             }
-            Ok(())
+            Ok(RunOutcome::ok())
         }
         Command::Get { pool, seq } => {
             let path = resolve_poolref(&pool, &pool_dir)?;
@@ -212,7 +238,7 @@ fn run() -> Result<(), (Error, ColorMode)> {
                 .get(seq)
                 .map_err(|err| add_missing_seq_hint(err, &pool))?;
             emit_json(message_from_frame(&frame)?);
-            Ok(())
+            Ok(RunOutcome::ok())
         }
         Command::Peek {
             pool,
@@ -243,7 +269,8 @@ fn run() -> Result<(), (Error, ColorMode)> {
                 pretty,
                 quiet_drops,
                 color_mode,
-            )
+            )?;
+            Ok(RunOutcome::ok())
         }
     })();
 
@@ -339,6 +366,21 @@ enum PeekFormat {
     Jsonl,
 }
 
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum InputMode {
+    Auto,
+    Jsonl,
+    Json,
+    Seq,
+    Jq,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, ValueEnum)]
+enum ErrorPolicyCli {
+    Stop,
+    Skip,
+}
+
 impl ColorMode {
     fn use_color(self, is_tty: bool) -> bool {
         match self {
@@ -383,7 +425,9 @@ Accepts JSON from a single inline value, a file, or piped stdin."#,
 
 NOTES
   - `--durability flush` trades throughput for stronger “written to storage” assurance.
-  - `--retry N` retries transient failures (lock contention, short-lived IO) with optional `--retry-delay`."#
+  - `--retry N` retries transient failures (lock contention, short-lived IO) with optional `--retry-delay`.
+  - Stdin defaults to `--in auto` (JSONL, JSON-seq, event streams, or multiline JSON).
+  - Use `--errors skip` to continue past bad records; skipped records emit notices and set exit code 1."#
     )]
     Poke {
         #[arg(help = "Pool name or path")]
@@ -411,6 +455,22 @@ NOTES
         retry: u32,
         #[arg(long, help = "Delay between retries (e.g. 50ms, 1s, 2m)")]
         retry_delay: Option<String>,
+        #[arg(
+            short = 'i',
+            long = "in",
+            default_value = "auto",
+            value_enum,
+            help = "Input mode for stdin streams"
+        )]
+        input: InputMode,
+        #[arg(
+            short = 'e',
+            long = "errors",
+            default_value = "stop",
+            value_enum,
+            help = "Stream error policy: stop|skip"
+        )]
+        errors: ErrorPolicyCli,
     },
     #[command(
         about = "Fetch one message by sequence number",
@@ -531,6 +591,10 @@ fn resolve_poolref(input: &str, pool_dir: &Path) -> Result<PathBuf, Error> {
 
 const DEFAULT_POOL_SIZE: u64 = 1024 * 1024;
 const DEFAULT_RETRY_DELAY: Duration = Duration::from_millis(50);
+const DEFAULT_SNIFF_BYTES: usize = 8 * 1024;
+const DEFAULT_SNIFF_LINES: usize = 8;
+const DEFAULT_MAX_RECORD_BYTES: usize = 1024 * 1024;
+const DEFAULT_MAX_SNIPPET_BYTES: usize = 200;
 
 fn add_missing_pool_hint(err: Error, pool_ref: &str, input: &str) -> Error {
     if err.kind() != ErrorKind::NotFound || err.hint().is_some() {
@@ -1022,24 +1086,139 @@ fn read_stdin() -> Result<String, Error> {
     Ok(buf)
 }
 
-fn read_json_stream<R, F>(reader: R, mut on_value: F) -> Result<usize, Error>
-where
-    R: Read,
-    F: FnMut(Value) -> Result<(), Error>,
-{
-    let stream = serde_json::Deserializer::from_reader(reader).into_iter::<Value>();
-    let mut count = 0usize;
-    for item in stream {
-        let value = item.map_err(|err| {
-            Error::new(ErrorKind::Usage)
-                .with_message("invalid json stream")
-                .with_hint("Provide JSON values separated by whitespace or newlines.")
-                .with_source(err)
-        })?;
-        on_value(value)?;
-        count += 1;
+fn input_mode_to_ingest(mode: InputMode) -> IngestMode {
+    match mode {
+        InputMode::Auto => IngestMode::Auto,
+        InputMode::Jsonl => IngestMode::Jsonl,
+        InputMode::Json => IngestMode::Json,
+        InputMode::Seq => IngestMode::Seq,
+        InputMode::Jq => IngestMode::Jq,
     }
-    Ok(count)
+}
+
+fn error_policy_to_ingest(policy: ErrorPolicyCli) -> ErrorPolicy {
+    match policy {
+        ErrorPolicyCli::Stop => ErrorPolicy::Stop,
+        ErrorPolicyCli::Skip => ErrorPolicy::Skip,
+    }
+}
+
+fn ingest_failure_notice(
+    failure: &IngestFailure,
+    pool_ref: &str,
+    pool_path: &Path,
+    color_mode: ColorMode,
+) {
+    let mut details = Map::new();
+    details.insert("mode".to_string(), json!(mode_label(failure.mode)));
+    details.insert("index".to_string(), json!(failure.index));
+    details.insert("error_kind".to_string(), json!(failure.error_kind));
+    details.insert(
+        "pool_path".to_string(),
+        json!(pool_path.display().to_string()),
+    );
+    if let Some(line) = failure.line {
+        details.insert("line".to_string(), json!(line));
+    }
+    if let Some(snippet) = &failure.snippet {
+        details.insert("snippet".to_string(), json!(snippet));
+    }
+    let notice = Notice {
+        kind: "ingest_skip".to_string(),
+        time: notice_time_now().unwrap_or_else(|| "unknown".to_string()),
+        cmd: "poke".to_string(),
+        pool: pool_ref.to_string(),
+        message: failure.message.clone(),
+        details,
+    };
+    emit_notice(&notice, color_mode);
+}
+
+fn ingest_summary_notice(
+    outcome: &IngestOutcome,
+    pool_ref: &str,
+    pool_path: &Path,
+    color_mode: ColorMode,
+) {
+    let mut details = Map::new();
+    details.insert("total".to_string(), json!(outcome.records_total));
+    details.insert("ok".to_string(), json!(outcome.ok));
+    details.insert("failed".to_string(), json!(outcome.failed));
+    details.insert(
+        "pool_path".to_string(),
+        json!(pool_path.display().to_string()),
+    );
+    let notice = Notice {
+        kind: "ingest_summary".to_string(),
+        time: notice_time_now().unwrap_or_else(|| "unknown".to_string()),
+        cmd: "poke".to_string(),
+        pool: pool_ref.to_string(),
+        message: "ingestion completed with skipped records".to_string(),
+        details,
+    };
+    emit_notice(&notice, color_mode);
+}
+
+fn mode_label(mode: IngestMode) -> &'static str {
+    match mode {
+        IngestMode::Auto => "auto",
+        IngestMode::Jsonl => "jsonl",
+        IngestMode::Json => "json",
+        IngestMode::Seq => "seq",
+        IngestMode::Jq => "jq",
+        IngestMode::Event => "event",
+    }
+}
+
+struct PokeIngestContext<'a> {
+    pool_ref: &'a str,
+    pool_path: &'a Path,
+    descrips: &'a [String],
+    durability: Durability,
+    retry_config: Option<RetryConfig>,
+    pool_handle: &'a mut Pool,
+    color_mode: ColorMode,
+    input: InputMode,
+    errors: ErrorPolicyCli,
+}
+
+fn ingest_from_stdin<R: Read>(
+    reader: R,
+    ctx: PokeIngestContext<'_>,
+) -> Result<IngestOutcome, Error> {
+    let ingest_config = IngestConfig {
+        mode: input_mode_to_ingest(ctx.input),
+        errors: error_policy_to_ingest(ctx.errors),
+        sniff_bytes: DEFAULT_SNIFF_BYTES,
+        sniff_lines: DEFAULT_SNIFF_LINES,
+        max_record_bytes: DEFAULT_MAX_RECORD_BYTES,
+        max_snippet_bytes: DEFAULT_MAX_SNIPPET_BYTES,
+    };
+
+    let outcome = ingest(
+        reader,
+        ingest_config,
+        |data| {
+            let payload = lite3::encode_message(ctx.descrips, &data)?;
+            let (seq, timestamp_ns) = retry_with_config(ctx.retry_config, || {
+                let timestamp_ns = now_ns()?;
+                let options = AppendOptions::new(timestamp_ns, ctx.durability);
+                let seq = ctx
+                    .pool_handle
+                    .append_with_options(payload.as_slice(), options)?;
+                Ok((seq, timestamp_ns))
+            })?;
+            emit_message(message_json(seq, timestamp_ns, ctx.descrips, &data)?, false);
+            Ok(())
+        },
+        |failure| ingest_failure_notice(&failure, ctx.pool_ref, ctx.pool_path, ctx.color_mode),
+    )?;
+
+    if ctx.errors == ErrorPolicyCli::Skip && outcome.failed > 0 {
+        ingest_summary_notice(&outcome, ctx.pool_ref, ctx.pool_path, ctx.color_mode);
+    }
+
+    Ok(outcome)
 }
 
 fn now_ns() -> Result<u64, Error> {
@@ -1273,9 +1452,29 @@ fn peek(
 
 #[cfg(test)]
 mod tests {
-    use super::{Error, ErrorKind, error_text, parse_size, read_json_stream};
+    use super::{Error, ErrorKind, error_text, parse_size};
     use serde_json::json;
     use std::io::Cursor;
+
+    fn read_json_stream<R, F>(reader: R, mut on_value: F) -> Result<usize, Error>
+    where
+        R: std::io::Read,
+        F: FnMut(serde_json::Value) -> Result<(), Error>,
+    {
+        let stream = serde_json::Deserializer::from_reader(reader).into_iter::<serde_json::Value>();
+        let mut count = 0usize;
+        for item in stream {
+            let value = item.map_err(|err| {
+                Error::new(ErrorKind::Usage)
+                    .with_message("invalid json stream")
+                    .with_hint("Provide JSON values separated by whitespace or newlines.")
+                    .with_source(err)
+            })?;
+            on_value(value)?;
+            count += 1;
+        }
+        Ok(count)
+    }
 
     #[test]
     fn parse_size_accepts_bytes_and_kmg() {
