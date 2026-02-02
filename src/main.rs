@@ -8,7 +8,7 @@ use std::ffi::OsString;
 use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
-use clap::{Parser, Subcommand, error::ErrorKind as ClapErrorKind};
+use clap::{Parser, Subcommand, ValueEnum, error::ErrorKind as ClapErrorKind};
 use serde_json::{Map, Value, json};
 use std::collections::VecDeque;
 use std::error::Error as StdError;
@@ -23,37 +23,44 @@ use plasmite::notice::{Notice, notice_json};
 fn main() {
     let exit_code = match run() {
         Ok(()) => 0,
-        Err(err) => {
-            emit_error(&err);
+        Err((err, color_mode)) => {
+            emit_error(&err, color_mode);
             to_exit_code(err.kind())
         }
     };
     std::process::exit(exit_code);
 }
 
-fn run() -> Result<(), Error> {
+fn run() -> Result<(), (Error, ColorMode)> {
     let cli = match Cli::try_parse_from(normalize_args(std::env::args_os())) {
         Ok(cli) => cli,
         Err(err) => match err.kind() {
             ClapErrorKind::DisplayHelp | ClapErrorKind::DisplayVersion => {
                 err.print().map_err(|io_err| {
-                    Error::new(ErrorKind::Io)
-                        .with_message("failed to write help")
-                        .with_source(io_err)
+                    (
+                        Error::new(ErrorKind::Io)
+                            .with_message("failed to write help")
+                            .with_source(io_err),
+                        ColorMode::Auto,
+                    )
                 })?;
                 return Ok(());
             }
             _ => {
                 let message = clap_error_summary(&err);
                 let hint = clap_error_hint(&err);
-                return Err(Error::new(ErrorKind::Usage)
-                    .with_message(message)
-                    .with_hint(hint));
+                return Err((
+                    Error::new(ErrorKind::Usage)
+                        .with_message(message)
+                        .with_hint(hint),
+                    ColorMode::Auto,
+                ));
             }
         },
     };
 
     let pool_dir = cli.dir.unwrap_or_else(default_pool_dir);
+    let color_mode = cli.color;
 
     let result = (|| match cli.command {
         Command::Version => {
@@ -203,11 +210,22 @@ fn run() -> Result<(), Error> {
             let pool_handle =
                 Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
             let pretty = !jsonl;
-            peek(&pool_handle, &pool, &path, tail, pretty, quiet_drops)
+            peek(
+                &pool_handle,
+                &pool,
+                &path,
+                tail,
+                pretty,
+                quiet_drops,
+                color_mode,
+            )
         }
     })();
 
-    result.map_err(add_corrupt_hint).map_err(add_io_hint)
+    result
+        .map_err(add_corrupt_hint)
+        .map_err(add_io_hint)
+        .map_err(|err| (err, color_mode))
 }
 
 fn normalize_args<I>(args: I) -> Vec<OsString>
@@ -271,9 +289,33 @@ struct Cli {
         help = "Override the pool directory (default: ~/.plasmite/pools)"
     )]
     dir: Option<PathBuf>,
+    #[arg(
+        long,
+        default_value = "auto",
+        value_enum,
+        help = "Colorize stderr diagnostics: auto|always|never"
+    )]
+    color: ColorMode,
 
     #[command(subcommand)]
     command: Command,
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum ColorMode {
+    Auto,
+    Always,
+    Never,
+}
+
+impl ColorMode {
+    fn use_color(self, is_tty: bool) -> bool {
+        match self {
+            ColorMode::Auto => is_tty,
+            ColorMode::Always => true,
+            ColorMode::Never => false,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -575,6 +617,23 @@ fn emit_json(value: serde_json::Value) {
     println!("{json}");
 }
 
+#[derive(Copy, Clone, Debug)]
+enum AnsiColor {
+    Red,
+    Yellow,
+}
+
+fn colorize_label(label: &str, enabled: bool, color: AnsiColor) -> String {
+    if !enabled {
+        return label.to_string();
+    }
+    let code = match color {
+        AnsiColor::Red => "31",
+        AnsiColor::Yellow => "33",
+    };
+    format!("\u{1b}[{code}m{label}\u{1b}[0m")
+}
+
 fn emit_message(value: serde_json::Value, pretty: bool) {
     let json = if pretty {
         serde_json::to_string_pretty(&value)
@@ -585,9 +644,10 @@ fn emit_message(value: serde_json::Value, pretty: bool) {
     println!("{json}");
 }
 
-fn emit_error(err: &Error) {
-    if io::stderr().is_terminal() {
-        eprintln!("{}", error_text(err));
+fn emit_error(err: &Error, color_mode: ColorMode) {
+    let is_tty = io::stderr().is_terminal();
+    if is_tty {
+        eprintln!("{}", error_text(err, color_mode.use_color(is_tty)));
         return;
     }
 
@@ -605,9 +665,15 @@ fn notice_time_now() -> Option<String> {
     ts.format(&Rfc3339).ok()
 }
 
-fn emit_notice(notice: &Notice) {
-    if io::stderr().is_terminal() {
-        eprintln!("notice: {} (pool: {})", notice.message, notice.pool);
+fn emit_notice(notice: &Notice, color_mode: ColorMode) {
+    let is_tty = io::stderr().is_terminal();
+    if is_tty {
+        eprintln!(
+            "{} {} (pool: {})",
+            colorize_label("notice:", color_mode.use_color(is_tty), AnsiColor::Yellow),
+            notice.message,
+            notice.pool
+        );
         return;
     }
 
@@ -670,26 +736,46 @@ fn error_json(err: &Error) -> Value {
     Value::Object(outer)
 }
 
-fn error_text(err: &Error) -> String {
+fn error_text(err: &Error, use_color: bool) -> String {
     let mut lines = Vec::new();
-    lines.push(format!("error: {}", error_message(err)));
+    lines.push(format!(
+        "{} {}",
+        colorize_label("error:", use_color, AnsiColor::Red),
+        error_message(err)
+    ));
 
     if let Some(hint) = err.hint() {
-        lines.push(format!("hint: {hint}"));
+        lines.push(format!(
+            "{} {hint}",
+            colorize_label("hint:", use_color, AnsiColor::Yellow)
+        ));
     }
     if let Some(path) = err.path() {
-        lines.push(format!("path: {}", path.display()));
+        lines.push(format!(
+            "{} {}",
+            colorize_label("path:", use_color, AnsiColor::Yellow),
+            path.display()
+        ));
     }
     if let Some(seq) = err.seq() {
-        lines.push(format!("seq: {seq}"));
+        lines.push(format!(
+            "{} {seq}",
+            colorize_label("seq:", use_color, AnsiColor::Yellow)
+        ));
     }
     if let Some(offset) = err.offset() {
-        lines.push(format!("offset: {offset}"));
+        lines.push(format!(
+            "{} {offset}",
+            colorize_label("offset:", use_color, AnsiColor::Yellow)
+        ));
     }
 
     let causes = error_causes(err);
     if let Some(cause) = causes.first() {
-        lines.push(format!("caused by: {cause}"));
+        lines.push(format!(
+            "{} {cause}",
+            colorize_label("caused by:", use_color, AnsiColor::Yellow)
+        ));
     }
 
     lines.join("\n")
@@ -889,6 +975,7 @@ fn peek(
     tail: u64,
     pretty: bool,
     quiet_drops: bool,
+    color_mode: ColorMode,
 ) -> Result<(), Error> {
     let mut cursor = Cursor::new();
     let mut header = pool.header_from_mmap()?;
@@ -973,7 +1060,7 @@ fn peek(
             message: format!("dropped {dropped_count} messages"),
             details,
         };
-        emit_notice(&notice);
+        emit_notice(&notice, color_mode);
         *last_notice_at = Some(Instant::now());
         pending.take();
     };
@@ -1028,7 +1115,7 @@ fn peek(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_size, read_json_stream};
+    use super::{Error, ErrorKind, error_text, parse_size, read_json_stream};
     use serde_json::json;
     use std::io::Cursor;
 
@@ -1059,5 +1146,15 @@ mod tests {
         .expect("stream parse");
         assert_eq!(count, 3);
         assert_eq!(values, vec![json!({"a":1}), json!({"b":2}), json!({"c":3})]);
+    }
+
+    #[test]
+    fn error_text_respects_color_flag() {
+        let err = Error::new(ErrorKind::Usage).with_message("bad input");
+        let colored = error_text(&err, true);
+        let plain = error_text(&err, false);
+        assert!(colored.contains("\u{1b}[31merror:\u{1b}[0m"));
+        assert!(plain.contains("error:"));
+        assert!(!plain.contains("\u{1b}["));
     }
 }

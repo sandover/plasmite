@@ -532,7 +532,14 @@ fn errors_are_json_on_non_tty_stderr() {
     let pool_dir = temp.path().join("pools");
 
     let peek = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "peek", "missing"])
+        .args([
+            "--color",
+            "always",
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "missing",
+        ])
         .output()
         .expect("peek");
     assert_eq!(peek.status.code().unwrap(), 3);
