@@ -991,6 +991,38 @@ fn pool_list_lists_pools_sorted_by_name() {
 }
 
 #[test]
+fn peek_since_future_exits_empty() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--since",
+            "2999-01-01T00:00:00Z",
+        ])
+        .output()
+        .expect("peek");
+    assert!(peek.status.success());
+    assert!(peek.stdout.is_empty());
+}
+
+#[test]
 fn peek_format_jsonl_matches_jsonl_alias() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");

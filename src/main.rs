@@ -259,6 +259,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             tail,
             quiet_drops,
             format,
+            since,
         } => {
             let path = resolve_poolref(&pool, &pool_dir)?;
             let pool_handle =
@@ -274,15 +275,24 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 PeekFormat::Pretty
             });
             let pretty = matches!(format, PeekFormat::Pretty);
-            peek(
-                &pool_handle,
-                &pool,
-                &path,
+            let now = now_ns()?;
+            let since_ns = since
+                .as_deref()
+                .map(|value| parse_since(value, now))
+                .transpose()?;
+            if let Some(since_ns) = since_ns {
+                if since_ns > now {
+                    return Ok(RunOutcome::ok());
+                }
+            }
+            let cfg = PeekConfig {
                 tail,
                 pretty,
+                since_ns,
                 quiet_drops,
                 color_mode,
-            )?;
+            };
+            peek(&pool_handle, &pool, &path, cfg)?;
             Ok(RunOutcome::ok())
         }
     })();
@@ -512,6 +522,7 @@ NOTES
   - Default output is pretty-printed JSON per message.
   - Use `--format jsonl` for compact, one-object-per-line output (recommended for pipes/scripts).
   - `--jsonl` is a compatibility alias for `--format jsonl`.
+  - `--since` filters by message time (RFC 3339 or relative like 5m); it cannot be combined with --tail.
   - Drop notices are emitted on stderr when the reader falls behind; use --quiet-drops to suppress."#
     )]
     Peek {
@@ -532,6 +543,12 @@ NOTES
             help = "Output format: pretty|jsonl (use --jsonl as alias for jsonl)"
         )]
         format: Option<PeekFormat>,
+        #[arg(
+            long,
+            help = "Only emit messages at or after this time (RFC 3339 or relative like 5m)",
+            conflicts_with = "tail"
+        )]
+        since: Option<String>,
         #[arg(long = "quiet-drops", help = "Suppress drop notices on stderr")]
         quiet_drops: bool,
     },
@@ -812,6 +829,41 @@ fn parse_size(input: &str) -> Result<u64, Error> {
             .with_message("size overflow")
             .with_hint("Use a smaller size value.")
     })
+}
+
+fn parse_since(input: &str, now_ns: u64) -> Result<u64, Error> {
+    if let Some(duration_ns) = parse_relative_since(input) {
+        return Ok(now_ns.saturating_sub(duration_ns));
+    }
+    let trimmed = input.trim();
+    let ts = time::OffsetDateTime::parse(trimmed, &time::format_description::well_known::Rfc3339)
+        .map_err(|err| {
+        Error::new(ErrorKind::Usage)
+            .with_message("invalid --since value")
+            .with_hint("Use RFC 3339 (2026-02-02T23:45:00Z) or relative like 5m.")
+            .with_source(err)
+    })?;
+    Ok(ts.unix_timestamp_nanos() as u64)
+}
+
+fn parse_relative_since(input: &str) -> Option<u64> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let (digits, unit) = trimmed.split_at(trimmed.len().saturating_sub(1));
+    if digits.is_empty() || !digits.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    let value: u64 = digits.parse().ok()?;
+    let seconds = match unit {
+        "s" | "S" => value,
+        "m" | "M" => value.saturating_mul(60),
+        "h" | "H" => value.saturating_mul(60 * 60),
+        "d" | "D" => value.saturating_mul(60 * 60 * 24),
+        _ => return None,
+    };
+    Some(seconds.saturating_mul(1_000_000_000))
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -1455,15 +1507,16 @@ impl DropNotice {
     }
 }
 
-fn peek(
-    pool: &Pool,
-    pool_ref: &str,
-    pool_path: &Path,
+#[derive(Copy, Clone, Debug)]
+struct PeekConfig {
     tail: u64,
     pretty: bool,
+    since_ns: Option<u64>,
     quiet_drops: bool,
     color_mode: ColorMode,
-) -> Result<(), Error> {
+}
+
+fn peek(pool: &Pool, pool_ref: &str, pool_path: &Path, cfg: PeekConfig) -> Result<(), Error> {
     let mut cursor = Cursor::new();
     let mut header = pool.header_from_mmap()?;
     let mut emit = VecDeque::new();
@@ -1472,14 +1525,31 @@ fn peek(
     let mut last_notice_at: Option<Instant> = None;
     let notice_interval = Duration::from_secs(1);
 
-    if tail > 0 {
+    if let Some(since_ns) = cfg.since_ns {
+        cursor.seek_to(header.tail_off as usize);
+        loop {
+            match cursor.next(pool)? {
+                CursorResult::Message(frame) => {
+                    if frame.timestamp_ns >= since_ns {
+                        emit_message(message_from_frame(&frame)?, cfg.pretty, cfg.color_mode);
+                        last_seen_seq = Some(frame.seq);
+                    }
+                }
+                CursorResult::WouldBlock => break,
+                CursorResult::FellBehind => {
+                    header = pool.header_from_mmap()?;
+                    cursor.seek_to(header.tail_off as usize);
+                }
+            }
+        }
+    } else if cfg.tail > 0 {
         cursor.seek_to(header.tail_off as usize);
         loop {
             match cursor.next(pool)? {
                 CursorResult::Message(frame) => {
                     emit.push_back(message_from_frame(&frame)?);
                     last_seen_seq = Some(frame.seq);
-                    while emit.len() > tail as usize {
+                    while emit.len() > cfg.tail as usize {
                         emit.pop_front();
                     }
                 }
@@ -1491,11 +1561,11 @@ fn peek(
             }
         }
         for value in emit.drain(..) {
-            emit_message(value, pretty, color_mode);
+            emit_message(value, cfg.pretty, cfg.color_mode);
         }
     }
 
-    if tail == 0 {
+    if cfg.since_ns.is_none() && cfg.tail == 0 {
         cursor.seek_to(header.head_off as usize);
     }
 
@@ -1507,7 +1577,7 @@ fn peek(
 
     let maybe_emit_pending = |pending: &mut Option<DropNotice>,
                               last_notice_at: &mut Option<Instant>| {
-        if quiet_drops {
+        if cfg.quiet_drops {
             pending.take();
             return;
         }
@@ -1547,13 +1617,13 @@ fn peek(
             message: format!("dropped {dropped_count} messages"),
             details,
         };
-        emit_notice(&notice, color_mode);
+        emit_notice(&notice, cfg.color_mode);
         *last_notice_at = Some(Instant::now());
         pending.take();
     };
 
     let queue_drop = |last_seen_seq: u64, next_seen_seq: u64, pending: &mut Option<DropNotice>| {
-        if quiet_drops {
+        if cfg.quiet_drops {
             return;
         }
         match pending {
@@ -1578,7 +1648,7 @@ fn peek(
                         maybe_emit_pending(&mut pending_drop, &mut last_notice_at);
                     }
                 }
-                emit_message(message_from_frame(&frame)?, pretty, color_mode);
+                emit_message(message_from_frame(&frame)?, cfg.pretty, cfg.color_mode);
                 last_seen_seq = Some(frame.seq);
                 maybe_emit_pending(&mut pending_drop, &mut last_notice_at);
                 backoff = Duration::from_millis(1);
@@ -1590,7 +1660,7 @@ fn peek(
             }
             CursorResult::FellBehind => {
                 header = pool.header_from_mmap()?;
-                if tail > 0 {
+                if cfg.tail > 0 {
                     cursor.seek_to(header.tail_off as usize);
                 } else {
                     cursor.seek_to(header.head_off as usize);

@@ -64,6 +64,9 @@ plasmite get foo 1
 
 # watch for new messages (Ctrl-C to stop)
 plasmite peek foo
+
+# watch messages from the last 5 minutes
+plasmite peek foo --since 5m
 ```
 
 Tip: `peek` is designed to compose with Unix tools:
