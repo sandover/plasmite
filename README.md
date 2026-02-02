@@ -162,6 +162,7 @@ On disk, each message payload is stored as **Lite³ bytes for `{meta,data}`**; t
 Errors:
 - On TTY, errors are concise human text (one line + hint).
 - When stderr is not a TTY (piped/redirected), errors are JSON objects on stderr for easy parsing.
+- On TTY, pretty JSON stdout is colorized by default; disable with `--color never`.
 
 Example (non-TTY JSON error):
 ```json

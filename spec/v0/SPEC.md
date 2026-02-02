@@ -144,7 +144,7 @@ Required fields:
 Invariants:
 
 * JSON notices never include ANSI escapes, regardless of color policy.
-* Colorization of human stderr output is controlled by `--color auto|always|never`.
+* Colorization of human stderr output and pretty JSON stdout is controlled by `--color auto|always|never`.
 * Notice schemas are additive-only once promoted.
 * Implementations should coalesce high-frequency notices and rate-limit emissions.
 

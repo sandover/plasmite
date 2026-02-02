@@ -14,8 +14,10 @@ use std::collections::VecDeque;
 use std::error::Error as StdError;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+mod color_json;
 mod ingest;
 
+use color_json::colorize_json;
 use ingest::{ErrorPolicy, IngestConfig, IngestFailure, IngestMode, IngestOutcome, ingest};
 use plasmite::core::cursor::{Cursor, CursorResult, FrameRef};
 use plasmite::core::error::{Error, ErrorKind, to_exit_code};
@@ -86,7 +88,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 "name": "plasmite",
                 "version": env!("CARGO_PKG_VERSION"),
             });
-            emit_json(output);
+            emit_json(output, color_mode);
             Ok(RunOutcome::ok())
         }
         Command::Pool { command } => match command {
@@ -112,7 +114,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                     let info = pool.info()?;
                     results.push(pool_info_json(&name, &info));
                 }
-                emit_json(json!({ "created": results }));
+                emit_json(json!({ "created": results }), color_mode);
                 Ok(RunOutcome::ok())
             }
             PoolCommand::Info { name } => {
@@ -120,7 +122,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 let pool =
                     Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &name, &name))?;
                 let info = pool.info()?;
-                emit_json(pool_info_json(&name, &info));
+                emit_json(pool_info_json(&name, &info), color_mode);
                 Ok(RunOutcome::ok())
             }
             PoolCommand::Delete { name } => {
@@ -138,12 +140,15 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                             .with_source(err)
                     }
                 })?;
-                emit_json(json!({
-                    "deleted": {
-                        "pool": name,
-                        "path": path.display().to_string(),
-                    }
-                }));
+                emit_json(
+                    json!({
+                        "deleted": {
+                            "pool": name,
+                            "path": path.display().to_string(),
+                        }
+                    }),
+                    color_mode,
+                );
                 Ok(RunOutcome::ok())
             }
         },
@@ -203,7 +208,10 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                     let seq = pool_handle.append_with_options(payload.as_slice(), options)?;
                     Ok((seq, timestamp_ns))
                 })?;
-                emit_json(message_json(seq, timestamp_ns, &descrip, &data)?);
+                emit_json(
+                    message_json(seq, timestamp_ns, &descrip, &data)?,
+                    color_mode,
+                );
             } else {
                 let outcome = ingest_from_stdin(
                     io::stdin().lock(),
@@ -237,7 +245,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             let frame = pool_handle
                 .get(seq)
                 .map_err(|err| add_missing_seq_hint(err, &pool))?;
-            emit_json(message_from_frame(&frame)?);
+            emit_json(message_from_frame(&frame)?, color_mode);
             Ok(RunOutcome::ok())
         }
         Command::Peek {
@@ -345,7 +353,7 @@ struct Cli {
         long,
         default_value = "auto",
         value_enum,
-        help = "Colorize stderr diagnostics: auto|always|never"
+        help = "Colorize stderr diagnostics and pretty JSON output: auto|always|never"
     )]
     color: ColorMode,
 
@@ -829,13 +837,21 @@ fn pool_info_json(pool_ref: &str, info: &plasmite::core::pool::PoolInfo) -> Valu
     Value::Object(map)
 }
 
-fn emit_json(value: serde_json::Value) {
-    let json = if io::stdout().is_terminal() {
-        serde_json::to_string_pretty(&value)
+fn emit_json(value: serde_json::Value, color_mode: ColorMode) {
+    let is_tty = io::stdout().is_terminal();
+    let use_color = color_mode.use_color(is_tty);
+    let pretty = is_tty || use_color;
+    let json = if pretty {
+        if use_color {
+            colorize_json(&value, true)
+        } else {
+            serde_json::to_string_pretty(&value)
+                .unwrap_or_else(|_| "{\"error\":\"json encode failed\"}".to_string())
+        }
     } else {
         serde_json::to_string(&value)
-    }
-    .unwrap_or_else(|_| "{\"error\":\"json encode failed\"}".to_string());
+            .unwrap_or_else(|_| "{\"error\":\"json encode failed\"}".to_string())
+    };
     println!("{json}");
 }
 
@@ -856,13 +872,20 @@ fn colorize_label(label: &str, enabled: bool, color: AnsiColor) -> String {
     format!("\u{1b}[{code}m{label}\u{1b}[0m")
 }
 
-fn emit_message(value: serde_json::Value, pretty: bool) {
+fn emit_message(value: serde_json::Value, pretty: bool, color_mode: ColorMode) {
+    let is_tty = io::stdout().is_terminal();
+    let use_color = color_mode.use_color(is_tty);
     let json = if pretty {
-        serde_json::to_string_pretty(&value)
+        if use_color {
+            colorize_json(&value, true)
+        } else {
+            serde_json::to_string_pretty(&value)
+                .unwrap_or_else(|_| "{\"error\":\"json encode failed\"}".to_string())
+        }
     } else {
         serde_json::to_string(&value)
-    }
-    .unwrap_or_else(|_| "{\"error\":\"json encode failed\"}".to_string());
+            .unwrap_or_else(|_| "{\"error\":\"json encode failed\"}".to_string())
+    };
     println!("{json}");
 }
 
@@ -1208,7 +1231,11 @@ fn ingest_from_stdin<R: Read>(
                     .append_with_options(payload.as_slice(), options)?;
                 Ok((seq, timestamp_ns))
             })?;
-            emit_message(message_json(seq, timestamp_ns, ctx.descrips, &data)?, false);
+            emit_message(
+                message_json(seq, timestamp_ns, ctx.descrips, &data)?,
+                false,
+                ctx.color_mode,
+            );
             Ok(())
         },
         |failure| ingest_failure_notice(&failure, ctx.pool_ref, ctx.pool_path, ctx.color_mode),
@@ -1341,7 +1368,7 @@ fn peek(
             }
         }
         for value in emit.drain(..) {
-            emit_message(value, pretty);
+            emit_message(value, pretty, color_mode);
         }
     }
 
@@ -1428,7 +1455,7 @@ fn peek(
                         maybe_emit_pending(&mut pending_drop, &mut last_notice_at);
                     }
                 }
-                emit_message(message_from_frame(&frame)?, pretty);
+                emit_message(message_from_frame(&frame)?, pretty, color_mode);
                 last_seen_seq = Some(frame.seq);
                 maybe_emit_pending(&mut pending_drop, &mut last_notice_at);
                 backoff = Duration::from_millis(1);
