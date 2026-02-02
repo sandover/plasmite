@@ -418,6 +418,131 @@ fn poke_retries_when_pool_is_busy() {
 }
 
 #[test]
+fn color_always_colorizes_pretty_stdout() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let info = cmd()
+        .args([
+            "--color",
+            "always",
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "info",
+            "demo",
+        ])
+        .output()
+        .expect("info");
+    assert!(info.status.success());
+    let stdout = String::from_utf8_lossy(&info.stdout);
+    assert!(stdout.contains("\u{1b}[36m\"pool\"\u{1b}[0m"));
+}
+
+#[test]
+fn color_never_does_not_emit_ansi() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let info = cmd()
+        .args([
+            "--color",
+            "never",
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "info",
+            "demo",
+        ])
+        .output()
+        .expect("info");
+    assert!(info.status.success());
+    let stdout = String::from_utf8_lossy(&info.stdout);
+    assert!(!stdout.contains("\u{1b}["));
+}
+
+#[test]
+fn color_always_does_not_color_jsonl() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let mut peek = cmd()
+        .args([
+            "--color",
+            "always",
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "1",
+            "--format",
+            "jsonl",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("peek jsonl");
+    let stdout = peek.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let read = reader.read_line(&mut line).expect("read line");
+    assert!(read > 0, "expected a line from peek output");
+    let line = line.trim_end();
+    assert!(!line.contains("\u{1b}["));
+    let _ = parse_json(line);
+    let _ = peek.kill();
+    let _ = peek.wait();
+}
+
+#[test]
 fn poke_auto_handles_pretty_json() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
