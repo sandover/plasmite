@@ -137,12 +137,19 @@ fn run() -> Result<(), (Error, ColorMode)> {
             durability,
             create,
             create_size,
+            retry,
+            retry_delay,
         } => {
             let path = resolve_poolref(&pool, &pool_dir)?;
             if create_size.is_some() && !create {
                 return Err(Error::new(ErrorKind::Usage)
                     .with_message("--create-size requires --create")
                     .with_hint("Add --create or remove --create-size."));
+            }
+            if retry_delay.is_some() && retry == 0 {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("--retry-delay requires --retry")
+                    .with_hint("Add --retry or remove --retry-delay."));
             }
             let mut pool_handle = match Pool::open(&path) {
                 Ok(pool) => pool,
@@ -160,6 +167,7 @@ fn run() -> Result<(), (Error, ColorMode)> {
                 }
             };
             let durability = parse_durability(&durability)?;
+            let retry_config = parse_retry_config(retry, retry_delay.as_deref())?;
             if data.is_some() && file.is_some() {
                 return Err(Error::new(ErrorKind::Usage)
                     .with_message("multiple data inputs provided")
@@ -169,16 +177,22 @@ fn run() -> Result<(), (Error, ColorMode)> {
             if data.is_some() || file.is_some() || io::stdin().is_terminal() {
                 let data = read_data_single(data, file)?;
                 let payload = lite3::encode_message(&descrip, &data)?;
-                let timestamp_ns = now_ns()?;
-                let options = AppendOptions::new(timestamp_ns, durability);
-                let seq = pool_handle.append_with_options(payload.as_slice(), options)?;
+                let (seq, timestamp_ns) = retry_with_config(retry_config, || {
+                    let timestamp_ns = now_ns()?;
+                    let options = AppendOptions::new(timestamp_ns, durability);
+                    let seq = pool_handle.append_with_options(payload.as_slice(), options)?;
+                    Ok((seq, timestamp_ns))
+                })?;
                 emit_json(message_json(seq, timestamp_ns, &descrip, &data)?);
             } else {
                 let count = read_json_stream(io::stdin().lock(), |data| {
                     let payload = lite3::encode_message(&descrip, &data)?;
-                    let timestamp_ns = now_ns()?;
-                    let options = AppendOptions::new(timestamp_ns, durability);
-                    let seq = pool_handle.append_with_options(payload.as_slice(), options)?;
+                    let (seq, timestamp_ns) = retry_with_config(retry_config, || {
+                        let timestamp_ns = now_ns()?;
+                        let options = AppendOptions::new(timestamp_ns, durability);
+                        let seq = pool_handle.append_with_options(payload.as_slice(), options)?;
+                        Ok((seq, timestamp_ns))
+                    })?;
                     emit_message(message_json(seq, timestamp_ns, &descrip, &data)?, false);
                     Ok(())
                 })?;
@@ -368,7 +382,8 @@ Accepts JSON from a single inline value, a file, or piped stdin."#,
   $ printf '%s\n' '{"x":1}' '{"x":2}' | plasmite poke demo
 
 NOTES
-  - `--durability flush` trades throughput for stronger “written to storage” assurance."#
+  - `--durability flush` trades throughput for stronger “written to storage” assurance.
+  - `--retry N` retries transient failures (lock contention, short-lived IO) with optional `--retry-delay`."#
     )]
     Poke {
         #[arg(help = "Pool name or path")]
@@ -392,6 +407,10 @@ NOTES
             help = "Pool size when creating (bytes or K/M/G)"
         )]
         create_size: Option<String>,
+        #[arg(long, default_value_t = 0, help = "Retry count for transient failures")]
+        retry: u32,
+        #[arg(long, help = "Delay between retries (e.g. 50ms, 1s, 2m)")]
+        retry_delay: Option<String>,
     },
     #[command(
         about = "Fetch one message by sequence number",
@@ -511,6 +530,7 @@ fn resolve_poolref(input: &str, pool_dir: &Path) -> Result<PathBuf, Error> {
 }
 
 const DEFAULT_POOL_SIZE: u64 = 1024 * 1024;
+const DEFAULT_RETRY_DELAY: Duration = Duration::from_millis(50);
 
 fn add_missing_pool_hint(err: Error, pool_ref: &str, input: &str) -> Error {
     if err.kind() != ErrorKind::NotFound || err.hint().is_some() {
@@ -597,6 +617,120 @@ fn parse_size(input: &str) -> Result<u64, Error> {
             .with_message("size overflow")
             .with_hint("Use a smaller size value.")
     })
+}
+
+#[derive(Copy, Clone, Debug)]
+struct RetryConfig {
+    retries: u32,
+    delay: Duration,
+}
+
+fn parse_retry_config(retry: u32, retry_delay: Option<&str>) -> Result<Option<RetryConfig>, Error> {
+    if retry == 0 {
+        return Ok(None);
+    }
+    let delay = match retry_delay {
+        Some(value) => parse_duration(value)?,
+        None => DEFAULT_RETRY_DELAY,
+    };
+    Ok(Some(RetryConfig {
+        retries: retry,
+        delay,
+    }))
+}
+
+fn parse_duration(input: &str) -> Result<Duration, Error> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("invalid duration")
+            .with_hint("Use a number plus ms|s|m|h (e.g. 10s)."));
+    }
+    let split = trimmed.char_indices().find(|(_, ch)| !ch.is_ascii_digit());
+    let (num_str, unit) = match split {
+        Some((idx, _)) => trimmed.split_at(idx),
+        None => ("", ""),
+    };
+    if num_str.is_empty() || unit.is_empty() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("invalid duration")
+            .with_hint("Use a number plus ms|s|m|h (e.g. 10s)."));
+    }
+    let value: u64 = num_str.parse().map_err(|_| {
+        Error::new(ErrorKind::Usage)
+            .with_message("invalid duration")
+            .with_hint("Use a number plus ms|s|m|h (e.g. 10s).")
+    })?;
+    let millis = match unit {
+        "ms" => value,
+        "s" => value.saturating_mul(1_000),
+        "m" => value.saturating_mul(60_000),
+        "h" => value.saturating_mul(3_600_000),
+        _ => {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("invalid duration")
+                .with_hint("Use a number plus ms|s|m|h (e.g. 10s)."));
+        }
+    };
+    Ok(Duration::from_millis(millis))
+}
+
+fn is_retryable(err: &Error) -> bool {
+    match err.kind() {
+        ErrorKind::Busy => true,
+        ErrorKind::Io => err
+            .source()
+            .and_then(|source| source.downcast_ref::<io::Error>())
+            .is_some_and(|io_err| {
+                matches!(
+                    io_err.kind(),
+                    io::ErrorKind::Interrupted
+                        | io::ErrorKind::WouldBlock
+                        | io::ErrorKind::TimedOut
+                )
+            }),
+        _ => false,
+    }
+}
+
+fn add_retry_hint(err: Error, attempts: u32, waited: Duration) -> Error {
+    let info = format!(
+        "Retry attempts: {attempts} (waited {}ms).",
+        waited.as_millis()
+    );
+    if let Some(hint) = err.hint().map(|hint| hint.to_string()) {
+        err.with_hint(format!("{hint} {info}"))
+    } else {
+        err.with_hint(info)
+    }
+}
+
+fn retry_with_config<T, F>(config: Option<RetryConfig>, mut f: F) -> Result<T, Error>
+where
+    F: FnMut() -> Result<T, Error>,
+{
+    let Some(config) = config else {
+        return f();
+    };
+    let mut attempts = 0u32;
+    let mut waited = Duration::from_millis(0);
+    loop {
+        attempts += 1;
+        match f() {
+            Ok(value) => return Ok(value),
+            Err(err) => {
+                if attempts <= config.retries && is_retryable(&err) {
+                    std::thread::sleep(config.delay);
+                    waited += config.delay;
+                    continue;
+                }
+                if attempts > 1 {
+                    return Err(add_retry_hint(err, attempts, waited));
+                }
+                return Err(err);
+            }
+        }
+    }
 }
 
 fn parse_durability(input: &str) -> Result<Durability, Error> {

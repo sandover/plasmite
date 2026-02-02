@@ -3,6 +3,7 @@
 //! Invariants: Parses stdout/stderr as JSON and asserts stable fields/behavior.
 //! Invariants: Uses temporary directories; never touches user home or project pools.
 //! Invariants: Timeouts are bounded to keep CI deterministic.
+use std::fs::File;
 use std::io::Write;
 use std::io::{BufRead, BufReader};
 use std::os::unix::fs::PermissionsExt;
@@ -11,6 +12,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use fs2::FileExt;
 use serde_json::Value;
 
 fn cmd() -> Command {
@@ -359,6 +361,60 @@ fn poke_emits_json_by_default() {
     let value = parse_json(std::str::from_utf8(&poke.stdout).expect("utf8"));
     assert!(value.get("seq").is_some());
     assert!(value.get("time").is_some());
+}
+
+#[test]
+fn poke_retries_when_pool_is_busy() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "busy",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let pool_path = pool_dir.join("busy.plasmite");
+    let file = File::open(&pool_path).expect("open pool");
+    file.lock_exclusive().expect("lock");
+
+    let (tx, rx) = mpsc::channel();
+    let pool_dir_str = pool_dir.to_str().unwrap().to_string();
+    thread::spawn(move || {
+        let output = cmd()
+            .args([
+                "--dir",
+                &pool_dir_str,
+                "poke",
+                "busy",
+                "{\"x\":1}",
+                "--retry",
+                "5",
+                "--retry-delay",
+                "50ms",
+            ])
+            .output()
+            .expect("poke");
+        let _ = tx.send(output);
+    });
+
+    thread::sleep(Duration::from_millis(150));
+    fs2::FileExt::unlock(&file).expect("unlock");
+
+    let output = rx.recv_timeout(Duration::from_secs(2)).expect("output");
+    assert!(
+        output.status.success(),
+        "poke failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value = parse_json(std::str::from_utf8(&output.stdout).expect("utf8"));
+    assert!(value.get("seq").is_some());
 }
 
 #[test]

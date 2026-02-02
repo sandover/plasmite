@@ -42,7 +42,7 @@ Minimal, explicit flag set for v0.0.1:
 
 * Global: `--dir`
 * `pool create`: `--size`
-* `poke`: `DATA`, `--file FILE` (plus stdin stream fallback), `--descrip`, `--durability fast|flush`, `--create`, `--create-size`
+* `poke`: `DATA`, `--file FILE` (plus stdin stream fallback), `--descrip`, `--durability fast|flush`, `--create`, `--create-size`, `--retry`, `--retry-delay`
 * `peek`: `--tail`, `--format pretty|jsonl`, `--jsonl`
 
 JSON output is the default for commands that print; `poke` always emits committed message JSON.
@@ -461,6 +461,12 @@ plasmite poke POOLREF [DATA] [OPTIONS]
 * `--durability fast|flush` (default: `fast`)
   * `fast`: best-effort (no explicit flush)
   * `flush`: flush frame + header to storage after append
+
+**Options (retries)**
+
+* `--retry N` (default: `0`): retry transient failures up to N times.
+* `--retry-delay DURATION` (optional): delay between retries (e.g. `50ms`, `1s`, `2m`).
+
 **Options (create)**
 
 * `--create` : create the pool if it is missing
