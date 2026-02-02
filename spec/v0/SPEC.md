@@ -224,6 +224,7 @@ Accept:
 ### Time/ranges (for peek)
 
 * `--tail N` (last N currently available)
+* `--since TIME` (RFC 3339 or relative `5m`, `2h`, `1d`)
 
 ### Exit codes
 
