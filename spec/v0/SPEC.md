@@ -43,7 +43,7 @@ Minimal, explicit flag set for v0.0.1:
 * Global: `--dir`
 * `pool create`: `--size`
 * `poke`: `DATA`, `--file FILE` (plus stdin stream fallback), `--descrip`, `--durability fast|flush`, `--create`, `--create-size`
-* `peek`: `--tail`, `--jsonl`
+* `peek`: `--tail`, `--format pretty|jsonl`, `--jsonl`
 
 JSON output is the default for commands that print; `poke` always emits committed message JSON.
 
@@ -60,7 +60,7 @@ Errors:
 ### Output formats
 
 * Non-streaming: JSON only (when output is enabled).
-* Streaming: default is pretty JSON per message; `--jsonl` emits one object per line.
+* Streaming: default is pretty JSON per message; `--format jsonl` (or `--jsonl`) emits one object per line.
 * Errors are JSON objects on stderr when stderr is not a TTY; otherwise concise text is used.
 * Exit codes are stable and match the core error kinds (see `docs/exit-codes.md`).
 

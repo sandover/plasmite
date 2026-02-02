@@ -390,7 +390,7 @@ fn peek_format_jsonl_matches_jsonl_alias() {
         .expect("poke");
     assert!(poke.status.success());
 
-    let fmt = cmd()
+    let mut fmt = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
@@ -401,14 +401,21 @@ fn peek_format_jsonl_matches_jsonl_alias() {
             "--format",
             "jsonl",
         ])
-        .output()
+        .stdout(Stdio::piped())
+        .spawn()
         .expect("peek format");
-    assert!(fmt.status.success());
-    let fmt_line = std::str::from_utf8(&fmt.stdout).expect("utf8").trim_end();
+    let fmt_stdout = fmt.stdout.take().expect("stdout");
+    let mut fmt_reader = BufReader::new(fmt_stdout);
+    let mut fmt_line = String::new();
+    let read = fmt_reader.read_line(&mut fmt_line).expect("read line");
+    assert!(read > 0, "expected a line from peek output");
+    let fmt_line = fmt_line.trim_end();
     assert!(!fmt_line.contains('\n'));
     let _ = parse_json(fmt_line);
+    let _ = fmt.kill();
+    let _ = fmt.wait();
 
-    let alias = cmd()
+    let mut alias = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
@@ -418,12 +425,19 @@ fn peek_format_jsonl_matches_jsonl_alias() {
             "1",
             "--jsonl",
         ])
-        .output()
+        .stdout(Stdio::piped())
+        .spawn()
         .expect("peek jsonl");
-    assert!(alias.status.success());
-    let alias_line = std::str::from_utf8(&alias.stdout).expect("utf8").trim_end();
+    let alias_stdout = alias.stdout.take().expect("stdout");
+    let mut alias_reader = BufReader::new(alias_stdout);
+    let mut alias_line = String::new();
+    let read = alias_reader.read_line(&mut alias_line).expect("read line");
+    assert!(read > 0, "expected a line from peek output");
+    let alias_line = alias_line.trim_end();
     assert!(!alias_line.contains('\n'));
     let _ = parse_json(alias_line);
+    let _ = alias.kill();
+    let _ = alias.wait();
 }
 
 #[test]
