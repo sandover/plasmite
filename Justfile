@@ -16,10 +16,10 @@ test:
 
 ci: fmt clippy test
 
-.scratch:
+scratch:
 	mkdir -p .scratch
 
-audit-db: .scratch
+audit-db: scratch
 	if [ -d .scratch/advisory-db/.git ]; then \
 	  git -C .scratch/advisory-db pull --ff-only; \
 	else \
