@@ -42,7 +42,7 @@ Minimal, explicit flag set for v0.0.1:
 
 * Global: `--dir`
 * `pool create`: `--size`
-* `poke`: `DATA`, `--file FILE` (plus stdin stream fallback), `--descrip`, `--durability fast|flush`, `--create`, `--create-size`, `--retry`, `--retry-delay`
+* `poke`: `DATA`, `--file FILE`, `--in`, `--errors`, `--descrip`, `--durability fast|flush`, `--create`, `--create-size`, `--retry`, `--retry-delay`
 * `peek`: `--tail`, `--format pretty|jsonl`, `--jsonl`
 
 JSON output is the default for commands that print; `poke` always emits committed message JSON.
@@ -147,6 +147,21 @@ Invariants:
 * Colorization of human stderr output is controlled by `--color auto|always|never`.
 * Notice schemas are additive-only once promoted.
 * Implementations should coalesce high-frequency notices and rate-limit emissions.
+
+### Notice kinds (current)
+
+* `drop` (from `peek` when messages are overwritten)
+  * `details.dropped_count` (number)
+* `ingest_skip` (from `poke` when `--errors skip` drops a bad record)
+  * `details.mode` (string): `auto|jsonl|json|seq|jq|event`
+  * `details.index` (number): 1-based record index
+  * `details.error_kind` (string): `Parse`, `Oversize`, or storage error kind
+  * `details.line` (number, optional): line number for line-based modes
+  * `details.snippet` (string, optional): truncated input excerpt
+* `ingest_summary` (from `poke` when `--errors skip` completes)
+  * `details.total` (number)
+  * `details.ok` (number)
+  * `details.failed` (number)
 
 ---
 
@@ -454,7 +469,24 @@ plasmite poke POOLREF [DATA] [OPTIONS]
 
 * `DATA` (inline JSON value)
 * `--file FILE.json` (read JSON from file; use `-` for stdin)
-* If stdin is not a TTY and no `DATA`/`--file` is provided: treat stdin as a stream of JSON values (jq-style). Each JSON value becomes one message.
+* If stdin is not a TTY and no `DATA`/`--file` is provided: treat stdin as a stream of JSON values (auto-detected format). Each JSON value becomes one message.
+
+**Options (stdin format)**
+
+* `--in auto|jsonl|json|seq|jq` (default: `auto`)
+  * `auto`: detect JSON Lines, JSON Sequence (0x1e), event-style streams (`data:` lines), or multiline JSON.
+  * `jsonl`: one JSON value per line (best for `jq -c`, log streams, ndjson).
+  * `json`: single JSON document (possibly pretty-printed).
+  * `seq`: JSON Sequence records separated by 0x1e (common on Linux).
+  * `jq`: whitespace-delimited JSON values (jq-style stream).
+
+**Options (stdin errors)**
+
+* `--errors stop|skip` (default: `stop`)
+  * `stop`: abort on first parse/append error.
+  * `skip`: continue past bad records, emit notices on stderr, and return exit code 1 if any record is skipped.
+  * In auto/jsonl multiline mode, `skip` resyncs on lines that look like new JSON values (`{` or `[`); use `--in json` for strict single-document parsing.
+  * `skip` is not supported for `--in jq` (no reliable resync).
 
 **Options (durability)**
 

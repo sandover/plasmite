@@ -9,7 +9,7 @@ Pools and their messages can fill a similar role to [OSC](https://ccrma.stanford
 
 It’s inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma) but simplified, written in Rust, and with JSON semantics. 
 
-## What you get
+## Basics
 
 - **Single-file pools**: each pool is a `.plasmite` file
 - **Room-scale concurrency**: many readers + many writers (writers serialize at append time).
@@ -70,6 +70,32 @@ Tip: `peek` is designed to compose with Unix tools:
 ```bash
 plasmite peek demo | jq -c '.data'
 ```
+
+### Streaming into `poke`
+
+`poke` is designed to accept common streaming formats with no glue:
+
+```bash
+# JSON Lines (jq-friendly)
+jq -c '.items[]' data.json | plasmite poke foo
+
+# Event-style streams (lines prefixed with data:)
+curl -N https://example.com/stream | plasmite poke foo
+
+# JSON Sequence (0x1e record separators, common on Linux)
+journalctl -o json-seq -f | plasmite poke foo
+```
+
+Use `--in` to force a mode when auto-detection is wrong:
+
+```bash
+cat payload.json | plasmite poke foo --in json
+journalctl -o json-seq -f | plasmite poke foo --in seq
+```
+
+Use `--errors skip` for best-effort ingestion; skipped records emit notices on stderr
+and set exit code 1. In auto mode, multiline recovery resyncs on lines that look like
+the start of a new JSON value (`{` or `[`); for strict multiline JSON, use `--in json`.
 
 ### Two-terminal live stream demo (macOS logs)
 
