@@ -490,3 +490,7 @@
 {"type":"state","ts":"2026-02-02T23:17:15.968824Z","data":{"id":"OLGAM2","state":"doing","ts":"2026-02-02T23:17:15.968824Z"}}
 {"type":"result","ts":"2026-02-02T23:17:39.633046Z","data":{"task_id":"OLGAM2","summary":"Added release checklist and CI gate references.","path":"docs/releasing.md","sha256_at_attach":"15dd02d560af9932bd234ee333c801b2168cb28012aaf232c18bf950fc3538f7","mtime_at_attach":"2026-02-02T23:17:22.399992099Z","git_commit_at_attach":"7abd9ee86cfcd35944a34b4f3a80f42c76dc1990","ts":"2026-02-02T23:17:39.633046Z"}}
 {"type":"state","ts":"2026-02-02T23:17:39.636575Z","data":{"id":"OLGAM2","state":"done","ts":"2026-02-02T23:17:39.636575Z"}}
+{"type":"claim","ts":"2026-02-02T23:26:57.621571Z","data":{"id":"Y7OLWF","agent_id":"gpt-5.2@codex","ts":"2026-02-02T23:26:57.621571Z"}}
+{"type":"state","ts":"2026-02-02T23:26:57.621571Z","data":{"id":"Y7OLWF","state":"doing","ts":"2026-02-02T23:26:57.621571Z"}}
+{"type":"result","ts":"2026-02-02T23:28:09.363295Z","data":{"task_id":"Y7OLWF","summary":"Documented stdin modes, auto precedence/limits, skip semantics, and examples.","path":"spec/v0/SPEC.md","sha256_at_attach":"56571fbd289038d96cfd433814536c7ee40c6e63cbfb618c0ec41d59a392d341","mtime_at_attach":"2026-02-02T23:27:35.261085677Z","git_commit_at_attach":"0e09009c3e68fd7d7fd65f8c1af0472a3fd75ced","ts":"2026-02-02T23:28:09.363295Z"}}
+{"type":"state","ts":"2026-02-02T23:28:09.367789Z","data":{"id":"Y7OLWF","state":"done","ts":"2026-02-02T23:28:09.367789Z"}}

@@ -474,7 +474,12 @@ plasmite poke POOLREF [DATA] [OPTIONS]
 **Options (stdin format)**
 
 * `--in auto|jsonl|json|seq|jq` (default: `auto`)
-  * `auto`: detect JSON Lines, JSON Sequence (0x1e), event-style streams (`data:` lines), or multiline JSON.
+  * `auto`: detect JSON Sequence (0x1e), event-style streams (`data:`/`event:`/`id:`/`:…` lines), or JSON Lines (with multiline recovery).
+  * Auto detection precedence (first match wins):
+    1) Input prefix contains `0x1e` → `seq`
+    2) First non-empty line starts with `data:`/`event:`/`id:`/`:` → `event`
+    3) Otherwise → `jsonl` (multiline recovery allowed)
+  * Auto detection sniff limits: first 8 KiB and up to 8 lines.
   * `jsonl`: one JSON value per line (best for `jq -c`, log streams, ndjson).
   * `json`: single JSON document (possibly pretty-printed).
   * `seq`: JSON Sequence records separated by 0x1e (common on Linux).
@@ -484,7 +489,8 @@ plasmite poke POOLREF [DATA] [OPTIONS]
 
 * `--errors stop|skip` (default: `stop`)
   * `stop`: abort on first parse/append error.
-  * `skip`: continue past bad records, emit notices on stderr, and return exit code 1 if any record is skipped.
+  * `skip`: continue past *parse/oversize* errors at record boundaries; emit notices on stderr; exit code 1 if any record is skipped.
+  * Append/storage errors are **not** skippable; they abort ingestion even in `skip` mode.
   * In auto/jsonl multiline mode, `skip` resyncs on lines that look like new JSON values (`{` or `[`); use `--in json` for strict single-document parsing.
   * `skip` is not supported for `--in jq` (no reliable resync).
 
@@ -509,6 +515,28 @@ This gives you the classic pattern:
 ```bash
 seq=$(plasmite poke mypool '{"x":1}' --descrip event | jq -r '.seq')
 plasmite get mypool "$seq" | jq .
+```
+
+**Examples (stdin)**
+
+```bash
+# Single JSON document (pretty JSON ok)
+curl -s https://example.com/payload.json | plasmite poke demo --in json
+
+# Event-style stream (data: lines)
+curl -N https://example.com/stream | plasmite poke demo
+
+# JSONL from jq
+jq -c '.items[]' data.json | plasmite poke demo
+
+# macOS unified log (ndjson)
+/usr/bin/log stream --style ndjson --level info | plasmite poke demo --descrip log
+
+# systemd journal JSON
+journalctl -o json -f | plasmite poke demo --in jsonl
+
+# systemd journal JSON Sequence (RS-delimited)
+journalctl -o json-seq -f | plasmite poke demo --in seq
 ```
 
 ---

@@ -270,6 +270,7 @@ where
                 index,
                 IngestMode::Jsonl,
                 Some(line_no),
+                config.errors,
                 on_value,
                 on_failure,
             )?,
@@ -294,6 +295,7 @@ where
                             index,
                             IngestMode::Jsonl,
                             Some(record_line),
+                            config.errors,
                             on_value,
                             on_failure,
                         )?;
@@ -380,7 +382,15 @@ where
     }
     match serde_json::from_str::<Value>(&buf) {
         Ok(value) => {
-            apply_value(value, 1, IngestMode::Json, None, on_value, on_failure)?;
+            apply_value(
+                value,
+                1,
+                IngestMode::Json,
+                None,
+                config.errors,
+                on_value,
+                on_failure,
+            )?;
         }
         Err(_) => {
             on_failure(
@@ -453,6 +463,7 @@ where
                                 index,
                                 IngestMode::Seq,
                                 None,
+                                config.errors,
                                 on_value,
                                 on_failure,
                             )?,
@@ -504,9 +515,15 @@ where
         } else {
             let text = String::from_utf8_lossy(&buf);
             match serde_json::from_str::<Value>(&text) {
-                Ok(value) => {
-                    apply_value(value, index, IngestMode::Seq, None, on_value, on_failure)?
-                }
+                Ok(value) => apply_value(
+                    value,
+                    index,
+                    IngestMode::Seq,
+                    None,
+                    config.errors,
+                    on_value,
+                    on_failure,
+                )?,
                 Err(_) => {
                     on_failure(
                         index,
@@ -579,6 +596,7 @@ where
                     index,
                     IngestMode::Event,
                     Some(line_no),
+                    config.errors,
                     on_value,
                     on_failure,
                 )?,
@@ -638,6 +656,7 @@ where
                     index,
                     IngestMode::Event,
                     Some(line_no),
+                    config.errors,
                     on_value,
                     on_failure,
                 )?,
@@ -680,7 +699,15 @@ where
                 .with_message("invalid json input")
                 .with_hint("Use --in jsonl for line-delimited input.")
         })?;
-        apply_value(value, index, IngestMode::Jq, None, on_value, on_failure)?;
+        apply_value(
+            value,
+            index,
+            IngestMode::Jq,
+            None,
+            config.errors,
+            on_value,
+            on_failure,
+        )?;
     }
     Ok(())
 }
@@ -690,6 +717,7 @@ fn apply_value<F, N>(
     index: u64,
     mode: IngestMode,
     line: Option<u64>,
+    errors: ErrorPolicy,
     on_value: &mut F,
     on_failure: &mut N,
 ) -> Result<(), Error>
@@ -700,6 +728,9 @@ where
     match on_value(value, index) {
         Ok(()) => Ok(()),
         Err(err) => {
+            if errors == ErrorPolicy::Skip {
+                return Err(err);
+            }
             let message = err.message().unwrap_or("append failed");
             let kind = format!("{:?}", err.kind());
             on_failure(index, mode, line, message, &kind, None)

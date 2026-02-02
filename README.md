@@ -96,6 +96,7 @@ journalctl -o json-seq -f | plasmite poke foo --in seq
 Use `--errors skip` for best-effort ingestion; skipped records emit notices on stderr
 and set exit code 1. In auto mode, multiline recovery resyncs on lines that look like
 the start of a new JSON value (`{` or `[`); for strict multiline JSON, use `--in json`.
+Append/storage errors are not skippable and will abort ingestion.
 
 ### Two-terminal live stream demo (macOS logs)
 
