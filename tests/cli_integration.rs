@@ -362,6 +362,71 @@ fn poke_emits_json_by_default() {
 }
 
 #[test]
+fn peek_format_jsonl_matches_jsonl_alias() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let fmt = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "1",
+            "--format",
+            "jsonl",
+        ])
+        .output()
+        .expect("peek format");
+    assert!(fmt.status.success());
+    let fmt_line = std::str::from_utf8(&fmt.stdout).expect("utf8").trim_end();
+    assert!(!fmt_line.contains('\n'));
+    let _ = parse_json(fmt_line);
+
+    let alias = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "1",
+            "--jsonl",
+        ])
+        .output()
+        .expect("peek jsonl");
+    assert!(alias.status.success());
+    let alias_line = std::str::from_utf8(&alias.stdout).expect("utf8").trim_end();
+    assert!(!alias_line.contains('\n'));
+    let _ = parse_json(alias_line);
+}
+
+#[test]
 fn peek_emits_drop_notice_on_stderr() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
@@ -468,6 +533,48 @@ fn peek_emits_drop_notice_on_stderr() {
 
     let _ = peek.kill();
     let _ = peek.wait();
+}
+
+#[test]
+fn peek_rejects_conflicting_output_flags() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "1",
+            "--jsonl",
+            "--format",
+            "jsonl",
+        ])
+        .output()
+        .expect("peek");
+    assert_eq!(peek.status.code().unwrap(), 2);
+    let err = parse_error_json(&peek.stderr);
+    let inner = err
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
+    assert_eq!(inner.get("kind").and_then(|v| v.as_str()).unwrap(), "Usage");
+    let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(hint.contains("--format jsonl") || hint.contains("--jsonl"));
 }
 
 #[test]

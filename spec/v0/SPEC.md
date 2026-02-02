@@ -421,7 +421,8 @@ plasmite peek POOLREF [OPTIONS]
 **Options**
 
 * `--tail N` (or `-n N`): print the last N messages first, then keep watching.
-* `--jsonl`: emit one JSON object per line (recommended for pipes).
+* `--format pretty|jsonl`: select output format (default: `pretty`).
+* `--jsonl`: alias for `--format jsonl` (compatibility).
 * `--quiet-drops`: suppress non-fatal drop notices on stderr.
 
 **Behavior**

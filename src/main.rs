@@ -205,11 +205,22 @@ fn run() -> Result<(), (Error, ColorMode)> {
             jsonl,
             tail,
             quiet_drops,
+            format,
         } => {
             let path = resolve_poolref(&pool, &pool_dir)?;
             let pool_handle =
                 Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
-            let pretty = !jsonl;
+            if jsonl && format.is_some() {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("conflicting output options")
+                    .with_hint("Use --format jsonl (or --jsonl), but not both."));
+            }
+            let format = format.unwrap_or(if jsonl {
+                PeekFormat::Jsonl
+            } else {
+                PeekFormat::Pretty
+            });
+            let pretty = matches!(format, PeekFormat::Pretty);
             peek(
                 &pool_handle,
                 &pool,
@@ -308,6 +319,12 @@ enum ColorMode {
     Never,
 }
 
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum PeekFormat {
+    Pretty,
+    Jsonl,
+}
+
 impl ColorMode {
     fn use_color(self, is_tty: bool) -> bool {
         match self {
@@ -401,7 +418,8 @@ Use `--tail N` to print the last N messages first, then keep watching."#,
 
 NOTES
   - Default output is pretty-printed JSON per message.
-  - Use `--jsonl` for compact, one-object-per-line output (recommended for pipes/scripts).
+  - Use `--format jsonl` for compact, one-object-per-line output (recommended for pipes/scripts).
+  - `--jsonl` is a compatibility alias for `--format jsonl`.
   - Drop notices are emitted on stderr when the reader falls behind; use --quiet-drops to suppress."#
     )]
     Peek {
@@ -416,6 +434,12 @@ NOTES
         tail: u64,
         #[arg(long, help = "Emit JSON Lines (one object per line)")]
         jsonl: bool,
+        #[arg(
+            long,
+            value_enum,
+            help = "Output format: pretty|jsonl (use --jsonl as alias for jsonl)"
+        )]
+        format: Option<PeekFormat>,
         #[arg(long = "quiet-drops", help = "Suppress drop notices on stderr")]
         quiet_drops: bool,
     },
