@@ -145,6 +145,14 @@ Notes:
 
 Use a release build for baseline numbers. See `docs/perf.md` for the full guide.
 
+## Development
+
+Optional local git hook gate (fmt/clippy/tests) + policy banner:
+
+```bash
+just hooks-install
+```
+
 ## Concepts
 
 ### Pools

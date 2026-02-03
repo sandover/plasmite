@@ -16,6 +16,15 @@ test:
 
 ci: fmt clippy test
 
+hooks-install:
+	git config core.hooksPath .githooks
+	chmod -R u+x .githooks
+	@echo "Installed git hooks via core.hooksPath=.githooks"
+
+hooks-uninstall:
+	git config --unset core.hooksPath || true
+	@echo "Uninstalled git hooks (unset core.hooksPath)"
+
 scratch:
 	mkdir -p .scratch
 
