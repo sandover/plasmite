@@ -71,7 +71,7 @@ plasmite peek build
 ```bash
 # Script A waits for a signal
 echo "Waiting for go signal..."
-plasmite peek signals --where '.data.go == true' --tail 1 > /dev/null
+plasmite peek signals --where '.data.go == true' --tail 1 --one > /dev/null
 echo "Got it! Proceeding..."
 
 # Script B sends the signal

@@ -264,6 +264,172 @@ fn peek_emits_new_messages() {
 }
 
 #[test]
+fn peek_one_exits_after_first_match() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let mut peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--jsonl",
+            "--one",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("peek");
+
+    thread::sleep(Duration::from_millis(50));
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":2}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let stdout = peek.stdout.take().expect("stdout");
+    let (line_tx, line_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        let _ = reader.read_line(&mut line);
+        let _ = line_tx.send(line);
+    });
+
+    let line = line_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("peek output");
+    let value = parse_json(line.trim());
+    assert_eq!(value.get("data").unwrap()["x"], 1);
+
+    let (exit_tx, exit_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let status = peek.wait().expect("wait");
+        let _ = exit_tx.send(status);
+    });
+    let status = exit_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("peek exit");
+    assert!(status.success());
+}
+
+#[test]
+fn peek_tail_one_emits_nth_match() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let mut peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "2",
+            "--jsonl",
+            "--one",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("peek");
+
+    thread::sleep(Duration::from_millis(50));
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":2}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let stdout = peek.stdout.take().expect("stdout");
+    let (line_tx, line_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        let _ = reader.read_line(&mut line);
+        let _ = line_tx.send(line);
+    });
+
+    let line = line_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("peek output");
+    let value = parse_json(line.trim());
+    assert_eq!(value.get("data").unwrap()["x"], 2);
+
+    let (exit_tx, exit_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let status = peek.wait().expect("wait");
+        let _ = exit_tx.send(status);
+    });
+    let status = exit_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("peek exit");
+    assert!(status.success());
+}
+
+#[test]
 fn peek_where_filters_messages() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");

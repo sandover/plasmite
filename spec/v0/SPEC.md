@@ -472,12 +472,14 @@ plasmite peek POOLREF [OPTIONS]
 * `--where EXPR` (repeatable): filter messages by boolean expression (AND across repeats).
 * `--format pretty|jsonl`: select output format (default: `pretty`).
 * `--jsonl`: alias for `--format jsonl` (compatibility).
+* `--one`: exit after emitting one matching message.
 * `--quiet-drops`: suppress non-fatal drop notices on stderr.
 
 **Behavior**
 
 * Without `--tail`, starts at **newest+1** and waits for new messages.
 * With `--tail N`, prints the last N messages currently available, then waits for new ones.
+  * With `--tail N --one`, emits the Nth matching message (or waits for it) and exits.
 * `--since` cannot be combined with `--tail`.
 * If `--since` is in the future, `peek` exits with no output.
 * Relative `--since` uses UTC now; RFC 3339 offsets are honored.

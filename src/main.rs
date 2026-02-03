@@ -259,6 +259,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             pool,
             jsonl,
             tail,
+            one,
             quiet_drops,
             format,
             since,
@@ -291,6 +292,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             let cfg = PeekConfig {
                 tail,
                 pretty,
+                one,
                 since_ns,
                 where_predicates: compile_filters(&where_expr)?,
                 quiet_drops,
@@ -533,6 +535,9 @@ Use `--tail N` to see recent history first, then keep watching."#,
   # Last 10 messages, then keep watching
   $ plasmite peek foo --tail 10
 
+  # Emit one matching message, then exit
+  $ plasmite peek foo --where '.data.status == "error"' --one
+
   # Messages from the last 5 minutes
   $ plasmite peek foo --since 5m
 
@@ -560,6 +565,8 @@ NOTES
             help = "Print the last N messages first, then keep watching"
         )]
         tail: u64,
+        #[arg(long, help = "Exit after emitting one matching message")]
+        one: bool,
         #[arg(long, help = "Emit JSON Lines (one object per line)")]
         jsonl: bool,
         #[arg(
@@ -1539,6 +1546,7 @@ impl DropNotice {
 struct PeekConfig {
     tail: u64,
     pretty: bool,
+    one: bool,
     since_ns: Option<u64>,
     where_predicates: Vec<JqFilter>,
     quiet_drops: bool,
@@ -1553,6 +1561,7 @@ fn peek(pool: &Pool, pool_ref: &str, pool_path: &Path, cfg: PeekConfig) -> Resul
     let mut pending_drop: Option<DropNotice> = None;
     let mut last_notice_at: Option<Instant> = None;
     let notice_interval = Duration::from_secs(1);
+    let tail_wait = cfg.one && cfg.tail > 0;
 
     if let Some(since_ns) = cfg.since_ns {
         cursor.seek_to(header.tail_off as usize);
@@ -1563,6 +1572,9 @@ fn peek(pool: &Pool, pool_ref: &str, pool_path: &Path, cfg: PeekConfig) -> Resul
                         let message = message_from_frame(&frame)?;
                         if matches_all(cfg.where_predicates.as_slice(), &message)? {
                             emit_message(message, cfg.pretty, cfg.color_mode);
+                            if cfg.one {
+                                return Ok(());
+                            }
                         }
                         last_seen_seq = Some(frame.seq);
                     }
@@ -1595,8 +1607,17 @@ fn peek(pool: &Pool, pool_ref: &str, pool_path: &Path, cfg: PeekConfig) -> Resul
                 }
             }
         }
-        for value in emit.drain(..) {
-            emit_message(value, cfg.pretty, cfg.color_mode);
+        if tail_wait {
+            if emit.len() >= cfg.tail as usize {
+                if let Some(value) = emit.back() {
+                    emit_message(value.clone(), cfg.pretty, cfg.color_mode);
+                }
+                return Ok(());
+            }
+        } else {
+            for value in emit.drain(..) {
+                emit_message(value, cfg.pretty, cfg.color_mode);
+            }
         }
     }
 
@@ -1685,7 +1706,23 @@ fn peek(pool: &Pool, pool_ref: &str, pool_path: &Path, cfg: PeekConfig) -> Resul
                 }
                 let message = message_from_frame(&frame)?;
                 if matches_all(cfg.where_predicates.as_slice(), &message)? {
-                    emit_message(message, cfg.pretty, cfg.color_mode);
+                    if tail_wait {
+                        emit.push_back(message);
+                        while emit.len() > cfg.tail as usize {
+                            emit.pop_front();
+                        }
+                        if emit.len() == cfg.tail as usize {
+                            if let Some(value) = emit.back() {
+                                emit_message(value.clone(), cfg.pretty, cfg.color_mode);
+                            }
+                            return Ok(());
+                        }
+                    } else {
+                        emit_message(message, cfg.pretty, cfg.color_mode);
+                        if cfg.one {
+                            return Ok(());
+                        }
+                    }
                 }
                 last_seen_seq = Some(frame.seq);
                 maybe_emit_pending(&mut pending_drop, &mut last_notice_at);
