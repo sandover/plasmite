@@ -16,16 +16,16 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 mod color_json;
 mod ingest;
-mod where_expr;
+mod jq_filter;
 
 use color_json::colorize_json;
 use ingest::{ErrorPolicy, IngestConfig, IngestFailure, IngestMode, IngestOutcome, ingest};
+use jq_filter::{JqFilter, compile_filters, matches_all};
 use plasmite::core::cursor::{Cursor, CursorResult, FrameRef};
 use plasmite::core::error::{Error, ErrorKind, to_exit_code};
 use plasmite::core::lite3::{self, Lite3DocRef};
 use plasmite::core::pool::{AppendOptions, Durability, Pool, PoolOptions};
 use plasmite::notice::{Notice, notice_json};
-use where_expr::{WherePredicate, compile_where_predicates, matches_all_where};
 
 #[derive(Copy, Clone, Debug)]
 struct RunOutcome {
@@ -292,7 +292,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 tail,
                 pretty,
                 since_ns,
-                where_predicates: compile_where_predicates(&where_expr)?,
+                where_predicates: compile_filters(&where_expr)?,
                 quiet_drops,
                 color_mode,
             };
@@ -1523,7 +1523,7 @@ struct PeekConfig {
     tail: u64,
     pretty: bool,
     since_ns: Option<u64>,
-    where_predicates: Vec<WherePredicate>,
+    where_predicates: Vec<JqFilter>,
     quiet_drops: bool,
     color_mode: ColorMode,
 }
@@ -1544,7 +1544,7 @@ fn peek(pool: &Pool, pool_ref: &str, pool_path: &Path, cfg: PeekConfig) -> Resul
                 CursorResult::Message(frame) => {
                     if frame.timestamp_ns >= since_ns {
                         let message = message_from_frame(&frame)?;
-                        if matches_all_where(cfg.where_predicates.as_slice(), &message)? {
+                        if matches_all(cfg.where_predicates.as_slice(), &message)? {
                             emit_message(message, cfg.pretty, cfg.color_mode);
                         }
                         last_seen_seq = Some(frame.seq);
@@ -1563,7 +1563,7 @@ fn peek(pool: &Pool, pool_ref: &str, pool_path: &Path, cfg: PeekConfig) -> Resul
             match cursor.next(pool)? {
                 CursorResult::Message(frame) => {
                     let message = message_from_frame(&frame)?;
-                    if matches_all_where(cfg.where_predicates.as_slice(), &message)? {
+                    if matches_all(cfg.where_predicates.as_slice(), &message)? {
                         emit.push_back(message);
                     }
                     last_seen_seq = Some(frame.seq);
@@ -1667,7 +1667,7 @@ fn peek(pool: &Pool, pool_ref: &str, pool_path: &Path, cfg: PeekConfig) -> Resul
                     }
                 }
                 let message = message_from_frame(&frame)?;
-                if matches_all_where(cfg.where_predicates.as_slice(), &message)? {
+                if matches_all(cfg.where_predicates.as_slice(), &message)? {
                     emit_message(message, cfg.pretty, cfg.color_mode);
                 }
                 last_seen_seq = Some(frame.seq);

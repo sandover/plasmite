@@ -1,34 +1,58 @@
-//! Purpose: Compile and evaluate `plasmite peek --where` expressions against message JSON.
-//! Exports: `WherePredicate`, `compile_where_predicates`, `matches_all_where`.
-//! Role: Small adapter around `jaq-core` to support boolean filtering without shelling out to `jq`.
+//! Purpose: Compile and evaluate jq-style expressions against JSON values.
+//! Exports: `JqFilter`, `compile_filters`, `matches_all`.
+//! Role: Adapter around `jaq-core` for boolean filtering in the CLI.
 //! Invariants: Parse/compile failures are usage errors; runtime eval errors count as "no match".
-//! Invariants: Each `--where` must yield only booleans (otherwise: usage error).
+//! Invariants: Each filter must yield only booleans (otherwise: usage error).
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt;
 
+use jaq_core::box_iter::box_once;
 use jaq_core::load::{Arena, File, Loader};
-use jaq_core::{Compiler, Ctx, Error as JaqError, Native, RcIter};
+use jaq_core::{Bind, Compiler, Ctx, Error as JaqError, Native, RcIter};
 use serde_json::Value;
 
 use plasmite::core::error::{Error, ErrorKind};
 
 #[derive(Clone)]
-pub struct WherePredicate {
+pub struct JqFilter {
     expr: String,
     filter: jaq_core::Filter<Native<JaqValue>>,
 }
 
-impl fmt::Debug for WherePredicate {
+impl fmt::Debug for JqFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WherePredicate")
+        f.debug_struct("JqFilter")
             .field("expr", &self.expr)
             .finish()
     }
 }
 
-impl WherePredicate {
+impl JqFilter {
+    pub fn compile(expr: &str) -> Result<Self, Error> {
+        let arena = Arena::default();
+        let loader = Loader::new(std::iter::empty());
+
+        let program = File {
+            code: expr,
+            path: (),
+        };
+        let modules = loader
+            .load(&arena, program)
+            .map_err(|errs| filter_compile_error(expr, errs))?;
+
+        let filter = Compiler::default()
+            .with_funs(jaq_std::base_funs::<JaqValue>().chain(custom_funs()))
+            .compile(modules)
+            .map_err(|errs| filter_compile_error(expr, errs))?;
+
+        Ok(Self {
+            expr: expr.to_string(),
+            filter,
+        })
+    }
+
     pub fn matches(&self, input: &Value) -> Result<bool, Error> {
         let input = JaqValue::from_json(input);
         let inputs = RcIter::new(core::iter::empty::<Result<JaqValue, String>>());
@@ -41,7 +65,7 @@ impl WherePredicate {
                 Ok(JaqValue::Bool(false)) => {}
                 Ok(other) => {
                     return Err(Error::new(ErrorKind::Usage)
-                        .with_message("--where expression must yield booleans")
+                        .with_message("filter expression must yield booleans")
                         .with_hint(format!(
                             "Expression `{}` yielded non-boolean value: {other}",
                             self.expr
@@ -58,51 +82,56 @@ impl WherePredicate {
     }
 }
 
-pub fn compile_where_predicates(exprs: &[String]) -> Result<Vec<WherePredicate>, Error> {
-    exprs
-        .iter()
-        .map(|expr| compile_where_predicate(expr))
-        .collect()
+pub fn compile_filters(exprs: &[String]) -> Result<Vec<JqFilter>, Error> {
+    exprs.iter().map(|expr| JqFilter::compile(expr)).collect()
 }
 
-pub fn matches_all_where(predicates: &[WherePredicate], input: &Value) -> Result<bool, Error> {
-    for predicate in predicates.iter() {
-        if !predicate.matches(input)? {
+pub fn matches_all(filters: &[JqFilter], input: &Value) -> Result<bool, Error> {
+    for filter in filters.iter() {
+        if !filter.matches(input)? {
             return Ok(false);
         }
     }
     Ok(true)
 }
 
-fn compile_where_predicate(expr: &str) -> Result<WherePredicate, Error> {
-    let arena = Arena::default();
-    let loader = Loader::new(std::iter::empty());
-
-    let program = File {
-        code: expr,
-        path: (),
-    };
-    let modules = loader
-        .load(&arena, program)
-        .map_err(|errs| where_compile_error(expr, errs))?;
-
-    let filter = Compiler::default()
-        .with_funs(jaq_std::base_funs::<JaqValue>())
-        .compile(modules)
-        .map_err(|errs| where_compile_error(expr, errs))?;
-
-    Ok(WherePredicate {
-        expr: expr.to_string(),
-        filter,
-    })
-}
-
-fn where_compile_error<E: fmt::Debug>(expr: &str, err: E) -> Error {
+fn filter_compile_error<E: fmt::Debug>(expr: &str, err: E) -> Error {
     Error::new(ErrorKind::Usage)
-        .with_message("invalid --where expression")
+        .with_message("invalid filter expression")
         .with_hint(format!(
             "Failed to parse/compile `{expr}`.\nDetails: {err:?}\nExample: --where '.data.kind == \"ping\"'"
         ))
+}
+
+fn custom_funs() -> impl Iterator<Item = (&'static str, Box<[Bind]>, Native<JaqValue>)> {
+    [
+        ("null", Native::new(null_run)),
+        ("true", Native::new(true_run)),
+        ("false", Native::new(false_run)),
+    ]
+    .into_iter()
+    .map(|(name, filter)| (name, Vec::<Bind>::new().into_boxed_slice(), filter))
+}
+
+fn null_run<'a>(
+    _lut: &'a jaq_core::compile::Lut<Native<JaqValue>>,
+    _cv: jaq_core::Cv<'a, JaqValue>,
+) -> jaq_core::ValXs<'a, JaqValue> {
+    box_once(Ok(JaqValue::Null))
+}
+
+fn true_run<'a>(
+    _lut: &'a jaq_core::compile::Lut<Native<JaqValue>>,
+    _cv: jaq_core::Cv<'a, JaqValue>,
+) -> jaq_core::ValXs<'a, JaqValue> {
+    box_once(Ok(JaqValue::Bool(true)))
+}
+
+fn false_run<'a>(
+    _lut: &'a jaq_core::compile::Lut<Native<JaqValue>>,
+    _cv: jaq_core::Cv<'a, JaqValue>,
+) -> jaq_core::ValXs<'a, JaqValue> {
+    box_once(Ok(JaqValue::Bool(false)))
 }
 
 #[derive(Clone, Debug)]
@@ -550,35 +579,56 @@ impl jaq_std::ValT for JaqValue {
 
 #[cfg(test)]
 mod tests {
-    use super::{compile_where_predicates, matches_all_where};
+    use super::{JqFilter, compile_filters, matches_all};
     use serde_json::json;
 
     #[test]
-    fn where_matches_simple_equality() {
-        let preds = compile_where_predicates(&[r#".data.x == 1"#.to_string()]).unwrap();
+    fn filter_matches_simple_equality() {
+        let preds = compile_filters(&[r#".data.x == 1"#.to_string()]).unwrap();
         let msg = json!({"seq":1,"time":"t","meta":{"descrips":[]},"data":{"x":1}});
-        assert!(matches_all_where(&preds, &msg).unwrap());
+        assert!(matches_all(&preds, &msg).unwrap());
     }
 
     #[test]
-    fn where_runtime_error_is_false() {
-        let preds = compile_where_predicates(&[r#".data.missing == 1"#.to_string()]).unwrap();
+    fn filter_runtime_error_is_false() {
+        let preds = compile_filters(&[r#".data.missing == 1"#.to_string()]).unwrap();
         let msg = json!({"seq":1,"time":"t","meta":{"descrips":[]},"data":{"x":1}});
-        assert!(!matches_all_where(&preds, &msg).unwrap());
+        assert!(!matches_all(&preds, &msg).unwrap());
     }
 
     #[test]
-    fn where_non_boolean_output_is_usage_error() {
-        let preds = compile_where_predicates(&[r#".data"#.to_string()]).unwrap();
+    fn filter_non_boolean_output_is_usage_error() {
+        let preds = compile_filters(&[r#".data"#.to_string()]).unwrap();
         let msg = json!({"seq":1,"time":"t","meta":{"descrips":[]},"data":{"x":1}});
-        assert!(matches_all_where(&preds, &msg).is_err());
+        assert!(matches_all(&preds, &msg).is_err());
     }
 
     #[test]
-    fn where_any_true_across_multiple_outputs() {
-        let preds =
-            compile_where_predicates(&[r#".meta.descrips[]? == "ping""#.to_string()]).unwrap();
+    fn filter_any_true_across_multiple_outputs() {
+        let preds = compile_filters(&[r#".meta.descrips[]? == "ping""#.to_string()]).unwrap();
         let msg = json!({"seq":1,"time":"t","meta":{"descrips":["foo","ping"]},"data":{}});
-        assert!(matches_all_where(&preds, &msg).unwrap());
+        assert!(matches_all(&preds, &msg).unwrap());
+    }
+
+    #[test]
+    fn filter_comparison_operators() {
+        let exprs = [
+            r#".data.x > 5"#.to_string(),
+            r#".data.x >= 5"#.to_string(),
+            r#".data.x < 20"#.to_string(),
+            r#".data.x <= 20"#.to_string(),
+            r#".data.x == 10"#.to_string(),
+            r#".data.x != 9"#.to_string(),
+        ];
+        let preds = compile_filters(&exprs).unwrap();
+        let msg = json!({"seq":1,"time":"t","meta":{"descrips":[]},"data":{"x":10}});
+        assert!(matches_all(&preds, &msg).unwrap());
+    }
+
+    #[test]
+    fn filter_null_handling() {
+        let filter = JqFilter::compile(r#".data.missing == null"#).unwrap();
+        let msg = json!({"seq":1,"time":"t","meta":{"descrips":[]},"data":{"missing":null}});
+        assert!(filter.matches(&msg).unwrap());
     }
 }
