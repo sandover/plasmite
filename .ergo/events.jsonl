@@ -664,3 +664,5 @@
 {"type":"claim","ts":"2026-02-03T00:42:35.078824Z","data":{"id":"AEFUAI","agent_id":"gpt-5.2@codex","ts":"2026-02-03T00:42:35.078824Z"}}
 {"type":"state","ts":"2026-02-03T00:42:35.078824Z","data":{"id":"AEFUAI","state":"doing","ts":"2026-02-03T00:42:35.078824Z"}}
 {"type":"state","ts":"2026-02-03T00:44:39.003621Z","data":{"id":"AEFUAI","state":"blocked","ts":"2026-02-03T00:44:39.003621Z"}}
+{"type":"result","ts":"2026-02-03T00:50:58.136967Z","data":{"task_id":"AEFUAI","summary":"Added jaq-core/jaq-std v2 and jaq-parse v1; verified build/tests/clippy with size delta +54,896 bytes","path":"Cargo.toml","sha256_at_attach":"9329912722ab39674a8cb41359b761b1fb18a8b9087c8627f64af7af3075bc47","mtime_at_attach":"2026-02-03T00:45:51.059042373Z","git_commit_at_attach":"f533c55e01390bd7c5d973848812efbfb941afca","ts":"2026-02-03T00:50:58.136967Z"}}
+{"type":"state","ts":"2026-02-03T00:50:58.140389Z","data":{"id":"AEFUAI","state":"done","ts":"2026-02-03T00:50:58.140389Z"}}
