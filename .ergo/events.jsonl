@@ -666,3 +666,21 @@
 {"type":"state","ts":"2026-02-03T00:44:39.003621Z","data":{"id":"AEFUAI","state":"blocked","ts":"2026-02-03T00:44:39.003621Z"}}
 {"type":"result","ts":"2026-02-03T00:50:58.136967Z","data":{"task_id":"AEFUAI","summary":"Added jaq-core/jaq-std v2 and jaq-parse v1; verified build/tests/clippy with size delta +54,896 bytes","path":"Cargo.toml","sha256_at_attach":"9329912722ab39674a8cb41359b761b1fb18a8b9087c8627f64af7af3075bc47","mtime_at_attach":"2026-02-03T00:45:51.059042373Z","git_commit_at_attach":"f533c55e01390bd7c5d973848812efbfb941afca","ts":"2026-02-03T00:50:58.136967Z"}}
 {"type":"state","ts":"2026-02-03T00:50:58.140389Z","data":{"id":"AEFUAI","state":"done","ts":"2026-02-03T00:50:58.140389Z"}}
+{"type":"state","ts":"2026-02-03T00:52:55.875327Z","data":{"id":"GFOUMO","state":"canceled","ts":"2026-02-03T00:52:55.875327Z"}}
+{"type":"state","ts":"2026-02-03T00:52:55.982841Z","data":{"id":"HM75UD","state":"canceled","ts":"2026-02-03T00:52:55.982841Z"}}
+{"type":"state","ts":"2026-02-03T00:52:56.088562Z","data":{"id":"M2RVOM","state":"canceled","ts":"2026-02-03T00:52:56.088562Z"}}
+{"type":"state","ts":"2026-02-03T00:52:56.1927Z","data":{"id":"NOK3RD","state":"canceled","ts":"2026-02-03T00:52:56.1927Z"}}
+{"type":"state","ts":"2026-02-03T00:52:56.296066Z","data":{"id":"QQ5Z6I","state":"canceled","ts":"2026-02-03T00:52:56.296066Z"}}
+{"type":"tombstone","ts":"2026-02-03T00:53:08.275488Z","data":{"id":"46KLDI","ts":"2026-02-03T00:53:08.275488Z"}}
+{"type":"tombstone","ts":"2026-02-03T00:53:08.275488Z","data":{"id":"AEFUAI","ts":"2026-02-03T00:53:08.275488Z"}}
+{"type":"tombstone","ts":"2026-02-03T00:53:08.275488Z","data":{"id":"E6INDQ","ts":"2026-02-03T00:53:08.275488Z"}}
+{"type":"tombstone","ts":"2026-02-03T00:53:08.275488Z","data":{"id":"GFOUMO","ts":"2026-02-03T00:53:08.275488Z"}}
+{"type":"tombstone","ts":"2026-02-03T00:53:08.275488Z","data":{"id":"HM75UD","ts":"2026-02-03T00:53:08.275488Z"}}
+{"type":"tombstone","ts":"2026-02-03T00:53:08.275488Z","data":{"id":"HMSIVD","ts":"2026-02-03T00:53:08.275488Z"}}
+{"type":"tombstone","ts":"2026-02-03T00:53:08.275488Z","data":{"id":"IPURLQ","ts":"2026-02-03T00:53:08.275488Z"}}
+{"type":"tombstone","ts":"2026-02-03T00:53:08.275488Z","data":{"id":"M2RVOM","ts":"2026-02-03T00:53:08.275488Z"}}
+{"type":"tombstone","ts":"2026-02-03T00:53:08.275488Z","data":{"id":"NOK3RD","ts":"2026-02-03T00:53:08.275488Z"}}
+{"type":"tombstone","ts":"2026-02-03T00:53:08.275488Z","data":{"id":"O7AHWT","ts":"2026-02-03T00:53:08.275488Z"}}
+{"type":"tombstone","ts":"2026-02-03T00:53:08.275488Z","data":{"id":"QQ5Z6I","ts":"2026-02-03T00:53:08.275488Z"}}
+{"type":"tombstone","ts":"2026-02-03T00:53:08.275488Z","data":{"id":"QYM774","ts":"2026-02-03T00:53:08.275488Z"}}
+{"type":"tombstone","ts":"2026-02-03T00:53:08.275488Z","data":{"id":"R5PFIA","ts":"2026-02-03T00:53:08.275488Z"}}
