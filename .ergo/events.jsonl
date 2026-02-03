@@ -653,3 +653,7 @@
 {"type":"state","ts":"2026-02-03T00:29:03.064285Z","data":{"id":"E6INDQ","state":"doing","ts":"2026-02-03T00:29:03.064285Z"}}
 {"type":"result","ts":"2026-02-03T00:29:42.503224Z","data":{"task_id":"E6INDQ","summary":"Documented safe offline resize policy and constraints.","path":"docs/design/resize-strategy.md","sha256_at_attach":"248d3d2ed482dabc5c4f5d117aa3322f019aa946c5f1146082e8e0b4baa4fead","mtime_at_attach":"2026-02-03T00:29:17.46117466Z","git_commit_at_attach":"b3523cdaabed0f142436655db4404114b7d6a01d","ts":"2026-02-03T00:29:42.503224Z"}}
 {"type":"state","ts":"2026-02-03T00:29:42.506661Z","data":{"id":"E6INDQ","state":"done","ts":"2026-02-03T00:29:42.506661Z"}}
+{"type":"claim","ts":"2026-02-03T00:33:28.456205Z","data":{"id":"O7AHWT","agent_id":"gpt-5.2@codex","ts":"2026-02-03T00:33:28.456205Z"}}
+{"type":"state","ts":"2026-02-03T00:33:28.456205Z","data":{"id":"O7AHWT","state":"doing","ts":"2026-02-03T00:33:28.456205Z"}}
+{"type":"result","ts":"2026-02-03T00:33:41.657851Z","data":{"task_id":"O7AHWT","summary":"Documented --where semantics (boolean, AND, runtime errors false).","path":"spec/v0/SPEC.md","sha256_at_attach":"6f33eff152e9fc2e4df6220b1bb1b82ec9c2012137379a34bdae3ba4ee2a09c1","mtime_at_attach":"2026-02-03T00:33:36.5408132Z","git_commit_at_attach":"61aa7417cd0e17916b30b962d912dbd50d979091","ts":"2026-02-03T00:33:41.657851Z"}}
+{"type":"state","ts":"2026-02-03T00:33:41.662009Z","data":{"id":"O7AHWT","state":"done","ts":"2026-02-03T00:33:41.662009Z"}}

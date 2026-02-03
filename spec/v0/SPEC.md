@@ -469,6 +469,7 @@ plasmite peek POOLREF [OPTIONS]
 
 * `--tail N` (or `-n N`): print the last N messages first, then keep watching.
 * `--since TIME`: only emit messages at/after TIME (RFC 3339 or relative `5m`, `2h`, `1d`).
+* `--where EXPR` (repeatable): filter messages by boolean expression (AND across repeats).
 * `--format pretty|jsonl`: select output format (default: `pretty`).
 * `--jsonl`: alias for `--format jsonl` (compatibility).
 * `--quiet-drops`: suppress non-fatal drop notices on stderr.
@@ -480,6 +481,9 @@ plasmite peek POOLREF [OPTIONS]
 * `--since` cannot be combined with `--tail`.
 * If `--since` is in the future, `peek` exits with no output.
 * Relative `--since` uses UTC now; RFC 3339 offsets are honored.
+* `--where` is evaluated against the full message JSON object (`.seq`, `.time`, `.meta`, `.data`).
+  * Non-boolean results are a usage error.
+  * Runtime errors (missing fields, type mismatches) evaluate to false (message excluded).
 * If the reader falls behind and messages are overwritten, a non-fatal drop notice is emitted on
   stderr (see “Notices”). Use `--quiet-drops` to suppress.
 
