@@ -19,6 +19,9 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 fs2 = "0.4"
+jaq-core = "2"
+jaq-parse = "1"
+jaq-std = "2"
 memmap2 = "0.9"
 libc = "0.2"
 serde_json = "1"

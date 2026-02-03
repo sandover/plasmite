@@ -661,3 +661,6 @@
 {"type":"state","ts":"2026-02-03T00:38:56.137293Z","data":{"id":"QYM774","state":"doing","ts":"2026-02-03T00:38:56.137293Z"}}
 {"type":"result","ts":"2026-02-03T00:39:35.751272Z","data":{"task_id":"QYM774","summary":"Documented future remote protocol versioning and capability handshake.","path":"spec/v0/SPEC.md","sha256_at_attach":"b4f4ec502d34a4dc1e389bc18b6d7a950e391312adc6aacdf4a9bc055d332acc","mtime_at_attach":"2026-02-03T00:39:24.865234969Z","git_commit_at_attach":"94cc01fe1913fb8664dc8c651f53b45e89070cc6","ts":"2026-02-03T00:39:35.751272Z"}}
 {"type":"state","ts":"2026-02-03T00:39:35.755536Z","data":{"id":"QYM774","state":"done","ts":"2026-02-03T00:39:35.755536Z"}}
+{"type":"claim","ts":"2026-02-03T00:42:35.078824Z","data":{"id":"AEFUAI","agent_id":"gpt-5.2@codex","ts":"2026-02-03T00:42:35.078824Z"}}
+{"type":"state","ts":"2026-02-03T00:42:35.078824Z","data":{"id":"AEFUAI","state":"doing","ts":"2026-02-03T00:42:35.078824Z"}}
+{"type":"state","ts":"2026-02-03T00:44:39.003621Z","data":{"id":"AEFUAI","state":"blocked","ts":"2026-02-03T00:44:39.003621Z"}}
