@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+#
+# Purpose: Suggested prepare-commit-msg hook to pre-fill a lightweight checklist that nudges
+#          agents toward repo conventions (Conventional Commits, validation, planning hygiene).
+# Exports: N/A (git hook entry point).
+# Role: Copy into `.git/hooks/prepare-commit-msg` to improve commit-message consistency locally.
+# Invariants: Never modifies the commit subject line; only appends commented guidance.
+# Invariants: Idempotent (won’t duplicate the checklist if it already exists).
+set -euo pipefail
+
+msg_file="${1:?missing commit message file path}"
+msg_source="${2:-}"
+
+has_checklist() {
+  grep -q 'plasmite commit checklist' "$msg_file" 2>/dev/null
+}
+
+append_checklist() {
+  cat >>"$msg_file" <<'TXT'
+# plasmite commit checklist
+# - Use Conventional Commits (type(scope): imperative summary; scope optional).
+# - Body (8-10 lines) explains what/why/how + constraints/invariants (+ notable risks/tests).
+# - When applicable, add trailers (one per line): Fixes: #XYZ, Refs: PROJ-9, BREAKING CHANGE: ...
+TXT
+}
+
+should_amend() {
+  # Only editor-driven commits: msg_source is empty when the message comes from the editor.
+  # This avoids polluting -m/-F/--no-edit/merge/squash flows.
+  [[ -z "${msg_source}" ]]
+}
+
+main() {
+  if ! should_amend; then
+    exit 0
+  fi
+  if has_checklist; then
+    exit 0
+  fi
+  append_checklist
+}
+
+main "$@"

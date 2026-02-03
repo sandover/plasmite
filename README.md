@@ -147,10 +147,20 @@ Use a release build for baseline numbers. See `docs/perf.md` for the full guide.
 
 ## Development
 
-Optional local git hook gate (fmt/clippy/tests) + policy banner:
+### Optional local git hooks
+
+This repo’s real “trust boundary” is **CI**, but local hooks are a useful early warning system.
+Hooks are local-only and bypassable (`git commit --no-verify`), so treat them as guardrails.
+
+Suggested hook scripts live in `docs/suggested-hooks/`. Copy them into `.git/hooks/`
+if you want local enforcement and local commit-message nudges:
 
 ```bash
-just hooks-install
+cp docs/suggested-hooks/pre-commit .git/hooks/pre-commit
+cp docs/suggested-hooks/prepare-commit-msg .git/hooks/prepare-commit-msg
+cp docs/suggested-hooks/pre-push .git/hooks/pre-push
+chmod +x .git/hooks/pre-commit .git/hooks/prepare-commit-msg
+chmod +x .git/hooks/pre-push
 ```
 
 ## Concepts
