@@ -668,6 +668,40 @@ When we add them, the CLI UX-level contract is:
 * Remote pool refs use `tcp(s)://host:port/POOL` (no trailing slash)
 * Subcommands that accept POOLREF should work remotely at least for: `peek`, `poke`, `get`, `export`, and `pool list`.
 
+### Remote protocol versioning + capability negotiation (future)
+
+Goal: make remote support evolvable without hidden state or “it worked on my server” drift.
+
+Recommended strategy:
+
+* Use an explicit protocol version `MAJOR.MINOR`.
+  * `MAJOR` breaks compatibility.
+  * `MINOR` is additive-only (new message types/fields/caps only; never change meaning).
+* Handshake chooses the highest mutually-supported version and a concrete set of enabled capabilities.
+* Unknown fields must be ignored for forward compatibility.
+
+Client → Server (`hello`), one JSON message:
+
+* `protocol.versions` (array of strings): supported versions, highest first (e.g. `["1.1","1.0"]`).
+* `capabilities.required` / `capabilities.optional` (arrays of strings): requested feature names.
+* `client.name` / `client.version` (strings): for debugging and telemetry.
+
+Server → Client (`welcome`), one JSON message:
+
+* `protocol.version` (string): chosen version.
+* `capabilities.enabled` (object): enabled capabilities and parameters (additive-only).
+* `limits` (object): sizes/timeouts (e.g. `max_frame_bytes`, `max_inflight`).
+
+Strictness:
+
+* If any `required` capability cannot be enabled: fail the handshake with a structured error.
+* Otherwise: enable the subset possible and report it in `capabilities.enabled`.
+
+Framing:
+
+* Transport should be message-based with an unambiguous frame boundary.
+* Recommended: length-prefixed UTF-8 JSON objects (so we never depend on “JSONL over TCP” parsing).
+
 `plasmite serve` would expose local pools over TCP with options like:
 
 * `--listen HOST:PORT` (default `0.0.0.0:65456`)
