@@ -260,6 +260,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             jsonl,
             tail,
             one,
+            timeout,
             quiet_drops,
             format,
             since,
@@ -289,17 +290,19 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                     return Ok(RunOutcome::ok());
                 }
             }
+            let timeout = timeout.as_deref().map(parse_duration).transpose()?;
             let cfg = PeekConfig {
                 tail,
                 pretty,
                 one,
+                timeout,
                 since_ns,
                 where_predicates: compile_filters(&where_expr)?,
                 quiet_drops,
                 color_mode,
             };
-            peek(&pool_handle, &pool, &path, cfg)?;
-            Ok(RunOutcome::ok())
+            let outcome = peek(&pool_handle, &pool, &path, cfg)?;
+            Ok(outcome)
         }
     })();
 
@@ -550,6 +553,9 @@ Use `--tail N` to see recent history first, then keep watching."#,
   # Pipe to jq
   $ plasmite peek foo --format jsonl | jq -r '.data.msg'
 
+  # Wait up to 5 seconds for a message
+  $ plasmite peek foo --timeout 5s
+
 NOTES
   - Use `--format jsonl` for scripts (one JSON object per line)
   - `--where` uses jq-style expressions; repeat for AND
@@ -569,6 +575,11 @@ NOTES
         one: bool,
         #[arg(long, help = "Emit JSON Lines (one object per line)")]
         jsonl: bool,
+        #[arg(
+            long,
+            help = "Exit 124 if no output within duration (e.g. 500ms, 5s, 1m)"
+        )]
+        timeout: Option<String>,
         #[arg(
             long,
             value_enum,
@@ -1547,13 +1558,19 @@ struct PeekConfig {
     tail: u64,
     pretty: bool,
     one: bool,
+    timeout: Option<Duration>,
     since_ns: Option<u64>,
     where_predicates: Vec<JqFilter>,
     quiet_drops: bool,
     color_mode: ColorMode,
 }
 
-fn peek(pool: &Pool, pool_ref: &str, pool_path: &Path, cfg: PeekConfig) -> Result<(), Error> {
+fn peek(
+    pool: &Pool,
+    pool_ref: &str,
+    pool_path: &Path,
+    cfg: PeekConfig,
+) -> Result<RunOutcome, Error> {
     let mut cursor = Cursor::new();
     let mut header = pool.header_from_mmap()?;
     let mut emit = VecDeque::new();
@@ -1562,6 +1579,13 @@ fn peek(pool: &Pool, pool_ref: &str, pool_path: &Path, cfg: PeekConfig) -> Resul
     let mut last_notice_at: Option<Instant> = None;
     let notice_interval = Duration::from_secs(1);
     let tail_wait = cfg.one && cfg.tail > 0;
+    let mut timeout_deadline = cfg.timeout.map(|duration| Instant::now() + duration);
+
+    let bump_timeout = |deadline: &mut Option<Instant>| {
+        if let Some(duration) = cfg.timeout {
+            *deadline = Some(Instant::now() + duration);
+        }
+    };
 
     if let Some(since_ns) = cfg.since_ns {
         cursor.seek_to(header.tail_off as usize);
@@ -1572,8 +1596,9 @@ fn peek(pool: &Pool, pool_ref: &str, pool_path: &Path, cfg: PeekConfig) -> Resul
                         let message = message_from_frame(&frame)?;
                         if matches_all(cfg.where_predicates.as_slice(), &message)? {
                             emit_message(message, cfg.pretty, cfg.color_mode);
+                            bump_timeout(&mut timeout_deadline);
                             if cfg.one {
-                                return Ok(());
+                                return Ok(RunOutcome::ok());
                             }
                         }
                         last_seen_seq = Some(frame.seq);
@@ -1612,11 +1637,12 @@ fn peek(pool: &Pool, pool_ref: &str, pool_path: &Path, cfg: PeekConfig) -> Resul
                 if let Some(value) = emit.back() {
                     emit_message(value.clone(), cfg.pretty, cfg.color_mode);
                 }
-                return Ok(());
+                return Ok(RunOutcome::ok());
             }
         } else {
             for value in emit.drain(..) {
                 emit_message(value, cfg.pretty, cfg.color_mode);
+                bump_timeout(&mut timeout_deadline);
             }
         }
     }
@@ -1715,12 +1741,13 @@ fn peek(pool: &Pool, pool_ref: &str, pool_path: &Path, cfg: PeekConfig) -> Resul
                             if let Some(value) = emit.back() {
                                 emit_message(value.clone(), cfg.pretty, cfg.color_mode);
                             }
-                            return Ok(());
+                            return Ok(RunOutcome::ok());
                         }
                     } else {
                         emit_message(message, cfg.pretty, cfg.color_mode);
+                        bump_timeout(&mut timeout_deadline);
                         if cfg.one {
-                            return Ok(());
+                            return Ok(RunOutcome::ok());
                         }
                     }
                 }
@@ -1730,7 +1757,16 @@ fn peek(pool: &Pool, pool_ref: &str, pool_path: &Path, cfg: PeekConfig) -> Resul
             }
             CursorResult::WouldBlock => {
                 maybe_emit_pending(&mut pending_drop, &mut last_notice_at);
-                std::thread::sleep(backoff);
+                if let Some(deadline) = timeout_deadline {
+                    let now = Instant::now();
+                    if now >= deadline {
+                        return Ok(RunOutcome::with_code(124));
+                    }
+                    let remaining = deadline.duration_since(now);
+                    std::thread::sleep(std::cmp::min(backoff, remaining));
+                } else {
+                    std::thread::sleep(backoff);
+                }
                 backoff = std::cmp::min(backoff * 2, max_backoff);
             }
             CursorResult::FellBehind => {
@@ -1747,9 +1783,10 @@ fn peek(pool: &Pool, pool_ref: &str, pool_path: &Path, cfg: PeekConfig) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use super::{Error, ErrorKind, error_text, parse_size};
+    use super::{Error, ErrorKind, error_text, parse_duration, parse_size};
     use serde_json::json;
     use std::io::Cursor;
+    use std::time::Duration;
 
     fn read_json_stream<R, F>(reader: R, mut on_value: F) -> Result<usize, Error>
     where
@@ -1785,6 +1822,13 @@ mod tests {
         assert!(parse_size("1MiB").is_err());
         assert!(parse_size("2Gi").is_err());
         assert!(parse_size("3KiB").is_err());
+    }
+
+    #[test]
+    fn parse_duration_accepts_ms_s_m() {
+        assert_eq!(parse_duration("500ms").unwrap(), Duration::from_millis(500));
+        assert_eq!(parse_duration("5s").unwrap(), Duration::from_secs(5));
+        assert_eq!(parse_duration("1m").unwrap(), Duration::from_secs(60));
     }
 
     #[test]

@@ -430,6 +430,83 @@ fn peek_tail_one_emits_nth_match() {
 }
 
 #[test]
+fn peek_timeout_exits_when_no_output() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--jsonl",
+            "--timeout",
+            "500ms",
+        ])
+        .output()
+        .expect("peek");
+    assert_eq!(output.status.code().unwrap(), 124);
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn peek_timeout_with_one_exits_on_message() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let pool_dir_str = pool_dir.to_str().unwrap().to_string();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(50));
+        let _ = cmd()
+            .args(["--dir", &pool_dir_str, "poke", "demo", "{\"x\":1}"])
+            .output();
+    });
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--jsonl",
+            "--one",
+            "--timeout",
+            "5s",
+        ])
+        .output()
+        .expect("peek");
+    assert!(output.status.success());
+    let lines = parse_json_lines(&output.stdout);
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].get("data").unwrap()["x"], 1);
+}
+
+#[test]
 fn peek_where_filters_messages() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");

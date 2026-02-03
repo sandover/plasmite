@@ -19,3 +19,9 @@ The CLI maps core error kinds to stable exit codes:
 | Permission | 6 |
 | Corrupt | 7 |
 | Io | 8 |
+
+Additional non-error exit codes:
+
+| Condition | Exit code |
+| --- | --- |
+| `peek --timeout` elapsed with no output | 124 |
