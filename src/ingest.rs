@@ -417,6 +417,49 @@ where
     F: FnMut(Value, u64) -> Result<(), Error>,
     N: FnMut(u64, IngestMode, Option<u64>, &str, &str, Option<String>) -> Result<(), Error>,
 {
+    fn handle_record<F, N>(
+        record: &[u8],
+        index: u64,
+        config: IngestConfig,
+        on_value: &mut F,
+        on_failure: &mut N,
+    ) -> Result<(), Error>
+    where
+        F: FnMut(Value, u64) -> Result<(), Error>,
+        N: FnMut(u64, IngestMode, Option<u64>, &str, &str, Option<String>) -> Result<(), Error>,
+    {
+        if record.len() > config.max_record_bytes {
+            return on_failure(
+                index,
+                IngestMode::Seq,
+                None,
+                "record exceeds size limit",
+                "Oversize",
+                Some(truncate_bytes(record, config.max_snippet_bytes)),
+            );
+        }
+        let text = String::from_utf8_lossy(record);
+        match serde_json::from_str::<Value>(&text) {
+            Ok(value) => apply_value(
+                value,
+                index,
+                IngestMode::Seq,
+                None,
+                config.errors,
+                on_value,
+                on_failure,
+            ),
+            Err(_) => on_failure(
+                index,
+                IngestMode::Seq,
+                None,
+                "invalid json input",
+                "Parse",
+                Some(truncate_bytes(record, config.max_snippet_bytes)),
+            ),
+        }
+    }
+
     let mut index = 0u64;
     let mut buf_reader = BufReader::new(reader);
     let mut buf = Vec::new();
@@ -446,39 +489,7 @@ where
                 let record = std::mem::take(&mut buf);
                 if !record.iter().all(|b| b.is_ascii_whitespace()) {
                     index += 1;
-                    if record.len() > config.max_record_bytes {
-                        on_failure(
-                            index,
-                            IngestMode::Seq,
-                            None,
-                            "record exceeds size limit",
-                            "Oversize",
-                            Some(truncate_bytes(&record, config.max_snippet_bytes)),
-                        )?;
-                    } else {
-                        let text = String::from_utf8_lossy(&record);
-                        match serde_json::from_str::<Value>(&text) {
-                            Ok(value) => apply_value(
-                                value,
-                                index,
-                                IngestMode::Seq,
-                                None,
-                                config.errors,
-                                on_value,
-                                on_failure,
-                            )?,
-                            Err(_) => {
-                                on_failure(
-                                    index,
-                                    IngestMode::Seq,
-                                    None,
-                                    "invalid json input",
-                                    "Parse",
-                                    Some(truncate_bytes(&record, config.max_snippet_bytes)),
-                                )?;
-                            }
-                        }
-                    }
+                    handle_record(&record, index, config, on_value, on_failure)?;
                 }
                 slice = &slice[pos + 1..];
                 continue;
@@ -503,39 +514,7 @@ where
     }
     if !skipping && !buf.is_empty() && !buf.iter().all(|b| b.is_ascii_whitespace()) {
         index += 1;
-        if buf.len() > config.max_record_bytes {
-            on_failure(
-                index,
-                IngestMode::Seq,
-                None,
-                "record exceeds size limit",
-                "Oversize",
-                Some(truncate_bytes(&buf, config.max_snippet_bytes)),
-            )?;
-        } else {
-            let text = String::from_utf8_lossy(&buf);
-            match serde_json::from_str::<Value>(&text) {
-                Ok(value) => apply_value(
-                    value,
-                    index,
-                    IngestMode::Seq,
-                    None,
-                    config.errors,
-                    on_value,
-                    on_failure,
-                )?,
-                Err(_) => {
-                    on_failure(
-                        index,
-                        IngestMode::Seq,
-                        None,
-                        "invalid json input",
-                        "Parse",
-                        Some(truncate_bytes(&buf, config.max_snippet_bytes)),
-                    )?;
-                }
-            }
-        }
+        handle_record(&buf, index, config, on_value, on_failure)?;
     }
     Ok(())
 }
