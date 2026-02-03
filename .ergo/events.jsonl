@@ -526,3 +526,7 @@
 {"type":"link","ts":"2026-02-03T00:19:34.448653Z","data":{"from_id":"NOK3RD","to_id":"AEFUAI","type":"depends"}}
 {"type":"link","ts":"2026-02-03T00:19:34.451773Z","data":{"from_id":"QQ5Z6I","to_id":"NOK3RD","type":"depends"}}
 {"type":"link","ts":"2026-02-03T00:19:34.454921Z","data":{"from_id":"M2RVOM","to_id":"QQ5Z6I","type":"depends"}}
+{"type":"result","ts":"2026-02-03T00:22:30.206996Z","data":{"task_id":"7ENHUU","summary":"Implemented --retry/--retry-delay with retry policy and tests.","path":"src/main.rs","sha256_at_attach":"280d6a631d608c4e56b025eef14fbd0d1cc02f0f4b97362f354481beaa7d362c","mtime_at_attach":"2026-02-02T23:51:33.223447995Z","git_commit_at_attach":"75a9b27fed4e45d0963300d3f4158b33a292b0d1","ts":"2026-02-03T00:22:30.206996Z"}}
+{"type":"state","ts":"2026-02-03T00:22:30.210104Z","data":{"id":"7ENHUU","state":"done","ts":"2026-02-03T00:22:30.210104Z"}}
+{"type":"result","ts":"2026-02-03T00:22:36.25163Z","data":{"task_id":"OHUA6S","summary":"Implemented --errors stop|skip with notices and exit policy.","path":"spec/v0/SPEC.md","sha256_at_attach":"8d71003048ef33109b5bf218d7a0b22a3354555fccd63a57c89ee6c52461a1e0","mtime_at_attach":"2026-02-02T23:52:45.655949446Z","git_commit_at_attach":"75a9b27fed4e45d0963300d3f4158b33a292b0d1","ts":"2026-02-03T00:22:36.25163Z"}}
+{"type":"state","ts":"2026-02-03T00:22:36.255273Z","data":{"id":"OHUA6S","state":"done","ts":"2026-02-03T00:22:36.255273Z"}}
