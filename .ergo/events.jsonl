@@ -649,3 +649,7 @@
 {"type":"tombstone","ts":"2026-02-03T00:23:38.944722Z","data":{"id":"ZYPVAI","ts":"2026-02-03T00:23:38.944722Z"}}
 {"type":"result","ts":"2026-02-03T00:25:30.983804Z","data":{"task_id":"HMSIVD","summary":"Reviewed ingestion code and reduced JSON-seq duplication.","path":"docs/design/ingest-review.md","sha256_at_attach":"58c9547609ba7d115ffa1a42ed50ac1ede25f800f9c489cab1569b6bce5de3cf","mtime_at_attach":"2026-02-03T00:25:00.012966153Z","git_commit_at_attach":"e27c7c243f2b6fcd0a736e6d0d4879d94ff24ab3","ts":"2026-02-03T00:25:30.983804Z"}}
 {"type":"state","ts":"2026-02-03T00:25:30.987924Z","data":{"id":"HMSIVD","state":"done","ts":"2026-02-03T00:25:30.987924Z"}}
+{"type":"claim","ts":"2026-02-03T00:29:03.064285Z","data":{"id":"E6INDQ","agent_id":"gpt-5.2@codex","ts":"2026-02-03T00:29:03.064285Z"}}
+{"type":"state","ts":"2026-02-03T00:29:03.064285Z","data":{"id":"E6INDQ","state":"doing","ts":"2026-02-03T00:29:03.064285Z"}}
+{"type":"result","ts":"2026-02-03T00:29:42.503224Z","data":{"task_id":"E6INDQ","summary":"Documented safe offline resize policy and constraints.","path":"docs/design/resize-strategy.md","sha256_at_attach":"248d3d2ed482dabc5c4f5d117aa3322f019aa946c5f1146082e8e0b4baa4fead","mtime_at_attach":"2026-02-03T00:29:17.46117466Z","git_commit_at_attach":"b3523cdaabed0f142436655db4404114b7d6a01d","ts":"2026-02-03T00:29:42.503224Z"}}
+{"type":"state","ts":"2026-02-03T00:29:42.506661Z","data":{"id":"E6INDQ","state":"done","ts":"2026-02-03T00:29:42.506661Z"}}
