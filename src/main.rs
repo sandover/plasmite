@@ -327,7 +327,7 @@ where
 #[command(
     name = "plasmite",
     version,
-    about = "Local, JSON-first message pools",
+    about = "Persistent message pools for local IPC",
     help_template = r#"{about-with-newline}
 {before-help}USAGE
   {usage}
@@ -341,23 +341,21 @@ OPTIONS
 {after-help}
 "#,
     long_about = None,
-    before_help = r#"Plasmite stores immutable JSON messages in a single-file, mmap-backed ring buffer.
+    before_help = r#"Multiple processes can write and read concurrently. Messages are JSON.
 
 Mental model:
-  - `poke` appends (write)
-  - `peek` streams (read)
-  - `get` fetches one message by sequence
+  - `poke` sends messages (write)
+  - `peek` watches messages (read/stream)
+  - `get` fetches one message by seq
 "#,
-    after_help = r#"EXAMPLES
-  $ plasmite pool create demo
-  $ plasmite poke demo --descrip ping '{"x":1}'
-  $ plasmite peek demo --where '.data.x == 1' --format jsonl
-  $ plasmite get demo 42
+    after_help = r#"EXAMPLE
+  $ plasmite pool create chat
+  $ plasmite peek chat              # Terminal 1: bob watches (waits for messages)
+  $ plasmite poke chat '{"from": "alice", "msg": "hello"}'   # Terminal 2: alice sends
+  # bob sees: {"seq":1,"time":"...","meta":{"descrips":[]},"data":{"from":"alice","msg":"hello"}}
 
 LEARN MORE
   $ plasmite <command> --help
-  $ plasmite peek --help
-  $ plasmite pool create --help
   https://github.com/sandover/plasmite"#,
     arg_required_else_help = true,
     disable_help_subcommand = true
@@ -423,38 +421,48 @@ enum Command {
     #[command(
         arg_required_else_help = true,
         about = "Manage pool files",
-        long_about = r#"Create and inspect pool files (single-file, mmap-backed rings on disk).
+        long_about = r#"Create and inspect pool files.
 
-Use `pool create` first, then use `poke` / `peek` / `get` to write and read messages."#,
+Pools are persistent ring buffers: multiple writers, multiple readers, crash-safe."#,
         after_help = r#"EXAMPLES
-  $ plasmite pool create demo
-  $ plasmite pool create --size 8M demo-1 demo-2
-  $ plasmite pool info demo
-  $ plasmite pool delete demo
+  $ plasmite pool create foo
+  $ plasmite pool create --size 8M bar baz
+  $ plasmite pool info foo
+  $ plasmite pool list
+  $ plasmite pool delete foo
 
 NOTES
-  - Pools live under the pool directory (default: ~/.plasmite/pools); override with `--dir`."#
+  - Default location: ~/.plasmite/pools (override with --dir)"#
     )]
     Pool {
         #[command(subcommand)]
         command: PoolCommand,
     },
     #[command(
-        about = "Append a message to a pool",
-        long_about = r#"Append JSON messages to a pool.
+        about = "Send a message to a pool",
+        long_about = r#"Send JSON messages to a pool.
 
-Accepts JSON from a single inline value, a file, or piped stdin."#,
+Accepts inline JSON, a file (--file), or streams via stdin (auto-detected)."#,
         after_help = r#"EXAMPLES
-  $ plasmite poke demo --descrip ping '{"x":1}'
-  $ plasmite poke demo --file payload.json
-  $ echo '{"x":1}' | plasmite poke demo
-  $ printf '%s\n' '{"x":1}' '{"x":2}' | plasmite poke demo
+  # Inline JSON
+  $ plasmite poke foo '{"hello": "world"}'
+
+  # Tag messages with --descrip
+  $ plasmite poke foo --descrip ping --descrip from-alice '{"msg": "hello bob"}'
+
+  # Pipe JSON Lines
+  $ jq -c '.items[]' data.json | plasmite poke foo
+
+  # Stream from curl (event streams auto-detected)
+  $ curl -N https://api.example.com/events | plasmite poke events
+
+  # Auto-create pool on first poke
+  $ plasmite poke bar --create '{"first": "message"}'
 
 NOTES
-  - `--durability flush` trades throughput for stronger “written to storage” assurance.
-  - `--retry N` retries transient failures (lock contention, short-lived IO) with optional `--retry-delay`.
-  - Stdin defaults to `--in auto` (JSONL, JSON-seq, event streams, or multiline JSON).
-  - Use `--errors skip` to continue past bad records; skipped records emit notices and set exit code 1."#
+  - `--in auto` detects JSONL, JSON-seq (0x1e), event streams (data: prefix)
+  - `--errors skip` continues past bad records; `--durability flush` syncs to disk
+  - `--retry N` retries on transient failures (lock contention, etc.)"#
     )]
     Poke {
         #[arg(help = "Pool name or path")]
@@ -501,9 +509,10 @@ NOTES
     },
     #[command(
         about = "Fetch one message by sequence number",
-        long_about = r#"Fetch a committed message by sequence number and print it as JSON."#,
-        after_help = r#"EXAMPLE
-  $ plasmite get demo 42"#
+        long_about = r#"Fetch a specific message by its seq number and print as JSON."#,
+        after_help = r#"EXAMPLES
+  $ plasmite get foo 1
+  $ plasmite get foo 42 | jq '.data'"#
     )]
     Get {
         #[arg(help = "Pool name or path")]
@@ -513,22 +522,33 @@ NOTES
     },
     #[command(
         about = "Watch messages from a pool",
-        long_about = r#"Watch a pool and print messages to stdout.
+        long_about = r#"Watch a pool and stream messages as they arrive.
 
-By default, `peek` waits for new messages and prints them as they arrive.
-Use `--tail N` to print the last N messages first, then keep watching."#,
+By default, `peek` waits for new messages forever (Ctrl-C to stop).
+Use `--tail N` to see recent history first, then keep watching."#,
         after_help = r#"EXAMPLES
-  $ plasmite peek demo
-  $ plasmite peek demo --tail 10
-  $ plasmite peek demo --where '.meta.descrips[]? == "ping"' --format jsonl
+  # Watch for new messages
+  $ plasmite peek foo
+
+  # Last 10 messages, then keep watching
+  $ plasmite peek foo --tail 10
+
+  # Messages from the last 5 minutes
+  $ plasmite peek foo --since 5m
+
+  # Filter by tag (descrip)
+  $ plasmite peek foo --where '.meta.descrips[]? == "ping"'
+
+  # Filter by data field
+  $ plasmite peek foo --where '.data.status == "error"'
+
+  # Pipe to jq
+  $ plasmite peek foo --format jsonl | jq -r '.data.msg'
 
 NOTES
-  - Default output is pretty-printed JSON per message.
-  - Use `--format jsonl` for compact, one-object-per-line output (recommended for pipes/scripts).
-  - `--jsonl` is a compatibility alias for `--format jsonl`.
-  - `--since` filters by message time (RFC 3339 or relative like 5m); it cannot be combined with --tail.
-  - `--where` filters by a jq-like boolean expression evaluated against the full message (`.seq`, `.time`, `.meta`, `.data`). Repeat `--where` to AND multiple predicates.
-  - Drop notices are emitted on stderr when the reader falls behind; use --quiet-drops to suppress."#
+  - Use `--format jsonl` for scripts (one JSON object per line)
+  - `--where` uses jq-style expressions; repeat for AND
+  - `--since 5m` and `--since 2026-01-15T10:00:00Z` both work"#
     )]
     Peek {
         #[arg(help = "Pool name or path")]
@@ -576,13 +596,13 @@ NOTES
 enum PoolCommand {
     #[command(
         about = "Create one or more pools",
-        long_about = r#"Create one or more pools in the pool directory."#,
+        long_about = r#"Create pool files. Default size is 1MB (use --size for larger)."#,
         after_help = r#"EXAMPLES
-  $ plasmite pool create demo
-  $ plasmite pool create --size 8M demo-1 demo-2
+  $ plasmite pool create foo
+  $ plasmite pool create --size 8M bar baz quux
 
 NOTES
-  - Use `--dir` to choose where pool files live."#
+  - Sizes: 64K, 1M, 8M, 1G (K/M/G are 1024-based)"#
     )]
     Create {
         #[arg(required = true, help = "Pool name(s) to create")]
@@ -592,9 +612,9 @@ NOTES
     },
     #[command(
         about = "Show pool metadata and bounds",
-        long_about = r#"Show pool metadata and bounds as JSON."#,
+        long_about = r#"Show pool size, message count, and sequence bounds as JSON."#,
         after_help = r#"EXAMPLE
-  $ plasmite pool info demo"#
+  $ plasmite pool info foo"#
     )]
     Info {
         #[arg(help = "Pool name or path")]
@@ -602,12 +622,9 @@ NOTES
     },
     #[command(
         about = "Delete a pool file",
-        long_about = r#"Delete a pool file (destructive)."#,
+        long_about = r#"Delete a pool file (destructive, cannot be undone)."#,
         after_help = r#"EXAMPLE
-  $ plasmite pool delete demo
-
-NOTES
-  - This permanently removes the pool file."#
+  $ plasmite pool delete foo"#
     )]
     Delete {
         #[arg(help = "Pool name or path")]

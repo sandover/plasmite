@@ -3,257 +3,259 @@
 [![CI](https://github.com/sandover/plasmite/actions/workflows/ci.yml/badge.svg)](https://github.com/sandover/plasmite/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Plasmite is a command line tool (and eventually library) for reading and writing messages into **pools**. Pools are persistent ring buffers of immutable messages that multiple local processes can append to and read from concurrently. They're a handy abstraction for coordinating small distributed systems such as spatial computing environments, installations, robotics setups, music & performances, etc. 
+Persistent message pools for local IPC. Multiple processes can write and read concurrently. Messages are JSON. Pools are just files.
 
-Pools and their messages can play a similar role to [OSC](https://ccrma.stanford.edu/groups/osc/index.html), but plasma is more approachable and its data is just JSON.
+```bash
+# First, create a pool
+plasmite pool create chat
 
-It’s inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma) but simplified, written in Rust, and with JSON semantics. 
+# Terminal 1 - bob starts watching (blocks, waiting for messages)
+plasmite peek chat
 
-## Basics
+# Terminal 2 - alice sends messages
+plasmite poke chat '{"from": "alice", "msg": "hello bob"}'
+plasmite poke chat '{"from": "alice", "msg": "you there?"}'
 
-- **Single-file pools**: each pool is a `.plasmite` file
-- **Room-scale concurrency**: many readers + many writers (writers serialize at append time).
-- **JSON contract**: JSON in and out
-- **Zero-copy storage format**: payloads are stored as **[Lite³](https://github.com/fastserial/lite3)** messages (see “Why Lite³”).
+# Terminal 1 - bob sees each message appear as alice sends it:
+#   {"seq":1,"time":"...","meta":{"descrips":[]},"data":{"from":"alice","msg":"hello bob"}}
+#   {"seq":2,"time":"...","meta":{"descrips":[]},"data":{"from":"alice","msg":"you there?"}}
+```
 
-Supported platforms: **macOS** and **Linux**.
+No daemon, no config, no ports. ~600k messages/sec on a laptop.
 
-## Interface
+## Why Plasmite?
 
-- `plasmite pool create` -- make a pool file
-- `plasmite pool info` -- info about the pool
-- `plasmite pool list` -- list pools in the pool dir
-- `plasmite pool delete` -- delete a pool file
-- `plasmite poke` -- deposit messages into a pool
-- `plasmite get` -- read one message from a pool
-- `plasmite peek` -- stream all messages from a pool
+Common local IPC options have tradeoffs:
+- Temp files need locking and don't support watching
+- Named pipes block writers and allow only one reader
+- Redis/RabbitMQ require running a daemon
+- WebSockets require networking code
 
-An alias binary, `pls`, is installed as well.
+Plasmite pools are ring buffers that support multiple concurrent writers and readers. Messages are JSON, so you can filter with `jq`. Pools are regular files you can `ls` and `rm`. Writes are crash-safe.
 
-Library will come later.
+| Alternative | Limitation | Plasmite |
+|-------------|------------|----------|
+| Temp files + locks | No watching, collision-prone | Multiple writers, real-time reads |
+| Named pipes | Blocks writers, one reader | Non-blocking, multiple readers |
+| Polling a directory | Busy loops, no ordering | Streaming with sequence numbers |
+| Redis | Requires daemon | Just files |
+| WebSockets | Requires server | No networking |
 
 ## Install
-
-### From source
 
 ```bash
 cargo install --path . --locked
 ```
 
-### Homebrew (tap)
+This installs `plasmite` and the `pls` alias. Supported: **macOS** and **Linux**.
 
-Copy `homebrew/plasmite.rb` into your tap repository.
-See `docs/homebrew.md` for the full steps.
+## Examples
 
+### Watch a process from another terminal
+
+**Terminal 1** - your build script:
 ```bash
-brew tap YOUR_GITHUB/tap
-brew install plasmite
+plasmite poke build --create '{"step": "compile", "status": "running"}'
+sleep 2  # ... compiling ...
+plasmite poke build '{"step": "compile", "status": "done"}'
+plasmite poke build '{"step": "test", "status": "running"}'
 ```
 
-## Quickstart
+**Terminal 2** - you, watching:
+```bash
+plasmite peek build
+```
+
+### Coordinate two scripts
 
 ```bash
-# create a pool
-plasmite pool create foo
+# Script A waits for a signal
+echo "Waiting for go signal..."
+plasmite peek signals --where '.data.go == true' --tail 1 > /dev/null
+echo "Got it! Proceeding..."
 
-# append a message (repeat --descrip to add more tags)
-plasmite poke foo --descrip greeting '{"hello":"world"}'
+# Script B sends the signal
+plasmite poke signals --create '{"go": true}'
+```
 
-# fetch by sequence
-plasmite get foo 1
+### Ingest streams from anywhere
 
-# watch for new messages (Ctrl-C to stop)
-plasmite peek foo
+```bash
+# Pipe JSON Lines from jq
+jq -c '.items[]' data.json | plasmite poke foo --create
 
-# watch messages from the last 5 minutes
+# Stream from curl (event streams auto-detected)
+curl -N https://api.example.com/stream | plasmite poke events --create
+
+# System logs (Linux)
+journalctl -o json-seq -f | plasmite poke syslog --create
+
+# System logs (macOS)
+/usr/bin/log stream --style ndjson | plasmite poke syslog --create
+```
+
+### Filter and transform
+
+```bash
+# Only errors
+plasmite peek foo --where '.data.level == "error"'
+
+# Only messages tagged "important"
+plasmite peek foo --where '.meta.descrips[]? == "important"'
+
+# Pipe to jq for transformation
+plasmite peek foo --format jsonl | jq -r '.data.msg'
+
+# Last 10 messages, then keep watching
+plasmite peek foo --tail 10
+
+# Messages from the last 5 minutes
 plasmite peek foo --since 5m
 ```
 
-Tip: `peek` is designed to compose with Unix tools. Use `--where` to filter at the source,
-then use `jq` to shape output:
+### Use from any language
 
-```bash
-plasmite peek foo --where '.meta.descrips[]? == "greeting"' --format jsonl | jq -r '.data.hello'
+Plasmite is just a CLI. Call it from anything:
+
+```python
+# Python
+import subprocess, json
+subprocess.run(["plasmite", "poke", "foo", "--create", json.dumps({"from": "python"})])
 ```
 
-Note: `--where` numeric comparisons only work for numbers that fit in an `f64`; larger
-integers are treated as non-numeric and will not match numeric predicates.
-
-## Help
-
-```bash
-plasmite --help
-plasmite peek --help
-plasmite pool create --help
+```javascript
+// Node.js
+const { execSync } = require('child_process');
+execSync(`plasmite poke foo --create '${JSON.stringify({from: "node"})}'`);
 ```
 
-### Streaming into `poke`
-
-`poke` is designed to accept common streaming formats with no glue:
-
 ```bash
-# create a pool for the stream (or use --create on poke)
-plasmite pool create ingest
-
-# JSON Lines (jq-friendly)
-jq -c '.items[]' data.json | plasmite poke ingest
-
-# Event-style streams (lines prefixed with data:)
-curl -N https://example.com/stream | plasmite poke ingest
-
-# JSON Sequence (0x1e record separators, common on Linux)
-journalctl -o json-seq -f | plasmite poke ingest
+# Or just shell
+plasmite poke foo --create '{"from": "bash"}'
 ```
 
-Use `--in` to force a mode when auto-detection is wrong:
+## Commands
 
-```bash
-cat payload.json | plasmite poke ingest --in json
-journalctl -o json-seq -f | plasmite poke ingest --in seq
-```
+| Command | Description |
+|---------|-------------|
+| `poke POOL DATA` | Send a message (`--create` to auto-create pool) |
+| `peek POOL` | Watch messages (streams until Ctrl-C) |
+| `get POOL SEQ` | Fetch one message by seq number |
+| `pool create NAME` | Create a pool (`--size 8M` for larger) |
+| `pool list` | List pools |
+| `pool info NAME` | Show pool metadata |
+| `pool delete NAME` | Delete a pool |
 
-Use `--errors skip` for best-effort ingestion; skipped records emit notices on stderr
-and set exit code 1. In auto mode, multiline recovery resyncs on lines that look like
-the start of a new JSON value (`{` or `[`); for strict multiline JSON, use `--in json`.
-Append/storage errors are not skippable and will abort ingestion.
+Alias: `pls` (e.g., `pls poke foo '{"x":1}'`)
 
-### Two-terminal live stream demo (macOS logs)
+Run `plasmite --help` or `plasmite <command> --help` for all options.
 
-This shows a real, high-frequency data source (macOS unified logging) being streamed into a pool
-in one terminal while another terminal follows it.
-
-Terminal 1 (writer):
-
-```bash
-plasmite pool create logs
-
-/usr/bin/log stream --style ndjson --level info \
-  | plasmite poke logs --descrip log
-```
-
-Terminal 2 (reader):
-
-```bash
-plasmite peek logs
-```
-
-Notes:
-- Use `/usr/bin/log` (in zsh, `log` can be a shell builtin).
-- Prefer `--style ndjson` for streaming; `--style json` is one big JSON value, so `jq` may appear to “hang”.
-- `poke` emits the committed message as JSON.
-- If it’s too chatty, add a filter (but avoid filters so strict that nothing matches):
-  `--predicate 'subsystem == "com.apple.SkyLight"'` or `--process WindowServer`.
-
-## Performance baselines
-
-Use a release build for baseline numbers. See `docs/perf.md` for the full guide.
-
-## Development
-
-### Optional local git hooks
-
-This repo’s real “trust boundary” is **CI**, but local hooks are a useful early warning system.
-Hooks are local-only and bypassable (`git commit --no-verify`), so treat them as guardrails.
-
-Suggested hook scripts live in `docs/suggested-hooks/`. Copy them into `.git/hooks/`
-if you want local enforcement and local commit-message nudges:
-
-```bash
-cp docs/suggested-hooks/pre-commit .git/hooks/pre-commit
-cp docs/suggested-hooks/prepare-commit-msg .git/hooks/prepare-commit-msg
-cp docs/suggested-hooks/pre-push .git/hooks/pre-push
-chmod +x .git/hooks/pre-commit .git/hooks/prepare-commit-msg
-chmod +x .git/hooks/pre-push
-```
-
-## Concepts
+## How It Works
 
 ### Pools
 
-A “pool” is a **persistent ring buffer** of messages:
+A pool is a **persistent ring buffer** - one `.plasmite` file:
 
-- Appends increase a monotonically increasing `seq` number.
-- Once the pool is full, newer appends overwrite the oldest messages (ring-buffer semantics).
-- Readers are best-effort: if writers outrun readers, readers can observe gaps (via `seq`).
+- **Multiple writers** append concurrently (serialized via OS file locks)
+- **Multiple readers** watch concurrently (lock-free, zero-copy)
+- **Bounded retention** - old messages overwritten when full
+- **Crash-safe** - torn writes never propagate
+
+Default location: `~/.plasmite/pools/`. Create explicitly or use `--create` on first poke.
 
 ### Messages
 
-Plasmite’s user-facing message model is a simplification of Plasma “proteins”:
-
-- `meta.descrips`: a list of strings (like Plasma “descrips”) for lightweight tagging/filtering.
-- `data`: arbitrary JSON object (your payload).
-
-Canonical CLI JSON shape:
-
 ```json
 {
-  "seq": 12345,
-  "time": "2026-01-28T18:06:00.123Z",
-  "meta": { "descrips": ["event", "ping"] },
-  "data": { "any": "thing" }
+  "seq": 42,
+  "time": "2026-02-03T12:00:00.123Z",
+  "meta": { "descrips": ["error", "db"] },
+  "data": { "your": "payload" }
 }
 ```
 
-On disk, each message payload is stored as **Lite³ bytes for `{meta,data}`**; the CLI remains
-**JSON-in/JSON-out** (`poke` encodes JSON to Lite³; `get`/`peek` decode Lite³ to JSON).
+- **seq** - auto-incrementing ID (for ordering, deduplication, `plasmite get`)
+- **time** - when it was written (RFC 3339, nanosecond precision)
+- **meta.descrips** - tags you add with `--descrip` (for filtering with `--where`)
+- **data** - your JSON payload
 
-Errors:
-- On TTY, errors are concise human text (one line + hint).
-- When stderr is not a TTY (piped/redirected), errors are JSON objects on stderr for easy parsing.
-- On TTY, pretty JSON stdout is colorized by default; disable with `--color never`.
-
-Example (non-TTY JSON error):
-```json
-{"error":{"kind":"NotFound","message":"pool not found","path":"/Users/me/.plasmite/pools/demo.plasmite","hint":"Create it first: plasmite pool create demo (or pass --dir for a different pool directory)."}}
+Tag messages when you poke them:
+```bash
+plasmite poke foo --descrip error --descrip db '{"msg": "connection lost"}'
 ```
 
-Example (TTY text error):
+Filter by tag when you peek:
+```bash
+plasmite peek foo --where '.meta.descrips[]? == "error"'
 ```
-error: invalid duration
-hint: Use a number plus ms|s|m|h (e.g. 10s).
+
+### Scripting
+
+Plasmite is built for scripts:
+- **TTY**: Human-readable errors with hints
+- **Pipes**: JSON errors on stderr, stable exit codes
+- See [docs/exit-codes.md](docs/exit-codes.md) for the full list
+
+## Advanced
+
+### Pool size
+
+Default is 1MB. Old messages are overwritten when full:
+
+```bash
+plasmite pool create bigpool --size 64M    # More history
+plasmite poke signals --create --create-size 64K '...'  # Tiny, ephemeral
 ```
 
-### Pool references
+### Durability
 
-Most commands take a pool reference:
+Default is fast (OS buffered). For critical data:
 
-- If the argument contains `/`, it’s treated as a path.
-- If it ends with `.plasmite`, it resolves to `POOL_DIR/<arg>`.
-- Otherwise it resolves to `POOL_DIR/<NAME>.plasmite`.
+```bash
+plasmite poke foo --durability flush '{"important": true}'
+```
 
-Default pool dir is `~/.plasmite/pools` (override with `--dir`).
+### Retries
 
-## Why Lite³
+Handle lock contention gracefully:
 
-Plasmite uses **Lite³** (a JSON-compatible, zero-copy binary format) for message payloads:
+```bash
+plasmite poke foo --retry 3 --retry-delay 100ms '{"data": 1}'
+```
 
-- **Zero-copy reads**: the pool is memory-mapped; readers can validate and view payload bytes
-  without a full JSON parse/deserialize step.
-- **Small + fast**: Lite³ is designed to make “wire format == memory format” practical.
-- **Debuggable**: Lite³ supports conversion to/from JSON, so the CLI can stay JSON-native.
+### Input modes
 
-Links:
-- Lite³ docs: `https://lite3.io/`
-- Lite³ repo: `https://github.com/fastserial/lite3`
+`poke` auto-detects JSONL, JSON-seq (0x1e), and event streams. Override with `--in`:
 
-This repo vendors a pinned Lite³ snapshot in `vendor/lite3/` to keep builds reproducible and
-to avoid network fetches at build time. See `vendor/README.md`.
+```bash
+cat records.jsonl | plasmite poke foo --in jsonl
+cat big.json | plasmite poke foo --in json
+```
 
-## Docs
+Skip bad records with `--errors skip` (exit 1 if any skipped).
 
-- CLI contract: `spec/v0/SPEC.md`
-- Storage + concurrency design: `docs/design/tdd-v0.0.1.md`
-- Vision: `docs/vision.md`
-- Architecture: `docs/architecture.md`
-- Roadmap: `docs/roadmap.md`
-- Decisions (ADRs): `docs/decisions/README.md`
-- Docs index: `docs/README.md`
-- Testing: `docs/TESTING.md`
-- Release checklist: `docs/RELEASING.md`
-- Exit codes: `docs/exit-codes.md`
-- Homebrew packaging: `docs/homebrew.md`
-- Performance baselines: `docs/perf.md`
-- Changelog: `CHANGELOG.md`
+## Performance
+
+Benchmarks on a laptop (M-series Mac, release build, 256-byte payloads):
+
+- **Append**: 600k+ messages/sec (single writer, fast durability)
+- **Follow latency**: sub-millisecond typical, ~3ms worst case
+- **Concurrent writers**: scales to 8+ with graceful degradation
+
+See [docs/perf.md](docs/perf.md) for the full benchmark suite.
+
+## Internals
+
+Plasmite uses **[Lite³](https://github.com/fastserial/lite3)** (a zero-copy binary JSON format) for on-disk storage. The CLI is JSON-in/JSON-out - you never see Lite³ directly.
+
+Inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma), simplified for modern workflows.
+
+## More Info
+
+- [CLI spec](spec/v0/SPEC.md) - Stable contract for scripting
+- [Architecture](docs/architecture.md) - How it's built
+- [Exit codes](docs/exit-codes.md) - For robust error handling
+- [Changelog](CHANGELOG.md) - Version history
 
 ## Development
 
@@ -261,8 +263,6 @@ to avoid network fetches at build time. See `vendor/README.md`.
 cargo test
 ```
 
-See `docs/TESTING.md` for the full list of test suites and what they cover.
+## License
 
-## Third-party / licenses
-
-See `THIRD_PARTY_NOTICES.md` for vendored dependencies and licenses.
+MIT. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for vendored code.
