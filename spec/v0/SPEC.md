@@ -45,7 +45,7 @@ Minimal, explicit flag set for v0.0.1:
 * `pool create`: `--size`
 * `pool list`: no flags
 * `poke`: `DATA`, `--file FILE`, `--in`, `--errors`, `--descrip`, `--durability fast|flush`, `--create`, `--create-size`, `--retry`, `--retry-delay`
-* `peek`: `--tail`, `--format pretty|jsonl`, `--jsonl`
+* `peek`: `--tail`, `--since`, `--where`, `--format pretty|jsonl`, `--jsonl`, `--quiet-drops`
 
 JSON output is the default for commands that print; `poke` always emits committed message JSON.
 

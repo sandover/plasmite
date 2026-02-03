@@ -23,7 +23,7 @@ Supported platforms: **macOS** and **Linux**.
 - `plasmite pool create` -- make a pool file
 - `plasmite pool info` -- info about the pool
 - `plasmite pool list` -- list pools in the pool dir
-- `plasmite pool delete` 
+- `plasmite pool delete` -- delete a pool file
 - `plasmite poke` -- deposit messages into a pool
 - `plasmite get` -- read one message from a pool
 - `plasmite peek` -- stream all messages from a pool
@@ -59,7 +59,7 @@ plasmite pool create foo
 # append a message (repeat --descrip to add more tags)
 plasmite poke foo --descrip greeting '{"hello":"world"}'
 
-# fetch by index
+# fetch by sequence
 plasmite get foo 1
 
 # watch for new messages (Ctrl-C to stop)
@@ -69,10 +69,19 @@ plasmite peek foo
 plasmite peek foo --since 5m
 ```
 
-Tip: `peek` is designed to compose with Unix tools:
+Tip: `peek` is designed to compose with Unix tools. Use `--where` to filter at the source,
+then use `jq` to shape output:
 
 ```bash
-plasmite peek demo | jq -c '.data'
+plasmite peek foo --where '.meta.descrips[]? == "greeting"' --format jsonl | jq -r '.data.hello'
+```
+
+## Help
+
+```bash
+plasmite --help
+plasmite peek --help
+plasmite pool create --help
 ```
 
 ### Streaming into `poke`
@@ -80,21 +89,24 @@ plasmite peek demo | jq -c '.data'
 `poke` is designed to accept common streaming formats with no glue:
 
 ```bash
+# create a pool for the stream (or use --create on poke)
+plasmite pool create ingest
+
 # JSON Lines (jq-friendly)
-jq -c '.items[]' data.json | plasmite poke foo
+jq -c '.items[]' data.json | plasmite poke ingest
 
 # Event-style streams (lines prefixed with data:)
-curl -N https://example.com/stream | plasmite poke foo
+curl -N https://example.com/stream | plasmite poke ingest
 
 # JSON Sequence (0x1e record separators, common on Linux)
-journalctl -o json-seq -f | plasmite poke foo
+journalctl -o json-seq -f | plasmite poke ingest
 ```
 
 Use `--in` to force a mode when auto-detection is wrong:
 
 ```bash
-cat payload.json | plasmite poke foo --in json
-journalctl -o json-seq -f | plasmite poke foo --in seq
+cat payload.json | plasmite poke ingest --in json
+journalctl -o json-seq -f | plasmite poke ingest --in seq
 ```
 
 Use `--errors skip` for best-effort ingestion; skipped records emit notices on stderr
@@ -110,16 +122,16 @@ in one terminal while another terminal follows it.
 Terminal 1 (writer):
 
 ```bash
-plasmite pool create foo
+plasmite pool create logs
 
 /usr/bin/log stream --style ndjson --level info \
-  | plasmite poke foo --descrip log
+  | plasmite poke logs --descrip log
 ```
 
 Terminal 2 (reader):
 
 ```bash
-plasmite peek foo
+plasmite peek logs
 ```
 
 Notes:
