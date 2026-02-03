@@ -507,6 +507,174 @@ fn peek_timeout_with_one_exits_on_message() {
 }
 
 #[test]
+fn peek_data_only_jsonl_emits_payload() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "1",
+            "--jsonl",
+            "--data-only",
+            "--one",
+        ])
+        .output()
+        .expect("peek");
+    assert!(output.status.success());
+    let lines = parse_json_lines(&output.stdout);
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].get("x").unwrap().as_i64().unwrap(), 1);
+    assert!(lines[0].get("data").is_none());
+}
+
+#[test]
+fn peek_data_only_where_filters_envelope() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":1}",
+            "--descrip",
+            "drop",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":2}",
+            "--descrip",
+            "keep",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "1",
+            "--jsonl",
+            "--data-only",
+            "--one",
+            "--where",
+            r#".meta.descrips[]? == "keep""#,
+        ])
+        .output()
+        .expect("peek");
+    assert!(output.status.success());
+    let lines = parse_json_lines(&output.stdout);
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].get("x").unwrap().as_i64().unwrap(), 2);
+    assert!(lines[0].get("data").is_none());
+}
+
+#[test]
+fn peek_data_only_pretty_emits_payload() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":3}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "1",
+            "--format",
+            "pretty",
+            "--data-only",
+            "--one",
+        ])
+        .output()
+        .expect("peek");
+    assert!(output.status.success());
+    let value = parse_json(std::str::from_utf8(&output.stdout).expect("utf8"));
+    assert_eq!(value.get("x").unwrap().as_i64().unwrap(), 3);
+    assert!(value.get("data").is_none());
+}
+
+#[test]
 fn peek_where_filters_messages() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");

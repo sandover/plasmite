@@ -474,6 +474,7 @@ plasmite peek POOLREF [OPTIONS]
 * `--jsonl`: alias for `--format jsonl` (compatibility).
 * `--one`: exit after emitting one matching message.
 * `--timeout DURATION`: exit 124 if no output within the duration.
+* `--data-only`: emit only the `.data` payload (filters still apply to the full message).
 * `--quiet-drops`: suppress non-fatal drop notices on stderr.
 
 **Behavior**
@@ -485,6 +486,7 @@ plasmite peek POOLREF [OPTIONS]
 * If `--since` is in the future, `peek` exits with no output.
 * `--timeout` counts since the last emitted message; it exits 124 after the interval with no output.
 * Relative `--since` uses UTC now; RFC 3339 offsets are honored.
+* `--data-only` still evaluates `--where` against the full message envelope.
 * `--where` is evaluated against the full message JSON object (`.seq`, `.time`, `.meta`, `.data`).
   * Non-boolean results are a usage error.
   * Runtime errors (missing fields, type mismatches) evaluate to false (message excluded).

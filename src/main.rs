@@ -261,6 +261,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             tail,
             one,
             timeout,
+            data_only,
             quiet_drops,
             format,
             since,
@@ -296,6 +297,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 pretty,
                 one,
                 timeout,
+                data_only,
                 since_ns,
                 where_predicates: compile_filters(&where_expr)?,
                 quiet_drops,
@@ -556,6 +558,9 @@ Use `--tail N` to see recent history first, then keep watching."#,
   # Wait up to 5 seconds for a message
   $ plasmite peek foo --timeout 5s
 
+  # Emit only data payloads
+  $ plasmite peek foo --data-only --format jsonl
+
 NOTES
   - Use `--format jsonl` for scripts (one JSON object per line)
   - `--where` uses jq-style expressions; repeat for AND
@@ -580,6 +585,8 @@ NOTES
             help = "Exit 124 if no output within duration (e.g. 500ms, 5s, 1m)"
         )]
         timeout: Option<String>,
+        #[arg(long, help = "Emit only the .data payload")]
+        data_only: bool,
         #[arg(
             long,
             value_enum,
@@ -1520,6 +1527,14 @@ fn message_from_frame(frame: &FrameRef<'_>) -> Result<Value, Error> {
     }))
 }
 
+fn output_value(message: Value, data_only: bool) -> Value {
+    if data_only {
+        message.get("data").cloned().unwrap_or(Value::Null)
+    } else {
+        message
+    }
+}
+
 fn decode_payload(payload: &[u8]) -> Result<(Value, Value), Error> {
     let json_str = Lite3DocRef::new(payload).to_json(false)?;
     let value: Value = serde_json::from_str(&json_str).map_err(|err| {
@@ -1559,6 +1574,7 @@ struct PeekConfig {
     pretty: bool,
     one: bool,
     timeout: Option<Duration>,
+    data_only: bool,
     since_ns: Option<u64>,
     where_predicates: Vec<JqFilter>,
     quiet_drops: bool,
@@ -1595,7 +1611,11 @@ fn peek(
                     if frame.timestamp_ns >= since_ns {
                         let message = message_from_frame(&frame)?;
                         if matches_all(cfg.where_predicates.as_slice(), &message)? {
-                            emit_message(message, cfg.pretty, cfg.color_mode);
+                            emit_message(
+                                output_value(message, cfg.data_only),
+                                cfg.pretty,
+                                cfg.color_mode,
+                            );
                             bump_timeout(&mut timeout_deadline);
                             if cfg.one {
                                 return Ok(RunOutcome::ok());
@@ -1635,13 +1655,21 @@ fn peek(
         if tail_wait {
             if emit.len() >= cfg.tail as usize {
                 if let Some(value) = emit.back() {
-                    emit_message(value.clone(), cfg.pretty, cfg.color_mode);
+                    emit_message(
+                        output_value(value.clone(), cfg.data_only),
+                        cfg.pretty,
+                        cfg.color_mode,
+                    );
                 }
                 return Ok(RunOutcome::ok());
             }
         } else {
             for value in emit.drain(..) {
-                emit_message(value, cfg.pretty, cfg.color_mode);
+                emit_message(
+                    output_value(value, cfg.data_only),
+                    cfg.pretty,
+                    cfg.color_mode,
+                );
                 bump_timeout(&mut timeout_deadline);
             }
         }
@@ -1739,12 +1767,20 @@ fn peek(
                         }
                         if emit.len() == cfg.tail as usize {
                             if let Some(value) = emit.back() {
-                                emit_message(value.clone(), cfg.pretty, cfg.color_mode);
+                                emit_message(
+                                    output_value(value.clone(), cfg.data_only),
+                                    cfg.pretty,
+                                    cfg.color_mode,
+                                );
                             }
                             return Ok(RunOutcome::ok());
                         }
                     } else {
-                        emit_message(message, cfg.pretty, cfg.color_mode);
+                        emit_message(
+                            output_value(message, cfg.data_only),
+                            cfg.pretty,
+                            cfg.color_mode,
+                        );
                         bump_timeout(&mut timeout_deadline);
                         if cfg.one {
                             return Ok(RunOutcome::ok());
