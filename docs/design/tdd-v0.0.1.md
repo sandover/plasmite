@@ -550,9 +550,15 @@ Future:
 `pool resize`:
 
 * requires exclusive lock
-* `ftruncate` to new size
-* update header: `file_size`, `ring_size`, etc.
-* **Processes must re-open** to see new mapping (documented limitation)
+* **No live resize while other processes are attached** (v0.0.x)
+  * mmap shrink hazards: truncating a file while a process holds an mmap can trigger SIGBUS
+* **Processes must re-open** to see a new mapping (documented limitation)
+* **Grow**: offline-only, can `ftruncate` then update header (`file_size`, `ring_size`, etc.)
+* **Shrink**: offline-only and should be conservative
+  * prefer “copy to new pool + swap” rather than truncating in-place
+  * if in-place shrink is added later, use a two-phase approach:
+    1) logical shrink (header ring size)
+    2) physical truncate only when no other process can be mmapped
 
 v0.1: safe approach is “resize only when no other processes are attached” (best-effort; we can’t reliably detect all attachers without a registry).
 

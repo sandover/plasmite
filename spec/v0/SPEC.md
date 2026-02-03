@@ -366,6 +366,12 @@ Resize a pool (if supported by the format you choose).
 plasmite pool resize NAME SIZE
 ```
 
+**Behavior**
+
+* v0.0.x policy: **offline-only** resize (no other processes attached).
+* Processes must re-open to observe a new mmap size.
+* Shrink must avoid mmap truncation hazards (SIGBUS); prefer “copy-to-new-pool + swap”.
+
 **Output**
 
 * Default: JSON object to stdout (pretty if TTY, compact otherwise).
