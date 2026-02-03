@@ -257,6 +257,321 @@ fn peek_emits_new_messages() {
 }
 
 #[test]
+fn peek_where_filters_messages() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":1}",
+            "--descrip",
+            "drop",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":2}",
+            "--descrip",
+            "keep",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let mut peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "10",
+            "--jsonl",
+            "--where",
+            r#".meta.descrips[]? == "keep""#,
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("peek");
+    let stdout = peek.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let read = reader.read_line(&mut line).expect("read line");
+    assert!(read > 0, "expected a line from peek output");
+    let value = parse_json(line.trim());
+    assert_eq!(value.get("data").unwrap()["x"], 2);
+    let _ = peek.kill();
+    let _ = peek.wait();
+}
+
+#[test]
+fn peek_where_multiple_predicates_and() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"level\":1}",
+            "--descrip",
+            "alpha",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"level\":2}",
+            "--descrip",
+            "alpha",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let mut peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "10",
+            "--jsonl",
+            "--where",
+            r#".meta.descrips[]? == "alpha""#,
+            "--where",
+            ".data.level >= 2",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("peek");
+    let stdout = peek.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let read = reader.read_line(&mut line).expect("read line");
+    assert!(read > 0, "expected a line from peek output");
+    let value = parse_json(line.trim());
+    assert_eq!(value.get("data").unwrap()["level"], 2);
+    let _ = peek.kill();
+    let _ = peek.wait();
+}
+
+#[test]
+fn peek_where_invalid_expression_is_usage_error() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "1",
+            "--jsonl",
+            "--where",
+            "not valid jq",
+        ])
+        .output()
+        .expect("peek");
+    assert_eq!(peek.status.code().unwrap(), 2);
+    let err = parse_error_json(&peek.stderr);
+    let inner = err
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
+    assert_eq!(inner.get("kind").and_then(|v| v.as_str()).unwrap(), "Usage");
+}
+
+#[test]
+fn peek_where_non_boolean_expression_is_usage_error() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "1",
+            "--jsonl",
+            "--where",
+            ".data",
+        ])
+        .output()
+        .expect("peek");
+    assert_eq!(peek.status.code().unwrap(), 2);
+    let err = parse_error_json(&peek.stderr);
+    let inner = err
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
+    assert_eq!(inner.get("kind").and_then(|v| v.as_str()).unwrap(), "Usage");
+}
+
+#[test]
+fn peek_where_with_since_emits_matches() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":5}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let mut peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--since",
+            "1h",
+            "--jsonl",
+            "--where",
+            ".data.x == 5",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("peek");
+    let stdout = peek.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let read = reader.read_line(&mut line).expect("read line");
+    assert!(read > 0, "expected a line from peek output");
+    let value = parse_json(line.trim());
+    assert_eq!(value.get("data").unwrap()["x"], 5);
+    let _ = peek.kill();
+    let _ = peek.wait();
+}
+
+#[test]
 fn not_found_exit_code() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
