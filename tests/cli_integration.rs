@@ -615,6 +615,96 @@ fn poke_auto_handles_event_stream() {
 }
 
 #[test]
+fn poke_auto_detects_json_seq() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let mut poke = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "poke", "demo"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("poke");
+    {
+        let stdin = poke.stdin.as_mut().expect("stdin");
+        stdin
+            .write_all(b"\x1e{\"x\":1}\x1e{\"x\":2}")
+            .expect("write stdin");
+    }
+    let output = poke.wait_with_output().expect("poke output");
+    assert!(output.status.success());
+    let lines = parse_json_lines(&output.stdout);
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0].get("data").unwrap()["x"], 1);
+}
+
+#[test]
+fn poke_auto_skip_reports_oversize() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let mut poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "-e",
+            "skip",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("poke");
+    {
+        let stdin = poke.stdin.as_mut().expect("stdin");
+        let big = "x".repeat(1024 * 1024 + 1);
+        let line = format!("{{\"big\":\"{big}\"}}\n");
+        stdin.write_all(line.as_bytes()).expect("write stdin");
+        stdin.write_all(b"{\"ok\":1}\n").expect("write ok");
+    }
+    let output = poke.wait_with_output().expect("poke output");
+    assert_eq!(output.status.code().unwrap(), 1);
+    let lines = parse_json_lines(&output.stdout);
+    assert_eq!(lines.len(), 1);
+    let notices = parse_json_lines(&output.stderr);
+    let oversize = notices.iter().find(|value| {
+        value
+            .get("notice")
+            .and_then(|v| v.get("details"))
+            .and_then(|v| v.get("error_kind"))
+            .and_then(|v| v.as_str())
+            == Some("Oversize")
+    });
+    assert!(oversize.is_some());
+}
+
+#[test]
 fn poke_seq_mode_parses_rs_records() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
