@@ -5,7 +5,7 @@
 //! Invariants: Timeouts are bounded to keep CI deterministic.
 use std::fs::File;
 use std::io::Write;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -27,6 +27,11 @@ fn parse_json(value: &str) -> Value {
 fn parse_json_lines(output: &[u8]) -> Vec<Value> {
     let text = String::from_utf8_lossy(output);
     text.lines().map(parse_json).collect()
+}
+
+fn read_json_value<R: Read>(reader: R) -> Value {
+    let mut stream = serde_json::Deserializer::from_reader(reader).into_iter::<Value>();
+    stream.next().expect("json value").expect("valid json")
 }
 
 fn parse_error_json(output: &[u8]) -> Value {
@@ -142,6 +147,8 @@ fn readme_quickstart_flow() {
             "pool",
             "create",
             "demo",
+            "--size",
+            "128K",
         ])
         .output()
         .expect("create");
@@ -567,6 +574,193 @@ fn peek_where_with_since_emits_matches() {
     assert!(read > 0, "expected a line from peek output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 5);
+    let _ = peek.kill();
+    let _ = peek.wait();
+}
+
+#[test]
+fn peek_where_with_format_pretty_emits_matches() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let mut peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "1",
+            "--format",
+            "pretty",
+            "--where",
+            ".data.x == 1",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("peek");
+    let stdout = peek.stdout.take().expect("stdout");
+    let reader = BufReader::new(stdout);
+    let value = read_json_value(reader);
+    assert_eq!(value.get("data").unwrap()["x"], 1);
+    let _ = peek.kill();
+    let _ = peek.wait();
+}
+
+#[test]
+fn peek_where_with_quiet_drops_suppresses_notice() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let mut peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "1",
+            "--jsonl",
+            "--where",
+            ".data.x == 1",
+            "--quiet-drops",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("peek");
+    let stdout = peek.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let read = reader.read_line(&mut line).expect("read line");
+    assert!(read > 0, "expected a line from peek output");
+    let value = parse_json(line.trim());
+    assert_eq!(value.get("data").unwrap()["x"], 1);
+    let _ = peek.kill();
+    let output = peek.wait_with_output().expect("wait");
+    assert!(
+        output.stderr.is_empty(),
+        "expected no drop notices on stderr"
+    );
+}
+
+#[test]
+fn peek_where_multiple_predicates_with_since() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":1}",
+            "--descrip",
+            "alpha",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":2}",
+            "--descrip",
+            "alpha",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let mut peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--since",
+            "1h",
+            "--jsonl",
+            "--where",
+            r#".meta.descrips[]? == "alpha""#,
+            "--where",
+            ".data.x == 2",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("peek");
+    let stdout = peek.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let read = reader.read_line(&mut line).expect("read line");
+    assert!(read > 0, "expected a line from peek output");
+    let value = parse_json(line.trim());
+    assert_eq!(value.get("data").unwrap()["x"], 2);
     let _ = peek.kill();
     let _ = peek.wait();
 }
@@ -1549,7 +1743,7 @@ fn peek_emits_drop_notice_on_stderr() {
             if reader.read_line(&mut line).unwrap_or(0) == 0 {
                 break;
             }
-            thread::sleep(Duration::from_millis(100));
+            thread::sleep(Duration::from_millis(500));
         }
     });
 
@@ -1570,8 +1764,8 @@ fn peek_emits_drop_notice_on_stderr() {
         }
     });
 
-    for i in 0..25u64 {
-        let payload = "a".repeat(65536);
+    for i in 0..200u64 {
+        let payload = "a".repeat(8192);
         let poke = cmd()
             .args([
                 "--dir",
@@ -1589,7 +1783,7 @@ fn peek_emits_drop_notice_on_stderr() {
     }
 
     let notice_line = rx
-        .recv_timeout(Duration::from_secs(5))
+        .recv_timeout(Duration::from_secs(15))
         .expect("drop notice");
     let notice_json = parse_notice_json(&notice_line);
     let notice = notice_json

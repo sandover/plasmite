@@ -733,3 +733,7 @@
 {"type":"claim","ts":"2026-02-03T02:37:06.547133Z","data":{"id":"ZTGHSM","agent_id":"gpt-5.2@codex","ts":"2026-02-03T02:37:06.547133Z"}}
 {"type":"state","ts":"2026-02-03T02:37:06.547133Z","data":{"id":"ZTGHSM","state":"doing","ts":"2026-02-03T02:37:06.547133Z"}}
 {"type":"state","ts":"2026-02-03T02:38:24.070736Z","data":{"id":"ZTGHSM","state":"done","ts":"2026-02-03T02:38:24.070736Z"}}
+{"type":"new_task","ts":"2026-02-03T02:39:00.772813Z","data":{"id":"ZDTFWJ","uuid":"d0fb95be-73e9-42e8-994f-d341f6553652","epic_id":"","state":"todo","title":"Extend --where combo tests","body":"## Goal\n- Add remaining CLI integration tests for peek --where flag combinations and edge cases.\n\n## Acceptance Criteria\n- Tests cover: --where with --format pretty, --where with --quiet-drops, and multiple --where with --since or --tail.\n- `cargo test` passes.\n\n## Validation Gates\n- `cargo test` passes.\n","created_at":"2026-02-03T02:39:00.772813Z"}}
+{"type":"claim","ts":"2026-02-03T02:39:04.140535Z","data":{"id":"ZDTFWJ","agent_id":"gpt-5.2@codex","ts":"2026-02-03T02:39:04.140535Z"}}
+{"type":"state","ts":"2026-02-03T02:39:04.140535Z","data":{"id":"ZDTFWJ","state":"doing","ts":"2026-02-03T02:39:04.140535Z"}}
+{"type":"state","ts":"2026-02-03T02:43:08.774048Z","data":{"id":"ZDTFWJ","state":"done","ts":"2026-02-03T02:43:08.774048Z"}}
