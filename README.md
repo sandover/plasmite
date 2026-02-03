@@ -5,7 +5,7 @@
 
 Plasmite is a command line tool (and eventually library) for reading and writing messages into **pools**. Pools are persistent ring buffers of immutable messages that multiple local processes can append to and read from concurrently. They're a handy abstraction for coordinating small distributed systems such as spatial computing environments, installations, robotics setups, music & performances, etc. 
 
-Pools and their messages can fill a similar role to [OSC](https://ccrma.stanford.edu/groups/osc/index.html), but much more approachable. All data is just JSON.
+Pools and their messages can play a similar role to [OSC](https://ccrma.stanford.edu/groups/osc/index.html), but plasma is more approachable and its data is just JSON.
 
 It’s inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma) but simplified, written in Rust, and with JSON semantics. 
 
@@ -28,17 +28,17 @@ Supported platforms: **macOS** and **Linux**.
 - `plasmite get` -- read one message from a pool
 - `plasmite peek` -- stream all messages from a pool
 
-A dedicated Rust library API will come later.
+An alias binary, `pls`, is installed as well.
+
+Library will come later.
 
 ## Install
 
-### From source (recommended while early)
+### From source
 
 ```bash
 cargo install --path . --locked
 ```
-
-Tip: a short alias binary, `pls`, is installed alongside `plasmite` when available.
 
 ### Homebrew (tap)
 
