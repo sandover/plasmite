@@ -737,3 +737,11 @@
 {"type":"claim","ts":"2026-02-03T02:39:04.140535Z","data":{"id":"ZDTFWJ","agent_id":"gpt-5.2@codex","ts":"2026-02-03T02:39:04.140535Z"}}
 {"type":"state","ts":"2026-02-03T02:39:04.140535Z","data":{"id":"ZDTFWJ","state":"doing","ts":"2026-02-03T02:39:04.140535Z"}}
 {"type":"state","ts":"2026-02-03T02:43:08.774048Z","data":{"id":"ZDTFWJ","state":"done","ts":"2026-02-03T02:43:08.774048Z"}}
+{"type":"claim","ts":"2026-02-03T02:46:54.518785Z","data":{"id":"2FSODW","agent_id":"gpt-5.2@codex","ts":"2026-02-03T02:46:54.518785Z"}}
+{"type":"state","ts":"2026-02-03T02:46:54.518785Z","data":{"id":"2FSODW","state":"doing","ts":"2026-02-03T02:46:54.518785Z"}}
+{"type":"result","ts":"2026-02-03T02:46:59.686304Z","data":{"task_id":"2FSODW","summary":"Peek command already wired to --where via JqFilter; help/examples updated and CLI integration tests added.","path":"src/main.rs","sha256_at_attach":"9fed9623b5b00a4373c80dae7fc9ad335bdae2f19e40e8b0a34e4b7ddb0ef1a6","mtime_at_attach":"2026-02-03T02:31:43.229244573Z","git_commit_at_attach":"4dfa60bbee944134f8469bef2e6c4f5b22ed23e4","ts":"2026-02-03T02:46:59.686304Z"}}
+{"type":"state","ts":"2026-02-03T02:46:59.692498Z","data":{"id":"2FSODW","state":"done","ts":"2026-02-03T02:46:59.692498Z"}}
+{"type":"claim","ts":"2026-02-03T03:50:59.191031Z","data":{"id":"5F56DQ","agent_id":"gpt-5.2@codex","ts":"2026-02-03T03:50:59.191031Z"}}
+{"type":"state","ts":"2026-02-03T03:50:59.191031Z","data":{"id":"5F56DQ","state":"doing","ts":"2026-02-03T03:50:59.191031Z"}}
+{"type":"result","ts":"2026-02-03T03:51:10.663352Z","data":{"task_id":"5F56DQ","summary":"--where CLI integration tests added and stable.","path":"tests/cli_integration.rs","sha256_at_attach":"368fdb5e3df5739cb8129ec58cacfdbbdbd99f95a388ffc8d269fb06d568d77e","mtime_at_attach":"2026-02-03T02:42:42.723489856Z","git_commit_at_attach":"4dfa60bbee944134f8469bef2e6c4f5b22ed23e4","ts":"2026-02-03T03:51:10.663352Z"}}
+{"type":"state","ts":"2026-02-03T03:51:10.669536Z","data":{"id":"5F56DQ","state":"done","ts":"2026-02-03T03:51:10.669536Z"}}
