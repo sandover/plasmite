@@ -174,7 +174,10 @@ impl JaqValue {
         match value {
             Value::Null => Self::Null,
             Value::Bool(b) => Self::Bool(*b),
-            Value::Number(n) => Self::Num(n.as_f64().unwrap_or(0.0)),
+            Value::Number(n) => match n.as_f64() {
+                Some(value) => Self::Num(value),
+                None => Self::Str(n.to_string()),
+            },
             Value::String(s) => Self::Str(s.clone()),
             Value::Array(a) => Self::Arr(a.iter().map(Self::from_json).collect()),
             Value::Object(o) => Self::Obj(
@@ -630,5 +633,17 @@ mod tests {
         let filter = JqFilter::compile(r#".data.missing == null"#).unwrap();
         let msg = json!({"seq":1,"time":"t","meta":{"descrips":[]},"data":{"missing":null}});
         assert!(filter.matches(&msg).unwrap());
+    }
+
+    #[test]
+    fn filter_large_integer_mismatch_is_false() {
+        let preds = compile_filters(&[r#".data.id == 0"#.to_string()]).unwrap();
+        let msg = json!({
+            "seq":1,
+            "time":"t",
+            "meta":{"descrips":[]},
+            "data":{"id":18446744073709551615u64}
+        });
+        assert!(!matches_all(&preds, &msg).unwrap());
     }
 }

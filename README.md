@@ -76,6 +76,9 @@ then use `jq` to shape output:
 plasmite peek foo --where '.meta.descrips[]? == "greeting"' --format jsonl | jq -r '.data.hello'
 ```
 
+Note: `--where` numeric comparisons only work for numbers that fit in an `f64`; larger
+integers are treated as non-numeric and will not match numeric predicates.
+
 ## Help
 
 ```bash
