@@ -34,3 +34,7 @@ jobs:
           fi
       - run: cargo audit --db .scratch/advisory-db --no-fetch
       - run: cargo test --all --locked
+      - name: ABI smoke test
+        run: |
+          cargo build --lib
+          ./scripts/abi_smoke.sh target/debug

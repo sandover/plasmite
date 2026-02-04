@@ -14,7 +14,7 @@ clippy:
 test:
 	cargo test
 
-ci: fmt clippy test
+ci: fmt clippy test abi-smoke
 
 abi:
 	cargo build --lib
@@ -26,6 +26,9 @@ abi-release:
 
 abi-test: abi
 	cargo test abi_smoke
+
+abi-smoke: abi
+	./scripts/abi_smoke.sh
 
 scratch:
 	mkdir -p .scratch
