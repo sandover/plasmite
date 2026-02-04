@@ -33,13 +33,13 @@ if err != nil {
 }
 defer client.Close()
 
-pool, err := client.CreatePool("docs", 64*1024*1024)
+pool, err := client.CreatePool(plasmite.PoolRefName("docs"), 64*1024*1024)
 if err != nil {
     // handle err
 }
 defer pool.Close()
 
-msg, err := pool.AppendJSON([]byte(`{"kind":"note","text":"hi"}`), []string{"note"}, plasmite.DurabilityFast)
+msg, err := pool.Append(map[string]any{"kind": "note", "text": "hi"}, []string{"note"}, plasmite.DurabilityFast)
 if err != nil {
     // handle err
 }

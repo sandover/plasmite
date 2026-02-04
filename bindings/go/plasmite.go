@@ -16,6 +16,7 @@ package plasmite
 import "C"
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"runtime"
@@ -60,6 +61,14 @@ const (
 	DurabilityFlush Durability = 1
 )
 
+type PoolRef string
+
+func PoolRefName(name string) PoolRef { return PoolRef(name) }
+
+func PoolRefPath(path string) PoolRef { return PoolRef(path) }
+
+func PoolRefURI(uri string) PoolRef { return PoolRef(uri) }
+
 type Client struct {
 	ptr *C.plsm_client_t
 }
@@ -96,14 +105,14 @@ func (c *Client) Close() {
 	c.ptr = nil
 }
 
-func (c *Client) CreatePool(ref string, sizeBytes uint64) (*Pool, error) {
+func (c *Client) CreatePool(ref PoolRef, sizeBytes uint64) (*Pool, error) {
 	if c == nil || c.ptr == nil {
 		return nil, errors.New("plasmite: client is closed")
 	}
 	if ref == "" {
 		return nil, errors.New("plasmite: pool ref is required")
 	}
-	cRef := C.CString(ref)
+	cRef := C.CString(string(ref))
 	defer C.free(unsafe.Pointer(cRef))
 
 	var cPool *C.plsm_pool_t
@@ -115,14 +124,14 @@ func (c *Client) CreatePool(ref string, sizeBytes uint64) (*Pool, error) {
 	return &Pool{ptr: cPool}, nil
 }
 
-func (c *Client) OpenPool(ref string) (*Pool, error) {
+func (c *Client) OpenPool(ref PoolRef) (*Pool, error) {
 	if c == nil || c.ptr == nil {
 		return nil, errors.New("plasmite: client is closed")
 	}
 	if ref == "" {
 		return nil, errors.New("plasmite: pool ref is required")
 	}
-	cRef := C.CString(ref)
+	cRef := C.CString(string(ref))
 	defer C.free(unsafe.Pointer(cRef))
 
 	var cPool *C.plsm_pool_t
@@ -174,6 +183,14 @@ func (p *Pool) AppendJSON(payload []byte, descrips []string, durability Durabili
 	return copyAndFreeBuf(&cBuf), nil
 }
 
+func (p *Pool) Append(value any, descrips []string, durability Durability) ([]byte, error) {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("plasmite: marshal payload: %w", err)
+	}
+	return p.AppendJSON(payload, descrips, durability)
+}
+
 func (p *Pool) GetJSON(seq uint64) ([]byte, error) {
 	if p == nil || p.ptr == nil {
 		return nil, errors.New("plasmite: pool is closed")
@@ -185,6 +202,10 @@ func (p *Pool) GetJSON(seq uint64) ([]byte, error) {
 		return nil, fromCError(cErr)
 	}
 	return copyAndFreeBuf(&cBuf), nil
+}
+
+func (p *Pool) Get(seq uint64) ([]byte, error) {
+	return p.GetJSON(seq)
 }
 
 func (p *Pool) OpenStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (*Stream, error) {
