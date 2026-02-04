@@ -64,7 +64,16 @@ Request:
 Response (200):
 
 ```json
-{ "pool": { "uuid": "...", "path": "/.../docs.plasmite", "size_bytes": 67108864, "created_at": "...", "updated_at": "..." } }
+{
+  "pool": {
+    "name": "docs",
+    "path": "/.../docs.plasmite",
+    "file_size": 67108864,
+    "ring_offset": 4096,
+    "ring_size": 67104768,
+    "bounds": { "oldest": 1, "newest": 42 }
+  }
+}
 ```
 
 ### Open Pool
@@ -92,7 +101,7 @@ Response (200): same `pool` object as create.
 Response (200):
 
 ```json
-{ "pools": [ { "uuid": "...", "path": "..." } ] }
+{ "pools": [ { "name": "docs", "path": "...", "file_size": 67108864, "ring_offset": 4096, "ring_size": 67104768, "bounds": {} } ] }
 ```
 
 ### Delete Pool
