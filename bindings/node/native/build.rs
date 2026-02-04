@@ -12,6 +12,10 @@ use std::path::PathBuf;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=PLASMITE_LIB_DIR");
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os == "macos" {
+        println!("cargo:rustc-link-arg=-Wl,-undefined,dynamic_lookup");
+    }
 
     let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let repo_root = crate_dir

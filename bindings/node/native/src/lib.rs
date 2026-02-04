@@ -8,7 +8,7 @@ Notes: The addon links against libplasmite and does not re-implement internals.
 */
 
 use libc::{c_char, c_int};
-use napi::bindgen_prelude::{Buffer, Status};
+use napi::bindgen_prelude::{BigInt, Buffer, Either, Status};
 use napi::{Error, Result};
 use napi_derive::napi;
 use std::ffi::{CStr, CString};
@@ -46,7 +46,7 @@ struct plsm_error_t {
     has_offset: u8,
 }
 
-extern "C" {
+unsafe extern "C" {
     fn plsm_client_new(
         pool_dir: *const c_char,
         out_client: *mut *mut plsm_client_t,
@@ -112,14 +112,14 @@ extern "C" {
 }
 
 #[napi]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Durability {
     Fast = 0,
     Flush = 1,
 }
 
 #[napi]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ErrorKind {
     Internal = 1,
     Usage = 2,
@@ -151,8 +151,9 @@ impl Client {
     }
 
     #[napi]
-    pub fn create_pool(&self, pool_ref: String, size_bytes: u64) -> Result<Pool> {
+    pub fn create_pool(&self, pool_ref: String, size_bytes: Either<u32, BigInt>) -> Result<Pool> {
         let pool_ref = CString::new(pool_ref).map_err(|_| Error::new(Status::InvalidArg, "pool_ref contains NUL"))?;
+        let size_bytes = to_u64(size_bytes, "size_bytes")?;
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
         let rc = unsafe { plsm_pool_create(self.ptr, pool_ref.as_ptr(), size_bytes, &mut out, &mut err) };
@@ -220,7 +221,8 @@ impl Pool {
     }
 
     #[napi]
-    pub fn get_json(&self, seq: u64) -> Result<Buffer> {
+    pub fn get_json(&self, seq: Either<u32, BigInt>) -> Result<Buffer> {
+        let seq = to_u64(seq, "seq")?;
         let mut out = plsm_buf_t { data: ptr::null_mut(), len: 0 };
         let mut err = ptr::null_mut();
         let rc = unsafe { plsm_pool_get_json(self.ptr, seq, &mut out, &mut err) };
@@ -231,7 +233,15 @@ impl Pool {
     }
 
     #[napi]
-    pub fn open_stream(&self, since_seq: Option<u64>, max_messages: Option<u64>, timeout_ms: Option<u64>) -> Result<Stream> {
+    pub fn open_stream(
+        &self,
+        since_seq: Option<Either<u32, BigInt>>,
+        max_messages: Option<Either<u32, BigInt>>,
+        timeout_ms: Option<Either<u32, BigInt>>,
+    ) -> Result<Stream> {
+        let since_seq = since_seq.map(|value| to_u64(value, "since_seq")).transpose()?;
+        let max_messages = max_messages.map(|value| to_u64(value, "max_messages")).transpose()?;
+        let timeout_ms = timeout_ms.map(|value| to_u64(value, "timeout_ms")).transpose()?;
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
         let rc = unsafe {
@@ -346,13 +356,15 @@ fn take_error(err: *mut plsm_error_t) -> Error {
         return Error::new(Status::GenericFailure, "plasmite: unknown error");
     }
     let owned = unsafe { &*err };
-    let message = unsafe { cstring_to_string(owned.message) };
+    let mut message = unsafe { cstring_to_string(owned.message) };
     let path = unsafe { cstring_to_string(owned.path) };
     let mut details = Vec::new();
-    details.push(format!("kind={}", error_kind_label(owned.kind)));
-    if !message.is_empty() {
-        details.push(format!("message={}", message));
+    let kind_label = error_kind_label(owned.kind);
+    details.push(format!("kind={}", kind_label));
+    if message.is_empty() {
+        message = default_error_message(kind_label).to_string();
     }
+    details.push(format!("message={}", message));
     if !path.is_empty() {
         details.push(format!("path={}", path));
     }
@@ -364,6 +376,20 @@ fn take_error(err: *mut plsm_error_t) -> Error {
     }
     unsafe { plsm_error_free(err) };
     Error::new(Status::GenericFailure, format!("plasmite error: {}", details.join("; ")))
+}
+
+fn default_error_message(kind: &str) -> &'static str {
+    match kind {
+        "Internal" => "internal error",
+        "Usage" => "usage error",
+        "NotFound" => "not found",
+        "AlreadyExists" => "already exists",
+        "Busy" => "busy",
+        "Permission" => "permission denied",
+        "Corrupt" => "corrupt",
+        "Io" => "io error",
+        _ => "error",
+    }
 }
 
 fn error_kind_label(kind: i32) -> &'static str {
@@ -384,5 +410,22 @@ unsafe fn cstring_to_string(ptr: *mut c_char) -> String {
     if ptr.is_null() {
         return String::new();
     }
-    CStr::from_ptr(ptr).to_string_lossy().to_string()
+    unsafe { CStr::from_ptr(ptr) }.to_string_lossy().to_string()
+}
+
+fn to_u64(value: Either<u32, BigInt>, name: &str) -> Result<u64> {
+    match value {
+        Either::A(number) => Ok(number as u64),
+        Either::B(bigint) => {
+            let (is_negative, value, lossless) = bigint.get_u64();
+            if !is_negative && lossless {
+                Ok(value)
+            } else {
+                Err(Error::new(
+                    Status::InvalidArg,
+                    format!("{name} must be non-negative"),
+                ))
+            }
+        }
+    }
 }

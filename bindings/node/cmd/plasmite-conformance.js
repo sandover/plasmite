@@ -398,7 +398,22 @@ function flattenDescrips(descrips) {
 }
 
 function deepEqual(a, b) {
-  return JSON.stringify(a) === JSON.stringify(b);
+  return JSON.stringify(normalize(a)) === JSON.stringify(normalize(b));
+}
+
+function normalize(value) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalize(entry));
+  }
+  if (value && typeof value === "object") {
+    const keys = Object.keys(value).sort();
+    const out = {};
+    keys.forEach((key) => {
+      out[key] = normalize(value[key]);
+    });
+    return out;
+  }
+  return value;
 }
 
 function stepError(index, stepId, message) {
