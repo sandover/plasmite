@@ -6,6 +6,7 @@
 
 mod client;
 mod message;
+mod remote;
 mod validation;
 
 pub use crate::core::cursor::{Cursor, CursorResult, FrameRef};
@@ -16,4 +17,5 @@ pub use crate::core::lite3::{self, Lite3DocRef};
 pub use crate::core::pool::{AppendOptions, Bounds, Durability, Pool, PoolInfo, PoolOptions};
 pub use client::{LocalClient, PoolRef};
 pub use message::{Message, Meta, PoolApiExt, Tail, TailOptions};
+pub use remote::{RemoteClient, RemotePool, RemoteTail};
 pub use validation::{ValidationIssue, ValidationReport, ValidationStatus};
