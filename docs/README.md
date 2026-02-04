@@ -29,6 +29,6 @@ Invariants: Normative contracts live under spec/; this file must not restate ver
 ## Design notes
 
 - Storage + concurrency TDD: `docs/design/tdd-v0.0.1.md`
+- Public API TDD (proposal): `docs/design/tdd-public-api-v0.md`
 - Correctness refactor notes: `docs/design/pool-correctness-refactor.md`
 - Snapshot notes: `docs/design/pool-snapshots.md`
-

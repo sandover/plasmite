@@ -212,6 +212,36 @@ This preserves the “in-memory == on-disk” feel:
 * Reader returns a view into `payload_bytes`
 * Lite³ can interpret it directly without copying
 
+#### Binary data story (v0.0.1)
+
+Plasmite is **JSON-in/JSON-out** at the CLI boundary. In v0.0.1, the on-disk payload is produced by encoding
+JSON into Lite³, and we validate a canonical shape that requires `data` to be a JSON **object**.
+
+That means “binary data” is represented as **structured JSON** inside `data` (typically base64), not as a raw
+Lite³ bytes value.
+
+> Note: Lite³ supports a `BYTES` type, but v0.0.1 does not expose a way to produce or consume it via the CLI
+> without changing the contract (JSON has no native bytes type). If we ever adopt a bytes-native path, it
+> should be explicitly versioned and reflected in `spec/`.
+
+Recommended convention for embedding bytes in `data`:
+
+```json
+{
+  "type": "blob",
+  "content_type": "application/octet-stream",
+  "encoding": "base64",
+  "bytes_base64": "AAEC…",
+  "len": 3,
+  "sha256": "…"
+}
+```
+
+Operational guidance:
+- Prefer inline base64 only for **small** payloads (base64 expands size ~33% and consumes ring capacity).
+- For medium payloads, chunk across multiple messages (`type="blob_chunk"` with `blob_id`, `chunk_index`, etc.).
+- For large artifacts, prefer out-of-band storage and store only a content-addressed reference (`type="blob_ref"`).
+
 ### Commit protocol (crash-safety)
 
 Writer (under lock):
