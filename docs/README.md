@@ -18,6 +18,7 @@ Invariants: Normative contracts live under spec/; this file must not restate ver
 
 - v0 CLI + message contract: `spec/v0/SPEC.md`
 - v0 public API contract: `spec/api/v0/SPEC.md`
+- v0 remote protocol: `spec/remote/v0/SPEC.md`
 
 ## Using the repo
 
