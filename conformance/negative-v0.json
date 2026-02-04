@@ -54,8 +54,8 @@
       },
       "expect": {
         "error": {
-          "kind": "Usage",
-          "message_contains": "object"
+          "kind": "Corrupt",
+          "has_path": true
         }
       }
     }

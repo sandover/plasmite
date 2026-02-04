@@ -254,9 +254,14 @@ impl Pool {
             .write(true)
             .open(&path)
             .map_err(|err| {
-                Error::new(map_io_error_kind(&err))
+                let err_kind = err.kind();
+                let mut error = Error::new(map_io_error_kind(&err))
                     .with_path(&path)
-                    .with_source(err)
+                    .with_source(err);
+                if err_kind == io::ErrorKind::NotFound {
+                    error = error.with_message("not found");
+                }
+                error
             })?;
 
         let actual_size = file

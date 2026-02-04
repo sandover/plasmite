@@ -191,12 +191,33 @@ def _take_error(err_ptr: POINTER(plsm_error_t) | None) -> PlasmiteError:
     if not err_ptr:
         return PlasmiteError(ErrorKind.INTERNAL, "plasmite: unknown error")
     err = err_ptr.contents
+    raw_kind = int(err.kind)
     message = err.message.decode("utf-8") if err.message else ""
     path = err.path.decode("utf-8") if err.path else None
     seq = int(err.seq) if err.has_seq else None
     offset = int(err.offset) if err.has_offset else None
     _LIB.plsm_error_free(err_ptr)
-    return PlasmiteError(ErrorKind(err.kind), message or "plasmite: error", path, seq, offset)
+    try:
+        kind = ErrorKind(raw_kind)
+    except ValueError:
+        kind = ErrorKind.INTERNAL
+    if not message:
+        message = _default_error_message(kind)
+    return PlasmiteError(kind, message, path, seq, offset)
+
+
+def _default_error_message(kind: ErrorKind) -> str:
+    mapping = {
+        ErrorKind.INTERNAL: "internal error",
+        ErrorKind.USAGE: "usage error",
+        ErrorKind.NOT_FOUND: "not found",
+        ErrorKind.ALREADY_EXISTS: "already exists",
+        ErrorKind.BUSY: "busy",
+        ErrorKind.PERMISSION: "permission denied",
+        ErrorKind.CORRUPT: "corrupt",
+        ErrorKind.IO: "io error",
+    }
+    return mapping.get(kind, "error")
 
 
 def _buf_to_bytes(buf: plsm_buf_t) -> bytes:
