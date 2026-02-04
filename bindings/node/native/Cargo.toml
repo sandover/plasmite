@@ -1,0 +1,18 @@
+[package]
+name = "plasmite-node"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+description = "Plasmite Node binding (C ABI-based)."
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", features = ["napi8"] }
+napi-derive = "2"
+libc = "0.2"
+
+[build-dependencies]
+cc = "1"

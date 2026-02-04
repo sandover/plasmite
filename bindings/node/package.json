@@ -1,0 +1,19 @@
+{
+  "name": "plasmite-node",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Plasmite Node bindings (C ABI-based)",
+  "license": "MIT",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "scripts": {
+    "build": "napi build --cargo-cwd native",
+    "test": "npm run build && node --test test/conformance.test.js"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
