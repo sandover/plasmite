@@ -1,6 +1,6 @@
 /*
 Purpose: Go bindings for the libplasmite C ABI (v0).
-Key Exports: Client, Pool, Stream, Durability, Error.
+Key Exports: Client, Pool, Stream, TailOptions, Durability, Error.
 Role: Minimal, ergonomic wrapper around include/plasmite.h for Go users.
 Invariants: Caller must Close resources; JSON bytes in/out; errors returned as Go error.
 Notes: Uses cgo and links to -lplasmite; caller configures library search path.
@@ -16,10 +16,13 @@ package plasmite
 import "C"
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"runtime"
+	"time"
 	"unsafe"
 )
 
@@ -257,10 +260,14 @@ func (s *Stream) NextJSON() ([]byte, error) {
 	var cBuf C.plsm_buf_t
 	var cErr *C.plsm_error_t
 	rc := C.plsm_stream_next(s.ptr, &cBuf, &cErr)
-	if rc != 0 {
+	switch rc {
+	case 1:
+		return copyAndFreeBuf(&cBuf), nil
+	case 0:
+		return nil, io.EOF
+	default:
 		return nil, fromCError(cErr)
 	}
-	return copyAndFreeBuf(&cBuf), nil
 }
 
 func (s *Stream) Close() {
@@ -269,6 +276,98 @@ func (s *Stream) Close() {
 	}
 	C.plsm_stream_free(s.ptr)
 	s.ptr = nil
+}
+
+type TailOptions struct {
+	SinceSeq    *uint64
+	MaxMessages *uint64
+	Timeout     time.Duration
+	Buffer      int
+}
+
+// Tail streams JSON messages on a buffered channel.
+// Backpressure: when the buffer is full, tailing blocks until the caller drains it.
+// Cancellation: the stream is reopened after Timeout to check ctx; set Timeout for responsiveness.
+func (p *Pool) Tail(ctx context.Context, opts TailOptions) (<-chan []byte, <-chan error) {
+	out := make(chan []byte, bufferSize(opts.Buffer))
+	errs := make(chan error, 1)
+
+	go func() {
+		defer close(out)
+		defer close(errs)
+
+		var delivered uint64
+		var since *uint64
+		if opts.SinceSeq != nil {
+			start := *opts.SinceSeq
+			since = &start
+		}
+
+		for {
+			if opts.MaxMessages != nil && delivered >= *opts.MaxMessages {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				errs <- ctx.Err()
+				return
+			default:
+			}
+
+			timeoutMs := opts.Timeout
+			if timeoutMs <= 0 {
+				timeoutMs = time.Second
+			}
+			timeoutValue := uint64(timeoutMs.Milliseconds())
+			var remaining *uint64
+			if opts.MaxMessages != nil {
+				left := *opts.MaxMessages - delivered
+				remaining = &left
+			}
+			stream, err := p.OpenStream(since, remaining, &timeoutValue)
+			if err != nil {
+				errs <- err
+				return
+			}
+
+			for {
+				msg, err := stream.NextJSON()
+				if err == io.EOF {
+					stream.Close()
+					break
+				}
+				if err != nil {
+					stream.Close()
+					errs <- err
+					return
+				}
+				delivered++
+				if opts.MaxMessages != nil && delivered >= *opts.MaxMessages {
+					stream.Close()
+					select {
+					case out <- msg:
+					case <-ctx.Done():
+						errs <- ctx.Err()
+					}
+					return
+				}
+				select {
+				case out <- msg:
+					seq, err := extractSeq(msg)
+					if err == nil {
+						next := seq + 1
+						since = &next
+					}
+				case <-ctx.Done():
+					stream.Close()
+					errs <- ctx.Err()
+					return
+				}
+			}
+		}
+	}()
+
+	return out, errs
 }
 
 func copyAndFreeBuf(buf *C.plsm_buf_t) []byte {
@@ -321,4 +420,21 @@ func cStringArray(values []string) (**C.char, func()) {
 		}
 	}
 	return (**C.char)(unsafe.Pointer(&cValues[0])), cleanup
+}
+
+func bufferSize(input int) int {
+	if input <= 0 {
+		return 64
+	}
+	return input
+}
+
+func extractSeq(message []byte) (uint64, error) {
+	var payload struct {
+		Seq uint64 `json:"seq"`
+	}
+	if err := json.Unmarshal(message, &payload); err != nil {
+		return 0, err
+	}
+	return payload.Seq, nil
 }
