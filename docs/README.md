@@ -29,6 +29,7 @@ Invariants: Normative contracts live under spec/; this file must not restate ver
 - API quickstart: `docs/api-quickstart.md`
 - Diagnostics: `docs/doctor.md`
 - libplasmite guide: `docs/libplasmite.md`
+- Go quickstart: `docs/go-quickstart.md`
 
 ## Design notes
 
