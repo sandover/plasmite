@@ -27,6 +27,11 @@ A conformance runner:
 - Fails fast on the first unmet expectation.
 - Emits a machine-readable summary (format runner-specific for now).
 
+## Runners
+
+- Rust: `cargo run --bin plasmite-conformance -- conformance/sample-v0.json`
+- Go: `cd bindings/go && go run ./cmd/plasmite-conformance ../../conformance/sample-v0.json`
+
 ## Manifest Files
 
 - The canonical manifest format is described in `manifest-v0.md`.

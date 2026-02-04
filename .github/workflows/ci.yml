@@ -18,6 +18,9 @@ jobs:
         with:
           toolchain: 1.88.0
           components: clippy, rustfmt
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
       - uses: taiki-e/install-action@v2
@@ -34,6 +37,22 @@ jobs:
           fi
       - run: cargo audit --db .scratch/advisory-db --no-fetch
       - run: cargo test --all --locked
+      - name: Rust conformance (sample)
+        run: cargo run --bin plasmite-conformance -- conformance/sample-v0.json
+      - name: Rust conformance (negative)
+        run: cargo run --bin plasmite-conformance -- conformance/negative-v0.json
+      - name: Go conformance
+        shell: bash
+        run: |
+          cargo build --lib
+          if [[ "${RUNNER_OS}" == "macOS" ]]; then
+            export DYLD_LIBRARY_PATH="$PWD/target/debug"
+          else
+            export LD_LIBRARY_PATH="$PWD/target/debug"
+          fi
+          cd bindings/go
+          CGO_LDFLAGS="-L$PWD/../../target/debug" go run ./cmd/plasmite-conformance ../../conformance/sample-v0.json
+          CGO_LDFLAGS="-L$PWD/../../target/debug" go run ./cmd/plasmite-conformance ../../conformance/negative-v0.json
       - name: ABI smoke test
         run: |
           cargo build --lib
