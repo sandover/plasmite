@@ -22,8 +22,9 @@ use color_json::colorize_json;
 use ingest::{ErrorPolicy, IngestConfig, IngestFailure, IngestMode, IngestOutcome, ingest};
 use jq_filter::{JqFilter, compile_filters, matches_all};
 use plasmite::api::{
-    AppendOptions, Cursor, CursorResult, Durability, Error, ErrorKind, FrameRef, Lite3DocRef, Pool,
-    PoolOptions, lite3, to_exit_code,
+    AppendOptions, Cursor, CursorResult, Durability, Error, ErrorKind, FrameRef, Lite3DocRef,
+    LocalClient, Pool, PoolOptions, PoolRef, ValidationReport, ValidationStatus, lite3,
+    to_exit_code,
 };
 use plasmite::notice::{Notice, notice_json};
 
@@ -92,6 +93,46 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             });
             emit_json(output, color_mode);
             Ok(RunOutcome::ok())
+        }
+        Command::Doctor { pool, all } => {
+            if all && pool.is_some() {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("--all cannot be combined with a pool name")
+                    .with_hint("Use --all by itself, or provide a single pool."));
+            }
+            let client = LocalClient::new().with_pool_dir(&pool_dir);
+            let reports = if let Some(pool) = pool {
+                let pool_ref = pool_ref_from_input(&pool, &pool_dir)?;
+                vec![client.validate_pool(&pool_ref)?]
+            } else {
+                let pools = client.list_pools()?;
+                let mut reports = Vec::new();
+                for info in pools {
+                    let pool_ref = PoolRef::path(info.path);
+                    reports.push(client.validate_pool(&pool_ref)?);
+                }
+                reports
+            };
+
+            let is_tty = std::io::stdout().is_terminal();
+            if is_tty {
+                for report in &reports {
+                    emit_doctor_human(report);
+                }
+            } else {
+                let values = reports.iter().map(report_json).collect::<Vec<_>>();
+                emit_json(json!({ "reports": values }), color_mode);
+            }
+
+            let has_corrupt = reports
+                .iter()
+                .any(|report| report.status == ValidationStatus::Corrupt);
+            let exit_code = if has_corrupt {
+                to_exit_code(ErrorKind::Corrupt)
+            } else {
+                0
+            };
+            Ok(RunOutcome::with_code(exit_code))
         }
         Command::Pool { command } => match command {
             PoolCommand::Create { names, size } => {
@@ -609,6 +650,23 @@ NOTES
         quiet_drops: bool,
     },
     #[command(
+        about = "Diagnose pool health",
+        long_about = r#"Validate one pool (or all pools) and emit a diagnostic report."#,
+        after_help = r#"EXAMPLES
+  $ plasmite doctor foo
+  $ plasmite doctor --all
+
+NOTES
+  - Outputs JSON when stdout is not a TTY.
+  - Exits nonzero when corruption is detected."#
+    )]
+    Doctor {
+        #[arg(help = "Pool name or path", required = false)]
+        pool: Option<String>,
+        #[arg(long, help = "Validate all pools in the pool directory")]
+        all: bool,
+    },
+    #[command(
         about = "Print version info as JSON",
         long_about = r#"Emit version info as JSON (stable, machine-readable)."#,
         after_help = r#"EXAMPLE
@@ -684,6 +742,11 @@ fn resolve_poolref(input: &str, pool_dir: &Path) -> Result<PathBuf, Error> {
     Ok(pool_dir.join(format!("{input}.plasmite")))
 }
 
+fn pool_ref_from_input(input: &str, pool_dir: &Path) -> Result<PoolRef, Error> {
+    let path = resolve_poolref(input, pool_dir)?;
+    Ok(PoolRef::path(path))
+}
+
 const DEFAULT_POOL_SIZE: u64 = 1024 * 1024;
 const DEFAULT_RETRY_DELAY: Duration = Duration::from_millis(50);
 const DEFAULT_SNIFF_BYTES: usize = 8 * 1024;
@@ -735,6 +798,58 @@ fn add_corrupt_hint(err: Error) -> Error {
         return err;
     }
     err.with_hint("Pool appears corrupt. Recreate it or investigate with validation tooling.")
+}
+
+fn emit_doctor_human(report: &ValidationReport) {
+    let label = report
+        .pool_ref
+        .clone()
+        .unwrap_or_else(|| report.path.to_string_lossy().to_string());
+    match report.status {
+        ValidationStatus::Ok => {
+            println!("OK: {label}");
+        }
+        ValidationStatus::Corrupt => {
+            let last_good = report
+                .last_good_seq
+                .map(|seq| format!(" last_good_seq={seq}"))
+                .unwrap_or_default();
+            let issue = report
+                .issues
+                .first()
+                .map(|issue| format!(" issue={}", issue.message))
+                .unwrap_or_default();
+            println!("CORRUPT: {label}{last_good}{issue}");
+        }
+    }
+}
+
+fn report_json(report: &ValidationReport) -> Value {
+    let issues = report
+        .issues
+        .iter()
+        .map(|issue| {
+            json!({
+                "code": issue.code,
+                "message": issue.message,
+                "seq": issue.seq,
+                "offset": issue.offset,
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "pool_ref": report.pool_ref,
+        "path": report.path.to_string_lossy(),
+        "status": match report.status {
+            ValidationStatus::Ok => "ok",
+            ValidationStatus::Corrupt => "corrupt",
+        },
+        "last_good_seq": report.last_good_seq,
+        "issue_count": report.issue_count,
+        "issues": issues,
+        "remediation_hints": report.remediation_hints,
+        "snapshot_path": report.snapshot_path.as_ref().map(|path| path.to_string_lossy()),
+    })
 }
 
 fn list_pools(pool_dir: &Path) -> Vec<Value> {
