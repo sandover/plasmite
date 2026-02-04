@@ -10,6 +10,17 @@ Notes: This document is non-normative; ABI details live in include/plasmite.h.
 
 `libplasmite` is the C ABI library used by official bindings.
 
+## ABI stability policy
+
+Within v0:
+- additive changes only
+- no breaking renames/removals
+- conformance suite only grows
+
+Breaking changes require a new major (v1), a migration guide, and a parallel
+support window when feasible. The ABI contract is versioned independently (for
+example, `libplasmite.so.0` where applicable).
+
 ## Build artifacts
 
 Build debug artifacts:
@@ -38,6 +49,13 @@ The public header lives at:
 
 - `include/plasmite.h`
 
+## Ownership rules
+
+- `plsm_client_t`, `plsm_pool_t`, and `plsm_stream_t` are opaque handles.
+- Free handles with `plsm_client_free`, `plsm_pool_free`, and `plsm_stream_free`.
+- Free buffers and errors with `plsm_buf_free` and `plsm_error_free`.
+- All returned JSON payloads are owned by the caller until freed.
+
 ## Linking
 
 ### Dynamic linking (recommended)
@@ -50,6 +68,28 @@ Link against `libplasmite.dylib` (macOS) or `libplasmite.so` (Linux) and ensure 
 ### Static linking
 
 Link against `libplasmite.a` if your toolchain prefers static libraries.
+
+## Binding-specific notes
+
+### C
+
+- Include `include/plasmite.h`.
+- Link with `-lplasmite` and an `-L` path to `target/debug` or `target/release`.
+
+### Go
+
+- The official module lives at `bindings/go`.
+- `CGO_LDFLAGS` should point at `target/debug` or `target/release`.
+
+### Python
+
+- Load `libplasmite` with `ctypes`/`cffi` and use `include/plasmite.h` for the ABI.
+- The official binding will live under `bindings/python`.
+
+### Node/TypeScript
+
+- Use `node-ffi`/`napi-rs` style bindings to load `libplasmite`.
+- The official binding will live under `bindings/node`.
 
 ## Overrides
 
