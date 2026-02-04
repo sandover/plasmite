@@ -11,6 +11,7 @@ rust-version = "1.88"
 
 [lib]
 path = "src/lib.rs"
+crate-type = ["rlib", "cdylib", "staticlib"]
 
 [[bin]]
 name = "plasmite"
