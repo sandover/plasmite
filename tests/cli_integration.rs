@@ -2530,6 +2530,63 @@ fn corrupt_pool_has_hint_and_path() {
 }
 
 #[test]
+fn doctor_reports_ok_as_json() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "doctorpool",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let doctor = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "doctor", "doctorpool"])
+        .output()
+        .expect("doctor");
+    assert!(doctor.status.success());
+    let output = parse_json(std::str::from_utf8(&doctor.stdout).expect("utf8"));
+    let reports = output
+        .get("reports")
+        .and_then(|v| v.as_array())
+        .expect("reports array");
+    assert_eq!(reports.len(), 1);
+    let report = reports[0].as_object().expect("report object");
+    assert_eq!(report.get("status").and_then(|v| v.as_str()), Some("ok"));
+}
+
+#[test]
+fn doctor_reports_corrupt_and_exit_code() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    std::fs::create_dir_all(&pool_dir).expect("mkdir");
+    let pool_path = pool_dir.join("bad.plasmite");
+    std::fs::write(&pool_path, b"NOPE").expect("write");
+
+    let doctor = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "doctor", "bad"])
+        .output()
+        .expect("doctor");
+    assert_eq!(doctor.status.code().unwrap(), 7);
+    let output = parse_json(std::str::from_utf8(&doctor.stdout).expect("utf8"));
+    let reports = output
+        .get("reports")
+        .and_then(|v| v.as_array())
+        .expect("reports array");
+    let report = reports[0].as_object().expect("report object");
+    assert_eq!(
+        report.get("status").and_then(|v| v.as_str()),
+        Some("corrupt")
+    );
+}
+
+#[test]
 fn poke_streams_json_values_from_stdin() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");

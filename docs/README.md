@@ -27,6 +27,7 @@ Invariants: Normative contracts live under spec/; this file must not restate ver
 - Homebrew packaging: `docs/homebrew.md`
 - Performance baselines: `docs/perf.md`
 - API quickstart: `docs/api-quickstart.md`
+- Diagnostics: `docs/doctor.md`
 
 ## Design notes
 

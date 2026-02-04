@@ -23,8 +23,8 @@ use ingest::{ErrorPolicy, IngestConfig, IngestFailure, IngestMode, IngestOutcome
 use jq_filter::{JqFilter, compile_filters, matches_all};
 use plasmite::api::{
     AppendOptions, Cursor, CursorResult, Durability, Error, ErrorKind, FrameRef, Lite3DocRef,
-    LocalClient, Pool, PoolOptions, PoolRef, ValidationReport, ValidationStatus, lite3,
-    to_exit_code,
+    LocalClient, Pool, PoolOptions, PoolRef, ValidationIssue, ValidationReport, ValidationStatus,
+    lite3, to_exit_code,
 };
 use plasmite::notice::{Notice, notice_json};
 
@@ -102,14 +102,16 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             }
             let client = LocalClient::new().with_pool_dir(&pool_dir);
             let reports = if let Some(pool) = pool {
-                let pool_ref = pool_ref_from_input(&pool, &pool_dir)?;
-                vec![client.validate_pool(&pool_ref)?]
+                let path = resolve_poolref(&pool, &pool_dir)?;
+                let pool_ref = PoolRef::path(path.clone());
+                vec![doctor_report(&client, pool_ref, pool, path)?]
             } else {
                 let pools = client.list_pools()?;
                 let mut reports = Vec::new();
                 for info in pools {
-                    let pool_ref = PoolRef::path(info.path);
-                    reports.push(client.validate_pool(&pool_ref)?);
+                    let label = info.path.to_string_lossy().to_string();
+                    let pool_ref = PoolRef::path(info.path.clone());
+                    reports.push(doctor_report(&client, pool_ref, label, info.path)?);
                 }
                 reports
             };
@@ -742,11 +744,6 @@ fn resolve_poolref(input: &str, pool_dir: &Path) -> Result<PathBuf, Error> {
     Ok(pool_dir.join(format!("{input}.plasmite")))
 }
 
-fn pool_ref_from_input(input: &str, pool_dir: &Path) -> Result<PoolRef, Error> {
-    let path = resolve_poolref(input, pool_dir)?;
-    Ok(PoolRef::path(path))
-}
-
 const DEFAULT_POOL_SIZE: u64 = 1024 * 1024;
 const DEFAULT_RETRY_DELAY: Duration = Duration::from_millis(50);
 const DEFAULT_SNIFF_BYTES: usize = 8 * 1024;
@@ -850,6 +847,30 @@ fn report_json(report: &ValidationReport) -> Value {
         "remediation_hints": report.remediation_hints,
         "snapshot_path": report.snapshot_path.as_ref().map(|path| path.to_string_lossy()),
     })
+}
+
+fn doctor_report(
+    client: &LocalClient,
+    pool_ref: PoolRef,
+    label: String,
+    path: PathBuf,
+) -> Result<ValidationReport, Error> {
+    match client.validate_pool(&pool_ref) {
+        Ok(report) => Ok(report.with_pool_ref(label)),
+        Err(err) if err.kind() == ErrorKind::Corrupt => {
+            Ok(ValidationReport::corrupt(path, error_issue(&err), None).with_pool_ref(label))
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn error_issue(err: &Error) -> ValidationIssue {
+    ValidationIssue {
+        code: "corrupt".to_string(),
+        message: err.message().unwrap_or("corrupt").to_string(),
+        seq: err.seq(),
+        offset: err.offset(),
+    }
 }
 
 fn list_pools(pool_dir: &Path) -> Vec<Value> {
