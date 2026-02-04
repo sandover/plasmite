@@ -1,0 +1,62 @@
+<!--
+Purpose: Define the v0 conformance manifest format for Plasmite bindings.
+Exports: N/A (specification text).
+Role: Normative schema for manifests consumed by conformance runners.
+Invariants: Versioned schema; step order is significant and deterministic.
+Notes: Manifests are JSON to keep parsing consistent across languages.
+-->
+
+# Conformance Manifest v0
+
+## Top-Level Fields
+
+- `conformance_version` (number, required): Must be `0`.
+- `name` (string, required): Human-friendly name for the manifest.
+- `workdir` (string, optional): Relative working directory name (default: `work`).
+- `steps` (array, required): Ordered list of operations.
+
+## Step Format
+
+Each step is a mapping with these fields:
+
+- `op` (string, required): Operation name.
+- `id` (string, optional): Unique identifier for cross-step references.
+- `pool` (string, optional): Pool name or path (required for pool operations).
+- `input` (object, optional): Operation-specific inputs.
+- `expect` (object, optional): Operation-specific expectations.
+
+## Operations (v0)
+
+### `create_pool`
+
+- `pool` (required): Pool name.
+- `input.size_bytes` (optional): Pool size in bytes.
+- `expect.created` (optional, bool): Defaults to `true`.
+
+### `append`
+
+- `pool` (required).
+- `input.data` (required): JSON payload.
+- `input.descrips` (optional): Array of tags.
+- `expect.seq` (optional): Expected sequence number.
+
+### `get`
+
+- `pool` (required).
+- `input.seq` (required): Sequence number.
+- `expect.data` (required): JSON payload.
+- `expect.descrips` (optional): Array of tags.
+
+### `tail`
+
+- `pool` (required).
+- `input.since_seq` (optional): Start sequence.
+- `input.max` (optional): Max messages to read.
+- `expect.messages` (required): Array of messages with `data` and optional `descrips`.
+
+## Runner Requirements
+
+- Steps must execute **in order**.
+- If an `expect` field is present, it must be enforced exactly.
+- Failure should include the step index and `id` (if present).
+- Runners may add transport-specific setup but must not alter semantics.

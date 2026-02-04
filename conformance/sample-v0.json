@@ -1,0 +1,74 @@
+{
+  "conformance_version": 0,
+  "name": "sample-create-append-get-tail",
+  "workdir": "work",
+  "steps": [
+    {
+      "op": "create_pool",
+      "id": "create",
+      "pool": "chat",
+      "input": {
+        "size_bytes": 1048576
+      },
+      "expect": {
+        "created": true
+      }
+    },
+    {
+      "op": "append",
+      "id": "append-1",
+      "pool": "chat",
+      "input": {
+        "data": {
+          "from": "alice",
+          "msg": "hi"
+        },
+        "descrips": [
+          "greeting"
+        ]
+      },
+      "expect": {
+        "seq": 1
+      }
+    },
+    {
+      "op": "get",
+      "id": "get-1",
+      "pool": "chat",
+      "input": {
+        "seq": 1
+      },
+      "expect": {
+        "data": {
+          "from": "alice",
+          "msg": "hi"
+        },
+        "descrips": [
+          "greeting"
+        ]
+      }
+    },
+    {
+      "op": "tail",
+      "id": "tail-1",
+      "pool": "chat",
+      "input": {
+        "since_seq": 1,
+        "max": 1
+      },
+      "expect": {
+        "messages": [
+          {
+            "data": {
+              "from": "alice",
+              "msg": "hi"
+            },
+            "descrips": [
+              "greeting"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
