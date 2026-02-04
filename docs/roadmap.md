@@ -13,6 +13,7 @@ This roadmap is outcome-oriented. Design details live in ADRs; compatibility pro
 
 - Remote pool refs + `plasmite serve` (TCP first)
 - Per-entry checksums (opt-in; not in v0.0.1)
+- Binary payload conventions (inline blobs/chunking) + optional blob store
 - Pattern matching / filtering interface (stateless; interface TBD)
 - Shell completion
 - `plasmite doctor` (validation + diagnostics)
@@ -20,4 +21,3 @@ This roadmap is outcome-oriented. Design details live in ADRs; compatibility pro
 ## Later
 
 - QUIC transport (“UDP access” via QUIC streams + TLS)
-

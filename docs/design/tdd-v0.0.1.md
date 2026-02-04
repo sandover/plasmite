@@ -237,10 +237,9 @@ Recommended convention for embedding bytes in `data`:
 }
 ```
 
-Operational guidance:
+Operational guidance (v0.0.1):
 - Prefer inline base64 only for **small** payloads (base64 expands size ~33% and consumes ring capacity).
-- For medium payloads, chunk across multiple messages (`type="blob_chunk"` with `blob_id`, `chunk_index`, etc.).
-- For large artifacts, prefer out-of-band storage and store only a content-addressed reference (`type="blob_ref"`).
+- Chunking and out-of-band blob references are **post-v0** roadmap items (see `docs/roadmap.md`).
 
 ### Commit protocol (crash-safety)
 

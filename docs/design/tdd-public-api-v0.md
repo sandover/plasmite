@@ -15,7 +15,7 @@ This TDD proposes a **best-in-class public API** (libraries + bindings) that pre
 - safe, ergonomic multi-language usage,
 - future remote access (`plasmite serve`) without breaking client code.
 
-This document is non-normative until promoted into a versioned API spec (recommended: `spec/api/v0/SPEC.md`).
+The normative public API contract now lives in `spec/api/v0/SPEC.md`; this document remains explanatory and non-normative.
 
 ---
 
@@ -312,7 +312,7 @@ Breaking changes require:
 ### Contracts
 
 - **CLI contract**: remains normative for scripting (`spec/v0/SPEC.md`).
-- **Public API contract**: becomes normative once `spec/api/v0/SPEC.md` exists and is referenced by bindings.
+- **Public API contract**: normative in `spec/api/v0/SPEC.md` and referenced by bindings.
 - **ABI contract**: versioned separately (e.g. `libplasmite.so.0`), with symbol versioning where available.
 
 ---
@@ -333,6 +333,7 @@ Breaking changes require:
 - Remote transport (`plasmite serve`) + wire protocol spec.
 - `plasmite doctor` + library validator APIs.
 - Optional per-entry checksums and richer diagnostics (still additive to message envelope).
+- Binary payload conventions (inline blobs/chunking) + optional blob store.
 - Windows support (requires an explicit design pass over mmap + locking + file watching).
 
 ---
@@ -345,9 +346,9 @@ Breaking changes require:
 
 ---
 
-## Binary data support (proposal)
+## Binary data support (post-v0 proposal)
 
-Plasmite is JSON-first at the contract boundary. For long-term compatibility across languages, “binary support” should be delivered as **standardized conventions** layered on top of the existing `{meta,data}` envelope.
+Plasmite is JSON-first at the contract boundary. For long-term compatibility across languages, “binary support” should be delivered as **standardized conventions** layered on top of the existing `{meta,data}` envelope. This is **post-v0** work.
 
 ### Design goals
 
