@@ -30,7 +30,7 @@ A conformance runner:
 ## Manifest Files
 
 - The canonical manifest format is described in `manifest-v0.md`.
-- Sample manifests live alongside the spec (e.g., `sample-v0.json`).
+- Sample manifests live alongside the spec (e.g., `sample-v0.json`, `negative-v0.json`).
 
 ## Scope
 

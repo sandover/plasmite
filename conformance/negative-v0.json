@@ -1,0 +1,63 @@
+{
+  "conformance_version": 0,
+  "name": "negative-errors",
+  "workdir": "work-negative",
+  "steps": [
+    {
+      "op": "get",
+      "id": "missing-pool",
+      "pool": "missing",
+      "input": {
+        "seq": 1
+      },
+      "expect": {
+        "error": {
+          "kind": "NotFound",
+          "message_contains": "not found",
+          "has_path": true
+        }
+      }
+    },
+    {
+      "op": "create_pool",
+      "id": "create",
+      "pool": "corrupt",
+      "input": {
+        "size_bytes": 1048576
+      }
+    },
+    {
+      "op": "corrupt_pool_header",
+      "id": "corrupt-header",
+      "pool": "corrupt"
+    },
+    {
+      "op": "get",
+      "id": "corrupt-pool",
+      "pool": "corrupt",
+      "input": {
+        "seq": 1
+      },
+      "expect": {
+        "error": {
+          "kind": "Corrupt",
+          "has_path": true
+        }
+      }
+    },
+    {
+      "op": "append",
+      "id": "invalid-input",
+      "pool": "corrupt",
+      "input": {
+        "data": "not-an-object"
+      },
+      "expect": {
+        "error": {
+          "kind": "Usage",
+          "message_contains": "object"
+        }
+      }
+    }
+  ]
+}

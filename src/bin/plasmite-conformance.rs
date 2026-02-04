@@ -4,7 +4,7 @@
 //! Invariants: Manifests are JSON-only; steps execute in order; fail-fast on errors.
 //! Invariants: Workdir is isolated under the manifest directory.
 
-use plasmite::api::{LocalClient, PoolApiExt, PoolOptions, PoolRef, TailOptions};
+use plasmite::api::{Error, LocalClient, PoolApiExt, PoolOptions, PoolRef, TailOptions};
 use serde_json::Value;
 use std::env;
 use std::fs;
@@ -70,6 +70,8 @@ fn run() -> Result<(), String> {
             "append" => run_append(&client, step, index, &step_id)?,
             "get" => run_get(&client, step, index, &step_id)?,
             "tail" => run_tail(&client, step, index, &step_id)?,
+            "corrupt_pool_header" => run_corrupt_pool_header(&client, step, index, &step_id)?,
+            "chmod_path" => run_chmod_path(step, index, &step_id)?,
             _ => return Err(step_err(index, &step_id, &format!("unknown op: {op}"))),
         }
     }
@@ -116,14 +118,9 @@ fn run_create_pool(
         .unwrap_or(1024 * 1024);
     let options = PoolOptions::new(size_bytes);
 
-    let result = client.create_pool(&pool_ref, options);
-    match result {
-        Ok(_) => Ok(()),
-        Err(err) => Err(step_err(
-            index,
-            step_id,
-            &format!("create_pool failed: {err}"),
-        )),
+    match client.create_pool(&pool_ref, options) {
+        Ok(_) => validate_expect_error(step.get("expect"), &Ok(()), index, step_id),
+        Err(err) => validate_expect_error(step.get("expect"), &Err(err), index, step_id),
     }
 }
 
@@ -148,28 +145,29 @@ fn run_append(
         None => Vec::new(),
     };
 
-    let mut pool = client
-        .open_pool(&pool_ref)
-        .map_err(|err| step_err(index, step_id, &format!("open_pool failed: {err}")))?;
-    let message = pool
-        .append_json_now(data, &descrips, plasmite::api::Durability::Fast)
-        .map_err(|err| step_err(index, step_id, &format!("append failed: {err}")))?;
+    let result = client.open_pool(&pool_ref).and_then(|mut pool| {
+        pool.append_json_now(data, &descrips, plasmite::api::Durability::Fast)
+    });
 
-    if let Some(expected_seq) = step
-        .get("expect")
-        .and_then(|expect| expect.get("seq"))
-        .and_then(Value::as_u64)
-    {
-        if message.seq != expected_seq {
-            return Err(step_err(
-                index,
-                step_id,
-                &format!("expected seq {expected_seq}, got {}", message.seq),
-            ));
+    match result {
+        Ok(message) => {
+            if let Some(expected_seq) = step
+                .get("expect")
+                .and_then(|expect| expect.get("seq"))
+                .and_then(Value::as_u64)
+            {
+                if message.seq != expected_seq {
+                    return Err(step_err(
+                        index,
+                        step_id,
+                        &format!("expected seq {expected_seq}, got {}", message.seq),
+                    ));
+                }
+            }
+            validate_expect_error(step.get("expect"), &Ok(()), index, step_id)
         }
+        Err(err) => validate_expect_error(step.get("expect"), &Err(err), index, step_id),
     }
-
-    Ok(())
 }
 
 fn run_get(
@@ -187,19 +185,20 @@ fn run_get(
         .and_then(Value::as_u64)
         .ok_or_else(|| step_err(index, step_id, "missing input.seq"))?;
 
-    let pool = client
+    let result = client
         .open_pool(&pool_ref)
-        .map_err(|err| step_err(index, step_id, &format!("open_pool failed: {err}")))?;
-    let message = pool
-        .get_message(seq)
-        .map_err(|err| step_err(index, step_id, &format!("get failed: {err}")))?;
+        .and_then(|pool| pool.get_message(seq));
 
-    if let Some(expect) = step.get("expect") {
-        expect_data(expect, &message.data, index, step_id)?;
-        expect_descrips(expect, &message.meta.descrips, index, step_id)?;
+    match result {
+        Ok(message) => {
+            if let Some(expect) = step.get("expect") {
+                expect_data(expect, &message.data, index, step_id)?;
+                expect_descrips(expect, &message.meta.descrips, index, step_id)?;
+            }
+            validate_expect_error(step.get("expect"), &Ok(()), index, step_id)
+        }
+        Err(err) => validate_expect_error(step.get("expect"), &Err(err), index, step_id),
     }
-
-    Ok(())
 }
 
 fn run_tail(
@@ -219,46 +218,198 @@ fn run_tail(
         options.max_messages = Some(max as usize);
     }
 
+    let result = client.open_pool(&pool_ref).map(|pool| {
+        let mut tail = pool.tail(options);
+        let mut messages = Vec::new();
+        while let Some(message) = tail.next_message()? {
+            messages.push(message);
+        }
+        Ok::<_, Error>(messages)
+    });
+
+    match result {
+        Ok(Ok(messages)) => {
+            let expect = step
+                .get("expect")
+                .ok_or_else(|| step_err(index, step_id, "missing expect"))?;
+            let expected_messages = expect
+                .get("messages")
+                .and_then(Value::as_array)
+                .ok_or_else(|| step_err(index, step_id, "expect.messages must be array"))?;
+
+            if messages.len() != expected_messages.len() {
+                return Err(step_err(
+                    index,
+                    step_id,
+                    &format!(
+                        "expected {} messages, got {}",
+                        expected_messages.len(),
+                        messages.len()
+                    ),
+                ));
+            }
+
+            for (idx, expected) in expected_messages.iter().enumerate() {
+                let actual = &messages[idx];
+                expect_data(expected, &actual.data, index, step_id)?;
+                expect_descrips(expected, &actual.meta.descrips, index, step_id)?;
+            }
+
+            validate_expect_error(step.get("expect"), &Ok(()), index, step_id)
+        }
+        Ok(Err(err)) => validate_expect_error(step.get("expect"), &Err(err), index, step_id),
+        Err(err) => validate_expect_error(step.get("expect"), &Err(err), index, step_id),
+    }
+}
+
+fn run_corrupt_pool_header(
+    client: &LocalClient,
+    step: &Value,
+    index: usize,
+    step_id: &Option<String>,
+) -> Result<(), String> {
+    let pool_ref = pool_ref_from_step(step, index, step_id)?;
     let pool = client
         .open_pool(&pool_ref)
         .map_err(|err| step_err(index, step_id, &format!("open_pool failed: {err}")))?;
-    let mut tail = pool.tail(options);
+    let path = pool
+        .info()
+        .map_err(|err| step_err(index, step_id, &format!("info failed: {err}")))?
+        .path;
+    std::fs::write(&path, b"NOPE").map_err(|err| {
+        step_err(
+            index,
+            step_id,
+            &format!("failed to corrupt pool header: {err}"),
+        )
+    })?;
+    Ok(())
+}
 
-    let mut messages = Vec::new();
-    while let Some(message) = tail
-        .next_message()
-        .map_err(|err| step_err(index, step_id, &format!("tail failed: {err}")))?
+fn run_chmod_path(step: &Value, index: usize, step_id: &Option<String>) -> Result<(), String> {
+    #[cfg(unix)]
     {
-        messages.push(message);
+        use std::os::unix::fs::PermissionsExt;
+        let input = step
+            .get("input")
+            .ok_or_else(|| step_err(index, step_id, "missing input"))?;
+        let path = input
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| step_err(index, step_id, "missing input.path"))?;
+        let mode = input
+            .get("mode")
+            .and_then(Value::as_str)
+            .ok_or_else(|| step_err(index, step_id, "missing input.mode"))?;
+        let mode = u32::from_str_radix(mode, 8)
+            .map_err(|_| step_err(index, step_id, "invalid input.mode"))?;
+        let mut perms = std::fs::metadata(path)
+            .map_err(|err| step_err(index, step_id, &format!("chmod metadata failed: {err}")))?
+            .permissions();
+        perms.set_mode(mode);
+        std::fs::set_permissions(path, perms)
+            .map_err(|err| step_err(index, step_id, &format!("chmod failed: {err}")))?;
+        Ok(())
     }
+    #[cfg(not(unix))]
+    {
+        let _ = (step, index, step_id);
+        Err(step_err(
+            index,
+            step_id,
+            "chmod_path is not supported on this platform",
+        ))
+    }
+}
 
-    let expect = step
-        .get("expect")
-        .ok_or_else(|| step_err(index, step_id, "missing expect"))?;
-    let expected_messages = expect
-        .get("messages")
-        .and_then(Value::as_array)
-        .ok_or_else(|| step_err(index, step_id, "expect.messages must be array"))?;
+fn validate_expect_error(
+    expect: Option<&Value>,
+    result: &Result<(), Error>,
+    index: usize,
+    step_id: &Option<String>,
+) -> Result<(), String> {
+    let Some(expect) = expect else {
+        return match result {
+            Ok(_) => Ok(()),
+            Err(err) => Err(step_err(
+                index,
+                step_id,
+                &format!("unexpected error: {err}"),
+            )),
+        };
+    };
+    let Some(expect_error) = expect.get("error") else {
+        return match result {
+            Ok(_) => Ok(()),
+            Err(err) => Err(step_err(
+                index,
+                step_id,
+                &format!("unexpected error: {err}"),
+            )),
+        };
+    };
 
-    if messages.len() != expected_messages.len() {
+    let err = result
+        .as_ref()
+        .err()
+        .ok_or_else(|| step_err(index, step_id, "expected error but operation succeeded"))?;
+
+    let kind = expect_error
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| step_err(index, step_id, "expect.error.kind is required"))?;
+    if kind != error_kind_label(err.kind()) {
         return Err(step_err(
             index,
             step_id,
             &format!(
-                "expected {} messages, got {}",
-                expected_messages.len(),
-                messages.len()
+                "expected error kind {kind}, got {}",
+                error_kind_label(err.kind())
             ),
         ));
     }
 
-    for (idx, expected) in expected_messages.iter().enumerate() {
-        let actual = &messages[idx];
-        expect_data(expected, &actual.data, index, step_id)?;
-        expect_descrips(expected, &actual.meta.descrips, index, step_id)?;
+    if let Some(substr) = expect_error.get("message_contains").and_then(Value::as_str) {
+        let message = err.message().unwrap_or("");
+        if !message.contains(substr) {
+            return Err(step_err(
+                index,
+                step_id,
+                &format!("expected message to contain '{substr}', got '{message}'"),
+            ));
+        }
+    }
+
+    if let Some(has_path) = expect_error.get("has_path").and_then(Value::as_bool) {
+        if has_path != err.path().is_some() {
+            return Err(step_err(index, step_id, "path presence mismatch"));
+        }
+    }
+    if let Some(has_seq) = expect_error.get("has_seq").and_then(Value::as_bool) {
+        if has_seq != err.seq().is_some() {
+            return Err(step_err(index, step_id, "seq presence mismatch"));
+        }
+    }
+    if let Some(has_offset) = expect_error.get("has_offset").and_then(Value::as_bool) {
+        if has_offset != err.offset().is_some() {
+            return Err(step_err(index, step_id, "offset presence mismatch"));
+        }
     }
 
     Ok(())
+}
+
+fn error_kind_label(kind: plasmite::api::ErrorKind) -> &'static str {
+    match kind {
+        plasmite::api::ErrorKind::Internal => "Internal",
+        plasmite::api::ErrorKind::Usage => "Usage",
+        plasmite::api::ErrorKind::NotFound => "NotFound",
+        plasmite::api::ErrorKind::AlreadyExists => "AlreadyExists",
+        plasmite::api::ErrorKind::Busy => "Busy",
+        plasmite::api::ErrorKind::Permission => "Permission",
+        plasmite::api::ErrorKind::Corrupt => "Corrupt",
+        plasmite::api::ErrorKind::Io => "Io",
+    }
 }
 
 fn pool_ref_from_step(

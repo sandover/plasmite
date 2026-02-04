@@ -39,6 +39,7 @@ Each step is a mapping with these fields:
 - `input.data` (required): JSON payload.
 - `input.descrips` (optional): Array of tags.
 - `expect.seq` (optional): Expected sequence number.
+- `expect.error` (optional): Expected error object (see Error Expectations).
 
 ### `get`
 
@@ -46,6 +47,7 @@ Each step is a mapping with these fields:
 - `input.seq` (required): Sequence number.
 - `expect.data` (required): JSON payload.
 - `expect.descrips` (optional): Array of tags.
+- `expect.error` (optional): Expected error object (see Error Expectations).
 
 ### `tail`
 
@@ -53,6 +55,28 @@ Each step is a mapping with these fields:
 - `input.since_seq` (optional): Start sequence.
 - `input.max` (optional): Max messages to read.
 - `expect.messages` (required): Array of messages with `data` and optional `descrips`.
+- `expect.error` (optional): Expected error object (see Error Expectations).
+
+### `corrupt_pool_header`
+
+- `pool` (required): Pool name or path.
+- Corrupts the pool header to simulate a `Corrupt` error.
+
+### `chmod_path`
+
+- `input.path` (required): Path to chmod.
+- `input.mode` (required): Octal string like `"000"`.
+- Only supported on unix runners.
+
+## Error Expectations
+
+When `expect.error` is present, the operation must fail and match:
+
+- `kind` (required): `Usage|NotFound|AlreadyExists|Busy|Permission|Corrupt|Io|Internal`
+- `message_contains` (optional): substring match
+- `has_path` (optional): boolean
+- `has_seq` (optional): boolean
+- `has_offset` (optional): boolean
 
 ## Runner Requirements
 
