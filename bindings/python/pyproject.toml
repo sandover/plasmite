@@ -1,0 +1,21 @@
+# Purpose: Define build metadata for the Plasmite Python binding.
+# Key exports: Package metadata and dependencies.
+# Role: Enable editable installs and packaging for the ctypes wrapper.
+# Invariants: Version aligns with core crate; no extra runtime deps.
+# Notes: Uses setuptools for lightweight packaging.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plasmite"
+version = "0.0.1"
+description = "Plasmite Python bindings (ctypes, C ABI)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["plasmite"]

@@ -32,6 +32,7 @@ A conformance runner:
 - Rust: `cargo run --bin plasmite-conformance -- conformance/sample-v0.json`
 - Go: `cd bindings/go && go run ./cmd/plasmite-conformance ../../conformance/sample-v0.json`
 - Node: `cd bindings/node && npm test`
+- Python: `cd bindings/python && python -m unittest`
 
 ## Manifest Files
 

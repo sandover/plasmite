@@ -24,6 +24,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
       - uses: taiki-e/install-action@v2
@@ -73,6 +76,19 @@ jobs:
           cd bindings/node
           npm install --no-package-lock
           npm test
+      - name: Python conformance
+        shell: bash
+        run: |
+          if [[ "${RUNNER_OS}" == "macOS" ]]; then
+            export DYLD_LIBRARY_PATH="$PWD/target/debug"
+          else
+            export LD_LIBRARY_PATH="$PWD/target/debug"
+          fi
+          export PLASMITE_LIB_DIR="$PWD/target/debug"
+          export PLASMITE_BIN="$PWD/target/debug/plasmite"
+          cd bindings/python
+          python -m pip install -e .
+          python -m unittest
       - name: ABI smoke test
         run: |
           cargo build --lib
