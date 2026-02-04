@@ -17,6 +17,7 @@ Invariants: Normative contracts live under spec/; this file must not restate ver
 ## Normative spec
 
 - v0 CLI + message contract: `spec/v0/SPEC.md`
+- v0 public API contract: `spec/api/v0/SPEC.md`
 
 ## Using the repo
 
@@ -25,6 +26,7 @@ Invariants: Normative contracts live under spec/; this file must not restate ver
 - Exit codes: `docs/exit-codes.md`
 - Homebrew packaging: `docs/homebrew.md`
 - Performance baselines: `docs/perf.md`
+- API quickstart: `docs/api-quickstart.md`
 
 ## Design notes
 
