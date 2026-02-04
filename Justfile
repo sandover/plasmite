@@ -16,6 +16,17 @@ test:
 
 ci: fmt clippy test
 
+abi:
+	cargo build --lib
+	@ls -1 target/debug/libplasmite.* 2>/dev/null || true
+
+abi-release:
+	cargo build --release --lib
+	@ls -1 target/release/libplasmite.* 2>/dev/null || true
+
+abi-test: abi
+	cargo test abi_smoke
+
 scratch:
 	mkdir -p .scratch
 

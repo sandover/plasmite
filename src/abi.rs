@@ -619,3 +619,72 @@ fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
             .with_source(err)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+
+    fn parse_buf(buf: &plsm_buf) -> Value {
+        let slice = unsafe { std::slice::from_raw_parts(buf.data, buf.len) };
+        serde_json::from_slice(slice).expect("valid json")
+    }
+
+    #[test]
+    fn abi_smoke_append_and_get() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pool_dir = temp.path().join("pools");
+        std::fs::create_dir_all(&pool_dir).expect("mkdir");
+
+        let pool_dir_c = CString::new(pool_dir.to_string_lossy().as_ref()).expect("cstr");
+        let mut client: *mut plsm_client = std::ptr::null_mut();
+        let mut err: *mut plsm_error = std::ptr::null_mut();
+        let rc = plsm_client_new(pool_dir_c.as_ptr(), &mut client, &mut err);
+        assert_eq!(rc, 0, "client_new failed");
+        assert!(!client.is_null());
+
+        let pool_name = CString::new("abi-pool").expect("cstr");
+        let mut pool: *mut plsm_pool = std::ptr::null_mut();
+        let rc = plsm_pool_create(client, pool_name.as_ptr(), 1024 * 1024, &mut pool, &mut err);
+        assert_eq!(rc, 0, "pool_create failed");
+        assert!(!pool.is_null());
+
+        let payload = CString::new(r#"{"x":1}"#).expect("payload");
+        let tag = CString::new("tag").expect("tag");
+        let tags = [tag.as_ptr()];
+        let mut out = plsm_buf {
+            data: std::ptr::null_mut(),
+            len: 0,
+        };
+        let rc = plsm_pool_append_json(
+            pool,
+            payload.as_ptr() as *const u8,
+            payload.as_bytes().len(),
+            tags.as_ptr(),
+            tags.len(),
+            0,
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(rc, 0, "append failed");
+        let message = parse_buf(&out);
+        plsm_buf_free(&mut out);
+        assert_eq!(message.get("data").unwrap()["x"], 1);
+
+        let mut out = plsm_buf {
+            data: std::ptr::null_mut(),
+            len: 0,
+        };
+        let rc = plsm_pool_get_json(pool, 1, &mut out, &mut err);
+        assert_eq!(rc, 0, "get failed");
+        let message = parse_buf(&out);
+        plsm_buf_free(&mut out);
+        assert_eq!(message.get("seq").and_then(|v| v.as_u64()), Some(1));
+
+        plsm_pool_free(pool);
+        plsm_client_free(client);
+        if !err.is_null() {
+            plsm_error_free(err);
+        }
+    }
+}
