@@ -1,0 +1,90 @@
+{
+  "conformance_version": 0,
+  "name": "multiprocess writers and tail",
+  "workdir": "work-multiprocess",
+  "steps": [
+    {
+      "op": "create_pool",
+      "pool": "multi",
+      "input": {
+        "size_bytes": 1048576
+      }
+    },
+    {
+      "op": "spawn_poke",
+      "pool": "multi",
+      "input": {
+        "messages": [
+          {
+            "data": {
+              "writer": "alpha",
+              "value": 1
+            },
+            "descrips": ["alpha"]
+          },
+          {
+            "data": {
+              "writer": "beta",
+              "value": 2
+            },
+            "descrips": ["beta"]
+          },
+          {
+            "data": {
+              "writer": "gamma",
+              "value": 3
+            },
+            "descrips": ["gamma"]
+          },
+          {
+            "data": {
+              "writer": "delta",
+              "value": 4
+            },
+            "descrips": ["delta"]
+          }
+        ]
+      }
+    },
+    {
+      "op": "tail",
+      "pool": "multi",
+      "input": {
+        "since_seq": 1,
+        "max": 4
+      },
+      "expect": {
+        "messages_unordered": [
+          {
+            "data": {
+              "writer": "alpha",
+              "value": 1
+            },
+            "descrips": ["alpha"]
+          },
+          {
+            "data": {
+              "writer": "beta",
+              "value": 2
+            },
+            "descrips": ["beta"]
+          },
+          {
+            "data": {
+              "writer": "gamma",
+              "value": 3
+            },
+            "descrips": ["gamma"]
+          },
+          {
+            "data": {
+              "writer": "delta",
+              "value": 4
+            },
+            "descrips": ["delta"]
+          }
+        ]
+      }
+    }
+  ]
+}

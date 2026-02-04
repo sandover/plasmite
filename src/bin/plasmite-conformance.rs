@@ -9,6 +9,7 @@ use serde_json::Value;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 fn main() {
     if let Err(err) = run() {
@@ -70,6 +71,7 @@ fn run() -> Result<(), String> {
             "append" => run_append(&client, step, index, &step_id)?,
             "get" => run_get(&client, step, index, &step_id)?,
             "tail" => run_tail(&client, step, index, &step_id)?,
+            "spawn_poke" => run_spawn_poke(&manifest_dir, &workdir_path, step, index, &step_id)?,
             "corrupt_pool_header" => run_corrupt_pool_header(&client, step, index, &step_id)?,
             "chmod_path" => run_chmod_path(step, index, &step_id)?,
             _ => return Err(step_err(index, &step_id, &format!("unknown op: {op}"))),
@@ -232,10 +234,32 @@ fn run_tail(
             let expect = step
                 .get("expect")
                 .ok_or_else(|| step_err(index, step_id, "missing expect"))?;
-            let expected_messages = expect
-                .get("messages")
-                .and_then(Value::as_array)
-                .ok_or_else(|| step_err(index, step_id, "expect.messages must be array"))?;
+            let ordered = expect.get("messages").and_then(Value::as_array);
+            let unordered = expect.get("messages_unordered").and_then(Value::as_array);
+            let (expected_messages, is_unordered) = match (ordered, unordered) {
+                (Some(messages), None) => (messages, false),
+                (None, Some(messages)) => (messages, true),
+                (None, None) => {
+                    return Err(step_err(
+                        index,
+                        step_id,
+                        "expect.messages or expect.messages_unordered is required",
+                    ));
+                }
+                (Some(_), Some(_)) => {
+                    return Err(step_err(
+                        index,
+                        step_id,
+                        "expect.messages and expect.messages_unordered are mutually exclusive",
+                    ));
+                }
+            };
+
+            for window in messages.windows(2) {
+                if window[0].seq >= window[1].seq {
+                    return Err(step_err(index, step_id, "tail messages out of order"));
+                }
+            }
 
             if messages.len() != expected_messages.len() {
                 return Err(step_err(
@@ -249,10 +273,34 @@ fn run_tail(
                 ));
             }
 
-            for (idx, expected) in expected_messages.iter().enumerate() {
-                let actual = &messages[idx];
-                expect_data(expected, &actual.data, index, step_id)?;
-                expect_descrips(expected, &actual.meta.descrips, index, step_id)?;
+            if is_unordered {
+                let mut remaining: Vec<&plasmite::api::Message> = messages.iter().collect();
+                for expected in expected_messages.iter() {
+                    let mut pos = None;
+                    for (idx, actual) in remaining.iter().enumerate() {
+                        match matches_expected_message(expected, actual) {
+                            Ok(true) => {
+                                pos = Some(idx);
+                                break;
+                            }
+                            Ok(false) => continue,
+                            Err(err) => {
+                                return Err(step_err(index, step_id, &err));
+                            }
+                        }
+                    }
+                    if let Some(pos) = pos {
+                        remaining.remove(pos);
+                    } else {
+                        return Err(step_err(index, step_id, "message mismatch"));
+                    }
+                }
+            } else {
+                for (idx, expected) in expected_messages.iter().enumerate() {
+                    let actual = &messages[idx];
+                    expect_data(expected, &actual.data, index, step_id)?;
+                    expect_descrips(expected, &actual.meta.descrips, index, step_id)?;
+                }
             }
 
             validate_expect_error(step.get("expect"), &Ok(()), index, step_id)
@@ -260,6 +308,71 @@ fn run_tail(
         Ok(Err(err)) => validate_expect_error(step.get("expect"), &Err(err), index, step_id),
         Err(err) => validate_expect_error(step.get("expect"), &Err(err), index, step_id),
     }
+}
+
+fn run_spawn_poke(
+    manifest_dir: &Path,
+    workdir_path: &Path,
+    step: &Value,
+    index: usize,
+    step_id: &Option<String>,
+) -> Result<(), String> {
+    let pool = step
+        .get("pool")
+        .and_then(Value::as_str)
+        .ok_or_else(|| step_err(index, step_id, "missing pool"))?;
+    let input = step
+        .get("input")
+        .ok_or_else(|| step_err(index, step_id, "missing input"))?;
+    let messages = input
+        .get("messages")
+        .and_then(Value::as_array)
+        .ok_or_else(|| step_err(index, step_id, "input.messages must be array"))?;
+    let plasmite_bin = resolve_plasmite_bin(manifest_dir)?;
+
+    let mut children = Vec::new();
+    for message in messages {
+        let payload = message
+            .get("data")
+            .ok_or_else(|| step_err(index, step_id, "message.data is required"))?;
+        let payload = serde_json::to_string(payload)
+            .map_err(|err| step_err(index, step_id, &format!("encode payload failed: {err}")))?;
+        let descrips = message
+            .get("descrips")
+            .and_then(Value::as_array)
+            .map(|values| parse_string_array(values.as_slice()))
+            .transpose()
+            .map_err(|err| step_err(index, step_id, &err))?;
+
+        let mut cmd = Command::new(&plasmite_bin);
+        cmd.arg("--dir")
+            .arg(workdir_path)
+            .arg("poke")
+            .arg(pool)
+            .arg(payload)
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit());
+        if let Some(descrips) = descrips {
+            for descrip in descrips {
+                cmd.arg("--descrip").arg(descrip);
+            }
+        }
+        let child = cmd
+            .spawn()
+            .map_err(|err| step_err(index, step_id, &format!("spawn poke failed: {err}")))?;
+        children.push(child);
+    }
+
+    for mut child in children {
+        let status = child
+            .wait()
+            .map_err(|err| step_err(index, step_id, &format!("poke wait failed: {err}")))?;
+        if !status.success() {
+            return Err(step_err(index, step_id, "poke process failed"));
+        }
+    }
+
+    Ok(())
 }
 
 fn run_corrupt_pool_header(
@@ -466,6 +579,40 @@ fn parse_string_array(values: &[Value]) -> Result<Vec<String>, String> {
                 .ok_or_else(|| "expected string array".to_string())
         })
         .collect()
+}
+
+fn resolve_plasmite_bin(manifest_dir: &Path) -> Result<PathBuf, String> {
+    if let Ok(value) = env::var("PLASMITE_BIN") {
+        return Ok(PathBuf::from(value));
+    }
+    let root = manifest_dir.parent().unwrap_or(manifest_dir);
+    let candidate = root.join("target").join("debug").join("plasmite");
+    if candidate.exists() {
+        return Ok(candidate);
+    }
+    Err("plasmite binary not found; set PLASMITE_BIN or build target/debug/plasmite".to_string())
+}
+
+fn matches_expected_message(
+    expected: &Value,
+    actual: &plasmite::api::Message,
+) -> Result<bool, String> {
+    let expected_data = expected
+        .get("data")
+        .ok_or_else(|| "expected message data is required".to_string())?;
+    if expected_data != &actual.data {
+        return Ok(false);
+    }
+    if let Some(expected_descrips) = expected.get("descrips") {
+        let expected = match expected_descrips.as_array() {
+            Some(values) => parse_string_array(values.as_slice())?,
+            None => return Err("descrips must be array".to_string()),
+        };
+        if expected != actual.meta.descrips {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn step_err(index: usize, step_id: &Option<String>, message: &str) -> String {

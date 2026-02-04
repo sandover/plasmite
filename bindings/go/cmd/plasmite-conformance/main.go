@@ -14,11 +14,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sandover/plasmite/bindings/go/plasmite"
@@ -45,6 +47,7 @@ func run() error {
 	}
 	manifestPath := os.Args[1]
 	manifestDir := filepath.Dir(manifestPath)
+	repoRoot := filepath.Dir(manifestDir)
 
 	content, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -112,6 +115,10 @@ func run() error {
 			}
 		case "tail":
 			if err := runTail(client, step, index, stepID); err != nil {
+				return err
+			}
+		case "spawn_poke":
+			if err := runSpawnPoke(repoRoot, workdirPath, step, index, stepID); err != nil {
 				return err
 			}
 		case "corrupt_pool_header":
@@ -274,7 +281,7 @@ func runTail(client *plasmite.Client, step map[string]any, index int, stepID *st
 		}
 	}
 
-	expectMessages, err := expectedMessages(step, index, stepID)
+	expectMessages, ordered, err := expectedMessages(step, index, stepID)
 	if err != nil {
 		return err
 	}
@@ -315,17 +322,111 @@ func runTail(client *plasmite.Client, step map[string]any, index int, stepID *st
 	if len(messages) != len(expectMessages) {
 		return stepErr(index, stepID, fmt.Sprintf("expected %d messages, got %d", len(expectMessages), len(messages)))
 	}
-	for idx, expected := range expectMessages {
-		actual := messages[idx]
-		if !reflect.DeepEqual(expected.Data, actual.Data) {
-			return stepErr(index, stepID, "data mismatch")
+	for i := 1; i < len(messages); i++ {
+		if messages[i-1].Seq >= messages[i].Seq {
+			return stepErr(index, stepID, "tail messages out of order")
 		}
-		if expected.Descrips != nil && !reflect.DeepEqual(expected.Descrips, actual.Meta.Descrips) {
-			return stepErr(index, stepID, "descrips mismatch")
+	}
+	if ordered {
+		for idx, expected := range expectMessages {
+			actual := messages[idx]
+			if !reflect.DeepEqual(expected.Data, actual.Data) {
+				return stepErr(index, stepID, "data mismatch")
+			}
+			if expected.Descrips != nil && !reflect.DeepEqual(expected.Descrips, actual.Meta.Descrips) {
+				return stepErr(index, stepID, "descrips mismatch")
+			}
+		}
+	} else {
+		used := make([]bool, len(messages))
+		for _, expected := range expectMessages {
+			found := false
+			for idx, actual := range messages {
+				if used[idx] {
+					continue
+				}
+				if !reflect.DeepEqual(expected.Data, actual.Data) {
+					continue
+				}
+				if expected.Descrips != nil && !reflect.DeepEqual(expected.Descrips, actual.Meta.Descrips) {
+					continue
+				}
+				used[idx] = true
+				found = true
+				break
+			}
+			if !found {
+				return stepErr(index, stepID, "message mismatch")
+			}
 		}
 	}
 
 	return validateExpectError(step["expect"], nil, index, stepID)
+}
+
+func runSpawnPoke(repoRoot string, workdirPath string, step map[string]any, index int, stepID *string) error {
+	pool, ok := step["pool"].(string)
+	if !ok {
+		return stepErr(index, stepID, "missing pool")
+	}
+	input, ok := step["input"].(map[string]any)
+	if !ok {
+		return stepErr(index, stepID, "missing input")
+	}
+	rawMessages, ok := input["messages"].([]any)
+	if !ok {
+		return stepErr(index, stepID, "input.messages must be array")
+	}
+	bin, err := resolvePlasmiteBin(repoRoot)
+	if err != nil {
+		return stepErr(index, stepID, err.Error())
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, len(rawMessages))
+	for _, raw := range rawMessages {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			return stepErr(index, stepID, "message must be object")
+		}
+		data, ok := entry["data"]
+		if !ok {
+			return stepErr(index, stepID, "message.data is required")
+		}
+		payload, err := json.Marshal(data)
+		if err != nil {
+			return stepErr(index, stepID, fmt.Sprintf("encode payload failed: %v", err))
+		}
+		var descrips []string
+		if rawDescrips, ok := entry["descrips"].([]any); ok {
+			descrips, err = parseStringArray(rawDescrips)
+			if err != nil {
+				return stepErr(index, stepID, err.Error())
+			}
+		}
+
+		wg.Add(1)
+		go func(payload string, descrips []string) {
+			defer wg.Done()
+			args := []string{"--dir", workdirPath, "poke", pool, payload}
+			for _, descrip := range descrips {
+				args = append(args, "--descrip", descrip)
+			}
+			cmd := exec.Command(bin, args...)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				errs <- err
+			}
+		}(string(payload), descrips)
+	}
+
+	wg.Wait()
+	close(errs)
+	if err := <-errs; err != nil {
+		return stepErr(index, stepID, fmt.Sprintf("poke process failed: %v", err))
+	}
+	return nil
 }
 
 func runCorruptPoolHeader(step map[string]any, index int, stepID *string, workdirPath string) error {
@@ -490,31 +591,50 @@ func parseStringArray(values []any) ([]string, error) {
 	return out, nil
 }
 
-func expectedMessages(step map[string]any, index int, stepID *string) ([]messageExpectation, error) {
+func expectedMessages(step map[string]any, index int, stepID *string) ([]messageExpectation, bool, error) {
 	expect, ok := step["expect"].(map[string]any)
 	if !ok {
-		return nil, stepErr(index, stepID, "missing expect")
+		return nil, false, stepErr(index, stepID, "missing expect")
 	}
 	rawMessages, ok := expect["messages"].([]any)
-	if !ok {
-		return nil, stepErr(index, stepID, "expect.messages must be array")
+	ordered := ok
+	if ok {
+		if _, hasUnordered := expect["messages_unordered"]; hasUnordered {
+			return nil, false, stepErr(index, stepID, "expect.messages and expect.messages_unordered are mutually exclusive")
+		}
+	} else {
+		rawMessages, ok = expect["messages_unordered"].([]any)
+		if !ok {
+			return nil, false, stepErr(index, stepID, "expect.messages or expect.messages_unordered is required")
+		}
 	}
 	messages := make([]messageExpectation, len(rawMessages))
 	for i, raw := range rawMessages {
 		entry, ok := raw.(map[string]any)
 		if !ok {
-			return nil, stepErr(index, stepID, "message must be object")
+			return nil, false, stepErr(index, stepID, "message must be object")
 		}
 		messages[i] = messageExpectation{Data: entry["data"]}
 		if rawDescrips, ok := entry["descrips"].([]any); ok {
 			descrips, err := parseStringArray(rawDescrips)
 			if err != nil {
-				return nil, stepErr(index, stepID, err.Error())
+				return nil, false, stepErr(index, stepID, err.Error())
 			}
 			messages[i].Descrips = descrips
 		}
 	}
-	return messages, nil
+	return messages, ordered, nil
+}
+
+func resolvePlasmiteBin(repoRoot string) (string, error) {
+	if value := os.Getenv("PLASMITE_BIN"); value != "" {
+		return value, nil
+	}
+	candidate := filepath.Join(repoRoot, "target", "debug", "plasmite")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate, nil
+	}
+	return "", errors.New("plasmite binary not found; set PLASMITE_BIN or build target/debug/plasmite")
 }
 
 type messageExpectation struct {

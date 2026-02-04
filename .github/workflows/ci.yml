@@ -37,10 +37,13 @@ jobs:
           fi
       - run: cargo audit --db .scratch/advisory-db --no-fetch
       - run: cargo test --all --locked
+      - run: cargo build --bin plasmite
       - name: Rust conformance (sample)
         run: cargo run --bin plasmite-conformance -- conformance/sample-v0.json
       - name: Rust conformance (negative)
         run: cargo run --bin plasmite-conformance -- conformance/negative-v0.json
+      - name: Rust conformance (multiprocess)
+        run: cargo run --bin plasmite-conformance -- conformance/multiprocess-v0.json
       - name: Go conformance
         shell: bash
         run: |
@@ -53,6 +56,7 @@ jobs:
           cd bindings/go
           CGO_LDFLAGS="-L$PWD/../../target/debug" go run ./cmd/plasmite-conformance ../../conformance/sample-v0.json
           CGO_LDFLAGS="-L$PWD/../../target/debug" go run ./cmd/plasmite-conformance ../../conformance/negative-v0.json
+          CGO_LDFLAGS="-L$PWD/../../target/debug" go run ./cmd/plasmite-conformance ../../conformance/multiprocess-v0.json
       - name: ABI smoke test
         run: |
           cargo build --lib
