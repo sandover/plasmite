@@ -6,7 +6,7 @@
 //! Invariants: No unbounded buffering; per-record buffering is capped.
 use std::io::{self, BufRead, BufReader, Read};
 
-use plasmite::core::error::{Error, ErrorKind};
+use plasmite::api::{Error, ErrorKind};
 use serde_json::Value;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -802,7 +802,7 @@ impl<R: Read> Read for PrefixReader<R> {
 #[cfg(test)]
 mod tests {
     use super::{ErrorPolicy, IngestConfig, IngestFailure, IngestMode, ingest, truncate_snippet};
-    use plasmite::core::error::Error;
+    use plasmite::api::Error;
 
     fn config(mode: IngestMode, errors: ErrorPolicy) -> IngestConfig {
         IngestConfig {

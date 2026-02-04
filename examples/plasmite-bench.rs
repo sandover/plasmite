@@ -15,8 +15,7 @@ use serde_json::{Map, Value, json};
 mod bench;
 
 use bench::{BenchArgs, BenchFormat, WorkerArgs, WorkerRole};
-use plasmite::core::error::{Error, ErrorKind, to_exit_code};
-use plasmite::core::pool::Durability;
+use plasmite::api::{Durability, Error, ErrorKind, to_exit_code};
 
 fn main() {
     let exit_code = match run() {

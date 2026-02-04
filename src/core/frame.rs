@@ -1,9 +1,10 @@
 //! Purpose: Define frame header layout plus helpers for sizing/alignment and validation.
-//! Exports: `FrameHeader`, `FrameState`, `FRAME_HEADER_LEN`, `frame_total_len`, `validate_payload`.
+//! Exports: `FrameHeader`, `FrameState`, `FRAME_HEADER_LEN`, `frame_total_len`.
 //! Role: Shared encoding/validation primitives used by planner, pool, cursor, and validator.
 //! Invariants: Frame headers are fixed-size (64 bytes) and encoded little-endian.
 //! Invariants: Payload validation enforces canonical Lite3 encoding when required.
 use crate::core::error::{Error, ErrorKind};
+#[cfg(test)]
 use crate::core::lite3;
 
 pub const FRAME_MAGIC: [u8; 4] = *b"FRM1";
@@ -136,6 +137,7 @@ pub fn max_payload(ring_size: usize, header_len: usize) -> usize {
     ring_cap.min(MAX_PAYLOAD_ABS)
 }
 
+#[cfg(test)]
 pub fn validate_payload(payload: &[u8]) -> Result<(), Error> {
     lite3::validate_bytes(payload).map_err(|err| {
         Error::new(ErrorKind::Corrupt)

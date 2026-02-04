@@ -13,7 +13,7 @@ use jaq_core::load::{Arena, File, Loader};
 use jaq_core::{Bind, Compiler, Ctx, Error as JaqError, Native, RcIter};
 use serde_json::Value;
 
-use plasmite::core::error::{Error, ErrorKind};
+use plasmite::api::{Error, ErrorKind};
 
 #[derive(Clone)]
 pub struct JqFilter {

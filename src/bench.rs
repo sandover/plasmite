@@ -14,10 +14,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
-use plasmite::core::cursor::{Cursor, CursorResult};
-use plasmite::core::error::{Error, ErrorKind};
-use plasmite::core::lite3;
-use plasmite::core::pool::{AppendOptions, Durability, Pool, PoolOptions};
+use plasmite::api::{
+    AppendOptions, Cursor, CursorResult, Durability, Error, ErrorKind, Pool, PoolOptions, lite3,
+};
 
 #[derive(Clone, Debug)]
 pub struct BenchArgs {

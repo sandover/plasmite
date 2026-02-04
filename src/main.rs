@@ -1,8 +1,8 @@
 //! Purpose: `plasmite` CLI entry point and v0.0.1 command dispatch.
 //! Role: Binary crate root; parses args, runs commands, emits JSON on stdout.
 //! Invariants: Successful command output is JSON on stdout; errors are JSON on stderr.
-//! Invariants: Process exit code is derived from `core::error::to_exit_code`.
-//! Invariants: All pool mutations go through `core::pool` (locks + mmap safety).
+//! Invariants: Process exit code is derived from `api::to_exit_code`.
+//! Invariants: All pool mutations go through `api::Pool` (locks + mmap safety).
 #![allow(clippy::result_large_err)]
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Read};
@@ -21,10 +21,10 @@ mod jq_filter;
 use color_json::colorize_json;
 use ingest::{ErrorPolicy, IngestConfig, IngestFailure, IngestMode, IngestOutcome, ingest};
 use jq_filter::{JqFilter, compile_filters, matches_all};
-use plasmite::core::cursor::{Cursor, CursorResult, FrameRef};
-use plasmite::core::error::{Error, ErrorKind, to_exit_code};
-use plasmite::core::lite3::{self, Lite3DocRef};
-use plasmite::core::pool::{AppendOptions, Durability, Pool, PoolOptions};
+use plasmite::api::{
+    AppendOptions, Cursor, CursorResult, Durability, Error, ErrorKind, FrameRef, Lite3DocRef, Pool,
+    PoolOptions, lite3, to_exit_code,
+};
 use plasmite::notice::{Notice, notice_json};
 
 #[derive(Copy, Clone, Debug)]
@@ -1043,7 +1043,7 @@ fn parse_durability(input: &str) -> Result<Durability, Error> {
     }
 }
 
-fn bounds_json(bounds: plasmite::core::pool::Bounds) -> Value {
+fn bounds_json(bounds: plasmite::api::Bounds) -> Value {
     let mut map = Map::new();
     if let Some(oldest) = bounds.oldest_seq {
         map.insert("oldest".to_string(), json!(oldest));
@@ -1054,7 +1054,7 @@ fn bounds_json(bounds: plasmite::core::pool::Bounds) -> Value {
     Value::Object(map)
 }
 
-fn pool_info_json(pool_ref: &str, info: &plasmite::core::pool::PoolInfo) -> Value {
+fn pool_info_json(pool_ref: &str, info: &plasmite::api::PoolInfo) -> Value {
     let mut map = Map::new();
     map.insert("name".to_string(), json!(pool_ref));
     map.insert("path".to_string(), json!(info.path.display().to_string()));

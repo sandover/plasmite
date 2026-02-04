@@ -1,7 +1,8 @@
-//! Purpose: Shared core library crate used by the `plasmite` CLI and tests.
-//! Exports: `core` (pool storage, framing, planning, validation, errors).
-//! Role: Internal library backing the binaries; not yet a stable public SDK.
-//! Invariants: Treat the crate API as internal until a dedicated library release.
+//! Purpose: Shared library crate used by the `plasmite` CLI and bindings.
+//! Exports: `api` (stable public surface), `notice` (structured stderr notices).
+//! Role: Public API boundary with private internal storage modules.
+//! Invariants: Additive-only changes to `api`; internal modules remain private.
 //! Invariants: Core modules prefer explicit inputs/outputs over hidden state.
-pub mod core;
+pub mod api;
+mod core;
 pub mod notice;

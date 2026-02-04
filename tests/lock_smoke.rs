@@ -5,7 +5,7 @@
 //! Invariants: Fast regression coverage, not an exhaustive concurrency proof.
 use std::process::{Command, Stdio};
 
-use plasmite::core::pool::Pool;
+use plasmite::api::Pool;
 
 fn cmd() -> Command {
     let exe = env!("CARGO_BIN_EXE_plasmite");

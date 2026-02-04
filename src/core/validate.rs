@@ -1,20 +1,33 @@
 //! Purpose: Validate pool/ring invariants and provide debug-only assertions with snapshots.
-//! Exports: `validate_pool_state`, `validate_frame_header`, `SnapshotMode`, `debug_assert_*`.
+//! Exports: `validate_frame_header`, `debug_assert_tail_committed`.
+//! Exports (tests): `validate_pool_state`, `SnapshotMode`, `debug_assert_pool_state_with_snapshot`.
 //! Role: Slow-path safety checks used at boundaries and in debug builds.
 //! Invariants: Full scans are explicit; hot paths use tail-only checks.
 //! Invariants: Snapshot output is opt-in and written under `.scratch/` only.
-use crate::core::error::{Error, ErrorKind};
-use crate::core::frame::{self, FRAME_HEADER_LEN, FrameHeader, FrameState};
+use crate::core::error::Error;
+#[cfg(test)]
+use crate::core::error::ErrorKind;
+#[cfg(test)]
+use crate::core::frame;
+use crate::core::frame::{FRAME_HEADER_LEN, FrameHeader, FrameState};
+#[cfg(test)]
 use crate::core::pool::PoolHeader;
+#[cfg(test)]
 use std::fs::{self, File};
+#[cfg(test)]
 use std::io::Write;
+#[cfg(test)]
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(test)]
 const SNAPSHOT_DIR: &str = ".scratch";
+#[cfg(test)]
 const SNAPSHOT_PREFIX: &str = "pool-snapshot-";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg(test)]
 pub enum SnapshotMode {
     Disabled,
     OnFailure,
@@ -24,6 +37,7 @@ pub fn validate_frame_header(header: &FrameHeader, ring_size: usize) -> Result<(
     header.validate(ring_size)
 }
 
+#[cfg(test)]
 pub fn validate_pool_state(header: PoolHeader, mmap: &[u8]) -> Result<(), Error> {
     if header.ring_size == 0 {
         return Err(Error::new(ErrorKind::Corrupt).with_message("ring size is zero"));
@@ -107,10 +121,12 @@ pub fn validate_pool_state(header: PoolHeader, mmap: &[u8]) -> Result<(), Error>
     Ok(())
 }
 
+#[cfg(test)]
 pub fn debug_assert_pool_state(header: PoolHeader, mmap: &[u8]) {
     debug_assert_pool_state_with_snapshot(header, mmap, SnapshotMode::Disabled);
 }
 
+#[cfg(test)]
 pub fn debug_assert_pool_state_with_snapshot(
     header: PoolHeader,
     mmap: &[u8],
@@ -169,6 +185,7 @@ fn read_frame_header(mmap: &[u8], ring_offset: usize, head: usize) -> Result<Fra
     FrameHeader::decode(&mmap[start..end])
 }
 
+#[cfg(test)]
 fn write_snapshot(header: PoolHeader, mmap: &[u8]) -> Option<PathBuf> {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -215,6 +232,7 @@ fn write_snapshot(header: PoolHeader, mmap: &[u8]) -> Option<PathBuf> {
     Some(path)
 }
 
+#[cfg(test)]
 fn write_frame_snapshot(
     file: &mut File,
     label: &str,
@@ -250,9 +268,12 @@ fn write_frame_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use super::{SNAPSHOT_PREFIX, SnapshotMode, debug_assert_pool_state_with_snapshot};
+    use super::{
+        SNAPSHOT_PREFIX, SnapshotMode, debug_assert_pool_state,
+        debug_assert_pool_state_with_snapshot,
+    };
     use crate::core::frame::FRAME_HEADER_LEN;
-    use crate::core::pool::PoolHeader;
+    use crate::core::pool::{Pool, PoolHeader, PoolOptions};
     use std::collections::HashSet;
     use std::fs;
 
@@ -296,5 +317,17 @@ mod tests {
         for name in new_files {
             let _ = fs::remove_file(std::path::Path::new(super::SNAPSHOT_DIR).join(name));
         }
+    }
+
+    #[test]
+    fn debug_assert_pool_state_no_snapshot_for_valid_pool() {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
+        let header = pool.header_from_mmap().expect("header");
+        debug_assert_pool_state(header, pool.mmap());
     }
 }
