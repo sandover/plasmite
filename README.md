@@ -3,25 +3,25 @@
 [![CI](https://github.com/sandover/plasmite/actions/workflows/ci.yml/badge.svg)](https://github.com/sandover/plasmite/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Persistent message pools for local IPC. Multiple processes can write and read concurrently. Messages are JSON. Pools are just files.
+Persistent JSON message queues backed by plain files, making interprocess communication easy and inspectable. Multiple processes can write and read concurrently. Message queues are ring buffers, so writes almost always succeed.
 
 ```bash
 # First, create a pool
-plasmite pool create chat
+pls pool create chat
 
-# Terminal 1 - bob starts watching (blocks, waiting for messages)
-plasmite peek chat
+# Bob's terminal - Bob starts watching (blocks, waiting for messages)
+pls peek chat
 
-# Terminal 2 - alice sends messages
-plasmite poke chat '{"from": "alice", "msg": "hello bob"}'
-plasmite poke chat '{"from": "alice", "msg": "you there?"}'
+# Alice's terminal - Alice sends messages
+pls poke chat '{"from": "alice", "msg": "hello bob"}'
+pls poke chat '{"from": "alice", "msg": "you there?"}'
 
-# Terminal 1 - bob sees each message appear as alice sends it:
+# Bob's Terminal - Bob sees each message appear as Alice sends it:
 #   {"seq":1,"time":"...","meta":{"descrips":[]},"data":{"from":"alice","msg":"hello bob"}}
 #   {"seq":2,"time":"...","meta":{"descrips":[]},"data":{"from":"alice","msg":"you there?"}}
 ```
 
-No daemon, no config, no ports. ~600k messages/sec on a laptop.
+No daemon, no config. ~600k messages/sec on a laptop.
 
 ## Why Plasmite?
 
@@ -55,15 +55,15 @@ This installs `plasmite` and the `pls` alias. Supported: **macOS** and **Linux**
 
 **Terminal 1** - your build script:
 ```bash
-plasmite poke build --create '{"step": "compile", "status": "running"}'
+pls poke build --create '{"step": "compile", "status": "running"}'
 sleep 2  # ... compiling ...
-plasmite poke build '{"step": "compile", "status": "done"}'
-plasmite poke build '{"step": "test", "status": "running"}'
+pls poke build '{"step": "compile", "status": "done"}'
+pls poke build '{"step": "test", "status": "running"}'
 ```
 
 **Terminal 2** - you, watching:
 ```bash
-plasmite peek build
+pls peek build
 ```
 
 ### Coordinate two scripts
@@ -71,67 +71,65 @@ plasmite peek build
 ```bash
 # Script A waits for a signal
 echo "Waiting for go signal..."
-plasmite peek signals --where '.data.go == true' --tail 1 --one > /dev/null
+pls peek signals --where '.data.go == true' --tail 1 --one > /dev/null
 echo "Got it! Proceeding..."
 
 # Script B sends the signal
-plasmite poke signals --create '{"go": true}'
+pls poke signals --create '{"go": true}'
 ```
 
-### Ingest streams from anywhere
+### Consume (or combine) streams from different sources
 
 ```bash
 # Pipe JSON Lines from jq
-jq -c '.items[]' data.json | plasmite poke foo --create
+jq -c '.items[]' data.json | pls poke foo --create
 
 # Stream from curl (event streams auto-detected)
-curl -N https://api.example.com/stream | plasmite poke events --create
+curl -N https://api.example.com/stream | pls poke events --create
 
 # System logs (Linux)
-journalctl -o json-seq -f | plasmite poke syslog --create
+journalctl -o json-seq -f | pls poke syslog --create
 
 # System logs (macOS)
-/usr/bin/log stream --style ndjson | plasmite poke syslog --create
+/usr/bin/log stream --style ndjson | pls poke syslog --create
 ```
 
 ### Filter and transform
 
 ```bash
 # Only errors
-plasmite peek foo --where '.data.level == "error"'
+pls peek foo --where '.data.level == "error"'
 
 # Only messages tagged "important"
-plasmite peek foo --where '.meta.descrips[]? == "important"'
+pls peek foo --where '.meta.descrips[]? == "important"'
 
 # Pipe to jq for transformation
-plasmite peek foo --format jsonl | jq -r '.data.msg'
+pls peek foo --format jsonl | jq -r '.data.msg'
 
 # Last 10 messages, then keep watching
-plasmite peek foo --tail 10
+pls peek foo --tail 10
 
 # Messages from the last 5 minutes
-plasmite peek foo --since 5m
+pls peek foo --since 5m
 ```
 
-### Use from any language
-
-Plasmite is just a CLI. Call it from anything:
+### Use it from scripts
 
 ```python
 # Python
 import subprocess, json
-subprocess.run(["plasmite", "poke", "foo", "--create", json.dumps({"from": "python"})])
+subprocess.run(["pls", "poke", "foo", "--create", json.dumps({"from": "python"})])
 ```
 
 ```javascript
 // Node.js
 const { execSync } = require('child_process');
-execSync(`plasmite poke foo --create '${JSON.stringify({from: "node"})}'`);
+execSync(`pls poke foo --create '${JSON.stringify({from: "node"})}'`);
 ```
 
 ```bash
 # Or just shell
-plasmite poke foo --create '{"from": "bash"}'
+pls poke foo --create '{"from": "bash"}'
 ```
 
 ## Commands
@@ -146,9 +144,7 @@ plasmite poke foo --create '{"from": "bash"}'
 | `pool info NAME` | Show pool metadata |
 | `pool delete NAME` | Delete a pool |
 
-Alias: `pls` (e.g., `pls poke foo '{"x":1}'`)
-
-Run `plasmite --help` or `plasmite <command> --help` for all options.
+Both `pls` and `plasmite` commands are supported.
 
 ## How It Works
 
@@ -181,12 +177,12 @@ Default location: `~/.plasmite/pools/`. Create explicitly or use `--create` on f
 
 Tag messages when you poke them:
 ```bash
-plasmite poke foo --descrip error --descrip db '{"msg": "connection lost"}'
+pls poke foo --descrip error --descrip db '{"msg": "connection lost"}'
 ```
 
 Filter by tag when you peek:
 ```bash
-plasmite peek foo --where '.meta.descrips[]? == "error"'
+pls peek foo --where '.meta.descrips[]? == "error"'
 ```
 
 ### Scripting
@@ -203,8 +199,8 @@ Plasmite is built for scripts:
 Default is 1MB. Old messages are overwritten when full:
 
 ```bash
-plasmite pool create bigpool --size 64M    # More history
-plasmite poke signals --create --create-size 64K '...'  # Tiny, ephemeral
+pls pool create bigpool --size 64M    # More history
+pls poke signals --create --create-size 64K '...'  # Tiny, ephemeral
 ```
 
 ### Durability
@@ -212,7 +208,7 @@ plasmite poke signals --create --create-size 64K '...'  # Tiny, ephemeral
 Default is fast (OS buffered). For critical data:
 
 ```bash
-plasmite poke foo --durability flush '{"important": true}'
+pls poke foo --durability flush '{"important": true}'
 ```
 
 ### Retries
@@ -220,7 +216,7 @@ plasmite poke foo --durability flush '{"important": true}'
 Handle lock contention gracefully:
 
 ```bash
-plasmite poke foo --retry 3 --retry-delay 100ms '{"data": 1}'
+pls poke foo --retry 3 --retry-delay 100ms '{"data": 1}'
 ```
 
 ### Input modes
@@ -228,8 +224,8 @@ plasmite poke foo --retry 3 --retry-delay 100ms '{"data": 1}'
 `poke` auto-detects JSONL, JSON-seq (0x1e), and event streams. Override with `--in`:
 
 ```bash
-cat records.jsonl | plasmite poke foo --in jsonl
-cat big.json | plasmite poke foo --in json
+cat records.jsonl | pls poke foo --in jsonl
+cat big.json | pls poke foo --in json
 ```
 
 Skip bad records with `--errors skip` (exit 1 if any skipped).
@@ -248,7 +244,7 @@ See [docs/perf.md](docs/perf.md) for the full benchmark suite.
 
 Plasmite uses **[Lite³](https://github.com/fastserial/lite3)** (a zero-copy binary JSON format) for on-disk storage. The CLI is JSON-in/JSON-out - you never see Lite³ directly.
 
-Inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma), simplified for modern workflows.
+Inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma).
 
 ## More Info
 
@@ -256,12 +252,6 @@ Inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma)
 - [Architecture](docs/architecture.md) - How it's built
 - [Exit codes](docs/exit-codes.md) - For robust error handling
 - [Changelog](CHANGELOG.md) - Version history
-
-## Development
-
-```bash
-cargo test
-```
 
 ## License
 
