@@ -7,5 +7,12 @@ Notes: Requires libplasmite to be discoverable at runtime.
 */
 
 const native = require("./index.node");
+const { RemoteClient, RemoteError, RemotePool, RemoteTail } = require("./remote");
 
-module.exports = native;
+module.exports = {
+  ...native,
+  RemoteClient,
+  RemoteError,
+  RemotePool,
+  RemoteTail,
+};

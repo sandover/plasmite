@@ -47,3 +47,18 @@ console.log(message.toString("utf8"))
 pool.close()
 client.close()
 ```
+
+## Remote Client (HTTP/JSON)
+
+```js
+const { RemoteClient } = require("plasmite-node")
+
+const client = new RemoteClient("http://127.0.0.1:9700")
+const pool = await client.openPool("docs")
+const message = await pool.append({ kind: "note", text: "hi" }, ["note"])
+console.log(message.seq, message.data)
+
+const tail = await pool.tail({ sinceSeq: message.seq, maxMessages: 1, timeoutMs: 500 })
+console.log(await tail.next())
+tail.cancel()
+```
