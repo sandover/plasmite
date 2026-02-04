@@ -28,6 +28,7 @@ Invariants: Normative contracts live under spec/; this file must not restate ver
 - Performance baselines: `docs/perf.md`
 - API quickstart: `docs/api-quickstart.md`
 - Diagnostics: `docs/doctor.md`
+- libplasmite guide: `docs/libplasmite.md`
 
 ## Design notes
 
