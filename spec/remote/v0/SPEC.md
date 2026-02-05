@@ -160,6 +160,7 @@ Reconnect semantics:
 - `200` success.
 - `400` usage errors (malformed input).
 - `401` unauthorized.
+- `403` forbidden (access mode disallows the operation).
 - `404` not found.
 - `409` already exists.
 - `423` busy/locked.

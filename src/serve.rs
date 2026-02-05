@@ -35,12 +35,31 @@ pub struct ServeConfig {
     pub bind: SocketAddr,
     pub pool_dir: PathBuf,
     pub token: Option<String>,
+    pub access_mode: AccessMode,
 }
 
 #[derive(Clone)]
 struct AppState {
     client: LocalClient,
     token: Option<String>,
+    access_mode: AccessMode,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum AccessMode {
+    ReadOnly,
+    WriteOnly,
+    ReadWrite,
+}
+
+impl AccessMode {
+    fn allows_read(self) -> bool {
+        matches!(self, AccessMode::ReadOnly | AccessMode::ReadWrite)
+    }
+
+    fn allows_write(self) -> bool {
+        matches!(self, AccessMode::WriteOnly | AccessMode::ReadWrite)
+    }
 }
 
 pub async fn serve(config: ServeConfig) -> Result<(), Error> {
@@ -54,6 +73,7 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
     let state = Arc::new(AppState {
         client: LocalClient::new().with_pool_dir(config.pool_dir),
         token: config.token,
+        access_mode: config.access_mode,
     });
 
     let app = Router::new()
@@ -158,6 +178,28 @@ fn authorize(headers: &HeaderMap, state: &AppState) -> Result<(), Error> {
     Ok(())
 }
 
+fn ensure_read_access(state: &AppState) -> Result<(), Error> {
+    if state.access_mode.allows_read() {
+        Ok(())
+    } else {
+        Err(access_error("read operations"))
+    }
+}
+
+fn ensure_write_access(state: &AppState) -> Result<(), Error> {
+    if state.access_mode.allows_write() {
+        Ok(())
+    } else {
+        Err(access_error("write operations"))
+    }
+}
+
+fn access_error(action: &str) -> Error {
+    Error::new(ErrorKind::Permission)
+        .with_message(format!("forbidden: access mode disallows {action}"))
+        .with_hint("Adjust --access to permit this operation.")
+}
+
 #[derive(Debug, Deserialize)]
 struct CreatePoolRequest {
     pool: String,
@@ -212,6 +254,9 @@ async fn create_pool(
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
     }
+    if let Err(err) = ensure_write_access(&state) {
+        return error_response(err);
+    }
     let pool_ref = match pool_ref_from_request(&payload.pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
@@ -234,6 +279,9 @@ async fn open_pool(
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
     }
+    if let Err(err) = ensure_read_access(&state) {
+        return error_response(err);
+    }
     let pool_ref = match pool_ref_from_request(&payload.pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
@@ -252,6 +300,9 @@ async fn pool_info(
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
     }
+    if let Err(err) = ensure_read_access(&state) {
+        return error_response(err);
+    }
     let pool_ref = match pool_ref_from_request(&pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
@@ -264,6 +315,9 @@ async fn pool_info(
 
 async fn list_pools(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     if let Err(err) = authorize(&headers, &state) {
+        return error_response(err);
+    }
+    if let Err(err) = ensure_read_access(&state) {
         return error_response(err);
     }
     match state.client.list_pools() {
@@ -293,6 +347,9 @@ async fn delete_pool(
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
     }
+    if let Err(err) = ensure_write_access(&state) {
+        return error_response(err);
+    }
     let pool_ref = match pool_ref_from_request(&pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
@@ -310,6 +367,9 @@ async fn append_message(
     Json(payload): Json<AppendRequest>,
 ) -> Response {
     if let Err(err) = authorize(&headers, &state) {
+        return error_response(err);
+    }
+    if let Err(err) = ensure_write_access(&state) {
         return error_response(err);
     }
     let pool_ref = match pool_ref_from_request(&pool) {
@@ -340,6 +400,9 @@ async fn get_message(
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
     }
+    if let Err(err) = ensure_read_access(&state) {
+        return error_response(err);
+    }
     let pool_ref = match pool_ref_from_request(&pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
@@ -362,6 +425,9 @@ async fn tail_messages(
     Query(query): Query<TailQuery>,
 ) -> Response {
     if let Err(err) = authorize(&headers, &state) {
+        return error_response(err);
+    }
+    if let Err(err) = ensure_read_access(&state) {
         return error_response(err);
     }
     let pool_ref = match pool_ref_from_request(&pool) {
@@ -471,7 +537,13 @@ fn error_response(err: Error) -> Response {
         ErrorKind::NotFound => StatusCode::NOT_FOUND,
         ErrorKind::AlreadyExists => StatusCode::CONFLICT,
         ErrorKind::Busy => StatusCode::LOCKED,
-        ErrorKind::Permission => StatusCode::UNAUTHORIZED,
+        ErrorKind::Permission => {
+            if is_access_forbidden(&err) {
+                StatusCode::FORBIDDEN
+            } else {
+                StatusCode::UNAUTHORIZED
+            }
+        }
         ErrorKind::Corrupt | ErrorKind::Io | ErrorKind::Internal => {
             StatusCode::INTERNAL_SERVER_ERROR
         }
@@ -492,9 +564,14 @@ fn error_response(err: Error) -> Response {
     response
 }
 
+fn is_access_forbidden(err: &Error) -> bool {
+    err.message()
+        .is_some_and(|message| message.starts_with("forbidden:"))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ErrorKind, ServeConfig, serve};
+    use super::{AccessMode, ErrorKind, ServeConfig, serve};
 
     #[tokio::test]
     async fn serve_rejects_non_loopback_bind() {
@@ -503,6 +580,7 @@ mod tests {
             bind: "0.0.0.0:0".parse().expect("bind"),
             pool_dir: temp.path().to_path_buf(),
             token: None,
+            access_mode: AccessMode::ReadWrite,
         };
         let err = serve(config).await.expect_err("expected usage error");
         assert_eq!(err.kind(), ErrorKind::Usage);

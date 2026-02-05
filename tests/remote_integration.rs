@@ -5,7 +5,9 @@
 //! Invariants: Bounded waits avoid test flakiness.
 //! Invariants: Server processes are cleaned up on drop.
 
-use plasmite::api::{Durability, ErrorKind, PoolOptions, PoolRef, RemoteClient, TailOptions};
+use plasmite::api::{
+    Durability, ErrorKind, LocalClient, PoolApiExt, PoolOptions, PoolRef, RemoteClient, TailOptions,
+};
 use serde_json::{Value, json};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
@@ -22,10 +24,22 @@ struct TestServer {
 
 impl TestServer {
     fn start(pool_dir: &std::path::Path) -> TestResult<Self> {
-        Self::start_with_token(pool_dir, None)
+        Self::start_with_options(pool_dir, None, None)
     }
 
     fn start_with_token(pool_dir: &std::path::Path, token: Option<&str>) -> TestResult<Self> {
+        Self::start_with_options(pool_dir, token, None)
+    }
+
+    fn start_with_access(pool_dir: &std::path::Path, access: &str) -> TestResult<Self> {
+        Self::start_with_options(pool_dir, None, Some(access))
+    }
+
+    fn start_with_options(
+        pool_dir: &std::path::Path,
+        token: Option<&str>,
+        access: Option<&str>,
+    ) -> TestResult<Self> {
         let port = pick_port()?;
         let bind = format!("127.0.0.1:{port}");
         let base_url = format!("http://{bind}");
@@ -39,6 +53,9 @@ impl TestServer {
             .arg(&bind)
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+        if let Some(access) = access {
+            command.arg("--access").arg(access);
+        }
         if let Some(token) = token {
             command.arg("--token").arg(token);
         }
@@ -280,6 +297,59 @@ fn remote_tail_respects_limits_and_timeouts() -> TestResult<()> {
     })?;
     let msg = tail.next_message()?.expect("resumed message");
     assert_eq!(msg.data, json!({"n": 3}));
+    Ok(())
+}
+
+#[test]
+fn remote_read_only_allows_reads_but_rejects_writes() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let pool_dir = temp_dir.path();
+    let local = LocalClient::new().with_pool_dir(pool_dir);
+    let pool_ref = PoolRef::name("ro-demo");
+    local.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
+    let mut pool = local.open_pool(&pool_ref)?;
+    let created = pool.append_json_now(&json!({"n": 1}), &[], Durability::Fast)?;
+
+    let server = TestServer::start_with_access(pool_dir, "read-only")?;
+    let client = server.client()?;
+    let remote_pool = client.open_pool(&pool_ref)?;
+    let fetched = remote_pool.get_message(created.seq)?;
+    assert_eq!(fetched.seq, created.seq);
+
+    let err = remote_pool
+        .append_json_now(&json!({"n": 2}), &[], Durability::Fast)
+        .expect_err("append should be forbidden");
+    assert_eq!(err.kind(), ErrorKind::Permission);
+    Ok(())
+}
+
+#[test]
+fn remote_write_only_allows_append_but_rejects_reads() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let pool_dir = temp_dir.path();
+    let local = LocalClient::new().with_pool_dir(pool_dir);
+    let pool_ref = PoolRef::name("wo-demo");
+    local.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
+
+    let server = TestServer::start_with_access(pool_dir, "write-only")?;
+    let append_url = format!("{}/v0/pools/wo-demo/append", server.base_url);
+    let append_body = r#"{"data":{"n":1},"descrips":[],"durability":"fast"}"#;
+    let append = ureq::post(&append_url)
+        .set("Content-Type", "application/json")
+        .send_string(append_body)
+        .expect("append");
+    assert_eq!(append.status(), 200);
+
+    let get_url = format!("{}/v0/pools/wo-demo/messages/1", server.base_url);
+    match ureq::get(&get_url).call() {
+        Ok(_) => return Err("expected get to be forbidden".into()),
+        Err(ureq::Error::Status(code, resp)) => {
+            assert_eq!(code, 403);
+            let body: Value = serde_json::from_str(&resp.into_string()?)?;
+            assert_eq!(body["error"]["kind"], "Permission");
+        }
+        Err(err) => return Err(err.into()),
+    }
     Ok(())
 }
 

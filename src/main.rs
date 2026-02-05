@@ -141,6 +141,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             bind,
             token,
             token_file,
+            access,
         } => {
             let bind: SocketAddr = bind
                 .parse()
@@ -159,6 +160,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 bind,
                 pool_dir: pool_dir.clone(),
                 token,
+                access_mode: access.into(),
             };
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -605,7 +607,8 @@ Implements the remote protocol spec under spec/remote/v0/SPEC.md."#,
 NOTES
   - v0 is loopback-only; non-loopback binds are rejected
   - Use Authorization: Bearer <token> when --token or --token-file is set
-  - Prefer --token-file for non-loopback deployments; --token is dev-only"#
+  - Prefer --token-file for non-loopback deployments; --token is dev-only
+  - Use --access to restrict read/write operations"#
     )]
     Serve {
         #[arg(long, default_value = "127.0.0.1:9700", help = "Bind address")]
@@ -614,6 +617,13 @@ NOTES
         token: Option<String>,
         #[arg(long, value_name = "PATH", help = "Read bearer token from file")]
         token_file: Option<PathBuf>,
+        #[arg(
+            long,
+            value_enum,
+            default_value = "read-write",
+            help = "Access mode: read-only|write-only|read-write"
+        )]
+        access: AccessModeCli,
     },
     #[command(
         about = "Fetch one message by sequence number",
@@ -733,6 +743,23 @@ NOTES
   $ plasmite version"#
     )]
     Version,
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum AccessModeCli {
+    ReadOnly,
+    WriteOnly,
+    ReadWrite,
+}
+
+impl From<AccessModeCli> for serve::AccessMode {
+    fn from(value: AccessModeCli) -> Self {
+        match value {
+            AccessModeCli::ReadOnly => serve::AccessMode::ReadOnly,
+            AccessModeCli::WriteOnly => serve::AccessMode::WriteOnly,
+            AccessModeCli::ReadWrite => serve::AccessMode::ReadWrite,
+        }
+    }
 }
 
 #[derive(Subcommand)]
