@@ -297,3 +297,40 @@ fn read_frame_header(mmap: &[u8], ring_offset: usize, head: usize) -> Result<Fra
     let end = start + FRAME_HEADER_LEN;
     FrameHeader::decode(&mmap[start..end]).map_err(|err| err.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ValidationStatus, validate_pool_state_report};
+    use crate::core::pool::{Pool, PoolOptions};
+
+    #[test]
+    fn validation_report_ok_for_empty_pool() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("empty.plasmite");
+        let pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
+        let header = pool.header_from_mmap().expect("header");
+
+        let report = validate_pool_state_report(header, pool.mmap(), &path);
+        assert_eq!(report.status, ValidationStatus::Ok);
+        assert_eq!(report.issue_count, 0);
+        assert!(report.issues.is_empty());
+        assert_eq!(report.last_good_seq, None);
+        assert_eq!(report.path, path);
+    }
+
+    #[test]
+    fn validation_report_marks_corrupt_header() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("corrupt.plasmite");
+        let pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
+        let mut header = pool.header_from_mmap().expect("header");
+        header.ring_size = 0;
+
+        let report = validate_pool_state_report(header, pool.mmap(), &path);
+        assert_eq!(report.status, ValidationStatus::Corrupt);
+        assert_eq!(report.issue_count, 1);
+        assert_eq!(report.issues.len(), 1);
+        assert_eq!(report.last_good_seq, None);
+        assert_eq!(report.path, path);
+    }
+}

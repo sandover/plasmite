@@ -1007,3 +1007,7 @@
 {"type":"state","ts":"2026-02-05T00:20:38.917969Z","data":{"id":"XWF6LT","state":"done","ts":"2026-02-05T00:20:38.917969Z"}}
 {"type":"claim","ts":"2026-02-05T00:22:41.311817Z","data":{"id":"AOL4XW","agent_id":"codex@bbook","ts":"2026-02-05T00:22:41.311817Z"}}
 {"type":"state","ts":"2026-02-05T00:22:41.311817Z","data":{"id":"AOL4XW","state":"doing","ts":"2026-02-05T00:22:41.311817Z"}}
+{"type":"result","ts":"2026-02-05T00:31:58.689169Z","data":{"task_id":"AOL4XW","summary":"Added ABI error/metadata tests for null refs, missing pools, seq, and invalid JSON.","path":"src/abi.rs","sha256_at_attach":"dd4cd8c5dcb6d38432b69d11159a4d77a52d86ac7b586d775f27280fd25b16c8","mtime_at_attach":"2026-02-05T00:31:07.775159864Z","git_commit_at_attach":"e2b9fae1b475b61a0776a9d19f4ceee793da65ff","ts":"2026-02-05T00:31:58.689169Z"}}
+{"type":"state","ts":"2026-02-05T00:31:58.750849Z","data":{"id":"AOL4XW","state":"done","ts":"2026-02-05T00:31:58.750849Z"}}
+{"type":"claim","ts":"2026-02-05T00:32:15.538264Z","data":{"id":"WB5ESL","agent_id":"codex@bbook","ts":"2026-02-05T00:32:15.538264Z"}}
+{"type":"state","ts":"2026-02-05T00:32:15.538264Z","data":{"id":"WB5ESL","state":"doing","ts":"2026-02-05T00:32:15.538264Z"}}

@@ -588,8 +588,12 @@ fn durability_to_str(durability: Durability) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_pool_from_url, normalize_base_url, parse_error_kind, parse_pool_uri};
+    use super::{
+        extract_pool_from_url, normalize_base_url, parse_error_kind, parse_pool_uri, path_to_string,
+    };
     use crate::core::error::ErrorKind;
+    use std::os::unix::ffi::OsStringExt;
+    use std::path::PathBuf;
 
     #[test]
     fn normalize_base_url_strips_path() {
@@ -624,5 +628,12 @@ mod tests {
         assert_eq!(parse_error_kind("Permission"), ErrorKind::Permission);
         assert_eq!(parse_error_kind("Corrupt"), ErrorKind::Corrupt);
         assert_eq!(parse_error_kind("Busy"), ErrorKind::Busy);
+    }
+
+    #[test]
+    fn path_to_string_rejects_invalid_utf8() {
+        let path = PathBuf::from(std::ffi::OsString::from_vec(vec![0xff, 0xfe, 0xfd]));
+        let err = path_to_string(&path).expect_err("err");
+        assert_eq!(err.kind(), ErrorKind::Usage);
     }
 }
