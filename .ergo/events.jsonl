@@ -1121,3 +1121,7 @@
 {"type":"state","ts":"2026-02-05T14:22:43.498067Z","data":{"id":"SW3JIX","state":"done","ts":"2026-02-05T14:22:43.498067Z"}}
 {"type":"result","ts":"2026-02-05T14:27:20.319612Z","data":{"task_id":"NBMQKD","summary":"Added access modes (read-only/write-only/read-write) with 403 handling and tests.","path":"src/serve.rs","sha256_at_attach":"7ae56b1bb5545fdd4f6f73128d4ad4cb2749a602d29ab7068af46e195446917c","mtime_at_attach":"2026-02-05T14:26:12.540829942Z","git_commit_at_attach":"78d80a67f53f19316d2f6f14b331e919d49af35c","ts":"2026-02-05T14:27:20.319612Z"}}
 {"type":"state","ts":"2026-02-05T14:27:20.329753Z","data":{"id":"NBMQKD","state":"done","ts":"2026-02-05T14:27:20.329753Z"}}
+{"type":"claim","ts":"2026-02-05T14:29:53.191802Z","data":{"id":"CAZU74","agent_id":"gpt5@codex","ts":"2026-02-05T14:29:53.191802Z"}}
+{"type":"state","ts":"2026-02-05T14:29:53.191802Z","data":{"id":"CAZU74","state":"doing","ts":"2026-02-05T14:29:53.191802Z"}}
+{"type":"result","ts":"2026-02-05T14:32:55.527367Z","data":{"task_id":"CAZU74","summary":"Added non-loopback opt-in checks plus token/TLS gating for write access.","path":"src/serve.rs","sha256_at_attach":"ecb84dc83c7962ccab9d2ac335d17aaf1bd6a07d940cdb39b99bc43230523a61","mtime_at_attach":"2026-02-05T14:31:33.05082374Z","git_commit_at_attach":"43340932dc629e4662a39ed4179d1945e35322b3","ts":"2026-02-05T14:32:55.527367Z"}}
+{"type":"state","ts":"2026-02-05T14:32:55.537004Z","data":{"id":"CAZU74","state":"done","ts":"2026-02-05T14:32:55.537004Z"}}

@@ -36,6 +36,12 @@ pub struct ServeConfig {
     pub pool_dir: PathBuf,
     pub token: Option<String>,
     pub access_mode: AccessMode,
+    pub allow_non_loopback: bool,
+    pub insecure_no_tls: bool,
+    pub token_file_used: bool,
+    pub tls_cert: Option<PathBuf>,
+    pub tls_key: Option<PathBuf>,
+    pub tls_self_signed: bool,
 }
 
 #[derive(Clone)]
@@ -63,10 +69,7 @@ impl AccessMode {
 }
 
 pub async fn serve(config: ServeConfig) -> Result<(), Error> {
-    if !is_loopback(config.bind.ip()) {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("remote bind is not supported in v0; use loopback"));
-    }
+    validate_config(&config)?;
 
     init_tracing();
 
@@ -134,6 +137,40 @@ fn is_loopback(ip: IpAddr) -> bool {
         IpAddr::V4(addr) => addr.is_loopback(),
         IpAddr::V6(addr) => addr.is_loopback(),
     }
+}
+
+fn validate_config(config: &ServeConfig) -> Result<(), Error> {
+    let is_loopback_bind = is_loopback(config.bind.ip());
+    if !is_loopback_bind && !config.allow_non_loopback {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("non-loopback bind requires explicit opt-in")
+            .with_hint("Re-run with --allow-non-loopback or use a loopback address."));
+    }
+
+    if config.tls_cert.is_some() != config.tls_key.is_some() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("TLS requires both --tls-cert and --tls-key")
+            .with_hint("Provide both paths or use --tls-self-signed."));
+    }
+
+    if !is_loopback_bind && config.access_mode.allows_write() {
+        if !config.token_file_used {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("non-loopback write requires --token-file")
+                .with_hint("Use --token-file for safer deployments."));
+        }
+        if !config.insecure_no_tls && !tls_is_configured(config) {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("non-loopback write requires TLS")
+                .with_hint("Use --tls-cert/--tls-key, --tls-self-signed, or --insecure-no-tls."));
+        }
+    }
+
+    Ok(())
+}
+
+fn tls_is_configured(config: &ServeConfig) -> bool {
+    config.tls_self_signed || (config.tls_cert.is_some() && config.tls_key.is_some())
 }
 
 fn init_tracing() {
@@ -571,7 +608,7 @@ fn is_access_forbidden(err: &Error) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{AccessMode, ErrorKind, ServeConfig, serve};
+    use super::{AccessMode, ErrorKind, ServeConfig, serve, validate_config};
 
     #[tokio::test]
     async fn serve_rejects_non_loopback_bind() {
@@ -581,8 +618,89 @@ mod tests {
             pool_dir: temp.path().to_path_buf(),
             token: None,
             access_mode: AccessMode::ReadWrite,
+            allow_non_loopback: false,
+            insecure_no_tls: false,
+            token_file_used: false,
+            tls_cert: None,
+            tls_key: None,
+            tls_self_signed: false,
         };
         let err = serve(config).await.expect_err("expected usage error");
+        assert_eq!(err.kind(), ErrorKind::Usage);
+    }
+
+    #[test]
+    fn non_loopback_requires_allow_flag() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = ServeConfig {
+            bind: "0.0.0.0:0".parse().expect("bind"),
+            pool_dir: temp.path().to_path_buf(),
+            token: None,
+            access_mode: AccessMode::ReadOnly,
+            allow_non_loopback: false,
+            insecure_no_tls: false,
+            token_file_used: false,
+            tls_cert: None,
+            tls_key: None,
+            tls_self_signed: false,
+        };
+        let err = validate_config(&config).expect_err("expected usage error");
+        assert_eq!(err.kind(), ErrorKind::Usage);
+    }
+
+    #[test]
+    fn non_loopback_read_only_allows_unauthenticated() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = ServeConfig {
+            bind: "0.0.0.0:0".parse().expect("bind"),
+            pool_dir: temp.path().to_path_buf(),
+            token: None,
+            access_mode: AccessMode::ReadOnly,
+            allow_non_loopback: true,
+            insecure_no_tls: false,
+            token_file_used: false,
+            tls_cert: None,
+            tls_key: None,
+            tls_self_signed: false,
+        };
+        validate_config(&config).expect("config ok");
+    }
+
+    #[test]
+    fn non_loopback_write_requires_token_file() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = ServeConfig {
+            bind: "0.0.0.0:0".parse().expect("bind"),
+            pool_dir: temp.path().to_path_buf(),
+            token: Some("dev".to_string()),
+            access_mode: AccessMode::WriteOnly,
+            allow_non_loopback: true,
+            insecure_no_tls: true,
+            token_file_used: false,
+            tls_cert: None,
+            tls_key: None,
+            tls_self_signed: false,
+        };
+        let err = validate_config(&config).expect_err("expected usage error");
+        assert_eq!(err.kind(), ErrorKind::Usage);
+    }
+
+    #[test]
+    fn non_loopback_write_requires_tls_or_insecure() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = ServeConfig {
+            bind: "0.0.0.0:0".parse().expect("bind"),
+            pool_dir: temp.path().to_path_buf(),
+            token: Some("dev".to_string()),
+            access_mode: AccessMode::WriteOnly,
+            allow_non_loopback: true,
+            insecure_no_tls: false,
+            token_file_used: true,
+            tls_cert: None,
+            tls_key: None,
+            tls_self_signed: false,
+        };
+        let err = validate_config(&config).expect_err("expected usage error");
         assert_eq!(err.kind(), ErrorKind::Usage);
     }
 }

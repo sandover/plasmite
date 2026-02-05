@@ -2791,6 +2791,93 @@ fn serve_rejects_invalid_bind() {
 }
 
 #[test]
+fn serve_rejects_non_loopback_without_allow() {
+    let serve = cmd()
+        .args(["serve", "--bind", "0.0.0.0:0"])
+        .output()
+        .expect("serve");
+    assert!(!serve.status.success());
+    let err = parse_error_json(&serve.stderr);
+    let kind = err
+        .get("error")
+        .and_then(|v| v.get("kind"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert_eq!(kind, "Usage");
+    let hint = err
+        .get("error")
+        .and_then(|v| v.get("hint"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(hint.contains("--allow-non-loopback"));
+}
+
+#[test]
+fn serve_non_loopback_write_requires_token_file() {
+    let serve = cmd()
+        .args([
+            "serve",
+            "--bind",
+            "0.0.0.0:0",
+            "--allow-non-loopback",
+            "--access",
+            "write-only",
+            "--insecure-no-tls",
+        ])
+        .output()
+        .expect("serve");
+    assert!(!serve.status.success());
+    let err = parse_error_json(&serve.stderr);
+    let kind = err
+        .get("error")
+        .and_then(|v| v.get("kind"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert_eq!(kind, "Usage");
+    let message = err
+        .get("error")
+        .and_then(|v| v.get("message"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(message.contains("--token-file"));
+}
+
+#[test]
+fn serve_non_loopback_write_requires_tls_or_insecure() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let token_path = temp.path().join("token.txt");
+    std::fs::write(&token_path, "secret").expect("write token");
+
+    let serve = cmd()
+        .args([
+            "serve",
+            "--bind",
+            "0.0.0.0:0",
+            "--allow-non-loopback",
+            "--access",
+            "write-only",
+            "--token-file",
+            token_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("serve");
+    assert!(!serve.status.success());
+    let err = parse_error_json(&serve.stderr);
+    let kind = err
+        .get("error")
+        .and_then(|v| v.get("kind"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert_eq!(kind, "Usage");
+    let message = err
+        .get("error")
+        .and_then(|v| v.get("message"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(message.contains("TLS"));
+}
+
+#[test]
 fn serve_responses_include_version_header() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");

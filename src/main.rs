@@ -142,6 +142,11 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             token,
             token_file,
             access,
+            allow_non_loopback,
+            insecure_no_tls,
+            tls_cert,
+            tls_key,
+            tls_self_signed,
         } => {
             let bind: SocketAddr = bind
                 .parse()
@@ -151,16 +156,22 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                     .with_message("--token cannot be combined with --token-file")
                     .with_hint("Use --token for dev, or --token-file for safer deployments."));
             }
-            let token = if let Some(path) = token_file {
-                Some(read_token_file(&path)?)
+            let (token, token_file_used) = if let Some(path) = token_file {
+                (Some(read_token_file(&path)?), true)
             } else {
-                token
+                (token, false)
             };
             let config = serve::ServeConfig {
                 bind,
                 pool_dir: pool_dir.clone(),
                 token,
                 access_mode: access.into(),
+                allow_non_loopback,
+                insecure_no_tls,
+                token_file_used,
+                tls_cert,
+                tls_key,
+                tls_self_signed,
             };
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -608,7 +619,8 @@ NOTES
   - v0 is loopback-only; non-loopback binds are rejected
   - Use Authorization: Bearer <token> when --token or --token-file is set
   - Prefer --token-file for non-loopback deployments; --token is dev-only
-  - Use --access to restrict read/write operations"#
+  - Use --access to restrict read/write operations
+  - Non-loopback writes require TLS + --token-file (or --insecure-no-tls for demos)"#
     )]
     Serve {
         #[arg(long, default_value = "127.0.0.1:9700", help = "Bind address")]
@@ -617,6 +629,16 @@ NOTES
         token: Option<String>,
         #[arg(long, value_name = "PATH", help = "Read bearer token from file")]
         token_file: Option<PathBuf>,
+        #[arg(long, help = "Allow non-loopback binds (unsafe without TLS + token)")]
+        allow_non_loopback: bool,
+        #[arg(long, help = "Allow non-loopback writes without TLS (unsafe)")]
+        insecure_no_tls: bool,
+        #[arg(long, value_name = "PATH", help = "TLS certificate path (PEM)")]
+        tls_cert: Option<PathBuf>,
+        #[arg(long, value_name = "PATH", help = "TLS key path (PEM)")]
+        tls_key: Option<PathBuf>,
+        #[arg(long, help = "Generate a self-signed TLS cert for this run")]
+        tls_self_signed: bool,
         #[arg(
             long,
             value_enum,
