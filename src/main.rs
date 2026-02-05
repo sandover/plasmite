@@ -137,10 +137,24 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             };
             Ok(RunOutcome::with_code(exit_code))
         }
-        Command::Serve { bind, token } => {
+        Command::Serve {
+            bind,
+            token,
+            token_file,
+        } => {
             let bind: SocketAddr = bind
                 .parse()
                 .map_err(|_| Error::new(ErrorKind::Usage).with_message("invalid bind address"))?;
+            if token.is_some() && token_file.is_some() {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("--token cannot be combined with --token-file")
+                    .with_hint("Use --token for dev, or --token-file for safer deployments."));
+            }
+            let token = if let Some(path) = token_file {
+                Some(read_token_file(&path)?)
+            } else {
+                token
+            };
             let config = serve::ServeConfig {
                 bind,
                 pool_dir: pool_dir.clone(),
@@ -586,16 +600,20 @@ Implements the remote protocol spec under spec/remote/v0/SPEC.md."#,
         after_help = r#"EXAMPLES
   $ plasmite serve
   $ plasmite serve --bind 127.0.0.1:9701 --token devtoken
+  $ plasmite serve --token-file /path/to/token
 
 NOTES
   - v0 is loopback-only; non-loopback binds are rejected
-  - Use Authorization: Bearer <token> when --token is set"#
+  - Use Authorization: Bearer <token> when --token or --token-file is set
+  - Prefer --token-file for non-loopback deployments; --token is dev-only"#
     )]
     Serve {
         #[arg(long, default_value = "127.0.0.1:9700", help = "Bind address")]
         bind: String,
-        #[arg(long, help = "Bearer token for auth (optional on loopback)")]
+        #[arg(long, help = "Bearer token for auth (dev-only; prefer --token-file)")]
         token: Option<String>,
+        #[arg(long, value_name = "PATH", help = "Read bearer token from file")]
+        token_file: Option<PathBuf>,
     },
     #[command(
         about = "Fetch one message by sequence number",
@@ -1051,6 +1069,22 @@ fn format_system_time(time: std::time::SystemTime) -> Option<String> {
 fn ensure_pool_dir(dir: &Path) -> Result<(), Error> {
     std::fs::create_dir_all(dir)
         .map_err(|err| Error::new(ErrorKind::Io).with_path(dir).with_source(err))
+}
+
+fn read_token_file(path: &Path) -> Result<String, Error> {
+    let raw = std::fs::read_to_string(path).map_err(|err| {
+        Error::new(ErrorKind::Usage)
+            .with_message("failed to read token file")
+            .with_path(path)
+            .with_source(err)
+    })?;
+    let token = raw.trim().to_string();
+    if token.is_empty() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("token file is empty")
+            .with_path(path));
+    }
+    Ok(token)
 }
 
 fn parse_size(input: &str) -> Result<u64, Error> {
@@ -2024,10 +2058,11 @@ fn peek(
 
 #[cfg(test)]
 mod tests {
-    use super::{Error, ErrorKind, error_text, parse_duration, parse_size};
+    use super::{Error, ErrorKind, error_text, parse_duration, parse_size, read_token_file};
     use serde_json::json;
     use std::io::Cursor;
     use std::time::Duration;
+    use tempfile::NamedTempFile;
 
     fn read_json_stream<R, F>(reader: R, mut on_value: F) -> Result<usize, Error>
     where
@@ -2083,6 +2118,22 @@ mod tests {
         .expect("stream parse");
         assert_eq!(count, 3);
         assert_eq!(values, vec![json!({"a":1}), json!({"b":2}), json!({"c":3})]);
+    }
+
+    #[test]
+    fn token_file_trims_and_reads() {
+        let mut file = NamedTempFile::new().expect("tempfile");
+        std::io::Write::write_all(&mut file, b"  secret-token \n").expect("write");
+        let token = read_token_file(file.path()).expect("token");
+        assert_eq!(token, "secret-token");
+    }
+
+    #[test]
+    fn token_file_rejects_empty() {
+        let mut file = NamedTempFile::new().expect("tempfile");
+        std::io::Write::write_all(&mut file, b" \n").expect("write");
+        let err = read_token_file(file.path()).expect_err("err");
+        assert_eq!(err.kind(), ErrorKind::Usage);
     }
 
     #[test]
