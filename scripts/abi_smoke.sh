@@ -84,8 +84,9 @@ int main(int argc, char **argv) {
 C
 
 cc -I "$root_dir/include" \
+  "$work_dir/abi_smoke.c" \
   -L "$build_dir" -lplasmite \
-  "$work_dir/abi_smoke.c" -o "$work_dir/abi_smoke"
+  -o "$work_dir/abi_smoke"
 
 if [[ "$(uname)" == "Darwin" ]]; then
   DYLD_LIBRARY_PATH="$build_dir" "$work_dir/abi_smoke" "$work_dir/pools"
