@@ -59,6 +59,25 @@ Each step is a mapping with these fields:
 - `expect.error` (optional): Expected error object (see Error Expectations).
 `expect.messages` and `expect.messages_unordered` are mutually exclusive.
 
+### `list_pools`
+
+- No `pool` field required.
+- `expect.names` (optional): Array of pool names expected to exist.
+- `expect.error` (optional): Expected error object (see Error Expectations).
+
+### `pool_info`
+
+- `pool` (required).
+- `expect.file_size` (optional): Expected file size in bytes.
+- `expect.ring_size` (optional): Expected ring size in bytes.
+- `expect.bounds` (optional): Object with `oldest`/`newest` (number or null).
+- `expect.error` (optional): Expected error object (see Error Expectations).
+
+### `delete_pool`
+
+- `pool` (required).
+- `expect.error` (optional): Expected error object (see Error Expectations).
+
 ### `spawn_poke`
 
 - `pool` (required).

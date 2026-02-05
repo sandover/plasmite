@@ -1,0 +1,54 @@
+{
+  "conformance_version": 0,
+  "name": "pool-admin",
+  "workdir": "work-admin",
+  "steps": [
+    {
+      "op": "create_pool",
+      "id": "create-alpha",
+      "pool": "alpha",
+      "input": {
+        "size_bytes": 1048576
+      }
+    },
+    {
+      "op": "create_pool",
+      "id": "create-beta",
+      "pool": "beta",
+      "input": {
+        "size_bytes": 1048576
+      }
+    },
+    {
+      "op": "list_pools",
+      "id": "list-initial",
+      "expect": {
+        "names": ["alpha", "beta"]
+      }
+    },
+    {
+      "op": "pool_info",
+      "id": "info-alpha",
+      "pool": "alpha",
+      "expect": {
+        "file_size": 1048576,
+        "bounds": {
+          "oldest": null,
+          "newest": null
+        }
+      }
+    },
+    {
+      "op": "delete_pool",
+      "id": "delete-beta",
+      "pool": "beta"
+    },
+    {
+      "op": "list_pools",
+      "id": "list-after-delete",
+      "expect": {
+        "names": ["alpha"]
+      }
+    }
+  ]
+}

@@ -38,6 +38,7 @@ A conformance runner:
 
 - The canonical manifest format is described in `manifest-v0.md`.
 - Sample manifests live alongside the spec (e.g., `sample-v0.json`, `negative-v0.json`).
+- Pool admin coverage lives in `pool-admin-v0.json`.
 
 ## Scope
 
@@ -47,5 +48,8 @@ Initial coverage focuses on:
 - `append`
 - `get`
 - `tail`
+- `list_pools`
+- `pool_info`
+- `delete_pool`
 
 Additional operations will be added additively with new fields or step types.

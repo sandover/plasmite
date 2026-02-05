@@ -14,7 +14,8 @@
         "error": {
           "kind": "NotFound",
           "message_contains": "not found",
-          "has_path": true
+          "has_path": true,
+          "has_seq": false
         }
       }
     },
@@ -41,6 +42,51 @@
       "expect": {
         "error": {
           "kind": "Corrupt",
+          "has_path": true
+        }
+      }
+    },
+    {
+      "op": "create_pool",
+      "id": "seq-missing-create",
+      "pool": "seq-missing",
+      "input": {
+        "size_bytes": 1048576
+      }
+    },
+    {
+      "op": "get",
+      "id": "missing-seq",
+      "pool": "seq-missing",
+      "input": {
+        "seq": 42
+      },
+      "expect": {
+        "error": {
+          "kind": "NotFound",
+          "has_path": false,
+          "has_seq": true
+        }
+      }
+    },
+    {
+      "op": "pool_info",
+      "id": "missing-info",
+      "pool": "missing-info",
+      "expect": {
+        "error": {
+          "kind": "NotFound",
+          "has_path": true
+        }
+      }
+    },
+    {
+      "op": "delete_pool",
+      "id": "missing-delete",
+      "pool": "missing-delete",
+      "expect": {
+        "error": {
+          "kind": "NotFound",
           "has_path": true
         }
       }

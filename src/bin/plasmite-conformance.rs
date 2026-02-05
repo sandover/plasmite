@@ -71,6 +71,9 @@ fn run() -> Result<(), String> {
             "append" => run_append(&client, step, index, &step_id)?,
             "get" => run_get(&client, step, index, &step_id)?,
             "tail" => run_tail(&client, step, index, &step_id)?,
+            "list_pools" => run_list_pools(&client, step, index, &step_id)?,
+            "pool_info" => run_pool_info(&client, step, index, &step_id)?,
+            "delete_pool" => run_delete_pool(&client, step, index, &step_id)?,
             "spawn_poke" => run_spawn_poke(&manifest_dir, &workdir_path, step, index, &step_id)?,
             "corrupt_pool_header" => run_corrupt_pool_header(&client, step, index, &step_id)?,
             "chmod_path" => run_chmod_path(step, index, &step_id)?,
@@ -306,6 +309,86 @@ fn run_tail(
             validate_expect_error(step.get("expect"), &Ok(()), index, step_id)
         }
         Ok(Err(err)) => validate_expect_error(step.get("expect"), &Err(err), index, step_id),
+        Err(err) => validate_expect_error(step.get("expect"), &Err(err), index, step_id),
+    }
+}
+
+fn run_list_pools(
+    client: &LocalClient,
+    step: &Value,
+    index: usize,
+    step_id: &Option<String>,
+) -> Result<(), String> {
+    let result = client.list_pools();
+    match result {
+        Ok(pools) => {
+            if let Some(expect) = step.get("expect") {
+                if let Some(expected) = expect.get("names") {
+                    let expected = match expected.as_array() {
+                        Some(values) => parse_string_array(values.as_slice())
+                            .map_err(|err| step_err(index, step_id, &err))?,
+                        None => return Err(step_err(index, step_id, "expect.names must be array")),
+                    };
+                    let mut actual = pools
+                        .iter()
+                        .filter_map(|pool| pool.path.file_stem().and_then(|name| name.to_str()))
+                        .map(str::to_string)
+                        .collect::<Vec<_>>();
+                    let mut expected = expected;
+                    actual.sort();
+                    expected.sort();
+                    if actual != expected {
+                        return Err(step_err(index, step_id, "pool list mismatch"));
+                    }
+                }
+            }
+            validate_expect_error(step.get("expect"), &Ok(()), index, step_id)
+        }
+        Err(err) => validate_expect_error(step.get("expect"), &Err(err), index, step_id),
+    }
+}
+
+fn run_pool_info(
+    client: &LocalClient,
+    step: &Value,
+    index: usize,
+    step_id: &Option<String>,
+) -> Result<(), String> {
+    let pool_ref = pool_ref_from_step(step, index, step_id)?;
+    let result = client.pool_info(&pool_ref);
+    match result {
+        Ok(info) => {
+            if let Some(expect) = step.get("expect") {
+                if let Some(size) = expect.get("file_size").and_then(Value::as_u64) {
+                    if info.file_size != size {
+                        return Err(step_err(index, step_id, "file_size mismatch"));
+                    }
+                }
+                if let Some(size) = expect.get("ring_size").and_then(Value::as_u64) {
+                    if info.ring_size != size {
+                        return Err(step_err(index, step_id, "ring_size mismatch"));
+                    }
+                }
+                if let Some(bounds) = expect.get("bounds") {
+                    expect_bounds(bounds, &info.bounds, index, step_id)?;
+                }
+            }
+            validate_expect_error(step.get("expect"), &Ok(()), index, step_id)
+        }
+        Err(err) => validate_expect_error(step.get("expect"), &Err(err), index, step_id),
+    }
+}
+
+fn run_delete_pool(
+    client: &LocalClient,
+    step: &Value,
+    index: usize,
+    step_id: &Option<String>,
+) -> Result<(), String> {
+    let pool_ref = pool_ref_from_step(step, index, step_id)?;
+    let result = client.delete_pool(&pool_ref);
+    match result {
+        Ok(()) => validate_expect_error(step.get("expect"), &Ok(()), index, step_id),
         Err(err) => validate_expect_error(step.get("expect"), &Err(err), index, step_id),
     }
 }
@@ -564,6 +647,39 @@ fn expect_descrips(
         };
         if expected != actual {
             return Err(step_err(index, step_id, "descrips mismatch"));
+        }
+    }
+    Ok(())
+}
+
+fn expect_bounds(
+    expect: &Value,
+    actual: &plasmite::api::Bounds,
+    index: usize,
+    step_id: &Option<String>,
+) -> Result<(), String> {
+    if let Some(oldest) = expect.get("oldest") {
+        let expected = if oldest.is_null() {
+            None
+        } else {
+            Some(oldest.as_u64().ok_or_else(|| {
+                step_err(index, step_id, "bounds.oldest must be a number or null")
+            })?)
+        };
+        if actual.oldest_seq != expected {
+            return Err(step_err(index, step_id, "bounds.oldest mismatch"));
+        }
+    }
+    if let Some(newest) = expect.get("newest") {
+        let expected = if newest.is_null() {
+            None
+        } else {
+            Some(newest.as_u64().ok_or_else(|| {
+                step_err(index, step_id, "bounds.newest must be a number or null")
+            })?)
+        };
+        if actual.newest_seq != expected {
+            return Err(step_err(index, step_id, "bounds.newest mismatch"));
         }
     }
     Ok(())

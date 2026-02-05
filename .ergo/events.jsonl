@@ -991,3 +991,7 @@
 {"type":"state","ts":"2026-02-05T00:06:07.203396Z","data":{"id":"RR3ILO","state":"done","ts":"2026-02-05T00:06:07.203396Z"}}
 {"type":"claim","ts":"2026-02-05T00:06:19.18972Z","data":{"id":"NKR2TH","agent_id":"codex@bbook","ts":"2026-02-05T00:06:19.18972Z"}}
 {"type":"state","ts":"2026-02-05T00:06:19.18972Z","data":{"id":"NKR2TH","state":"doing","ts":"2026-02-05T00:06:19.18972Z"}}
+{"type":"result","ts":"2026-02-05T00:10:29.377233Z","data":{"task_id":"NKR2TH","summary":"Added doctor/serve CLI coverage plus header checks; doctor --all now tolerates corrupt pools.","path":"tests/cli_integration.rs","sha256_at_attach":"1b3945191bf6ac4602fd9e2e4812f4d30495b0016f9eba3f9c46fb37d82ab10f","mtime_at_attach":"2026-02-05T00:10:20.952835836Z","git_commit_at_attach":"4efa90d1572ee35b636a951b2386e12465ffcde2","ts":"2026-02-05T00:10:29.377233Z"}}
+{"type":"state","ts":"2026-02-05T00:10:29.382378Z","data":{"id":"NKR2TH","state":"done","ts":"2026-02-05T00:10:29.382378Z"}}
+{"type":"claim","ts":"2026-02-05T00:10:36.836607Z","data":{"id":"6F3ISD","agent_id":"codex@bbook","ts":"2026-02-05T00:10:36.836607Z"}}
+{"type":"state","ts":"2026-02-05T00:10:36.836607Z","data":{"id":"6F3ISD","state":"doing","ts":"2026-02-05T00:10:36.836607Z"}}
