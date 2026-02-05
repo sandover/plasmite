@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -115,6 +116,18 @@ func run() error {
 			}
 		case "tail":
 			if err := runTail(client, step, index, stepID); err != nil {
+				return err
+			}
+		case "list_pools":
+			if err := runListPools(step, index, stepID, workdirPath); err != nil {
+				return err
+			}
+		case "pool_info":
+			if err := runPoolInfo(repoRoot, workdirPath, step, index, stepID); err != nil {
+				return err
+			}
+		case "delete_pool":
+			if err := runDeletePool(step, index, stepID, workdirPath); err != nil {
 				return err
 			}
 		case "spawn_poke":
@@ -364,6 +377,99 @@ func runTail(client *plasmite.Client, step map[string]any, index int, stepID *st
 	return validateExpectError(step["expect"], nil, index, stepID)
 }
 
+func runListPools(step map[string]any, index int, stepID *string, workdirPath string) error {
+	names, err := listPoolNames(workdirPath)
+	if err != nil {
+		return validateExpectError(step["expect"], err, index, stepID)
+	}
+	if err := validateExpectError(step["expect"], nil, index, stepID); err != nil {
+		return err
+	}
+
+	if expect, ok := step["expect"].(map[string]any); ok {
+		if rawNames, ok := expect["names"]; ok {
+			list, ok := rawNames.([]any)
+			if !ok {
+				return stepErr(index, stepID, "expect.names must be array")
+			}
+			expected, err := parseStringArray(list)
+			if err != nil {
+				return stepErr(index, stepID, err.Error())
+			}
+			actual := append([]string{}, names...)
+			sort.Strings(actual)
+			sort.Strings(expected)
+			if !reflect.DeepEqual(actual, expected) {
+				return stepErr(index, stepID, "pool list mismatch")
+			}
+		}
+	}
+
+	return nil
+}
+
+func runPoolInfo(repoRoot string, workdirPath string, step map[string]any, index int, stepID *string) error {
+	pool, ok := step["pool"].(string)
+	if !ok {
+		return stepErr(index, stepID, "missing pool")
+	}
+	bin, err := resolvePlasmiteBin(repoRoot)
+	if err != nil {
+		return stepErr(index, stepID, err.Error())
+	}
+	cmd := exec.Command(bin, "--dir", workdirPath, "pool", "info", pool)
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			parsed, parseErr := parseErrorJSON(exitErr.Stderr)
+			if parseErr != nil {
+				return stepErr(index, stepID, fmt.Sprintf("pool info failed: %v", err))
+			}
+			return validateExpectError(step["expect"], parsed, index, stepID)
+		}
+		return stepErr(index, stepID, fmt.Sprintf("pool info failed: %v", err))
+	}
+	if err := validateExpectError(step["expect"], nil, index, stepID); err != nil {
+		return err
+	}
+	info, err := parsePoolInfo(output)
+	if err != nil {
+		return stepErr(index, stepID, fmt.Sprintf("parse pool info failed: %v", err))
+	}
+
+	if expect, ok := step["expect"].(map[string]any); ok {
+		if raw, ok := expect["file_size"].(float64); ok {
+			if info.FileSize != uint64(raw) {
+				return stepErr(index, stepID, "file_size mismatch")
+			}
+		}
+		if raw, ok := expect["ring_size"].(float64); ok {
+			if info.RingSize != uint64(raw) {
+				return stepErr(index, stepID, "ring_size mismatch")
+			}
+		}
+		if bounds, ok := expect["bounds"].(map[string]any); ok {
+			if err := expectBounds(bounds, info.Bounds, index, stepID); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func runDeletePool(step map[string]any, index int, stepID *string, workdirPath string) error {
+	pool, ok := step["pool"].(string)
+	if !ok {
+		return stepErr(index, stepID, "missing pool")
+	}
+	path := resolvePoolPath(pool, workdirPath)
+	if err := os.Remove(path); err != nil {
+		return validateExpectError(step["expect"], mapIOError(err, path, "failed to delete pool"), index, stepID)
+	}
+	return validateExpectError(step["expect"], nil, index, stepID)
+}
+
 func runSpawnPoke(repoRoot string, workdirPath string, step map[string]any, index int, stepID *string) error {
 	pool, ok := step["pool"].(string)
 	if !ok {
@@ -465,6 +571,178 @@ func runChmodPath(step map[string]any, index int, stepID *string) error {
 		return stepErr(index, stepID, fmt.Sprintf("chmod failed: %v", err))
 	}
 	return nil
+}
+
+type poolInfo struct {
+	FileSize uint64
+	RingSize uint64
+	Bounds   poolBounds
+}
+
+type poolBounds struct {
+	Oldest *uint64
+	Newest *uint64
+}
+
+func listPoolNames(workdirPath string) ([]string, error) {
+	entries, err := os.ReadDir(workdirPath)
+	if err != nil {
+		return nil, mapIOError(err, workdirPath, "failed to read pool directory")
+	}
+	var names []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasSuffix(name, ".plasmite") {
+			names = append(names, strings.TrimSuffix(name, ".plasmite"))
+		}
+	}
+	return names, nil
+}
+
+func mapIOError(err error, path string, message string) *plasmite.Error {
+	kind := plasmite.ErrorIO
+	if os.IsNotExist(err) {
+		kind = plasmite.ErrorNotFound
+	} else if os.IsPermission(err) {
+		kind = plasmite.ErrorPermission
+	}
+	return &plasmite.Error{
+		Kind:    kind,
+		Message: message,
+		Path:    path,
+	}
+}
+
+func parseErrorJSON(data []byte) (*plasmite.Error, error) {
+	if len(data) == 0 {
+		return nil, errors.New("empty error output")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	rawErr, ok := payload["error"].(map[string]any)
+	if !ok {
+		return nil, errors.New("missing error object")
+	}
+	kindLabel, _ := rawErr["kind"].(string)
+	message, _ := rawErr["message"].(string)
+	path, _ := rawErr["path"].(string)
+	seq, err := parseOptionalUint(rawErr["seq"])
+	if err != nil {
+		return nil, err
+	}
+	offset, err := parseOptionalUint(rawErr["offset"])
+	if err != nil {
+		return nil, err
+	}
+	return &plasmite.Error{
+		Kind:    errorKindFromString(kindLabel),
+		Message: message,
+		Path:    path,
+		Seq:     seq,
+		Offset:  offset,
+	}, nil
+}
+
+func errorKindFromString(kind string) plasmite.ErrorKind {
+	switch kind {
+	case "Internal":
+		return plasmite.ErrorInternal
+	case "Usage":
+		return plasmite.ErrorUsage
+	case "NotFound":
+		return plasmite.ErrorNotFound
+	case "AlreadyExists":
+		return plasmite.ErrorAlreadyExists
+	case "Busy":
+		return plasmite.ErrorBusy
+	case "Permission":
+		return plasmite.ErrorPermission
+	case "Corrupt":
+		return plasmite.ErrorCorrupt
+	case "Io":
+		return plasmite.ErrorIO
+	default:
+		return plasmite.ErrorInternal
+	}
+}
+
+func parsePoolInfo(data []byte) (poolInfo, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return poolInfo{}, err
+	}
+	fileSizeRaw, ok := payload["file_size"].(float64)
+	if !ok {
+		return poolInfo{}, errors.New("missing file_size")
+	}
+	ringSizeRaw, ok := payload["ring_size"].(float64)
+	if !ok {
+		return poolInfo{}, errors.New("missing ring_size")
+	}
+	var bounds poolBounds
+	if rawBounds, ok := payload["bounds"].(map[string]any); ok {
+		oldest, err := parseOptionalUint(rawBounds["oldest"])
+		if err != nil {
+			return poolInfo{}, err
+		}
+		newest, err := parseOptionalUint(rawBounds["newest"])
+		if err != nil {
+			return poolInfo{}, err
+		}
+		bounds.Oldest = oldest
+		bounds.Newest = newest
+	}
+	return poolInfo{
+		FileSize: uint64(fileSizeRaw),
+		RingSize: uint64(ringSizeRaw),
+		Bounds:   bounds,
+	}, nil
+}
+
+func parseOptionalUint(value any) (*uint64, error) {
+	if value == nil {
+		return nil, nil
+	}
+	raw, ok := value.(float64)
+	if !ok {
+		return nil, errors.New("expected number or null")
+	}
+	out := uint64(raw)
+	return &out, nil
+}
+
+func expectBounds(expect map[string]any, actual poolBounds, index int, stepID *string) error {
+	if raw, ok := expect["oldest"]; ok {
+		expected, err := parseOptionalUint(raw)
+		if err != nil {
+			return stepErr(index, stepID, "bounds.oldest must be number or null")
+		}
+		if !uintPtrEqual(expected, actual.Oldest) {
+			return stepErr(index, stepID, "bounds.oldest mismatch")
+		}
+	}
+	if raw, ok := expect["newest"]; ok {
+		expected, err := parseOptionalUint(raw)
+		if err != nil {
+			return stepErr(index, stepID, "bounds.newest must be number or null")
+		}
+		if !uintPtrEqual(expected, actual.Newest) {
+			return stepErr(index, stepID, "bounds.newest mismatch")
+		}
+	}
+	return nil
+}
+
+func uintPtrEqual(left *uint64, right *uint64) bool {
+	if left == nil && right == nil {
+		return true
+	}
+	if left == nil || right == nil {
+		return false
+	}
+	return *left == *right
 }
 
 func validateExpectError(expect any, resultErr error, index int, stepID *string) error {

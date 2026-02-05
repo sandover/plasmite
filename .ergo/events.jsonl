@@ -995,3 +995,7 @@
 {"type":"state","ts":"2026-02-05T00:10:29.382378Z","data":{"id":"NKR2TH","state":"done","ts":"2026-02-05T00:10:29.382378Z"}}
 {"type":"claim","ts":"2026-02-05T00:10:36.836607Z","data":{"id":"6F3ISD","agent_id":"codex@bbook","ts":"2026-02-05T00:10:36.836607Z"}}
 {"type":"state","ts":"2026-02-05T00:10:36.836607Z","data":{"id":"6F3ISD","state":"doing","ts":"2026-02-05T00:10:36.836607Z"}}
+{"type":"result","ts":"2026-02-05T00:13:37.747223Z","data":{"task_id":"6F3ISD","summary":"Added list/delete/info ops with new manifests and runner support for conformance coverage.","path":"conformance/manifest-v0.md","sha256_at_attach":"6e37ac8a5fff50f92360aad393c51639c51d3d729fd5d823c1e64b8759ac5252","mtime_at_attach":"2026-02-05T00:13:30.707022472Z","git_commit_at_attach":"9145f7feefd70e7cc717e2d319eb279ff60bdfc5","ts":"2026-02-05T00:13:37.747223Z"}}
+{"type":"state","ts":"2026-02-05T00:13:37.752007Z","data":{"id":"6F3ISD","state":"done","ts":"2026-02-05T00:13:37.752007Z"}}
+{"type":"claim","ts":"2026-02-05T00:13:43.401857Z","data":{"id":"6QTASE","agent_id":"codex@bbook","ts":"2026-02-05T00:13:43.401857Z"}}
+{"type":"state","ts":"2026-02-05T00:13:43.401857Z","data":{"id":"6QTASE","state":"doing","ts":"2026-02-05T00:13:43.401857Z"}}
