@@ -6,7 +6,7 @@
 //! Invariants: Server processes are cleaned up on drop.
 
 use plasmite::api::{Durability, ErrorKind, PoolOptions, PoolRef, RemoteClient, TailOptions};
-use serde_json::json;
+use serde_json::{Value, json};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
 use std::thread::sleep;
@@ -157,6 +157,46 @@ fn remote_auth_requires_valid_token() -> TestResult<()> {
 }
 
 #[test]
+fn remote_rejects_path_pool_names() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::start(temp_dir.path())?;
+
+    let create_url = format!("{}/v0/pools", server.base_url);
+    let create_body = r#"{"pool":"/tmp/evil","size_bytes":1024}"#;
+    match ureq::post(&create_url)
+        .set("Content-Type", "application/json")
+        .send_string(create_body)
+    {
+        Ok(_) => return Err("expected create to fail with Usage error".into()),
+        Err(ureq::Error::Status(code, resp)) => {
+            assert_eq!(code, 400);
+            let body = resp.into_string()?;
+            let value: Value = serde_json::from_str(&body)?;
+            assert_eq!(value["error"]["kind"], "Usage");
+        }
+        Err(err) => return Err(err.into()),
+    }
+
+    let open_url = format!("{}/v0/pools/open", server.base_url);
+    let open_body = r#"{"pool":"/tmp/evil"}"#;
+    match ureq::post(&open_url)
+        .set("Content-Type", "application/json")
+        .send_string(open_body)
+    {
+        Ok(_) => return Err("expected open to fail with Usage error".into()),
+        Err(ureq::Error::Status(code, resp)) => {
+            assert_eq!(code, 400);
+            let body = resp.into_string()?;
+            let value: Value = serde_json::from_str(&body)?;
+            assert_eq!(value["error"]["kind"], "Usage");
+        }
+        Err(err) => return Err(err.into()),
+    }
+
+    Ok(())
+}
+
+#[test]
 fn remote_list_delete_and_info() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::start(temp_dir.path())?;
@@ -256,7 +296,7 @@ fn wait_for_server(addr: SocketAddr) -> TestResult<()> {
         if TcpStream::connect(addr).is_ok() {
             return Ok(());
         }
-        if start.elapsed() > Duration::from_secs(2) {
+        if start.elapsed() > Duration::from_secs(5) {
             return Err("server did not start in time".into());
         }
         sleep(Duration::from_millis(20));

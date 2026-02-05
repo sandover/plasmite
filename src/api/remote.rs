@@ -2,7 +2,7 @@
 //! Exports: `RemoteClient`, `RemotePool`, `RemoteTail`.
 //! Role: Transport-agnostic client that mirrors local pool operations remotely.
 //! Invariants: Requests/response envelopes align with spec/remote/v0/SPEC.md.
-//! Invariants: Pool refs resolve to a base URL + pool identifier (name or path).
+//! Invariants: Pool refs resolve to a base URL + pool identifier (name only).
 //! Invariants: Tail streams are JSONL and cancelable via drop or `cancel()`.
 #![allow(clippy::result_large_err)]
 
@@ -219,18 +219,20 @@ impl RemoteClient {
 
     fn resolve_pool_ref(&self, pool_ref: &PoolRef) -> ApiResult<ResolvedPool> {
         match pool_ref {
-            PoolRef::Name(name) => Ok(ResolvedPool {
-                base_url: self.inner.base_url.clone(),
-                pool: name.clone(),
-            }),
-            PoolRef::Path(path) => {
-                let pool = path_to_string(path.as_path())?;
+            PoolRef::Name(name) => {
+                ensure_pool_name(name)?;
                 Ok(ResolvedPool {
                     base_url: self.inner.base_url.clone(),
-                    pool,
+                    pool: name.clone(),
                 })
             }
-            PoolRef::Uri(uri) => parse_pool_uri(uri),
+            PoolRef::Path(_) => Err(Error::new(ErrorKind::Usage)
+                .with_message("remote pool refs must use pool names, not filesystem paths")),
+            PoolRef::Uri(uri) => {
+                let resolved = parse_pool_uri(uri)?;
+                ensure_pool_name(&resolved.pool)?;
+                Ok(resolved)
+            }
         }
     }
 
@@ -473,11 +475,11 @@ fn extract_pool_from_url(url: &Url) -> ApiResult<String> {
     if segments.is_empty() {
         return Err(Error::new(ErrorKind::Usage).with_message("pool uri missing path"));
     }
-    if segments.len() >= 3 && segments[0] == "v0" && segments[1] == "pools" {
-        return Ok(segments[2..].join("/"));
+    if segments.len() == 3 && segments[0] == "v0" && segments[1] == "pools" {
+        return Ok(segments[2].to_string());
     }
-    if segments.len() >= 2 && (segments[0] == "pools" || segments[0] == "pool") {
-        return Ok(segments[1..].join("/"));
+    if segments.len() == 2 && (segments[0] == "pools" || segments[0] == "pool") {
+        return Ok(segments[1].to_string());
     }
     if segments.len() == 1 {
         return Ok(segments[0].to_string());
@@ -485,10 +487,12 @@ fn extract_pool_from_url(url: &Url) -> ApiResult<String> {
     Err(Error::new(ErrorKind::Usage).with_message("pool uri path must include pool name"))
 }
 
-fn path_to_string(path: &std::path::Path) -> ApiResult<String> {
-    path.to_str()
-        .map(str::to_string)
-        .ok_or_else(|| Error::new(ErrorKind::Usage).with_message("pool path is not valid utf-8"))
+fn ensure_pool_name(pool: &str) -> ApiResult<()> {
+    if pool.contains('/') {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("remote pool names must not contain path separators"));
+    }
+    Ok(())
 }
 
 fn read_json_response<R>(response: ureq::Response) -> ApiResult<R>
@@ -589,11 +593,11 @@ fn durability_to_str(durability: Durability) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_pool_from_url, normalize_base_url, parse_error_kind, parse_pool_uri, path_to_string,
+        RemoteClient, extract_pool_from_url, normalize_base_url, parse_error_kind, parse_pool_uri,
     };
+    use crate::api::PoolRef;
     use crate::core::error::ErrorKind;
-    use std::os::unix::ffi::OsStringExt;
-    use std::path::PathBuf;
+    use crate::core::pool::PoolOptions;
 
     #[test]
     fn normalize_base_url_strips_path() {
@@ -631,9 +635,12 @@ mod tests {
     }
 
     #[test]
-    fn path_to_string_rejects_invalid_utf8() {
-        let path = PathBuf::from(std::ffi::OsString::from_vec(vec![0xff, 0xfe, 0xfd]));
-        let err = path_to_string(&path).expect_err("err");
+    fn remote_client_rejects_path_pool_ref() {
+        let client = RemoteClient::new("http://localhost:8080").expect("client");
+        let pool_ref = PoolRef::path("/tmp/evil.plasmite");
+        let err = client
+            .create_pool(&pool_ref, PoolOptions::new(1024))
+            .expect_err("err");
         assert_eq!(err.kind(), ErrorKind::Usage);
     }
 }

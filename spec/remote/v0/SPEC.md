@@ -46,7 +46,8 @@ Errors are returned with HTTP status `4xx/5xx` and a JSON body:
 
 ## Pool References
 
-- `pool` fields accept **names** or **paths**.
+- `pool` fields accept **names only** (no path separators).
+- Path-based pools are a local implementation detail and are not part of the remote v0 contract.
 - Remote URIs are out of scope for v0.
 
 ## Endpoints

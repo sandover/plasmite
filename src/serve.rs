@@ -147,11 +147,14 @@ async fn create_pool(
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
     }
+    let pool_ref = match pool_ref_from_request(&payload.pool) {
+        Ok(pool_ref) => pool_ref,
+        Err(err) => return error_response(err),
+    };
     let size_bytes = payload.size_bytes.unwrap_or(1024 * 1024);
-    let result = state.client.create_pool(
-        &pool_ref_from_path(&payload.pool),
-        PoolOptions::new(size_bytes),
-    );
+    let result = state
+        .client
+        .create_pool(&pool_ref, PoolOptions::new(size_bytes));
     match result {
         Ok(info) => json_response(json!({ "pool": pool_info_json(&payload.pool, &info) })),
         Err(err) => error_response(err),
@@ -166,7 +169,11 @@ async fn open_pool(
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
     }
-    match state.client.pool_info(&pool_ref_from_path(&payload.pool)) {
+    let pool_ref = match pool_ref_from_request(&payload.pool) {
+        Ok(pool_ref) => pool_ref,
+        Err(err) => return error_response(err),
+    };
+    match state.client.pool_info(&pool_ref) {
         Ok(info) => json_response(json!({ "pool": pool_info_json(&payload.pool, &info) })),
         Err(err) => error_response(err),
     }
@@ -180,7 +187,11 @@ async fn pool_info(
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
     }
-    match state.client.pool_info(&pool_ref_from_path(&pool)) {
+    let pool_ref = match pool_ref_from_request(&pool) {
+        Ok(pool_ref) => pool_ref,
+        Err(err) => return error_response(err),
+    };
+    match state.client.pool_info(&pool_ref) {
         Ok(info) => json_response(json!({ "pool": pool_info_json(&pool, &info) })),
         Err(err) => error_response(err),
     }
@@ -217,7 +228,11 @@ async fn delete_pool(
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
     }
-    match state.client.delete_pool(&pool_ref_from_path(&pool)) {
+    let pool_ref = match pool_ref_from_request(&pool) {
+        Ok(pool_ref) => pool_ref,
+        Err(err) => return error_response(err),
+    };
+    match state.client.delete_pool(&pool_ref) {
         Ok(()) => json_response(json!({ "ok": true })),
         Err(err) => error_response(err),
     }
@@ -232,6 +247,10 @@ async fn append_message(
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
     }
+    let pool_ref = match pool_ref_from_request(&pool) {
+        Ok(pool_ref) => pool_ref,
+        Err(err) => return error_response(err),
+    };
     let durability = match payload.durability.as_deref() {
         Some("flush") => Durability::Flush,
         _ => Durability::Fast,
@@ -240,7 +259,7 @@ async fn append_message(
 
     let result = state
         .client
-        .open_pool(&pool_ref_from_path(&pool))
+        .open_pool(&pool_ref)
         .and_then(|mut pool| pool.append_json_now(&payload.data, &descrips, durability));
     match result {
         Ok(message) => json_response(json!({ "message": message_json(&message) })),
@@ -256,9 +275,13 @@ async fn get_message(
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
     }
+    let pool_ref = match pool_ref_from_request(&pool) {
+        Ok(pool_ref) => pool_ref,
+        Err(err) => return error_response(err),
+    };
     let result = state
         .client
-        .open_pool(&pool_ref_from_path(&pool))
+        .open_pool(&pool_ref)
         .and_then(|pool| pool.get_message(seq));
 
     match result {
@@ -276,7 +299,10 @@ async fn tail_messages(
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
     }
-    let pool_ref = pool_ref_from_path(&pool);
+    let pool_ref = match pool_ref_from_request(&pool) {
+        Ok(pool_ref) => pool_ref,
+        Err(err) => return error_response(err),
+    };
     let client = state.client.clone();
 
     let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
@@ -326,12 +352,13 @@ async fn tail_messages(
     response
 }
 
-fn pool_ref_from_path(pool: &str) -> PoolRef {
+fn pool_ref_from_request(pool: &str) -> Result<PoolRef, Error> {
     if pool.contains('/') {
-        PoolRef::path(pool)
-    } else {
-        PoolRef::name(pool)
+        return Err(
+            Error::new(ErrorKind::Usage).with_message("pool name must not contain path separators")
+        );
     }
+    Ok(PoolRef::name(pool))
 }
 
 fn message_json(message: &plasmite::api::Message) -> serde_json::Value {
