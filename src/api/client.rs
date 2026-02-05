@@ -5,8 +5,8 @@
 //! Invariants: Remote pool refs are accepted but rejected at runtime in v0.
 #![allow(clippy::result_large_err)]
 
-use super::ValidationReport;
 use super::validation::validate_pool_state_report;
+use super::{ValidationIssue, ValidationReport};
 use crate::core::error::{Error, ErrorKind};
 use crate::core::pool::{Pool, PoolInfo, PoolOptions};
 use std::path::{Path, PathBuf};
@@ -128,7 +128,30 @@ impl LocalClient {
 
     pub fn validate_pool(&self, pool_ref: &PoolRef) -> ApiResult<ValidationReport> {
         let path = pool_ref.resolve_local_path(&self.pool_dir)?;
-        let pool = Pool::open(&path)?;
+        let pool = match Pool::open(&path) {
+            Ok(pool) => pool,
+            Err(err) if err.kind() == ErrorKind::Usage => {
+                let message = err
+                    .message()
+                    .unwrap_or("unsupported pool format")
+                    .to_string();
+                let mut report = ValidationReport::corrupt(
+                    path.clone(),
+                    ValidationIssue {
+                        code: "format".to_string(),
+                        message,
+                        seq: None,
+                        offset: None,
+                    },
+                    None,
+                );
+                if let Some(hint) = err.hint() {
+                    report.remediation_hints = vec![hint.to_string()];
+                }
+                return Ok(report.with_pool_ref(pool_ref.describe()));
+            }
+            Err(err) => return Err(err),
+        };
         let header = pool.header_from_mmap()?;
         let report = validate_pool_state_report(header, pool.mmap(), &path)
             .with_pool_ref(pool_ref.describe());

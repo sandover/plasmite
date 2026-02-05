@@ -105,7 +105,7 @@ impl Default for Cursor {
     }
 }
 
-enum ReadResult<'a> {
+pub(crate) enum ReadResult<'a> {
     Message {
         frame: FrameRef<'a>,
         next_off: usize,
@@ -115,7 +115,7 @@ enum ReadResult<'a> {
     FellBehind,
 }
 
-fn read_frame_at<'a>(
+pub(crate) fn read_frame_at<'a>(
     mmap: &'a [u8],
     ring_offset: usize,
     ring_size: usize,

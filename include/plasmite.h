@@ -1,8 +1,8 @@
 /*
 Purpose: C ABI for Plasmite bindings using libplasmite.
-Key Exports: Client/Pool/Stream handles, append/get/tail functions, buffers, errors.
+Key Exports: Client/Pool/Stream handles, JSON + Lite3 append/get/tail functions, buffers, errors.
 Role: Stable boundary for official bindings (Go/Python/Node) in v0.
-Invariants: JSON bytes in/out; opaque handles; explicit free functions.
+Invariants: JSON bytes in/out; Lite3 bytes for fast paths; opaque handles; explicit free functions.
 Invariants: Error kinds are stable; remote refs return Usage in v0.
 Notes: All allocations returned must be freed by the caller via provided free functions.
 */
@@ -20,6 +20,7 @@ extern "C" {
 typedef struct plsm_client plsm_client_t;
 typedef struct plsm_pool plsm_pool_t;
 typedef struct plsm_stream plsm_stream_t;
+typedef struct plsm_lite3_stream plsm_lite3_stream_t;
 
 typedef enum plsm_error_kind {
     PLSM_ERROR_INTERNAL = 1,
@@ -36,6 +37,13 @@ typedef struct plsm_buf {
     uint8_t *data;
     size_t len;
 } plsm_buf_t;
+
+typedef struct plsm_lite3_frame {
+    uint64_t seq;
+    uint64_t timestamp_ns;
+    uint32_t flags;
+    plsm_buf_t payload;
+} plsm_lite3_frame_t;
 
 typedef struct plsm_error {
     int32_t kind;
@@ -64,10 +72,24 @@ int plsm_pool_append_json(
     plsm_buf_t *out_message,
     plsm_error_t **out_err);
 
+int plsm_pool_append_lite3(
+    plsm_pool_t *pool,
+    const uint8_t *payload,
+    size_t payload_len,
+    uint32_t durability,
+    uint64_t *out_seq,
+    plsm_error_t **out_err);
+
 int plsm_pool_get_json(
     plsm_pool_t *pool,
     uint64_t seq,
     plsm_buf_t *out_message,
+    plsm_error_t **out_err);
+
+int plsm_pool_get_lite3(
+    plsm_pool_t *pool,
+    uint64_t seq,
+    plsm_lite3_frame_t *out_frame,
     plsm_error_t **out_err);
 
 int plsm_stream_open(
@@ -86,9 +108,27 @@ int plsm_stream_next(
     plsm_buf_t *out_message,
     plsm_error_t **out_err);
 
+int plsm_lite3_stream_open(
+    plsm_pool_t *pool,
+    uint64_t since_seq,
+    uint32_t has_since,
+    uint64_t max_messages,
+    uint32_t has_max,
+    uint64_t timeout_ms,
+    uint32_t has_timeout,
+    plsm_lite3_stream_t **out_stream,
+    plsm_error_t **out_err);
+
+int plsm_lite3_stream_next(
+    plsm_lite3_stream_t *stream,
+    plsm_lite3_frame_t *out_frame,
+    plsm_error_t **out_err);
+
 void plsm_stream_free(plsm_stream_t *stream);
+void plsm_lite3_stream_free(plsm_lite3_stream_t *stream);
 
 void plsm_buf_free(plsm_buf_t *buf);
+void plsm_lite3_frame_free(plsm_lite3_frame_t *frame);
 void plsm_error_free(plsm_error_t *err);
 
 #ifdef __cplusplus

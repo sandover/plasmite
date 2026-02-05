@@ -85,6 +85,16 @@ The CLI message schema is fixed and versioned by convention:
 * On disk: the payload is Lite³ bytes for `{meta,data}`.
 * On the CLI: JSON in/out only (encode on `poke`, decode on reads).
 
+### Pool format versioning
+
+* Pool files include an on-disk format version in the header.
+* Incompatible format changes MUST bump the on-disk version.
+* Older binaries MUST refuse to open newer formats with a Usage error that includes:
+  * the detected version
+  * the supported versions
+  * migration guidance (e.g., export/import or recreate)
+* Hard migrations are acceptable; format bumps are the compatibility boundary.
+
 ### Pool references (normative)
 
 * `NAME` resolves to `POOL_DIR/NAME.plasmite`.

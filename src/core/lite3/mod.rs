@@ -5,6 +5,8 @@
 //! Invariants: All FFI interaction is confined to this module + `sys`.
 use std::ffi::CString;
 use std::io;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::{Map, Value};
 
@@ -96,20 +98,28 @@ impl<'a> Lite3DocRef<'a> {
     }
 
     pub fn to_json(&self, pretty: bool) -> Result<String, Error> {
+        #[cfg(test)]
+        TO_JSON_CALLS.fetch_add(1, Ordering::Relaxed);
+        self.to_json_at(0, pretty)
+    }
+
+    pub fn to_json_at(&self, ofs: usize, pretty: bool) -> Result<String, Error> {
+        #[cfg(test)]
+        TO_JSON_AT_CALLS.fetch_add(1, Ordering::Relaxed);
         let mut out_len: usize = 0;
         let ptr = unsafe {
             if pretty {
                 sys::plasmite_lite3_json_enc_pretty(
                     self.bytes.as_ptr(),
                     self.bytes.len(),
-                    0,
+                    ofs,
                     &mut out_len as *mut usize,
                 )
             } else {
                 sys::plasmite_lite3_json_enc(
                     self.bytes.as_ptr(),
                     self.bytes.len(),
-                    0,
+                    ofs,
                     &mut out_len as *mut usize,
                 )
             }
@@ -131,6 +141,29 @@ impl<'a> Lite3DocRef<'a> {
         }
 
         json
+    }
+
+    pub fn key_offset(&self, key: &str) -> Result<usize, Error> {
+        get_key_offset(self.bytes, key)
+    }
+
+    pub fn key_offset_at(&self, ofs: usize, key: &str) -> Result<usize, Error> {
+        get_key_offset_at(self.bytes, ofs, key)
+    }
+
+    pub fn type_at_key(&self, ofs: usize, key: &str) -> Result<u8, Error> {
+        let value = unsafe {
+            sys::plasmite_lite3_get_type(
+                self.bytes.as_ptr(),
+                self.bytes.len(),
+                ofs,
+                c_key(key).as_ptr(),
+            )
+        };
+        if value == sys::LITE3_TYPE_INVALID {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("missing key"));
+        }
+        Ok(value)
     }
 
     pub fn validate(&self) -> Result<(), Error> {
@@ -280,6 +313,25 @@ fn array_item_type(bytes: &[u8], ofs: usize, index: u32) -> Result<u8, Error> {
         return Err(Error::new(ErrorKind::Corrupt).with_message("invalid array index"));
     }
     Ok(out_type)
+}
+
+#[cfg(test)]
+static TO_JSON_CALLS: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+static TO_JSON_AT_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+pub(crate) fn reset_json_counters() {
+    TO_JSON_CALLS.store(0, Ordering::Relaxed);
+    TO_JSON_AT_CALLS.store(0, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+pub(crate) fn json_counter_snapshot() -> (usize, usize) {
+    (
+        TO_JSON_CALLS.load(Ordering::Relaxed),
+        TO_JSON_AT_CALLS.load(Ordering::Relaxed),
+    )
 }
 
 #[cfg(test)]

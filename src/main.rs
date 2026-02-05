@@ -26,7 +26,9 @@ use jq_filter::{JqFilter, compile_filters, matches_all};
 use plasmite::api::{
     AppendOptions, Cursor, CursorResult, Durability, Error, ErrorKind, FrameRef, Lite3DocRef,
     LocalClient, Pool, PoolOptions, PoolRef, ValidationIssue, ValidationReport, ValidationStatus,
-    lite3, to_exit_code,
+    lite3,
+    notify::{self, NotifyWait},
+    to_exit_code,
 };
 use plasmite::notice::{Notice, notice_json};
 
@@ -360,6 +362,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             timeout,
             data_only,
             quiet_drops,
+            no_notify,
             format,
             since,
             where_expr,
@@ -398,6 +401,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 since_ns,
                 where_predicates: compile_filters(&where_expr)?,
                 quiet_drops,
+                notify: !no_notify,
                 color_mode,
             };
             let outcome = peek(&pool_handle, &pool, &path, cfg)?;
@@ -767,6 +771,8 @@ NOTES
         where_expr: Vec<String>,
         #[arg(long = "quiet-drops", help = "Suppress drop notices on stderr")]
         quiet_drops: bool,
+        #[arg(long = "no-notify", help = "Disable semaphore wakeups (poll only)")]
+        no_notify: bool,
     },
     #[command(
         about = "Diagnose pool health",
@@ -1854,23 +1860,46 @@ fn output_value(message: Value, data_only: bool) -> Value {
 }
 
 fn decode_payload(payload: &[u8]) -> Result<(Value, Value), Error> {
-    let json_str = Lite3DocRef::new(payload).to_json(false)?;
-    let value: Value = serde_json::from_str(&json_str).map_err(|err| {
+    let doc = Lite3DocRef::new(payload);
+    let meta_type = doc
+        .type_at_key(0, "meta")
+        .map_err(|err| err.with_message("missing meta"))?;
+    if meta_type != lite3::sys::LITE3_TYPE_OBJECT {
+        return Err(Error::new(ErrorKind::Corrupt).with_message("meta is not object"));
+    }
+
+    let meta_ofs = doc
+        .key_offset("meta")
+        .map_err(|err| err.with_message("missing meta"))?;
+    let descrips_ofs = doc
+        .key_offset_at(meta_ofs, "descrips")
+        .map_err(|err| err.with_message("missing meta.descrips"))?;
+    let descrips_json = doc.to_json_at(descrips_ofs, false)?;
+    let descrips_value: Value = serde_json::from_str(&descrips_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
             .with_source(err)
     })?;
-    let obj = value
-        .as_object()
-        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("payload is not object"))?;
-    let meta = obj
-        .get("meta")
-        .cloned()
-        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("missing meta"))?;
-    let data = obj
-        .get("data")
-        .cloned()
-        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("missing data"))?;
+    let descrips = descrips_value
+        .as_array()
+        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("meta.descrips must be array"))?
+        .iter()
+        .map(|item| item.as_str().map(|s| s.to_string()))
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| {
+            Error::new(ErrorKind::Corrupt).with_message("meta.descrips must be string array")
+        })?;
+    let meta = json!({ "descrips": descrips });
+
+    let data_ofs = doc
+        .key_offset("data")
+        .map_err(|err| err.with_message("missing data"))?;
+    let data_json = doc.to_json_at(data_ofs, false)?;
+    let data: Value = serde_json::from_str(&data_json).map_err(|err| {
+        Error::new(ErrorKind::Corrupt)
+            .with_message("invalid payload json")
+            .with_source(err)
+    })?;
     Ok((meta, data))
 }
 
@@ -1896,6 +1925,7 @@ struct PeekConfig {
     since_ns: Option<u64>,
     where_predicates: Vec<JqFilter>,
     quiet_drops: bool,
+    notify: bool,
     color_mode: ColorMode,
 }
 
@@ -1914,6 +1944,7 @@ fn peek(
     let notice_interval = Duration::from_secs(1);
     let tail_wait = cfg.one && cfg.tail > 0;
     let mut timeout_deadline = cfg.timeout.map(|duration| Instant::now() + duration);
+    let mut notify_enabled = cfg.notify;
 
     let bump_timeout = |deadline: &mut Option<Instant>| {
         if let Some(duration) = cfg.timeout {
@@ -2001,7 +2032,7 @@ fn peek(
     let max_backoff = Duration::from_millis(50);
 
     let pool_ref = pool_ref.to_string();
-    let pool_path = pool_path.display().to_string();
+    let pool_path_label = pool_path.display().to_string();
 
     let maybe_emit_pending = |pending: &mut Option<DropNotice>,
                               last_notice_at: &mut Option<Instant>| {
@@ -2036,7 +2067,7 @@ fn peek(
             json!(pending_notice.next_seen_seq),
         );
         details.insert("dropped_count".to_string(), json!(dropped_count));
-        details.insert("pool_path".to_string(), json!(pool_path.as_str()));
+        details.insert("pool_path".to_string(), json!(pool_path_label.as_str()));
         let notice = Notice {
             kind: "drop".to_string(),
             time,
@@ -2117,7 +2148,26 @@ fn peek(
                         return Ok(RunOutcome::with_code(124));
                     }
                     let remaining = deadline.duration_since(now);
-                    std::thread::sleep(std::cmp::min(backoff, remaining));
+                    let wait_for = std::cmp::min(backoff, remaining);
+                    if notify_enabled {
+                        match notify::wait_for_path(pool_path, wait_for) {
+                            NotifyWait::Signaled | NotifyWait::TimedOut => {}
+                            NotifyWait::Unavailable => {
+                                notify_enabled = false;
+                                std::thread::sleep(wait_for);
+                            }
+                        }
+                    } else {
+                        std::thread::sleep(wait_for);
+                    }
+                } else if notify_enabled {
+                    match notify::wait_for_path(pool_path, backoff) {
+                        NotifyWait::Signaled | NotifyWait::TimedOut => {}
+                        NotifyWait::Unavailable => {
+                            notify_enabled = false;
+                            std::thread::sleep(backoff);
+                        }
+                    }
                 } else {
                     std::thread::sleep(backoff);
                 }

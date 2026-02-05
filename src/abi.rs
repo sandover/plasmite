@@ -1,7 +1,7 @@
 //! Purpose: C ABI bridge for bindings (libplasmite).
 //! Exports: C-callable client/pool/stream functions and buffer/error helpers.
 //! Role: Stable ABI surface for non-Rust bindings in v0.
-//! Invariants: JSON bytes in/out; opaque handles; explicit free functions.
+//! Invariants: JSON bytes in/out; Lite3 bytes for fast paths; explicit free functions.
 //! Invariants: Error kinds map 1:1 with core error kinds.
 //! Notes: Remote pool refs are not supported in v0.
 #![allow(clippy::result_large_err)]
@@ -38,9 +38,28 @@ pub struct plsm_stream {
 }
 
 #[repr(C)]
+pub struct plsm_lite3_stream {
+    pool: Pool,
+    cursor: crate::api::Cursor,
+    since_seq: Option<u64>,
+    max_messages: Option<usize>,
+    seen: usize,
+    poll_interval: Duration,
+    deadline: Option<Instant>,
+}
+
+#[repr(C)]
 pub struct plsm_buf {
     data: *mut u8,
     len: usize,
+}
+
+#[repr(C)]
+pub struct plsm_lite3_frame {
+    seq: u64,
+    timestamp_ns: u64,
+    flags: u32,
+    payload: plsm_buf,
 }
 
 #[repr(C)]
@@ -222,6 +241,52 @@ pub extern "C" fn plsm_pool_append_json(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn plsm_pool_append_lite3(
+    pool: *mut plsm_pool,
+    payload: *const u8,
+    payload_len: usize,
+    durability: u32,
+    out_seq: *mut u64,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    let pool = match borrow_pool(pool, out_err) {
+        Ok(pool) => pool,
+        Err(code) => return code,
+    };
+    if out_seq.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("out_seq is null"),
+        );
+    }
+    if payload.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("lite3_bytes is null"),
+        );
+    }
+    let payload = unsafe { std::slice::from_raw_parts(payload, payload_len) };
+    let durability = match durability {
+        0 => crate::api::Durability::Fast,
+        1 => crate::api::Durability::Flush,
+        _ => {
+            return fail(
+                out_err,
+                Error::new(ErrorKind::Usage).with_message("invalid durability"),
+            );
+        }
+    };
+    let seq = match pool.pool.append_lite3_now(payload, durability) {
+        Ok(seq) => seq,
+        Err(err) => return fail(out_err, err),
+    };
+    unsafe {
+        *out_seq = seq;
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn plsm_pool_get_json(
     pool: *mut plsm_pool,
     seq: u64,
@@ -237,6 +302,27 @@ pub extern "C" fn plsm_pool_get_json(
         Err(err) => return fail(out_err, err),
     };
     if let Err(err) = write_message_buf(out_message, message) {
+        return fail(out_err, err);
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_pool_get_lite3(
+    pool: *mut plsm_pool,
+    seq: u64,
+    out_frame: *mut plsm_lite3_frame,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    let pool = match borrow_pool(pool, out_err) {
+        Ok(pool) => pool,
+        Err(code) => return code,
+    };
+    let frame = match pool.pool.get_lite3(seq) {
+        Ok(frame) => frame,
+        Err(err) => return fail(out_err, err),
+    };
+    if let Err(err) = write_lite3_frame(out_frame, frame) {
         return fail(out_err, err);
     }
     0
@@ -353,7 +439,123 @@ pub extern "C" fn plsm_stream_next(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn plsm_lite3_stream_open(
+    pool: *mut plsm_pool,
+    since_seq: u64,
+    has_since: u32,
+    max_messages: u64,
+    has_max: u32,
+    timeout_ms: u64,
+    has_timeout: u32,
+    out_stream: *mut *mut plsm_lite3_stream,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    let pool = match borrow_pool(pool, out_err) {
+        Ok(pool) => pool,
+        Err(code) => return code,
+    };
+    if out_stream.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("out_stream is null"),
+        );
+    }
+    let since = if has_since != 0 {
+        Some(since_seq)
+    } else {
+        None
+    };
+    let max = if has_max != 0 {
+        Some(max_messages as usize)
+    } else {
+        None
+    };
+    let timeout = if has_timeout != 0 {
+        Some(Duration::from_millis(timeout_ms))
+    } else {
+        None
+    };
+    let deadline = timeout.map(|duration| Instant::now() + duration);
+    let info = match pool.pool.info() {
+        Ok(info) => info,
+        Err(err) => return fail(out_err, err),
+    };
+    let pool = match Pool::open(&info.path) {
+        Ok(pool) => pool,
+        Err(err) => return fail(out_err, err),
+    };
+    let handle = Box::new(plsm_lite3_stream {
+        pool,
+        cursor: crate::api::Cursor::new(),
+        since_seq: since,
+        max_messages: max,
+        seen: 0,
+        poll_interval: Duration::from_millis(50),
+        deadline,
+    });
+    unsafe {
+        *out_stream = Box::into_raw(handle);
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_lite3_stream_next(
+    stream: *mut plsm_lite3_stream,
+    out_frame: *mut plsm_lite3_frame,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    let stream = match borrow_lite3_stream(stream, out_err) {
+        Ok(stream) => stream,
+        Err(code) => return code,
+    };
+    if let Some(max) = stream.max_messages {
+        if stream.seen >= max {
+            return 0;
+        }
+    }
+
+    loop {
+        if let Some(deadline) = stream.deadline {
+            if Instant::now() >= deadline {
+                return 0;
+            }
+        }
+
+        match stream.cursor.next(&stream.pool) {
+            Ok(crate::api::CursorResult::Message(frame)) => {
+                if let Some(min_seq) = stream.since_seq {
+                    if frame.seq < min_seq {
+                        continue;
+                    }
+                }
+                stream.seen += 1;
+                if let Err(err) = write_lite3_frame(out_frame, frame) {
+                    return fail(out_err, err);
+                }
+                return 1;
+            }
+            Ok(crate::api::CursorResult::WouldBlock) => {
+                std::thread::sleep(stream.poll_interval);
+            }
+            Ok(crate::api::CursorResult::FellBehind) => continue,
+            Err(err) => return fail(out_err, err),
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn plsm_stream_free(stream: *mut plsm_stream) {
+    if stream.is_null() {
+        return;
+    }
+    unsafe {
+        drop(Box::from_raw(stream));
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_lite3_stream_free(stream: *mut plsm_lite3_stream) {
     if stream.is_null() {
         return;
     }
@@ -374,6 +576,20 @@ pub extern "C" fn plsm_buf_free(buf: *mut plsm_buf) {
         }
         buf.data = ptr::null_mut();
         buf.len = 0;
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_lite3_frame_free(frame: *mut plsm_lite3_frame) {
+    if frame.is_null() {
+        return;
+    }
+    unsafe {
+        let frame = &mut *frame;
+        plsm_buf_free(&mut frame.payload);
+        frame.seq = 0;
+        frame.timestamp_ns = 0;
+        frame.flags = 0;
     }
 }
 
@@ -423,6 +639,19 @@ fn borrow_stream<'a>(
     stream: *mut plsm_stream,
     out_err: *mut *mut plsm_error,
 ) -> Result<&'a mut plsm_stream, i32> {
+    if stream.is_null() {
+        return Err(fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("stream is null"),
+        ));
+    }
+    unsafe { Ok(&mut *stream) }
+}
+
+fn borrow_lite3_stream<'a>(
+    stream: *mut plsm_lite3_stream,
+    out_err: *mut *mut plsm_error,
+) -> Result<&'a mut plsm_lite3_stream, i32> {
     if stream.is_null() {
         return Err(fail(
             out_err,
@@ -493,30 +722,26 @@ fn parse_descrips(descrips: *const *const c_char, len: usize) -> Result<Vec<Stri
 }
 
 fn message_from_frame(frame: &crate::api::FrameRef<'_>) -> Result<crate::api::Message, Error> {
-    let json_str = crate::api::Lite3DocRef::new(frame.payload).to_json(false)?;
-    let value: Value = serde_json::from_str(&json_str).map_err(|err| {
+    let doc = crate::api::Lite3DocRef::new(frame.payload);
+    let meta_type = doc
+        .type_at_key(0, "meta")
+        .map_err(|err| err.with_message("missing meta"))?;
+    if meta_type != crate::api::lite3::sys::LITE3_TYPE_OBJECT {
+        return Err(Error::new(ErrorKind::Corrupt).with_message("meta is not object"));
+    }
+
+    let meta_ofs = doc
+        .key_offset("meta")
+        .map_err(|err| err.with_message("missing meta"))?;
+    let descrips_ofs = doc
+        .key_offset_at(meta_ofs, "descrips")
+        .map_err(|err| err.with_message("missing meta.descrips"))?;
+    let descrips_json = doc.to_json_at(descrips_ofs, false)?;
+    let descrips_value: Value = serde_json::from_str(&descrips_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
             .with_source(err)
     })?;
-    let obj = value
-        .as_object()
-        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("payload is not object"))?;
-    let meta_value = obj
-        .get("meta")
-        .cloned()
-        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("missing meta"))?;
-    let data = obj
-        .get("data")
-        .cloned()
-        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("missing data"))?;
-
-    let meta_obj = meta_value
-        .as_object()
-        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("meta is not object"))?;
-    let descrips_value = meta_obj
-        .get("descrips")
-        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("missing meta.descrips"))?;
     let descrips = descrips_value
         .as_array()
         .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("meta.descrips must be array"))?
@@ -527,13 +752,22 @@ fn message_from_frame(frame: &crate::api::FrameRef<'_>) -> Result<crate::api::Me
             Error::new(ErrorKind::Corrupt).with_message("meta.descrips must be string array")
         })?;
 
-    let message = crate::api::Message {
+    let data_ofs = doc
+        .key_offset("data")
+        .map_err(|err| err.with_message("missing data"))?;
+    let data_json = doc.to_json_at(data_ofs, false)?;
+    let data: Value = serde_json::from_str(&data_json).map_err(|err| {
+        Error::new(ErrorKind::Corrupt)
+            .with_message("invalid payload json")
+            .with_source(err)
+    })?;
+
+    Ok(crate::api::Message {
         seq: frame.seq,
         time: format_ts(frame.timestamp_ns)?,
         meta: crate::api::Meta { descrips },
         data,
-    };
-    Ok(message)
+    })
 }
 
 fn write_message_buf(
@@ -559,6 +793,26 @@ fn write_message_buf(
         let mut data = json_bytes.into_boxed_slice();
         buf.len = data.len();
         buf.data = data.as_mut_ptr();
+        std::mem::forget(data);
+    }
+    Ok(())
+}
+
+fn write_lite3_frame(
+    out_frame: *mut plsm_lite3_frame,
+    frame: crate::api::FrameRef<'_>,
+) -> Result<(), Error> {
+    if out_frame.is_null() {
+        return Err(Error::new(ErrorKind::Usage).with_message("out_frame is null"));
+    }
+    unsafe {
+        let out_frame = &mut *out_frame;
+        let mut data = frame.payload.to_vec().into_boxed_slice();
+        out_frame.payload.len = data.len();
+        out_frame.payload.data = data.as_mut_ptr();
+        out_frame.seq = frame.seq;
+        out_frame.timestamp_ns = frame.timestamp_ns;
+        out_frame.flags = frame.flags;
         std::mem::forget(data);
     }
     Ok(())
@@ -628,6 +882,11 @@ mod tests {
     fn parse_buf(buf: &plsm_buf) -> Value {
         let slice = unsafe { std::slice::from_raw_parts(buf.data, buf.len) };
         serde_json::from_slice(slice).expect("valid json")
+    }
+
+    fn take_lite3_payload(frame: &plsm_lite3_frame) -> Vec<u8> {
+        let slice = unsafe { std::slice::from_raw_parts(frame.payload.data, frame.payload.len) };
+        slice.to_vec()
     }
 
     fn take_error(err: *mut plsm_error) -> (i32, String, Option<String>, Option<u64>, Option<u64>) {
@@ -712,6 +971,81 @@ mod tests {
         let message = parse_buf(&out);
         plsm_buf_free(&mut out);
         assert_eq!(message.get("seq").and_then(|v| v.as_u64()), Some(1));
+
+        plsm_pool_free(pool);
+        plsm_client_free(client);
+        if !err.is_null() {
+            plsm_error_free(err);
+        }
+    }
+
+    #[test]
+    fn abi_smoke_append_get_lite3() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pool_dir = temp.path().join("pools");
+        std::fs::create_dir_all(&pool_dir).expect("mkdir");
+
+        let pool_dir_c = CString::new(pool_dir.to_string_lossy().as_ref()).expect("cstr");
+        let mut client: *mut plsm_client = std::ptr::null_mut();
+        let mut err: *mut plsm_error = std::ptr::null_mut();
+        let rc = plsm_client_new(pool_dir_c.as_ptr(), &mut client, &mut err);
+        assert_eq!(rc, 0, "client_new failed");
+
+        let pool_name = CString::new("abi-lite3").expect("cstr");
+        let mut pool: *mut plsm_pool = std::ptr::null_mut();
+        let rc = plsm_pool_create(client, pool_name.as_ptr(), 1024 * 1024, &mut pool, &mut err);
+        assert_eq!(rc, 0, "pool_create failed");
+
+        let payload =
+            crate::core::lite3::encode_message(&["tag".to_string()], &serde_json::json!({"x": 1}))
+                .expect("payload");
+        let mut seq: u64 = 0;
+        let rc = plsm_pool_append_lite3(
+            pool,
+            payload.as_slice().as_ptr(),
+            payload.len(),
+            0,
+            &mut seq,
+            &mut err,
+        );
+        assert_eq!(rc, 0, "append lite3 failed");
+        assert_eq!(seq, 1);
+
+        let mut frame = plsm_lite3_frame {
+            seq: 0,
+            timestamp_ns: 0,
+            flags: 0,
+            payload: plsm_buf {
+                data: std::ptr::null_mut(),
+                len: 0,
+            },
+        };
+        let rc = plsm_pool_get_lite3(pool, 1, &mut frame, &mut err);
+        assert_eq!(rc, 0, "get lite3 failed");
+        assert_eq!(frame.seq, 1);
+        assert_eq!(take_lite3_payload(&frame), payload.as_slice());
+        plsm_lite3_frame_free(&mut frame);
+
+        let mut stream: *mut plsm_lite3_stream = std::ptr::null_mut();
+        let rc = plsm_lite3_stream_open(pool, 1, 1, 1, 1, 0, 0, &mut stream, &mut err);
+        assert_eq!(rc, 0, "lite3 stream open failed");
+        assert!(!stream.is_null());
+
+        let mut frame = plsm_lite3_frame {
+            seq: 0,
+            timestamp_ns: 0,
+            flags: 0,
+            payload: plsm_buf {
+                data: std::ptr::null_mut(),
+                len: 0,
+            },
+        };
+        let rc = plsm_lite3_stream_next(stream, &mut frame, &mut err);
+        assert_eq!(rc, 1, "lite3 stream next failed");
+        assert_eq!(frame.seq, 1);
+        assert_eq!(take_lite3_payload(&frame), payload.as_slice());
+        plsm_lite3_frame_free(&mut frame);
+        plsm_lite3_stream_free(stream);
 
         plsm_pool_free(pool);
         plsm_client_free(client);
@@ -849,6 +1183,41 @@ mod tests {
         let (kind, message, _path, _seq, _offset) = take_error(err);
         assert_eq!(kind, error_kind_code(ErrorKind::Usage));
         assert_eq!(message, "json_bytes is null");
+
+        plsm_pool_free(pool);
+        plsm_client_free(client);
+    }
+
+    #[test]
+    fn abi_errors_report_invalid_lite3() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pool_dir = temp.path().join("pools");
+        std::fs::create_dir_all(&pool_dir).expect("mkdir");
+        let pool_dir_c = CString::new(pool_dir.to_string_lossy().as_ref()).expect("cstr");
+
+        let mut client: *mut plsm_client = std::ptr::null_mut();
+        let mut err: *mut plsm_error = std::ptr::null_mut();
+        let rc = plsm_client_new(pool_dir_c.as_ptr(), &mut client, &mut err);
+        assert_eq!(rc, 0, "client_new failed");
+
+        let pool_name = CString::new("lite3-invalid").expect("cstr");
+        let mut pool: *mut plsm_pool = std::ptr::null_mut();
+        let rc = plsm_pool_create(client, pool_name.as_ptr(), 1024 * 1024, &mut pool, &mut err);
+        assert_eq!(rc, 0, "pool_create failed");
+
+        let mut seq: u64 = 0;
+        let rc = plsm_pool_append_lite3(pool, std::ptr::null(), 0, 0, &mut seq, &mut err);
+        assert_eq!(rc, -1);
+        let (kind, message, _path, _seq, _offset) = take_error(err);
+        assert_eq!(kind, error_kind_code(ErrorKind::Usage));
+        assert_eq!(message, "lite3_bytes is null");
+
+        let payload = [0u8; 8];
+        let rc =
+            plsm_pool_append_lite3(pool, payload.as_ptr(), payload.len(), 0, &mut seq, &mut err);
+        assert_eq!(rc, -1);
+        let (kind, _message, _path, _seq, _offset) = take_error(err);
+        assert_eq!(kind, error_kind_code(ErrorKind::Corrupt));
 
         plsm_pool_free(pool);
         plsm_client_free(client);

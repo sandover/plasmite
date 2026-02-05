@@ -1,9 +1,11 @@
 //! Purpose: Manage pool files (create/open), mmap access, locking, and append application.
-//! Exports: `Pool`, `PoolOptions`, `AppendOptions`, `Durability`, `PoolHeader`, `Bounds`, `PoolInfo`.
+//! Exports: `Pool`, `PoolOptions`, `AppendOptions`, `Durability`, `PoolHeader`, `Bounds`,
+//! `PoolInfo`, `SeqOffsetCache`.
 //! Role: IO boundary for the core: owns file handles/mmap and delegates planning to `plan`.
 //! Invariants: All mutations hold an exclusive append lock across processes.
 //! Invariants: Append writes mark frames `Writing` -> payload -> `Committed`; header persists last.
 //! Invariants: Header size is fixed (4096) and validated strictly on open.
+use std::collections::{HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -13,12 +15,13 @@ use libc::{EACCES, EPERM};
 use memmap2::MmapMut;
 
 use crate::core::error::{Error, ErrorKind};
+use crate::core::format;
 use crate::core::frame::{self, FRAME_HEADER_LEN, FrameHeader, FrameState};
+use crate::core::notify;
 use crate::core::plan;
 use crate::core::validate;
 
 const MAGIC: [u8; 4] = *b"PLSM";
-const VERSION: u32 = 1;
 const ENDIANNESS_LE: u8 = 1;
 const HEADER_SIZE: usize = 4096;
 
@@ -58,7 +61,7 @@ impl PoolHeader {
     fn encode(&self) -> [u8; HEADER_SIZE] {
         let mut buf = [0u8; HEADER_SIZE];
         buf[0..4].copy_from_slice(&MAGIC);
-        buf[4..8].copy_from_slice(&VERSION.to_le_bytes());
+        buf[4..8].copy_from_slice(&format::POOL_FORMAT_VERSION.to_le_bytes());
         buf[8] = ENDIANNESS_LE;
 
         write_u64(&mut buf, 16, self.file_size);
@@ -81,8 +84,8 @@ impl PoolHeader {
             return Err(Error::new(ErrorKind::Corrupt).with_message("bad magic"));
         }
         let version = u32::from_le_bytes(read_4(buf, 4));
-        if version != VERSION {
-            return Err(Error::new(ErrorKind::Corrupt).with_message("unsupported version"));
+        if version != format::POOL_FORMAT_VERSION {
+            return Err(format::pool_version_error(version));
         }
         if buf[8] != ENDIANNESS_LE {
             return Err(Error::new(ErrorKind::Corrupt).with_message("unsupported endianness"));
@@ -195,6 +198,84 @@ impl Default for AppendOptions {
     }
 }
 
+/// Bounded LRU cache mapping sequence numbers to ring offsets.
+/// Use with `Pool::get_with_cache`; the cache is optional and must be passed explicitly.
+#[derive(Debug, Clone)]
+pub struct SeqOffsetCache {
+    max_entries: usize,
+    entries: HashMap<u64, usize>,
+    order: VecDeque<u64>,
+}
+
+impl SeqOffsetCache {
+    pub fn new(max_entries: usize) -> Self {
+        Self {
+            max_entries,
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+        }
+    }
+
+    pub fn max_entries(&self) -> usize {
+        self.max_entries
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.order.clear();
+    }
+
+    pub fn get(&mut self, seq: u64) -> Option<usize> {
+        let offset = *self.entries.get(&seq)?;
+        self.touch(seq);
+        Some(offset)
+    }
+
+    pub fn insert(&mut self, seq: u64, offset: usize) {
+        if self.max_entries == 0 {
+            return;
+        }
+        if let std::collections::hash_map::Entry::Occupied(mut entry) = self.entries.entry(seq) {
+            entry.insert(offset);
+            self.touch(seq);
+            return;
+        }
+
+        if self.entries.len() == self.max_entries {
+            if let Some(evict) = self.order.pop_back() {
+                self.entries.remove(&evict);
+            }
+        }
+
+        self.entries.insert(seq, offset);
+        self.order.push_front(seq);
+    }
+
+    pub fn remove(&mut self, seq: u64) {
+        if self.entries.remove(&seq).is_none() {
+            return;
+        }
+        if let Some(index) = self.order.iter().position(|item| *item == seq) {
+            self.order.remove(index);
+        }
+    }
+
+    fn touch(&mut self, seq: u64) {
+        if let Some(index) = self.order.iter().position(|item| *item == seq) {
+            self.order.remove(index);
+        }
+        self.order.push_front(seq);
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Bounds {
     pub oldest_seq: Option<u64>,
@@ -293,6 +374,10 @@ impl Pool {
         PoolHeader::decode(&self.mmap[0..HEADER_SIZE])
     }
 
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
     pub fn mmap_len(&self) -> usize {
         self.mmap.len()
     }
@@ -363,6 +448,80 @@ impl Pool {
                             .with_seq(seq));
                     }
                     cursor.seek_to(header.tail_off as usize);
+                }
+            }
+        }
+    }
+
+    /// Fetch a frame using a caller-managed seq->offset cache for faster repeats.
+    /// The cache is an optional optimization and must be passed explicitly.
+    pub fn get_with_cache(
+        &self,
+        seq: u64,
+        cache: &mut SeqOffsetCache,
+    ) -> Result<crate::core::cursor::FrameRef<'_>, Error> {
+        let mut header = self.header_from_mmap()?;
+        let bounds = bounds_from_header(header);
+        let (oldest, newest) = match (bounds.oldest_seq, bounds.newest_seq) {
+            (Some(oldest), Some(newest)) => (oldest, newest),
+            _ => {
+                return Err(Error::new(ErrorKind::NotFound)
+                    .with_message("message not found")
+                    .with_seq(seq));
+            }
+        };
+
+        if seq < oldest || seq > newest {
+            return Err(Error::new(ErrorKind::NotFound)
+                .with_message("message not found")
+                .with_seq(seq));
+        }
+
+        let ring_offset = header.ring_offset as usize;
+        let ring_size = header.ring_size as usize;
+
+        if let Some(offset) = cache.get(seq) {
+            let cached =
+                crate::core::cursor::read_frame_at(self.mmap(), ring_offset, ring_size, offset);
+            if let Ok(crate::core::cursor::ReadResult::Message { frame, .. }) = cached {
+                if frame.seq == seq {
+                    return Ok(frame);
+                }
+            }
+            cache.remove(seq);
+        }
+
+        let mut offset = header.tail_off as usize;
+        loop {
+            match crate::core::cursor::read_frame_at(self.mmap(), ring_offset, ring_size, offset)? {
+                crate::core::cursor::ReadResult::Message { frame, next_off } => {
+                    cache.insert(frame.seq, offset);
+                    if frame.seq == seq {
+                        return Ok(frame);
+                    }
+                    if frame.seq > seq {
+                        return Err(Error::new(ErrorKind::NotFound)
+                            .with_message("message not found")
+                            .with_seq(seq));
+                    }
+                    offset = next_off;
+                }
+                crate::core::cursor::ReadResult::Wrap => {
+                    offset = 0;
+                }
+                crate::core::cursor::ReadResult::WouldBlock => {
+                    return Err(Error::new(ErrorKind::NotFound)
+                        .with_message("message not found")
+                        .with_seq(seq));
+                }
+                crate::core::cursor::ReadResult::FellBehind => {
+                    header = self.header_from_mmap()?;
+                    if header.oldest_seq != 0 && seq < header.oldest_seq {
+                        return Err(Error::new(ErrorKind::NotFound)
+                            .with_message("message not found")
+                            .with_seq(seq));
+                    }
+                    offset = header.tail_off as usize;
                 }
             }
         }
@@ -456,6 +615,8 @@ impl Pool {
             self.header.oldest_seq,
         );
 
+        let _ = notify::post_for_path(&self.path);
+
         Ok(plan.seq)
     }
 }
@@ -517,8 +678,17 @@ fn write_header(file: &mut File, header: &PoolHeader, path: &Path) -> Result<(),
 }
 
 fn write_pool_header(mmap: &mut MmapMut, header: &PoolHeader) {
-    let buf = header.encode();
-    mmap[0..HEADER_SIZE].copy_from_slice(&buf);
+    mmap[0..4].copy_from_slice(&MAGIC);
+    mmap[4..8].copy_from_slice(&format::POOL_FORMAT_VERSION.to_le_bytes());
+    mmap[8] = ENDIANNESS_LE;
+    write_u64(mmap, 16, header.file_size);
+    write_u64(mmap, 24, header.ring_offset);
+    write_u64(mmap, 32, header.ring_size);
+    write_u64(mmap, 40, header.flags);
+    write_u64(mmap, 48, header.head_off);
+    write_u64(mmap, 56, header.tail_off);
+    write_u64(mmap, 64, header.oldest_seq);
+    write_u64(mmap, 72, header.newest_seq);
 }
 
 fn flush_mmap_range(
@@ -630,7 +800,7 @@ fn apply_append(
 
 #[cfg(test)]
 mod tests {
-    use super::{HEADER_SIZE, Pool, PoolHeader, PoolOptions, apply_append};
+    use super::{HEADER_SIZE, Pool, PoolHeader, PoolOptions, SeqOffsetCache, apply_append};
     use crate::core::error::{Error, ErrorKind};
     use crate::core::frame::{self, FRAME_HEADER_LEN, FrameHeader, FrameState};
     use crate::core::lite3;
@@ -676,6 +846,36 @@ mod tests {
             Ok(_) => panic!("expected corrupt header error"),
             Err(err) => assert_eq!(err.kind(), ErrorKind::Corrupt),
         }
+    }
+
+    #[test]
+    fn unsupported_version_is_usage_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .read(true)
+            .open(&path)
+            .expect("create");
+        file.set_len(1024 * 1024).expect("len");
+
+        let header = super::PoolHeader::new(1024 * 1024).expect("header");
+        let mut buf = header.encode();
+        buf[4..8].copy_from_slice(&42u32.to_le_bytes());
+        file.seek(SeekFrom::Start(0)).expect("seek");
+        file.write_all(&buf).expect("write");
+        file.flush().expect("flush");
+
+        let err = match Pool::open(&path) {
+            Ok(_) => panic!("expected unsupported version error"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), ErrorKind::Usage);
+        let message = err.message().unwrap_or("");
+        assert!(message.contains("42"));
+        assert!(message.contains("1"));
     }
 
     #[test]
@@ -987,6 +1187,20 @@ mod tests {
     }
 
     #[test]
+    fn append_succeeds_when_notify_unavailable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 2048)).expect("create");
+
+        crate::core::notify::force_unavailable_for_tests(true);
+        let result = pool.append(payload.as_slice());
+        crate::core::notify::force_unavailable_for_tests(false);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn model_apply_matches_plan_on_wrap() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
@@ -1086,6 +1300,69 @@ mod tests {
         assert_eq!(value["data"]["x"], 2);
 
         let err = pool.get(4).expect_err("missing");
+        assert_eq!(err.kind(), ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn write_pool_header_partial_updates() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 2048)).expect("create");
+        let mut header = pool.header_from_mmap().expect("header");
+        header.flags = 1;
+        header.head_off = 128;
+        header.tail_off = 64;
+        header.oldest_seq = 10;
+        header.newest_seq = 12;
+
+        pool.mmap[0..HEADER_SIZE].fill(0);
+        super::write_pool_header(&mut pool.mmap, &header);
+
+        let decoded = super::PoolHeader::decode(&pool.mmap[0..HEADER_SIZE]).expect("decode");
+        assert_eq!(decoded, header);
+    }
+
+    #[test]
+    fn get_with_cache_hits() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 2048)).expect("create");
+
+        for value in 1..=3 {
+            let payload =
+                lite3::encode_message(&[], &serde_json::json!({"x": value})).expect("payload");
+            pool.append(payload.as_slice()).expect("append");
+        }
+
+        let mut cache = SeqOffsetCache::new(8);
+        let frame = pool.get_with_cache(2, &mut cache).expect("get");
+        assert_eq!(frame.seq, 2);
+        assert!(cache.get(2).is_some());
+
+        let cached = pool.get_with_cache(2, &mut cache).expect("cached get");
+        assert_eq!(cached.seq, 2);
+    }
+
+    #[test]
+    fn get_with_cache_stale_entry_falls_back() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
+        let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("frame len");
+        let ring_size = frame_len * 2 + FRAME_HEADER_LEN;
+        let mut pool =
+            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+
+        pool.append(payload.as_slice()).expect("append 1");
+        pool.append(payload.as_slice()).expect("append 2");
+
+        let mut cache = SeqOffsetCache::new(8);
+        let frame = pool.get_with_cache(1, &mut cache).expect("get");
+        assert_eq!(frame.seq, 1);
+
+        pool.append(payload.as_slice()).expect("append 3");
+
+        let err = pool.get_with_cache(1, &mut cache).expect_err("stale");
         assert_eq!(err.kind(), ErrorKind::NotFound);
     }
 
