@@ -1,3 +1,11 @@
+<!--
+Purpose: Provide a concise, reproducible checklist for tagging and publishing releases.
+Exports: N/A (documentation).
+Role: Maintainer runbook; complements CI and the release workflow configuration.
+Invariants: Local gates must match CI (fmt/clippy/test); steps should work from a clean checkout.
+Notes: Keep example version/tag values in sync with the latest release.
+-->
+
 # Releasing Plasmite
 
 This checklist keeps releases reproducible and ensures CI gates are green before tagging.

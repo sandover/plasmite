@@ -161,7 +161,7 @@ See [Go quickstart](docs/go-quickstart.md), [bindings/python](bindings/python/RE
 | `pool info NAME` | Show pool metadata |
 | `pool delete NAME` | Delete a pool |
 | `doctor POOL` | Validate pool health (`--all` for all pools) |
-| `serve` | Serve pools over HTTP (loopback-only in v0) |
+| `serve` | Serve pools over HTTP (loopback default; non-loopback opt-in) |
 
 Both `pls` and `plasmite` commands are supported.
 

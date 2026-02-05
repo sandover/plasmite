@@ -616,8 +616,8 @@ NOTES
         errors: ErrorPolicyCli,
     },
     #[command(
-        about = "Serve pools over HTTP (loopback-only in v0)",
-        long_about = r#"Serve pools over HTTP (loopback-only in v0).
+        about = "Serve pools over HTTP (loopback default in v0)",
+        long_about = r#"Serve pools over HTTP (loopback default in v0).
 
 Implements the remote protocol spec under spec/remote/v0/SPEC.md."#,
         after_help = r#"EXAMPLES
@@ -627,7 +627,7 @@ Implements the remote protocol spec under spec/remote/v0/SPEC.md."#,
   $ plasmite serve --tls-self-signed
 
 NOTES
-  - v0 is loopback-only; non-loopback binds are rejected
+  - Loopback is the default; non-loopback binds require --allow-non-loopback
   - Use Authorization: Bearer <token> when --token or --token-file is set
   - Prefer --token-file for non-loopback deployments; --token is dev-only
   - Use --access to restrict read/write operations

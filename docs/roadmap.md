@@ -11,7 +11,7 @@ This roadmap is outcome-oriented. Design details live in ADRs; compatibility pro
 
 ## Completed (post v0.0.1)
 
-- ✓ `plasmite serve` - HTTP/JSON server (loopback-only for v0)
+- ✓ `plasmite serve` - HTTP/JSON server (loopback by default; non-loopback opt-in)
 - ✓ `plasmite doctor` - Pool validation and diagnostics
 - ✓ Language bindings - Go, Python, Node.js (via libplasmite C ABI)
 - ✓ Public Rust API (`plasmite::api`)
@@ -29,4 +29,3 @@ This roadmap is outcome-oriented. Design details live in ADRs; compatibility pro
 - Binary payload conventions (inline blobs/chunking) + optional blob store
 - Pattern matching / filtering interface (stateless; interface TBD)
 - QUIC transport ("UDP access" via QUIC streams + TLS)
-- Non-loopback `serve` (with auth + TLS)

@@ -11,7 +11,6 @@ Invariants: Normative contracts live under spec/; this file must not restate ver
 
 - Vision: `docs/vision.md`
 - Architecture: `docs/architecture.md`
-- Interactive explainer (HTML): `docs/plasmite-explainer.html`
 - Roadmap: `docs/roadmap.md`
 - Decisions (ADRs): `docs/decisions/README.md`
 
@@ -57,7 +56,7 @@ Plasmite includes an HTTP server (`plasmite serve`) for remote pool access:
 ## Development
 
 - Testing: `docs/TESTING.md`
-- Releasing: `docs/RELEASING.md`
+- Releasing: `docs/releasing.md`
 - Homebrew packaging: `docs/homebrew.md`
 - Performance baselines: `docs/perf.md`
 - Conformance suite: `conformance/README.md`

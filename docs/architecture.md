@@ -52,11 +52,10 @@ Plasmite is **transport-agnostic**:
 ### Current: HTTP/JSON (v0)
 
 `plasmite serve` exposes pools over HTTP with JSON request/response bodies:
-- Loopback-only in v0 (127.0.0.1)
+- Loopback by default in v0; non-loopback binds require explicit opt-in
 - See `spec/remote/v0/SPEC.md` for the protocol contract
 - Node.js `RemoteClient` provides a typed client
 
 ### Future: QUIC transport
 
 "UDP access" will be delivered via **QUIC** (UDP-based transport with streams, reliability, and TLS), not bespoke unreliable UDP. This will enable lower-latency streaming and better handling of unreliable networks.
-
