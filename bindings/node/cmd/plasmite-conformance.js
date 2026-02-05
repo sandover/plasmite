@@ -251,7 +251,11 @@ function runListPools(step, index, stepId, workdirPath) {
     const actual = [...result.value].sort();
     const expected = [...step.expect.names].sort();
     if (!deepEqual(actual, expected)) {
-      throw stepError(index, stepId, "pool list mismatch");
+      throw stepError(
+        index,
+        stepId,
+        `pool list mismatch: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
+      );
     }
   }
 }
@@ -365,7 +369,7 @@ function listPoolNames(workdirPath) {
     const entries = fs.readdirSync(workdirPath);
     return entries
       .filter((entry) => entry.endsWith(".plasmite"))
-      .map((entry) => entry.replace(/\\.plasmite$/, ""));
+      .map((entry) => entry.replace(/\.plasmite$/, ""));
   } catch (err) {
     throw mapFsError(err, workdirPath, "failed to read pool directory");
   }
@@ -411,10 +415,12 @@ function makePlasmiteError({ kind, message, path, seq, offset }) {
 }
 
 function expectBounds(expected, actual, index, stepId) {
-  if ("oldest" in expected && expected.oldest !== actual?.oldest) {
+  const actualOldest = actual?.oldest ?? null;
+  const actualNewest = actual?.newest ?? null;
+  if ("oldest" in expected && expected.oldest !== actualOldest) {
     throw stepError(index, stepId, "bounds.oldest mismatch");
   }
-  if ("newest" in expected && expected.newest !== actual?.newest) {
+  if ("newest" in expected && expected.newest !== actualNewest) {
     throw stepError(index, stepId, "bounds.newest mismatch");
   }
 }

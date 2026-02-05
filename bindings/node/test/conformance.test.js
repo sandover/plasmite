@@ -36,3 +36,4 @@ function runManifest(name) {
 test("conformance sample", () => runManifest("sample-v0.json"));
 test("conformance negative", () => runManifest("negative-v0.json"));
 test("conformance multiprocess", () => runManifest("multiprocess-v0.json"));
+test("conformance pool admin", () => runManifest("pool-admin-v0.json"));

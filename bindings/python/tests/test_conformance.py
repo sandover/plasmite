@@ -63,6 +63,9 @@ class ConformanceTests(unittest.TestCase):
     def test_multiprocess(self) -> None:
         self.run_manifest("multiprocess-v0.json")
 
+    def test_pool_admin(self) -> None:
+        self.run_manifest("pool-admin-v0.json")
+
 
 if __name__ == "__main__":
     unittest.main()
