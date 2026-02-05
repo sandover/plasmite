@@ -14,12 +14,16 @@ use axum::{Json, Router};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::future::IntoFuture;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::time::Duration;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
+use tower_http::trace::TraceLayer;
+use tracing_subscriber::EnvFilter;
 
 use plasmite::api::{
     Bounds, Durability, Error, ErrorKind, LocalClient, PoolApiExt, PoolInfo, PoolOptions, PoolRef,
@@ -45,12 +49,15 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
             .with_message("remote bind is not supported in v0; use loopback"));
     }
 
+    init_tracing();
+
     let state = Arc::new(AppState {
         client: LocalClient::new().with_pool_dir(config.pool_dir),
         token: config.token,
     });
 
     let app = Router::new()
+        .route("/healthz", get(healthz))
         .route("/v0/pools", post(create_pool).get(list_pools))
         .route("/v0/pools/open", post(open_pool))
         .route("/v0/pools/:pool/info", get(pool_info))
@@ -58,6 +65,7 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
         .route("/v0/pools/:pool/append", post(append_message))
         .route("/v0/pools/:pool/messages/:seq", get(get_message))
         .route("/v0/pools/:pool/tail", get(tail_messages))
+        .layer(TraceLayer::new_for_http())
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(config.bind)
@@ -68,11 +76,37 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
                 .with_source(err)
         })?;
 
-    axum::serve(listener, app).await.map_err(|err| {
-        Error::new(ErrorKind::Io)
-            .with_message("server failed")
-            .with_source(err)
-    })
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let server = axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            let _ = shutdown_rx.await;
+        })
+        .into_future();
+    tokio::pin!(server);
+
+    tokio::select! {
+        result = &mut server => {
+            result.map_err(|err| {
+                Error::new(ErrorKind::Io)
+                    .with_message("server failed")
+                    .with_source(err)
+            })?;
+        }
+        _ = shutdown_signal() => {
+            let _ = shutdown_tx.send(());
+            match tokio::time::timeout(Duration::from_secs(10), &mut server).await {
+                Ok(result) => result.map_err(|err| {
+                    Error::new(ErrorKind::Io)
+                        .with_message("server failed")
+                        .with_source(err)
+                })?,
+                Err(_) => {
+                    return Err(Error::new(ErrorKind::Io).with_message("server shutdown timed out"));
+                }
+            }
+        }
+    };
+    Ok(())
 }
 
 fn is_loopback(ip: IpAddr) -> bool {
@@ -80,6 +114,33 @@ fn is_loopback(ip: IpAddr) -> bool {
         IpAddr::V4(addr) => addr.is_loopback(),
         IpAddr::V6(addr) => addr.is_loopback(),
     }
+}
+
+fn init_tracing() {
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_target(false)
+        .try_init();
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("install SIGTERM handler");
+        signal.recv().await;
+    };
+    #[cfg(unix)]
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
+    #[cfg(not(unix))]
+    ctrl_c.await;
 }
 
 fn authorize(headers: &HeaderMap, state: &AppState) -> Result<(), Error> {
@@ -120,6 +181,10 @@ struct TailQuery {
     since_seq: Option<u64>,
     max: Option<u64>,
     timeout_ms: Option<u64>,
+}
+
+async fn healthz() -> Response {
+    json_response(json!({ "ok": true }))
 }
 
 #[derive(Debug, Serialize)]

@@ -2816,4 +2816,11 @@ fn serve_responses_include_version_header() {
     let tail_url = format!("{}/v0/pools/demo/tail?timeout_ms=10", server.base_url);
     let tail = ureq::get(&tail_url).call().expect("tail");
     assert_eq!(tail.header("plasmite-version"), Some("0"));
+
+    let health_url = format!("{}/healthz", server.base_url);
+    let health = ureq::get(&health_url).call().expect("healthz");
+    assert_eq!(health.header("plasmite-version"), Some("0"));
+    let body: serde_json::Value =
+        serde_json::from_str(&health.into_string().expect("body")).expect("healthz json");
+    assert_eq!(body.get("ok").and_then(|v| v.as_bool()), Some(true));
 }

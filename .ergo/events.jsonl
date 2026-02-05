@@ -1113,3 +1113,7 @@
 {"type":"state","ts":"2026-02-05T06:13:00.985942Z","data":{"id":"IMNE2D","state":"doing","ts":"2026-02-05T06:13:00.985942Z"}}
 {"type":"result","ts":"2026-02-05T14:07:09.252573Z","data":{"task_id":"IMNE2D","summary":"Remote pool refs are names-only; server/client now reject path pools with Usage errors.","path":"spec/remote/v0/SPEC.md","sha256_at_attach":"da0224ad5df0bd3733ee2f3092143ed3bda9c4e29a73d8204d828802c35caf59","mtime_at_attach":"2026-02-05T06:14:15.513514047Z","git_commit_at_attach":"6a92ab57a9d66904aab810fd4abc945a873e8369","ts":"2026-02-05T14:07:09.252573Z"}}
 {"type":"state","ts":"2026-02-05T14:07:09.262399Z","data":{"id":"IMNE2D","state":"done","ts":"2026-02-05T14:07:09.262399Z"}}
+{"type":"claim","ts":"2026-02-05T14:08:08.808688Z","data":{"id":"BN3JYY","agent_id":"gpt5@codex","ts":"2026-02-05T14:08:08.808688Z"}}
+{"type":"state","ts":"2026-02-05T14:08:08.808688Z","data":{"id":"BN3JYY","state":"doing","ts":"2026-02-05T14:08:08.808688Z"}}
+{"type":"result","ts":"2026-02-05T14:19:30.906625Z","data":{"task_id":"BN3JYY","summary":"Added /healthz, structured request logging, and graceful shutdown with timeout.","path":"src/serve.rs","sha256_at_attach":"6b9ed0eade32db362d4118641703d4e026e3daea1210ebc9350e11d5f43b0bed","mtime_at_attach":"2026-02-05T14:11:44.205680903Z","git_commit_at_attach":"1f03a30ea113d1c5d645440f4a7eb0e283bd2cc6","ts":"2026-02-05T14:19:30.906625Z"}}
+{"type":"state","ts":"2026-02-05T14:19:30.923507Z","data":{"id":"BN3JYY","state":"done","ts":"2026-02-05T14:19:30.923507Z"}}
