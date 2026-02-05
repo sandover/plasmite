@@ -623,11 +623,43 @@ fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::CString;
+    use std::ffi::{CStr, CString};
 
     fn parse_buf(buf: &plsm_buf) -> Value {
         let slice = unsafe { std::slice::from_raw_parts(buf.data, buf.len) };
         serde_json::from_slice(slice).expect("valid json")
+    }
+
+    fn take_error(err: *mut plsm_error) -> (i32, String, Option<String>, Option<u64>, Option<u64>) {
+        assert!(!err.is_null(), "expected error");
+        let owned = unsafe { &*err };
+        let message = unsafe { CStr::from_ptr(owned.message) }
+            .to_str()
+            .unwrap_or("")
+            .to_string();
+        let path = if owned.path.is_null() {
+            None
+        } else {
+            Some(
+                unsafe { CStr::from_ptr(owned.path) }
+                    .to_str()
+                    .unwrap_or("")
+                    .to_string(),
+            )
+        };
+        let seq = if owned.has_seq != 0 {
+            Some(owned.seq)
+        } else {
+            None
+        };
+        let offset = if owned.has_offset != 0 {
+            Some(owned.offset)
+        } else {
+            None
+        };
+        let kind = owned.kind;
+        plsm_error_free(err);
+        (kind, message, path, seq, offset)
     }
 
     #[test]
@@ -686,5 +718,139 @@ mod tests {
         if !err.is_null() {
             plsm_error_free(err);
         }
+    }
+
+    #[test]
+    fn abi_errors_report_usage_on_null_pointers() {
+        let mut err: *mut plsm_error = std::ptr::null_mut();
+        let rc = plsm_client_new(std::ptr::null(), std::ptr::null_mut(), &mut err);
+        assert_eq!(rc, -1);
+        let (kind, message, _path, _seq, _offset) = take_error(err);
+        assert_eq!(kind, error_kind_code(ErrorKind::Usage));
+        assert_eq!(message, "out_client is null");
+    }
+
+    #[test]
+    fn abi_errors_report_invalid_pool_ref() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pool_dir = temp.path().join("pools");
+        std::fs::create_dir_all(&pool_dir).expect("mkdir");
+        let pool_dir_c = CString::new(pool_dir.to_string_lossy().as_ref()).expect("cstr");
+
+        let mut client: *mut plsm_client = std::ptr::null_mut();
+        let mut err: *mut plsm_error = std::ptr::null_mut();
+        let rc = plsm_client_new(pool_dir_c.as_ptr(), &mut client, &mut err);
+        assert_eq!(rc, 0, "client_new failed");
+
+        let mut pool: *mut plsm_pool = std::ptr::null_mut();
+        let rc = plsm_pool_open(client, std::ptr::null(), &mut pool, &mut err);
+        assert_eq!(rc, -1);
+        let (kind, message, _path, _seq, _offset) = take_error(err);
+        assert_eq!(kind, error_kind_code(ErrorKind::Usage));
+        assert_eq!(message, "pool_ref is null");
+
+        let remote = CString::new("http://example.com/pool").expect("cstr");
+        let rc = plsm_pool_open(client, remote.as_ptr(), &mut pool, &mut err);
+        assert_eq!(rc, -1);
+        let (kind, message, _path, _seq, _offset) = take_error(err);
+        assert_eq!(kind, error_kind_code(ErrorKind::Usage));
+        assert_eq!(message, "remote pool refs are not supported in v0");
+
+        plsm_client_free(client);
+    }
+
+    #[test]
+    fn abi_errors_include_path_for_missing_pool() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pool_dir = temp.path().join("pools");
+        std::fs::create_dir_all(&pool_dir).expect("mkdir");
+        let pool_dir_c = CString::new(pool_dir.to_string_lossy().as_ref()).expect("cstr");
+
+        let mut client: *mut plsm_client = std::ptr::null_mut();
+        let mut err: *mut plsm_error = std::ptr::null_mut();
+        let rc = plsm_client_new(pool_dir_c.as_ptr(), &mut client, &mut err);
+        assert_eq!(rc, 0, "client_new failed");
+
+        let pool_name = CString::new("missing").expect("cstr");
+        let mut pool: *mut plsm_pool = std::ptr::null_mut();
+        let rc = plsm_pool_open(client, pool_name.as_ptr(), &mut pool, &mut err);
+        assert_eq!(rc, -1);
+        let (kind, _message, path, _seq, _offset) = take_error(err);
+        assert_eq!(kind, error_kind_code(ErrorKind::NotFound));
+        let path = path.expect("path");
+        assert!(path.ends_with("missing.plasmite"));
+
+        plsm_client_free(client);
+    }
+
+    #[test]
+    fn abi_errors_report_seq_on_missing_message() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pool_dir = temp.path().join("pools");
+        std::fs::create_dir_all(&pool_dir).expect("mkdir");
+        let pool_dir_c = CString::new(pool_dir.to_string_lossy().as_ref()).expect("cstr");
+
+        let mut client: *mut plsm_client = std::ptr::null_mut();
+        let mut err: *mut plsm_error = std::ptr::null_mut();
+        let rc = plsm_client_new(pool_dir_c.as_ptr(), &mut client, &mut err);
+        assert_eq!(rc, 0, "client_new failed");
+
+        let pool_name = CString::new("seq").expect("cstr");
+        let mut pool: *mut plsm_pool = std::ptr::null_mut();
+        let rc = plsm_pool_create(client, pool_name.as_ptr(), 1024 * 1024, &mut pool, &mut err);
+        assert_eq!(rc, 0, "pool_create failed");
+
+        let mut out = plsm_buf {
+            data: std::ptr::null_mut(),
+            len: 0,
+        };
+        let rc = plsm_pool_get_json(pool, 42, &mut out, &mut err);
+        assert_eq!(rc, -1);
+        let (kind, _message, _path, seq, _offset) = take_error(err);
+        assert_eq!(kind, error_kind_code(ErrorKind::NotFound));
+        assert_eq!(seq, Some(42));
+
+        plsm_pool_free(pool);
+        plsm_client_free(client);
+    }
+
+    #[test]
+    fn abi_errors_report_invalid_json() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pool_dir = temp.path().join("pools");
+        std::fs::create_dir_all(&pool_dir).expect("mkdir");
+        let pool_dir_c = CString::new(pool_dir.to_string_lossy().as_ref()).expect("cstr");
+
+        let mut client: *mut plsm_client = std::ptr::null_mut();
+        let mut err: *mut plsm_error = std::ptr::null_mut();
+        let rc = plsm_client_new(pool_dir_c.as_ptr(), &mut client, &mut err);
+        assert_eq!(rc, 0, "client_new failed");
+
+        let pool_name = CString::new("json").expect("cstr");
+        let mut pool: *mut plsm_pool = std::ptr::null_mut();
+        let rc = plsm_pool_create(client, pool_name.as_ptr(), 1024 * 1024, &mut pool, &mut err);
+        assert_eq!(rc, 0, "pool_create failed");
+
+        let mut out = plsm_buf {
+            data: std::ptr::null_mut(),
+            len: 0,
+        };
+        let rc = plsm_pool_append_json(
+            pool,
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            0,
+            0,
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(rc, -1);
+        let (kind, message, _path, _seq, _offset) = take_error(err);
+        assert_eq!(kind, error_kind_code(ErrorKind::Usage));
+        assert_eq!(message, "json_bytes is null");
+
+        plsm_pool_free(pool);
+        plsm_client_free(client);
     }
 }
