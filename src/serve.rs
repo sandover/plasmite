@@ -12,17 +12,27 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use bytes::Bytes;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto::Builder as AutoBuilder;
+use hyper_util::service::TowerToHyperService;
+use rcgen::{Certificate, CertificateParams, SanType};
+use rustls::ServerConfig;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::future::IntoFuture;
-use std::net::{IpAddr, SocketAddr};
+use std::io::Cursor;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Semaphore, mpsc};
+use tokio::task::JoinSet;
 use tokio::time::Duration;
+use tokio_rustls::TlsAcceptor;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use tower_http::trace::TraceLayer;
+use tower_service::Service;
 use tracing_subscriber::EnvFilter;
 
 use plasmite::api::{
@@ -83,6 +93,8 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
         .try_into()
         .map_err(|_| Error::new(ErrorKind::Usage).with_message("--max-body-bytes is too large"))?;
 
+    let tls_config = build_tls_config(&config).await?;
+
     let state = Arc::new(AppState {
         client: LocalClient::new().with_pool_dir(config.pool_dir),
         token: config.token,
@@ -104,45 +116,10 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(config.bind)
-        .await
-        .map_err(|err| {
-            Error::new(ErrorKind::Io)
-                .with_message("failed to bind server")
-                .with_source(err)
-        })?;
-
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    let server = axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = shutdown_rx.await;
-        })
-        .into_future();
-    tokio::pin!(server);
-
-    tokio::select! {
-        result = &mut server => {
-            result.map_err(|err| {
-                Error::new(ErrorKind::Io)
-                    .with_message("server failed")
-                    .with_source(err)
-            })?;
-        }
-        _ = shutdown_signal() => {
-            let _ = shutdown_tx.send(());
-            match tokio::time::timeout(Duration::from_secs(10), &mut server).await {
-                Ok(result) => result.map_err(|err| {
-                    Error::new(ErrorKind::Io)
-                        .with_message("server failed")
-                        .with_source(err)
-                })?,
-                Err(_) => {
-                    return Err(Error::new(ErrorKind::Io).with_message("server shutdown timed out"));
-                }
-            }
-        }
-    };
-    Ok(())
+    if let Some(tls_config) = tls_config {
+        return serve_tls(config.bind, app, tls_config).await;
+    }
+    serve_plain(config.bind, app).await
 }
 
 fn is_loopback(ip: IpAddr) -> bool {
@@ -164,6 +141,12 @@ fn validate_config(config: &ServeConfig) -> Result<(), Error> {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("TLS requires both --tls-cert and --tls-key")
             .with_hint("Provide both paths or use --tls-self-signed."));
+    }
+
+    if config.tls_self_signed && (config.tls_cert.is_some() || config.tls_key.is_some()) {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("--tls-self-signed cannot be combined with --tls-cert/--tls-key")
+            .with_hint("Use either --tls-self-signed or provide certificate paths."));
     }
 
     if config.max_body_bytes == 0 {
@@ -208,6 +191,215 @@ fn validate_config(config: &ServeConfig) -> Result<(), Error> {
 
 fn tls_is_configured(config: &ServeConfig) -> bool {
     config.tls_self_signed || (config.tls_cert.is_some() && config.tls_key.is_some())
+}
+
+async fn build_tls_config(config: &ServeConfig) -> Result<Option<Arc<ServerConfig>>, Error> {
+    if config.tls_self_signed {
+        let mut params = CertificateParams::new(vec!["localhost".to_string()]);
+        params
+            .subject_alt_names
+            .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+        params
+            .subject_alt_names
+            .push(SanType::IpAddress(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+        if !config.bind.ip().is_unspecified() {
+            params
+                .subject_alt_names
+                .push(SanType::IpAddress(config.bind.ip()));
+        }
+        let cert = Certificate::from_params(params).map_err(|err| {
+            Error::new(ErrorKind::Internal)
+                .with_message("failed to generate self-signed certificate")
+                .with_source(err)
+        })?;
+        let cert_der = cert.serialize_der().map_err(|err| {
+            Error::new(ErrorKind::Internal)
+                .with_message("failed to serialize self-signed certificate")
+                .with_source(err)
+        })?;
+        let key_der = cert.serialize_private_key_der();
+        let certs = vec![CertificateDer::from(cert_der)];
+        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_der));
+        let tls = build_server_config(certs, key)?;
+        return Ok(Some(Arc::new(tls)));
+    }
+
+    if let (Some(cert), Some(key)) = (&config.tls_cert, &config.tls_key) {
+        let tls = load_tls_config_from_pem(cert, key)?;
+        return Ok(Some(Arc::new(tls)));
+    }
+
+    Ok(None)
+}
+
+fn load_tls_config_from_pem(
+    cert_path: &PathBuf,
+    key_path: &PathBuf,
+) -> Result<ServerConfig, Error> {
+    let cert_bytes = std::fs::read(cert_path).map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message("failed to read TLS certificate")
+            .with_path(cert_path)
+            .with_source(err)
+    })?;
+    let key_bytes = std::fs::read(key_path).map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message("failed to read TLS key")
+            .with_path(key_path)
+            .with_source(err)
+    })?;
+
+    let mut cert_reader = Cursor::new(cert_bytes);
+    let certs = rustls_pemfile::certs(&mut cert_reader)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_message("failed to parse TLS certificate")
+                .with_path(cert_path)
+                .with_source(err)
+        })?;
+    if certs.is_empty() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("TLS certificate file contains no certificates")
+            .with_path(cert_path));
+    }
+
+    let mut key_reader = Cursor::new(key_bytes);
+    let key = rustls_pemfile::private_key(&mut key_reader)
+        .map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_message("failed to parse TLS key")
+                .with_path(key_path)
+                .with_source(err)
+        })?
+        .ok_or_else(|| {
+            Error::new(ErrorKind::Usage)
+                .with_message("TLS key file contains no private key")
+                .with_path(key_path)
+        })?;
+
+    build_server_config(certs, key)
+}
+
+fn build_server_config(
+    certs: Vec<CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
+) -> Result<ServerConfig, Error> {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let mut config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|err| {
+            Error::new(ErrorKind::Usage)
+                .with_message("invalid TLS certificate or key")
+                .with_source(err)
+        })?;
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    Ok(config)
+}
+
+async fn serve_plain(bind: SocketAddr, app: Router) -> Result<(), Error> {
+    let listener = tokio::net::TcpListener::bind(bind).await.map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message("failed to bind server")
+            .with_source(err)
+    })?;
+
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let server = axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            let _ = shutdown_rx.await;
+        })
+        .into_future();
+    tokio::pin!(server);
+
+    tokio::select! {
+        result = &mut server => {
+            result.map_err(|err| {
+                Error::new(ErrorKind::Io)
+                    .with_message("server failed")
+                    .with_source(err)
+            })?;
+        }
+        _ = shutdown_signal() => {
+            let _ = shutdown_tx.send(());
+            match tokio::time::timeout(Duration::from_secs(10), &mut server).await {
+                Ok(result) => result.map_err(|err| {
+                    Error::new(ErrorKind::Io)
+                        .with_message("server failed")
+                        .with_source(err)
+                })?,
+                Err(_) => {
+                    return Err(Error::new(ErrorKind::Io).with_message("server shutdown timed out"));
+                }
+            }
+        }
+    };
+    Ok(())
+}
+
+async fn serve_tls(
+    bind: SocketAddr,
+    app: Router,
+    tls_config: Arc<ServerConfig>,
+) -> Result<(), Error> {
+    let listener = tokio::net::TcpListener::bind(bind).await.map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message("failed to bind TLS server")
+            .with_source(err)
+    })?;
+    let acceptor = TlsAcceptor::from(tls_config);
+    let builder = AutoBuilder::new(TokioExecutor::new());
+    let mut make_service = app.into_make_service();
+    let mut tasks = JoinSet::new();
+
+    let shutdown = shutdown_signal();
+    tokio::pin!(shutdown);
+
+    loop {
+        tokio::select! {
+            _ = &mut shutdown => break,
+            accept = listener.accept() => {
+                let (stream, peer_addr) = match accept {
+                    Ok(result) => result,
+                    Err(err) => {
+                        return Err(Error::new(ErrorKind::Io)
+                            .with_message("failed to accept TLS connection")
+                            .with_source(err));
+                    }
+                };
+
+                let service = match make_service.call(peer_addr).await {
+                    Ok(service) => service,
+                    Err(_) => continue,
+                };
+
+                let acceptor = acceptor.clone();
+                let builder = builder.clone();
+                tasks.spawn(async move {
+                    let tls_stream = match acceptor.accept(stream).await {
+                        Ok(stream) => stream,
+                        Err(_) => return,
+                    };
+                    let io = TokioIo::new(tls_stream);
+                    let service = TowerToHyperService::new(service);
+                    let _ = builder.serve_connection_with_upgrades(io, service).await;
+                });
+            }
+        }
+    }
+
+    let deadline = tokio::time::sleep(Duration::from_secs(10));
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            _ = &mut deadline => break,
+            Some(_) = tasks.join_next() => {}
+            else => break,
+        }
+    }
+
+    Ok(())
 }
 
 fn init_tracing() {

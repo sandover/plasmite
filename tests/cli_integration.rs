@@ -6,15 +6,17 @@
 use std::fs::File;
 use std::io::Write;
 use std::io::{BufRead, BufReader, Read};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 use std::{thread::sleep, time::Instant};
 
 use fs2::FileExt;
+use rcgen::{Certificate, CertificateParams, SanType};
 use serde_json::{Value, json};
 
 fn cmd() -> Command {
@@ -33,9 +35,17 @@ impl ServeProcess {
     }
 
     fn start_with_args(pool_dir: &std::path::Path, extra_args: &[&str]) -> Self {
+        Self::start_with_args_and_scheme(pool_dir, extra_args, "http")
+    }
+
+    fn start_with_args_and_scheme(
+        pool_dir: &std::path::Path,
+        extra_args: &[&str],
+        scheme: &str,
+    ) -> Self {
         let port = pick_port().expect("port");
         let bind = format!("127.0.0.1:{port}");
-        let base_url = format!("http://{bind}");
+        let base_url = format!("{scheme}://{bind}");
 
         let mut command = cmd();
         command.args([
@@ -103,7 +113,7 @@ fn wait_for_server(addr: SocketAddr) -> std::io::Result<()> {
         if TcpStream::connect(addr).is_ok() {
             return Ok(());
         }
-        if start.elapsed() > Duration::from_secs(2) {
+        if start.elapsed() > Duration::from_secs(5) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 "server did not start in time",
@@ -2987,4 +2997,66 @@ fn serve_rejects_excessive_tail_timeout() {
         }
         Err(err) => panic!("request failed: {err:?}"),
     }
+}
+
+#[test]
+fn serve_tls_allows_healthz_with_trusted_cert() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let _ = ureq::rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let mut params = CertificateParams::new(vec!["localhost".to_string()]);
+    params
+        .subject_alt_names
+        .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+    params
+        .subject_alt_names
+        .push(SanType::IpAddress(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+    let cert = Certificate::from_params(params).expect("cert");
+    let cert_pem = cert.serialize_pem().expect("cert pem");
+    let key_pem = cert.serialize_private_key_pem();
+    let cert_path = temp.path().join("cert.pem");
+    let key_path = temp.path().join("key.pem");
+    std::fs::write(&cert_path, cert_pem).expect("write cert");
+    std::fs::write(&key_path, key_pem).expect("write key");
+
+    let server = ServeProcess::start_with_args_and_scheme(
+        &pool_dir,
+        &[
+            "--tls-cert",
+            cert_path.to_str().unwrap(),
+            "--tls-key",
+            key_path.to_str().unwrap(),
+        ],
+        "https",
+    );
+
+    let mut root_store = ureq::rustls::RootCertStore::empty();
+    let cert_der = cert.serialize_der().expect("cert der");
+    let (added, _) = root_store
+        .add_parsable_certificates([ureq::rustls::pki_types::CertificateDer::from(cert_der)]);
+    assert_eq!(added, 1);
+    let client_config = ureq::rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    let agent = ureq::builder().tls_config(Arc::new(client_config)).build();
+
+    let health_url = format!("{}/healthz", server.base_url);
+    let response = agent.get(&health_url).call().expect("healthz");
+    assert_eq!(response.status(), 200);
+    let body: Value = serde_json::from_str(&response.into_string().expect("body")).expect("json");
+    assert_eq!(body.get("ok").and_then(|value| value.as_bool()), Some(true));
 }

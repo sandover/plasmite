@@ -620,6 +620,7 @@ Implements the remote protocol spec under spec/remote/v0/SPEC.md."#,
   $ plasmite serve
   $ plasmite serve --bind 127.0.0.1:9701 --token devtoken
   $ plasmite serve --token-file /path/to/token
+  $ plasmite serve --tls-self-signed
 
 NOTES
   - v0 is loopback-only; non-loopback binds are rejected
@@ -627,6 +628,7 @@ NOTES
   - Prefer --token-file for non-loopback deployments; --token is dev-only
   - Use --access to restrict read/write operations
   - Non-loopback writes require TLS + --token-file (or --insecure-no-tls for demos)
+  - --tls-self-signed is for demos; clients must trust the generated cert
   - Safety limits: --max-body-bytes, --max-tail-timeout-ms, --max-tail-concurrency"#
     )]
     Serve {
