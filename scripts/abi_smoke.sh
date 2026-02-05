@@ -20,6 +20,7 @@ fi
 mkdir -p .scratch
 work_dir=$(mktemp -d .scratch/abi-smoke.XXXXXX)
 trap 'rm -rf "$work_dir"' EXIT
+mkdir -p "$work_dir/pools"
 
 cat > "$work_dir/abi_smoke.c" <<'C'
 #include "plasmite.h"
