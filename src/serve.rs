@@ -399,3 +399,20 @@ fn error_response(err: Error) -> Response {
         .insert("plasmite-version", HeaderValue::from_static("0"));
     response
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ErrorKind, ServeConfig, serve};
+
+    #[tokio::test]
+    async fn serve_rejects_non_loopback_bind() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = ServeConfig {
+            bind: "0.0.0.0:0".parse().expect("bind"),
+            pool_dir: temp.path().to_path_buf(),
+            token: None,
+        };
+        let err = serve(config).await.expect_err("expected usage error");
+        assert_eq!(err.kind(), ErrorKind::Usage);
+    }
+}

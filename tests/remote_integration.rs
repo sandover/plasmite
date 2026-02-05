@@ -17,31 +17,52 @@ type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 struct TestServer {
     child: Child,
     base_url: String,
+    token: Option<String>,
 }
 
 impl TestServer {
     fn start(pool_dir: &std::path::Path) -> TestResult<Self> {
+        Self::start_with_token(pool_dir, None)
+    }
+
+    fn start_with_token(pool_dir: &std::path::Path, token: Option<&str>) -> TestResult<Self> {
         let port = pick_port()?;
         let bind = format!("127.0.0.1:{port}");
         let base_url = format!("http://{bind}");
 
-        let child = Command::new(env!("CARGO_BIN_EXE_plasmite"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_plasmite"));
+        command
             .arg("--dir")
             .arg(pool_dir)
             .arg("serve")
             .arg("--bind")
             .arg(&bind)
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
+            .stderr(Stdio::null());
+        if let Some(token) = token {
+            command.arg("--token").arg(token);
+        }
+        let child = command.spawn()?;
 
         wait_for_server(bind.parse()?)?;
 
-        Ok(Self { child, base_url })
+        Ok(Self {
+            child,
+            base_url,
+            token: token.map(str::to_string),
+        })
     }
 
     fn client(&self) -> TestResult<RemoteClient> {
         Ok(RemoteClient::new(self.base_url.clone())?)
+    }
+
+    fn client_with_token(&self) -> TestResult<RemoteClient> {
+        let mut client = RemoteClient::new(self.base_url.clone())?;
+        if let Some(token) = &self.token {
+            client = client.with_token(token.clone());
+        }
+        Ok(client)
     }
 }
 
@@ -107,6 +128,118 @@ fn remote_errors_propagate_kind() -> TestResult<()> {
         Err(err) => err,
     };
     assert_eq!(err.kind(), ErrorKind::NotFound);
+    Ok(())
+}
+
+#[test]
+fn remote_auth_requires_valid_token() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::start_with_token(temp_dir.path(), Some("secret"))?;
+
+    let missing = server.client()?;
+    let err = missing.list_pools().expect_err("missing token");
+    assert_eq!(err.kind(), ErrorKind::Permission);
+
+    let invalid = RemoteClient::new(server.base_url.clone())?.with_token("bad");
+    let err = invalid.list_pools().expect_err("invalid token");
+    assert_eq!(err.kind(), ErrorKind::Permission);
+
+    let client = server.client_with_token()?;
+    client.create_pool(&PoolRef::name("alpha"), PoolOptions::new(1024 * 1024))?;
+    let pools = client.list_pools()?;
+    assert!(pools.iter().any(|pool| {
+        pool.path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "alpha.plasmite")
+    }));
+    Ok(())
+}
+
+#[test]
+fn remote_list_delete_and_info() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::start(temp_dir.path())?;
+    let client = server.client()?;
+    let pool_ref = PoolRef::name("info");
+
+    client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
+    let info = client.pool_info(&pool_ref)?;
+    assert!(info.file_size >= 1024 * 1024);
+
+    let pools = client.list_pools()?;
+    assert!(
+        pools
+            .iter()
+            .any(|pool| pool.path.ends_with("info.plasmite"))
+    );
+
+    client.delete_pool(&pool_ref)?;
+    let pools = client.list_pools()?;
+    assert!(
+        !pools
+            .iter()
+            .any(|pool| pool.path.ends_with("info.plasmite"))
+    );
+    Ok(())
+}
+
+#[test]
+fn remote_corrupt_errors() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let pool_dir = temp_dir.path();
+    let server = TestServer::start(pool_dir)?;
+    let client = server.client()?;
+
+    let corrupt_path = pool_dir.join("bad.plasmite");
+    std::fs::write(&corrupt_path, b"NOPE")?;
+    let err = match client.open_pool(&PoolRef::name("bad")) {
+        Ok(_) => return Err("expected corrupt pool error".into()),
+        Err(err) => err,
+    };
+    assert_eq!(err.kind(), ErrorKind::Corrupt);
+    Ok(())
+}
+
+#[test]
+fn remote_tail_respects_limits_and_timeouts() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::start(temp_dir.path())?;
+    let client = server.client()?;
+    let pool_ref = PoolRef::name("tail-limits");
+
+    client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
+    let pool = client.open_pool(&pool_ref)?;
+    let first = pool.append_json_now(&json!({"n": 1}), &[], Durability::Fast)?;
+    let _second = pool.append_json_now(&json!({"n": 2}), &[], Durability::Fast)?;
+
+    let options = TailOptions {
+        since_seq: Some(first.seq),
+        max_messages: Some(1),
+        timeout: Some(Duration::from_millis(500)),
+        ..TailOptions::default()
+    };
+    let mut tail = pool.tail(options)?;
+    let msg = tail.next_message()?.expect("first message");
+    assert_eq!(msg.seq, first.seq);
+    assert!(tail.next_message()?.is_none());
+
+    let mut tail = pool.tail(TailOptions {
+        since_seq: Some(9999),
+        timeout: Some(Duration::from_millis(100)),
+        ..TailOptions::default()
+    })?;
+    assert!(tail.next_message()?.is_none());
+
+    let _third = pool.append_json_now(&json!({"n": 3}), &[], Durability::Fast)?;
+    let mut tail = pool.tail(TailOptions {
+        since_seq: Some(3),
+        max_messages: Some(1),
+        timeout: Some(Duration::from_millis(500)),
+        ..TailOptions::default()
+    })?;
+    let msg = tail.next_message()?.expect("resumed message");
+    assert_eq!(msg.data, json!({"n": 3}));
     Ok(())
 }
 

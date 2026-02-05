@@ -588,7 +588,8 @@ fn durability_to_str(durability: Durability) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_pool_from_url, normalize_base_url, parse_pool_uri};
+    use super::{extract_pool_from_url, normalize_base_url, parse_error_kind, parse_pool_uri};
+    use crate::core::error::ErrorKind;
 
     #[test]
     fn normalize_base_url_strips_path() {
@@ -614,5 +615,14 @@ mod tests {
         let url = url::Url::parse("http://localhost:8080/alpha/beta").expect("url");
         let err = extract_pool_from_url(&url).expect_err("err");
         assert_eq!(err.kind(), super::ErrorKind::Usage);
+    }
+
+    #[test]
+    fn parse_error_kind_maps_known_values() {
+        assert_eq!(parse_error_kind("Usage"), ErrorKind::Usage);
+        assert_eq!(parse_error_kind("AlreadyExists"), ErrorKind::AlreadyExists);
+        assert_eq!(parse_error_kind("Permission"), ErrorKind::Permission);
+        assert_eq!(parse_error_kind("Corrupt"), ErrorKind::Corrupt);
+        assert_eq!(parse_error_kind("Busy"), ErrorKind::Busy);
     }
 }
