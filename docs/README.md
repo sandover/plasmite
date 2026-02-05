@@ -47,6 +47,7 @@ Plasmite includes an HTTP server (`plasmite serve`) for remote pool access:
 
 - Protocol spec: `spec/remote/v0/SPEC.md`
 - Node.js `RemoteClient`: `bindings/node/README.md`
+- Deployment + security notes: see “Remote Access” in `README.md`
 
 ## CLI reference
 

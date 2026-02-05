@@ -162,6 +162,11 @@ Reconnect semantics:
 - On auth failure, servers MUST return `401` with an error envelope.
 - Loopback-only deployments MAY disable auth by default.
 
+## Access Modes
+
+- Servers MAY be configured read-only or write-only.
+- Disallowed operations MUST return `403` with an error envelope.
+
 ## Status Codes
 
 - `200` success.

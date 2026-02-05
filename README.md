@@ -254,17 +254,32 @@ Skip bad records with `--errors skip` (exit 1 if any skipped).
 Serve pools over HTTP for access from other processes or machines:
 
 ```bash
-# Start the server (loopback-only in v0)
+# Loopback dev (default)
 pls serve --bind 127.0.0.1:9700
+
+# LAN read-only (no auth)
+pls serve --bind 0.0.0.0:9700 --allow-non-loopback --access read-only
+
+# LAN write with TLS + token
+pls serve --bind 0.0.0.0:9700 --allow-non-loopback \
+  --token-file /path/to/token \
+  --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
 
 # Use curl to append a message
 curl -X POST http://127.0.0.1:9700/v0/pools/demo/append \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $(cat /path/to/token)" \
   -d '{"data": {"msg": "hello from curl"}, "descrips": ["remote"]}'
 
 # Tail messages (JSON Lines stream)
 curl -N http://127.0.0.1:9700/v0/pools/demo/tail
 ```
+
+Notes:
+- Non-loopback binds require `--allow-non-loopback`.
+- Non-loopback writes require `--token-file` and TLS (or `--insecure-no-tls` for demos).
+- Access modes: `read-only`, `write-only`, `read-write`.
+- `--tls-self-signed` is for local demos; prefer real certs or a reverse proxy for LAN.
 
 The Node.js binding includes a `RemoteClient` for programmatic access:
 

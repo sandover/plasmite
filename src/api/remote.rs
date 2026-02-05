@@ -516,7 +516,8 @@ fn parse_error_response(status: u16, response: ureq::Response) -> Error {
     if let Ok(envelope) = serde_json::from_str::<ErrorEnvelope>(&body) {
         return error_from_remote(envelope.error);
     }
-    Error::new(ErrorKind::Io).with_message(format!("remote error status {status}"))
+    let kind = error_kind_from_status(status);
+    Error::new(kind).with_message(format!("remote error status {status}"))
 }
 
 fn error_from_remote(remote: RemoteError) -> Error {
@@ -551,6 +552,18 @@ fn parse_error_kind(kind: &str) -> ErrorKind {
         "Corrupt" => ErrorKind::Corrupt,
         "Io" => ErrorKind::Io,
         _ => ErrorKind::Internal,
+    }
+}
+
+fn error_kind_from_status(status: u16) -> ErrorKind {
+    match status {
+        400 | 413 => ErrorKind::Usage,
+        401 | 403 => ErrorKind::Permission,
+        404 => ErrorKind::NotFound,
+        409 => ErrorKind::AlreadyExists,
+        423 => ErrorKind::Busy,
+        500..=599 => ErrorKind::Internal,
+        _ => ErrorKind::Io,
     }
 }
 
