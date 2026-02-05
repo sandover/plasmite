@@ -101,6 +101,15 @@ pub fn validate_pool_state(header: PoolHeader, mmap: &[u8]) -> Result<(), Error>
         if offset + frame_len > ring_size {
             return Err(Error::new(ErrorKind::Corrupt).with_message("frame exceeds ring"));
         }
+
+        let payload_start = ring_offset + offset + FRAME_HEADER_LEN;
+        let payload_end = payload_start + frame.payload_len as usize;
+        let marker_start = payload_end;
+        let marker_end = marker_start + frame::FRAME_COMMIT_MARKER_LEN;
+        if &mmap[marker_start..marker_end] != frame::FRAME_COMMIT_MARKER.as_slice() {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("missing frame commit marker"));
+        }
+
         let mut next_off = offset + frame_len;
         if next_off == ring_size {
             next_off = 0;

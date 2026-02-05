@@ -754,6 +754,9 @@ fn write_frame(
     let payload_start = ring_offset + head + FRAME_HEADER_LEN;
     let payload_end = payload_start + payload.len();
     mmap[payload_start..payload_end].copy_from_slice(payload);
+    let marker_start = payload_end;
+    let marker_end = marker_start + frame::FRAME_COMMIT_MARKER_LEN;
+    mmap[marker_start..marker_end].copy_from_slice(&frame::FRAME_COMMIT_MARKER);
     Ok(())
 }
 
@@ -1098,6 +1101,9 @@ mod tests {
         let payload_start = end;
         let payload_end = payload_start + payload_len;
         storage[payload_start..payload_end].fill(0u8);
+        let marker_start = payload_end;
+        let marker_end = marker_start + frame::FRAME_COMMIT_MARKER_LEN;
+        storage[marker_start..marker_end].copy_from_slice(&frame::FRAME_COMMIT_MARKER);
     }
 
     fn scan_frames(mmap: &[u8], header: PoolHeader) -> Vec<(usize, u64, u32)> {

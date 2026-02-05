@@ -289,6 +289,11 @@ mod tests {
         let payload_start = end;
         let payload_end = payload_start + payload_len;
         storage[payload_start..payload_end].fill(0u8);
+        if header.state == FrameState::Committed {
+            let marker_start = payload_end;
+            let marker_end = marker_start + frame::FRAME_COMMIT_MARKER_LEN;
+            storage[marker_start..marker_end].copy_from_slice(&frame::FRAME_COMMIT_MARKER);
+        }
     }
 
     fn write_committed_frame(storage: &mut [u8], offset: usize, seq: u64, payload_len: usize) {

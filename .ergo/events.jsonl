@@ -1255,3 +1255,9 @@
 {"type":"state","ts":"2026-02-05T19:14:00.409333Z","data":{"id":"WRUYBU","state":"doing","ts":"2026-02-05T19:14:00.409333Z"}}
 {"type":"result","ts":"2026-02-05T19:43:27.267761Z","data":{"task_id":"WRUYBU","summary":"Add remote Lite3 append/get/tail endpoints + client APIs + tests; cargo fmt/clippy/test","path":"src/serve.rs","sha256_at_attach":"20486ad1c5cf67b54cbbeeaab210e9315bb8cc066a6e4450bdfbc3fd0cd3f4b2","mtime_at_attach":"2026-02-05T19:33:45.976914952Z","git_commit_at_attach":"197692f85ae1986e38e3e6a334107a25cfd5838e","ts":"2026-02-05T19:43:27.267761Z"}}
 {"type":"state","ts":"2026-02-05T19:43:27.274634Z","data":{"id":"WRUYBU","state":"done","ts":"2026-02-05T19:43:27.274634Z"}}
+{"type":"claim","ts":"2026-02-05T19:54:27.474772Z","data":{"id":"OMD57H","agent_id":"codex@agent-host","ts":"2026-02-05T19:54:27.474772Z"}}
+{"type":"state","ts":"2026-02-05T19:54:27.474772Z","data":{"id":"OMD57H","state":"doing","ts":"2026-02-05T19:54:27.474772Z"}}
+{"type":"state","ts":"2026-02-05T19:57:14.610246Z","data":{"id":"OMD57H","state":"done","ts":"2026-02-05T19:57:14.610246Z"}}
+{"type":"state","ts":"2026-02-05T21:34:38.566915Z","data":{"id":"PPG2YK","state":"doing","ts":"2026-02-05T21:34:38.566915Z"}}
+{"type":"result","ts":"2026-02-05T21:42:01.212729Z","data":{"task_id":"PPG2YK","summary":"Add per-frame commit marker checks so reads avoid double header decode; update writer/validator/docs","path":"src/core/cursor.rs","sha256_at_attach":"963a5a98734816b02165c1d0a2ea7827aed7f0e2ce45b69d663ef99ea8e6c0dd","mtime_at_attach":"2026-02-05T21:40:12.005072888Z","git_commit_at_attach":"ddde7a11cf93736cbb2f686e02d5048c83ba8761","ts":"2026-02-05T21:42:01.212729Z"}}
+{"type":"state","ts":"2026-02-05T21:42:01.218938Z","data":{"id":"PPG2YK","state":"done","ts":"2026-02-05T21:42:01.218938Z"}}

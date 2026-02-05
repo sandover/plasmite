@@ -1,14 +1,17 @@
 //! Purpose: Define frame header layout plus helpers for sizing/alignment and validation.
-//! Exports: `FrameHeader`, `FrameState`, `FRAME_HEADER_LEN`, `frame_total_len`.
+//! Exports: `FrameHeader`, `FrameState`, `FRAME_HEADER_LEN`, `FRAME_COMMIT_MARKER`, `frame_total_len`.
 //! Role: Shared encoding/validation primitives used by planner, pool, cursor, and validator.
 //! Invariants: Frame headers are fixed-size (64 bytes) and encoded little-endian.
 //! Invariants: Payload validation enforces canonical Lite3 encoding when required.
+//! Invariants: Committed frames include an 8-byte commit marker written after the payload.
 use crate::core::error::{Error, ErrorKind};
 #[cfg(test)]
 use crate::core::lite3;
 
 pub const FRAME_MAGIC: [u8; 4] = *b"FRM1";
 pub const FRAME_HEADER_LEN: usize = 64;
+pub const FRAME_COMMIT_MARKER: [u8; 8] = *b"PLSMCMIT";
+pub const FRAME_COMMIT_MARKER_LEN: usize = FRAME_COMMIT_MARKER.len();
 pub const MAX_PAYLOAD_ABS: usize = 256 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -129,11 +132,14 @@ pub fn align8(value: usize) -> Option<usize> {
 }
 
 pub fn frame_total_len(header_len: usize, payload_len: usize) -> Option<usize> {
-    header_len.checked_add(payload_len).and_then(align8)
+    header_len
+        .checked_add(payload_len)?
+        .checked_add(FRAME_COMMIT_MARKER_LEN)
+        .and_then(align8)
 }
 
 pub fn max_payload(ring_size: usize, header_len: usize) -> usize {
-    let ring_cap = ring_size.saturating_sub(header_len);
+    let ring_cap = ring_size.saturating_sub(header_len.saturating_add(FRAME_COMMIT_MARKER_LEN));
     ring_cap.min(MAX_PAYLOAD_ABS)
 }
 
@@ -195,7 +201,7 @@ mod tests {
     #[test]
     fn frame_total_len_is_aligned() {
         let total = frame_total_len(64, 1);
-        assert_eq!(total, Some(72));
+        assert_eq!(total, Some(80));
     }
 
     #[test]
@@ -233,7 +239,7 @@ mod tests {
     #[test]
     fn max_payload_is_ring_limited() {
         let max = max_payload(128, FRAME_HEADER_LEN);
-        assert_eq!(max, 64);
+        assert_eq!(max, 56);
     }
 
     #[test]

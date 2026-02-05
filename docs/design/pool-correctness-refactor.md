@@ -47,10 +47,12 @@ State transition API (pure)
 
 IO application order (append)
 1) If wrapping is needed, write wrap marker at end of ring.
-2) Write frame header + payload.
-3) Write commit marker for the frame (atomic signal of commit).
-4) Update header (newest seq, head offset, possibly oldest seq if empty).
-5) Persist ordering as needed (fsync/flush decisions stay in IO layer).
+2) Write frame header in `Writing` state.
+3) Write payload bytes.
+4) Write commit marker for the frame (written after payload).
+5) Flip frame header state to `Committed`.
+6) Update header (newest seq, head offset, possibly oldest seq if empty).
+7) Persist ordering as needed (fsync/flush decisions stay in IO layer).
 
 Decision: dual-header + checksum scheme
 - Not now.
@@ -82,7 +84,8 @@ Failure-mode table
 | Failure point                              | Observed state                          | Expected behavior |
 |--------------------------------------------|-----------------------------------------|-------------------|
 | Crash during payload write                 | Partial frame, no commit marker         | Ignore frame      |
-| Crash after commit marker, before header   | Frame committed, header newest old      | Header wins       |
+| Crash after commit marker, before commit   | Marker present, state still `Writing`   | Ignore frame      |
+| Crash after commit, before header          | Frame committed, header newest old      | Header wins       |
 | Crash during header write                  | Header may be partially updated         | Header validation fails, report error |
 | Crash during wrap marker write             | Partial wrap marker                     | Treat as invalid, stop scan |
 | Power loss during fsync                    | Header/ring out of sync                 | Read with header; validator reports |
@@ -90,5 +93,6 @@ Failure-mode table
 Crash test phases
 - AfterWrap: wrap marker written (if any), frame not started; header unchanged.
 - AfterWrite: frame header in Writing state + payload bytes written; header unchanged.
+- AfterMarker: commit marker written; frame header still Writing; header unchanged.
 - AfterCommit: frame header updated to Committed; header unchanged.
 - AfterHeader: pool header updated to new head/tail/seqs (fully visible).
