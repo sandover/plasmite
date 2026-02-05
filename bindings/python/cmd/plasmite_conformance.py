@@ -17,7 +17,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from plasmite import Client, Durability, PlasmiteError, parse_message
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+if str(PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_ROOT))
+
+from plasmite import Client, Durability, ErrorKind, PlasmiteError, parse_message
 
 
 def main() -> None:
@@ -53,6 +57,12 @@ def main() -> None:
             run_get(client, step, index, step_id)
         elif op == "tail":
             run_tail(client, step, index, step_id)
+        elif op == "list_pools":
+            run_list_pools(workdir_path, step, index, step_id)
+        elif op == "pool_info":
+            run_pool_info(repo_root, workdir_path, step, index, step_id)
+        elif op == "delete_pool":
+            run_delete_pool(workdir_path, step, index, step_id)
         elif op == "spawn_poke":
             run_spawn_poke(repo_root, workdir_path, step, index, step_id)
         elif op == "corrupt_pool_header":
@@ -193,6 +203,61 @@ def run_tail(client: Client, step: dict[str, Any], index: int, step_id: str | No
                 raise step_err(index, step_id, "message mismatch")
 
 
+def run_list_pools(workdir_path: Path, step: dict[str, Any], index: int, step_id: str | None) -> None:
+    try:
+        names = list_pool_names(workdir_path)
+    except PlasmiteError as err:
+        validate_expect_error(step.get("expect"), err, index, step_id)
+        return
+    validate_expect_error(step.get("expect"), None, index, step_id)
+
+    expect = step.get("expect", {})
+    if "names" in expect:
+        expected = expect["names"]
+        if not isinstance(expected, list):
+            raise step_err(index, step_id, "expect.names must be array")
+        if sorted(expected) != sorted(names):
+            raise step_err(index, step_id, "pool list mismatch")
+
+
+def run_pool_info(
+    repo_root: Path, workdir_path: Path, step: dict[str, Any], index: int, step_id: str | None
+) -> None:
+    pool = require_pool(step, index, step_id)
+    plasmite_bin = resolve_plasmite_bin(repo_root)
+    result = subprocess.run(
+        [plasmite_bin, "--dir", str(workdir_path), "pool", "info", pool],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        err = parse_error_json(result.stderr)
+        validate_expect_error(step.get("expect"), err, index, step_id)
+        return
+
+    validate_expect_error(step.get("expect"), None, index, step_id)
+    info = json.loads(result.stdout)
+    expect = step.get("expect", {})
+
+    if "file_size" in expect and info.get("file_size") != expect["file_size"]:
+        raise step_err(index, step_id, "file_size mismatch")
+    if "ring_size" in expect and info.get("ring_size") != expect["ring_size"]:
+        raise step_err(index, step_id, "ring_size mismatch")
+    if "bounds" in expect:
+        expect_bounds(expect["bounds"], info.get("bounds", {}), index, step_id)
+
+
+def run_delete_pool(workdir_path: Path, step: dict[str, Any], index: int, step_id: str | None) -> None:
+    pool = require_pool(step, index, step_id)
+    pool_path = Path(resolve_pool_path(workdir_path, pool))
+    try:
+        pool_path.unlink()
+    except OSError as err:
+        validate_expect_error(step.get("expect"), map_os_error(err, pool_path), index, step_id)
+        return
+    validate_expect_error(step.get("expect"), None, index, step_id)
+
+
 def run_spawn_poke(repo_root: Path, workdir_path: Path, step: dict[str, Any], index: int, step_id: str | None) -> None:
     pool = require_pool(step, index, step_id)
     input_data = require_input(step, index, step_id)
@@ -299,6 +364,60 @@ def error_kind_label(kind: Any) -> str:
     if hasattr(kind, "name"):
         return mapping.get(kind.name, "Internal")
     return mapping.get(str(kind), "Internal")
+
+
+def error_kind_from_label(label: str) -> ErrorKind:
+    mapping = {
+        "Internal": ErrorKind.INTERNAL,
+        "Usage": ErrorKind.USAGE,
+        "NotFound": ErrorKind.NOT_FOUND,
+        "AlreadyExists": ErrorKind.ALREADY_EXISTS,
+        "Busy": ErrorKind.BUSY,
+        "Permission": ErrorKind.PERMISSION,
+        "Corrupt": ErrorKind.CORRUPT,
+        "Io": ErrorKind.IO,
+    }
+    return mapping.get(label, ErrorKind.INTERNAL)
+
+
+def parse_error_json(output: str) -> PlasmiteError:
+    payload = json.loads(output or "{}")
+    err = payload.get("error", {})
+    kind = error_kind_from_label(err.get("kind", "Internal"))
+    message = err.get("message") or "error"
+    path = err.get("path")
+    seq = err.get("seq")
+    offset = err.get("offset")
+    return PlasmiteError(kind, message, path=path, seq=seq, offset=offset)
+
+
+def map_os_error(err: OSError, path: Path) -> PlasmiteError:
+    if err.errno in (2,):
+        kind = ErrorKind.NOT_FOUND
+    elif err.errno in (13, 1):
+        kind = ErrorKind.PERMISSION
+    else:
+        kind = ErrorKind.IO
+    return PlasmiteError(kind, str(err), path=str(path))
+
+
+def list_pool_names(workdir_path: Path) -> list[str]:
+    try:
+        entries = list(workdir_path.iterdir())
+    except OSError as err:
+        raise map_os_error(err, workdir_path) from err
+    names = []
+    for entry in entries:
+        if entry.name.endswith(".plasmite"):
+            names.append(entry.name[:-9])
+    return names
+
+
+def expect_bounds(expected: dict[str, Any], actual: dict[str, Any], index: int, step_id: str | None) -> None:
+    if "oldest" in expected and expected["oldest"] != actual.get("oldest"):
+        raise step_err(index, step_id, "bounds.oldest mismatch")
+    if "newest" in expected and expected["newest"] != actual.get("newest"):
+        raise step_err(index, step_id, "bounds.newest mismatch")
 
 
 def resolve_pool_path(workdir_path: Path, pool: str) -> str:

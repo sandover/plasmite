@@ -999,3 +999,7 @@
 {"type":"state","ts":"2026-02-05T00:13:37.752007Z","data":{"id":"6F3ISD","state":"done","ts":"2026-02-05T00:13:37.752007Z"}}
 {"type":"claim","ts":"2026-02-05T00:13:43.401857Z","data":{"id":"6QTASE","agent_id":"codex@bbook","ts":"2026-02-05T00:13:43.401857Z"}}
 {"type":"state","ts":"2026-02-05T00:13:43.401857Z","data":{"id":"6QTASE","state":"doing","ts":"2026-02-05T00:13:43.401857Z"}}
+{"type":"result","ts":"2026-02-05T00:17:21.25846Z","data":{"task_id":"6QTASE","summary":"Go conformance runner now supports list/delete/info ops and bounds/error parsing.","path":"bindings/go/cmd/plasmite-conformance/main.go","sha256_at_attach":"26e86faa897a782090348b9e410b7a07e105a03c8c0c1dace778b665d84a64e8","mtime_at_attach":"2026-02-05T00:16:52.937424511Z","git_commit_at_attach":"ded0ece4b49ba930932c3e84c21c054c9e7aab6e","ts":"2026-02-05T00:17:21.25846Z"}}
+{"type":"state","ts":"2026-02-05T00:17:21.263881Z","data":{"id":"6QTASE","state":"done","ts":"2026-02-05T00:17:21.263881Z"}}
+{"type":"claim","ts":"2026-02-05T00:17:23.924967Z","data":{"id":"XWF6LT","agent_id":"codex@bbook","ts":"2026-02-05T00:17:23.924967Z"}}
+{"type":"state","ts":"2026-02-05T00:17:23.924967Z","data":{"id":"XWF6LT","state":"doing","ts":"2026-02-05T00:17:23.924967Z"}}

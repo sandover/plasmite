@@ -9,7 +9,7 @@ Notes: Mirrors Rust/Go conformance runner behavior.
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const { Client, Durability } = require("../index.js");
 
 async function main() {
@@ -53,6 +53,15 @@ async function main() {
         break;
       case "tail":
         runTail(client, step, index, stepId);
+        break;
+      case "list_pools":
+        runListPools(step, index, stepId, workdirPath);
+        break;
+      case "pool_info":
+        runPoolInfo(repoRoot, workdirPath, step, index, stepId);
+        break;
+      case "delete_pool":
+        runDeletePool(step, index, stepId, workdirPath);
         break;
       case "spawn_poke":
         await runSpawnPoke(repoRoot, workdirPath, step, index, stepId);
@@ -228,6 +237,64 @@ function runTail(client, step, index, stepId) {
   }
 }
 
+function runListPools(step, index, stepId, workdirPath) {
+  const result = tryCall(() => listPoolNames(workdirPath));
+  if (result.error) {
+    validateExpectError(step.expect, result.error, index, stepId);
+    return;
+  }
+  validateExpectError(step.expect, null, index, stepId);
+  if (step.expect?.names) {
+    if (!Array.isArray(step.expect.names)) {
+      throw stepError(index, stepId, "expect.names must be array");
+    }
+    const actual = [...result.value].sort();
+    const expected = [...step.expect.names].sort();
+    if (!deepEqual(actual, expected)) {
+      throw stepError(index, stepId, "pool list mismatch");
+    }
+  }
+}
+
+function runPoolInfo(repoRoot, workdirPath, step, index, stepId) {
+  const pool = requirePool(step, index, stepId);
+  const plasmiteBin = resolvePlasmiteBin(repoRoot);
+  const result = spawnSync(
+    plasmiteBin,
+    ["--dir", workdirPath, "pool", "info", pool],
+    { encoding: "utf8" }
+  );
+  if (result.status !== 0) {
+    const err = parseErrorJSON(result.stderr);
+    validateExpectError(step.expect, err, index, stepId);
+    return;
+  }
+  validateExpectError(step.expect, null, index, stepId);
+  const info = JSON.parse(result.stdout);
+  if (step.expect?.file_size !== undefined && info.file_size !== step.expect.file_size) {
+    throw stepError(index, stepId, "file_size mismatch");
+  }
+  if (step.expect?.ring_size !== undefined && info.ring_size !== step.expect.ring_size) {
+    throw stepError(index, stepId, "ring_size mismatch");
+  }
+  if (step.expect?.bounds) {
+    expectBounds(step.expect.bounds, info.bounds ?? {}, index, stepId);
+  }
+}
+
+function runDeletePool(step, index, stepId, workdirPath) {
+  const pool = requirePool(step, index, stepId);
+  const poolPath = resolvePoolPath(workdirPath, pool);
+  try {
+    fs.unlinkSync(poolPath);
+  } catch (err) {
+    const mapped = mapFsError(err, poolPath, "failed to delete pool");
+    validateExpectError(step.expect, mapped, index, stepId);
+    return;
+  }
+  validateExpectError(step.expect, null, index, stepId);
+}
+
 async function runSpawnPoke(repoRoot, workdirPath, step, index, stepId) {
   const pool = requirePool(step, index, stepId);
   const input = requireInput(step, index, stepId);
@@ -291,6 +358,65 @@ function runChmodPath(step, index, stepId) {
     throw stepError(index, stepId, "missing input.mode");
   }
   fs.chmodSync(pathValue, parseInt(modeValue, 8));
+}
+
+function listPoolNames(workdirPath) {
+  try {
+    const entries = fs.readdirSync(workdirPath);
+    return entries
+      .filter((entry) => entry.endsWith(".plasmite"))
+      .map((entry) => entry.replace(/\\.plasmite$/, ""));
+  } catch (err) {
+    throw mapFsError(err, workdirPath, "failed to read pool directory");
+  }
+}
+
+function mapFsError(err, targetPath, message) {
+  const code = err?.code;
+  let kind = "Io";
+  if (code === "ENOENT") {
+    kind = "NotFound";
+  } else if (code === "EACCES" || code === "EPERM") {
+    kind = "Permission";
+  }
+  return makePlasmiteError({ kind, message, path: targetPath });
+}
+
+function parseErrorJSON(output) {
+  if (!output) {
+    return new Error("plasmite error: kind=Internal; message=error");
+  }
+  let payload = {};
+  try {
+    payload = JSON.parse(output);
+  } catch (err) {
+    return new Error(`plasmite error: kind=Internal; message=${String(err)}`);
+  }
+  const errObj = payload.error ?? {};
+  return makePlasmiteError({
+    kind: errObj.kind ?? "Internal",
+    message: errObj.message ?? "error",
+    path: errObj.path,
+    seq: errObj.seq,
+    offset: errObj.offset,
+  });
+}
+
+function makePlasmiteError({ kind, message, path, seq, offset }) {
+  const details = [`kind=${kind}`, `message=${message}`];
+  if (path) details.push(`path=${path}`);
+  if (seq !== undefined && seq !== null) details.push(`seq=${seq}`);
+  if (offset !== undefined && offset !== null) details.push(`offset=${offset}`);
+  return new Error(`plasmite error: ${details.join("; ")}`);
+}
+
+function expectBounds(expected, actual, index, stepId) {
+  if ("oldest" in expected && expected.oldest !== actual?.oldest) {
+    throw stepError(index, stepId, "bounds.oldest mismatch");
+  }
+  if ("newest" in expected && expected.newest !== actual?.newest) {
+    throw stepError(index, stepId, "bounds.newest mismatch");
+  }
 }
 
 function expectedMessages(expect, index, stepId) {
