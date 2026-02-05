@@ -108,12 +108,11 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 let pool_ref = PoolRef::path(path.clone());
                 vec![doctor_report(&client, pool_ref, pool, path)?]
             } else {
-                let pools = client.list_pools()?;
                 let mut reports = Vec::new();
-                for info in pools {
-                    let label = info.path.to_string_lossy().to_string();
-                    let pool_ref = PoolRef::path(info.path.clone());
-                    reports.push(doctor_report(&client, pool_ref, label, info.path)?);
+                for path in list_pool_paths(&pool_dir)? {
+                    let label = path.to_string_lossy().to_string();
+                    let pool_ref = PoolRef::path(path.clone());
+                    reports.push(doctor_report(&client, pool_ref, label, path)?);
                 }
                 reports
             };
@@ -912,6 +911,35 @@ fn error_issue(err: &Error) -> ValidationIssue {
         seq: err.seq(),
         offset: err.offset(),
     }
+}
+
+fn list_pool_paths(pool_dir: &Path) -> Result<Vec<PathBuf>, Error> {
+    let entries = std::fs::read_dir(pool_dir).map_err(|err| {
+        let kind = match err.kind() {
+            std::io::ErrorKind::NotFound => ErrorKind::NotFound,
+            std::io::ErrorKind::PermissionDenied => ErrorKind::Permission,
+            _ => ErrorKind::Io,
+        };
+        Error::new(kind)
+            .with_message("failed to read pool directory")
+            .with_path(pool_dir)
+            .with_source(err)
+    })?;
+
+    let mut pools = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_message("failed to read pool directory entry")
+                .with_path(pool_dir)
+                .with_source(err)
+        })?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("plasmite") {
+            pools.push(path);
+        }
+    }
+    Ok(pools)
 }
 
 fn list_pools(pool_dir: &Path) -> Vec<Value> {

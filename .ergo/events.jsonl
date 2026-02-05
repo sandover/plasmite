@@ -987,3 +987,7 @@
 {"type":"link","ts":"2026-02-05T00:01:56.661398Z","data":{"from_id":"XWF6LT","to_id":"6F3ISD","type":"depends"}}
 {"type":"claim","ts":"2026-02-05T00:02:06.716669Z","data":{"id":"RR3ILO","agent_id":"codex@bbook","ts":"2026-02-05T00:02:06.716669Z"}}
 {"type":"state","ts":"2026-02-05T00:02:06.716669Z","data":{"id":"RR3ILO","state":"doing","ts":"2026-02-05T00:02:06.716669Z"}}
+{"type":"result","ts":"2026-02-05T00:06:07.197664Z","data":{"task_id":"RR3ILO","summary":"Expanded remote integration coverage plus loopback rejection and error kind mapping.","path":"tests/remote_integration.rs","sha256_at_attach":"d9c3c47d979a4f59014fe6521d0cd26a6cb765d29353027073d4248ad730965c","mtime_at_attach":"2026-02-05T00:05:50.221547873Z","git_commit_at_attach":"a81a8adcd78b6bc1a91a6201c9c894d29065c196","ts":"2026-02-05T00:06:07.197664Z"}}
+{"type":"state","ts":"2026-02-05T00:06:07.203396Z","data":{"id":"RR3ILO","state":"done","ts":"2026-02-05T00:06:07.203396Z"}}
+{"type":"claim","ts":"2026-02-05T00:06:19.18972Z","data":{"id":"NKR2TH","agent_id":"codex@bbook","ts":"2026-02-05T00:06:19.18972Z"}}
+{"type":"state","ts":"2026-02-05T00:06:19.18972Z","data":{"id":"NKR2TH","state":"doing","ts":"2026-02-05T00:06:19.18972Z"}}

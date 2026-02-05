@@ -6,11 +6,13 @@
 use std::fs::File;
 use std::io::Write;
 use std::io::{BufRead, BufReader, Read};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
+use std::{thread::sleep, time::Instant};
 
 use fs2::FileExt;
 use serde_json::Value;
@@ -18,6 +20,43 @@ use serde_json::Value;
 fn cmd() -> Command {
     let exe = env!("CARGO_BIN_EXE_plasmite");
     Command::new(exe)
+}
+
+struct ServeProcess {
+    child: Child,
+    base_url: String,
+}
+
+impl ServeProcess {
+    fn start(pool_dir: &std::path::Path) -> Self {
+        let port = pick_port().expect("port");
+        let bind = format!("127.0.0.1:{port}");
+        let base_url = format!("http://{bind}");
+
+        let child = cmd()
+            .args([
+                "--dir",
+                pool_dir.to_str().unwrap(),
+                "serve",
+                "--bind",
+                &bind,
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn serve");
+
+        wait_for_server(bind.parse().expect("addr")).expect("server ready");
+
+        Self { child, base_url }
+    }
+}
+
+impl Drop for ServeProcess {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 fn parse_json(value: &str) -> Value {
@@ -41,6 +80,29 @@ fn parse_error_json(output: &[u8]) -> Value {
 
 fn parse_notice_json(line: &str) -> Value {
     parse_json(line.trim())
+}
+
+fn pick_port() -> std::io::Result<u16> {
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let port = listener.local_addr()?.port();
+    drop(listener);
+    Ok(port)
+}
+
+fn wait_for_server(addr: SocketAddr) -> std::io::Result<()> {
+    let start = Instant::now();
+    loop {
+        if TcpStream::connect(addr).is_ok() {
+            return Ok(());
+        }
+        if start.elapsed() > Duration::from_secs(2) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "server did not start in time",
+            ));
+        }
+        sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]
@@ -2587,6 +2649,58 @@ fn doctor_reports_corrupt_and_exit_code() {
 }
 
 #[test]
+fn doctor_all_reports_mixed_ok_and_corrupt() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "ok"])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    std::fs::create_dir_all(&pool_dir).expect("mkdir");
+    let pool_path = pool_dir.join("bad.plasmite");
+    std::fs::write(&pool_path, b"NOPE").expect("write");
+
+    let doctor = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "doctor", "--all"])
+        .output()
+        .expect("doctor");
+    assert_eq!(doctor.status.code().unwrap(), 7);
+    let output = parse_json(std::str::from_utf8(&doctor.stdout).expect("utf8"));
+    let reports = output
+        .get("reports")
+        .and_then(|v| v.as_array())
+        .expect("reports array");
+    let statuses = reports
+        .iter()
+        .filter_map(|report| report.get("status").and_then(|v| v.as_str()))
+        .collect::<Vec<_>>();
+    assert!(statuses.contains(&"ok"));
+    assert!(statuses.contains(&"corrupt"));
+}
+
+#[test]
+fn doctor_missing_pool_reports_not_found() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let doctor = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "doctor", "missing"])
+        .output()
+        .expect("doctor");
+    assert!(!doctor.status.success());
+    let err = parse_error_json(&doctor.stderr);
+    let kind = err
+        .get("error")
+        .and_then(|v| v.get("kind"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert_eq!(kind, "NotFound");
+}
+
+#[test]
 fn poke_streams_json_values_from_stdin() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
@@ -2649,4 +2763,57 @@ fn poke_streams_json_values_from_stdin() {
     assert_eq!(peek_lines.len(), 2);
     assert_eq!(peek_lines[0].get("data").unwrap()["x"], 1);
     assert_eq!(peek_lines[1].get("data").unwrap()["x"], 2);
+}
+
+#[test]
+fn serve_rejects_invalid_bind() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let serve = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "serve",
+            "--bind",
+            "nope",
+        ])
+        .output()
+        .expect("serve");
+    assert!(!serve.status.success());
+    let err = parse_error_json(&serve.stderr);
+    let kind = err
+        .get("error")
+        .and_then(|v| v.get("kind"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert_eq!(kind, "Usage");
+}
+
+#[test]
+fn serve_responses_include_version_header() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let server = ServeProcess::start(&pool_dir);
+
+    let list_url = format!("{}/v0/pools", server.base_url);
+    let list = ureq::get(&list_url).call().expect("list");
+    assert_eq!(list.header("plasmite-version"), Some("0"));
+
+    let tail_url = format!("{}/v0/pools/demo/tail?timeout_ms=10", server.base_url);
+    let tail = ureq::get(&tail_url).call().expect("tail");
+    assert_eq!(tail.header("plasmite-version"), Some("0"));
 }
