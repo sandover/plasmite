@@ -8,7 +8,7 @@
   "types": "index.d.ts",
   "scripts": {
     "build": "napi build --cargo-cwd native",
-    "test": "npm run build && node --test test/conformance.test.js"
+    "test": "npm run build && node --test test/*.test.js"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0"
