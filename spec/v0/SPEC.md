@@ -94,10 +94,13 @@ The CLI message schema is fixed and versioned by convention:
 
 Supported in v0.0.1: **macOS** and **Linux**.
 
-### Out of scope
+### Out of scope (not yet frozen)
 
-* Remote refs (`tcp(s)://...`) and `plasmite serve`.
-* Any additional subcommands or flags not listed above.
+The following are implemented but not yet part of the frozen v0.0.1 contract (their APIs may evolve):
+
+* `plasmite serve` - HTTP server for remote access (loopback-only; see `spec/remote/v0/SPEC.md`)
+* `plasmite doctor` - Pool validation (see `docs/doctor.md`)
+* Remote refs (`tcp(s)://...`) - planned for future versions
 
 ---
 
@@ -665,58 +668,21 @@ Notes:
 
 # Roadmap (v2+)
 
-## Remote refs + `plasmite serve`
+## Remote refs in CLI
 
-Remote pool refs are explicitly out of scope for v0.1.
+`plasmite serve` is implemented (HTTP/JSON, loopback-only). See `spec/remote/v0/SPEC.md` for the protocol.
 
-When we add them, the CLI UX-level contract is:
+Remote pool refs in CLI commands are still planned:
 
-* Remote pool refs use `tcp(s)://host:port/POOL` (no trailing slash)
+* Remote pool refs would use `http(s)://host:port/POOL` (no trailing slash)
 * Subcommands that accept POOLREF should work remotely at least for: `peek`, `poke`, `get`, `export`, and `pool list`.
 
-### Remote protocol versioning + capability negotiation (future)
+### Future serve enhancements
 
-Goal: make remote support evolvable without hidden state or “it worked on my server” drift.
-
-Recommended strategy:
-
-* Use an explicit protocol version `MAJOR.MINOR`.
-  * `MAJOR` breaks compatibility.
-  * `MINOR` is additive-only (new message types/fields/caps only; never change meaning).
-* Handshake chooses the highest mutually-supported version and a concrete set of enabled capabilities.
-* Unknown fields must be ignored for forward compatibility.
-
-Client → Server (`hello`), one JSON message:
-
-* `protocol.versions` (array of strings): supported versions, highest first (e.g. `["1.1","1.0"]`).
-* `capabilities.required` / `capabilities.optional` (arrays of strings): requested feature names.
-* `client.name` / `client.version` (strings): for debugging and telemetry.
-
-Server → Client (`welcome`), one JSON message:
-
-* `protocol.version` (string): chosen version.
-* `capabilities.enabled` (object): enabled capabilities and parameters (additive-only).
-* `limits` (object): sizes/timeouts (e.g. `max_frame_bytes`, `max_inflight`).
-
-Strictness:
-
-* If any `required` capability cannot be enabled: fail the handshake with a structured error.
-* Otherwise: enable the subset possible and report it in `capabilities.enabled`.
-
-Framing:
-
-* Transport should be message-based with an unambiguous frame boundary.
-* Recommended: length-prefixed UTF-8 JSON objects (so we never depend on “JSONL over TCP” parsing).
-
-`plasmite serve` would expose local pools over TCP with options like:
-
-* `--listen HOST:PORT` (default `0.0.0.0:65456`)
-* `--dir PATH`
 * `--tls` / `--tls-cert FILE --tls-key FILE`
 * `--require-client-cert` (mTLS)
-* `--allow-insecure` (explicit)
-* `--pidfile FILE`
-* `--log FORMAT` (`stderr|pool:NAME|file:PATH`)
+* Non-loopback binds (requires auth)
+* QUIC transport
 
 ## Raw bytes convenience
 
@@ -734,11 +700,16 @@ plasmite completion bash|zsh|fish
 
 ## `plasmite doctor`
 
-Environment and sanity checks.
+Pool validation and diagnostics. See `docs/doctor.md` for full documentation.
 
-* prints a JSON object describing pool dir, config, and permission checks
-* can validate a pool file quickly
-* helpful when debugging “why can’t I see pools”
+```bash
+plasmite doctor <POOL>    # validate one pool
+plasmite doctor --all     # validate all pools
+```
+
+* On TTY: human-friendly lines (`OK` or `CORRUPT`)
+* On non-TTY: JSON output with a `reports` array
+* Exits nonzero (7) when corruption is detected
 
 ## `plasmite version`
 

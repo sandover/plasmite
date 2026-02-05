@@ -83,6 +83,50 @@ fi
 cargo audit --db .scratch/advisory-db --no-fetch
 ```
 
+## Conformance suite
+
+The conformance suite validates that all language bindings behave consistently.
+See `conformance/README.md` for the full manifest format.
+
+Run the Rust conformance runner:
+
+```bash
+cargo run --bin plasmite-conformance -- conformance/sample-v0.json
+```
+
+Run Go conformance:
+
+```bash
+cd bindings/go
+CGO_LDFLAGS="-L$(pwd)/../../target/debug" go run ./cmd/plasmite-conformance ../../conformance/sample-v0.json
+```
+
+## Binding tests
+
+### Go
+
+```bash
+cd bindings/go
+cargo build -p plasmite  # build libplasmite first
+CGO_LDFLAGS="-L$(pwd)/../../target/debug" go test ./...
+```
+
+### Python
+
+```bash
+cd bindings/python
+cargo build -p plasmite
+PLASMITE_LIB_DIR="$(pwd)/../../target/debug" python -m unittest
+```
+
+### Node.js
+
+```bash
+cd bindings/node
+cargo build -p plasmite
+PLASMITE_LIB_DIR="$(pwd)/../../target/debug" npm test
+```
+
 ## Notes
 
 - Toolchain: pinned in `rust-toolchain.toml` (includes `clippy` + `rustfmt`).

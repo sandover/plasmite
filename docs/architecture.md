@@ -42,12 +42,21 @@ Key invariants:
 - Every committed message has an RFC 3339 `time` (UTC).
 - Corruption is detected and reported as an “invalid/corrupt pool” error kind.
 
-## Preparing for remote access (TCP now, QUIC later)
+## Remote access
 
-Plasmite’s goal is to remain **transport-agnostic**:
-- Standardize a `PoolRef` model that can represent local names/paths now and URI-based refs later.
-- Define one framing format for message streams so stdin/file/TCP/QUIC can share the same logical events.
-- Make `plasmite serve` (future) a thin adapter: socket ↔ framing ↔ core operations.
+Plasmite is **transport-agnostic**:
+- The `PoolRef` model represents local names/paths now and can represent URI-based refs later.
+- Message streams use the same logical format whether over stdin, file, HTTP, or future transports.
+- `plasmite serve` is a thin adapter: HTTP ↔ framing ↔ core operations.
 
-“UDP access” is expected to be delivered via **QUIC** (UDP-based transport with streams, reliability, and TLS), not bespoke unreliable UDP.
+### Current: HTTP/JSON (v0)
+
+`plasmite serve` exposes pools over HTTP with JSON request/response bodies:
+- Loopback-only in v0 (127.0.0.1)
+- See `spec/remote/v0/SPEC.md` for the protocol contract
+- Node.js `RemoteClient` provides a typed client
+
+### Future: QUIC transport
+
+"UDP access" will be delivered via **QUIC** (UDP-based transport with streams, reliability, and TLS), not bespoke unreliable UDP. This will enable lower-latency streaming and better handling of unreliable networks.
 

@@ -5,6 +5,8 @@
 
 Persistent JSON message queues backed by plain files, making interprocess communication easy and inspectable. Multiple processes can write and read concurrently. Message queues are ring buffers, so writes almost always succeed.
 
+Use Plasmite via the CLI, native bindings (Go, Python, Node), or the HTTP API.
+
 ```bash
 # First, create a pool
 pls pool create chat
@@ -115,22 +117,37 @@ pls peek foo --since 5m
 
 ### Use it from scripts
 
+**Via CLI** (any language):
+```bash
+pls poke foo --create '{"from": "bash"}'
+```
+
+**Native bindings** (no subprocess overhead):
+
+```go
+// Go
+client, _ := plasmite.NewClient("./data")
+pool, _ := client.CreatePool(plasmite.PoolRefName("foo"), 1024*1024)
+pool.Append(map[string]any{"from": "go"}, nil, plasmite.DurabilityFast)
+```
+
 ```python
 # Python
-import subprocess, json
-subprocess.run(["pls", "poke", "foo", "--create", json.dumps({"from": "python"})])
+from plasmite import Client
+client = Client("./data")
+pool = client.create_pool("foo", 1024*1024)
+pool.append_json(b'{"from": "python"}', [], "fast")
 ```
 
 ```javascript
 // Node.js
-const { execSync } = require('child_process');
-execSync(`pls poke foo --create '${JSON.stringify({from: "node"})}'`);
+const { Client } = require("plasmite-node")
+const client = new Client("./data")
+const pool = client.createPool("foo", 1024 * 1024)
+pool.appendJson(Buffer.from('{"from": "node"}'), [], "fast")
 ```
 
-```bash
-# Or just shell
-pls poke foo --create '{"from": "bash"}'
-```
+See [Go quickstart](docs/go-quickstart.md), [bindings/python](bindings/python/README.md), and [bindings/node](bindings/node/README.md) for full documentation.
 
 ## Commands
 
@@ -143,6 +160,8 @@ pls poke foo --create '{"from": "bash"}'
 | `pool list` | List pools |
 | `pool info NAME` | Show pool metadata |
 | `pool delete NAME` | Delete a pool |
+| `doctor POOL` | Validate pool health (`--all` for all pools) |
+| `serve` | Serve pools over HTTP (loopback-only in v0) |
 
 Both `pls` and `plasmite` commands are supported.
 
@@ -230,6 +249,34 @@ cat big.json | pls poke foo --in json
 
 Skip bad records with `--errors skip` (exit 1 if any skipped).
 
+## Remote Access
+
+Serve pools over HTTP for access from other processes or machines:
+
+```bash
+# Start the server (loopback-only in v0)
+pls serve --bind 127.0.0.1:9700
+
+# Use curl to append a message
+curl -X POST http://127.0.0.1:9700/v0/pools/demo/append \
+  -H "Content-Type: application/json" \
+  -d '{"data": {"msg": "hello from curl"}, "descrips": ["remote"]}'
+
+# Tail messages (JSON Lines stream)
+curl -N http://127.0.0.1:9700/v0/pools/demo/tail
+```
+
+The Node.js binding includes a `RemoteClient` for programmatic access:
+
+```javascript
+const { RemoteClient } = require("plasmite-node")
+const client = new RemoteClient("http://127.0.0.1:9700")
+const pool = await client.openPool("demo")
+await pool.append({ msg: "hello" }, ["remote"])
+```
+
+See [Remote protocol spec](spec/remote/v0/SPEC.md) for the full API.
+
 ## Performance
 
 Benchmarks on a laptop (M-series Mac, release build, 256-byte payloads):
@@ -248,9 +295,20 @@ Inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma)
 
 ## More Info
 
+**Specs** (normative contracts):
 - [CLI spec](spec/v0/SPEC.md) - Stable contract for scripting
+- [API spec](spec/api/v0/SPEC.md) - Public API for bindings
+- [Remote spec](spec/remote/v0/SPEC.md) - HTTP/JSON remote protocol
+
+**Guides**:
+- [API quickstart](docs/api-quickstart.md) - Embedding in Rust
+- [Go quickstart](docs/go-quickstart.md) - Using the Go bindings
+- [libplasmite](docs/libplasmite.md) - Building the C ABI
+
+**Reference**:
 - [Architecture](docs/architecture.md) - How it's built
 - [Exit codes](docs/exit-codes.md) - For robust error handling
+- [Diagnostics](docs/doctor.md) - Pool validation
 - [Changelog](CHANGELOG.md) - Version history
 
 ## License

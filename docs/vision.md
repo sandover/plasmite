@@ -11,9 +11,10 @@ Plasmite is a **local-first, JSON-first message pool** for “a handful to dozen
 
 ## What it is
 
-- A small CLI that lets you create pools, append JSON messages, and observe messages as they arrive.
+- A CLI, library, and HTTP server for creating pools, appending JSON messages, and observing messages as they arrive.
+- Language bindings (Go, Python, Node.js) for embedding without subprocess overhead.
 - A durable-ish local IPC/log primitive with a stable, script-friendly contract.
-- A foundation for future remote access that doesn’t fork the contract surface.
+- Remote access via HTTP (`plasmite serve`) for multi-machine coordination.
 
 ## What it is not (non-goals)
 

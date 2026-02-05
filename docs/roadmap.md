@@ -9,15 +9,24 @@ Invariants: v0 contract remains stable; roadmap items are non-binding until prom
 
 This roadmap is outcome-oriented. Design details live in ADRs; compatibility promises live in versioned specs.
 
-## After v0.0.1
+## Completed (post v0.0.1)
 
-- Remote pool refs + `plasmite serve` (TCP first)
-- Per-entry checksums (opt-in; not in v0.0.1)
+- ✓ `plasmite serve` - HTTP/JSON server (loopback-only for v0)
+- ✓ `plasmite doctor` - Pool validation and diagnostics
+- ✓ Language bindings - Go, Python, Node.js (via libplasmite C ABI)
+- ✓ Public Rust API (`plasmite::api`)
+- ✓ Remote protocol spec (HTTP/JSON)
+- ✓ Conformance test suite (cross-language)
+
+## In progress
+
+- Shell completion
+- Remote pool refs in CLI (using `plasmite serve` as backend)
+
+## Future
+
+- Per-entry checksums (opt-in)
 - Binary payload conventions (inline blobs/chunking) + optional blob store
 - Pattern matching / filtering interface (stateless; interface TBD)
-- Shell completion
-- `plasmite doctor` (validation + diagnostics)
-
-## Later
-
-- QUIC transport (“UDP access” via QUIC streams + TLS)
+- QUIC transport ("UDP access" via QUIC streams + TLS)
+- Non-loopback `serve` (with auth + TLS)
