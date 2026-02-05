@@ -1,7 +1,8 @@
 # Plasmite Go Bindings (v0)
 
 These bindings wrap the `libplasmite` C ABI via cgo and return JSON message bytes
-that match the v0 API spec.
+that match the v0 API spec. Lite3 fast-path APIs accept and return raw Lite3
+payload bytes.
 
 ## Build Requirements
 - Go 1.22+
@@ -44,4 +45,10 @@ if err != nil {
     // handle err
 }
 _ = msg
+
+frame, err := pool.GetLite3(1)
+if err != nil {
+    // handle err
+}
+_ = frame
 ```

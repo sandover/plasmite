@@ -1,9 +1,9 @@
-//! Purpose: Provide an HTTP/JSON remote client for the Plasmite v0 protocol.
-//! Exports: `RemoteClient`, `RemotePool`, `RemoteTail`.
+//! Purpose: Provide an HTTP client for the Plasmite v0 protocol (JSON + Lite3 bytes).
+//! Exports: `RemoteClient`, `RemotePool`, `RemoteTail`, `RemoteLite3Tail`, `RemoteLite3Frame`.
 //! Role: Transport-agnostic client that mirrors local pool operations remotely.
 //! Invariants: Requests/response envelopes align with spec/remote/v0/SPEC.md.
 //! Invariants: Pool refs resolve to a base URL + pool identifier (name only).
-//! Invariants: Tail streams are JSONL and cancelable via drop or `cancel()`.
+//! Invariants: Tail streams are JSONL (messages) or framed Lite3 bytes (fast path).
 #![allow(clippy::result_large_err)]
 
 use super::{Message, Meta, PoolRef, TailOptions};
@@ -12,7 +12,7 @@ use crate::core::pool::{AppendOptions, Bounds, Durability, PoolInfo, PoolOptions
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 use std::sync::Arc;
 use url::Url;
@@ -42,6 +42,17 @@ pub struct RemoteTail {
     reader: Option<BufReader<Box<dyn std::io::Read + Send + Sync>>>,
 }
 
+pub struct RemoteLite3Tail {
+    reader: Option<BufReader<Box<dyn std::io::Read + Send + Sync>>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RemoteLite3Frame {
+    pub seq: u64,
+    pub timestamp_ns: u64,
+    pub payload: Vec<u8>,
+}
+
 #[derive(Clone, Debug)]
 struct ResolvedPool {
     base_url: Url,
@@ -61,6 +72,16 @@ struct PoolsEnvelope {
 #[derive(Deserialize)]
 struct MessageEnvelope {
     message: RemoteMessage,
+}
+
+#[derive(Deserialize)]
+struct Lite3AppendEnvelope {
+    message: Lite3AppendMessage,
+}
+
+#[derive(Deserialize)]
+struct Lite3AppendMessage {
+    seq: u64,
 }
 
 #[derive(Deserialize)]
@@ -285,6 +306,20 @@ impl RemoteClient {
                 .with_source(err)),
         }
     }
+
+    fn request_stream_lite3(&self, url: &Url) -> ApiResult<ureq::Response> {
+        let response = self
+            .request("GET", url)
+            .set("Accept", "application/x-plasmite-lite3-stream")
+            .call();
+        match response {
+            Ok(resp) => Ok(resp),
+            Err(ureq::Error::Status(code, resp)) => Err(parse_error_response(code, resp)),
+            Err(ureq::Error::Transport(err)) => Err(Error::new(ErrorKind::Io)
+                .with_message("request failed")
+                .with_source(err)),
+        }
+    }
 }
 
 impl RemotePool {
@@ -340,6 +375,45 @@ impl RemotePool {
         )
     }
 
+    pub fn append_lite3(&self, payload: &[u8], options: AppendOptions) -> ApiResult<u64> {
+        if options.timestamp_ns != 0 {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("remote append does not support explicit timestamps"));
+        }
+        let mut url = build_url(&self.base_url, &["v0", "pools", &self.pool, "append_lite3"])?;
+        if options.durability == Durability::Flush {
+            url.query_pairs_mut()
+                .append_pair("durability", durability_to_str(options.durability));
+        }
+        let response = self
+            .client
+            .request("POST", &url)
+            .set("Accept", "application/json")
+            .set("Content-Type", "application/x-plasmite-lite3")
+            .send_bytes(payload);
+
+        match response {
+            Ok(resp) => {
+                let envelope: Lite3AppendEnvelope = read_json_response(resp)?;
+                Ok(envelope.message.seq)
+            }
+            Err(ureq::Error::Status(code, resp)) => Err(parse_error_response(code, resp)),
+            Err(ureq::Error::Transport(err)) => Err(Error::new(ErrorKind::Io)
+                .with_message("request failed")
+                .with_source(err)),
+        }
+    }
+
+    pub fn append_lite3_now(&self, payload: &[u8], durability: Durability) -> ApiResult<u64> {
+        self.append_lite3(
+            payload,
+            AppendOptions {
+                timestamp_ns: 0,
+                durability,
+            },
+        )
+    }
+
     pub fn get_message(&self, seq: u64) -> ApiResult<Message> {
         let url = build_url(
             &self.base_url,
@@ -350,6 +424,41 @@ impl RemotePool {
             .request_json::<(), _>("GET", &url, &())
             .map_err(|err| err.with_path(self.pool.clone()).with_seq(seq))?;
         Ok(message_from_remote(envelope.message))
+    }
+
+    pub fn get_lite3(&self, seq: u64) -> ApiResult<Vec<u8>> {
+        let url = build_url(
+            &self.base_url,
+            &[
+                "v0",
+                "pools",
+                &self.pool,
+                "messages",
+                &seq.to_string(),
+                "lite3",
+            ],
+        )?;
+        let response = self
+            .client
+            .request("GET", &url)
+            .set("Accept", "application/x-plasmite-lite3")
+            .call();
+        match response {
+            Ok(resp) => {
+                let mut reader = resp.into_reader();
+                let mut out = Vec::new();
+                reader.read_to_end(&mut out).map_err(|err| {
+                    Error::new(ErrorKind::Io)
+                        .with_message("failed to read lite3 response")
+                        .with_source(err)
+                })?;
+                Ok(out)
+            }
+            Err(ureq::Error::Status(code, resp)) => Err(parse_error_response(code, resp)),
+            Err(ureq::Error::Transport(err)) => Err(Error::new(ErrorKind::Io)
+                .with_message("request failed")
+                .with_source(err)),
+        }
     }
 
     pub fn tail(&self, options: TailOptions) -> ApiResult<RemoteTail> {
@@ -372,6 +481,30 @@ impl RemotePool {
             .request_stream(&url)
             .map_err(|err| err.with_path(self.pool.clone()))?;
         Ok(RemoteTail {
+            reader: Some(BufReader::new(response.into_reader())),
+        })
+    }
+
+    pub fn tail_lite3(&self, options: TailOptions) -> ApiResult<RemoteLite3Tail> {
+        let mut url = build_url(&self.base_url, &["v0", "pools", &self.pool, "tail_lite3"])?;
+        {
+            let mut pairs = url.query_pairs_mut();
+            if let Some(since) = options.since_seq {
+                pairs.append_pair("since_seq", &since.to_string());
+            }
+            if let Some(max) = options.max_messages {
+                pairs.append_pair("max", &max.to_string());
+            }
+            if let Some(timeout) = options.timeout {
+                pairs.append_pair("timeout_ms", &timeout.as_millis().to_string());
+            }
+        }
+
+        let response = self
+            .client
+            .request_stream_lite3(&url)
+            .map_err(|err| err.with_path(self.pool.clone()))?;
+        Ok(RemoteLite3Tail {
             reader: Some(BufReader::new(response.into_reader())),
         })
     }
@@ -402,6 +535,36 @@ impl RemoteTail {
             })?;
             return Ok(Some(message_from_remote(message)));
         }
+    }
+
+    pub fn cancel(&mut self) {
+        self.reader = None;
+    }
+}
+
+impl RemoteLite3Tail {
+    pub fn next_frame(&mut self) -> ApiResult<Option<RemoteLite3Frame>> {
+        let Some(reader) = self.reader.as_mut() else {
+            return Ok(None);
+        };
+        let mut header = [0u8; 20];
+        if !read_exact_or_eof(reader, &mut header)? {
+            return Ok(None);
+        }
+        let seq = u64::from_be_bytes(header[0..8].try_into().expect("seq header"));
+        let timestamp_ns = u64::from_be_bytes(header[8..16].try_into().expect("timestamp header"));
+        let len = u32::from_be_bytes(header[16..20].try_into().expect("len header")) as usize;
+        let mut payload = vec![0u8; len];
+        reader.read_exact(&mut payload).map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_message("failed to read lite3 payload")
+                .with_source(err)
+        })?;
+        Ok(Some(RemoteLite3Frame {
+            seq,
+            timestamp_ns,
+            payload,
+        }))
     }
 
     pub fn cancel(&mut self) {
@@ -518,6 +681,31 @@ fn parse_error_response(status: u16, response: ureq::Response) -> Error {
     }
     let kind = error_kind_from_status(status);
     Error::new(kind).with_message(format!("remote error status {status}"))
+}
+
+fn read_exact_or_eof(reader: &mut dyn Read, buf: &mut [u8]) -> ApiResult<bool> {
+    let mut offset = 0;
+    while offset < buf.len() {
+        match reader.read(&mut buf[offset..]) {
+            Ok(0) => {
+                if offset == 0 {
+                    return Ok(false);
+                }
+                return Err(
+                    Error::new(ErrorKind::Io).with_message("unexpected eof in lite3 stream")
+                );
+            }
+            Ok(read) => {
+                offset += read;
+            }
+            Err(err) => {
+                return Err(Error::new(ErrorKind::Io)
+                    .with_message("failed to read lite3 stream")
+                    .with_source(err));
+            }
+        }
+    }
+    Ok(true)
 }
 
 fn error_from_remote(remote: RemoteError) -> Error {

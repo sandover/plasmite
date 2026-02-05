@@ -43,6 +43,9 @@ pool = client.create_pool("docs", 64 * 1024 * 1024)
 message = pool.append_json(b'{"kind":"note","text":"hi"}', ["note"], Durability.FAST)
 print(message.decode("utf-8"))
 
+frame = pool.get_lite3(1)
+print(len(frame.payload))
+
 pool.close()
 client.close()
 ```

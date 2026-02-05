@@ -30,9 +30,22 @@ struct plsm_stream_t {
 }
 
 #[repr(C)]
+struct plsm_lite3_stream_t {
+    _private: [u8; 0],
+}
+
+#[repr(C)]
 struct plsm_buf_t {
     data: *mut u8,
     len: usize,
+}
+
+#[repr(C)]
+struct plsm_lite3_frame_t {
+    seq: u64,
+    timestamp_ns: u64,
+    flags: u32,
+    payload: plsm_buf_t,
 }
 
 #[repr(C)]
@@ -80,10 +93,26 @@ unsafe extern "C" {
         out_err: *mut *mut plsm_error_t,
     ) -> c_int;
 
+    fn plsm_pool_append_lite3(
+        pool: *mut plsm_pool_t,
+        payload: *const u8,
+        payload_len: usize,
+        durability: u32,
+        out_seq: *mut u64,
+        out_err: *mut *mut plsm_error_t,
+    ) -> c_int;
+
     fn plsm_pool_get_json(
         pool: *mut plsm_pool_t,
         seq: u64,
         out_message: *mut plsm_buf_t,
+        out_err: *mut *mut plsm_error_t,
+    ) -> c_int;
+
+    fn plsm_pool_get_lite3(
+        pool: *mut plsm_pool_t,
+        seq: u64,
+        out_frame: *mut plsm_lite3_frame_t,
         out_err: *mut *mut plsm_error_t,
     ) -> c_int;
 
@@ -99,15 +128,35 @@ unsafe extern "C" {
         out_err: *mut *mut plsm_error_t,
     ) -> c_int;
 
+    fn plsm_lite3_stream_open(
+        pool: *mut plsm_pool_t,
+        since_seq: u64,
+        has_since: u32,
+        max_messages: u64,
+        has_max: u32,
+        timeout_ms: u64,
+        has_timeout: u32,
+        out_stream: *mut *mut plsm_lite3_stream_t,
+        out_err: *mut *mut plsm_error_t,
+    ) -> c_int;
+
     fn plsm_stream_next(
         stream: *mut plsm_stream_t,
         out_message: *mut plsm_buf_t,
         out_err: *mut *mut plsm_error_t,
     ) -> c_int;
 
+    fn plsm_lite3_stream_next(
+        stream: *mut plsm_lite3_stream_t,
+        out_frame: *mut plsm_lite3_frame_t,
+        out_err: *mut *mut plsm_error_t,
+    ) -> c_int;
+
     fn plsm_stream_free(stream: *mut plsm_stream_t);
+    fn plsm_lite3_stream_free(stream: *mut plsm_lite3_stream_t);
 
     fn plsm_buf_free(buf: *mut plsm_buf_t);
+    fn plsm_lite3_frame_free(frame: *mut plsm_lite3_frame_t);
     fn plsm_error_free(err: *mut plsm_error_t);
 }
 
@@ -195,6 +244,15 @@ pub struct Pool {
     ptr: *mut plsm_pool_t,
 }
 
+#[napi(object)]
+pub struct Lite3Frame {
+    pub seq: BigInt,
+    #[napi(js_name = "timestampNs")]
+    pub timestamp_ns: BigInt,
+    pub flags: u32,
+    pub payload: Buffer,
+}
+
 #[napi]
 impl Pool {
     #[napi]
@@ -221,6 +279,26 @@ impl Pool {
     }
 
     #[napi]
+    pub fn append_lite3(&self, payload: Buffer, durability: Durability) -> Result<BigInt> {
+        let mut seq = 0u64;
+        let mut err = ptr::null_mut();
+        let rc = unsafe {
+            plsm_pool_append_lite3(
+                self.ptr,
+                payload.as_ptr(),
+                payload.len(),
+                durability as u32,
+                &mut seq,
+                &mut err,
+            )
+        };
+        if rc != 0 {
+            return Err(take_error(err));
+        }
+        Ok(BigInt::from(seq))
+    }
+
+    #[napi]
     pub fn get_json(&self, seq: Either<u32, BigInt>) -> Result<Buffer> {
         let seq = to_u64(seq, "seq")?;
         let mut out = plsm_buf_t { data: ptr::null_mut(), len: 0 };
@@ -230,6 +308,23 @@ impl Pool {
             return Err(take_error(err));
         }
         Ok(copy_and_free_buf(out))
+    }
+
+    #[napi]
+    pub fn get_lite3(&self, seq: Either<u32, BigInt>) -> Result<Lite3Frame> {
+        let seq = to_u64(seq, "seq")?;
+        let mut out = plsm_lite3_frame_t {
+            seq: 0,
+            timestamp_ns: 0,
+            flags: 0,
+            payload: plsm_buf_t { data: ptr::null_mut(), len: 0 },
+        };
+        let mut err = ptr::null_mut();
+        let rc = unsafe { plsm_pool_get_lite3(self.ptr, seq, &mut out, &mut err) };
+        if rc != 0 {
+            return Err(take_error(err));
+        }
+        Ok(copy_and_free_lite3_frame(out))
     }
 
     #[napi]
@@ -261,6 +356,37 @@ impl Pool {
             return Err(take_error(err));
         }
         Ok(Stream { ptr: out })
+    }
+
+    #[napi]
+    pub fn open_lite3_stream(
+        &self,
+        since_seq: Option<Either<u32, BigInt>>,
+        max_messages: Option<Either<u32, BigInt>>,
+        timeout_ms: Option<Either<u32, BigInt>>,
+    ) -> Result<Lite3Stream> {
+        let since_seq = since_seq.map(|value| to_u64(value, "since_seq")).transpose()?;
+        let max_messages = max_messages.map(|value| to_u64(value, "max_messages")).transpose()?;
+        let timeout_ms = timeout_ms.map(|value| to_u64(value, "timeout_ms")).transpose()?;
+        let mut out = ptr::null_mut();
+        let mut err = ptr::null_mut();
+        let rc = unsafe {
+            plsm_lite3_stream_open(
+                self.ptr,
+                since_seq.unwrap_or(0),
+                if since_seq.is_some() { 1 } else { 0 },
+                max_messages.unwrap_or(0),
+                if max_messages.is_some() { 1 } else { 0 },
+                timeout_ms.unwrap_or(0),
+                if timeout_ms.is_some() { 1 } else { 0 },
+                &mut out,
+                &mut err,
+            )
+        };
+        if rc != 0 {
+            return Err(take_error(err));
+        }
+        Ok(Lite3Stream { ptr: out })
     }
 
     #[napi]
@@ -312,6 +438,45 @@ impl Drop for Stream {
     }
 }
 
+#[napi]
+pub struct Lite3Stream {
+    ptr: *mut plsm_lite3_stream_t,
+}
+
+#[napi]
+impl Lite3Stream {
+    #[napi]
+    pub fn next(&self) -> Result<Option<Lite3Frame>> {
+        let mut out = plsm_lite3_frame_t {
+            seq: 0,
+            timestamp_ns: 0,
+            flags: 0,
+            payload: plsm_buf_t { data: ptr::null_mut(), len: 0 },
+        };
+        let mut err = ptr::null_mut();
+        let rc = unsafe { plsm_lite3_stream_next(self.ptr, &mut out, &mut err) };
+        match rc {
+            1 => Ok(Some(copy_and_free_lite3_frame(out))),
+            0 => Ok(None),
+            _ => Err(take_error(err)),
+        }
+    }
+
+    #[napi]
+    pub fn close(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe { plsm_lite3_stream_free(self.ptr) };
+            self.ptr = ptr::null_mut();
+        }
+    }
+}
+
+impl Drop for Lite3Stream {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
 struct CStringArray {
     ptrs: Vec<*const c_char>,
     _strings: Vec<CString>,
@@ -349,6 +514,24 @@ fn copy_and_free_buf(mut buf: plsm_buf_t) -> Buffer {
     };
     unsafe { plsm_buf_free(&mut buf) };
     Buffer::from(data)
+}
+
+fn copy_and_free_lite3_frame(mut frame: plsm_lite3_frame_t) -> Lite3Frame {
+    let seq = frame.seq;
+    let timestamp_ns = frame.timestamp_ns;
+    let flags = frame.flags;
+    let payload = if frame.payload.data.is_null() || frame.payload.len == 0 {
+        Vec::new()
+    } else {
+        unsafe { std::slice::from_raw_parts(frame.payload.data, frame.payload.len) }.to_vec()
+    };
+    unsafe { plsm_lite3_frame_free(&mut frame) };
+    Lite3Frame {
+        seq: BigInt::from(seq),
+        timestamp_ns: BigInt::from(timestamp_ns),
+        flags,
+        payload: Buffer::from(payload),
+    }
 }
 
 fn take_error(err: *mut plsm_error_t) -> Error {

@@ -17,6 +17,7 @@ It is designed to be human-friendly and easy to integrate with existing infrastr
 - Encoding: UTF-8 JSON bodies; streaming uses JSON Lines (one JSON object per line).
 - Auth: bearer tokens via `Authorization: Bearer <token>`.
 - Versioning: URI path version prefix (e.g. `/v0`) + `plasmite-version: 0` response header.
+- Lite3-bytes endpoints are an additive performance path; errors remain JSON envelopes.
 
 ## Version Negotiation
 
@@ -127,11 +128,40 @@ Response (200):
 { "message": { "seq": 1, "time": "...", "meta": {"descrips": []}, "data": {"kind":"note"} } }
 ```
 
+### Append Lite3 (bytes)
+
+`POST /v0/pools/{pool}/append_lite3`
+
+Request:
+
+- `Content-Type: application/x-plasmite-lite3`
+- Body: raw Lite3 bytes as defined by `spec/lite3/SPEC.md`.
+- Optional query: `durability=fast|flush` (default `fast`).
+
+Response (200): same `message` object as append.
+
+Errors:
+
+- `400` (Usage) for malformed Lite3 payloads or invalid framing.
+- `422` (Corrupt) for payloads that fail internal validation after decode.
+- Error responses use the standard JSON error envelope.
+
 ### Get
 
 `GET /v0/pools/{pool}/messages/{seq}`
 
 Response (200): same `message` object as append.
+
+### Get Lite3 (bytes)
+
+`GET /v0/pools/{pool}/messages/{seq}/lite3`
+
+Response (200):
+
+- `Content-Type: application/x-plasmite-lite3`
+- Body: raw Lite3 bytes for the stored message.
+- `plasmite-seq` response header with the message sequence number (string).
+- Error responses use the standard JSON error envelope.
 
 ### Tail (streaming)
 
@@ -142,6 +172,20 @@ Response (200):
 - `Content-Type: application/jsonl`
 - Body is a stream of JSON objects (one per line), each matching the `message` envelope.
 - When `max` is reached or `timeout_ms` elapses, the server closes the stream.
+
+### Tail Lite3 (streaming bytes)
+
+`GET /v0/pools/{pool}/tail_lite3?since_seq=1&max=10&timeout_ms=500`
+
+Response (200):
+
+- `Content-Type: application/x-plasmite-lite3-stream`
+- Body is a stream of framed entries until EOF:
+  - `[u64be seq][u64be timestamp_ns][u32be len][len bytes payload]` repeated.
+  - `seq` and `timestamp_ns` are the stored message metadata.
+  - `payload` is the raw Lite3 message bytes (same bytes as in storage).
+- When `max` is reached or `timeout_ms` elapses, the server closes the stream.
+- Error responses use the standard JSON error envelope (not streamed).
 
 Cancellation:
 - Clients cancel by closing the connection.
@@ -155,6 +199,7 @@ Reconnect semantics:
 - Servers MAY omit the error envelope for `413` responses emitted by transport layers.
 - Servers MAY enforce a maximum tail timeout; requests over the limit should return `400` (Usage).
 - Servers MAY cap concurrent tail streams; excess requests should return `423` (Busy).
+- Servers SHOULD apply the same size limits to `append_lite3` payloads.
 
 ## Authentication
 

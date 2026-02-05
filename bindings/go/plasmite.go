@@ -84,6 +84,17 @@ type Stream struct {
 	ptr *C.plsm_stream_t
 }
 
+type Lite3Stream struct {
+	ptr *C.plsm_lite3_stream_t
+}
+
+type Lite3Frame struct {
+	Seq         uint64
+	TimestampNs uint64
+	Flags       uint32
+	Payload     []byte
+}
+
 func NewClient(poolDir string) (*Client, error) {
 	if poolDir == "" {
 		return nil, errors.New("plasmite: poolDir is required")
@@ -194,6 +205,34 @@ func (p *Pool) Append(value any, descrips []string, durability Durability) ([]by
 	return p.AppendJSON(payload, descrips, durability)
 }
 
+// AppendLite3 appends a pre-encoded Lite3 payload without JSON encoding.
+func (p *Pool) AppendLite3(payload []byte, durability Durability) (uint64, error) {
+	if p == nil || p.ptr == nil {
+		return 0, errors.New("plasmite: pool is closed")
+	}
+	if len(payload) == 0 {
+		return 0, errors.New("plasmite: payload is required")
+	}
+	cPayload := (*C.uint8_t)(unsafe.Pointer(&payload[0]))
+	cLen := C.size_t(len(payload))
+
+	var cSeq C.uint64_t
+	var cErr *C.plsm_error_t
+	rc := C.plsm_pool_append_lite3(
+		p.ptr,
+		cPayload,
+		cLen,
+		C.uint32_t(durability),
+		&cSeq,
+		&cErr,
+	)
+	runtime.KeepAlive(payload)
+	if rc != 0 {
+		return 0, fromCError(cErr)
+	}
+	return uint64(cSeq), nil
+}
+
 func (p *Pool) GetJSON(seq uint64) ([]byte, error) {
 	if p == nil || p.ptr == nil {
 		return nil, errors.New("plasmite: pool is closed")
@@ -209,6 +248,20 @@ func (p *Pool) GetJSON(seq uint64) ([]byte, error) {
 
 func (p *Pool) Get(seq uint64) ([]byte, error) {
 	return p.GetJSON(seq)
+}
+
+// GetLite3 returns the raw Lite3 payload and metadata for the given sequence.
+func (p *Pool) GetLite3(seq uint64) (*Lite3Frame, error) {
+	if p == nil || p.ptr == nil {
+		return nil, errors.New("plasmite: pool is closed")
+	}
+	var cFrame C.plsm_lite3_frame_t
+	var cErr *C.plsm_error_t
+	rc := C.plsm_pool_get_lite3(p.ptr, C.uint64_t(seq), &cFrame, &cErr)
+	if rc != 0 {
+		return nil, fromCError(cErr)
+	}
+	return copyAndFreeLite3Frame(&cFrame), nil
 }
 
 func (p *Pool) OpenStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (*Stream, error) {
@@ -253,6 +306,48 @@ func (p *Pool) OpenStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint
 	return &Stream{ptr: cStream}, nil
 }
 
+func (p *Pool) OpenLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (*Lite3Stream, error) {
+	if p == nil || p.ptr == nil {
+		return nil, errors.New("plasmite: pool is closed")
+	}
+	var sinceVal C.uint64_t
+	var hasSince C.uint32_t
+	if sinceSeq != nil {
+		sinceVal = C.uint64_t(*sinceSeq)
+		hasSince = 1
+	}
+	var maxVal C.uint64_t
+	var hasMax C.uint32_t
+	if maxMessages != nil {
+		maxVal = C.uint64_t(*maxMessages)
+		hasMax = 1
+	}
+	var timeoutVal C.uint64_t
+	var hasTimeout C.uint32_t
+	if timeoutMs != nil {
+		timeoutVal = C.uint64_t(*timeoutMs)
+		hasTimeout = 1
+	}
+
+	var cStream *C.plsm_lite3_stream_t
+	var cErr *C.plsm_error_t
+	rc := C.plsm_lite3_stream_open(
+		p.ptr,
+		sinceVal,
+		hasSince,
+		maxVal,
+		hasMax,
+		timeoutVal,
+		hasTimeout,
+		&cStream,
+		&cErr,
+	)
+	if rc != 0 {
+		return nil, fromCError(cErr)
+	}
+	return &Lite3Stream{ptr: cStream}, nil
+}
+
 func (s *Stream) NextJSON() ([]byte, error) {
 	if s == nil || s.ptr == nil {
 		return nil, errors.New("plasmite: stream is closed")
@@ -270,11 +365,36 @@ func (s *Stream) NextJSON() ([]byte, error) {
 	}
 }
 
+func (s *Lite3Stream) Next() (*Lite3Frame, error) {
+	if s == nil || s.ptr == nil {
+		return nil, errors.New("plasmite: stream is closed")
+	}
+	var cFrame C.plsm_lite3_frame_t
+	var cErr *C.plsm_error_t
+	rc := C.plsm_lite3_stream_next(s.ptr, &cFrame, &cErr)
+	switch rc {
+	case 1:
+		return copyAndFreeLite3Frame(&cFrame), nil
+	case 0:
+		return nil, io.EOF
+	default:
+		return nil, fromCError(cErr)
+	}
+}
+
 func (s *Stream) Close() {
 	if s == nil || s.ptr == nil {
 		return
 	}
 	C.plsm_stream_free(s.ptr)
+	s.ptr = nil
+}
+
+func (s *Lite3Stream) Close() {
+	if s == nil || s.ptr == nil {
+		return
+	}
+	C.plsm_lite3_stream_free(s.ptr)
 	s.ptr = nil
 }
 
@@ -370,6 +490,88 @@ func (p *Pool) Tail(ctx context.Context, opts TailOptions) (<-chan []byte, <-cha
 	return out, errs
 }
 
+// TailLite3 streams Lite3 frames on a buffered channel.
+// Backpressure: when the buffer is full, tailing blocks until the caller drains it.
+// Cancellation: the stream is reopened after Timeout to check ctx; set Timeout for responsiveness.
+func (p *Pool) TailLite3(ctx context.Context, opts TailOptions) (<-chan *Lite3Frame, <-chan error) {
+	out := make(chan *Lite3Frame, bufferSize(opts.Buffer))
+	errs := make(chan error, 1)
+
+	go func() {
+		defer close(out)
+		defer close(errs)
+
+		var delivered uint64
+		var since *uint64
+		if opts.SinceSeq != nil {
+			start := *opts.SinceSeq
+			since = &start
+		}
+
+		for {
+			if opts.MaxMessages != nil && delivered >= *opts.MaxMessages {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				errs <- ctx.Err()
+				return
+			default:
+			}
+
+			timeoutMs := opts.Timeout
+			if timeoutMs <= 0 {
+				timeoutMs = time.Second
+			}
+			timeoutValue := uint64(timeoutMs.Milliseconds())
+			var remaining *uint64
+			if opts.MaxMessages != nil {
+				left := *opts.MaxMessages - delivered
+				remaining = &left
+			}
+			stream, err := p.OpenLite3Stream(since, remaining, &timeoutValue)
+			if err != nil {
+				errs <- err
+				return
+			}
+
+			for {
+				frame, err := stream.Next()
+				if err == io.EOF {
+					stream.Close()
+					break
+				}
+				if err != nil {
+					stream.Close()
+					errs <- err
+					return
+				}
+				delivered++
+				if opts.MaxMessages != nil && delivered >= *opts.MaxMessages {
+					stream.Close()
+					select {
+					case out <- frame:
+					case <-ctx.Done():
+						errs <- ctx.Err()
+					}
+					return
+				}
+				select {
+				case out <- frame:
+					next := frame.Seq + 1
+					since = &next
+				case <-ctx.Done():
+					stream.Close()
+					errs <- ctx.Err()
+					return
+				}
+			}
+		}
+	}()
+
+	return out, errs
+}
+
 func copyAndFreeBuf(buf *C.plsm_buf_t) []byte {
 	if buf == nil || buf.data == nil || buf.len == 0 {
 		return nil
@@ -377,6 +579,24 @@ func copyAndFreeBuf(buf *C.plsm_buf_t) []byte {
 	data := C.GoBytes(unsafe.Pointer(buf.data), C.int(buf.len))
 	C.plsm_buf_free(buf)
 	return data
+}
+
+func copyAndFreeLite3Frame(frame *C.plsm_lite3_frame_t) *Lite3Frame {
+	if frame == nil {
+		return nil
+	}
+	var payload []byte
+	if frame.payload.data != nil && frame.payload.len != 0 {
+		payload = C.GoBytes(unsafe.Pointer(frame.payload.data), C.int(frame.payload.len))
+	}
+	out := &Lite3Frame{
+		Seq:         uint64(frame.seq),
+		TimestampNs: uint64(frame.timestamp_ns),
+		Flags:       uint32(frame.flags),
+		Payload:     payload,
+	}
+	C.plsm_lite3_frame_free(frame)
+	return out
 }
 
 func fromCError(cErr *C.plsm_error_t) *Error {

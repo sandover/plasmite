@@ -44,6 +44,9 @@ const payload = Buffer.from(JSON.stringify({ kind: "note", text: "hi" }))
 const message = pool.appendJson(payload, ["note"], Durability.Fast)
 console.log(message.toString("utf8"))
 
+const frame = pool.getLite3(BigInt(1))
+console.log(frame.payload.length)
+
 pool.close()
 client.close()
 ```

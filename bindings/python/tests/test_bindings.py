@@ -19,7 +19,7 @@ LIB_DIR = os.environ.get("PLASMITE_LIB_DIR") or str(REPO_ROOT / "target" / "debu
 if "PLASMITE_LIB_DIR" not in os.environ:
     os.environ["PLASMITE_LIB_DIR"] = LIB_DIR
 
-from plasmite import Client, Durability, PlasmiteError, parse_message
+from plasmite import Client, Durability, Lite3Frame, PlasmiteError, parse_message
 
 
 class BindingTests(unittest.TestCase):
@@ -76,6 +76,44 @@ class BindingTests(unittest.TestCase):
         client.close()
         with self.assertRaises(PlasmiteError):
             client.create_pool("oops", 1024 * 1024)
+
+    def test_lite3_append_get_stream(self) -> None:
+        client = Client(str(self.pool_dir))
+        pool = client.create_pool("lite3", 1024 * 1024)
+
+        msg_bytes = pool.append_json(
+            json.dumps({"x": 1}).encode("utf-8"), ["alpha"], Durability.FAST
+        )
+        message = parse_message(msg_bytes)
+        frame = pool.get_lite3(message["seq"])
+        self.assertIsInstance(frame, Lite3Frame)
+        self.assertGreater(len(frame.payload), 0)
+
+        seq2 = pool.append_lite3(frame.payload, Durability.FAST)
+        frame2 = pool.get_lite3(seq2)
+        self.assertEqual(frame2.payload, frame.payload)
+
+        stream = pool.open_lite3_stream(since_seq=seq2, max_messages=1, timeout_ms=50)
+        next_frame = stream.next()
+        self.assertIsNotNone(next_frame)
+        assert next_frame is not None
+        self.assertEqual(next_frame.seq, seq2)
+        self.assertEqual(next_frame.payload, frame.payload)
+        self.assertIsNone(stream.next())
+        stream.close()
+
+        pool.close()
+        client.close()
+
+    def test_lite3_invalid_payload(self) -> None:
+        client = Client(str(self.pool_dir))
+        pool = client.create_pool("lite3-bad", 1024 * 1024)
+
+        with self.assertRaises(PlasmiteError):
+            pool.append_lite3(b"\x01", Durability.FAST)
+
+        pool.close()
+        client.close()
 
 
 if __name__ == "__main__":

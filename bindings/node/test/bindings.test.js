@@ -74,3 +74,49 @@ test("closed pool/client reject operations", () => {
   client.close();
   assert.throws(() => client.createPool("other", 1024 * 1024));
 });
+
+test("lite3 append/get/tail round-trips bytes", () => {
+  const temp = makeTempDir();
+  const poolDir = path.join(temp, "pools");
+  fs.mkdirSync(poolDir, { recursive: true });
+  const client = new Client(poolDir);
+  const pool = client.createPool("lite3", 1024 * 1024);
+
+  const payload = { x: 1 };
+  const messageBuf = pool.appendJson(
+    Buffer.from(JSON.stringify(payload)),
+    ["alpha"],
+    Durability.Fast
+  );
+  const message = JSON.parse(messageBuf.toString("utf8"));
+  const lite3Frame = pool.getLite3(BigInt(message.seq));
+  assert.ok(lite3Frame.payload.length > 0);
+
+  const seq2 = pool.appendLite3(lite3Frame.payload, Durability.Fast);
+  const lite3Frame2 = pool.getLite3(seq2);
+  assert.deepEqual(lite3Frame2.payload, lite3Frame.payload);
+
+  const stream = pool.openLite3Stream(seq2, BigInt(1), BigInt(50));
+  const next = stream.next();
+  assert.ok(next);
+  assert.equal(next.seq, seq2);
+  assert.deepEqual(next.payload, lite3Frame.payload);
+  assert.equal(stream.next(), null);
+  stream.close();
+
+  pool.close();
+  client.close();
+});
+
+test("lite3 append rejects invalid payloads", () => {
+  const temp = makeTempDir();
+  const poolDir = path.join(temp, "pools");
+  fs.mkdirSync(poolDir, { recursive: true });
+  const client = new Client(poolDir);
+  const pool = client.createPool("lite3-bad", 1024 * 1024);
+
+  assert.throws(() => pool.appendLite3(Buffer.from([0x01]), Durability.Fast));
+
+  pool.close();
+  client.close();
+});

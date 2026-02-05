@@ -1,9 +1,9 @@
 //! Purpose: Provide the HTTP/JSON remote server for Plasmite.
 //! Exports: `ServeConfig`, `serve`.
 //! Role: Axum-based loopback server implementing the remote v0 spec.
-//! Invariants: JSON envelopes match spec/v0/SPEC.md; error kinds remain stable.
+//! Invariants: JSON envelopes match spec/remote/v0/SPEC.md; error kinds remain stable.
 //! Invariants: Loopback-only unless explicitly allowed (v0 policy).
-//! Notes: Streaming uses JSONL; tail is at-least-once and resumable.
+//! Notes: Streaming uses JSONL or framed Lite3; tail is at-least-once and resumable.
 
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path as AxumPath, Query, State};
@@ -37,7 +37,7 @@ use tracing_subscriber::EnvFilter;
 
 use plasmite::api::{
     Bounds, Durability, Error, ErrorKind, LocalClient, PoolApiExt, PoolInfo, PoolOptions, PoolRef,
-    TailOptions,
+    TailOptions, lite3,
 };
 
 #[derive(Clone, Debug)]
@@ -110,8 +110,11 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
         .route("/v0/pools/:pool/info", get(pool_info))
         .route("/v0/pools/:pool", delete(delete_pool))
         .route("/v0/pools/:pool/append", post(append_message))
+        .route("/v0/pools/:pool/append_lite3", post(append_lite3))
         .route("/v0/pools/:pool/messages/:seq", get(get_message))
+        .route("/v0/pools/:pool/messages/:seq/lite3", get(get_lite3))
         .route("/v0/pools/:pool/tail", get(tail_messages))
+        .route("/v0/pools/:pool/tail_lite3", get(tail_lite3))
         .layer(DefaultBodyLimit::max(max_body_bytes))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -491,6 +494,11 @@ struct TailQuery {
     timeout_ms: Option<u64>,
 }
 
+#[derive(Debug, Deserialize)]
+struct AppendLite3Query {
+    durability: Option<String>,
+}
+
 async fn healthz() -> Response {
     json_response(json!({ "ok": true }))
 }
@@ -642,16 +650,57 @@ async fn append_message(
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
     };
-    let durability = match payload.durability.as_deref() {
-        Some("flush") => Durability::Flush,
-        _ => Durability::Fast,
-    };
+    let durability = durability_from_str(payload.durability.as_deref());
     let descrips = payload.descrips.unwrap_or_default();
 
     let result = state
         .client
         .open_pool(&pool_ref)
         .and_then(|mut pool| pool.append_json_now(&payload.data, &descrips, durability));
+    match result {
+        Ok(message) => json_response(json!({ "message": message_json(&message) })),
+        Err(err) => error_response(err),
+    }
+}
+
+async fn append_lite3(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    AxumPath(pool): AxumPath<String>,
+    Query(query): Query<AppendLite3Query>,
+    payload: Bytes,
+) -> Response {
+    if let Err(err) = authorize(&headers, &state) {
+        return error_response(err);
+    }
+    if let Err(err) = ensure_write_access(&state) {
+        return error_response(err);
+    }
+    if let Some(content_type) = headers
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+    {
+        if !content_type.starts_with("application/x-plasmite-lite3") {
+            return error_response(
+                Error::new(ErrorKind::Usage).with_message("invalid content-type for lite3 append"),
+            );
+        }
+    }
+    if payload.is_empty() {
+        return error_response(
+            Error::new(ErrorKind::Usage).with_message("lite3 payload is required"),
+        );
+    }
+    let pool_ref = match pool_ref_from_request(&pool) {
+        Ok(pool_ref) => pool_ref,
+        Err(err) => return error_response(err),
+    };
+    let durability = durability_from_str(query.durability.as_deref());
+    let payload = payload.to_vec();
+    let result = state.client.open_pool(&pool_ref).and_then(|mut pool| {
+        let seq = pool.append_lite3_now(&payload, durability)?;
+        pool.get_message(seq)
+    });
     match result {
         Ok(message) => json_response(json!({ "message": message_json(&message) })),
         Err(err) => error_response(err),
@@ -680,6 +729,48 @@ async fn get_message(
 
     match result {
         Ok(message) => json_response(json!({ "message": message_json(&message) })),
+        Err(err) => error_response(err),
+    }
+}
+
+async fn get_lite3(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    AxumPath((pool, seq)): AxumPath<(String, u64)>,
+) -> Response {
+    if let Err(err) = authorize(&headers, &state) {
+        return error_response(err);
+    }
+    if let Err(err) = ensure_read_access(&state) {
+        return error_response(err);
+    }
+    let pool_ref = match pool_ref_from_request(&pool) {
+        Ok(pool_ref) => pool_ref,
+        Err(err) => return error_response(err),
+    };
+    let result = state.client.open_pool(&pool_ref).and_then(|pool| {
+        let frame = pool.get_lite3(seq)?;
+        let payload = frame.payload.to_vec();
+        lite3::validate_bytes(&payload)?;
+        Ok(payload)
+    });
+    match result {
+        Ok(payload) => {
+            let mut response = Response::new(Body::from(Bytes::copy_from_slice(&payload)));
+            response.headers_mut().insert(
+                "content-type",
+                HeaderValue::from_static("application/x-plasmite-lite3"),
+            );
+            response.headers_mut().insert(
+                "plasmite-seq",
+                HeaderValue::from_str(&seq.to_string())
+                    .unwrap_or_else(|_| HeaderValue::from_static("0")),
+            );
+            response
+                .headers_mut()
+                .insert("plasmite-version", HeaderValue::from_static("0"));
+            response
+        }
         Err(err) => error_response(err),
     }
 }
@@ -770,6 +861,95 @@ async fn tail_messages(
     response
 }
 
+async fn tail_lite3(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    AxumPath(pool): AxumPath<String>,
+    Query(query): Query<TailQuery>,
+) -> Response {
+    if let Err(err) = authorize(&headers, &state) {
+        return error_response(err);
+    }
+    if let Err(err) = ensure_read_access(&state) {
+        return error_response(err);
+    }
+    let pool_ref = match pool_ref_from_request(&pool) {
+        Ok(pool_ref) => pool_ref,
+        Err(err) => return error_response(err),
+    };
+    if let Some(since_seq) = query.since_seq {
+        let precheck = state.client.open_pool(&pool_ref).and_then(|pool| {
+            let frame = pool.get_lite3(since_seq)?;
+            lite3::validate_bytes(frame.payload)?;
+            Ok(())
+        });
+        match precheck {
+            Ok(()) => {}
+            Err(err) if err.kind() == ErrorKind::NotFound => {}
+            Err(err) => return error_response(err),
+        }
+    }
+    let client = state.client.clone();
+    let permit = match state.tail_semaphore.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return error_response(
+                Error::new(ErrorKind::Busy)
+                    .with_message("too many concurrent tail requests")
+                    .with_hint("Try again later or reduce tail concurrency."),
+            );
+        }
+    };
+    if let Some(timeout_ms) = query.timeout_ms {
+        if timeout_ms > state.max_tail_timeout_ms {
+            return error_response(
+                Error::new(ErrorKind::Usage)
+                    .with_message("tail timeout exceeds server limit")
+                    .with_hint(format!("Use timeout_ms <= {}.", state.max_tail_timeout_ms)),
+            );
+        }
+    }
+    let timeout_ms = query.timeout_ms.unwrap_or(state.max_tail_timeout_ms);
+
+    let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let result = client.open_pool(&pool_ref).and_then(|pool| {
+            let options = TailOptions {
+                since_seq: query.since_seq,
+                max_messages: query.max.map(|value| value as usize),
+                timeout: Some(std::time::Duration::from_millis(timeout_ms)),
+                ..TailOptions::default()
+            };
+            let mut tail = pool.tail_lite3(options);
+            while let Some(frame) = tail.next_frame()? {
+                lite3::validate_bytes(frame.payload)?;
+                let encoded = encode_lite3_stream_frame(&frame)?;
+                if tx.blocking_send(Ok(encoded)).is_err() {
+                    break;
+                }
+            }
+            Ok(())
+        });
+        if let Err(err) = result {
+            let _ = tx.blocking_send(Err(err));
+        }
+    });
+
+    let stream = ReceiverStream::new(rx)
+        .map(|result| result.map_err(|err| std::io::Error::other(err.to_string())));
+
+    let mut response = Response::new(Body::from_stream(stream));
+    response.headers_mut().insert(
+        "content-type",
+        HeaderValue::from_static("application/x-plasmite-lite3-stream"),
+    );
+    response
+        .headers_mut()
+        .insert("plasmite-version", HeaderValue::from_static("0"));
+    response
+}
+
 fn pool_ref_from_request(pool: &str) -> Result<PoolRef, Error> {
     if pool.contains('/') {
         return Err(
@@ -816,6 +996,25 @@ fn json_response(payload: serde_json::Value) -> Response {
         .headers_mut()
         .insert("plasmite-version", HeaderValue::from_static("0"));
     response
+}
+
+fn encode_lite3_stream_frame(frame: &plasmite::api::FrameRef<'_>) -> Result<Bytes, Error> {
+    let payload_len: u32 = frame.payload.len().try_into().map_err(|_| {
+        Error::new(ErrorKind::Usage).with_message("lite3 payload exceeds max frame length")
+    })?;
+    let mut buf = Vec::with_capacity(8 + 8 + 4 + payload_len as usize);
+    buf.extend_from_slice(&frame.seq.to_be_bytes());
+    buf.extend_from_slice(&frame.timestamp_ns.to_be_bytes());
+    buf.extend_from_slice(&payload_len.to_be_bytes());
+    buf.extend_from_slice(frame.payload);
+    Ok(Bytes::from(buf))
+}
+
+fn durability_from_str(value: Option<&str>) -> Durability {
+    match value {
+        Some("flush") => Durability::Flush,
+        _ => Durability::Fast,
+    }
 }
 
 fn error_response(err: Error) -> Response {

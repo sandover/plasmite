@@ -6,7 +6,8 @@
 //! Invariants: Server processes are cleaned up on drop.
 
 use plasmite::api::{
-    Durability, ErrorKind, LocalClient, PoolApiExt, PoolOptions, PoolRef, RemoteClient, TailOptions,
+    AppendOptions, Durability, ErrorKind, LocalClient, Pool, PoolApiExt, PoolOptions, PoolRef,
+    RemoteClient, TailOptions,
 };
 use serde_json::{Value, json};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -105,6 +106,88 @@ fn remote_append_and_get() -> TestResult<()> {
     let fetched = pool.get_message(message.seq)?;
     assert_eq!(fetched.seq, message.seq);
     assert_eq!(fetched.data, payload);
+    Ok(())
+}
+
+#[test]
+fn remote_append_get_tail_lite3() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::start(temp_dir.path())?;
+    let client = server.client()?;
+    let pool_ref = PoolRef::name("lite3");
+
+    client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
+    let pool = client.open_pool(&pool_ref)?;
+    let message = pool.append_json_now(&json!({"x": 1}), &[], Durability::Fast)?;
+    let payload = match pool.get_lite3(message.seq) {
+        Ok(payload) => payload,
+        Err(err) => return Err(format!("get_lite3 failed: {err}").into()),
+    };
+
+    let seq = match pool.append_lite3_now(&payload, Durability::Fast) {
+        Ok(seq) => seq,
+        Err(err) => return Err(format!("append_lite3_now failed: {err}").into()),
+    };
+
+    let fetched = match pool.get_lite3(seq) {
+        Ok(payload) => payload,
+        Err(err) => return Err(format!("get_lite3 failed: {err}").into()),
+    };
+    assert_eq!(fetched, payload);
+
+    let options = TailOptions {
+        since_seq: Some(seq),
+        max_messages: Some(1),
+        timeout: Some(Duration::from_millis(500)),
+        ..TailOptions::default()
+    };
+    let mut tail = match pool.tail_lite3(options) {
+        Ok(tail) => tail,
+        Err(err) => return Err(format!("tail_lite3 failed: {err}").into()),
+    };
+    let frame = match tail.next_frame() {
+        Ok(Some(frame)) => frame,
+        Ok(None) => return Err("tail_lite3 returned no frame".into()),
+        Err(err) => return Err(format!("tail_lite3 next_frame failed: {err}").into()),
+    };
+    assert_eq!(frame.seq, seq);
+    assert_eq!(frame.payload, payload);
+    Ok(())
+}
+
+#[test]
+fn remote_lite3_invalid_payloads_error() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let pool_dir = temp_dir.path();
+    let pool_path = pool_dir.join("bad-lite3.plasmite");
+    let mut raw_pool = Pool::create(&pool_path, PoolOptions::new(1024 * 1024))?;
+    raw_pool.append_with_options(&[0x01], AppendOptions::new(123, Durability::Fast))?;
+    drop(raw_pool);
+
+    let server = TestServer::start(pool_dir)?;
+    let client = server.client()?;
+    let pool_ref = PoolRef::name("bad-lite3");
+    let pool = client.open_pool(&pool_ref)?;
+
+    let err = pool.get_lite3(1).expect_err("invalid lite3 get");
+    assert_eq!(err.kind(), ErrorKind::Corrupt);
+
+    let err = pool
+        .append_lite3_now(&[0x01], Durability::Fast)
+        .expect_err("invalid lite3 append");
+    assert_eq!(err.kind(), ErrorKind::Corrupt);
+
+    let options = TailOptions {
+        since_seq: Some(1),
+        max_messages: Some(1),
+        timeout: Some(Duration::from_millis(200)),
+        ..TailOptions::default()
+    };
+    let err = match pool.tail_lite3(options) {
+        Ok(_) => return Err("expected invalid lite3 tail".into()),
+        Err(err) => err,
+    };
+    assert_eq!(err.kind(), ErrorKind::Corrupt);
     Ok(())
 }
 

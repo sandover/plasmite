@@ -17,6 +17,12 @@ export const enum ErrorKind {
   Corrupt = 7,
   Io = 8
 }
+export interface Lite3Frame {
+  seq: bigint
+  timestampNs: bigint
+  flags: number
+  payload: Buffer
+}
 export declare class Client {
   constructor(poolDir: string)
   createPool(poolRef: string, sizeBytes: number | bigint): Pool
@@ -25,11 +31,18 @@ export declare class Client {
 }
 export declare class Pool {
   appendJson(payload: Buffer, descrips: Array<string>, durability: Durability): Buffer
+  appendLite3(payload: Buffer, durability: Durability): bigint
   getJson(seq: number | bigint): Buffer
+  getLite3(seq: number | bigint): Lite3Frame
   openStream(sinceSeq?: number | bigint | undefined | null, maxMessages?: number | bigint | undefined | null, timeoutMs?: number | bigint | undefined | null): Stream
+  openLite3Stream(sinceSeq?: number | bigint | undefined | null, maxMessages?: number | bigint | undefined | null, timeoutMs?: number | bigint | undefined | null): Lite3Stream
   close(): void
 }
 export declare class Stream {
   nextJson(): Buffer | null
+  close(): void
+}
+export declare class Lite3Stream {
+  next(): Lite3Frame | null
   close(): void
 }

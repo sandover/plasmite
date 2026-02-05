@@ -73,10 +73,23 @@ class plsm_stream_t(Structure):
     pass
 
 
+class plsm_lite3_stream_t(Structure):
+    pass
+
+
 class plsm_buf_t(Structure):
     _fields_ = [
         ("data", c_void_p),
         ("len", c_size_t),
+    ]
+
+
+class plsm_lite3_frame_t(Structure):
+    _fields_ = [
+        ("seq", c_uint64),
+        ("timestamp_ns", c_uint64),
+        ("flags", c_uint32),
+        ("payload", plsm_buf_t),
     ]
 
 
@@ -149,6 +162,16 @@ _LIB.plsm_pool_append_json.argtypes = [
 ]
 _LIB.plsm_pool_append_json.restype = c_int
 
+_LIB.plsm_pool_append_lite3.argtypes = [
+    POINTER(plsm_pool_t),
+    POINTER(c_uint8),
+    c_size_t,
+    c_uint32,
+    POINTER(c_uint64),
+    POINTER(POINTER(plsm_error_t)),
+]
+_LIB.plsm_pool_append_lite3.restype = c_int
+
 _LIB.plsm_pool_get_json.argtypes = [
     POINTER(plsm_pool_t),
     c_uint64,
@@ -156,6 +179,14 @@ _LIB.plsm_pool_get_json.argtypes = [
     POINTER(POINTER(plsm_error_t)),
 ]
 _LIB.plsm_pool_get_json.restype = c_int
+
+_LIB.plsm_pool_get_lite3.argtypes = [
+    POINTER(plsm_pool_t),
+    c_uint64,
+    POINTER(plsm_lite3_frame_t),
+    POINTER(POINTER(plsm_error_t)),
+]
+_LIB.plsm_pool_get_lite3.restype = c_int
 
 _LIB.plsm_stream_open.argtypes = [
     POINTER(plsm_pool_t),
@@ -170,6 +201,19 @@ _LIB.plsm_stream_open.argtypes = [
 ]
 _LIB.plsm_stream_open.restype = c_int
 
+_LIB.plsm_lite3_stream_open.argtypes = [
+    POINTER(plsm_pool_t),
+    c_uint64,
+    c_uint32,
+    c_uint64,
+    c_uint32,
+    c_uint64,
+    c_uint32,
+    POINTER(POINTER(plsm_lite3_stream_t)),
+    POINTER(POINTER(plsm_error_t)),
+]
+_LIB.plsm_lite3_stream_open.restype = c_int
+
 _LIB.plsm_stream_next.argtypes = [
     POINTER(plsm_stream_t),
     POINTER(plsm_buf_t),
@@ -177,11 +221,24 @@ _LIB.plsm_stream_next.argtypes = [
 ]
 _LIB.plsm_stream_next.restype = c_int
 
+_LIB.plsm_lite3_stream_next.argtypes = [
+    POINTER(plsm_lite3_stream_t),
+    POINTER(plsm_lite3_frame_t),
+    POINTER(POINTER(plsm_error_t)),
+]
+_LIB.plsm_lite3_stream_next.restype = c_int
+
 _LIB.plsm_stream_free.argtypes = [POINTER(plsm_stream_t)]
 _LIB.plsm_stream_free.restype = None
 
+_LIB.plsm_lite3_stream_free.argtypes = [POINTER(plsm_lite3_stream_t)]
+_LIB.plsm_lite3_stream_free.restype = None
+
 _LIB.plsm_buf_free.argtypes = [POINTER(plsm_buf_t)]
 _LIB.plsm_buf_free.restype = None
+
+_LIB.plsm_lite3_frame_free.argtypes = [POINTER(plsm_lite3_frame_t)]
+_LIB.plsm_lite3_frame_free.restype = None
 
 _LIB.plsm_error_free.argtypes = [POINTER(plsm_error_t)]
 _LIB.plsm_error_free.restype = None
@@ -228,6 +285,18 @@ def _buf_to_bytes(buf: plsm_buf_t) -> bytes:
     out = bytes(data)
     _LIB.plsm_buf_free(byref(buf))
     return out
+
+
+def _frame_to_py(frame: plsm_lite3_frame_t) -> Lite3Frame:
+    seq = int(frame.seq)
+    timestamp_ns = int(frame.timestamp_ns)
+    flags = int(frame.flags)
+    payload = b""
+    if frame.payload.data and frame.payload.len:
+        data = (c_uint8 * frame.payload.len).from_address(frame.payload.data)
+        payload = bytes(data)
+    _LIB.plsm_lite3_frame_free(byref(frame))
+    return Lite3Frame(seq=seq, timestamp_ns=timestamp_ns, flags=flags, payload=payload)
 
 
 def _descrip_array(values: Iterable[str]) -> tuple[POINTER(c_char_p), list[bytes]]:
@@ -287,6 +356,14 @@ class Client:
         self.close()
 
 
+class Lite3Frame:
+    def __init__(self, seq: int, timestamp_ns: int, flags: int, payload: bytes) -> None:
+        self.seq = seq
+        self.timestamp_ns = timestamp_ns
+        self.flags = flags
+        self.payload = payload
+
+
 class Pool:
     def __init__(self, ptr: POINTER(plsm_pool_t)) -> None:
         self._ptr = ptr
@@ -310,6 +387,24 @@ class Pool:
             raise _take_error(out_err)
         return _buf_to_bytes(buf)
 
+    def append_lite3(self, payload: bytes, durability: Durability) -> int:
+        if not payload:
+            raise ValueError("payload is required")
+        out_seq = c_uint64()
+        out_err = POINTER(plsm_error_t)()
+        payload_buf = (c_uint8 * len(payload)).from_buffer_copy(payload)
+        rc = _LIB.plsm_pool_append_lite3(
+            self._ptr,
+            payload_buf,
+            c_size_t(len(payload)),
+            c_uint32(int(durability)),
+            byref(out_seq),
+            byref(out_err),
+        )
+        if rc != 0:
+            raise _take_error(out_err)
+        return int(out_seq.value)
+
     def get_json(self, seq: int) -> bytes:
         buf = plsm_buf_t()
         out_err = POINTER(plsm_error_t)()
@@ -317,6 +412,14 @@ class Pool:
         if rc != 0:
             raise _take_error(out_err)
         return _buf_to_bytes(buf)
+
+    def get_lite3(self, seq: int) -> Lite3Frame:
+        frame = plsm_lite3_frame_t()
+        out_err = POINTER(plsm_error_t)()
+        rc = _LIB.plsm_pool_get_lite3(self._ptr, c_uint64(seq), byref(frame), byref(out_err))
+        if rc != 0:
+            raise _take_error(out_err)
+        return _frame_to_py(frame)
 
     def open_stream(
         self,
@@ -340,6 +443,29 @@ class Pool:
         if rc != 0:
             raise _take_error(out_err)
         return Stream(out_stream)
+
+    def open_lite3_stream(
+        self,
+        since_seq: Optional[int] = None,
+        max_messages: Optional[int] = None,
+        timeout_ms: Optional[int] = None,
+    ) -> Lite3Stream:
+        out_stream = POINTER(plsm_lite3_stream_t)()
+        out_err = POINTER(plsm_error_t)()
+        rc = _LIB.plsm_lite3_stream_open(
+            self._ptr,
+            c_uint64(since_seq or 0),
+            c_uint32(1 if since_seq is not None else 0),
+            c_uint64(max_messages or 0),
+            c_uint32(1 if max_messages is not None else 0),
+            c_uint64(timeout_ms or 0),
+            c_uint32(1 if timeout_ms is not None else 0),
+            byref(out_stream),
+            byref(out_err),
+        )
+        if rc != 0:
+            raise _take_error(out_err)
+        return Lite3Stream(out_stream)
 
     def close(self) -> None:
         if getattr(self, "_ptr", None):
@@ -373,6 +499,29 @@ class Stream:
         self.close()
 
 
+class Lite3Stream:
+    def __init__(self, ptr: POINTER(plsm_lite3_stream_t)) -> None:
+        self._ptr = ptr
+
+    def next(self) -> Optional[Lite3Frame]:
+        frame = plsm_lite3_frame_t()
+        out_err = POINTER(plsm_error_t)()
+        rc = _LIB.plsm_lite3_stream_next(self._ptr, byref(frame), byref(out_err))
+        if rc == 1:
+            return _frame_to_py(frame)
+        if rc == 0:
+            return None
+        raise _take_error(out_err)
+
+    def close(self) -> None:
+        if getattr(self, "_ptr", None):
+            _LIB.plsm_lite3_stream_free(self._ptr)
+            self._ptr = None
+
+    def __del__(self) -> None:
+        self.close()
+
+
 def parse_message(payload: bytes) -> dict:
     return json.loads(payload.decode("utf-8"))
 
@@ -381,6 +530,8 @@ __all__ = [
     "Client",
     "Pool",
     "Stream",
+    "Lite3Frame",
+    "Lite3Stream",
     "Durability",
     "ErrorKind",
     "PlasmiteError",
