@@ -1015,3 +1015,11 @@
 {"type":"state","ts":"2026-02-05T00:35:56.309548Z","data":{"id":"WB5ESL","state":"done","ts":"2026-02-05T00:35:56.309548Z"}}
 {"type":"claim","ts":"2026-02-05T00:36:01.088962Z","data":{"id":"IHNLM2","agent_id":"codex@bbook","ts":"2026-02-05T00:36:01.088962Z"}}
 {"type":"state","ts":"2026-02-05T00:36:01.088962Z","data":{"id":"IHNLM2","state":"doing","ts":"2026-02-05T00:36:01.088962Z"}}
+{"type":"result","ts":"2026-02-05T00:38:21.556608Z","data":{"task_id":"IHNLM2","summary":"Added Go binding tests for tail cancel/resume, payloads, and Close idempotency.","path":"bindings/go/plasmite_test.go","sha256_at_attach":"7ca696da88f6a738a6dea3dc7173974a17b34b91984db051212c7982c771884b","mtime_at_attach":"2026-02-05T00:37:38.110522408Z","git_commit_at_attach":"e20ca2ae340f8e430b80cc296c36e9ac3775deb7","ts":"2026-02-05T00:38:21.556608Z"}}
+{"type":"state","ts":"2026-02-05T00:38:21.562344Z","data":{"id":"IHNLM2","state":"done","ts":"2026-02-05T00:38:21.562344Z"}}
+{"type":"claim","ts":"2026-02-05T00:38:28.053942Z","data":{"id":"AOYD3S","agent_id":"codex@bbook","ts":"2026-02-05T00:38:28.053942Z"}}
+{"type":"state","ts":"2026-02-05T00:38:28.053942Z","data":{"id":"AOYD3S","state":"doing","ts":"2026-02-05T00:38:28.053942Z"}}
+{"type":"claim","ts":"2026-02-05T00:40:48.88133Z","data":{"id":"5ZF5RD","agent_id":"codex@bbook","ts":"2026-02-05T00:40:48.88133Z"}}
+{"type":"state","ts":"2026-02-05T00:40:48.88133Z","data":{"id":"5ZF5RD","state":"doing","ts":"2026-02-05T00:40:48.88133Z"}}
+{"type":"result","ts":"2026-02-05T00:42:34.300348Z","data":{"task_id":"5ZF5RD","summary":"Added Python binding tests for tail timeout, payloads, and Close errors.","path":"bindings/python/tests/test_bindings.py","sha256_at_attach":"58703f14ced43aa01c2a62e27d1d5aadeba0af86790f290f8393dba4982d787a","mtime_at_attach":"2026-02-05T00:41:51.231639693Z","git_commit_at_attach":"e20ca2ae340f8e430b80cc296c36e9ac3775deb7","ts":"2026-02-05T00:42:34.300348Z"}}
+{"type":"state","ts":"2026-02-05T00:42:34.305646Z","data":{"id":"5ZF5RD","state":"done","ts":"2026-02-05T00:42:34.305646Z"}}
