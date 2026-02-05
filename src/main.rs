@@ -147,6 +147,9 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             tls_cert,
             tls_key,
             tls_self_signed,
+            max_body_bytes,
+            max_tail_timeout_ms,
+            max_tail_concurrency,
         } => {
             let bind: SocketAddr = bind
                 .parse()
@@ -172,6 +175,9 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 tls_cert,
                 tls_key,
                 tls_self_signed,
+                max_body_bytes,
+                max_tail_timeout_ms,
+                max_concurrent_tails: max_tail_concurrency,
             };
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -620,7 +626,8 @@ NOTES
   - Use Authorization: Bearer <token> when --token or --token-file is set
   - Prefer --token-file for non-loopback deployments; --token is dev-only
   - Use --access to restrict read/write operations
-  - Non-loopback writes require TLS + --token-file (or --insecure-no-tls for demos)"#
+  - Non-loopback writes require TLS + --token-file (or --insecure-no-tls for demos)
+  - Safety limits: --max-body-bytes, --max-tail-timeout-ms, --max-tail-concurrency"#
     )]
     Serve {
         #[arg(long, default_value = "127.0.0.1:9700", help = "Bind address")]
@@ -646,6 +653,24 @@ NOTES
             help = "Access mode: read-only|write-only|read-write"
         )]
         access: AccessModeCli,
+        #[arg(
+            long,
+            default_value_t = DEFAULT_MAX_BODY_BYTES,
+            help = "Max request body size in bytes"
+        )]
+        max_body_bytes: u64,
+        #[arg(
+            long,
+            default_value_t = DEFAULT_MAX_TAIL_TIMEOUT_MS,
+            help = "Max tail timeout in milliseconds"
+        )]
+        max_tail_timeout_ms: u64,
+        #[arg(
+            long,
+            default_value_t = DEFAULT_MAX_TAIL_CONCURRENCY,
+            help = "Max concurrent tail streams"
+        )]
+        max_tail_concurrency: usize,
     },
     #[command(
         about = "Fetch one message by sequence number",
@@ -857,6 +882,9 @@ const DEFAULT_SNIFF_BYTES: usize = 8 * 1024;
 const DEFAULT_SNIFF_LINES: usize = 8;
 const DEFAULT_MAX_RECORD_BYTES: usize = 1024 * 1024;
 const DEFAULT_MAX_SNIPPET_BYTES: usize = 200;
+const DEFAULT_MAX_BODY_BYTES: u64 = 1024 * 1024;
+const DEFAULT_MAX_TAIL_TIMEOUT_MS: u64 = 30_000;
+const DEFAULT_MAX_TAIL_CONCURRENCY: usize = 64;
 
 fn add_missing_pool_hint(err: Error, pool_ref: &str, input: &str) -> Error {
     if err.kind() != ErrorKind::NotFound || err.hint().is_some() {

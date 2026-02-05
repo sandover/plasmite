@@ -149,6 +149,13 @@ Cancellation:
 Reconnect semantics:
 - At-least-once delivery; clients should resume with `since_seq` and de-dupe by `seq`.
 
+## Server Limits
+
+- Servers MAY enforce a maximum request body size and return `413` with an error envelope.
+- Servers MAY omit the error envelope for `413` responses emitted by transport layers.
+- Servers MAY enforce a maximum tail timeout; requests over the limit should return `400` (Usage).
+- Servers MAY cap concurrent tail streams; excess requests should return `423` (Busy).
+
 ## Authentication
 
 - If auth is enabled, clients MUST send `Authorization: Bearer <token>`.
@@ -163,6 +170,7 @@ Reconnect semantics:
 - `403` forbidden (access mode disallows the operation).
 - `404` not found.
 - `409` already exists.
+- `413` payload too large.
 - `423` busy/locked.
 - `500` internal errors.
 

@@ -6,7 +6,7 @@
 //! Notes: Streaming uses JSONL; tail is at-least-once and resumable.
 
 use axum::body::Body;
-use axum::extract::{Path as AxumPath, Query, State};
+use axum::extract::{DefaultBodyLimit, Path as AxumPath, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
@@ -18,7 +18,7 @@ use std::future::IntoFuture;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, mpsc};
 use tokio::time::Duration;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
@@ -42,6 +42,9 @@ pub struct ServeConfig {
     pub tls_cert: Option<PathBuf>,
     pub tls_key: Option<PathBuf>,
     pub tls_self_signed: bool,
+    pub max_body_bytes: u64,
+    pub max_tail_timeout_ms: u64,
+    pub max_concurrent_tails: usize,
 }
 
 #[derive(Clone)]
@@ -49,6 +52,8 @@ struct AppState {
     client: LocalClient,
     token: Option<String>,
     access_mode: AccessMode,
+    max_tail_timeout_ms: u64,
+    tail_semaphore: Arc<Semaphore>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -73,10 +78,17 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
 
     init_tracing();
 
+    let max_body_bytes: usize = config
+        .max_body_bytes
+        .try_into()
+        .map_err(|_| Error::new(ErrorKind::Usage).with_message("--max-body-bytes is too large"))?;
+
     let state = Arc::new(AppState {
         client: LocalClient::new().with_pool_dir(config.pool_dir),
         token: config.token,
         access_mode: config.access_mode,
+        max_tail_timeout_ms: config.max_tail_timeout_ms,
+        tail_semaphore: Arc::new(Semaphore::new(config.max_concurrent_tails)),
     });
 
     let app = Router::new()
@@ -88,6 +100,7 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
         .route("/v0/pools/:pool/append", post(append_message))
         .route("/v0/pools/:pool/messages/:seq", get(get_message))
         .route("/v0/pools/:pool/tail", get(tail_messages))
+        .layer(DefaultBodyLimit::max(max_body_bytes))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -151,6 +164,30 @@ fn validate_config(config: &ServeConfig) -> Result<(), Error> {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("TLS requires both --tls-cert and --tls-key")
             .with_hint("Provide both paths or use --tls-self-signed."));
+    }
+
+    if config.max_body_bytes == 0 {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("--max-body-bytes must be greater than zero")
+            .with_hint("Use a positive value like 1048576."));
+    }
+
+    if config.max_tail_timeout_ms == 0 {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("--max-tail-timeout-ms must be greater than zero")
+            .with_hint("Use a positive value like 30000."));
+    }
+
+    if config.max_concurrent_tails == 0 {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("--max-tail-concurrency must be greater than zero")
+            .with_hint("Use a positive value like 64."));
+    }
+
+    if config.max_body_bytes > usize::MAX as u64 {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("--max-body-bytes exceeds platform limits")
+            .with_hint("Use a smaller value that fits in memory."));
     }
 
     if !is_loopback_bind && config.access_mode.allows_write() {
@@ -472,14 +509,35 @@ async fn tail_messages(
         Err(err) => return error_response(err),
     };
     let client = state.client.clone();
+    let permit = match state.tail_semaphore.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return error_response(
+                Error::new(ErrorKind::Busy)
+                    .with_message("too many concurrent tail requests")
+                    .with_hint("Try again later or reduce tail concurrency."),
+            );
+        }
+    };
+    if let Some(timeout_ms) = query.timeout_ms {
+        if timeout_ms > state.max_tail_timeout_ms {
+            return error_response(
+                Error::new(ErrorKind::Usage)
+                    .with_message("tail timeout exceeds server limit")
+                    .with_hint(format!("Use timeout_ms <= {}.", state.max_tail_timeout_ms)),
+            );
+        }
+    }
+    let timeout_ms = query.timeout_ms.unwrap_or(state.max_tail_timeout_ms);
 
     let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
     tokio::task::spawn_blocking(move || {
+        let _permit = permit;
         let result = client.open_pool(&pool_ref).and_then(|pool| {
             let options = TailOptions {
                 since_seq: query.since_seq,
                 max_messages: query.max.map(|value| value as usize),
-                timeout: query.timeout_ms.map(std::time::Duration::from_millis),
+                timeout: Some(std::time::Duration::from_millis(timeout_ms)),
                 ..TailOptions::default()
             };
             let mut tail = pool.tail(options);
@@ -585,6 +643,10 @@ fn error_response(err: Error) -> Response {
             StatusCode::INTERNAL_SERVER_ERROR
         }
     };
+    error_response_with_status(err, status)
+}
+
+fn error_response_with_status(err: Error, status: StatusCode) -> Response {
     let body = ErrorEnvelope {
         error: ErrorBody {
             kind: format!("{:?}", err.kind()),
@@ -624,6 +686,9 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             tls_self_signed: false,
+            max_body_bytes: 1024 * 1024,
+            max_tail_timeout_ms: 30_000,
+            max_concurrent_tails: 64,
         };
         let err = serve(config).await.expect_err("expected usage error");
         assert_eq!(err.kind(), ErrorKind::Usage);
@@ -643,6 +708,9 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             tls_self_signed: false,
+            max_body_bytes: 1024 * 1024,
+            max_tail_timeout_ms: 30_000,
+            max_concurrent_tails: 64,
         };
         let err = validate_config(&config).expect_err("expected usage error");
         assert_eq!(err.kind(), ErrorKind::Usage);
@@ -662,6 +730,9 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             tls_self_signed: false,
+            max_body_bytes: 1024 * 1024,
+            max_tail_timeout_ms: 30_000,
+            max_concurrent_tails: 64,
         };
         validate_config(&config).expect("config ok");
     }
@@ -680,6 +751,9 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             tls_self_signed: false,
+            max_body_bytes: 1024 * 1024,
+            max_tail_timeout_ms: 30_000,
+            max_concurrent_tails: 64,
         };
         let err = validate_config(&config).expect_err("expected usage error");
         assert_eq!(err.kind(), ErrorKind::Usage);
@@ -699,6 +773,31 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             tls_self_signed: false,
+            max_body_bytes: 1024 * 1024,
+            max_tail_timeout_ms: 30_000,
+            max_concurrent_tails: 64,
+        };
+        let err = validate_config(&config).expect_err("expected usage error");
+        assert_eq!(err.kind(), ErrorKind::Usage);
+    }
+
+    #[test]
+    fn safety_limits_require_positive_values() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = ServeConfig {
+            bind: "127.0.0.1:0".parse().expect("bind"),
+            pool_dir: temp.path().to_path_buf(),
+            token: None,
+            access_mode: AccessMode::ReadOnly,
+            allow_non_loopback: false,
+            insecure_no_tls: false,
+            token_file_used: false,
+            tls_cert: None,
+            tls_key: None,
+            tls_self_signed: false,
+            max_body_bytes: 0,
+            max_tail_timeout_ms: 30_000,
+            max_concurrent_tails: 64,
         };
         let err = validate_config(&config).expect_err("expected usage error");
         assert_eq!(err.kind(), ErrorKind::Usage);

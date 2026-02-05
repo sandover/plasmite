@@ -15,7 +15,7 @@ use std::time::Duration;
 use std::{thread::sleep, time::Instant};
 
 use fs2::FileExt;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 fn cmd() -> Command {
     let exe = env!("CARGO_BIN_EXE_plasmite");
@@ -29,18 +29,26 @@ struct ServeProcess {
 
 impl ServeProcess {
     fn start(pool_dir: &std::path::Path) -> Self {
+        Self::start_with_args(pool_dir, &[])
+    }
+
+    fn start_with_args(pool_dir: &std::path::Path, extra_args: &[&str]) -> Self {
         let port = pick_port().expect("port");
         let bind = format!("127.0.0.1:{port}");
         let base_url = format!("http://{bind}");
 
-        let child = cmd()
-            .args([
-                "--dir",
-                pool_dir.to_str().unwrap(),
-                "serve",
-                "--bind",
-                &bind,
-            ])
+        let mut command = cmd();
+        command.args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "serve",
+            "--bind",
+            &bind,
+        ]);
+        if !extra_args.is_empty() {
+            command.args(extra_args);
+        }
+        let child = command
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -2910,4 +2918,73 @@ fn serve_responses_include_version_header() {
     let body: serde_json::Value =
         serde_json::from_str(&health.into_string().expect("body")).expect("healthz json");
     assert_eq!(body.get("ok").and_then(|v| v.as_bool()), Some(true));
+}
+
+#[test]
+fn serve_rejects_oversized_body() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let server = ServeProcess::start_with_args(&pool_dir, &["--max-body-bytes", "64"]);
+    let append_url = format!("{}/v0/pools/demo/append", server.base_url);
+    let payload = json!({
+        "data": { "big": "x".repeat(256) },
+        "descrips": ["oversized"],
+        "durability": "fast"
+    })
+    .to_string();
+
+    match ureq::post(&append_url)
+        .set("Content-Type", "application/json")
+        .send_string(&payload)
+    {
+        Ok(_) => panic!("expected 413 for oversized body"),
+        Err(ureq::Error::Status(code, _resp)) => {
+            assert_eq!(code, 413);
+        }
+        Err(err) => panic!("request failed: {err:?}"),
+    }
+}
+
+#[test]
+fn serve_rejects_excessive_tail_timeout() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let server = ServeProcess::start_with_args(&pool_dir, &["--max-tail-timeout-ms", "5"]);
+    let tail_url = format!("{}/v0/pools/demo/tail?timeout_ms=10", server.base_url);
+    match ureq::get(&tail_url).call() {
+        Ok(_) => panic!("expected tail timeout rejection"),
+        Err(ureq::Error::Status(code, resp)) => {
+            assert_eq!(code, 400);
+            let body = resp.into_string().expect("body");
+            let value: Value = serde_json::from_str(&body).expect("json");
+            assert_eq!(value["error"]["kind"], "Usage");
+        }
+        Err(err) => panic!("request failed: {err:?}"),
+    }
 }
