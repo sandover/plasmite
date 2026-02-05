@@ -33,6 +33,7 @@ pub struct PoolHeader {
     pub flags: u64,
     pub head_off: u64,
     pub tail_off: u64,
+    pub tail_next_off: u64,
     pub oldest_seq: u64,
     pub newest_seq: u64,
 }
@@ -53,6 +54,7 @@ impl PoolHeader {
             flags: 0,
             head_off: 0,
             tail_off: 0,
+            tail_next_off: 0,
             oldest_seq: 0,
             newest_seq: 0,
         })
@@ -70,8 +72,9 @@ impl PoolHeader {
         write_u64(&mut buf, 40, self.flags);
         write_u64(&mut buf, 48, self.head_off);
         write_u64(&mut buf, 56, self.tail_off);
-        write_u64(&mut buf, 64, self.oldest_seq);
-        write_u64(&mut buf, 72, self.newest_seq);
+        write_u64(&mut buf, 64, self.tail_next_off);
+        write_u64(&mut buf, 72, self.oldest_seq);
+        write_u64(&mut buf, 80, self.newest_seq);
 
         buf
     }
@@ -97,8 +100,9 @@ impl PoolHeader {
         let flags = read_u64(buf, 40);
         let head_off = read_u64(buf, 48);
         let tail_off = read_u64(buf, 56);
-        let oldest_seq = read_u64(buf, 64);
-        let newest_seq = read_u64(buf, 72);
+        let tail_next_off = read_u64(buf, 64);
+        let oldest_seq = read_u64(buf, 72);
+        let newest_seq = read_u64(buf, 80);
 
         Ok(Self {
             file_size,
@@ -107,6 +111,7 @@ impl PoolHeader {
             flags,
             head_off,
             tail_off,
+            tail_next_off,
             oldest_seq,
             newest_seq,
         })
@@ -128,10 +133,27 @@ impl PoolHeader {
         if self.ring_size == 0 {
             return Err(Error::new(ErrorKind::Corrupt).with_message("ring size is zero"));
         }
+        let ring_size = self.ring_size;
+        if self.head_off >= ring_size
+            || self.tail_off >= ring_size
+            || self.tail_next_off >= ring_size
+        {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("header offset out of range"));
+        }
+        if self.head_off % 8 != 0 || self.tail_off % 8 != 0 || self.tail_next_off % 8 != 0 {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("header offset not aligned"));
+        }
         // Empty pool is indicated by oldest_seq == 0. newest_seq is monotonic and may be non-zero
         // even when the pool is empty (e.g. after overwriting all messages).
         if self.oldest_seq != 0 && self.oldest_seq > self.newest_seq {
             return Err(Error::new(ErrorKind::Corrupt).with_message("seq bounds inverted"));
+        }
+        if self.oldest_seq == 0
+            && (self.head_off != self.tail_off || self.tail_next_off != self.tail_off)
+        {
+            return Err(
+                Error::new(ErrorKind::Corrupt).with_message("empty header offsets mismatch")
+            );
         }
         Ok(())
     }
@@ -612,6 +634,7 @@ impl Pool {
             ring_offset,
             ring_size,
             self.header.tail_off as usize,
+            self.header.tail_next_off as usize,
             self.header.oldest_seq,
         );
 
@@ -687,8 +710,9 @@ fn write_pool_header(mmap: &mut MmapMut, header: &PoolHeader) {
     write_u64(mmap, 40, header.flags);
     write_u64(mmap, 48, header.head_off);
     write_u64(mmap, 56, header.tail_off);
-    write_u64(mmap, 64, header.oldest_seq);
-    write_u64(mmap, 72, header.newest_seq);
+    write_u64(mmap, 64, header.tail_next_off);
+    write_u64(mmap, 72, header.oldest_seq);
+    write_u64(mmap, 80, header.newest_seq);
 }
 
 fn flush_mmap_range(
@@ -878,7 +902,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::Usage);
         let message = err.message().unwrap_or("");
         assert!(message.contains("42"));
-        assert!(message.contains("1"));
+        assert!(message.contains("2"));
     }
 
     #[test]

@@ -49,11 +49,15 @@ pub fn validate_pool_state(header: PoolHeader, mmap: &[u8]) -> Result<(), Error>
     }
     let head = header.head_off as usize;
     let tail = header.tail_off as usize;
+    let tail_next = header.tail_next_off as usize;
     if head >= ring_size || tail >= ring_size {
         return Err(Error::new(ErrorKind::Corrupt).with_message("head/tail out of range"));
     }
+    if tail_next >= ring_size {
+        return Err(Error::new(ErrorKind::Corrupt).with_message("tail_next out of range"));
+    }
     if header.oldest_seq == 0 {
-        if header.head_off != header.tail_off {
+        if header.head_off != header.tail_off || header.tail_next_off != header.tail_off {
             return Err(
                 Error::new(ErrorKind::Corrupt).with_message("empty pool head/tail mismatch")
             );
@@ -62,6 +66,34 @@ pub fn validate_pool_state(header: PoolHeader, mmap: &[u8]) -> Result<(), Error>
     }
     if header.newest_seq < header.oldest_seq {
         return Err(Error::new(ErrorKind::Corrupt).with_message("seq bounds inverted"));
+    }
+
+    let expected_tail_next = if ring_size - tail < FRAME_HEADER_LEN {
+        0usize
+    } else {
+        let tail_frame = read_frame_header(mmap, ring_offset, tail)?;
+        validate_frame_header(&tail_frame, ring_size)?;
+        match tail_frame.state {
+            FrameState::Wrap => 0usize,
+            FrameState::Committed => {
+                let frame_len =
+                    frame::frame_total_len(FRAME_HEADER_LEN, tail_frame.payload_len as usize)
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::Corrupt).with_message("frame length overflow")
+                        })?;
+                let mut next_off = tail + frame_len;
+                if next_off == ring_size {
+                    next_off = 0;
+                }
+                next_off
+            }
+            _ => {
+                return Err(Error::new(ErrorKind::Corrupt).with_message("unexpected frame state"));
+            }
+        }
+    };
+    if tail_next != expected_tail_next {
+        return Err(Error::new(ErrorKind::Corrupt).with_message("tail_next mismatch"));
     }
 
     let mut offset = tail;
@@ -165,6 +197,7 @@ pub fn debug_assert_tail_committed(
     ring_offset: usize,
     ring_size: usize,
     tail: usize,
+    tail_next_off: usize,
     oldest_seq: u64,
 ) {
     if !cfg!(debug_assertions) || oldest_seq == 0 {
@@ -185,6 +218,16 @@ pub fn debug_assert_tail_committed(
     }
     if header.seq != oldest_seq {
         panic!("tail seq mismatch");
+    }
+    let frame_len =
+        crate::core::frame::frame_total_len(FRAME_HEADER_LEN, header.payload_len as usize)
+            .expect("tail frame length overflow");
+    let mut expected_next = tail + frame_len;
+    if expected_next == ring_size {
+        expected_next = 0;
+    }
+    if tail_next_off != expected_next {
+        panic!("tail_next_off mismatch");
     }
 }
 
@@ -311,6 +354,7 @@ mod tests {
             flags: 0,
             head_off: 0,
             tail_off: 0,
+            tail_next_off: 0,
             oldest_seq: 1,
             newest_seq: 1,
         };

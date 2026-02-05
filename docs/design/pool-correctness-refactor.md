@@ -38,6 +38,8 @@ Core invariants (selected)
 - Header:
   - header size and ring size are valid; head offset is derivable from newest
     frame metadata if a full scan is done.
+  - header includes `tail_next_off` (offset after the tail frame) to reduce
+    planning overhead under overwrite pressure.
 
 State transition API (pure)
 - fn plan_append(state: PoolState, payload_len: u32) -> Result<AppendPlan>

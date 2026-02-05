@@ -59,12 +59,18 @@ pub fn plan_append(
         return Err(Error::new(ErrorKind::Usage).with_message("frame larger than ring"));
     }
 
+    let original_tail = header.tail_off as usize;
+    let original_tail_next_off = header.tail_next_off as usize;
     let mut head = header.head_off as usize;
-    let mut tail = header.tail_off as usize;
+    let mut tail = original_tail;
+    let mut tail_next_off = original_tail_next_off;
     let mut oldest_seq = header.oldest_seq;
     let mut newest_seq = header.newest_seq;
     if head >= ring_size || tail >= ring_size {
         return Err(Error::new(ErrorKind::Corrupt).with_message("head/tail out of range"));
+    }
+    if oldest_seq == 0 {
+        tail_next_off = tail;
     }
     if oldest_seq == 0 && head != tail {
         return Err(Error::new(ErrorKind::Corrupt).with_message("empty pool head/tail mismatch"));
@@ -80,15 +86,25 @@ pub fn plan_append(
     while free_space(head, tail, ring_size, oldest_seq) < required
         || (wrap_required && oldest_seq != 0 && tail < frame_len)
     {
-        let outcome = plan_drop_step(storage, ring_offset, ring_size, head, tail, oldest_seq)?;
+        let outcome = if oldest_seq == 0 {
+            None
+        } else if let Some(fast) =
+            plan_drop_step_fast(ring_size, head, tail, tail_next_off, oldest_seq)
+        {
+            Some(fast)
+        } else {
+            plan_drop_step(storage, ring_offset, ring_size, head, tail, oldest_seq)?
+        };
         let Some((step, new_tail, new_oldest)) = outcome else {
             return Err(Error::new(ErrorKind::Busy).with_message("unable to make space"));
         };
         drops.push(step);
         tail = new_tail;
         oldest_seq = new_oldest;
+        tail_next_off = 0;
         if tail == head {
             oldest_seq = 0;
+            tail_next_off = tail;
         }
         required = if oldest_seq == 0 {
             frame_len
@@ -108,6 +124,7 @@ pub fn plan_append(
     if oldest_seq == 0 {
         tail = head;
     }
+    let appending_into_empty = oldest_seq == 0;
 
     let seq = if newest_seq == 0 { 1 } else { newest_seq + 1 };
     if oldest_seq == 0 {
@@ -120,9 +137,17 @@ pub fn plan_append(
         new_head = 0;
     }
 
+    let tail_next_off = if appending_into_empty {
+        new_head as u64
+    } else if tail == original_tail {
+        original_tail_next_off as u64
+    } else {
+        compute_tail_next_off(storage, ring_offset, ring_size, tail)? as u64
+    };
     let next_header = PoolHeader {
         head_off: new_head as u64,
         tail_off: tail as u64,
+        tail_next_off,
         oldest_seq,
         newest_seq,
         ..header
@@ -136,6 +161,51 @@ pub fn plan_append(
         next_header,
         seq,
     })
+}
+
+fn plan_drop_step_fast(
+    ring_size: usize,
+    head: usize,
+    tail: usize,
+    tail_next_off: usize,
+    oldest_seq: u64,
+) -> Option<(DropStep, usize, u64)> {
+    if tail_next_off == 0 || tail_next_off >= ring_size || tail_next_off % 8 != 0 {
+        return None;
+    }
+    if ring_size - tail_next_off < FRAME_HEADER_LEN {
+        // The next tail must always point at a readable header (or 0 via a wrap marker).
+        return None;
+    }
+    if tail_next_off == tail {
+        // Full-ring single-frame case. Drop empties the ring (tail == head, oldest_seq != 0).
+        if head != tail {
+            return None;
+        }
+        let step = DropStep {
+            offset: tail,
+            len: ring_size,
+            kind: DropKind::Frame { seq: oldest_seq },
+        };
+        return Some((step, tail, 0));
+    }
+
+    if tail_next_off <= tail {
+        return None;
+    }
+    let len = tail_next_off - tail;
+    if len < FRAME_HEADER_LEN || len % 8 != 0 {
+        return None;
+    }
+
+    let new_tail = tail_next_off;
+    let new_oldest = if new_tail == head { 0 } else { oldest_seq + 1 };
+    let step = DropStep {
+        offset: tail,
+        len,
+        kind: DropKind::Frame { seq: oldest_seq },
+    };
+    Some((step, new_tail, new_oldest))
 }
 
 fn plan_drop_step(
@@ -189,6 +259,32 @@ fn plan_drop_step(
         }
         _ => Err(Error::new(ErrorKind::Corrupt).with_message("invalid tail frame state")),
     }
+}
+
+fn compute_tail_next_off(
+    storage: &[u8],
+    ring_offset: usize,
+    ring_size: usize,
+    tail: usize,
+) -> Result<usize, Error> {
+    if ring_size.saturating_sub(tail) < FRAME_HEADER_LEN {
+        return Ok(0);
+    }
+    let frame = read_frame_header(storage, ring_offset, tail)?;
+    frame.validate(ring_size)?;
+    if frame.state == FrameState::Wrap {
+        return Ok(0);
+    }
+    if frame.state != FrameState::Committed {
+        return Err(Error::new(ErrorKind::Corrupt).with_message("invalid tail frame state"));
+    }
+    let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, frame.payload_len as usize)
+        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("frame length overflow"))?;
+    let mut next_off = tail + frame_len;
+    if next_off == ring_size {
+        next_off = 0;
+    }
+    Ok(next_off)
 }
 
 fn read_frame_header(
@@ -267,6 +363,7 @@ mod tests {
         ring_size: usize,
         head: usize,
         tail: usize,
+        tail_next_off: usize,
         oldest_seq: u64,
         newest_seq: u64,
     ) -> PoolHeader {
@@ -277,6 +374,7 @@ mod tests {
             flags: 0,
             head_off: head as u64,
             tail_off: tail as u64,
+            tail_next_off: tail_next_off as u64,
             oldest_seq,
             newest_seq,
         }
@@ -307,7 +405,7 @@ mod tests {
         let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload_len).expect("frame len");
         let ring_size = frame_len * 4;
         let storage = vec![0u8; RING_OFFSET + ring_size];
-        let header = header_for(ring_size, 0, 0, 0, 0);
+        let header = header_for(ring_size, 0, 0, 0, 0, 0);
 
         let plan = plan_append(header, &storage, payload_len).expect("plan");
         assert_eq!(plan.drops.len(), 0);
@@ -326,7 +424,7 @@ mod tests {
         let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload_len).expect("frame len");
         let ring_size = frame_len;
         let storage = vec![0u8; RING_OFFSET + ring_size];
-        let header = header_for(ring_size, 0, 0, 0, 0);
+        let header = header_for(ring_size, 0, 0, 0, 0, 0);
 
         let plan = plan_append(header, &storage, payload_len).expect("plan");
         assert_eq!(plan.frame_offset, 0);
@@ -343,7 +441,7 @@ mod tests {
         let ring_size = frame_len * 3 + FRAME_HEADER_LEN;
         let storage = vec![0u8; RING_OFFSET + ring_size];
         let head = ring_size - FRAME_HEADER_LEN;
-        let header = header_for(ring_size, head, head, 0, 0);
+        let header = header_for(ring_size, head, head, head, 0, 0);
 
         let plan = plan_append(header, &storage, payload_len).expect("plan");
         assert_eq!(plan.wrap_offset, Some(head));
@@ -363,7 +461,7 @@ mod tests {
         let second = FrameHeader::new(FrameState::Committed, 0, 2, 0, payload_len as u32, 0);
         write_frame(&mut storage, frame_len, &second, payload_len);
 
-        let header = header_for(ring_size, 0, 0, 1, 2);
+        let header = header_for(ring_size, 0, 0, frame_len, 1, 2);
         let plan = plan_append(header, &storage, payload_len).expect("plan");
 
         assert_eq!(plan.drops.len(), 1);
@@ -389,6 +487,7 @@ mod tests {
                 flags: 0,
                 head_off: 0,
                 tail_off: 0,
+                tail_next_off: 0,
                 oldest_seq: 0,
                 newest_seq: 0,
             };
@@ -416,5 +515,46 @@ mod tests {
                 validate::validate_pool_state(header, &storage).expect("validate");
             }
         }
+    }
+
+    #[test]
+    fn tail_next_allows_drop_without_decoding_tail_header() {
+        let payload_len = 64usize;
+        let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload_len).expect("frame len");
+        let ring_size = 512usize;
+        let mut storage = vec![0u8; RING_OFFSET + ring_size];
+
+        // Tail frame bytes at offset 0 are all zeroes (invalid magic). If `plan_append` tried to
+        // decode them while freeing space, it would return Corrupt.
+        //
+        // We still need a valid new tail frame so `tail_next_off` can be computed for the next
+        // header.
+        let new_tail = 256usize;
+        let tail_frame = FrameHeader::new(FrameState::Committed, 0, 2, 0, 0, 0);
+        let start = RING_OFFSET + new_tail;
+        storage[start..start + FRAME_HEADER_LEN].copy_from_slice(&tail_frame.encode());
+        let marker_start = start + FRAME_HEADER_LEN;
+        let marker_end = marker_start + frame::FRAME_COMMIT_MARKER_LEN;
+        storage[marker_start..marker_end].copy_from_slice(&frame::FRAME_COMMIT_MARKER);
+
+        let header = PoolHeader {
+            file_size: (RING_OFFSET + ring_size) as u64,
+            ring_offset: RING_OFFSET as u64,
+            ring_size: ring_size as u64,
+            flags: 0,
+            head_off: (ring_size - 8) as u64,
+            tail_off: 0,
+            tail_next_off: new_tail as u64,
+            oldest_seq: 1,
+            newest_seq: 2,
+        };
+
+        let plan = plan_append(header, &storage, payload_len).expect("plan");
+        assert_eq!(plan.drops.len(), 1);
+        assert_eq!(plan.drops[0].offset, 0);
+        assert_eq!(plan.drops[0].kind, DropKind::Frame { seq: 1 });
+        assert_eq!(plan.next_header.tail_off as usize, new_tail);
+        assert_eq!(plan.next_header.oldest_seq, 2);
+        assert_eq!(plan.frame_len, frame_len);
     }
 }

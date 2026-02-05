@@ -1261,3 +1261,7 @@
 {"type":"state","ts":"2026-02-05T21:34:38.566915Z","data":{"id":"PPG2YK","state":"doing","ts":"2026-02-05T21:34:38.566915Z"}}
 {"type":"result","ts":"2026-02-05T21:42:01.212729Z","data":{"task_id":"PPG2YK","summary":"Add per-frame commit marker checks so reads avoid double header decode; update writer/validator/docs","path":"src/core/cursor.rs","sha256_at_attach":"963a5a98734816b02165c1d0a2ea7827aed7f0e2ce45b69d663ef99ea8e6c0dd","mtime_at_attach":"2026-02-05T21:40:12.005072888Z","git_commit_at_attach":"ddde7a11cf93736cbb2f686e02d5048c83ba8761","ts":"2026-02-05T21:42:01.212729Z"}}
 {"type":"state","ts":"2026-02-05T21:42:01.218938Z","data":{"id":"PPG2YK","state":"done","ts":"2026-02-05T21:42:01.218938Z"}}
+{"type":"claim","ts":"2026-02-05T21:46:17.415451Z","data":{"id":"M2NTI5","agent_id":"codex@agent-host","ts":"2026-02-05T21:46:17.415451Z"}}
+{"type":"state","ts":"2026-02-05T21:46:17.415451Z","data":{"id":"M2NTI5","state":"doing","ts":"2026-02-05T21:46:17.415451Z"}}
+{"type":"result","ts":"2026-02-05T22:02:17.22324Z","data":{"task_id":"M2NTI5","summary":"Add tail_next_off to v2 pool header and use it in plan drops; update validators/docs/tests","path":"src/core/pool.rs","sha256_at_attach":"45df43db4c5b733846b8baf8f5b97bcbe9814d81af5174c3045c077ba0e4c5fe","mtime_at_attach":"2026-02-05T21:54:46.502293408Z","git_commit_at_attach":"c133fe4c04a276bec3468a4df98f4906cbf9d899","ts":"2026-02-05T22:02:17.22324Z"}}
+{"type":"state","ts":"2026-02-05T22:02:17.229765Z","data":{"id":"M2NTI5","state":"done","ts":"2026-02-05T22:02:17.229765Z"}}
