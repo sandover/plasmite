@@ -9,7 +9,8 @@ use std::io::{self, IsTerminal, Read};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use clap::{Parser, Subcommand, ValueEnum, error::ErrorKind as ClapErrorKind};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum, error::ErrorKind as ClapErrorKind};
+use clap_complete::aot::Shell;
 use serde_json::{Map, Value, json};
 use std::collections::VecDeque;
 use std::error::Error as StdError;
@@ -97,6 +98,11 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
     let color_mode = cli.color;
 
     let result = (|| match cli.command {
+        Command::Completion { shell } => {
+            let mut cmd = Cli::command();
+            clap_complete::aot::generate(shell, &mut cmd, "plasmite", &mut io::stdout());
+            Ok(RunOutcome::ok())
+        }
         Command::Version => {
             let output = json!({
                 "name": "plasmite",
@@ -873,6 +879,21 @@ NOTES
   $ plasmite version"#
     )]
     Version,
+    #[command(
+        about = "Generate shell completions",
+        long_about = r#"Generate shell completion scripts.
+
+Prints a completion script for the given shell to stdout.
+Source the output in your shell profile to enable tab completion."#,
+        after_help = r#"EXAMPLES
+  $ plasmite completion bash > ~/.local/share/bash-completion/completions/plasmite
+  $ plasmite completion zsh > ~/.zfunc/_plasmite
+  $ plasmite completion fish > ~/.config/fish/completions/plasmite.fish"#
+    )]
+    Completion {
+        #[arg(help = "Shell to generate completions for")]
+        shell: Shell,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]

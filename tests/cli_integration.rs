@@ -128,7 +128,13 @@ fn top_level_help_lists_common_pool_operations() {
     let output = cmd().arg("--help").output().expect("help");
     assert!(output.status.success());
     let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
-    assert!(stdout.contains("pool     Manage pool files"));
+    assert!(
+        stdout.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("pool") && t.ends_with("Manage pool files")
+        }),
+        "expected 'pool ... Manage pool files' in help output"
+    );
     assert!(stdout.contains("plasmite pool list"));
 }
 

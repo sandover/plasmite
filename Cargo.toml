@@ -20,6 +20,7 @@ path = "src/main.rs"
 [dependencies]
 sha2 = "0.10"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 fs2 = "0.4"
 jaq-core = "2"
 jaq-parse = "1"
