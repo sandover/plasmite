@@ -451,7 +451,7 @@ plasmite pool info NAME [--json]
 **Behavior**
 
 * Default output is human-readable for interactive use.
-* `--json` emits a JSON object with stable base fields (`name`, `path`, `file_size`, `index_capacity`, `index_size_bytes`, `ring_offset`, `ring_size`, `bounds`).
+* `--json` emits a JSON object with stable base fields (`name`, `path`, `file_size`, `index_offset`, `index_capacity`, `index_size_bytes`, `ring_offset`, `ring_size`, `bounds`).
 * Metrics are exposed under an additive `metrics` object.
 * Backward compatibility: clients MUST treat missing `metrics` or missing metric subfields as "unavailable", not errors.
 * Throughput (`messages/sec`) is intentionally out of scope for v0 `pool info` output (see notes below).
@@ -466,6 +466,7 @@ plasmite pool info NAME [--json]
 * `name` (string): pool name or provided pool reference.
 * `path` (string): absolute pool path.
 * `file_size` (number): pool file size in bytes.
+* `index_offset` (number): start offset of the inline index region in bytes.
 * `index_capacity` (number): inline index slot count (`0` means scan-only mode).
 * `index_size_bytes` (number): bytes reserved for the inline index region.
 * `ring_offset` (number): start offset of ring region in bytes.
@@ -493,10 +494,11 @@ plasmite pool info NAME [--json]
   "name": "demo",
   "path": "/Users/me/.plasmite/pools/demo.plasmite",
   "file_size": 1048576,
+  "index_offset": 4096,
   "index_capacity": 4096,
   "index_size_bytes": 65536,
   "ring_offset": 69632,
-  "ring_size": 979944,
+  "ring_size": 978944,
   "bounds": { "oldest": 41, "newest": 42 },
   "metrics": {
     "message_count": 2,

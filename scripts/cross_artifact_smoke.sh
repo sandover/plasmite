@@ -23,7 +23,13 @@ export PLASMITE_BIN="$LIB_DIR/plasmite"
 export GOCACHE="$ROOT/.scratch/go-build"
 mkdir -p "$ROOT/.scratch/go-build"
 
-expected_version="3"
+expected_version="$(
+  sed -n 's/^pub const POOL_FORMAT_VERSION: u32 = \([0-9][0-9]*\);/\1/p' "$ROOT/src/core/format.rs"
+)"
+if [[ -z "$expected_version" ]]; then
+  echo "failed to detect POOL_FORMAT_VERSION from src/core/format.rs"
+  exit 1
+fi
 
 check_pool_version() {
   local pool_path="$1"

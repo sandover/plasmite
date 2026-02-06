@@ -766,11 +766,15 @@ impl Pool {
                     "failed to flush wrap marker",
                 )?;
             }
-            if let Some((index_start, index_len)) = index_slot_range(
-                plan.next_header.index_offset,
-                plan.next_header.index_capacity,
-                plan.seq,
-            ) {
+            if plan.next_header.index_capacity > 0 {
+                let (index_start, index_len) = index_slot_range(
+                    plan.next_header.index_offset,
+                    plan.next_header.index_capacity,
+                    plan.seq,
+                )
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::Corrupt).with_message("index slot calculation overflow")
+                })?;
                 flush_mmap_range(
                     &self.mmap,
                     index_start,
@@ -1074,7 +1078,7 @@ fn apply_append(
         plan.next_header.index_capacity,
         plan.seq,
         plan.frame_offset as u64,
-    );
+    )?;
 
     write_pool_header(mmap, &plan.next_header);
 
@@ -1087,24 +1091,32 @@ fn write_index_slot(
     index_capacity: u32,
     seq: u64,
     ring_relative_offset: u64,
-) {
+) -> Result<(), Error> {
     if index_capacity == 0 {
-        return;
+        return Ok(());
     }
-    let slot = (seq % index_capacity as u64) as usize;
-    let start = index_offset as usize + slot * INDEX_SLOT_BYTES as usize;
-    let end = start + INDEX_SLOT_BYTES as usize;
+    let (start, slot_bytes) =
+        index_slot_range(index_offset, index_capacity, seq).ok_or_else(|| {
+            Error::new(ErrorKind::Corrupt).with_message("index slot calculation overflow")
+        })?;
+    let end = start + slot_bytes;
+    if end > mmap.len() {
+        return Err(Error::new(ErrorKind::Corrupt).with_message("index slot out of bounds"));
+    }
     mmap[start..start + 8].copy_from_slice(&seq.to_le_bytes());
     mmap[start + 8..end].copy_from_slice(&ring_relative_offset.to_le_bytes());
+    Ok(())
 }
 
 fn index_slot_range(index_offset: u64, index_capacity: u32, seq: u64) -> Option<(usize, usize)> {
     if index_capacity == 0 {
         return None;
     }
-    let slot = (seq % index_capacity as u64) as usize;
-    let start = index_offset as usize + slot * INDEX_SLOT_BYTES as usize;
-    Some((start, INDEX_SLOT_BYTES as usize))
+    let slot = usize::try_from(seq % index_capacity as u64).ok()?;
+    let index_offset = usize::try_from(index_offset).ok()?;
+    let slot_bytes = usize::try_from(INDEX_SLOT_BYTES).ok()?;
+    let start = index_offset.checked_add(slot.checked_mul(slot_bytes)?)?;
+    Some((start, slot_bytes))
 }
 
 #[cfg(test)]
@@ -1408,7 +1420,8 @@ mod tests {
             plan.next_header.index_capacity,
             plan.seq,
             plan.frame_offset as u64,
-        );
+        )
+        .expect("write index");
         let encoded = plan.next_header.encode();
         storage[0..HEADER_SIZE].copy_from_slice(&encoded);
     }
@@ -1984,7 +1997,7 @@ mod tests {
             plan.next_header.index_capacity,
             plan.seq,
             plan.frame_offset as u64,
-        );
+        )?;
 
         super::write_pool_header(&mut pool.mmap, &plan.next_header);
         if matches!(phase, CrashPhase::Header) {
