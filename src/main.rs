@@ -463,10 +463,16 @@ Mental model:
   # bob sees: {"seq":1,"time":"...","meta":{"descrips":[]},"data":{"from":"alice","msg":"hello"}}
 
 LEARN MORE
+  Common pool operations:
+    plasmite pool create <name>
+    plasmite pool info <name>
+    plasmite pool list
+    plasmite pool delete <name>
+
   $ plasmite <command> --help
   https://github.com/sandover/plasmite"#,
     arg_required_else_help = true,
-    disable_help_subcommand = true
+    disable_help_subcommand = false
 )]
 struct Cli {
     #[arg(

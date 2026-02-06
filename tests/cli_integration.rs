@@ -124,6 +124,33 @@ fn wait_for_server(addr: SocketAddr) -> std::io::Result<()> {
 }
 
 #[test]
+fn top_level_help_lists_common_pool_operations() {
+    let output = cmd().arg("--help").output().expect("help");
+    assert!(output.status.success());
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+    assert!(stdout.contains("pool     Manage pool files"));
+    assert!(stdout.contains("plasmite pool list"));
+}
+
+#[test]
+fn help_subcommand_is_enabled() {
+    let output = cmd().arg("help").output().expect("help");
+    assert!(output.status.success());
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+    assert!(stdout.contains("USAGE"));
+    assert!(stdout.contains("COMMANDS"));
+}
+
+#[test]
+fn help_pool_lists_pool_subcommands() {
+    let output = cmd().args(["help", "pool"]).output().expect("help pool");
+    assert!(output.status.success());
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+    assert!(stdout.contains("Usage: plasmite pool <COMMAND>"));
+    assert!(stdout.contains("list    List pools in the pool directory"));
+}
+
+#[test]
 fn create_poke_get_peek_flow() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
