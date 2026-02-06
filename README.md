@@ -96,6 +96,22 @@ journalctl -o json-seq -f | pls poke syslog --create
 /usr/bin/log stream --style ndjson | pls poke syslog --create
 ```
 
+### Replay with timing
+
+```bash
+# Replay last 100 messages at original speed
+pls peek events --tail 100 --replay 1
+
+# Replay at 2x speed
+pls peek events --tail 50 --replay 2
+
+# Replay at half speed (useful for analyzing fast streams)
+pls peek sensor-data --since 5m --replay 0.5
+
+# Replay without delays (bounded dump, exits when done)
+pls peek events --tail 100 --replay 0
+```
+
 ### Filter and transform
 
 ```bash
@@ -147,6 +163,30 @@ const pool = client.createPool("foo", 1024 * 1024)
 pool.appendJson(Buffer.from('{"from": "node"}'), [], "fast")
 ```
 
+**Replay from code** (all bindings support replay with speed control):
+
+```go
+// Go - replay at 2x speed
+msgs, errs := pool.Replay(ctx, plasmite.ReplayOptions{Speed: 2.0})
+for msg := range msgs {
+    fmt.Println(string(msg))
+}
+```
+
+```python
+# Python - replay at original speed
+for msg in pool.replay(speed=1.0):
+    print(msg.decode())
+```
+
+```javascript
+// Node.js - replay at 0.5x speed
+const { replay } = require("plasmite-node")
+for await (const msg of replay(pool, { speed: 0.5 })) {
+  console.log(msg.toString())
+}
+```
+
 See [Go quickstart](docs/go-quickstart.md), [bindings/python](bindings/python/README.md), and [bindings/node](bindings/node/README.md) for full documentation.
 
 ## Commands
@@ -154,7 +194,7 @@ See [Go quickstart](docs/go-quickstart.md), [bindings/python](bindings/python/RE
 | Command | Description |
 |---------|-------------|
 | `poke POOL DATA` | Send a message (`--create` to auto-create pool) |
-| `peek POOL` | Watch messages (streams until Ctrl-C) |
+| `peek POOL` | Watch messages (streams until Ctrl-C; `--replay N` for timed playback) |
 | `get POOL SEQ` | Fetch one message by seq number |
 | `pool create NAME` | Create a pool (`--size 8M` for larger) |
 | `pool list` | List pools |
