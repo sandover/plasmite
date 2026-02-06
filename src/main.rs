@@ -618,7 +618,8 @@ NOTES
         about = "Send a message to a pool",
         long_about = r#"Send JSON messages to a pool.
 
-Accepts inline JSON, a file (--file), or streams via stdin (auto-detected)."#,
+Accepts local pool refs (name/path), remote shorthand refs (http(s)://host:port/<pool>),
+inline JSON, a file (--file), or streams via stdin (auto-detected)."#,
         after_help = r#"EXAMPLES
   # Inline JSON
   $ plasmite poke foo '{"hello": "world"}'
@@ -632,16 +633,22 @@ Accepts inline JSON, a file (--file), or streams via stdin (auto-detected)."#,
   # Stream from curl (event streams auto-detected)
   $ curl -N https://api.example.com/events | plasmite poke events
 
+  # Remote shorthand ref (serve must already expose the pool)
+  $ plasmite poke http://127.0.0.1:9700/demo --descrip remote '{"msg":"hello"}'
+
   # Auto-create pool on first poke
   $ plasmite poke bar --create '{"first": "message"}'
 
 NOTES
+  - Remote refs must be shorthand: http(s)://host:port/<pool> (no trailing slash)
+  - API-shaped URLs (e.g. /v0/pools/<pool>/append) are rejected as POOL refs
+  - `--create` is local-only; remote poke never creates remote pools
   - `--in auto` detects JSONL, JSON-seq (0x1e), event streams (data: prefix)
   - `--errors skip` continues past bad records; `--durability flush` syncs to disk
   - `--retry N` retries on transient failures (lock contention, etc.)"#
     )]
     Poke {
-        #[arg(help = "Pool name or path")]
+        #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
         pool: String,
         #[arg(help = "Inline JSON value")]
         data: Option<String>,

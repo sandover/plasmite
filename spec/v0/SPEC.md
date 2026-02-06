@@ -518,6 +518,15 @@ Append a message to a pool.
 plasmite poke POOLREF [DATA] [OPTIONS]
 ```
 
+POOLREF for `poke` supports:
+- local name/path refs (existing behavior), and
+- remote shorthand refs: `http(s)://host:port/<pool>` (exactly one pool path segment, no trailing slash).
+
+Rejected remote forms:
+- API-shaped URLs such as `/v0/pools/<pool>/append`
+- query/fragment suffixes
+- non-HTTP schemes
+
 **Options (metadata)**
 
 * `--descrip TEXT` (repeatable)
@@ -566,8 +575,9 @@ plasmite poke POOLREF [DATA] [OPTIONS]
 
 **Options (create)**
 
-* `--create` : create the pool if it is missing
-* `--create-size SIZE` : pool size for creation (bytes or K/M/G)
+* `--create` : create the pool if it is missing (**local refs only**)
+* `--create-size SIZE` : pool size for creation (bytes or K/M/G; requires `--create`)
+* Remote refs never create pools via `poke`; passing `--create` with a remote ref is a usage error.
 
 This gives you the classic pattern:
 
@@ -682,9 +692,15 @@ Notes:
 
 `plasmite serve` is implemented (HTTP/JSON, loopback-only). See `spec/remote/v0/SPEC.md` for the protocol.
 
-Remote pool refs in CLI commands are still planned:
+Remote pool refs in CLI commands are partially implemented:
 
-* Remote pool refs would use `http(s)://host:port/POOL` (no trailing slash)
+* `plasmite poke` supports shorthand remote refs:
+  * `http(s)://host:port/<pool>` (no trailing slash)
+  * API-shaped URLs are rejected as `POOLREF` input
+  * remote `--create` is rejected (no remote resource creation from `poke`)
+
+Additional command coverage is still planned:
+
 * Subcommands that accept POOLREF should work remotely at least for: `peek`, `poke`, `get`, `export`, and `pool list`.
 
 ### Future serve enhancements
@@ -768,5 +784,5 @@ plasmite export mypool --tail 200 --jsonl > dump.jsonl
 * `p-info` becomes JSON-by-default.
 * `p-oldest-idx` / `p-newest-idx` removed; use `pool info` for bounds.
 * `p-await` becomes `peek` (no separate concept).
-* The trailing-slash remote server quirk is removed (when remote refs land).
+* Remote shorthand refs reject trailing slashes (e.g. `/demo/` is invalid; use `/demo`).
 * “Pool sleep” becomes an advanced/maintenance concern; only add if actually needed.

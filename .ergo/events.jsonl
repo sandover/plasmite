@@ -1306,3 +1306,7 @@
 {"type":"state","ts":"2026-02-06T02:04:35.9245Z","data":{"id":"P6JR2F","state":"doing","ts":"2026-02-06T02:04:35.9245Z"}}
 {"type":"result","ts":"2026-02-06T02:05:28.923409Z","data":{"task_id":"P6JR2F","summary":"Added CLI integration coverage for remote poke URL happy path and security/error cases","path":"tests/cli_integration.rs","sha256_at_attach":"6ffe97fac032a1a653ae4d334c200c739cf5f87838e57ea98bfe4fbc43a4a6cc","mtime_at_attach":"2026-02-06T02:05:22.245340675Z","git_commit_at_attach":"6daac4f1277b6dc90f0421e63088f0367830ef1b","ts":"2026-02-06T02:05:28.923409Z"}}
 {"type":"state","ts":"2026-02-06T02:05:28.931125Z","data":{"id":"P6JR2F","state":"done","ts":"2026-02-06T02:05:28.931125Z"}}
+{"type":"claim","ts":"2026-02-06T02:05:47.064263Z","data":{"id":"AEBF5Y","agent_id":"codex@brandon-mbp","ts":"2026-02-06T02:05:47.064263Z"}}
+{"type":"state","ts":"2026-02-06T02:05:47.064263Z","data":{"id":"AEBF5Y","state":"doing","ts":"2026-02-06T02:05:47.064263Z"}}
+{"type":"result","ts":"2026-02-06T02:07:10.014194Z","data":{"task_id":"AEBF5Y","summary":"Documented shorthand remote poke refs, API-shaped URL rejection, and remote --create prohibition across help/README/spec","path":"README.md","sha256_at_attach":"476bdb33463135b94c466d6e2c5cd8ffedcf4cf0c47be1bb2452c8ab7a91d70c","mtime_at_attach":"2026-02-06T02:06:14.494535262Z","git_commit_at_attach":"99f874bfa35fa20d6afcf34c5a834bccfd05bd04","ts":"2026-02-06T02:07:10.014194Z"}}
+{"type":"state","ts":"2026-02-06T02:07:10.020313Z","data":{"id":"AEBF5Y","state":"done","ts":"2026-02-06T02:07:10.020313Z"}}

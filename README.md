@@ -273,11 +273,22 @@ curl -X POST http://127.0.0.1:9700/v0/pools/demo/append \
 
 # Tail messages (JSON Lines stream)
 curl -N http://127.0.0.1:9700/v0/pools/demo/tail
+
+# Ergonomic CLI shorthand for remote append
+pls poke http://127.0.0.1:9700/demo --descrip ping '{"x":1}'
+
+# Rejected: API-shaped URL (use shorthand above)
+pls poke http://127.0.0.1:9700/v0/pools/demo/append '{"x":1}'
+
+# Rejected: remote create is not allowed via poke
+pls poke http://127.0.0.1:9700/demo --create '{"x":1}'
 ```
 
 Notes:
 - Non-loopback binds require `--allow-non-loopback`.
 - Non-loopback writes require `--token-file` and TLS (or `--insecure-no-tls` for demos).
+- Remote `poke` refs must be shorthand `http(s)://host:port/<pool>` (no trailing slash).
+- Remote `poke` does not create pools; `--create` is local-only by design.
 - Access modes: `read-only`, `write-only`, `read-write`.
 - `--tls-self-signed` is for local demos; prefer real certs or a reverse proxy for LAN.
 
