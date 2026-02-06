@@ -11,7 +11,8 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use clap::{
-    CommandFactory, Parser, Subcommand, ValueEnum, ValueHint, error::ErrorKind as ClapErrorKind,
+    Args, CommandFactory, Parser, Subcommand, ValueEnum, ValueHint,
+    error::ErrorKind as ClapErrorKind,
 };
 use clap_complete::aot::Shell;
 use serde_json::{Map, Value, json};
@@ -24,6 +25,7 @@ mod color_json;
 mod ingest;
 mod jq_filter;
 mod serve;
+mod serve_init;
 
 use color_json::colorize_json;
 use ingest::{ErrorPolicy, IngestConfig, IngestFailure, IngestMode, IngestOutcome, ingest};
@@ -155,59 +157,83 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             };
             Ok(RunOutcome::with_code(exit_code))
         }
-        Command::Serve {
-            bind,
-            token,
-            token_file,
-            access,
-            allow_non_loopback,
-            insecure_no_tls,
-            tls_cert,
-            tls_key,
-            tls_self_signed,
-            max_body_bytes,
-            max_tail_timeout_ms,
-            max_tail_concurrency,
-        } => {
-            let bind: SocketAddr = bind
-                .parse()
-                .map_err(|_| Error::new(ErrorKind::Usage).with_message("invalid bind address"))?;
-            if token.is_some() && token_file.is_some() {
-                return Err(Error::new(ErrorKind::Usage)
-                    .with_message("--token cannot be combined with --token-file")
-                    .with_hint("Use --token for dev, or --token-file for safer deployments."));
-            }
-            let (token, token_file_used) = if let Some(path) = token_file {
-                (Some(read_token_file(&path)?), true)
-            } else {
-                (token, false)
-            };
-            let config = serve::ServeConfig {
-                bind,
-                pool_dir: pool_dir.clone(),
-                token,
-                access_mode: access.into(),
-                allow_non_loopback,
-                insecure_no_tls,
-                token_file_used,
-                tls_cert,
-                tls_key,
-                tls_self_signed,
-                max_body_bytes,
-                max_tail_timeout_ms,
-                max_concurrent_tails: max_tail_concurrency,
-            };
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .map_err(|err| {
-                    Error::new(ErrorKind::Internal)
-                        .with_message("failed to start runtime")
-                        .with_source(err)
+        Command::Serve { subcommand, run } => match subcommand {
+            Some(ServeSubcommand::Init(args)) => {
+                let bind: SocketAddr = args.bind.parse().map_err(|_| {
+                    Error::new(ErrorKind::Usage)
+                        .with_message("invalid bind address")
+                        .with_hint("Use a host:port value like 0.0.0.0:9700.")
                 })?;
-            runtime.block_on(serve::serve(config))?;
-            Ok(RunOutcome::ok())
-        }
+                let config = serve_init::ServeInitConfig {
+                    output_dir: args.output_dir,
+                    token_file: args.token_file,
+                    tls_cert: args.tls_cert,
+                    tls_key: args.tls_key,
+                    bind,
+                    force: args.force,
+                };
+                let result = serve_init::init(config)?;
+                if io::stdout().is_terminal() {
+                    emit_serve_init_human(&result);
+                } else {
+                    emit_json(
+                        json!({
+                            "init": {
+                                "artifact_paths": {
+                                    "token_file": result.token_file,
+                                    "tls_cert": result.tls_cert,
+                                    "tls_key": result.tls_key,
+                                },
+                                "next_commands": result.next_commands,
+                            }
+                        }),
+                        color_mode,
+                    );
+                }
+                Ok(RunOutcome::ok())
+            }
+            None => {
+                let bind: SocketAddr = run.bind.parse().map_err(|_| {
+                    Error::new(ErrorKind::Usage).with_message("invalid bind address")
+                })?;
+                if run.token.is_some() && run.token_file.is_some() {
+                    return Err(Error::new(ErrorKind::Usage)
+                        .with_message("--token cannot be combined with --token-file")
+                        .with_hint("Use --token for dev, or run `plasmite serve init` and use the generated --token-file for safer deployments."));
+                }
+                let (token, token_file_used) = if let Some(path) = run.token_file {
+                    (Some(read_token_file(&path)?), true)
+                } else {
+                    (run.token, false)
+                };
+                let config = serve::ServeConfig {
+                    bind,
+                    pool_dir: pool_dir.clone(),
+                    token,
+                    access_mode: run.access.into(),
+                    allow_non_loopback: run.allow_non_loopback,
+                    insecure_no_tls: run.insecure_no_tls,
+                    token_file_used,
+                    tls_cert: run.tls_cert,
+                    tls_key: run.tls_key,
+                    tls_self_signed: run.tls_self_signed,
+                    max_body_bytes: run.max_body_bytes,
+                    max_tail_timeout_ms: run.max_tail_timeout_ms,
+                    max_concurrent_tails: run.max_tail_concurrency,
+                };
+                emit_serve_startup_guidance(&config);
+                let runtime = tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|err| {
+                        Error::new(ErrorKind::Internal)
+                            .with_message("failed to start runtime")
+                            .with_source(err)
+                    })?;
+                runtime.block_on(serve::serve(config))?;
+                Ok(RunOutcome::ok())
+            }
+        },
         Command::Pool { command } => match command {
             PoolCommand::Create { names, size } => {
                 let size = size
@@ -736,8 +762,11 @@ Implements the remote protocol spec under spec/remote/v0/SPEC.md."#,
   $ plasmite serve --bind 127.0.0.1:9701 --token devtoken
   $ plasmite serve --token-file /path/to/token
   $ plasmite serve --tls-self-signed
+  $ plasmite serve init --output-dir ./.plasmite-serve
 
 NOTES
+  - `plasmite serve` prints a startup "next commands" block on interactive terminals
+  - Use `plasmite serve init` to scaffold token + TLS artifacts for safer non-loopback setup
   - Loopback is the default; non-loopback binds require --allow-non-loopback
   - Use Authorization: Bearer <token> when --token or --token-file is set
   - Prefer --token-file for non-loopback deployments; --token is dev-only
@@ -747,47 +776,10 @@ NOTES
   - Safety limits: --max-body-bytes, --max-tail-timeout-ms, --max-tail-concurrency"#
     )]
     Serve {
-        #[arg(long, default_value = "127.0.0.1:9700", help = "Bind address")]
-        bind: String,
-        #[arg(long, help = "Bearer token for auth (dev-only; prefer --token-file)")]
-        token: Option<String>,
-        #[arg(long, value_name = "PATH", help = "Read bearer token from file", value_hint = ValueHint::FilePath)]
-        token_file: Option<PathBuf>,
-        #[arg(long, help = "Allow non-loopback binds (unsafe without TLS + token)")]
-        allow_non_loopback: bool,
-        #[arg(long, help = "Allow non-loopback writes without TLS (unsafe)")]
-        insecure_no_tls: bool,
-        #[arg(long, value_name = "PATH", help = "TLS certificate path (PEM)", value_hint = ValueHint::FilePath)]
-        tls_cert: Option<PathBuf>,
-        #[arg(long, value_name = "PATH", help = "TLS key path (PEM)", value_hint = ValueHint::FilePath)]
-        tls_key: Option<PathBuf>,
-        #[arg(long, help = "Generate a self-signed TLS cert for this run")]
-        tls_self_signed: bool,
-        #[arg(
-            long,
-            value_enum,
-            default_value = "read-write",
-            help = "Access mode: read-only|write-only|read-write"
-        )]
-        access: AccessModeCli,
-        #[arg(
-            long,
-            default_value_t = DEFAULT_MAX_BODY_BYTES,
-            help = "Max request body size in bytes"
-        )]
-        max_body_bytes: u64,
-        #[arg(
-            long,
-            default_value_t = DEFAULT_MAX_TAIL_TIMEOUT_MS,
-            help = "Max tail timeout in milliseconds"
-        )]
-        max_tail_timeout_ms: u64,
-        #[arg(
-            long,
-            default_value_t = DEFAULT_MAX_TAIL_CONCURRENCY,
-            help = "Max concurrent tail streams"
-        )]
-        max_tail_concurrency: usize,
+        #[command(subcommand)]
+        subcommand: Option<ServeSubcommand>,
+        #[command(flatten)]
+        run: ServeRunArgs,
     },
     #[command(
         about = "Fetch one message by sequence number",
@@ -1011,6 +1003,112 @@ NOTES
   - Pools that cannot be read include an error field."#
     )]
     List,
+}
+
+#[derive(Subcommand)]
+enum ServeSubcommand {
+    #[command(
+        about = "Bootstrap secure serve token/TLS artifacts",
+        long_about = r#"Generate token + TLS artifacts and print copy/paste next commands for secure serve startup."#,
+        after_help = r#"EXAMPLES
+  $ plasmite serve init
+  $ plasmite serve init --output-dir ./.plasmite-serve
+  $ plasmite serve init --output-dir ./.plasmite-serve --force
+
+NOTES
+  - Writes token/cert/key files without printing secret token values
+  - Refuses to overwrite existing artifacts unless --force is set"#
+    )]
+    Init(ServeInitArgs),
+}
+
+#[derive(Args)]
+struct ServeInitArgs {
+    #[arg(
+        long,
+        default_value = "0.0.0.0:9700",
+        help = "Bind address used in printed next commands"
+    )]
+    bind: String,
+    #[arg(
+        long,
+        default_value = ".",
+        value_name = "PATH",
+        help = "Base output directory for generated artifacts",
+        value_hint = ValueHint::DirPath
+    )]
+    output_dir: PathBuf,
+    #[arg(
+        long,
+        default_value = "serve-token.txt",
+        value_name = "PATH",
+        help = "Token output path (relative to --output-dir unless absolute)",
+        value_hint = ValueHint::FilePath
+    )]
+    token_file: PathBuf,
+    #[arg(
+        long = "tls-cert",
+        default_value = "serve-cert.pem",
+        value_name = "PATH",
+        help = "TLS certificate output path (relative to --output-dir unless absolute)",
+        value_hint = ValueHint::FilePath
+    )]
+    tls_cert: PathBuf,
+    #[arg(
+        long = "tls-key",
+        default_value = "serve-key.pem",
+        value_name = "PATH",
+        help = "TLS private key output path (relative to --output-dir unless absolute)",
+        value_hint = ValueHint::FilePath
+    )]
+    tls_key: PathBuf,
+    #[arg(long, help = "Overwrite existing generated artifacts")]
+    force: bool,
+}
+
+#[derive(Args)]
+struct ServeRunArgs {
+    #[arg(long, default_value = "127.0.0.1:9700", help = "Bind address")]
+    bind: String,
+    #[arg(long, help = "Bearer token for auth (dev-only; prefer --token-file)")]
+    token: Option<String>,
+    #[arg(long, value_name = "PATH", help = "Read bearer token from file", value_hint = ValueHint::FilePath)]
+    token_file: Option<PathBuf>,
+    #[arg(long, help = "Allow non-loopback binds (unsafe without TLS + token)")]
+    allow_non_loopback: bool,
+    #[arg(long, help = "Allow non-loopback writes without TLS (unsafe)")]
+    insecure_no_tls: bool,
+    #[arg(long, value_name = "PATH", help = "TLS certificate path (PEM)", value_hint = ValueHint::FilePath)]
+    tls_cert: Option<PathBuf>,
+    #[arg(long, value_name = "PATH", help = "TLS key path (PEM)", value_hint = ValueHint::FilePath)]
+    tls_key: Option<PathBuf>,
+    #[arg(long, help = "Generate a self-signed TLS cert for this run")]
+    tls_self_signed: bool,
+    #[arg(
+        long,
+        value_enum,
+        default_value = "read-write",
+        help = "Access mode: read-only|write-only|read-write"
+    )]
+    access: AccessModeCli,
+    #[arg(
+        long,
+        default_value_t = DEFAULT_MAX_BODY_BYTES,
+        help = "Max request body size in bytes"
+    )]
+    max_body_bytes: u64,
+    #[arg(
+        long,
+        default_value_t = DEFAULT_MAX_TAIL_TIMEOUT_MS,
+        help = "Max tail timeout in milliseconds"
+    )]
+    max_tail_timeout_ms: u64,
+    #[arg(
+        long,
+        default_value_t = DEFAULT_MAX_TAIL_CONCURRENCY,
+        help = "Max concurrent tail streams"
+    )]
+    max_tail_concurrency: usize,
 }
 
 fn default_pool_dir() -> PathBuf {
@@ -1368,6 +1466,117 @@ fn read_token_file(path: &Path) -> Result<String, Error> {
             .with_path(path));
     }
     Ok(token)
+}
+
+fn emit_serve_init_human(result: &serve_init::ServeInitResult) {
+    println!("serve init: generated artifacts");
+    println!("  token_file: {}", result.token_file);
+    println!("  tls_cert:   {}", result.tls_cert);
+    println!("  tls_key:    {}", result.tls_key);
+    println!();
+    println!("next commands:");
+    for (idx, cmd) in result.next_commands.iter().enumerate() {
+        println!("  {}. {}", idx + 1, cmd);
+    }
+    println!();
+    println!("notes:");
+    println!("  - token value is not printed; read it from token_file when needed");
+    println!("  - TLS is self-signed; curl examples use -k for local testing");
+}
+
+fn emit_serve_startup_guidance(config: &serve::ServeConfig) {
+    if !io::stderr().is_terminal() {
+        return;
+    }
+    for line in build_serve_startup_lines(config) {
+        eprintln!("{line}");
+    }
+}
+
+fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<String> {
+    let tls_enabled =
+        config.tls_self_signed || (config.tls_cert.is_some() && config.tls_key.is_some());
+    let scheme = if tls_enabled { "https" } else { "http" };
+    let host = display_host(config.bind.ip());
+    let base_url = format!("{scheme}://{host}:{}", config.bind.port());
+    let pool = "demo";
+    let append_url = format!("{base_url}/v0/pools/{pool}/append");
+    let tail_url = format!("{base_url}/v0/pools/{pool}/tail?timeout_ms=5000");
+    let curl_tls_flag = if config.tls_self_signed { " -k" } else { "" };
+    let auth_header = if config.token.is_some() {
+        " -H 'Authorization: Bearer <token>'"
+    } else {
+        ""
+    };
+
+    let auth_line = if config.token.is_some() {
+        if config.token_file_used {
+            "auth: bearer token (from --token-file; value not shown)"
+        } else {
+            "auth: bearer token (from --token; value not shown)"
+        }
+    } else {
+        "auth: none"
+    };
+
+    let tls_line = if config.tls_self_signed {
+        "tls: self-signed"
+    } else if tls_enabled {
+        "tls: enabled"
+    } else {
+        "tls: disabled"
+    };
+
+    let access_line = match config.access_mode {
+        serve::AccessMode::ReadOnly => "access: read-only",
+        serve::AccessMode::WriteOnly => "access: write-only",
+        serve::AccessMode::ReadWrite => "access: read-write",
+    };
+
+    let mut lines = vec![
+        "plasmite serve".to_string(),
+        format!("  base_url: {base_url}"),
+        format!("  {auth_line}"),
+        format!("  {tls_line}"),
+        format!("  {access_line}"),
+        "try:".to_string(),
+        format!(
+            "  curl{curl_tls_flag} -sS -X POST{auth_header} -H 'content-type: application/json' --data '{{\"hello\":\"world\"}}' '{append_url}'"
+        ),
+        format!("  curl{curl_tls_flag} -N -sS{auth_header} '{tail_url}'"),
+    ];
+
+    if config.token.is_some() && config.token_file_used {
+        lines
+            .push("note: the token value is not printed; read it from your token file".to_string());
+    }
+    if config.tls_self_signed {
+        lines.push("note: self-signed TLS; curl examples use -k for local testing".to_string());
+    }
+
+    lines.push(String::new());
+
+    lines
+}
+
+fn display_host(ip: std::net::IpAddr) -> String {
+    match ip {
+        std::net::IpAddr::V4(addr) => {
+            if addr.is_unspecified() {
+                "127.0.0.1".to_string()
+            } else {
+                addr.to_string()
+            }
+        }
+        std::net::IpAddr::V6(addr) => {
+            let shown = if addr.is_unspecified() {
+                "::1".to_string()
+            } else {
+                addr.to_string()
+            };
+            format!("[{shown}]")
+        }
+    }
 }
 
 fn parse_size(input: &str) -> Result<u64, Error> {

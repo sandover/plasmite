@@ -143,13 +143,13 @@ fn validate_config(config: &ServeConfig) -> Result<(), Error> {
     if config.tls_cert.is_some() != config.tls_key.is_some() {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("TLS requires both --tls-cert and --tls-key")
-            .with_hint("Provide both paths or use --tls-self-signed."));
+            .with_hint("Provide both paths or run `plasmite serve init` to generate matching TLS artifacts."));
     }
 
     if config.tls_self_signed && (config.tls_cert.is_some() || config.tls_key.is_some()) {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("--tls-self-signed cannot be combined with --tls-cert/--tls-key")
-            .with_hint("Use either --tls-self-signed or provide certificate paths."));
+            .with_hint("Use either --tls-self-signed or provide certificate paths; `plasmite serve init` can generate cert/key files."));
     }
 
     if config.max_body_bytes == 0 {
@@ -180,12 +180,12 @@ fn validate_config(config: &ServeConfig) -> Result<(), Error> {
         if !config.token_file_used {
             return Err(Error::new(ErrorKind::Usage)
                 .with_message("non-loopback write requires --token-file")
-                .with_hint("Use --token-file for safer deployments."));
+                .with_hint("Run `plasmite serve init` and use the generated --token-file for non-loopback write access."));
         }
         if !config.insecure_no_tls && !tls_is_configured(config) {
             return Err(Error::new(ErrorKind::Usage)
                 .with_message("non-loopback write requires TLS")
-                .with_hint("Use --tls-cert/--tls-key, --tls-self-signed, or --insecure-no-tls."));
+                .with_hint("Run `plasmite serve init` for cert/key artifacts, or use --tls-cert/--tls-key, --tls-self-signed, or --insecure-no-tls."));
         }
     }
 

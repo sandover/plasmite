@@ -325,6 +325,13 @@ Serve pools over HTTP for access from other machines or containers.
 # Local-only (default, for dev)
 pls serve
 
+# Secure non-loopback bootstrap (recommended)
+pls serve init --output-dir ./.plasmite-serve
+pls serve --bind 0.0.0.0:9700 --allow-non-loopback \
+  --token-file ./.plasmite-serve/serve-token.txt \
+  --tls-cert ./.plasmite-serve/serve-cert.pem \
+  --tls-key ./.plasmite-serve/serve-key.pem
+
 # Expose to LAN read-only (no auth required)
 pls serve --bind 0.0.0.0:9700 --allow-non-loopback --access read-only
 
@@ -333,6 +340,11 @@ pls serve --bind 0.0.0.0:9700 --allow-non-loopback \
   --token-file ~/.plasmite/token \
   --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
 ```
+
+When `pls serve` runs in an interactive terminal, it prints a startup **next commands** block with:
+- resolved base URL
+- copy/paste append + tail examples
+- auth and TLS notes for the active configuration
 
 ### From another machine
 

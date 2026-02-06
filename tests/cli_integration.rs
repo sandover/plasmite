@@ -8,6 +8,7 @@ use std::io::Write;
 use std::io::{BufRead, BufReader, Read};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -3096,6 +3097,106 @@ fn serve_rejects_invalid_bind() {
 }
 
 #[test]
+fn serve_init_help_is_available() {
+    let output = cmd()
+        .args(["serve", "init", "--help"])
+        .output()
+        .expect("serve init help");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Generate token + TLS artifacts"));
+}
+
+#[test]
+fn serve_init_writes_artifacts_and_next_commands() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let out_dir = temp.path().join("serve-init");
+    let output = cmd()
+        .args([
+            "serve",
+            "init",
+            "--output-dir",
+            out_dir.to_str().unwrap(),
+            "--bind",
+            "0.0.0.0:9700",
+        ])
+        .output()
+        .expect("serve init");
+    assert!(output.status.success());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+    let payload = parse_json(stdout);
+    let artifacts = payload
+        .get("init")
+        .and_then(|v| v.get("artifact_paths"))
+        .expect("artifact_paths");
+    let token_file = artifacts
+        .get("token_file")
+        .and_then(|v| v.as_str())
+        .expect("token_file");
+    let tls_cert = artifacts
+        .get("tls_cert")
+        .and_then(|v| v.as_str())
+        .expect("tls_cert");
+    let tls_key = artifacts
+        .get("tls_key")
+        .and_then(|v| v.as_str())
+        .expect("tls_key");
+    assert!(Path::new(token_file).exists());
+    assert!(Path::new(tls_cert).exists());
+    assert!(Path::new(tls_key).exists());
+
+    let token = std::fs::read_to_string(token_file).expect("read token");
+    assert!(!token.trim().is_empty());
+    assert!(
+        !stdout.contains(token.trim()),
+        "token value should not be echoed to stdout"
+    );
+
+    let next_commands = payload
+        .get("init")
+        .and_then(|v| v.get("next_commands"))
+        .and_then(|v| v.as_array())
+        .expect("next_commands");
+    assert!(next_commands.iter().any(|v| {
+        v.as_str()
+            .unwrap_or("")
+            .contains("plasmite serve --bind 0.0.0.0:9700 --allow-non-loopback")
+    }));
+}
+
+#[test]
+fn serve_init_requires_force_for_existing_artifacts() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let out_dir = temp.path().join("serve-init");
+
+    let first = cmd()
+        .args(["serve", "init", "--output-dir", out_dir.to_str().unwrap()])
+        .output()
+        .expect("first serve init");
+    assert!(first.status.success());
+
+    let second = cmd()
+        .args(["serve", "init", "--output-dir", out_dir.to_str().unwrap()])
+        .output()
+        .expect("second serve init");
+    assert!(!second.status.success());
+    let err = parse_error_json(&second.stderr);
+    let kind = err
+        .get("error")
+        .and_then(|v| v.get("kind"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert_eq!(kind, "AlreadyExists");
+    let hint = err
+        .get("error")
+        .and_then(|v| v.get("hint"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(hint.contains("--force"));
+}
+
+#[test]
 fn serve_rejects_non_loopback_without_allow() {
     let serve = cmd()
         .args(["serve", "--bind", "0.0.0.0:0"])
@@ -3145,6 +3246,12 @@ fn serve_non_loopback_write_requires_token_file() {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     assert!(message.contains("--token-file"));
+    let hint = err
+        .get("error")
+        .and_then(|v| v.get("hint"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(hint.contains("serve init"));
 }
 
 #[test]
@@ -3180,6 +3287,73 @@ fn serve_non_loopback_write_requires_tls_or_insecure() {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     assert!(message.contains("TLS"));
+    let hint = err
+        .get("error")
+        .and_then(|v| v.get("hint"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(hint.contains("serve init"));
+}
+
+#[test]
+fn serve_rejects_token_and_token_file_combination_with_init_hint() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let token_path = temp.path().join("token.txt");
+    std::fs::write(&token_path, "secret").expect("write token");
+
+    let serve = cmd()
+        .args([
+            "serve",
+            "--token",
+            "dev-token",
+            "--token-file",
+            token_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("serve");
+    assert!(!serve.status.success());
+    let err = parse_error_json(&serve.stderr);
+    let kind = err
+        .get("error")
+        .and_then(|v| v.get("kind"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert_eq!(kind, "Usage");
+    let hint = err
+        .get("error")
+        .and_then(|v| v.get("hint"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(hint.contains("serve init"));
+}
+
+#[test]
+fn serve_rejects_conflicting_tls_flags_with_init_hint() {
+    let serve = cmd()
+        .args([
+            "serve",
+            "--tls-self-signed",
+            "--tls-cert",
+            "cert.pem",
+            "--tls-key",
+            "key.pem",
+        ])
+        .output()
+        .expect("serve");
+    assert!(!serve.status.success());
+    let err = parse_error_json(&serve.stderr);
+    let kind = err
+        .get("error")
+        .and_then(|v| v.get("kind"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert_eq!(kind, "Usage");
+    let hint = err
+        .get("error")
+        .and_then(|v| v.get("hint"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(hint.contains("serve init"));
 }
 
 #[test]
