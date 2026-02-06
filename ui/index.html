@@ -170,6 +170,34 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         background: #12161d;
       }
 
+      /* --- Pool info panel --- */
+
+      .info-panel {
+        padding: 0.5rem 0.8rem;
+        border-bottom: 1px solid var(--line);
+        font-size: 0.74rem;
+        display: grid;
+        gap: 0.08rem;
+        background: var(--panel);
+      }
+
+      .info-row {
+        display: flex;
+        gap: 0.4rem;
+        line-height: 1.3;
+      }
+
+      .info-key {
+        color: #7e8ca4;
+        min-width: 4.2rem;
+      }
+
+      .info-val {
+        color: #c8d3e2;
+        min-width: 0;
+        word-break: break-all;
+      }
+
       /* --- Message cards --- */
 
       .msg {
@@ -224,10 +252,27 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         cursor: default;
       }
 
+      .msg-section {
+        display: grid;
+        grid-template-columns: 2.2rem minmax(0, 1fr);
+        column-gap: 0.14rem;
+        align-items: start;
+        margin-top: 0.12rem;
+      }
+
+      .section-label {
+        color: #7e8ca4;
+        font-size: 0.63rem;
+        letter-spacing: 0.025em;
+        text-transform: uppercase;
+        padding-top: 0.02rem;
+      }
+
       .tags {
         display: inline-flex;
         gap: 0.2rem;
-        margin-left: auto;
+        flex-wrap: wrap;
+        align-items: baseline;
       }
 
       .tag {
@@ -266,7 +311,6 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         display: flex;
         flex-wrap: wrap;
         align-items: baseline;
-        margin-top: 0.18rem;
         gap: 0.06rem 0;
       }
 
@@ -375,6 +419,10 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         .fact span {
           max-width: 100%;
         }
+
+        .msg-section {
+          grid-template-columns: 2rem minmax(0, 1fr);
+        }
       }
     </style>
   </head>
@@ -397,6 +445,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           token: params.get("token") || "",
           n: N,
           p: null,
+          poolInfo: null,
           liveStatus: "reconnecting",
           messages: [],
           nextSeq: null,
@@ -568,6 +617,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
                   '<button type="button" data-apply-token>Apply</button>' +
                 '</div>' +
               '</header>' +
+              '<div class="info-panel" data-info></div>' +
               (error ? '<div class="body"><p class="error">' + escapeHtml(error) + '</p></div>' : "") +
               '<section class="stream" data-stream></section>' +
             '</section>';
@@ -627,7 +677,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           var tint = getMessageTint(message, descrips);
           if (tint) card.dataset.tint = tint;
 
-          // --- Identity line: #seq · relative-time ... tags ---
+          // --- Identity line: #seq · relative-time ---
           var head = document.createElement("div");
           head.className = "msg-head";
 
@@ -648,41 +698,57 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           timeEl.title = isoTime;
           timeEl.textContent = isoTime ? formatRelativeTime(isoTime) : "";
           head.appendChild(timeEl);
-
-          if (descrips.length > 0) {
-            var tagsEl = document.createElement("div");
-            tagsEl.className = "tags";
-            for (var i = 0; i < descrips.length; i++) {
-              var t = document.createElement("span");
-              t.className = "tag";
-              t.textContent = String(descrips[i]);
-              var kind = classifyTag(descrips[i]);
-              if (kind) t.dataset.kind = kind;
-              tagsEl.appendChild(t);
-            }
-            head.appendChild(tagsEl);
-          }
           card.appendChild(head);
 
-          // --- Data facts ---
+          // --- Meta section (tags on the left for scannability) ---
+          var metaSection = document.createElement("div");
+          metaSection.className = "msg-section";
+          var metaLabel = document.createElement("div");
+          metaLabel.className = "section-label";
+          metaLabel.textContent = "meta";
+          metaSection.appendChild(metaLabel);
+          var tagsEl = document.createElement("div");
+          tagsEl.className = "tags";
+          for (var i = 0; i < descrips.length; i++) {
+            var t = document.createElement("span");
+            t.className = "tag";
+            t.textContent = String(descrips[i]);
+            var kind = classifyTag(descrips[i]);
+            if (kind) t.dataset.kind = kind;
+            tagsEl.appendChild(t);
+          }
+          metaSection.appendChild(tagsEl);
+          card.appendChild(metaSection);
+
+          // --- Data section (facts + preview) ---
+          var dataSection = document.createElement("div");
+          dataSection.className = "msg-section";
+          var dataLabel = document.createElement("div");
+          dataLabel.className = "section-label";
+          dataLabel.textContent = "data";
+          dataSection.appendChild(dataLabel);
+          var dataContent = document.createElement("div");
+
           var unpacked = unpackEnvelope(message.data);
           var facts = collectFacts(unpacked.primary, unpacked.envelope);
           if (facts.length > 0) {
-            appendFacts(card, facts);
+            appendFacts(dataContent, facts);
           }
 
-          // --- Preview ---
           var previewText = extractPreview(unpacked.primary);
           if (previewText) {
-            appendPreview(card, previewText);
+            appendPreview(dataContent, previewText);
           } else if (facts.length === 0) {
             var fallback = compactValue(message.data, 300);
             if (fallback) {
-              appendPreview(card, fallback);
+              appendPreview(dataContent, fallback);
             }
           }
 
-          // --- Raw JSON (complete message) ---
+          dataSection.appendChild(dataContent);
+          card.appendChild(dataSection);
+
+          // --- Raw JSON (complete message, outside sections) ---
           appendRawJson(card, message);
 
           return card;
@@ -917,14 +983,77 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
             throw new Error("pool info failed (" + response.status + "): " + text);
           }
           var body = await response.json();
-          state.p = body && body.pool ? body.pool.ring_size : null;
-          var newest = body && body.pool && body.pool.bounds ? body.pool.bounds.newest : null;
-          var oldest = body && body.pool && body.pool.bounds ? body.pool.bounds.oldest : null;
+          state.poolInfo = body && body.pool ? body.pool : null;
+          state.p = state.poolInfo ? state.poolInfo.ring_size : null;
+          var newest = state.poolInfo && state.poolInfo.bounds ? state.poolInfo.bounds.newest : null;
+          var oldest = state.poolInfo && state.poolInfo.bounds ? state.poolInfo.bounds.oldest : null;
           if (Number.isFinite(newest)) {
             var floor = Number.isFinite(oldest) ? oldest : 1;
             state.nextSeq = Math.max(floor, newest - state.n + 1);
           }
           updateIndicators();
+          renderPoolInfo();
+        }
+
+        function renderPoolInfo() {
+          var el = document.querySelector("[data-info]");
+          if (!el || !state.poolInfo) return;
+          var info = state.poolInfo;
+          var bounds = info.bounds || {};
+          var metrics = info.metrics || {};
+          var util = metrics.utilization || {};
+          var age = metrics.age || {};
+
+          var count = metrics.message_count != null ? metrics.message_count
+            : (bounds.oldest != null && bounds.newest != null)
+              ? (bounds.newest - bounds.oldest + 1) : "-";
+
+          var rows = [
+            ["Pool", info.name || poolName],
+            ["Path", info.path || "-"],
+            [
+              "Size",
+              formatHumanBytes(info.file_size) +
+                " (ring: offset=" + (info.ring_offset || 0) +
+                " size=" + formatHumanBytes(info.ring_size) + ")"
+            ],
+            [
+              "Bounds",
+              "oldest=" + (bounds.oldest != null ? bounds.oldest : "-") +
+              " newest=" + (bounds.newest != null ? bounds.newest : "-") +
+              " count=" + count
+            ],
+          ];
+
+          if (util.used_bytes != null) {
+            var pct = util.used_percent != null ? util.used_percent.toFixed(2) + "%" : "-";
+            rows.push([
+              "Util",
+              formatHumanBytes(util.used_bytes) + " used, " +
+              formatHumanBytes(util.free_bytes) + " free (" + pct + ")"
+            ]);
+          }
+          if (age.oldest_time) {
+            rows.push(["Oldest", age.oldest_time + " (" + formatRelativeTime(age.oldest_time) + ")"]);
+          }
+          if (age.newest_time) {
+            rows.push(["Newest", age.newest_time + " (" + formatRelativeTime(age.newest_time) + ")"]);
+          }
+
+          el.textContent = "";
+          for (var i = 0; i < rows.length; i++) {
+            var row = document.createElement("div");
+            row.className = "info-row";
+            var key = document.createElement("span");
+            key.className = "info-key";
+            key.textContent = rows[i][0];
+            row.appendChild(key);
+            var val = document.createElement("span");
+            val.className = "info-val";
+            val.textContent = rows[i][1];
+            row.appendChild(val);
+            el.appendChild(row);
+          }
         }
 
         async function streamEventsLoop() {
