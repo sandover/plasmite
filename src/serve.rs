@@ -40,6 +40,8 @@ use plasmite::api::{
     TailOptions, lite3,
 };
 
+const UI_INDEX_HTML: &str = include_str!("../ui/index.html");
+
 #[derive(Clone, Debug)]
 pub struct ServeConfig {
     pub bind: SocketAddr,
@@ -84,7 +86,7 @@ impl AccessMode {
 }
 
 pub async fn serve(config: ServeConfig) -> Result<(), Error> {
-    validate_config(&config)?;
+    preflight_config(&config)?;
 
     init_tracing();
 
@@ -105,6 +107,8 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
 
     let app = Router::new()
         .route("/healthz", get(healthz))
+        .route("/ui", get(ui_index))
+        .route("/ui/pools/:pool", get(ui_pool))
         .route("/v0/pools", post(create_pool).get(list_pools))
         .route("/v0/pools/open", post(open_pool))
         .route("/v0/pools/:pool/info", get(pool_info))
@@ -115,6 +119,9 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
         .route("/v0/pools/:pool/messages/:seq/lite3", get(get_lite3))
         .route("/v0/pools/:pool/tail", get(tail_messages))
         .route("/v0/pools/:pool/tail_lite3", get(tail_lite3))
+        .route("/v0/ui/pools", get(list_pools))
+        .route("/v0/ui/pools/:pool/info", get(pool_info))
+        .route("/v0/ui/pools/:pool/events", get(ui_events))
         .layer(DefaultBodyLimit::max(max_body_bytes))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -123,6 +130,10 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
         return serve_tls(config.bind, app, tls_config).await;
     }
     serve_plain(config.bind, app).await
+}
+
+pub fn preflight_config(config: &ServeConfig) -> Result<(), Error> {
+    validate_config(config)
 }
 
 fn is_loopback(ip: IpAddr) -> bool {
@@ -501,6 +512,14 @@ struct AppendLite3Query {
 
 async fn healthz() -> Response {
     json_response(json!({ "ok": true }))
+}
+
+async fn ui_index() -> Response {
+    html_response(UI_INDEX_HTML)
+}
+
+async fn ui_pool(AxumPath(_pool): AxumPath<String>) -> Response {
+    html_response(UI_INDEX_HTML)
 }
 
 #[derive(Debug, Serialize)]
@@ -950,6 +969,97 @@ async fn tail_lite3(
     response
 }
 
+async fn ui_events(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    AxumPath(pool): AxumPath<String>,
+    Query(query): Query<TailQuery>,
+) -> Response {
+    if let Err(err) = authorize(&headers, &state) {
+        return error_response(err);
+    }
+    if let Err(err) = ensure_read_access(&state) {
+        return error_response(err);
+    }
+    let pool_ref = match pool_ref_from_request(&pool) {
+        Ok(pool_ref) => pool_ref,
+        Err(err) => return error_response(err),
+    };
+    let permit = match state.tail_semaphore.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return error_response(
+                Error::new(ErrorKind::Busy)
+                    .with_message("too many concurrent tail requests")
+                    .with_hint("Try again later or reduce tail concurrency."),
+            );
+        }
+    };
+    if let Some(timeout_ms) = query.timeout_ms {
+        if timeout_ms > state.max_tail_timeout_ms {
+            return error_response(
+                Error::new(ErrorKind::Usage)
+                    .with_message("tail timeout exceeds server limit")
+                    .with_hint(format!("Use timeout_ms <= {}.", state.max_tail_timeout_ms)),
+            );
+        }
+    }
+    let timeout_ms = query.timeout_ms.unwrap_or(state.max_tail_timeout_ms);
+    let client = state.client.clone();
+    let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
+
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let result = client.open_pool(&pool_ref).and_then(|pool| {
+            let options = TailOptions {
+                since_seq: query.since_seq,
+                max_messages: query.max.map(|value| value as usize),
+                timeout: Some(std::time::Duration::from_millis(timeout_ms)),
+                ..TailOptions::default()
+            };
+            let mut tail = pool.tail(options);
+            while let Some(message) = tail.next_message()? {
+                let mut payload = serde_json::to_vec(&message_json(&message)).map_err(|err| {
+                    Error::new(ErrorKind::Internal)
+                        .with_message("failed to encode message")
+                        .with_source(err)
+                })?;
+                // SSE event frame: clients parse one JSON message per event.
+                let mut frame = b"event: message\ndata: ".to_vec();
+                frame.append(&mut payload);
+                frame.extend_from_slice(b"\n\n");
+                if tx.blocking_send(Ok(Bytes::from(frame))).is_err() {
+                    break;
+                }
+            }
+            Ok(())
+        });
+        if let Err(err) = result {
+            let _ = tx.blocking_send(Err(err));
+        }
+    });
+
+    let stream = ReceiverStream::new(rx)
+        .map(|result| result.map_err(|err| std::io::Error::other(err.to_string())));
+
+    let mut response = Response::new(Body::from_stream(stream));
+    response.headers_mut().insert(
+        "content-type",
+        HeaderValue::from_static("text/event-stream"),
+    );
+    response.headers_mut().insert(
+        "cache-control",
+        HeaderValue::from_static("no-cache, no-transform"),
+    );
+    response
+        .headers_mut()
+        .insert("connection", HeaderValue::from_static("keep-alive"));
+    response
+        .headers_mut()
+        .insert("plasmite-version", HeaderValue::from_static("0"));
+    response
+}
+
 fn pool_ref_from_request(pool: &str) -> Result<PoolRef, Error> {
     if pool.contains('/') {
         return Err(
@@ -1013,6 +1123,18 @@ fn bounds_json(bounds: Bounds) -> serde_json::Value {
 
 fn json_response(payload: serde_json::Value) -> Response {
     let mut response = Json(payload).into_response();
+    response
+        .headers_mut()
+        .insert("plasmite-version", HeaderValue::from_static("0"));
+    response
+}
+
+fn html_response(body: &str) -> Response {
+    let mut response = Response::new(Body::from(body.to_owned()));
+    response.headers_mut().insert(
+        "content-type",
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
     response
         .headers_mut()
         .insert("plasmite-version", HeaderValue::from_static("0"));

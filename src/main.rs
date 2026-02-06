@@ -192,35 +192,15 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 }
                 Ok(RunOutcome::ok())
             }
+            Some(ServeSubcommand::Check) => {
+                let config = serve_config_from_run_args(run, &pool_dir)?;
+                serve::preflight_config(&config)?;
+                emit_serve_check_report(&config, color_mode);
+                Ok(RunOutcome::ok())
+            }
             None => {
-                let bind: SocketAddr = run.bind.parse().map_err(|_| {
-                    Error::new(ErrorKind::Usage).with_message("invalid bind address")
-                })?;
-                if run.token.is_some() && run.token_file.is_some() {
-                    return Err(Error::new(ErrorKind::Usage)
-                        .with_message("--token cannot be combined with --token-file")
-                        .with_hint("Use --token for dev, or run `plasmite serve init` and use the generated --token-file for safer deployments."));
-                }
-                let (token, token_file_used) = if let Some(path) = run.token_file {
-                    (Some(read_token_file(&path)?), true)
-                } else {
-                    (run.token, false)
-                };
-                let config = serve::ServeConfig {
-                    bind,
-                    pool_dir: pool_dir.clone(),
-                    token,
-                    access_mode: run.access.into(),
-                    allow_non_loopback: run.allow_non_loopback,
-                    insecure_no_tls: run.insecure_no_tls,
-                    token_file_used,
-                    tls_cert: run.tls_cert,
-                    tls_key: run.tls_key,
-                    tls_self_signed: run.tls_self_signed,
-                    max_body_bytes: run.max_body_bytes,
-                    max_tail_timeout_ms: run.max_tail_timeout_ms,
-                    max_concurrent_tails: run.max_tail_concurrency,
-                };
+                let config = serve_config_from_run_args(run, &pool_dir)?;
+                serve::preflight_config(&config)?;
                 emit_serve_startup_guidance(&config);
                 let runtime = tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
@@ -762,10 +742,12 @@ Implements the remote protocol spec under spec/remote/v0/SPEC.md."#,
   $ plasmite serve --bind 127.0.0.1:9701 --token devtoken
   $ plasmite serve --token-file /path/to/token
   $ plasmite serve --tls-self-signed
+  $ plasmite serve check
   $ plasmite serve init --output-dir ./.plasmite-serve
 
 NOTES
   - `plasmite serve` prints a startup "next commands" block on interactive terminals
+  - Use `plasmite serve check` to validate config and inspect resolved endpoints without binding sockets
   - Use `plasmite serve init` to scaffold token + TLS artifacts for safer non-loopback setup
   - Loopback is the default; non-loopback binds require --allow-non-loopback
   - Use Authorization: Bearer <token> when --token or --token-file is set
@@ -921,10 +903,13 @@ NOTES
         long_about = r#"Generate shell completion scripts.
 
 Prints a completion script for the given shell to stdout.
-Source the output in your shell profile to enable tab completion."#,
+Install the generated file in your shell's completion directory (or source it)
+to enable tab completion."#,
         after_help = r#"EXAMPLES
   $ plasmite completion bash > ~/.local/share/bash-completion/completions/plasmite
+  $ source ~/.bashrc
   $ plasmite completion zsh > ~/.zfunc/_plasmite
+  $ autoload -U compinit && compinit
   $ plasmite completion fish > ~/.config/fish/completions/plasmite.fish"#
     )]
     Completion {
@@ -1020,6 +1005,19 @@ NOTES
   - Refuses to overwrite existing artifacts unless --force is set"#
     )]
     Init(ServeInitArgs),
+    #[command(
+        about = "Validate serve config and print effective endpoints without starting",
+        long_about = r#"Validate serve config and print effective endpoints without starting a server."#,
+        after_help = r#"EXAMPLES
+  $ plasmite serve check
+  $ plasmite serve --bind 0.0.0.0:9700 --allow-non-loopback --access read-only check
+  $ plasmite serve --token-file ~/.plasmite/token --tls-self-signed check
+
+NOTES
+  - Exits non-zero when config is invalid
+  - Does not bind sockets or start background tasks"#
+    )]
+    Check,
 }
 
 #[derive(Args)]
@@ -1494,11 +1492,12 @@ fn emit_serve_startup_guidance(config: &serve::ServeConfig) {
 }
 
 fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<String> {
-    let tls_enabled =
-        config.tls_self_signed || (config.tls_cert.is_some() && config.tls_key.is_some());
-    let scheme = if tls_enabled { "https" } else { "http" };
+    let tls_enabled = serve_tls_enabled(config);
+    let scheme = serve_scheme(config);
     let host = display_host(config.bind.ip());
     let base_url = format!("{scheme}://{host}:{}", config.bind.port());
+    let web_ui_url = format!("{base_url}/ui");
+    let web_ui_pool_url = format!("{base_url}/ui/pools/demo");
     let pool = "demo";
     let append_url = format!("{base_url}/v0/pools/{pool}/append");
     let tail_url = format!("{base_url}/v0/pools/{pool}/tail?timeout_ms=5000");
@@ -1535,10 +1534,14 @@ fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<String> {
 
     let mut lines = vec![
         "plasmite serve".to_string(),
+        format!("  listen: {}", config.bind),
         format!("  base_url: {base_url}"),
+        format!("  web_ui: {web_ui_url}"),
+        format!("  web_ui_pool: {web_ui_pool_url}"),
         format!("  {auth_line}"),
         format!("  {tls_line}"),
         format!("  {access_line}"),
+        "  stop: press Ctrl-C".to_string(),
         "try:".to_string(),
         format!(
             "  curl{curl_tls_flag} -sS -X POST{auth_header} -H 'content-type: application/json' --data '{{\"hello\":\"world\"}}' '{append_url}'"
@@ -1553,10 +1556,181 @@ fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<String> {
     if config.tls_self_signed {
         lines.push("note: self-signed TLS; curl examples use -k for local testing".to_string());
     }
+    if config.bind.ip().is_unspecified() {
+        lines.push(
+            "note: listening on all interfaces; remote clients must use your host IP or DNS name (not 127.0.0.1).".to_string(),
+        );
+    }
 
     lines.push(String::new());
 
     lines
+}
+
+fn emit_serve_check_report(config: &serve::ServeConfig, color_mode: ColorMode) {
+    if io::stdout().is_terminal() {
+        for line in build_serve_check_lines(config) {
+            println!("{line}");
+        }
+        return;
+    }
+
+    let tls_enabled = serve_tls_enabled(config);
+    let base_url = format!(
+        "{}://{}:{}",
+        serve_scheme(config),
+        display_host(config.bind.ip()),
+        config.bind.port()
+    );
+    let auth_mode = if config.token.is_some() {
+        if config.token_file_used {
+            "bearer token (--token-file)"
+        } else {
+            "bearer token (--token)"
+        }
+    } else {
+        "none"
+    };
+    let tls_mode = if config.tls_self_signed {
+        "self-signed"
+    } else if tls_enabled {
+        "enabled"
+    } else {
+        "disabled"
+    };
+    let access_mode = match config.access_mode {
+        serve::AccessMode::ReadOnly => "read-only",
+        serve::AccessMode::WriteOnly => "write-only",
+        serve::AccessMode::ReadWrite => "read-write",
+    };
+
+    emit_json(
+        json!({
+            "check": {
+                "status": "valid",
+                "listen": config.bind.to_string(),
+                "base_url": base_url,
+                "web_ui": format!("{base_url}/ui"),
+                "web_ui_pool": format!("{base_url}/ui/pools/demo"),
+                "auth": auth_mode,
+                "tls": tls_mode,
+                "access": access_mode,
+                "limits": {
+                    "max_body_bytes": config.max_body_bytes,
+                    "max_tail_timeout_ms": config.max_tail_timeout_ms,
+                    "max_tail_concurrency": config.max_concurrent_tails
+                }
+            }
+        }),
+        color_mode,
+    );
+}
+
+fn build_serve_check_lines(config: &serve::ServeConfig) -> Vec<String> {
+    let tls_enabled = serve_tls_enabled(config);
+    let base_url = format!(
+        "{}://{}:{}",
+        serve_scheme(config),
+        display_host(config.bind.ip()),
+        config.bind.port()
+    );
+    let auth_line = if config.token.is_some() {
+        if config.token_file_used {
+            "auth: bearer token (from --token-file; value not shown)"
+        } else {
+            "auth: bearer token (from --token; value not shown)"
+        }
+    } else {
+        "auth: none"
+    };
+    let tls_line = if config.tls_self_signed {
+        "tls: self-signed"
+    } else if tls_enabled {
+        "tls: enabled"
+    } else {
+        "tls: disabled"
+    };
+    let access_line = match config.access_mode {
+        serve::AccessMode::ReadOnly => "access: read-only",
+        serve::AccessMode::WriteOnly => "access: write-only",
+        serve::AccessMode::ReadWrite => "access: read-write",
+    };
+
+    let mut lines = vec![
+        "plasmite serve check".to_string(),
+        "  status: valid".to_string(),
+        format!("  listen: {}", config.bind),
+        format!("  base_url: {base_url}"),
+        format!("  web_ui: {base_url}/ui"),
+        format!("  web_ui_pool: {base_url}/ui/pools/demo"),
+        format!("  {auth_line}"),
+        format!("  {tls_line}"),
+        format!("  {access_line}"),
+        format!(
+            "  limits: body={}B tail_timeout={}ms tail_concurrency={}",
+            config.max_body_bytes, config.max_tail_timeout_ms, config.max_concurrent_tails
+        ),
+    ];
+
+    if config.bind.ip().is_unspecified() {
+        lines.push(
+            "note: listening on all interfaces; remote clients must use your host IP or DNS name."
+                .to_string(),
+        );
+    }
+    if config.tls_self_signed {
+        lines.push("note: self-signed TLS; clients must trust the generated cert".to_string());
+    }
+    lines.push(String::new());
+    lines
+}
+
+fn serve_scheme(config: &serve::ServeConfig) -> &'static str {
+    if serve_tls_enabled(config) {
+        "https"
+    } else {
+        "http"
+    }
+}
+
+fn serve_tls_enabled(config: &serve::ServeConfig) -> bool {
+    config.tls_self_signed || (config.tls_cert.is_some() && config.tls_key.is_some())
+}
+
+fn serve_config_from_run_args(
+    run: ServeRunArgs,
+    pool_dir: &Path,
+) -> Result<serve::ServeConfig, Error> {
+    let bind: SocketAddr = run.bind.parse().map_err(|_| {
+        Error::new(ErrorKind::Usage)
+            .with_message("invalid bind address")
+            .with_hint("Use a host:port value like 127.0.0.1:9700.")
+    })?;
+    if run.token.is_some() && run.token_file.is_some() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("--token cannot be combined with --token-file")
+            .with_hint("Use --token for dev, or run `plasmite serve init` and use the generated --token-file for safer deployments."));
+    }
+    let (token, token_file_used) = if let Some(path) = run.token_file {
+        (Some(read_token_file(&path)?), true)
+    } else {
+        (run.token, false)
+    };
+    Ok(serve::ServeConfig {
+        bind,
+        pool_dir: pool_dir.to_path_buf(),
+        token,
+        access_mode: run.access.into(),
+        allow_non_loopback: run.allow_non_loopback,
+        insecure_no_tls: run.insecure_no_tls,
+        token_file_used,
+        tls_cert: run.tls_cert,
+        tls_key: run.tls_key,
+        tls_self_signed: run.tls_self_signed,
+        max_body_bytes: run.max_body_bytes,
+        max_tail_timeout_ms: run.max_tail_timeout_ms,
+        max_concurrent_tails: run.max_tail_concurrency,
+    })
 }
 
 fn display_host(ip: std::net::IpAddr) -> String {

@@ -384,6 +384,74 @@ fn remote_tail_respects_limits_and_timeouts() -> TestResult<()> {
 }
 
 #[test]
+fn remote_ui_routes_serve_single_page_html() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::start(temp_dir.path())?;
+
+    let ui = ureq::get(&format!("{}/ui", server.base_url))
+        .call()
+        .expect("ui route");
+    assert_eq!(ui.status(), 200);
+    assert!(
+        ui.header("content-type")
+            .unwrap_or_default()
+            .starts_with("text/html")
+    );
+    let body = ui.into_string()?;
+    assert!(body.contains("Plasmite UI"));
+
+    let pool_view = ureq::get(&format!("{}/ui/pools/demo", server.base_url))
+        .call()
+        .expect("pool ui route");
+    assert_eq!(pool_view.status(), 200);
+    assert!(
+        pool_view
+            .header("content-type")
+            .unwrap_or_default()
+            .starts_with("text/html")
+    );
+    Ok(())
+}
+
+#[test]
+fn remote_ui_events_stream_sends_sse_and_requires_auth() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::start_with_token(temp_dir.path(), Some("secret"))?;
+    let client = server.client_with_token()?;
+    let pool_ref = PoolRef::name("ui-events");
+
+    client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
+    let pool = client.open_pool(&pool_ref)?;
+    let created =
+        pool.append_json_now(&json!({"kind": "ui", "ok": true}), &[], Durability::Fast)?;
+
+    match ureq::get(&format!(
+        "{}/v0/ui/pools/ui-events/events?since_seq={}&max=1",
+        server.base_url, created.seq
+    ))
+    .call()
+    {
+        Ok(_) => return Err("expected unauthorized SSE request to fail".into()),
+        Err(ureq::Error::Status(code, _)) => assert_eq!(code, 401),
+        Err(err) => return Err(err.into()),
+    }
+
+    let response = ureq::get(&format!(
+        "{}/v0/ui/pools/ui-events/events?since_seq={}&max=1",
+        server.base_url, created.seq
+    ))
+    .set("Authorization", "Bearer secret")
+    .call()
+    .expect("authorized sse request");
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.header("content-type"), Some("text/event-stream"));
+    let body = response.into_string()?;
+    assert!(body.contains("event: message"));
+    assert!(body.contains("\"seq\":1"));
+    Ok(())
+}
+
+#[test]
 fn remote_read_only_allows_reads_but_rejects_writes() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let pool_dir = temp_dir.path();

@@ -3108,6 +3108,38 @@ fn serve_init_help_is_available() {
 }
 
 #[test]
+fn serve_check_outputs_resolved_config() {
+    let output = cmd()
+        .args(["serve", "check"])
+        .output()
+        .expect("serve check");
+    assert!(output.status.success());
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+    let payload = parse_json(stdout);
+    let check = payload.get("check").expect("check");
+    let status = check.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    assert_eq!(status, "valid");
+    let base_url = check.get("base_url").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(base_url.contains("127.0.0.1:9700"));
+}
+
+#[test]
+fn serve_check_rejects_invalid_config() {
+    let output = cmd()
+        .args(["serve", "--bind", "0.0.0.0:0", "check"])
+        .output()
+        .expect("serve check");
+    assert!(!output.status.success());
+    let err = parse_error_json(&output.stderr);
+    let kind = err
+        .get("error")
+        .and_then(|v| v.get("kind"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert_eq!(kind, "Usage");
+}
+
+#[test]
 fn serve_init_writes_artifacts_and_next_commands() {
     let temp = tempfile::tempdir().expect("tempdir");
     let out_dir = temp.path().join("serve-init");

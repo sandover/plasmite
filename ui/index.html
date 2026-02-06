@@ -1,0 +1,1056 @@
+<!--
+Purpose: Single-file web UI for watching Plasmite pools in real time.
+Key exports: Route entry points `/ui` and `/ui/pools/{name}` in this same document.
+Role: Browser client for list/info/SSE endpoints provided by `plasmite serve`.
+Invariants: No framework runtime, no build step, and no local JS package dependencies.
+Invariants: Message content is rendered as text (never injected as HTML).
+Invariants: Client scrollback is bounded by N and oldest entries are dropped first.
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plasmite UI</title>
+    <style>
+      :root {
+        --bg: #16181d;
+        --panel: #1f232b;
+        --panel-2: #252b36;
+        --text: #e8e9ed;
+        --muted: #a5acbb;
+        --line: #343c4b;
+        --ok: #66d9b8;
+        --warn: #f7cf6e;
+        --error: #ef7e7e;
+        --accent: #7eb5ef;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background:
+          radial-gradient(1200px 500px at 85% -10%, #2a2e3a 0%, transparent 60%),
+          linear-gradient(180deg, #171a20, #13151a);
+        color: var(--text);
+        font-family: "Inconsolata", "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+      }
+
+      .app {
+        width: min(1100px, 100% - 2rem);
+        margin: 1rem auto 2rem;
+        display: grid;
+        gap: 0.8rem;
+      }
+
+      .card {
+        background: linear-gradient(180deg, var(--panel), #1a1f28);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+
+      .header {
+        padding: 0.9rem 1rem;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        gap: 0.8rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .title {
+        font-size: 1rem;
+        letter-spacing: 0.02em;
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .pill {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        border-radius: 999px;
+        padding: 0.18rem 0.6rem;
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+
+      .pill[data-status="live"] {
+        color: var(--ok);
+        border-color: #2f6a5a;
+      }
+
+      .pill[data-status="reconnecting"] {
+        color: var(--warn);
+        border-color: #6a5a2f;
+      }
+
+      .pill[data-status="error"] {
+        color: var(--error);
+        border-color: #704848;
+      }
+
+      .toolbar {
+        display: flex;
+        gap: 0.6rem;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-left: auto;
+      }
+
+      button,
+      input {
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--text);
+        font-family: inherit;
+        padding: 0.45rem 0.6rem;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      button:hover {
+        border-color: #4a5570;
+      }
+
+      input {
+        width: 14rem;
+      }
+
+      .body {
+        padding: 1rem;
+      }
+
+      .rows {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 0.4rem;
+      }
+
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        border: 1px solid var(--line);
+        background: #1b2029;
+        border-radius: 10px;
+        padding: 0.7rem 0.8rem;
+        align-items: center;
+        text-decoration: none;
+        color: var(--text);
+      }
+
+      .row:hover {
+        border-color: #4a5570;
+        background: #212836;
+      }
+
+      .stack {
+        display: grid;
+        gap: 0.25rem;
+      }
+
+      .stream {
+        border-top: 1px solid var(--line);
+        max-height: 65vh;
+        overflow: auto;
+        padding: 0.44rem 0.6rem;
+        background: #12161d;
+      }
+
+      /* --- Message cards --- */
+
+      .msg {
+        border: 1px solid #2a3140;
+        border-radius: 6px;
+        background: rgba(16, 20, 28, 0.52);
+        padding: 0.38rem 0.5rem 0.32rem;
+        border-left: 3px solid transparent;
+      }
+
+      .msg + .msg {
+        margin-top: 0.3rem;
+      }
+
+      .msg[data-tint="ok"] {
+        border-left-color: var(--ok);
+      }
+
+      .msg[data-tint="warn"] {
+        border-left-color: var(--warn);
+      }
+
+      .msg[data-tint="error"] {
+        border-left-color: var(--error);
+      }
+
+      .msg[data-tint="accent"] {
+        border-left-color: var(--accent);
+      }
+
+      .msg-head {
+        display: flex;
+        align-items: baseline;
+        gap: 0.32rem;
+        flex-wrap: wrap;
+      }
+
+      .seq {
+        color: #8fd3ff;
+        font-weight: 600;
+        font-size: 0.82rem;
+      }
+
+      .dot {
+        color: #4a5570;
+        font-size: 0.78rem;
+      }
+
+      .time {
+        color: #93a0b4;
+        font-size: 0.76rem;
+        cursor: default;
+      }
+
+      .tags {
+        display: inline-flex;
+        gap: 0.2rem;
+        margin-left: auto;
+      }
+
+      .tag {
+        display: inline-block;
+        border: 1px solid #3b4558;
+        border-radius: 999px;
+        background: transparent;
+        color: #b7c4dc;
+        padding: 0.01rem 0.28rem;
+        font-size: 0.71rem;
+        line-height: 1.2;
+        max-width: 9.8rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .tag[data-kind="error"] {
+        border-color: #7a4d52;
+        color: #f0bec3;
+      }
+
+      .tag[data-kind="warn"] {
+        border-color: #776136;
+        color: #eedcae;
+      }
+
+      .tag[data-kind="ok"] {
+        border-color: #3c6f5f;
+        color: #bae6d8;
+      }
+
+      /* --- Facts (key-value pairs from data payload) --- */
+
+      .facts {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        margin-top: 0.18rem;
+        gap: 0.06rem 0;
+      }
+
+      .fact {
+        display: inline-flex;
+        gap: 0.16rem;
+        align-items: baseline;
+        font-size: 0.74rem;
+        max-width: min(46rem, 100%);
+      }
+
+      .fact + .fact::before {
+        content: "\00b7";
+        color: #4a5570;
+        padding: 0 0.22rem;
+        flex-shrink: 0;
+      }
+
+      .fact kbd {
+        color: #8393ad;
+        font-family: inherit;
+        font-size: 0.67rem;
+        letter-spacing: 0.012em;
+      }
+
+      .fact span {
+        color: #d2dae7;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 28rem;
+      }
+
+      .preview {
+        margin-top: 0.14rem;
+        color: #c8d3e2;
+        font-size: 0.77rem;
+        line-height: 1.28;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      .details {
+        margin-top: 0.1rem;
+      }
+
+      .details > summary {
+        cursor: pointer;
+        color: #7f8ea5;
+        font-size: 0.67rem;
+        letter-spacing: 0.02em;
+      }
+
+      .details > summary::marker {
+        color: #6f7f99;
+      }
+
+      .value-text {
+        margin: 0;
+        color: #dde1ea;
+        white-space: pre-wrap;
+        word-break: break-word;
+        line-height: 1.24;
+        font-size: 0.75rem;
+      }
+
+      .error {
+        color: var(--error);
+      }
+
+      @media (max-width: 720px) {
+        .app {
+          width: calc(100% - 1rem);
+          margin-top: 0.6rem;
+        }
+
+        .header {
+          padding: 0.7rem;
+        }
+
+        .body {
+          padding: 0.7rem;
+        }
+
+        input {
+          width: 100%;
+          min-width: 0;
+        }
+
+        .toolbar {
+          margin-left: 0;
+          width: 100%;
+        }
+
+        .tags {
+          margin-left: 0;
+        }
+
+        .tag {
+          max-width: 100%;
+        }
+
+        .fact span {
+          max-width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main id="app" class="app" aria-live="polite"></main>
+    <script>
+      (() => {
+        const app = document.getElementById("app");
+        const path = decodeURIComponent(window.location.pathname);
+        const onPoolPage = path.startsWith("/ui/pools/");
+        const poolName = onPoolPage ? path.slice("/ui/pools/".length) : "";
+
+        const params = new URLSearchParams(window.location.search);
+        const requestedN = Number(params.get("n") || "400");
+        const N = Number.isFinite(requestedN)
+          ? Math.max(1, Math.min(2000, Math.trunc(requestedN)))
+          : 400;
+
+        const state = {
+          token: params.get("token") || "",
+          n: N,
+          p: null,
+          liveStatus: "reconnecting",
+          messages: [],
+          nextSeq: null,
+          stopped: false,
+          reconnectTimer: null,
+        };
+
+        /* ---- Utility functions ---- */
+
+        function authHeaders() {
+          if (!state.token) {
+            return {};
+          }
+          return { Authorization: `Bearer ${state.token}` };
+        }
+
+        function setLiveStatus(status) {
+          state.liveStatus = status;
+          const el = document.querySelector("[data-live-pill]");
+          if (!el) {
+            return;
+          }
+          el.dataset.status = status;
+          if (status === "live") {
+            el.textContent = "live";
+          } else if (status === "error") {
+            el.textContent = "error";
+          } else {
+            el.textContent = "reconnecting";
+          }
+        }
+
+        function updateIndicators() {
+          const nEl = document.querySelector("[data-n]");
+          const pEl = document.querySelector("[data-p-pill]");
+          if (nEl) {
+            nEl.textContent = String(state.messages.length);
+          }
+          if (pEl) {
+            if (state.p == null) {
+              pEl.style.display = "none";
+            } else {
+              pEl.style.display = "";
+              pEl.textContent = formatHumanBytes(state.p) + " pool";
+            }
+          }
+        }
+
+        function pad2(n) {
+          return n < 10 ? "0" + n : String(n);
+        }
+
+        function formatRelativeTime(isoString) {
+          if (!isoString) return "";
+          const date = new Date(isoString);
+          if (isNaN(date.getTime())) return isoString;
+          const nowMs = Date.now();
+          const diffMs = nowMs - date.getTime();
+          if (diffMs < 0) return "just now";
+          const diffS = Math.floor(diffMs / 1000);
+          if (diffS < 5) return "just now";
+          if (diffS < 60) return diffS + "s ago";
+          const diffM = Math.floor(diffS / 60);
+          if (diffM < 60) return diffM + "m ago";
+          const diffH = Math.floor(diffM / 60);
+          if (diffH < 24) return diffH + "h ago";
+          const diffD = Math.floor(diffH / 24);
+          if (diffD === 1) {
+            return "yesterday " + pad2(date.getHours()) + ":" + pad2(date.getMinutes());
+          }
+          var months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+          return months[date.getMonth()] + " " + date.getDate() + " " + pad2(date.getHours()) + ":" + pad2(date.getMinutes());
+        }
+
+        function formatHumanBytes(bytes) {
+          if (bytes == null || bytes === 0) return "0 B";
+          if (bytes < 1024) return bytes + " B";
+          if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+          if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+          return (bytes / (1024 * 1024 * 1024)).toFixed(1) + " GB";
+        }
+
+        function isIsoTimestamp(value) {
+          return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value);
+        }
+
+        function humanizeTimestamp(isoString) {
+          var date = new Date(isoString);
+          if (isNaN(date.getTime())) return isoString;
+          var now = new Date();
+          if (date.toDateString() === now.toDateString()) {
+            return pad2(date.getHours()) + ":" + pad2(date.getMinutes()) + ":" + pad2(date.getSeconds());
+          }
+          var months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+          return months[date.getMonth()] + " " + date.getDate() + " " + pad2(date.getHours()) + ":" + pad2(date.getMinutes());
+        }
+
+        function startTimeUpdater() {
+          setInterval(function () {
+            var els = document.querySelectorAll("[data-time]");
+            for (var i = 0; i < els.length; i++) {
+              var iso = els[i].dataset.time;
+              if (iso) {
+                els[i].textContent = formatRelativeTime(iso);
+              }
+            }
+          }, 10000);
+        }
+
+        /* ---- Pool list ---- */
+
+        function renderPoolList(pools, error) {
+          var listRows = pools
+            .slice()
+            .sort(function (a, b) { return a.name.localeCompare(b.name); })
+            .map(function (pool) {
+              var newest = pool && pool.bounds ? pool.bounds.newest : null;
+              return '<a class="row" href="/ui/pools/' + encodeURIComponent(pool.name) + '"><span class="stack"><strong>' + escapeHtml(pool.name) + '</strong><span class="muted">path: ' + escapeHtml(pool.path || "") + '</span></span><span class="stack muted"><span>P: ' + (pool.ring_size || "-") + '</span><span>newest: ' + (newest || "-") + '</span></span></a>';
+            })
+            .join("");
+
+          app.innerHTML =
+            '<section class="card">' +
+              '<header class="header">' +
+                '<div class="title">PLASMITE UI</div>' +
+                '<span class="pill" data-status="' + state.liveStatus + '">catalog</span>' +
+                '<div class="toolbar">' +
+                  '<input data-token-input type="password" placeholder="Bearer token (optional)" value="' + escapeAttr(state.token) + '" />' +
+                  '<button type="button" data-reload>Reload</button>' +
+                '</div>' +
+              '</header>' +
+              '<div class="body">' +
+                '<p class="muted">Pool browser. Click a pool to open its watch view.</p>' +
+                (error ? '<p class="error">' + escapeHtml(error) + '</p>' : "") +
+                '<div class="rows">' +
+                  (listRows || '<div class="muted">No pools found.</div>') +
+                '</div>' +
+              '</div>' +
+            '</section>';
+
+          var tokenInput = document.querySelector("[data-token-input]");
+          if (tokenInput) {
+            tokenInput.addEventListener("change", function () {
+              state.token = tokenInput.value.trim();
+            });
+          }
+          var reloadBtn = document.querySelector("[data-reload]");
+          if (reloadBtn) {
+            reloadBtn.addEventListener("click", function () {
+              state.token = (tokenInput ? tokenInput.value.trim() : "") || "";
+              loadPoolList();
+            });
+          }
+        }
+
+        /* ---- Pool watch view ---- */
+
+        function renderPoolView(error) {
+          app.innerHTML =
+            '<section class="card">' +
+              '<header class="header">' +
+                '<a class="row" href="/ui" style="padding:0.25rem 0.5rem; min-width:0;">&lt; back</a>' +
+                '<div class="title">pool: ' + escapeHtml(poolName) + '</div>' +
+                '<span class="pill" data-live-pill data-status="' + state.liveStatus + '">reconnecting</span>' +
+                '<span class="pill"><span data-n>0</span> of ' + state.n + ' buffered</span>' +
+                '<span class="pill" data-p-pill style="display:none"></span>' +
+                '<div class="toolbar">' +
+                  '<input data-token-input type="password" placeholder="Bearer token (optional)" value="' + escapeAttr(state.token) + '" />' +
+                  '<button type="button" data-apply-token>Apply</button>' +
+                '</div>' +
+              '</header>' +
+              (error ? '<div class="body"><p class="error">' + escapeHtml(error) + '</p></div>' : "") +
+              '<section class="stream" data-stream></section>' +
+            '</section>';
+
+          updateIndicators();
+          setLiveStatus(state.liveStatus);
+
+          var tokenInput = document.querySelector("[data-token-input]");
+          var applyBtn = document.querySelector("[data-apply-token]");
+          if (applyBtn) {
+            applyBtn.addEventListener("click", function () {
+              state.token = (tokenInput ? tokenInput.value.trim() : "") || "";
+              restartStream();
+            });
+          }
+        }
+
+        /* ---- Message rendering ---- */
+
+        function appendMessageLine(message) {
+          var seq = Number(message.seq);
+          if (Number.isFinite(seq)) {
+            state.nextSeq = seq + 1;
+          }
+
+          var streamEl = document.querySelector("[data-stream]");
+          if (!streamEl) {
+            return;
+          }
+
+          var nearBottom =
+            streamEl.scrollHeight - (streamEl.scrollTop + streamEl.clientHeight) < 16;
+
+          state.messages.push(message);
+          streamEl.appendChild(renderMessage(message));
+
+          while (state.messages.length > state.n) {
+            state.messages.shift();
+            if (streamEl.firstChild) {
+              streamEl.removeChild(streamEl.firstChild);
+            }
+          }
+
+          if (nearBottom) {
+            streamEl.scrollTop = streamEl.scrollHeight;
+          }
+
+          updateIndicators();
+        }
+
+        function renderMessage(message) {
+          var meta = message && typeof message.meta === "object" && message.meta ? message.meta : {};
+          var descrips = Array.isArray(meta.descrips) ? meta.descrips : [];
+
+          var card = document.createElement("article");
+          card.className = "msg";
+          var tint = getMessageTint(message, descrips);
+          if (tint) card.dataset.tint = tint;
+
+          // --- Identity line: #seq · relative-time ... tags ---
+          var head = document.createElement("div");
+          head.className = "msg-head";
+
+          var seqEl = document.createElement("span");
+          seqEl.className = "seq";
+          seqEl.textContent = "#" + (message.seq != null ? message.seq : "-");
+          head.appendChild(seqEl);
+
+          var dotEl = document.createElement("span");
+          dotEl.className = "dot";
+          dotEl.textContent = "\u00b7";
+          head.appendChild(dotEl);
+
+          var isoTime = message.time || "";
+          var timeEl = document.createElement("span");
+          timeEl.className = "time";
+          timeEl.dataset.time = isoTime;
+          timeEl.title = isoTime;
+          timeEl.textContent = isoTime ? formatRelativeTime(isoTime) : "";
+          head.appendChild(timeEl);
+
+          if (descrips.length > 0) {
+            var tagsEl = document.createElement("div");
+            tagsEl.className = "tags";
+            for (var i = 0; i < descrips.length; i++) {
+              var t = document.createElement("span");
+              t.className = "tag";
+              t.textContent = String(descrips[i]);
+              var kind = classifyTag(descrips[i]);
+              if (kind) t.dataset.kind = kind;
+              tagsEl.appendChild(t);
+            }
+            head.appendChild(tagsEl);
+          }
+          card.appendChild(head);
+
+          // --- Data facts ---
+          var unpacked = unpackEnvelope(message.data);
+          var facts = collectFacts(unpacked.primary, unpacked.envelope);
+          if (facts.length > 0) {
+            appendFacts(card, facts);
+          }
+
+          // --- Preview ---
+          var previewText = extractPreview(unpacked.primary);
+          if (previewText) {
+            appendPreview(card, previewText);
+          } else if (facts.length === 0) {
+            var fallback = compactValue(message.data, 300);
+            if (fallback) {
+              appendPreview(card, fallback);
+            }
+          }
+
+          // --- Raw JSON (complete message) ---
+          appendRawJson(card, message);
+
+          return card;
+        }
+
+        function getMessageTint(message, descrips) {
+          var hasOk = false;
+          for (var i = 0; i < descrips.length; i++) {
+            var kind = classifyTag(descrips[i]);
+            if (kind === "error") return "error";
+            if (kind === "warn") return "warn";
+            if (kind === "ok") hasOk = true;
+          }
+          var data = isPlainObject(message.data) ? message.data : {};
+          if (data.type === "result" || hasOk) return "ok";
+          if (data.type === "claim") return "accent";
+          return "";
+        }
+
+        function appendFacts(parent, facts) {
+          if (!facts.length) return;
+          var wrap = document.createElement("div");
+          wrap.className = "facts";
+          for (var i = 0; i < facts.length; i++) {
+            var key = facts[i][0];
+            var value = facts[i][1];
+            var fact = document.createElement("span");
+            fact.className = "fact";
+            var keyEl = document.createElement("kbd");
+            keyEl.textContent = key;
+            fact.appendChild(keyEl);
+            var valueEl = document.createElement("span");
+            if (isIsoTimestamp(value)) {
+              valueEl.textContent = humanizeTimestamp(value);
+              valueEl.title = value;
+            } else {
+              valueEl.textContent = value;
+            }
+            fact.appendChild(valueEl);
+            wrap.appendChild(fact);
+          }
+          parent.appendChild(wrap);
+        }
+
+        function appendPreview(parent, text) {
+          if (!text) return;
+          var el = document.createElement("div");
+          el.className = "preview";
+          el.textContent = text;
+          parent.appendChild(el);
+        }
+
+        function appendRawJson(parent, message) {
+          var details = document.createElement("details");
+          details.className = "details";
+          var summary = document.createElement("summary");
+          summary.textContent = "json";
+          details.appendChild(summary);
+          var pre = document.createElement("pre");
+          pre.className = "value-text";
+          pre.textContent = prettyJson(message);
+          details.appendChild(pre);
+          parent.appendChild(details);
+        }
+
+        /* ---- Data processing ---- */
+
+        function collectFacts() {
+          var values = Array.prototype.slice.call(arguments);
+          var orderedKeys = [
+            "type",
+            "id",
+            "state",
+            "task_id",
+            "agent_id",
+            "from_id",
+            "to_id",
+            "path",
+            "ts",
+          ];
+          var seen = {};
+          var facts = [];
+          for (var ki = 0; ki < orderedKeys.length; ki++) {
+            var key = orderedKeys[ki];
+            for (var vi = 0; vi < values.length; vi++) {
+              var value = values[vi];
+              if (!isPlainObject(value) || !(key in value) || value[key] == null) {
+                continue;
+              }
+              var text = compactValue(value[key], key === "ts" ? 42 : 72);
+              if (!text) continue;
+              facts.push([key, text]);
+              seen[key] = true;
+              break;
+            }
+            if (facts.length >= 6) return facts;
+          }
+          for (var vi2 = 0; vi2 < values.length; vi2++) {
+            var v = values[vi2];
+            if (!isPlainObject(v)) continue;
+            var entries = Object.entries(v);
+            for (var ei = 0; ei < entries.length; ei++) {
+              var eKey = entries[ei][0];
+              var eRaw = entries[ei][1];
+              if (seen[eKey] || eKey === "descrips" || eKey === "data" || eRaw == null) continue;
+              var eText = compactValue(eRaw, 72);
+              if (!eText) continue;
+              facts.push([eKey, eText]);
+              seen[eKey] = true;
+              if (facts.length >= 6) return facts;
+            }
+          }
+          return facts;
+        }
+
+        function unpackEnvelope(value) {
+          if (
+            isPlainObject(value) &&
+            "data" in value &&
+            (Object.hasOwn(value, "type") || Object.hasOwn(value, "ts"))
+          ) {
+            return { primary: value.data, envelope: value };
+          }
+          return { primary: value, envelope: {} };
+        }
+
+        function extractPreview(value) {
+          if (!isPlainObject(value)) {
+            var text = compactValue(value, 200);
+            return text && text.length > 90 ? text : "";
+          }
+          var summaryCandidate = value.summary != null ? value.summary : value.body;
+          if (typeof summaryCandidate === "string") {
+            return compactValue(summaryCandidate, 220);
+          }
+          return "";
+        }
+
+        function compactValue(value, maxChars) {
+          if (value == null) return "";
+          var text =
+            typeof value === "string" ? value.replace(/\s+/g, " ").trim() : compactJson(value);
+          if (!text) return "";
+          return text.length > maxChars ? text.slice(0, maxChars - 1) + "\u2026" : text;
+        }
+
+        /* ---- Helpers ---- */
+
+        function isPlainObject(value) {
+          return typeof value === "object" && value != null && !Array.isArray(value);
+        }
+
+        function classifyTag(tag) {
+          var t = String(tag).toLowerCase();
+          if (
+            t.includes("error") ||
+            t.includes("fail") ||
+            t.includes("panic") ||
+            t.includes("fatal")
+          ) {
+            return "error";
+          }
+          if (
+            t.includes("warn") ||
+            t.includes("retry") ||
+            t.includes("reconnect") ||
+            t.includes("cancel")
+          ) {
+            return "warn";
+          }
+          if (t.includes("done") || t.includes("ok") || t.includes("success") || t.includes("result")) {
+            return "ok";
+          }
+          return "";
+        }
+
+        function compactJson(value) {
+          try {
+            var text = JSON.stringify(value);
+            return text.length > 220 ? prettyJson(value) : text;
+          } catch (_) {
+            return String(value);
+          }
+        }
+
+        function prettyJson(value) {
+          try {
+            return JSON.stringify(value, null, 2);
+          } catch (_) {
+            return String(value);
+          }
+        }
+
+        function escapeHtml(value) {
+          return String(value)
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#39;");
+        }
+
+        function escapeAttr(value) {
+          return escapeHtml(value).replaceAll("`", "&#96;");
+        }
+
+        /* ---- Data fetching ---- */
+
+        async function loadPoolList() {
+          renderPoolList([], null);
+          try {
+            var response = await fetch("/v0/ui/pools", {
+              headers: authHeaders(),
+            });
+            if (!response.ok) {
+              var text = await response.text();
+              throw new Error("pool list failed (" + response.status + "): " + text);
+            }
+            var body = await response.json();
+            renderPoolList(body.pools || [], null);
+          } catch (err) {
+            renderPoolList([], String(err.message || err));
+          }
+        }
+
+        async function loadPoolInfo() {
+          var response = await fetch("/v0/ui/pools/" + encodeURIComponent(poolName) + "/info", {
+            headers: authHeaders(),
+          });
+          if (!response.ok) {
+            var text = await response.text();
+            throw new Error("pool info failed (" + response.status + "): " + text);
+          }
+          var body = await response.json();
+          state.p = body && body.pool ? body.pool.ring_size : null;
+          var newest = body && body.pool && body.pool.bounds ? body.pool.bounds.newest : null;
+          var oldest = body && body.pool && body.pool.bounds ? body.pool.bounds.oldest : null;
+          if (Number.isFinite(newest)) {
+            var floor = Number.isFinite(oldest) ? oldest : 1;
+            state.nextSeq = Math.max(floor, newest - state.n + 1);
+          }
+          updateIndicators();
+        }
+
+        async function streamEventsLoop() {
+          while (!state.stopped) {
+            setLiveStatus("reconnecting");
+            var since = state.nextSeq == null ? "" : "since_seq=" + encodeURIComponent(state.nextSeq) + "&";
+            var url = "/v0/ui/pools/" + encodeURIComponent(poolName) + "/events?" + since + "timeout_ms=30000";
+
+            try {
+              var response = await fetch(url, {
+                headers: authHeaders(),
+              });
+              if (!response.ok) {
+                var text = await response.text();
+                throw new Error("stream failed (" + response.status + "): " + text);
+              }
+              if (!response.body) {
+                throw new Error("stream response body unavailable");
+              }
+
+              setLiveStatus("live");
+              var reader = response.body.getReader();
+              var decoder = new TextDecoder();
+              var buf = "";
+              var event = "";
+              var data = "";
+
+              while (!state.stopped) {
+                var part = await reader.read();
+                if (part.done) {
+                  break;
+                }
+                buf += decoder.decode(part.value, { stream: true });
+                var lines = buf.split("\n");
+                buf = lines.pop() || "";
+
+                for (var li = 0; li < lines.length; li++) {
+                  var lineRaw = lines[li];
+                  var line = lineRaw.endsWith("\r")
+                    ? lineRaw.slice(0, -1)
+                    : lineRaw;
+                  if (!line) {
+                    if (event === "message" && data) {
+                      try {
+                        appendMessageLine(JSON.parse(data));
+                      } catch (_) {
+                        /* ignore malformed event payloads */
+                      }
+                    }
+                    event = "";
+                    data = "";
+                    continue;
+                  }
+                  if (line.startsWith("event:")) {
+                    event = line.slice(6).trim();
+                  } else if (line.startsWith("data:")) {
+                    var chunk = line.slice(5).trimStart();
+                    data = data ? data + "\n" + chunk : chunk;
+                  }
+                }
+              }
+            } catch (err) {
+              setLiveStatus("error");
+              var streamEl = document.querySelector("[data-stream]");
+              if (streamEl) {
+                var errCard = document.createElement("article");
+                errCard.className = "msg";
+                errCard.dataset.tint = "error";
+                var errText = document.createElement("pre");
+                errText.className = "value-text error";
+                errText.textContent = String(err.message || err);
+                errCard.appendChild(errText);
+                streamEl.appendChild(errCard);
+              }
+            }
+
+            if (!state.stopped) {
+              await wait(700);
+            }
+          }
+        }
+
+        async function restartStream() {
+          state.stopped = true;
+          if (state.reconnectTimer) {
+            clearTimeout(state.reconnectTimer);
+            state.reconnectTimer = null;
+          }
+          await wait(30);
+          state.stopped = false;
+          state.messages = [];
+          state.nextSeq = null;
+          var streamEl = document.querySelector("[data-stream]");
+          if (streamEl) streamEl.textContent = "";
+          try {
+            await loadPoolInfo();
+            streamEventsLoop();
+          } catch (err) {
+            renderPoolView(String(err.message || err));
+          }
+        }
+
+        function wait(ms) {
+          return new Promise(function (resolve) { setTimeout(resolve, ms); });
+        }
+
+        /* ---- Boot ---- */
+
+        async function boot() {
+          startTimeUpdater();
+          if (!onPoolPage) {
+            await loadPoolList();
+            return;
+          }
+          renderPoolView(null);
+          try {
+            await loadPoolInfo();
+          } catch (err) {
+            renderPoolView(String(err.message || err));
+            return;
+          }
+          streamEventsLoop();
+        }
+
+        boot();
+      })();
+    </script>
+  </body>
+</html>

@@ -205,6 +205,28 @@ See [Go quickstart](docs/go-quickstart.md), [bindings/python](bindings/python/RE
 
 Both `pls` and `plasmite` commands are supported.
 
+## Shell Completion
+
+Generate completion scripts from the CLI:
+
+```bash
+plasmite completion bash > /tmp/plasmite.bash
+plasmite completion zsh > /tmp/_plasmite
+plasmite completion fish > /tmp/plasmite.fish
+```
+
+Install by shell:
+
+- `bash` (macOS/Linux): copy to `~/.local/share/bash-completion/completions/plasmite` (or `/etc/bash_completion.d/plasmite` system-wide), then `source ~/.bashrc`.
+- `zsh` (macOS/Linux): copy to a directory in `$fpath` such as `~/.zfunc/_plasmite`, then run `autoload -U compinit && compinit` (or source from `~/.zshrc`).
+- `fish`: copy to `~/.config/fish/completions/plasmite.fish`.
+
+Verify:
+
+```bash
+plasmite <TAB>
+```
+
 ## How It Works
 
 ### Pools
@@ -325,6 +347,9 @@ Serve pools over HTTP for access from other machines or containers.
 # Local-only (default, for dev)
 pls serve
 
+# Validate serve config and print effective endpoints without starting
+pls serve check
+
 # Secure non-loopback bootstrap (recommended)
 pls serve init --output-dir ./.plasmite-serve
 pls serve --bind 0.0.0.0:9700 --allow-non-loopback \
@@ -345,6 +370,32 @@ When `pls serve` runs in an interactive terminal, it prints a startup **next com
 - resolved base URL
 - copy/paste append + tail examples
 - auth and TLS notes for the active configuration
+
+### Web UI (single-page, no build step)
+
+When `pls serve` is running, a built-in web UI is always available:
+
+```bash
+# Pool browser
+open http://127.0.0.1:9700/ui
+
+# Shareable direct link to a specific pool
+open http://127.0.0.1:9700/ui/pools/demo
+```
+
+The UI is a literal single HTML page (no React, no frontend build tooling) that uses server endpoints for pool list/info and live events.
+
+- `N` shows how many messages are currently buffered in your browser tab.
+- `P` shows the pool ring capacity from server metadata.
+- If auth is enabled on `serve`, paste the bearer token in the UI token field to authorize requests.
+
+Pool list view:
+
+![Plasmite UI pool list](docs/images/ui/ui-pool-list.png)
+
+Pool watch view:
+
+![Plasmite UI pool watch](docs/images/ui/ui-pool-watch.png)
 
 ### From another machine
 
