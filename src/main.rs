@@ -14,6 +14,7 @@ use serde_json::{Map, Value, json};
 use std::collections::VecDeque;
 use std::error::Error as StdError;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use url::Url;
 
 mod color_json;
 mod ingest;
@@ -35,6 +36,12 @@ use plasmite::notice::{Notice, notice_json};
 #[derive(Copy, Clone, Debug)]
 struct RunOutcome {
     exit_code: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PokeTarget {
+    LocalPath(PathBuf),
+    Remote { base_url: String, pool: String },
 }
 
 impl RunOutcome {
@@ -271,7 +278,17 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             input,
             errors,
         } => {
-            let path = resolve_poolref(&pool, &pool_dir)?;
+            let target = resolve_poke_target(&pool, &pool_dir)?;
+            let path = match target {
+                PokeTarget::LocalPath(path) => path,
+                PokeTarget::Remote { .. } => {
+                    return Err(Error::new(ErrorKind::Usage)
+                        .with_message("remote pool refs are not implemented for poke")
+                        .with_hint(
+                            "Use curl for now, or continue after resolver task implementation.",
+                        ));
+                }
+            };
             if create_size.is_some() && !create {
                 return Err(Error::new(ErrorKind::Usage)
                     .with_message("--create-size requires --create")
@@ -888,6 +905,60 @@ fn resolve_poolref(input: &str, pool_dir: &Path) -> Result<PathBuf, Error> {
         return Ok(pool_dir.join(input));
     }
     Ok(pool_dir.join(format!("{input}.plasmite")))
+}
+
+fn resolve_poke_target(input: &str, pool_dir: &Path) -> Result<PokeTarget, Error> {
+    if input.starts_with("http://") || input.starts_with("https://") {
+        return parse_remote_poke_target(input);
+    }
+    if input.contains("://") {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("remote pool ref must use http or https scheme")
+            .with_hint("Use shorthand: http(s)://host:port/<pool>."));
+    }
+    resolve_poolref(input, pool_dir).map(PokeTarget::LocalPath)
+}
+
+fn parse_remote_poke_target(input: &str) -> Result<PokeTarget, Error> {
+    let mut url = Url::parse(input).map_err(|err| {
+        Error::new(ErrorKind::Usage)
+            .with_message("invalid remote pool ref")
+            .with_hint("Use shorthand: http(s)://host:port/<pool>.")
+            .with_source(err)
+    })?;
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("remote pool ref must not include query or fragment")
+            .with_hint("Use shorthand: http(s)://host:port/<pool>."));
+    }
+    let path = url.path();
+    if path.contains("%2f") || path.contains("%2F") {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("remote pool name must not contain path separators")
+            .with_hint("Use a single pool segment: http(s)://host:port/<pool>."));
+    }
+    let segments: Vec<_> = url
+        .path_segments()
+        .map(|parts| parts.collect::<Vec<_>>())
+        .unwrap_or_default();
+    if segments.len() != 1
+        || segments[0].is_empty()
+        || segments[0] == "pool"
+        || (segments.len() >= 2 && segments[0] == "pools")
+        || (segments.len() >= 3 && segments[0] == "v0" && segments[1] == "pools")
+    {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("remote pool ref must use shorthand http(s)://host:port/<pool>")
+            .with_hint("API-shaped URLs are not accepted as pool refs."));
+    }
+    let pool = segments[0].to_string();
+    url.set_path("/");
+    url.set_query(None);
+    url.set_fragment(None);
+    Ok(PokeTarget::Remote {
+        base_url: url.to_string(),
+        pool,
+    })
 }
 
 const DEFAULT_POOL_SIZE: u64 = 1024 * 1024;
@@ -2193,9 +2264,13 @@ fn peek(
 
 #[cfg(test)]
 mod tests {
-    use super::{Error, ErrorKind, error_text, parse_duration, parse_size, read_token_file};
+    use super::{
+        Error, ErrorKind, PokeTarget, error_text, parse_duration, parse_size, read_token_file,
+        resolve_poke_target,
+    };
     use serde_json::json;
     use std::io::Cursor;
+    use std::path::Path;
     use std::time::Duration;
     use tempfile::NamedTempFile;
 
@@ -2279,5 +2354,62 @@ mod tests {
         assert!(colored.contains("\u{1b}[31merror:\u{1b}[0m"));
         assert!(plain.contains("error:"));
         assert!(!plain.contains("\u{1b}["));
+    }
+
+    #[test]
+    fn resolve_poke_target_classifies_local_name() {
+        let pool_dir = Path::new("/tmp/pools");
+        let target = resolve_poke_target("demo", pool_dir).expect("target");
+        match target {
+            PokeTarget::LocalPath(path) => assert_eq!(path, pool_dir.join("demo.plasmite")),
+            _ => panic!("expected local path"),
+        }
+    }
+
+    #[test]
+    fn resolve_poke_target_accepts_remote_shorthand() {
+        let target = resolve_poke_target("http://localhost:9170/demo", Path::new("/tmp/pools"))
+            .expect("target");
+        assert_eq!(
+            target,
+            PokeTarget::Remote {
+                base_url: "http://localhost:9170/".to_string(),
+                pool: "demo".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_poke_target_rejects_api_shaped_remote_ref() {
+        let err = resolve_poke_target(
+            "http://localhost:9170/v0/pools/demo/append",
+            Path::new("/tmp/pools"),
+        )
+        .expect_err("err");
+        assert_eq!(err.kind(), ErrorKind::Usage);
+    }
+
+    #[test]
+    fn resolve_poke_target_rejects_trailing_slash_remote_ref() {
+        let err = resolve_poke_target("http://localhost:9170/demo/", Path::new("/tmp/pools"))
+            .expect_err("err");
+        assert_eq!(err.kind(), ErrorKind::Usage);
+    }
+
+    #[test]
+    fn resolve_poke_target_rejects_unsupported_scheme() {
+        let err = resolve_poke_target("tcp://localhost:9170/demo", Path::new("/tmp/pools"))
+            .expect_err("err");
+        assert_eq!(err.kind(), ErrorKind::Usage);
+    }
+
+    #[test]
+    fn resolve_poke_target_rejects_query_and_fragment() {
+        let err = resolve_poke_target("http://localhost:9170/demo?x=1", Path::new("/tmp/pools"))
+            .expect_err("err");
+        assert_eq!(err.kind(), ErrorKind::Usage);
+        let err = resolve_poke_target("http://localhost:9170/demo#frag", Path::new("/tmp/pools"))
+            .expect_err("err");
+        assert_eq!(err.kind(), ErrorKind::Usage);
     }
 }
