@@ -2746,6 +2746,143 @@ fn doctor_missing_pool_reports_not_found() {
 }
 
 #[test]
+fn poke_remote_url_happy_path_appends_message() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let server = ServeProcess::start(&pool_dir);
+    let pool_url = format!("{}/demo", server.base_url);
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            &pool_url,
+            "{\"x\":1}",
+            "--descrip",
+            "ping",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+    let value = parse_json(std::str::from_utf8(&poke.stdout).expect("utf8"));
+    assert_eq!(value.get("seq").and_then(|v| v.as_u64()), Some(1));
+    assert_eq!(value.get("data").and_then(|v| v.get("x")), Some(&json!(1)));
+    assert_eq!(
+        value.get("meta").and_then(|v| v.get("descrips")),
+        Some(&json!(["ping"]))
+    );
+}
+
+#[test]
+fn poke_remote_url_rejects_api_shaped_path() {
+    let output = cmd()
+        .args([
+            "poke",
+            "http://localhost:9170/v0/pools/demo/append",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(!output.status.success());
+    let err = parse_error_json(&output.stderr);
+    assert_eq!(
+        err.get("error")
+            .and_then(|v| v.get("kind"))
+            .and_then(|v| v.as_str()),
+        Some("Usage")
+    );
+}
+
+#[test]
+fn poke_remote_url_rejects_trailing_slash() {
+    let output = cmd()
+        .args(["poke", "http://localhost:9170/demo/", "{\"x\":1}"])
+        .output()
+        .expect("poke");
+    assert!(!output.status.success());
+    let err = parse_error_json(&output.stderr);
+    assert_eq!(
+        err.get("error")
+            .and_then(|v| v.get("kind"))
+            .and_then(|v| v.as_str()),
+        Some("Usage")
+    );
+}
+
+#[test]
+fn poke_remote_url_rejects_create_flag() {
+    let output = cmd()
+        .args([
+            "poke",
+            "http://localhost:9170/demo",
+            "--create",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(!output.status.success());
+    let err = parse_error_json(&output.stderr);
+    assert_eq!(
+        err.get("error")
+            .and_then(|v| v.get("kind"))
+            .and_then(|v| v.as_str()),
+        Some("Usage")
+    );
+    let message = err
+        .get("error")
+        .and_then(|v| v.get("message"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(message.contains("does not support --create"));
+}
+
+#[test]
+fn poke_remote_url_auth_errors_propagate() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let server = ServeProcess::start_with_args(&pool_dir, &["--token", "secret-token"]);
+    let pool_url = format!("{}/demo", server.base_url);
+    let output = cmd()
+        .args(["poke", &pool_url, "{\"x\":1}"])
+        .output()
+        .expect("poke");
+    assert!(!output.status.success());
+    let err = parse_error_json(&output.stderr);
+    assert_eq!(
+        err.get("error")
+            .and_then(|v| v.get("kind"))
+            .and_then(|v| v.as_str()),
+        Some("Permission")
+    );
+}
+
+#[test]
 fn poke_streams_json_values_from_stdin() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");

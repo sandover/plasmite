@@ -1302,3 +1302,7 @@
 {"type":"state","ts":"2026-02-06T02:02:25.300617Z","data":{"id":"R6WMU2","state":"doing","ts":"2026-02-06T02:02:25.300617Z"}}
 {"type":"result","ts":"2026-02-06T02:04:16.753879Z","data":{"task_id":"R6WMU2","summary":"Implemented remote poke dispatch via RemoteClient with shorthand URL support and remote --create rejection","path":"src/main.rs","sha256_at_attach":"54b433b41dcf6a039ef0e09e7c97dc98c64b5729de9b9398028f46d032c76064","mtime_at_attach":"2026-02-06T02:04:11.583513774Z","git_commit_at_attach":"0316d24b05ec070177ffde6a4caef0e9e6f07875","ts":"2026-02-06T02:04:16.753879Z"}}
 {"type":"state","ts":"2026-02-06T02:04:16.7605Z","data":{"id":"R6WMU2","state":"done","ts":"2026-02-06T02:04:16.7605Z"}}
+{"type":"claim","ts":"2026-02-06T02:04:35.9245Z","data":{"id":"P6JR2F","agent_id":"codex@brandon-mbp","ts":"2026-02-06T02:04:35.9245Z"}}
+{"type":"state","ts":"2026-02-06T02:04:35.9245Z","data":{"id":"P6JR2F","state":"doing","ts":"2026-02-06T02:04:35.9245Z"}}
+{"type":"result","ts":"2026-02-06T02:05:28.923409Z","data":{"task_id":"P6JR2F","summary":"Added CLI integration coverage for remote poke URL happy path and security/error cases","path":"tests/cli_integration.rs","sha256_at_attach":"6ffe97fac032a1a653ae4d334c200c739cf5f87838e57ea98bfe4fbc43a4a6cc","mtime_at_attach":"2026-02-06T02:05:22.245340675Z","git_commit_at_attach":"6daac4f1277b6dc90f0421e63088f0367830ef1b","ts":"2026-02-06T02:05:28.923409Z"}}
+{"type":"state","ts":"2026-02-06T02:05:28.931125Z","data":{"id":"P6JR2F","state":"done","ts":"2026-02-06T02:05:28.931125Z"}}
