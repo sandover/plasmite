@@ -6,8 +6,23 @@
 //! Invariants: No unbounded buffering; per-record buffering is capped.
 use std::io::{self, BufRead, BufReader, Read};
 
+use bstr::ByteSlice;
 use plasmite::api::{Error, ErrorKind};
+use serde::de::DeserializeOwned;
 use serde_json::Value;
+
+/// Parse JSON from a string slice. When the `simd` feature is enabled, uses simd-json
+/// for faster parsing. simd-json requires mutable input, so we clone before parsing.
+#[cfg(feature = "simd")]
+fn json_from_str<T: DeserializeOwned>(s: &str) -> Result<T, simd_json::Error> {
+    let mut bytes = s.as_bytes().to_vec();
+    simd_json::serde::from_slice(&mut bytes)
+}
+
+#[cfg(not(feature = "simd"))]
+fn json_from_str<T: DeserializeOwned>(s: &str) -> Result<T, serde_json::Error> {
+    serde_json::from_str(s)
+}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum IngestMode {
@@ -186,7 +201,7 @@ fn detect_auto_mode(prefix: &[u8]) -> AutoMode {
     if prefix.contains(&0x1e) {
         return AutoMode::JsonSeq;
     }
-    let text = String::from_utf8_lossy(prefix);
+    let text = prefix.to_str_lossy();
     for raw_line in text.lines() {
         let line = raw_line.trim();
         if line.is_empty() {
@@ -264,7 +279,7 @@ where
             )?;
             continue;
         }
-        match serde_json::from_str::<Value>(trimmed) {
+        match json_from_str::<Value>(trimmed) {
             Ok(value) => apply_value(
                 value,
                 index,
@@ -289,7 +304,7 @@ where
                         )?;
                         break;
                     }
-                    if let Ok(value) = serde_json::from_str::<Value>(&buf) {
+                    if let Ok(value) = json_from_str::<Value>(&buf) {
                         apply_value(
                             value,
                             index,
@@ -380,7 +395,7 @@ where
         )?;
         return Ok(());
     }
-    match serde_json::from_str::<Value>(&buf) {
+    match json_from_str::<Value>(&buf) {
         Ok(value) => {
             apply_value(
                 value,
@@ -438,8 +453,8 @@ where
                 Some(truncate_bytes(record, config.max_snippet_bytes)),
             );
         }
-        let text = String::from_utf8_lossy(record);
-        match serde_json::from_str::<Value>(&text) {
+        let text = record.to_str_lossy();
+        match json_from_str::<Value>(&text) {
             Ok(value) => apply_value(
                 value,
                 index,
@@ -569,7 +584,7 @@ where
                 )?;
                 continue;
             }
-            match serde_json::from_str::<Value>(&payload) {
+            match json_from_str::<Value>(&payload) {
                 Ok(value) => apply_value(
                     value,
                     index,
@@ -629,7 +644,7 @@ where
                 Some(truncate_snippet(&payload, config.max_snippet_bytes)),
             )?;
         } else {
-            match serde_json::from_str::<Value>(&payload) {
+            match json_from_str::<Value>(&payload) {
                 Ok(value) => apply_value(
                     value,
                     index,
@@ -771,7 +786,7 @@ fn join_snippet(lines: &[String], max: usize) -> String {
 }
 
 fn truncate_bytes(input: &[u8], max: usize) -> String {
-    let text = String::from_utf8_lossy(input);
+    let text = input.to_str_lossy();
     truncate_snippet(&text, max)
 }
 

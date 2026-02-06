@@ -9,7 +9,9 @@ use std::io::{self, IsTerminal, Read};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum, error::ErrorKind as ClapErrorKind};
+use clap::{
+    CommandFactory, Parser, Subcommand, ValueEnum, ValueHint, error::ErrorKind as ClapErrorKind,
+};
 use clap_complete::aot::Shell;
 use serde_json::{Map, Value, json};
 use std::collections::VecDeque;
@@ -545,7 +547,8 @@ LEARN MORE
 struct Cli {
     #[arg(
         long,
-        help = "Pool directory for named pools (default: ~/.plasmite/pools)"
+        help = "Pool directory for named pools (default: ~/.plasmite/pools)",
+        value_hint = ValueHint::DirPath
     )]
     dir: Option<PathBuf>,
     #[arg(
@@ -663,7 +666,8 @@ NOTES
         #[arg(
             long = "file",
             help = "JSON file path (use - for stdin)",
-            conflicts_with = "data"
+            conflicts_with = "data",
+            value_hint = ValueHint::FilePath
         )]
         file: Option<String>,
         #[arg(long, default_value = "fast", help = "Durability mode: fast|flush")]
@@ -721,15 +725,15 @@ NOTES
         bind: String,
         #[arg(long, help = "Bearer token for auth (dev-only; prefer --token-file)")]
         token: Option<String>,
-        #[arg(long, value_name = "PATH", help = "Read bearer token from file")]
+        #[arg(long, value_name = "PATH", help = "Read bearer token from file", value_hint = ValueHint::FilePath)]
         token_file: Option<PathBuf>,
         #[arg(long, help = "Allow non-loopback binds (unsafe without TLS + token)")]
         allow_non_loopback: bool,
         #[arg(long, help = "Allow non-loopback writes without TLS (unsafe)")]
         insecure_no_tls: bool,
-        #[arg(long, value_name = "PATH", help = "TLS certificate path (PEM)")]
+        #[arg(long, value_name = "PATH", help = "TLS certificate path (PEM)", value_hint = ValueHint::FilePath)]
         tls_cert: Option<PathBuf>,
-        #[arg(long, value_name = "PATH", help = "TLS key path (PEM)")]
+        #[arg(long, value_name = "PATH", help = "TLS key path (PEM)", value_hint = ValueHint::FilePath)]
         tls_key: Option<PathBuf>,
         #[arg(long, help = "Generate a self-signed TLS cert for this run")]
         tls_self_signed: bool,

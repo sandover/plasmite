@@ -299,6 +299,16 @@ Benchmarks on a laptop (M-series Mac, release build, 256-byte payloads):
 
 See [docs/perf.md](docs/perf.md) for the full benchmark suite.
 
+### SIMD JSON Parsing
+
+For higher throughput, build with the `simd` feature to enable [simd-json](https://github.com/simd-lite/simd-json) for JSON parsing:
+
+```bash
+cargo build --release --features simd
+```
+
+This can improve ingest performance by 2-4x on CPUs with AVX2/SSE4.2 support.
+
 ## Internals
 
 Plasmite uses **[Lite³](https://github.com/fastserial/lite3)** (a zero-copy binary JSON format) for on-disk storage. The CLI is JSON-in/JSON-out - you never see Lite³ directly.
