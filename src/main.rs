@@ -32,8 +32,8 @@ use ingest::{ErrorPolicy, IngestConfig, IngestFailure, IngestMode, IngestOutcome
 use jq_filter::{JqFilter, compile_filters, matches_all};
 use plasmite::api::{
     AppendOptions, Cursor, CursorResult, Durability, Error, ErrorKind, FrameRef, Lite3DocRef,
-    LocalClient, Pool, PoolOptions, PoolRef, RemoteClient, RemotePool, ValidationIssue,
-    ValidationReport, ValidationStatus, lite3,
+    LocalClient, Pool, PoolOptions, PoolRef, RemoteClient, RemotePool, TailOptions,
+    ValidationIssue, ValidationReport, ValidationStatus, lite3,
     notify::{self, NotifyWait},
     to_exit_code,
 };
@@ -45,7 +45,7 @@ struct RunOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum PokeTarget {
+enum PoolTarget {
     LocalPath(PathBuf),
     Remote { base_url: String, pool: String },
 }
@@ -297,7 +297,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             input,
             errors,
         } => {
-            let target = resolve_poke_target(&pool, &pool_dir)?;
+            let target = resolve_pool_target(&pool, &pool_dir)?;
             if create_size.is_some() && !create {
                 return Err(Error::new(ErrorKind::Usage)
                     .with_message("--create-size requires --create")
@@ -317,7 +317,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             }
             let single_input = data.is_some() || file.is_some() || io::stdin().is_terminal();
             match target {
-                PokeTarget::LocalPath(path) => {
+                PoolTarget::LocalPath(path) => {
                     let mut pool_handle = match Pool::open(&path) {
                         Ok(pool) => pool,
                         Err(err) if create && err.kind() == ErrorKind::NotFound => {
@@ -375,7 +375,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                         }
                     }
                 }
-                PokeTarget::Remote {
+                PoolTarget::Remote {
                     base_url,
                     pool: name,
                 } => {
@@ -449,28 +449,6 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             where_expr,
             replay,
         } => {
-            if let Some(speed) = replay {
-                if speed < 0.0 {
-                    return Err(Error::new(ErrorKind::Usage)
-                        .with_message("--replay speed must be non-negative")
-                        .with_hint("Use --replay 1 for realtime, --replay 2 for 2x, --replay 0 for no delay."));
-                }
-                if !speed.is_finite() {
-                    return Err(Error::new(ErrorKind::Usage)
-                        .with_message("--replay speed must be a finite number")
-                        .with_hint("Use --replay 1 for realtime, --replay 2 for 2x, --replay 0 for no delay."));
-                }
-                if tail == 0 && since.is_none() {
-                    return Err(Error::new(ErrorKind::Usage)
-                        .with_message("--replay requires --tail or --since")
-                        .with_hint(
-                            "Replay needs historical messages. Use --tail N or --since DURATION.",
-                        ));
-                }
-            }
-            let path = resolve_poolref(&pool, &pool_dir)?;
-            let pool_handle =
-                Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
             if jsonl && format.is_some() {
                 return Err(Error::new(ErrorKind::Usage)
                     .with_message("conflicting output options")
@@ -487,11 +465,6 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 .as_deref()
                 .map(|value| parse_since(value, now))
                 .transpose()?;
-            if let Some(since_ns) = since_ns {
-                if since_ns > now {
-                    return Ok(RunOutcome::ok());
-                }
-            }
             let timeout = timeout.as_deref().map(parse_duration).transpose()?;
             let cfg = PeekConfig {
                 tail,
@@ -506,8 +479,43 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 color_mode,
                 replay_speed: replay,
             };
-            let outcome = peek(&pool_handle, &pool, &path, cfg)?;
-            Ok(outcome)
+            let target = resolve_pool_target(&pool, &pool_dir)?;
+            match target {
+                PoolTarget::LocalPath(path) => {
+                    if let Some(speed) = replay {
+                        if speed < 0.0 {
+                            return Err(Error::new(ErrorKind::Usage)
+                                .with_message("--replay speed must be non-negative")
+                                .with_hint("Use --replay 1 for realtime, --replay 2 for 2x, --replay 0 for no delay."));
+                        }
+                        if !speed.is_finite() {
+                            return Err(Error::new(ErrorKind::Usage)
+                                .with_message("--replay speed must be a finite number")
+                                .with_hint("Use --replay 1 for realtime, --replay 2 for 2x, --replay 0 for no delay."));
+                        }
+                        if tail == 0 && since.is_none() {
+                            return Err(Error::new(ErrorKind::Usage)
+                                .with_message("--replay requires --tail or --since")
+                                .with_hint(
+                                    "Replay needs historical messages. Use --tail N or --since DURATION.",
+                                ));
+                        }
+                    }
+                    if let Some(since_ns) = since_ns {
+                        if since_ns > now {
+                            return Ok(RunOutcome::ok());
+                        }
+                    }
+                    let pool_handle = Pool::open(&path)
+                        .map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
+                    let outcome = peek(&pool_handle, &pool, &path, cfg)?;
+                    Ok(outcome)
+                }
+                PoolTarget::Remote { base_url, pool } => {
+                    let outcome = peek_remote(&base_url, &pool, &cfg)?;
+                    Ok(outcome)
+                }
+            }
         }
     })();
 
@@ -817,15 +825,21 @@ Use `--replay N` with `--tail` or `--since` to replay with timing."#,
   # Emit only data payloads
   $ plasmite peek foo --data-only --format jsonl
 
+  # Remote shorthand ref (serve must already expose the pool)
+  $ plasmite peek http://127.0.0.1:9700/demo --tail 20 --format jsonl
+
 NOTES
   - Use `--format jsonl` for scripts (one JSON object per line)
   - `--where` uses jq-style expressions; repeat for AND
   - `--since 5m` and `--since 2026-01-15T10:00:00Z` both work
+  - Remote refs must be shorthand: http(s)://host:port/<pool> (no trailing slash)
+  - Remote `peek` supports `--tail`, `--where`, `--one`, `--timeout`, `--data-only`, and `--format`
+  - Remote `peek` rejects `--since` and `--replay` with actionable guidance
   - `--replay N` exits when all selected messages are emitted (no live follow)
   - `--replay 0` emits as fast as possible (same as peek, but bounded)"#
     )]
     Peek {
-        #[arg(help = "Pool name or path")]
+        #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
         pool: String,
         #[arg(
             long = "tail",
@@ -1124,19 +1138,19 @@ fn resolve_poolref(input: &str, pool_dir: &Path) -> Result<PathBuf, Error> {
     Ok(pool_dir.join(format!("{input}.plasmite")))
 }
 
-fn resolve_poke_target(input: &str, pool_dir: &Path) -> Result<PokeTarget, Error> {
+fn resolve_pool_target(input: &str, pool_dir: &Path) -> Result<PoolTarget, Error> {
     if input.starts_with("http://") || input.starts_with("https://") {
-        return parse_remote_poke_target(input);
+        return parse_remote_pool_target(input);
     }
     if input.contains("://") {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("remote pool ref must use http or https scheme")
             .with_hint("Use shorthand: http(s)://host:port/<pool>."));
     }
-    resolve_poolref(input, pool_dir).map(PokeTarget::LocalPath)
+    resolve_poolref(input, pool_dir).map(PoolTarget::LocalPath)
 }
 
-fn parse_remote_poke_target(input: &str) -> Result<PokeTarget, Error> {
+fn parse_remote_pool_target(input: &str) -> Result<PoolTarget, Error> {
     let mut url = Url::parse(input).map_err(|err| {
         Error::new(ErrorKind::Usage)
             .with_message("invalid remote pool ref")
@@ -1172,7 +1186,7 @@ fn parse_remote_poke_target(input: &str) -> Result<PokeTarget, Error> {
     url.set_path("/");
     url.set_query(None);
     url.set_fragment(None);
-    Ok(PokeTarget::Remote {
+    Ok(PoolTarget::Remote {
         base_url: url.to_string(),
         pool,
     })
@@ -2650,6 +2664,96 @@ struct PeekConfig {
     replay_speed: Option<f64>,
 }
 
+fn peek_remote(base_url: &str, pool: &str, cfg: &PeekConfig) -> Result<RunOutcome, Error> {
+    if cfg.replay_speed.is_some() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("remote peek does not support --replay")
+            .with_hint("Use local peek with --replay, or omit --replay for remote streams."));
+    }
+    if cfg.since_ns.is_some() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("remote peek does not support --since")
+            .with_hint("Use --tail N for remote refs, or run --since against a local pool path."));
+    }
+    if !cfg.notify {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("remote peek does not support --no-notify")
+            .with_hint("--no-notify only applies to local pool semaphores."));
+    }
+    if cfg.quiet_drops {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("remote peek does not support --quiet-drops")
+            .with_hint("--quiet-drops only applies to local drop notices."));
+    }
+
+    let client = RemoteClient::new(base_url.to_string())?;
+    let remote_pool = client.open_pool(&PoolRef::name(pool))?;
+
+    let mut next_since_seq = if cfg.tail > 0 {
+        let info = remote_pool.info()?;
+        match (info.bounds.oldest_seq, info.bounds.newest_seq) {
+            (Some(oldest), Some(newest)) => Some(
+                newest
+                    .saturating_sub(cfg.tail.saturating_sub(1))
+                    .max(oldest),
+            ),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    let mut tail_wait_matches = VecDeque::new();
+    loop {
+        let mut options = TailOptions::new();
+        options.since_seq = next_since_seq;
+        options.timeout = cfg.timeout;
+        let mut tail = remote_pool.tail(options)?;
+
+        let mut emitted_in_cycle = false;
+        while let Some(message) = tail.next_message()? {
+            next_since_seq = Some(message.seq.saturating_add(1));
+            let value = message_to_json(&message);
+            if !matches_all(cfg.where_predicates.as_slice(), &value)? {
+                continue;
+            }
+
+            if cfg.one && cfg.tail > 0 {
+                tail_wait_matches.push_back(value);
+                while tail_wait_matches.len() > cfg.tail as usize {
+                    tail_wait_matches.pop_front();
+                }
+                if tail_wait_matches.len() == cfg.tail as usize {
+                    if let Some(latest) = tail_wait_matches.back() {
+                        emit_message(
+                            output_value(latest.clone(), cfg.data_only),
+                            cfg.pretty,
+                            cfg.color_mode,
+                        );
+                    }
+                    return Ok(RunOutcome::ok());
+                }
+                emitted_in_cycle = true;
+                continue;
+            }
+
+            emit_message(
+                output_value(value, cfg.data_only),
+                cfg.pretty,
+                cfg.color_mode,
+            );
+            emitted_in_cycle = true;
+            if cfg.one {
+                return Ok(RunOutcome::ok());
+            }
+        }
+
+        if cfg.timeout.is_some() && !emitted_in_cycle {
+            return Ok(RunOutcome::with_code(124));
+        }
+    }
+}
+
 fn peek(
     pool: &Pool,
     pool_ref: &str,
@@ -2995,8 +3099,8 @@ fn peek_replay(pool: &Pool, cfg: &PeekConfig) -> Result<RunOutcome, Error> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Error, ErrorKind, PokeTarget, error_text, parse_duration, parse_size, read_token_file,
-        resolve_poke_target,
+        Error, ErrorKind, PoolTarget, error_text, parse_duration, parse_size, read_token_file,
+        resolve_pool_target,
     };
     use serde_json::json;
     use std::io::Cursor;
@@ -3087,22 +3191,22 @@ mod tests {
     }
 
     #[test]
-    fn resolve_poke_target_classifies_local_name() {
+    fn resolve_pool_target_classifies_local_name() {
         let pool_dir = Path::new("/tmp/pools");
-        let target = resolve_poke_target("demo", pool_dir).expect("target");
+        let target = resolve_pool_target("demo", pool_dir).expect("target");
         match target {
-            PokeTarget::LocalPath(path) => assert_eq!(path, pool_dir.join("demo.plasmite")),
+            PoolTarget::LocalPath(path) => assert_eq!(path, pool_dir.join("demo.plasmite")),
             _ => panic!("expected local path"),
         }
     }
 
     #[test]
-    fn resolve_poke_target_accepts_remote_shorthand() {
-        let target = resolve_poke_target("http://localhost:9170/demo", Path::new("/tmp/pools"))
+    fn resolve_pool_target_accepts_remote_shorthand() {
+        let target = resolve_pool_target("http://localhost:9170/demo", Path::new("/tmp/pools"))
             .expect("target");
         assert_eq!(
             target,
-            PokeTarget::Remote {
+            PoolTarget::Remote {
                 base_url: "http://localhost:9170/".to_string(),
                 pool: "demo".to_string(),
             }
@@ -3110,8 +3214,8 @@ mod tests {
     }
 
     #[test]
-    fn resolve_poke_target_rejects_api_shaped_remote_ref() {
-        let err = resolve_poke_target(
+    fn resolve_pool_target_rejects_api_shaped_remote_ref() {
+        let err = resolve_pool_target(
             "http://localhost:9170/v0/pools/demo/append",
             Path::new("/tmp/pools"),
         )
@@ -3120,25 +3224,25 @@ mod tests {
     }
 
     #[test]
-    fn resolve_poke_target_rejects_trailing_slash_remote_ref() {
-        let err = resolve_poke_target("http://localhost:9170/demo/", Path::new("/tmp/pools"))
+    fn resolve_pool_target_rejects_trailing_slash_remote_ref() {
+        let err = resolve_pool_target("http://localhost:9170/demo/", Path::new("/tmp/pools"))
             .expect_err("err");
         assert_eq!(err.kind(), ErrorKind::Usage);
     }
 
     #[test]
-    fn resolve_poke_target_rejects_unsupported_scheme() {
-        let err = resolve_poke_target("tcp://localhost:9170/demo", Path::new("/tmp/pools"))
+    fn resolve_pool_target_rejects_unsupported_scheme() {
+        let err = resolve_pool_target("tcp://localhost:9170/demo", Path::new("/tmp/pools"))
             .expect_err("err");
         assert_eq!(err.kind(), ErrorKind::Usage);
     }
 
     #[test]
-    fn resolve_poke_target_rejects_query_and_fragment() {
-        let err = resolve_poke_target("http://localhost:9170/demo?x=1", Path::new("/tmp/pools"))
+    fn resolve_pool_target_rejects_query_and_fragment() {
+        let err = resolve_pool_target("http://localhost:9170/demo?x=1", Path::new("/tmp/pools"))
             .expect_err("err");
         assert_eq!(err.kind(), ErrorKind::Usage);
-        let err = resolve_poke_target("http://localhost:9170/demo#frag", Path::new("/tmp/pools"))
+        let err = resolve_pool_target("http://localhost:9170/demo#frag", Path::new("/tmp/pools"))
             .expect_err("err");
         assert_eq!(err.kind(), ErrorKind::Usage);
     }

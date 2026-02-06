@@ -402,9 +402,12 @@ Pool watch view:
 ```bash
 # Append from a remote host
 pls poke http://server:9700/events '{"sensor": "temp", "value": 23.5}'
+
+# Watch from a remote host (same shorthand POOLREF model)
+pls peek http://server:9700/events --tail 20 --format jsonl
 ```
 
-> **Note:** Remote `peek` is not yet supported via shorthand URLs. Use the HTTP API directly or the Node.js `RemoteClient` for remote tailing.
+> **Note:** Remote `peek` supports shorthand refs (`http://host:port/<pool>`) with `--tail`, `--where`, `--one`, `--timeout`, `--data-only`, and `--format`. `--since` and `--replay` are local-only.
 
 ### From code
 
@@ -416,7 +419,7 @@ const pool = await client.openPool("events")
 await pool.append({ sensor: "temp", value: 23.5 }, [])
 ```
 
-> **Notes:** Remote `poke` uses shorthand URLs (`http://host:port/pool`). Pool creation is local-only. See [Remote protocol spec](spec/remote/v0/SPEC.md).
+> **Notes:** Remote `poke` and `peek` use shorthand URLs (`http://host:port/pool`). Pool creation is local-only. See [Remote protocol spec](spec/remote/v0/SPEC.md).
 
 ## Performance
 

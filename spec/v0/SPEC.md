@@ -559,6 +559,15 @@ Stream messages from a pool.
 plasmite peek POOLREF [OPTIONS]
 ```
 
+POOLREF for `peek` supports:
+- local name/path refs, and
+- remote shorthand refs: `http(s)://host:port/<pool>` (exactly one pool path segment, no trailing slash).
+
+Rejected remote forms:
+- API-shaped URLs such as `/v0/pools/<pool>/tail`
+- query/fragment suffixes
+- non-HTTP schemes
+
 **Options**
 
 * `--tail N` (or `-n N`): print the last N messages first, then keep watching.
@@ -570,6 +579,7 @@ plasmite peek POOLREF [OPTIONS]
 * `--timeout DURATION`: exit 124 if no output within the duration.
 * `--data-only`: emit only the `.data` payload (filters still apply to the full message).
 * `--quiet-drops`: suppress non-fatal drop notices on stderr.
+* `--replay SPEED`: replay historical messages with timing (**local pools only**).
 
 **Behavior**
 
@@ -586,6 +596,9 @@ plasmite peek POOLREF [OPTIONS]
   * Runtime errors (missing fields, type mismatches) evaluate to false (message excluded).
 * If the reader falls behind and messages are overwritten, a non-fatal drop notice is emitted on
   stderr (see “Notices”). Use `--quiet-drops` to suppress.
+* Remote-mode flag behavior:
+  * Supported: `--tail`, `--where`, `--one`, `--timeout`, `--data-only`, `--format`/`--jsonl`
+  * Rejected with usage guidance: `--since`, `--replay`, `--quiet-drops`, `--no-notify`
 
 ---
 
@@ -791,10 +804,15 @@ Remote pool refs in CLI commands are partially implemented:
   * `http(s)://host:port/<pool>` (no trailing slash)
   * API-shaped URLs are rejected as `POOLREF` input
   * remote `--create` is rejected (no remote resource creation from `poke`)
+* `plasmite peek` supports shorthand remote refs:
+  * `http(s)://host:port/<pool>` (no trailing slash)
+  * API-shaped URLs are rejected as `POOLREF` input
+  * remote mode supports `--tail`, `--where`, `--one`, `--timeout`, `--data-only`, and `--format`
+  * remote `--since` and `--replay` are rejected with guidance
 
 Additional command coverage is still planned:
 
-* Subcommands that accept POOLREF should work remotely at least for: `peek`, `poke`, `get`, `export`, and `pool list`.
+* Subcommands that accept POOLREF should work remotely at least for: `get`, `export`, and `pool list`.
 
 ### Future serve enhancements
 

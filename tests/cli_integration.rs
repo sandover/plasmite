@@ -3007,6 +3007,148 @@ fn poke_remote_url_auth_errors_propagate() {
 }
 
 #[test]
+fn peek_remote_url_happy_path_reads_recent_messages() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let first = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(first.status.success());
+    let second = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":2}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(second.status.success());
+
+    let server = ServeProcess::start(&pool_dir);
+    let pool_url = format!("{}/demo", server.base_url);
+    let peek = cmd()
+        .args([
+            "peek",
+            &pool_url,
+            "--tail",
+            "2",
+            "--one",
+            "--jsonl",
+            "--timeout",
+            "2s",
+        ])
+        .output()
+        .expect("peek");
+    assert!(
+        peek.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&peek.stderr)
+    );
+    let value = parse_json(std::str::from_utf8(&peek.stdout).expect("utf8").trim());
+    assert_eq!(value.get("seq").and_then(|v| v.as_u64()), Some(2));
+    assert_eq!(value.get("data").and_then(|v| v.get("x")), Some(&json!(2)));
+}
+
+#[test]
+fn peek_remote_url_rejects_api_shaped_path() {
+    let output = cmd()
+        .args([
+            "peek",
+            "http://localhost:9170/v0/pools/demo/tail",
+            "--jsonl",
+        ])
+        .output()
+        .expect("peek");
+    assert!(!output.status.success());
+    let err = parse_error_json(&output.stderr);
+    assert_eq!(
+        err.get("error")
+            .and_then(|v| v.get("kind"))
+            .and_then(|v| v.as_str()),
+        Some("Usage")
+    );
+}
+
+#[test]
+fn peek_remote_url_rejects_since_and_replay() {
+    let pool_url = "http://localhost:9170/demo";
+
+    let since = cmd()
+        .args(["peek", pool_url, "--since", "5m"])
+        .output()
+        .expect("peek");
+    assert!(!since.status.success());
+    let since_err = parse_error_json(&since.stderr);
+    let since_message = since_err
+        .get("error")
+        .and_then(|v| v.get("message"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(since_message.contains("does not support --since"));
+
+    let replay = cmd()
+        .args(["peek", pool_url, "--tail", "5", "--replay", "1"])
+        .output()
+        .expect("peek");
+    assert!(!replay.status.success());
+    let replay_err = parse_error_json(&replay.stderr);
+    let replay_message = replay_err
+        .get("error")
+        .and_then(|v| v.get("message"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(replay_message.contains("does not support --replay"));
+}
+
+#[test]
+fn peek_remote_url_timeout_returns_124() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let server = ServeProcess::start(&pool_dir);
+    let pool_url = format!("{}/demo", server.base_url);
+    let peek = cmd()
+        .args(["peek", &pool_url, "--jsonl", "--timeout", "150ms"])
+        .output()
+        .expect("peek");
+    assert_eq!(peek.status.code(), Some(124));
+}
+
+#[test]
 fn poke_streams_json_values_from_stdin() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
