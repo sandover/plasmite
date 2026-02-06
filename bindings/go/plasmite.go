@@ -572,6 +572,105 @@ func (p *Pool) TailLite3(ctx context.Context, opts TailOptions) (<-chan *Lite3Fr
 	return out, errs
 }
 
+// ReplayOptions configures a bounded replay of pool messages with inter-message timing.
+type ReplayOptions struct {
+	Speed       float64       // Speed multiplier (1.0 = realtime)
+	SinceSeq    *uint64       // Optional: only messages at/after this seq
+	MaxMessages *uint64       // Optional: replay at most N messages
+	Timeout     time.Duration // Timeout for initial stream read
+}
+
+// Replay collects all messages from the pool, then yields them with inter-message delays
+// scaled by the speed multiplier. Unlike Tail, Replay is bounded — it does not follow live writes.
+func (p *Pool) Replay(ctx context.Context, opts ReplayOptions) (<-chan []byte, <-chan error) {
+	out := make(chan []byte, 64)
+	errs := make(chan error, 1)
+
+	go func() {
+		defer close(out)
+		defer close(errs)
+
+		timeoutMs := opts.Timeout
+		if timeoutMs <= 0 {
+			timeoutMs = time.Second
+		}
+		timeoutValue := uint64(timeoutMs.Milliseconds())
+
+		stream, err := p.OpenStream(opts.SinceSeq, opts.MaxMessages, &timeoutValue)
+		if err != nil {
+			errs <- err
+			return
+		}
+
+		var messages [][]byte
+		for {
+			msg, err := stream.NextJSON()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				stream.Close()
+				errs <- err
+				return
+			}
+			messages = append(messages, msg)
+		}
+		stream.Close()
+
+		if len(messages) == 0 {
+			return
+		}
+
+		speed := opts.Speed
+		if speed <= 0 {
+			speed = 1.0
+		}
+
+		timestamps := make([]time.Time, len(messages))
+		for i, msg := range messages {
+			timestamps[i] = extractTime(msg)
+		}
+
+		for i, msg := range messages {
+			if i > 0 && !timestamps[i-1].IsZero() && !timestamps[i].IsZero() {
+				delta := timestamps[i].Sub(timestamps[i-1])
+				if delta > 0 {
+					delay := time.Duration(float64(delta) / speed)
+					select {
+					case <-time.After(delay):
+					case <-ctx.Done():
+						errs <- ctx.Err()
+						return
+					}
+				}
+			}
+
+			select {
+			case out <- msg:
+			case <-ctx.Done():
+				errs <- ctx.Err()
+				return
+			}
+		}
+	}()
+
+	return out, errs
+}
+
+func extractTime(message []byte) time.Time {
+	var payload struct {
+		Time string `json:"time"`
+	}
+	if err := json.Unmarshal(message, &payload); err != nil || payload.Time == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339Nano, payload.Time)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
 func copyAndFreeBuf(buf *C.plsm_buf_t) []byte {
 	if buf == nil || buf.data == nil || buf.len == 0 {
 		return nil

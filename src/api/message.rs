@@ -1,8 +1,9 @@
-//! Purpose: Define public message types and append/get/tail helpers for the API.
-//! Exports: `Message`, `Meta`, `TailOptions`, `Tail`, `Lite3Tail`.
+//! Purpose: Define public message types and append/get/tail/replay helpers for the API.
+//! Exports: `Message`, `Meta`, `TailOptions`, `Tail`, `Lite3Tail`, `ReplayOptions`, `Replay`.
 //! Role: Stable message envelope aligned with the CLI contract.
 //! Invariants: Message fields mirror CLI JSON; time is RFC3339 UTC.
 //! Invariants: Tail streams preserve ordering and avoid unbounded buffering.
+//! Invariants: Replay is bounded; all messages are collected up front.
 #![allow(clippy::result_large_err)]
 
 use crate::core::cursor::{Cursor, CursorResult, FrameRef};
@@ -69,6 +70,92 @@ pub struct Lite3Tail<'a> {
     seen: usize,
     deadline: Option<Instant>,
     notify: Option<PoolSemaphore>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ReplayOptions {
+    pub speed: f64,
+    pub tail: Option<u64>,
+    pub since_ns: Option<u64>,
+}
+
+impl ReplayOptions {
+    pub fn new(speed: f64) -> Self {
+        Self {
+            speed,
+            tail: None,
+            since_ns: None,
+        }
+    }
+}
+
+pub struct Replay {
+    messages: Vec<Message>,
+    timestamps_ns: Vec<u64>,
+    index: usize,
+    speed: f64,
+}
+
+impl Replay {
+    fn new(pool: &Pool, options: ReplayOptions) -> Result<Self, Error> {
+        let mut cursor = Cursor::new();
+        let mut entries: Vec<(u64, Message)> = Vec::new();
+
+        loop {
+            match cursor.next(pool)? {
+                CursorResult::Message(frame) => {
+                    if let Some(since) = options.since_ns {
+                        if frame.timestamp_ns < since {
+                            continue;
+                        }
+                    }
+                    let ts = frame.timestamp_ns;
+                    let msg = message_from_frame(&frame)?;
+                    entries.push((ts, msg));
+                }
+                CursorResult::WouldBlock => break,
+                CursorResult::FellBehind => continue,
+            }
+        }
+
+        if let Some(n) = options.tail {
+            let n = n as usize;
+            if entries.len() > n {
+                entries = entries.split_off(entries.len() - n);
+            }
+        }
+
+        let (timestamps_ns, messages): (Vec<u64>, Vec<Message>) = entries.into_iter().unzip();
+
+        Ok(Self {
+            messages,
+            timestamps_ns,
+            index: 0,
+            speed: options.speed,
+        })
+    }
+
+    pub fn next_message(&mut self) -> Option<&Message> {
+        if self.index >= self.messages.len() {
+            return None;
+        }
+
+        if self.index > 0 {
+            let prev_ts = self.timestamps_ns[self.index - 1];
+            let curr_ts = self.timestamps_ns[self.index];
+            if curr_ts > prev_ts {
+                let delta_ns = curr_ts - prev_ts;
+                let sleep_ns = (delta_ns as f64 / self.speed) as u64;
+                if sleep_ns > 0 {
+                    std::thread::sleep(Duration::from_nanos(sleep_ns));
+                }
+            }
+        }
+
+        let msg = &self.messages[self.index];
+        self.index += 1;
+        Some(msg)
+    }
 }
 
 impl<'a> Tail<'a> {
@@ -255,6 +342,8 @@ pub trait PoolApiExt {
 
     /// Tail frames without JSON decoding.
     fn tail_lite3(&self, options: TailOptions) -> Lite3Tail<'_>;
+
+    fn replay(&self, options: ReplayOptions) -> Result<Replay, Error>;
 }
 
 impl PoolApiExt for Pool {
@@ -313,6 +402,10 @@ impl PoolApiExt for Pool {
 
     fn tail_lite3(&self, options: TailOptions) -> Lite3Tail<'_> {
         Lite3Tail::new(self, options)
+    }
+
+    fn replay(&self, options: ReplayOptions) -> Result<Replay, Error> {
+        Replay::new(self, options)
     }
 }
 
@@ -398,7 +491,7 @@ fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Meta, PoolApiExt, TailOptions, decode_payload};
+    use super::{Meta, PoolApiExt, ReplayOptions, TailOptions, decode_payload};
     use crate::core::lite3::{encode_message, json_counter_snapshot, reset_json_counters};
     use crate::core::pool::{Pool, PoolOptions};
     use serde_json::json;
@@ -466,5 +559,34 @@ mod tests {
         options.notify = false;
         let tail = pool.tail(options);
         assert!(tail.notify.is_none());
+    }
+
+    #[test]
+    fn replay_returns_messages_in_order() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
+
+        let values = [json!({"n": 1}), json!({"n": 2}), json!({"n": 3})];
+        for (i, data) in values.iter().enumerate() {
+            let ts = 1_000_000_000 + (i as u64) * 10_000_000;
+            let opts =
+                crate::core::pool::AppendOptions::new(ts, crate::core::pool::Durability::Flush);
+            pool.append_json(data, &["tag".to_string()], opts)
+                .expect("append");
+        }
+
+        let options = ReplayOptions::new(100.0);
+        let mut replay = pool.replay(options).expect("replay");
+
+        let mut collected = Vec::new();
+        while let Some(msg) = replay.next_message() {
+            collected.push(msg.data.clone());
+        }
+
+        assert_eq!(collected.len(), 3);
+        assert_eq!(collected[0], values[0]);
+        assert_eq!(collected[1], values[1]);
+        assert_eq!(collected[2], values[2]);
     }
 }

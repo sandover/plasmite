@@ -19,6 +19,6 @@ pub use crate::core::pool::{
     AppendOptions, Bounds, Durability, Pool, PoolInfo, PoolOptions, SeqOffsetCache,
 };
 pub use client::{LocalClient, PoolRef};
-pub use message::{Lite3Tail, Message, Meta, PoolApiExt, Tail, TailOptions};
+pub use message::{Lite3Tail, Message, Meta, PoolApiExt, Replay, ReplayOptions, Tail, TailOptions};
 pub use remote::{RemoteClient, RemoteLite3Frame, RemoteLite3Tail, RemotePool, RemoteTail};
 pub use validation::{ValidationIssue, ValidationReport, ValidationStatus};

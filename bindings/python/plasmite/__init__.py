@@ -22,11 +22,13 @@ from ctypes import (
     c_uint8,
     c_void_p,
 )
+from datetime import datetime
 from enum import IntEnum
 import json
 import os
 import sys
-from typing import Iterable, Optional
+import time as _time
+from typing import Generator, Iterable, Optional
 
 
 class ErrorKind(IntEnum):
@@ -466,6 +468,51 @@ class Pool:
         if rc != 0:
             raise _take_error(out_err)
         return Lite3Stream(out_stream)
+
+    def replay(
+        self,
+        speed: float = 1.0,
+        since_seq: Optional[int] = None,
+        max_messages: Optional[int] = None,
+        timeout_ms: Optional[int] = None,
+    ) -> Generator[bytes, None, None]:
+        """Replay messages with original timing scaled by speed.
+
+        Yields bytes (JSON messages) with inter-message delays derived from
+        each message's ``time`` field.  The first message is yielded
+        immediately; subsequent messages are delayed by
+        ``(current_time - prev_time) / speed``.
+        """
+        if speed <= 0:
+            raise ValueError("speed must be positive")
+
+        stream = self.open_stream(
+            since_seq=since_seq,
+            max_messages=max_messages,
+            timeout_ms=timeout_ms,
+        )
+        try:
+            prev_dt: Optional[datetime] = None
+            while True:
+                msg = stream.next_json()
+                if msg is None:
+                    break
+                parsed = json.loads(msg)
+                raw_time = parsed.get("time")
+                cur_dt: Optional[datetime] = None
+                if raw_time is not None:
+                    cur_dt = datetime.fromisoformat(
+                        raw_time.replace("Z", "+00:00")
+                    )
+                if prev_dt is not None and cur_dt is not None:
+                    delta = (cur_dt - prev_dt).total_seconds() / speed
+                    if delta > 0:
+                        _time.sleep(delta)
+                if cur_dt is not None:
+                    prev_dt = cur_dt
+                yield msg
+        finally:
+            stream.close()
 
     def close(self) -> None:
         if getattr(self, "_ptr", None):
