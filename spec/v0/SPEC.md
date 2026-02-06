@@ -108,7 +108,7 @@ Supported in v0.0.1: **macOS** and **Linux**.
 
 The following are implemented but not yet part of the frozen v0.0.1 contract (their APIs may evolve):
 
-* `plasmite serve` - HTTP server for remote access (loopback-only; see `spec/remote/v0/SPEC.md`)
+* `plasmite serve` - HTTP server for remote access (loopback default; non-loopback requires explicit flags; see `spec/remote/v0/SPEC.md`)
 * `plasmite doctor` - Pool validation (see `docs/doctor.md`)
 * Remote refs (`tcp(s)://...`) - planned for future versions
 
@@ -690,7 +690,19 @@ Notes:
 
 ## Remote refs in CLI
 
-`plasmite serve` is implemented (HTTP/JSON, loopback-only). See `spec/remote/v0/SPEC.md` for the protocol.
+`plasmite serve` is implemented (HTTP/JSON, loopback default with optional non-loopback). See `spec/remote/v0/SPEC.md` for the protocol.
+
+Serve onboarding behavior in v0 includes:
+
+* `plasmite serve init` generates bootstrap artifacts for secure non-loopback usage:
+  * token file
+  * self-signed TLS cert/key
+  * copy/paste startup command examples
+* `plasmite serve` emits a startup "next commands" block on interactive terminals with:
+  * resolved base URL
+  * one append and one read/tail command example
+  * auth/TLS notes that reflect effective config
+* Startup guidance must never echo secret token values.
 
 Remote pool refs in CLI commands are partially implemented:
 
@@ -707,7 +719,6 @@ Additional command coverage is still planned:
 
 * `--tls` / `--tls-cert FILE --tls-key FILE`
 * `--require-client-cert` (mTLS)
-* Non-loopback binds (requires auth)
 * QUIC transport
 
 ## Raw bytes convenience
