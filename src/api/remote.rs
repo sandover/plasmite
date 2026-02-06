@@ -97,7 +97,7 @@ struct RemoteMessage {
 
 #[derive(Deserialize)]
 struct RemoteMeta {
-    descrips: Vec<String>,
+    tags: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -177,7 +177,7 @@ struct OpenPoolRequest<'a> {
 #[derive(Serialize)]
 struct AppendRequest<'a> {
     data: &'a Value,
-    descrips: &'a [String],
+    tags: &'a [String],
     durability: &'a str,
 }
 
@@ -373,7 +373,7 @@ impl RemotePool {
     pub fn append_json(
         &self,
         data: &Value,
-        descrips: &[String],
+        tags: &[String],
         options: AppendOptions,
     ) -> ApiResult<Message> {
         if options.timestamp_ns != 0 {
@@ -383,7 +383,7 @@ impl RemotePool {
         let url = build_url(&self.base_url, &["v0", "pools", &self.pool, "append"])?;
         let payload = AppendRequest {
             data,
-            descrips,
+            tags,
             durability: durability_to_str(options.durability),
         };
         let envelope: MessageEnvelope = self
@@ -396,12 +396,12 @@ impl RemotePool {
     pub fn append_json_now(
         &self,
         data: &Value,
-        descrips: &[String],
+        tags: &[String],
         durability: Durability,
     ) -> ApiResult<Message> {
         self.append_json(
             data,
-            descrips,
+            tags,
             AppendOptions {
                 timestamp_ns: 0,
                 durability,
@@ -840,7 +840,7 @@ fn message_from_remote(remote: RemoteMessage) -> Message {
         seq: remote.seq,
         time: remote.time,
         meta: Meta {
-            descrips: remote.meta.descrips,
+            tags: remote.meta.tags,
         },
         data: remote.data,
     }

@@ -18,7 +18,7 @@ function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "plasmite-node-"));
 }
 
-test("append/get supports large payload and descrips", () => {
+test("append/get supports large payload and tags", () => {
   const temp = makeTempDir();
   const poolDir = path.join(temp, "pools");
   fs.mkdirSync(poolDir, { recursive: true });
@@ -26,15 +26,15 @@ test("append/get supports large payload and descrips", () => {
   const pool = client.createPool("big", 1024 * 1024);
 
   const payload = { blob: "x".repeat(64 * 1024) };
-  const descrips = ["alpha", "beta", "gamma"];
+  const tags = ["alpha", "beta", "gamma"];
   const messageBuf = pool.appendJson(
     Buffer.from(JSON.stringify(payload)),
-    descrips,
+    tags,
     Durability.Fast
   );
   const message = JSON.parse(messageBuf.toString("utf8"));
   assert.equal(message.data.blob.length, payload.blob.length);
-  assert.deepEqual(message.meta.descrips, descrips);
+  assert.deepEqual(message.meta.tags, tags);
 
   const fetchedBuf = pool.getJson(BigInt(message.seq));
   const fetched = JSON.parse(fetchedBuf.toString("utf8"));

@@ -119,13 +119,13 @@ Response (200): `{ "ok": true }`
 Request:
 
 ```json
-{ "data": {"kind":"note"}, "descrips": ["note"], "durability": "fast" }
+{ "data": {"kind":"note"}, "tags": ["note"], "durability": "fast" }
 ```
 
 Response (200):
 
 ```json
-{ "message": { "seq": 1, "time": "...", "meta": {"descrips": []}, "data": {"kind":"note"} } }
+{ "message": { "seq": 1, "time": "...", "meta": {"tags": []}, "data": {"kind":"note"} } }
 ```
 
 ### Append Lite3 (bytes)

@@ -23,7 +23,7 @@
           "from": "alice",
           "msg": "hi"
         },
-        "descrips": [
+        "tags": [
           "greeting"
         ]
       },
@@ -43,7 +43,7 @@
           "from": "alice",
           "msg": "hi"
         },
-        "descrips": [
+        "tags": [
           "greeting"
         ]
       }
@@ -63,7 +63,7 @@
               "from": "alice",
               "msg": "hi"
             },
-            "descrips": [
+            "tags": [
               "greeting"
             ]
           }

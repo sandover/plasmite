@@ -16,7 +16,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Meta {
-    pub descrips: Vec<String>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -316,14 +316,14 @@ pub trait PoolApiExt {
     fn append_json(
         &mut self,
         data: &Value,
-        descrips: &[String],
+        tags: &[String],
         options: AppendOptions,
     ) -> Result<Message, Error>;
 
     fn append_json_now(
         &mut self,
         data: &Value,
-        descrips: &[String],
+        tags: &[String],
         durability: Durability,
     ) -> Result<Message, Error>;
 
@@ -350,16 +350,16 @@ impl PoolApiExt for Pool {
     fn append_json(
         &mut self,
         data: &Value,
-        descrips: &[String],
+        tags: &[String],
         options: AppendOptions,
     ) -> Result<Message, Error> {
-        let payload = crate::core::lite3::encode_message(descrips, data)?;
+        let payload = crate::core::lite3::encode_message(tags, data)?;
         let seq = self.append_with_options(payload.as_slice(), options)?;
         Ok(Message {
             seq,
             time: format_ts(options.timestamp_ns)?,
             meta: Meta {
-                descrips: descrips.to_vec(),
+                tags: tags.to_vec(),
             },
             data: data.clone(),
         })
@@ -368,12 +368,12 @@ impl PoolApiExt for Pool {
     fn append_json_now(
         &mut self,
         data: &Value,
-        descrips: &[String],
+        tags: &[String],
         durability: Durability,
     ) -> Result<Message, Error> {
         let timestamp_ns = now_ns()?;
         let options = AppendOptions::new(timestamp_ns, durability);
-        self.append_json(data, descrips, options)
+        self.append_json(data, tags, options)
     }
 
     fn append_lite3(&mut self, payload: &[u8], options: AppendOptions) -> Result<u64, Error> {
@@ -432,22 +432,22 @@ fn decode_payload(payload: &[u8]) -> Result<(Meta, Value), Error> {
         .key_offset("meta")
         .map_err(|err| err.with_message("missing meta"))?;
     let descrips_ofs = doc
-        .key_offset_at(meta_ofs, "descrips")
-        .map_err(|err| err.with_message("missing meta.descrips"))?;
+        .key_offset_at(meta_ofs, "tags")
+        .map_err(|err| err.with_message("missing meta.tags"))?;
     let descrips_json = doc.to_json_at(descrips_ofs, false)?;
     let descrips_value: Value = serde_json::from_str(&descrips_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
             .with_source(err)
     })?;
-    let descrips = descrips_value
+    let tags = descrips_value
         .as_array()
-        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("meta.descrips must be array"))?
+        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("meta.tags must be array"))?
         .iter()
         .map(|item| item.as_str().map(|s| s.to_string()))
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| {
-            Error::new(ErrorKind::Corrupt).with_message("meta.descrips must be string array")
+            Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
         })?;
 
     let data_ofs = doc
@@ -460,7 +460,7 @@ fn decode_payload(payload: &[u8]) -> Result<(Meta, Value), Error> {
             .with_source(err)
     })?;
 
-    Ok((Meta { descrips }, data))
+    Ok((Meta { tags }, data))
 }
 
 fn now_ns() -> Result<u64, Error> {
@@ -505,7 +505,7 @@ mod tests {
         assert_eq!(
             meta,
             Meta {
-                descrips: vec!["tag".to_string()]
+                tags: vec!["tag".to_string()]
             }
         );
         assert_eq!(out, data);

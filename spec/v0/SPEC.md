@@ -44,7 +44,7 @@ Minimal, explicit flag set for v0.0.1:
 * Global: `--dir`
 * `pool create`: `--size`, `--index-capacity`
 * `pool list`: no flags
-* `poke`: `DATA`, `--file FILE`, `--in`, `--errors`, `--descrip`, `--durability fast|flush`, `--create`, `--create-size`, `--retry`, `--retry-delay`
+* `poke`: `DATA`, `--file FILE`, `--in`, `--errors`, `--tag`, `--durability fast|flush`, `--create`, `--create-size`, `--retry`, `--retry-delay`
 * `peek`: `--tail`, `--since`, `--where`, `--format pretty|jsonl`, `--jsonl`, `--quiet-drops`
 
 JSON output is the default for commands that print; `poke` always emits committed message JSON.
@@ -75,13 +75,13 @@ The CLI message schema is fixed and versioned by convention:
   "seq": 12345,
   "time": "2026-01-28T18:06:00.123Z",
   "meta": {
-    "descrips": ["event", "ping"]
+    "tags": ["event", "ping"]
   },
   "data": { "any": "thing" }
 }
 ```
 
-* `meta.descrips` is always present (empty array if unset).
+* `meta.tags` is always present (empty array if unset).
 * On disk: the payload is Lite³ bytes for `{meta,data}`.
 * On the CLI: JSON in/out only (encode on `poke`, decode on reads).
 
@@ -261,10 +261,10 @@ A “message” is conceptually:
 
 * **seq**: monotonically increasing integer within a pool (primary handle)
 * **time**: timestamp (stored as ns; rendered as RFC3339 in CLI JSON)
-* **meta**: lightweight metadata (required; at minimum `descrips: string[]`)
+* **meta**: lightweight metadata (required; at minimum `tags: string[]`)
 * **data**: arbitrary JSON object (primary user payload)
 
-`meta.descrips` is always present (empty array if unset).
+`meta.tags` is always present (empty array if unset).
 
 Canonical JSON rendering for tools:
 
@@ -273,13 +273,13 @@ Canonical JSON rendering for tools:
   "seq": 12345,
   "time": "2026-01-28T18:06:00.123Z",
   "meta": {
-    "descrips": ["event", "ping"]
+    "tags": ["event", "ping"]
   },
   "data": { "any": "thing" }
 }
 ```
 
-This makes `jq '.meta.descrips[]?'` or `jq '.data'` straightforward.
+This makes `jq '.meta.tags[]?'` or `jq '.data'` straightforward.
 
 On disk, each message payload is stored as a **Lite³ document** (bytes). The CLI remains **JSON-in/JSON-out**: `poke` encodes JSON into Lite³, and read/stream commands decode Lite³ back to JSON for printing.
 
@@ -548,13 +548,15 @@ Delete a pool file (destructive).
 **Synopsis**
 
 ```bash
-plasmite pool delete NAME
+plasmite pool delete NAME [NAME...]
 ```
 
 **Behavior**
 
-* Removes the resolved pool file.
-* Returns NotFound if the pool does not exist.
+* Attempts to remove each resolved pool file (best effort).
+* Reports per-pool success and failure details.
+* Exits non-zero if any requested pool fails to delete.
+* Remote/URI refs are rejected (`Usage`); local names/paths only.
 
 ---
 
@@ -632,9 +634,9 @@ Rejected remote forms:
 
 **Options (metadata)**
 
-* `--descrip TEXT` (repeatable)
-  * populates `meta.descrips` in-order
-  * `meta.descrips` is always present (empty array if no `--descrip` flags)
+* `--tag TEXT` (repeatable)
+  * populates `meta.tags` in-order
+  * `meta.tags` is always present (empty array if no `--tag` flags)
 
 **Options (data)**
 
@@ -685,7 +687,7 @@ Rejected remote forms:
 This gives you the classic pattern:
 
 ```bash
-seq=$(plasmite poke mypool '{"x":1}' --descrip event | jq -r '.seq')
+seq=$(plasmite poke mypool '{"x":1}' --tag event | jq -r '.seq')
 plasmite get mypool "$seq" | jq .
 ```
 
@@ -702,7 +704,7 @@ curl -N https://example.com/stream | plasmite poke demo
 jq -c '.items[]' data.json | plasmite poke demo
 
 # macOS unified log (ndjson)
-/usr/bin/log stream --style ndjson --level info | plasmite poke demo --descrip log
+/usr/bin/log stream --style ndjson --level info | plasmite poke demo --tag log
 
 # systemd journal JSON
 journalctl -o json -f | plasmite poke demo --in jsonl
@@ -877,13 +879,13 @@ plasmite peek mypool
 ### 2) Pipe into `jq`
 
 ```bash
-plasmite peek mypool --jsonl | jq -r '.meta.descrips[]?'
+plasmite peek mypool --jsonl | jq -r '.meta.tags[]?'
 ```
 
 ### 3) Inject like `poke`
 
 ```bash
-echo '{"type":"ping","t":123,"source":"cli"}' | plasmite poke mypool --descrip ping
+echo '{"type":"ping","t":123,"source":"cli"}' | plasmite poke mypool --tag ping
 ```
 
 ### 4) Fetch by seq

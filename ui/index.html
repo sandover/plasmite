@@ -670,11 +670,11 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
 
         function renderMessage(message) {
           var meta = message && typeof message.meta === "object" && message.meta ? message.meta : {};
-          var descrips = Array.isArray(meta.descrips) ? meta.descrips : [];
+          var tags = Array.isArray(meta.tags) ? meta.tags : [];
 
           var card = document.createElement("article");
           card.className = "msg";
-          var tint = getMessageTint(message, descrips);
+          var tint = getMessageTint(message, tags);
           if (tint) card.dataset.tint = tint;
 
           // --- Identity line: #seq · relative-time ---
@@ -709,11 +709,11 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           metaSection.appendChild(metaLabel);
           var tagsEl = document.createElement("div");
           tagsEl.className = "tags";
-          for (var i = 0; i < descrips.length; i++) {
+          for (var i = 0; i < tags.length; i++) {
             var t = document.createElement("span");
             t.className = "tag";
-            t.textContent = String(descrips[i]);
-            var kind = classifyTag(descrips[i]);
+            t.textContent = String(tags[i]);
+            var kind = classifyTag(tags[i]);
             if (kind) t.dataset.kind = kind;
             tagsEl.appendChild(t);
           }
@@ -754,10 +754,10 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           return card;
         }
 
-        function getMessageTint(message, descrips) {
+        function getMessageTint(message, tags) {
           var hasOk = false;
-          for (var i = 0; i < descrips.length; i++) {
-            var kind = classifyTag(descrips[i]);
+          for (var i = 0; i < tags.length; i++) {
+            var kind = classifyTag(tags[i]);
             if (kind === "error") return "error";
             if (kind === "warn") return "warn";
             if (kind === "ok") hasOk = true;
@@ -853,7 +853,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
             for (var ei = 0; ei < entries.length; ei++) {
               var eKey = entries[ei][0];
               var eRaw = entries[ei][1];
-              if (seen[eKey] || eKey === "descrips" || eKey === "data" || eRaw == null) continue;
+              if (seen[eKey] || eKey === "tags" || eKey === "data" || eRaw == null) continue;
               var eText = compactValue(eRaw, 72);
               if (!eText) continue;
               facts.push([eKey, eText]);

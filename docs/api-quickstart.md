@@ -34,8 +34,8 @@ use plasmite::api::{PoolApiExt, Durability};
 use serde_json::json;
 
 let data = json!({"msg": "hello"});
-let descrips = vec!["greeting".to_string()];
-let message = pool.append_json_now(&data, &descrips, Durability::Fast)?;
+let tags = vec!["greeting".to_string()];
+let message = pool.append_json_now(&data, &tags, Durability::Fast)?;
 println!("seq={}", message.seq);
 ```
 

@@ -20,8 +20,8 @@ pls poke chat '{"from": "alice", "msg": "hello bob"}'
 pls poke chat '{"from": "alice", "msg": "you there?"}'
 
 # Bob's Terminal - Bob sees each message appear as Alice sends it:
-#   {"seq":1,"time":"...","meta":{"descrips":[]},"data":{"from":"alice","msg":"hello bob"}}
-#   {"seq":2,"time":"...","meta":{"descrips":[]},"data":{"from":"alice","msg":"you there?"}}
+#   {"seq":1,"time":"...","meta":{"tags":[]},"data":{"from":"alice","msg":"hello bob"}}
+#   {"seq":2,"time":"...","meta":{"tags":[]},"data":{"from":"alice","msg":"you there?"}}
 ```
 
 No daemon, no config. ~600k messages/sec on a laptop.
@@ -120,7 +120,7 @@ pls peek events --tail 100 --replay 0
 pls peek foo --where '.data.level == "error"'
 
 # Only messages tagged "important"
-pls peek foo --where '.meta.descrips[]? == "important"'
+pls peek foo --where '.meta.tags[]? == "important"'
 
 # Pipe to jq for transformation
 pls peek foo --format jsonl | jq -r '.data.msg'
@@ -200,7 +200,7 @@ See [Go quickstart](docs/go-quickstart.md), [bindings/python](bindings/python/RE
 | `pool create NAME` | Create a pool (`--size 8M` for larger) |
 | `pool list` | List pools |
 | `pool info NAME [--json]` | Show pool metadata, bounds, and metrics |
-| `pool delete NAME` | Delete a pool |
+| `pool delete NAME...` | Delete one or more pools |
 | `doctor POOL` | Validate pool health (`--all` for all pools) |
 | `serve` | Serve pools over HTTP (loopback default; non-loopback opt-in) |
 
@@ -247,24 +247,24 @@ Default location: `~/.plasmite/pools/`. Create explicitly or use `--create` on f
 {
   "seq": 42,
   "time": "2026-02-03T12:00:00.123Z",
-  "meta": { "descrips": ["error", "db"] },
+  "meta": { "tags": ["error", "db"] },
   "data": { "your": "payload" }
 }
 ```
 
 - **seq** - auto-incrementing ID (for ordering, deduplication, `plasmite get`)
 - **time** - when it was written (RFC 3339, nanosecond precision)
-- **meta.descrips** - tags you add with `--descrip` (for filtering with `--where`)
+- **meta.tags** - tags you add with `--tag` (for filtering with `--where`)
 - **data** - your JSON payload
 
 Tag messages when you poke them:
 ```bash
-pls poke foo --descrip error --descrip db '{"msg": "connection lost"}'
+pls poke foo --tag error --tag db '{"msg": "connection lost"}'
 ```
 
 Filter by tag when you peek:
 ```bash
-pls peek foo --where '.meta.descrips[]? == "error"'
+pls peek foo --where '.meta.tags[]? == "error"'
 ```
 
 ### Scripting

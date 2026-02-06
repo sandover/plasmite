@@ -86,7 +86,7 @@ unsafe extern "C" {
         pool: *mut plsm_pool_t,
         json_bytes: *const u8,
         json_len: usize,
-        descrips: *const *const c_char,
+        tags: *const *const c_char,
         descrips_len: usize,
         durability: u32,
         out_message: *mut plsm_buf_t,
@@ -256,8 +256,8 @@ pub struct Lite3Frame {
 #[napi]
 impl Pool {
     #[napi]
-    pub fn append_json(&self, payload: Buffer, descrips: Vec<String>, durability: Durability) -> Result<Buffer> {
-        let c_descrips = CStringArray::new(&descrips)?;
+    pub fn append_json(&self, payload: Buffer, tags: Vec<String>, durability: Durability) -> Result<Buffer> {
+        let c_descrips = CStringArray::new(&tags)?;
         let mut out = plsm_buf_t { data: ptr::null_mut(), len: 0 };
         let mut err = ptr::null_mut();
         let rc = unsafe {
@@ -266,7 +266,7 @@ impl Pool {
                 payload.as_ptr(),
                 payload.len(),
                 c_descrips.as_ptr(),
-                descrips.len(),
+                tags.len(),
                 durability as u32,
                 &mut out,
                 &mut err,
@@ -487,7 +487,7 @@ impl CStringArray {
         let mut c_strings = Vec::with_capacity(values.len());
         for value in values {
             let cstr = CString::new(value.as_str())
-                .map_err(|_| Error::new(Status::InvalidArg, "descrips contains NUL"))?;
+                .map_err(|_| Error::new(Status::InvalidArg, "tags contains NUL"))?;
             c_strings.push(cstr);
         }
         let ptrs = c_strings.iter().map(|s| s.as_ptr()).collect();

@@ -202,10 +202,10 @@ Header integrity rule:
 Payload is a single Lite³ document containing the canonical shape:
 
 ```json
-{ "meta": { "descrips": ["..."] }, "data": { ... } }
+{ "meta": { "tags": ["..."] }, "data": { ... } }
 ```
 
-`meta.descrips` is always present (empty array if unset).
+`meta.tags` is always present (empty array if unset).
 
 This preserves the “in-memory == on-disk” feel:
 

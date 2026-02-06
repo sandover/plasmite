@@ -370,10 +370,10 @@ class Pool:
     def __init__(self, ptr: POINTER(plsm_pool_t)) -> None:
         self._ptr = ptr
 
-    def append_json(self, payload: bytes, descrips: Iterable[str], durability: Durability) -> bytes:
+    def append_json(self, payload: bytes, tags: Iterable[str], durability: Durability) -> bytes:
         buf = plsm_buf_t()
         out_err = POINTER(plsm_error_t)()
-        arr, _keep = _descrip_array(descrips)
+        arr, _keep = _descrip_array(tags)
         payload_buf = (c_uint8 * len(payload)).from_buffer_copy(payload)
         rc = _LIB.plsm_pool_append_json(
             self._ptr,

@@ -494,7 +494,7 @@ struct PoolRequest {
 #[derive(Debug, Deserialize)]
 struct AppendRequest {
     data: serde_json::Value,
-    descrips: Option<Vec<String>>,
+    tags: Option<Vec<String>>,
     durability: Option<String>,
 }
 
@@ -670,12 +670,12 @@ async fn append_message(
         Err(err) => return error_response(err),
     };
     let durability = durability_from_str(payload.durability.as_deref());
-    let descrips = payload.descrips.unwrap_or_default();
+    let tags = payload.tags.unwrap_or_default();
 
     let result = state
         .client
         .open_pool(&pool_ref)
-        .and_then(|mut pool| pool.append_json_now(&payload.data, &descrips, durability));
+        .and_then(|mut pool| pool.append_json_now(&payload.data, &tags, durability));
     match result {
         Ok(message) => json_response(json!({ "message": message_json(&message) })),
         Err(err) => error_response(err),
@@ -1073,7 +1073,7 @@ fn message_json(message: &plasmite::api::Message) -> serde_json::Value {
     json!({
         "seq": message.seq,
         "time": message.time.clone(),
-        "meta": { "descrips": message.meta.descrips.clone() },
+        "meta": { "tags": message.meta.tags.clone() },
         "data": message.data.clone(),
     })
 }

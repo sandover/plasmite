@@ -66,7 +66,7 @@ int plsm_pool_append_json(
     plsm_pool_t *pool,
     const uint8_t *json_bytes,
     size_t json_len,
-    const char **descrips,
+    const char **tags,
     size_t descrips_len,
     uint32_t durability,
     plsm_buf_t *out_message,

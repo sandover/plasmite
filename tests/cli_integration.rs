@@ -198,7 +198,7 @@ fn create_poke_get_peek_flow() {
             "poke",
             "testpool",
             "{\"x\":1}",
-            "--descrip",
+            "--tag",
             "ping",
         ])
         .output()
@@ -207,7 +207,7 @@ fn create_poke_get_peek_flow() {
     let poke_json = parse_json(std::str::from_utf8(&poke.stdout).expect("utf8"));
     let seq = poke_json.get("seq").unwrap().as_u64().unwrap();
     assert!(poke_json.get("time").is_some());
-    assert_eq!(poke_json.get("meta").unwrap()["descrips"][0], "ping");
+    assert_eq!(poke_json.get("meta").unwrap()["tags"][0], "ping");
     assert_eq!(poke_json.get("data").unwrap()["x"], 1);
 
     let get = cmd()
@@ -499,7 +499,7 @@ fn readme_quickstart_flow() {
             "poke",
             "demo",
             "{\"x\":1}",
-            "--descrip",
+            "--tag",
             "ping",
         ])
         .output()
@@ -918,7 +918,7 @@ fn peek_data_only_where_filters_envelope() {
             "poke",
             "demo",
             "{\"x\":1}",
-            "--descrip",
+            "--tag",
             "drop",
         ])
         .output()
@@ -932,7 +932,7 @@ fn peek_data_only_where_filters_envelope() {
             "poke",
             "demo",
             "{\"x\":2}",
-            "--descrip",
+            "--tag",
             "keep",
         ])
         .output()
@@ -951,7 +951,7 @@ fn peek_data_only_where_filters_envelope() {
             "--data-only",
             "--one",
             "--where",
-            r#".meta.descrips[]? == "keep""#,
+            r#".meta.tags[]? == "keep""#,
         ])
         .output()
         .expect("peek");
@@ -1036,7 +1036,7 @@ fn peek_where_filters_messages() {
             "poke",
             "demo",
             "{\"x\":1}",
-            "--descrip",
+            "--tag",
             "drop",
         ])
         .output()
@@ -1050,7 +1050,7 @@ fn peek_where_filters_messages() {
             "poke",
             "demo",
             "{\"x\":2}",
-            "--descrip",
+            "--tag",
             "keep",
         ])
         .output()
@@ -1067,7 +1067,7 @@ fn peek_where_filters_messages() {
             "10",
             "--jsonl",
             "--where",
-            r#".meta.descrips[]? == "keep""#,
+            r#".meta.tags[]? == "keep""#,
         ])
         .stdout(Stdio::piped())
         .spawn()
@@ -1107,7 +1107,7 @@ fn peek_where_multiple_predicates_and() {
             "poke",
             "demo",
             "{\"level\":1}",
-            "--descrip",
+            "--tag",
             "alpha",
         ])
         .output()
@@ -1121,7 +1121,7 @@ fn peek_where_multiple_predicates_and() {
             "poke",
             "demo",
             "{\"level\":2}",
-            "--descrip",
+            "--tag",
             "alpha",
         ])
         .output()
@@ -1138,7 +1138,7 @@ fn peek_where_multiple_predicates_and() {
             "10",
             "--jsonl",
             "--where",
-            r#".meta.descrips[]? == "alpha""#,
+            r#".meta.tags[]? == "alpha""#,
             "--where",
             ".data.level >= 2",
         ])
@@ -1465,7 +1465,7 @@ fn peek_where_multiple_predicates_with_since() {
             "poke",
             "demo",
             "{\"x\":1}",
-            "--descrip",
+            "--tag",
             "alpha",
         ])
         .output()
@@ -1479,7 +1479,7 @@ fn peek_where_multiple_predicates_with_since() {
             "poke",
             "demo",
             "{\"x\":2}",
-            "--descrip",
+            "--tag",
             "alpha",
         ])
         .output()
@@ -1496,7 +1496,7 @@ fn peek_where_multiple_predicates_with_since() {
             "1h",
             "--jsonl",
             "--where",
-            r#".meta.descrips[]? == "alpha""#,
+            r#".meta.tags[]? == "alpha""#,
             "--where",
             ".data.x == 2",
         ])
@@ -2654,8 +2654,136 @@ fn pool_delete_removes_pool_file() {
         .output()
         .expect("delete");
     assert!(delete.status.success());
+    let output = parse_json(std::str::from_utf8(&delete.stdout).expect("utf8"));
+    let deleted = output
+        .get("deleted")
+        .and_then(|v| v.as_array())
+        .expect("deleted array");
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(
+        deleted[0].get("pool").and_then(|v| v.as_str()),
+        Some("deleteme")
+    );
+    let failed = output
+        .get("failed")
+        .and_then(|v| v.as_array())
+        .expect("failed array");
+    assert!(failed.is_empty());
     let pool_path = pool_dir.join("deleteme.plasmite");
     assert!(!pool_path.exists());
+}
+
+#[test]
+fn pool_delete_multiple_best_effort_mixed_results() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "a",
+            "b",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let delete = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "delete",
+            "a",
+            "missing",
+            "b",
+        ])
+        .output()
+        .expect("delete");
+    assert_eq!(delete.status.code(), Some(3));
+
+    let output = parse_json(std::str::from_utf8(&delete.stdout).expect("utf8"));
+    let deleted = output
+        .get("deleted")
+        .and_then(|v| v.as_array())
+        .expect("deleted array");
+    assert_eq!(deleted.len(), 2);
+    let deleted_names = deleted
+        .iter()
+        .filter_map(|entry| entry.get("pool").and_then(|v| v.as_str()))
+        .collect::<Vec<_>>();
+    assert!(deleted_names.contains(&"a"));
+    assert!(deleted_names.contains(&"b"));
+
+    let failed = output
+        .get("failed")
+        .and_then(|v| v.as_array())
+        .expect("failed array");
+    assert_eq!(failed.len(), 1);
+    assert_eq!(
+        failed[0].get("pool").and_then(|v| v.as_str()),
+        Some("missing")
+    );
+    let error = failed[0]
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
+    assert_eq!(error.get("kind").and_then(|v| v.as_str()), Some("NotFound"));
+
+    assert!(!pool_dir.join("a.plasmite").exists());
+    assert!(!pool_dir.join("b.plasmite").exists());
+}
+
+#[test]
+fn pool_delete_multiple_with_invalid_ref_continues() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "ok"])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let delete = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "delete",
+            "ok",
+            "http://127.0.0.1:9700/demo",
+        ])
+        .output()
+        .expect("delete");
+    assert_eq!(delete.status.code(), Some(2));
+
+    let output = parse_json(std::str::from_utf8(&delete.stdout).expect("utf8"));
+    let deleted = output
+        .get("deleted")
+        .and_then(|v| v.as_array())
+        .expect("deleted array");
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0].get("pool").and_then(|v| v.as_str()), Some("ok"));
+
+    let failed = output
+        .get("failed")
+        .and_then(|v| v.as_array())
+        .expect("failed array");
+    assert_eq!(failed.len(), 1);
+    assert_eq!(
+        failed[0].get("pool").and_then(|v| v.as_str()),
+        Some("http://127.0.0.1:9700/demo")
+    );
+    let error = failed[0]
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
+    assert_eq!(error.get("kind").and_then(|v| v.as_str()), Some("Usage"));
+    assert!(!pool_dir.join("ok.plasmite").exists());
 }
 
 #[test]
@@ -3004,7 +3132,7 @@ fn poke_remote_url_happy_path_appends_message() {
             "poke",
             &pool_url,
             "{\"x\":1}",
-            "--descrip",
+            "--tag",
             "ping",
         ])
         .output()
@@ -3014,7 +3142,7 @@ fn poke_remote_url_happy_path_appends_message() {
     assert_eq!(value.get("seq").and_then(|v| v.as_u64()), Some(1));
     assert_eq!(value.get("data").and_then(|v| v.get("x")), Some(&json!(1)));
     assert_eq!(
-        value.get("meta").and_then(|v| v.get("descrips")),
+        value.get("meta").and_then(|v| v.get("tags")),
         Some(&json!(["ping"]))
     );
 }
@@ -3695,7 +3823,7 @@ fn serve_rejects_oversized_body() {
     let append_url = format!("{}/v0/pools/demo/append", server.base_url);
     let payload = json!({
         "data": { "big": "x".repeat(256) },
-        "descrips": ["oversized"],
+        "tags": ["oversized"],
         "durability": "fast"
     })
     .to_string();

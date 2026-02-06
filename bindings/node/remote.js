@@ -124,8 +124,8 @@ class RemotePool {
     return this.pool;
   }
 
-  async append(data, descrips = [], durability = "fast") {
-    const payload = { data, descrips, durability };
+  async append(data, tags = [], durability = "fast") {
+    const payload = { data, tags, durability };
     const url = buildUrl(this.client.baseUrl, ["v0", "pools", this.pool, "append"]);
     const response = await this.client._requestJson("POST", url, payload);
     return response.message;

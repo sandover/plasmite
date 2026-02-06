@@ -59,7 +59,7 @@ Message envelope shared with the CLI schema.
 
 ### Meta
 
-- `descrips: []string`
+- `tags: []string`
 - Future fields must be additive and namespace-aware.
 
 ### PoolInfo
@@ -98,7 +98,7 @@ Message envelope shared with the CLI schema.
 
 - Appends a message and returns the committed envelope.
 - Must be atomic with respect to the pool ordering.
-- `meta.descrips` are stored verbatim; ordering is preserved.
+- `meta.tags` are stored verbatim; ordering is preserved.
 
 ### get
 

@@ -91,7 +91,7 @@ def run_append(client: Client, step: dict[str, Any], index: int, step_id: str | 
     input_data = require_input(step, index, step_id)
     if "data" not in input_data:
         raise step_err(index, step_id, "missing input.data")
-    descrips = input_data.get("descrips", [])
+    tags = input_data.get("tags", [])
 
     pool_handle = try_call(lambda: client.open_pool(pool))
     if pool_handle.error:
@@ -99,7 +99,7 @@ def run_append(client: Client, step: dict[str, Any], index: int, step_id: str | 
         return
 
     payload = json.dumps(input_data["data"]).encode("utf-8")
-    result = try_call(lambda: pool_handle.value.append_json(payload, descrips, Durability.FAST))
+    result = try_call(lambda: pool_handle.value.append_json(payload, tags, Durability.FAST))
     pool_handle.value.close()
     if result.error:
         validate_expect_error(step.get("expect"), result.error, index, step_id)
@@ -133,8 +133,8 @@ def run_get(client: Client, step: dict[str, Any], index: int, step_id: str | Non
     message = parse_message(result.value)
     if step.get("expect", {}).get("data") is not None and step["expect"]["data"] != message.get("data"):
         raise step_err(index, step_id, "data mismatch")
-    if step.get("expect", {}).get("descrips") is not None and step["expect"]["descrips"] != message.get("meta", {}).get("descrips"):
-        raise step_err(index, step_id, "descrips mismatch")
+    if step.get("expect", {}).get("tags") is not None and step["expect"]["tags"] != message.get("meta", {}).get("tags"):
+        raise step_err(index, step_id, "tags mismatch")
 
 
 def run_tail(client: Client, step: dict[str, Any], index: int, step_id: str | None) -> None:
@@ -185,8 +185,8 @@ def run_tail(client: Client, step: dict[str, Any], index: int, step_id: str | No
         for idx, entry in enumerate(expected["messages"]):
             if entry["data"] != messages[idx]["data"]:
                 raise step_err(index, step_id, "data mismatch")
-            if "descrips" in entry and entry["descrips"] != messages[idx]["meta"]["descrips"]:
-                raise step_err(index, step_id, "descrips mismatch")
+            if "tags" in entry and entry["tags"] != messages[idx]["meta"]["tags"]:
+                raise step_err(index, step_id, "tags mismatch")
     else:
         remaining = messages[:]
         for entry in expected["messages"]:
@@ -194,7 +194,7 @@ def run_tail(client: Client, step: dict[str, Any], index: int, step_id: str | No
             for idx, actual in enumerate(remaining):
                 if entry["data"] != actual["data"]:
                     continue
-                if "descrips" in entry and entry["descrips"] != actual["meta"]["descrips"]:
+                if "tags" in entry and entry["tags"] != actual["meta"]["tags"]:
                     continue
                 remaining.pop(idx)
                 matched = True
@@ -272,12 +272,12 @@ def run_spawn_poke(repo_root: Path, workdir_path: Path, step: dict[str, Any], in
         if "data" not in message:
             raise step_err(index, step_id, "message.data is required")
         payload = json.dumps(message["data"])
-        descrips = message.get("descrips", [])
-        if not isinstance(descrips, list):
-            raise step_err(index, step_id, "message.descrips must be array")
+        tags = message.get("tags", [])
+        if not isinstance(tags, list):
+            raise step_err(index, step_id, "message.tags must be array")
         args = [plasmite_bin, "--dir", str(workdir_path), "poke", pool, payload]
-        for descrip in descrips:
-            args.extend(["--descrip", descrip])
+        for tag in tags:
+            args.extend(["--tag", tag])
         processes.append(subprocess.Popen(args))
 
     for proc in processes:

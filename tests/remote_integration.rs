@@ -484,7 +484,7 @@ fn remote_write_only_allows_append_but_rejects_reads() -> TestResult<()> {
 
     let server = TestServer::start_with_access(pool_dir, "write-only")?;
     let append_url = format!("{}/v0/pools/wo-demo/append", server.base_url);
-    let append_body = r#"{"data":{"n":1},"descrips":[],"durability":"fast"}"#;
+    let append_body = r#"{"data":{"n":1},"tags":[],"durability":"fast"}"#;
     let append = ureq::post(&append_url)
         .set("Content-Type", "application/json")
         .send_string(append_body)

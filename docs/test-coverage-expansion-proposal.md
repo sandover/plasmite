@@ -80,7 +80,7 @@ Coverage gaps:
 Proposed tests:
 - ABI-level tests that intentionally call functions with invalid inputs and confirm non-zero return codes and error metadata.
 - Binding-level tests for Close idempotency and error on using closed handles.
-- Binding tests for append/get with large payloads and large descrips arrays.
+- Binding tests for append/get with large payloads and large tags arrays.
 - Streaming tests in Go (context cancellation), Node (abort signal), and Python (generator stop) to verify tail shutdown.
 
 User perspective / misuse to cover:

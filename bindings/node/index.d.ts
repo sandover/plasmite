@@ -30,7 +30,7 @@ export declare class Client {
   close(): void
 }
 export declare class Pool {
-  appendJson(payload: Buffer, descrips: Array<string>, durability: Durability): Buffer
+  appendJson(payload: Buffer, tags: Array<string>, durability: Durability): Buffer
   appendLite3(payload: Buffer, durability: Durability): bigint
   getJson(seq: number | bigint): Buffer
   getLite3(seq: number | bigint): Lite3Frame

@@ -165,7 +165,7 @@ func (p *Pool) Close() {
 	p.ptr = nil
 }
 
-func (p *Pool) AppendJSON(payload []byte, descrips []string, durability Durability) ([]byte, error) {
+func (p *Pool) AppendJSON(payload []byte, tags []string, durability Durability) ([]byte, error) {
 	if p == nil || p.ptr == nil {
 		return nil, errors.New("plasmite: pool is closed")
 	}
@@ -175,7 +175,7 @@ func (p *Pool) AppendJSON(payload []byte, descrips []string, durability Durabili
 	cPayload := (*C.uint8_t)(unsafe.Pointer(&payload[0]))
 	cLen := C.size_t(len(payload))
 
-	cDescrips, cleanup := cStringArray(descrips)
+	cDescrips, cleanup := cStringArray(tags)
 	defer cleanup()
 
 	var cBuf C.plsm_buf_t
@@ -185,24 +185,24 @@ func (p *Pool) AppendJSON(payload []byte, descrips []string, durability Durabili
 		cPayload,
 		cLen,
 		cDescrips,
-		C.size_t(len(descrips)),
+		C.size_t(len(tags)),
 		C.uint32_t(durability),
 		&cBuf,
 		&cErr,
 	)
-	runtime.KeepAlive(descrips)
+	runtime.KeepAlive(tags)
 	if rc != 0 {
 		return nil, fromCError(cErr)
 	}
 	return copyAndFreeBuf(&cBuf), nil
 }
 
-func (p *Pool) Append(value any, descrips []string, durability Durability) ([]byte, error) {
+func (p *Pool) Append(value any, tags []string, durability Durability) ([]byte, error) {
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return nil, fmt.Errorf("plasmite: marshal payload: %w", err)
 	}
-	return p.AppendJSON(payload, descrips, durability)
+	return p.AppendJSON(payload, tags, durability)
 }
 
 // AppendLite3 appends a pre-encoded Lite3 payload without JSON encoding.

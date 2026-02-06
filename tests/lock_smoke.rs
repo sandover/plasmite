@@ -39,7 +39,7 @@ fn concurrent_poke_is_serialized() {
                 "poke",
                 "lockpool",
                 &format!("{{\"i\":{i}}}"),
-                "--descrip",
+                "--tag",
                 "lock",
             ])
             .stdout(Stdio::null())

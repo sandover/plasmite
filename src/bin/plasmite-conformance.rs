@@ -142,17 +142,17 @@ fn run_append(
     let data = input
         .get("data")
         .ok_or_else(|| step_err(index, step_id, "missing input.data"))?;
-    let descrips = match input.get("descrips") {
+    let tags = match input.get("tags") {
         Some(Value::Array(values)) => {
             parse_string_array(values.as_slice()).map_err(|err| step_err(index, step_id, &err))?
         }
-        Some(_) => return Err(step_err(index, step_id, "descrips must be array")),
+        Some(_) => return Err(step_err(index, step_id, "tags must be array")),
         None => Vec::new(),
     };
 
-    let result = client.open_pool(&pool_ref).and_then(|mut pool| {
-        pool.append_json_now(data, &descrips, plasmite::api::Durability::Fast)
-    });
+    let result = client
+        .open_pool(&pool_ref)
+        .and_then(|mut pool| pool.append_json_now(data, &tags, plasmite::api::Durability::Fast));
 
     match result {
         Ok(message) => {
@@ -198,7 +198,7 @@ fn run_get(
         Ok(message) => {
             if let Some(expect) = step.get("expect") {
                 expect_data(expect, &message.data, index, step_id)?;
-                expect_descrips(expect, &message.meta.descrips, index, step_id)?;
+                expect_descrips(expect, &message.meta.tags, index, step_id)?;
             }
             validate_expect_error(step.get("expect"), &Ok(()), index, step_id)
         }
@@ -302,7 +302,7 @@ fn run_tail(
                 for (idx, expected) in expected_messages.iter().enumerate() {
                     let actual = &messages[idx];
                     expect_data(expected, &actual.data, index, step_id)?;
-                    expect_descrips(expected, &actual.meta.descrips, index, step_id)?;
+                    expect_descrips(expected, &actual.meta.tags, index, step_id)?;
                 }
             }
 
@@ -420,8 +420,8 @@ fn run_spawn_poke(
             .ok_or_else(|| step_err(index, step_id, "message.data is required"))?;
         let payload = serde_json::to_string(payload)
             .map_err(|err| step_err(index, step_id, &format!("encode payload failed: {err}")))?;
-        let descrips = message
-            .get("descrips")
+        let tags = message
+            .get("tags")
             .and_then(Value::as_array)
             .map(|values| parse_string_array(values.as_slice()))
             .transpose()
@@ -435,9 +435,9 @@ fn run_spawn_poke(
             .arg(payload)
             .stdout(Stdio::null())
             .stderr(Stdio::inherit());
-        if let Some(descrips) = descrips {
-            for descrip in descrips {
-                cmd.arg("--descrip").arg(descrip);
+        if let Some(tags) = tags {
+            for tag in tags {
+                cmd.arg("--tag").arg(tag);
             }
         }
         let child = cmd
@@ -639,14 +639,14 @@ fn expect_descrips(
     index: usize,
     step_id: &Option<String>,
 ) -> Result<(), String> {
-    if let Some(expected_descrips) = expect.get("descrips") {
+    if let Some(expected_descrips) = expect.get("tags") {
         let expected = match expected_descrips.as_array() {
             Some(values) => parse_string_array(values.as_slice())
                 .map_err(|err| step_err(index, step_id, &err))?,
-            None => return Err(step_err(index, step_id, "descrips must be array")),
+            None => return Err(step_err(index, step_id, "tags must be array")),
         };
         if expected != actual {
-            return Err(step_err(index, step_id, "descrips mismatch"));
+            return Err(step_err(index, step_id, "tags mismatch"));
         }
     }
     Ok(())
@@ -719,12 +719,12 @@ fn matches_expected_message(
     if expected_data != &actual.data {
         return Ok(false);
     }
-    if let Some(expected_descrips) = expected.get("descrips") {
+    if let Some(expected_descrips) = expected.get("tags") {
         let expected = match expected_descrips.as_array() {
             Some(values) => parse_string_array(values.as_slice())?,
-            None => return Err("descrips must be array".to_string()),
+            None => return Err("tags must be array".to_string()),
         };
-        if expected != actual.meta.descrips {
+        if expected != actual.meta.tags {
             return Ok(false);
         }
     }

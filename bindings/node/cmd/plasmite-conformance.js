@@ -100,7 +100,7 @@ function runAppend(client, step, index, stepId) {
   if (payload === undefined) {
     throw stepError(index, stepId, "missing input.data");
   }
-  const descrips = input.descrips ?? [];
+  const tags = input.tags ?? [];
 
   const poolHandle = tryCall(() => client.openPool(pool));
   if (poolHandle.error) {
@@ -111,7 +111,7 @@ function runAppend(client, step, index, stepId) {
   const result = tryCall(() =>
     poolHandle.value.appendJson(
       Buffer.from(JSON.stringify(payload)),
-      descrips,
+      tags,
       Durability.Fast
     )
   );
@@ -155,8 +155,8 @@ function runGet(client, step, index, stepId) {
   if (step.expect?.data !== undefined && !deepEqual(step.expect.data, message.data)) {
     throw stepError(index, stepId, "data mismatch");
   }
-  if (step.expect?.descrips !== undefined && !deepEqual(step.expect.descrips, message.meta.descrips)) {
-    throw stepError(index, stepId, "descrips mismatch");
+  if (step.expect?.tags !== undefined && !deepEqual(step.expect.tags, message.meta.tags)) {
+    throw stepError(index, stepId, "tags mismatch");
   }
 }
 
@@ -214,8 +214,8 @@ function runTail(client, step, index, stepId) {
       if (!deepEqual(entry.data, messages[idx].data)) {
         throw stepError(index, stepId, "data mismatch");
       }
-      if (entry.descrips && !deepEqual(entry.descrips, messages[idx].meta.descrips)) {
-        throw stepError(index, stepId, "descrips mismatch");
+      if (entry.tags && !deepEqual(entry.tags, messages[idx].meta.tags)) {
+        throw stepError(index, stepId, "tags mismatch");
       }
     });
   } else {
@@ -225,7 +225,7 @@ function runTail(client, step, index, stepId) {
       for (let idx = 0; idx < messages.length; idx += 1) {
         if (used[idx]) continue;
         if (!deepEqual(entry.data, messages[idx].data)) continue;
-        if (entry.descrips && !deepEqual(entry.descrips, messages[idx].meta.descrips)) continue;
+        if (entry.tags && !deepEqual(entry.tags, messages[idx].meta.tags)) continue;
         used[idx] = true;
         found = true;
         break;
@@ -314,14 +314,14 @@ async function runSpawnPoke(repoRoot, workdirPath, step, index, stepId) {
       throw stepError(index, stepId, "message.data is required");
     }
     const payload = JSON.stringify(message.data);
-    const descrips = message.descrips ?? [];
-    if (!Array.isArray(descrips)) {
-      throw stepError(index, stepId, "message.descrips must be array");
+    const tags = message.tags ?? [];
+    if (!Array.isArray(tags)) {
+      throw stepError(index, stepId, "message.tags must be array");
     }
     return new Promise((resolve, reject) => {
       const child = spawn(
         plasmiteBin,
-        ["--dir", workdirPath, "poke", pool, payload, ...flattenDescrips(descrips)],
+        ["--dir", workdirPath, "poke", pool, payload, ...flattenDescrips(tags)],
         { stdio: "inherit" }
       );
       child.on("error", reject);
@@ -521,10 +521,10 @@ function resolvePlasmiteBin(repoRoot) {
   throw new Error("plasmite binary not found; set PLASMITE_BIN or build target/debug/plasmite");
 }
 
-function flattenDescrips(descrips) {
+function flattenDescrips(tags) {
   const out = [];
-  descrips.forEach((value) => {
-    out.push("--descrip", value);
+  tags.forEach((value) => {
+    out.push("--tag", value);
   });
   return out;
 }

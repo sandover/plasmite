@@ -268,31 +268,64 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 }
                 Ok(RunOutcome::ok())
             }
-            PoolCommand::Delete { name } => {
-                let path = resolve_poolref(&name, &pool_dir)?;
-                std::fs::remove_file(&path).map_err(|err| {
-                    if err.kind() == std::io::ErrorKind::NotFound {
-                        Error::new(ErrorKind::NotFound)
-                            .with_message("pool not found")
-                            .with_path(&path)
-                            .with_hint("Create the pool first or check --dir.")
+            PoolCommand::Delete { names } => {
+                let mut deleted = Vec::new();
+                let mut failed = Vec::new();
+                let mut first_error_kind = None;
+
+                for name in names {
+                    let result = if name.contains("://") {
+                        Err(Error::new(ErrorKind::Usage)
+                            .with_message("pool delete accepts local pool names or paths only")
+                            .with_hint("Use pool names/paths for local delete, or call remote APIs directly."))
                     } else {
-                        Error::new(ErrorKind::Io)
-                            .with_message("failed to delete pool")
-                            .with_path(&path)
-                            .with_source(err)
-                    }
-                })?;
-                emit_json(
-                    json!({
-                        "deleted": {
+                        resolve_poolref(&name, &pool_dir).and_then(|path| {
+                            std::fs::remove_file(&path).map_err(|err| {
+                                if err.kind() == std::io::ErrorKind::NotFound {
+                                    Error::new(ErrorKind::NotFound)
+                                        .with_message("pool not found")
+                                        .with_path(&path)
+                                        .with_hint("Create the pool first or check --dir.")
+                                } else {
+                                    Error::new(ErrorKind::Io)
+                                        .with_message("failed to delete pool")
+                                        .with_path(&path)
+                                        .with_source(err)
+                                }
+                            })?;
+                            Ok(path)
+                        })
+                    };
+
+                    match result {
+                        Ok(path) => deleted.push(json!({
                             "pool": name,
                             "path": path.display().to_string(),
+                        })),
+                        Err(err) => {
+                            if first_error_kind.is_none() {
+                                first_error_kind = Some(err.kind());
+                            }
+                            failed.push(json!({
+                                "pool": name,
+                                "error": error_json(&err)["error"].clone(),
+                            }));
                         }
+                    }
+                }
+
+                emit_json(
+                    json!({
+                        "deleted": deleted,
+                        "failed": failed,
                     }),
                     color_mode,
                 );
-                Ok(RunOutcome::ok())
+                if let Some(kind) = first_error_kind {
+                    Ok(RunOutcome::with_code(to_exit_code(kind)))
+                } else {
+                    Ok(RunOutcome::ok())
+                }
             }
             PoolCommand::List => {
                 let pools = list_pools(&pool_dir);
@@ -302,7 +335,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
         },
         Command::Poke {
             pool,
-            descrip,
+            tag,
             data,
             file,
             durability,
@@ -351,7 +384,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                     };
                     if single_input {
                         let data = read_data_single(data, file)?;
-                        let payload = lite3::encode_message(&descrip, &data)?;
+                        let payload = lite3::encode_message(&tag, &data)?;
                         let (seq, timestamp_ns) = retry_with_config(retry_config, || {
                             let timestamp_ns = now_ns()?;
                             let options = AppendOptions::new(timestamp_ns, durability);
@@ -359,10 +392,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                                 pool_handle.append_with_options(payload.as_slice(), options)?;
                             Ok((seq, timestamp_ns))
                         })?;
-                        emit_json(
-                            message_json(seq, timestamp_ns, &descrip, &data)?,
-                            color_mode,
-                        );
+                        emit_json(message_json(seq, timestamp_ns, &tag, &data)?, color_mode);
                     } else {
                         let pool_path_label = path.display().to_string();
                         let outcome = ingest_from_stdin(
@@ -370,7 +400,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                             PokeIngestContext {
                                 pool_ref: &pool,
                                 pool_path_label: &pool_path_label,
-                                descrips: &descrip,
+                                tags: &tag,
                                 durability,
                                 retry_config,
                                 pool_handle: &mut pool_handle,
@@ -407,7 +437,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                     if single_input {
                         let data = read_data_single(data, file)?;
                         let message = retry_with_config(retry_config, || {
-                            remote_pool.append_json_now(&data, &descrip, durability)
+                            remote_pool.append_json_now(&data, &tag, durability)
                         })?;
                         emit_json(message_to_json(&message), color_mode);
                     } else {
@@ -417,7 +447,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                             RemotePokeIngestContext {
                                 pool_ref: &pool,
                                 pool_path_label: &pool_path_label,
-                                descrips: &descrip,
+                                tags: &tag,
                                 durability,
                                 retry_config,
                                 remote_pool: &remote_pool,
@@ -586,14 +616,14 @@ Mental model:
   $ plasmite pool create chat
   $ plasmite peek chat              # Terminal 1: bob watches (waits for messages)
   $ plasmite poke chat '{"from": "alice", "msg": "hello"}'   # Terminal 2: alice sends
-  # bob sees: {"seq":1,"time":"...","meta":{"descrips":[]},"data":{"from":"alice","msg":"hello"}}
+  # bob sees: {"seq":1,"time":"...","meta":{"tags":[]},"data":{"from":"alice","msg":"hello"}}
 
 LEARN MORE
   Common pool operations:
     plasmite pool create <name>
     plasmite pool info <name>
     plasmite pool list
-    plasmite pool delete <name>
+    plasmite pool delete <name>...
 
   $ plasmite <command> --help
   https://github.com/sandover/plasmite"#,
@@ -671,6 +701,7 @@ Pools are persistent ring buffers: multiple writers, multiple readers, crash-saf
   $ plasmite pool info foo
   $ plasmite pool list
   $ plasmite pool delete foo
+  $ plasmite pool delete foo bar baz
 
 NOTES
   - Default location: ~/.plasmite/pools (override with --dir)"#
@@ -689,8 +720,8 @@ inline JSON, a file (--file), or streams via stdin (auto-detected)."#,
   # Inline JSON
   $ plasmite poke foo '{"hello": "world"}'
 
-  # Tag messages with --descrip
-  $ plasmite poke foo --descrip ping --descrip from-alice '{"msg": "hello bob"}'
+  # Tag messages with --tag
+  $ plasmite poke foo --tag ping --tag from-alice '{"msg": "hello bob"}'
 
   # Pipe JSON Lines
   $ jq -c '.items[]' data.json | plasmite poke foo
@@ -699,7 +730,7 @@ inline JSON, a file (--file), or streams via stdin (auto-detected)."#,
   $ curl -N https://api.example.com/events | plasmite poke events
 
   # Remote shorthand ref (serve must already expose the pool)
-  $ plasmite poke http://127.0.0.1:9700/demo --descrip remote '{"msg":"hello"}'
+  $ plasmite poke http://127.0.0.1:9700/demo --tag remote '{"msg":"hello"}'
 
   # Auto-create pool on first poke
   $ plasmite poke bar --create '{"first": "message"}'
@@ -718,7 +749,7 @@ NOTES
         #[arg(help = "Inline JSON value")]
         data: Option<String>,
         #[arg(long, help = "Repeatable tag/descriptor for the message")]
-        descrip: Vec<String>,
+        tag: Vec<String>,
         #[arg(
             long = "file",
             help = "JSON file path (use - for stdin)",
@@ -829,8 +860,8 @@ Use `--replay N` with `--tail` or `--since` to replay with timing."#,
   # Replay at half speed
   $ plasmite peek foo --since 5m --replay 0.5
 
-  # Filter by tag (descrip)
-  $ plasmite peek foo --where '.meta.descrips[]? == "ping"'
+  # Filter by tag (tag)
+  $ plasmite peek foo --where '.meta.tags[]? == "ping"'
 
   # Pipe to jq
   $ plasmite peek foo --format jsonl | jq -r '.data.msg'
@@ -1005,14 +1036,19 @@ NOTES
         json: bool,
     },
     #[command(
-        about = "Delete a pool file",
-        long_about = r#"Delete a pool file (destructive, cannot be undone)."#,
-        after_help = r#"EXAMPLE
-  $ plasmite pool delete foo"#
+        about = "Delete one or more pool files",
+        long_about = r#"Delete one or more pool files (destructive, cannot be undone)."#,
+        after_help = r#"EXAMPLES
+  $ plasmite pool delete foo
+  $ plasmite pool delete foo bar baz
+
+NOTES
+  - Best effort: attempts all deletes and reports per-pool failures.
+  - Exits non-zero if any requested pool failed to delete."#
     )]
     Delete {
-        #[arg(help = "Pool name or path")]
-        name: String,
+        #[arg(required = true, help = "Pool name(s) or path(s)")]
+        names: Vec<String>,
     },
     #[command(
         about = "List pools in the pool directory",
@@ -2453,7 +2489,7 @@ fn mode_label(mode: IngestMode) -> &'static str {
 struct PokeIngestContext<'a> {
     pool_ref: &'a str,
     pool_path_label: &'a str,
-    descrips: &'a [String],
+    tags: &'a [String],
     durability: Durability,
     retry_config: Option<RetryConfig>,
     pool_handle: &'a mut Pool,
@@ -2465,7 +2501,7 @@ struct PokeIngestContext<'a> {
 struct RemotePokeIngestContext<'a> {
     pool_ref: &'a str,
     pool_path_label: &'a str,
-    descrips: &'a [String],
+    tags: &'a [String],
     durability: Durability,
     retry_config: Option<RetryConfig>,
     remote_pool: &'a RemotePool,
@@ -2491,7 +2527,7 @@ fn ingest_from_stdin<R: Read>(
         reader,
         ingest_config,
         |data| {
-            let payload = lite3::encode_message(ctx.descrips, &data)?;
+            let payload = lite3::encode_message(ctx.tags, &data)?;
             let (seq, timestamp_ns) = retry_with_config(ctx.retry_config, || {
                 let timestamp_ns = now_ns()?;
                 let options = AppendOptions::new(timestamp_ns, ctx.durability);
@@ -2501,7 +2537,7 @@ fn ingest_from_stdin<R: Read>(
                 Ok((seq, timestamp_ns))
             })?;
             emit_message(
-                message_json(seq, timestamp_ns, ctx.descrips, &data)?,
+                message_json(seq, timestamp_ns, ctx.tags, &data)?,
                 false,
                 ctx.color_mode,
             );
@@ -2538,7 +2574,7 @@ fn ingest_from_stdin_remote<R: Read>(
         |data| {
             let message = retry_with_config(ctx.retry_config, || {
                 ctx.remote_pool
-                    .append_json_now(&data, ctx.descrips, ctx.durability)
+                    .append_json_now(&data, ctx.tags, ctx.durability)
             })?;
             emit_message(message_to_json(&message), false, ctx.color_mode);
             Ok(())
@@ -2584,10 +2620,10 @@ fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
 fn message_json(
     seq: u64,
     timestamp_ns: u64,
-    descrips: &[String],
+    tags: &[String],
     data: &Value,
 ) -> Result<Value, Error> {
-    let meta = json!({ "descrips": descrips });
+    let meta = json!({ "tags": tags });
     Ok(json!({
         "seq": seq,
         "time": format_ts(timestamp_ns)?,
@@ -2601,7 +2637,7 @@ fn message_to_json(message: &plasmite::api::Message) -> Value {
         "seq": message.seq,
         "time": message.time,
         "meta": {
-            "descrips": message.meta.descrips,
+            "tags": message.meta.tags,
         },
         "data": message.data,
     })
@@ -2638,24 +2674,24 @@ fn decode_payload(payload: &[u8]) -> Result<(Value, Value), Error> {
         .key_offset("meta")
         .map_err(|err| err.with_message("missing meta"))?;
     let descrips_ofs = doc
-        .key_offset_at(meta_ofs, "descrips")
-        .map_err(|err| err.with_message("missing meta.descrips"))?;
+        .key_offset_at(meta_ofs, "tags")
+        .map_err(|err| err.with_message("missing meta.tags"))?;
     let descrips_json = doc.to_json_at(descrips_ofs, false)?;
     let descrips_value: Value = serde_json::from_str(&descrips_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
             .with_source(err)
     })?;
-    let descrips = descrips_value
+    let tags = descrips_value
         .as_array()
-        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("meta.descrips must be array"))?
+        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("meta.tags must be array"))?
         .iter()
         .map(|item| item.as_str().map(|s| s.to_string()))
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| {
-            Error::new(ErrorKind::Corrupt).with_message("meta.descrips must be string array")
+            Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
         })?;
-    let meta = json!({ "descrips": descrips });
+    let meta = json!({ "tags": tags });
 
     let data_ofs = doc
         .key_offset("data")

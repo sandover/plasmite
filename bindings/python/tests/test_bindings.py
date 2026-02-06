@@ -38,13 +38,13 @@ class BindingTests(unittest.TestCase):
         pool = client.create_pool("big", 1024 * 1024)
 
         payload = {"blob": "x" * (64 * 1024)}
-        descrips = ["alpha", "beta", "gamma"]
+        tags = ["alpha", "beta", "gamma"]
         msg_bytes = pool.append_json(
-            json.dumps(payload).encode("utf-8"), descrips, Durability.FAST
+            json.dumps(payload).encode("utf-8"), tags, Durability.FAST
         )
         message = parse_message(msg_bytes)
         self.assertEqual(len(message["data"]["blob"]), len(payload["blob"]))
-        self.assertEqual(message["meta"]["descrips"], descrips)
+        self.assertEqual(message["meta"]["tags"], tags)
 
         get_bytes = pool.get_json(message["seq"])
         fetched = parse_message(get_bytes)

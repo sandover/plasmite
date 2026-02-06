@@ -37,7 +37,7 @@ Each step is a mapping with these fields:
 
 - `pool` (required).
 - `input.data` (required): JSON payload.
-- `input.descrips` (optional): Array of tags.
+- `input.tags` (optional): Array of tags.
 - `expect.seq` (optional): Expected sequence number.
 - `expect.error` (optional): Expected error object (see Error Expectations).
 
@@ -46,7 +46,7 @@ Each step is a mapping with these fields:
 - `pool` (required).
 - `input.seq` (required): Sequence number.
 - `expect.data` (required): JSON payload.
-- `expect.descrips` (optional): Array of tags.
+- `expect.tags` (optional): Array of tags.
 - `expect.error` (optional): Expected error object (see Error Expectations).
 
 ### `tail`
@@ -54,7 +54,7 @@ Each step is a mapping with these fields:
 - `pool` (required).
 - `input.since_seq` (optional): Start sequence.
 - `input.max` (optional): Max messages to read.
-- `expect.messages` (required): Array of messages with `data` and optional `descrips`.
+- `expect.messages` (required): Array of messages with `data` and optional `tags`.
 - `expect.messages_unordered` (optional): Array of messages without ordering guarantees.
 - `expect.error` (optional): Expected error object (see Error Expectations).
 `expect.messages` and `expect.messages_unordered` are mutually exclusive.
@@ -81,7 +81,7 @@ Each step is a mapping with these fields:
 ### `spawn_poke`
 
 - `pool` (required).
-- `input.messages` (required): Array of message objects with `data` and optional `descrips`.
+- `input.messages` (required): Array of message objects with `data` and optional `tags`.
 - Spawns separate processes that append concurrently via the CLI (`plasmite poke`).
 - Runners may honor `PLASMITE_BIN` to locate the CLI binary.
 

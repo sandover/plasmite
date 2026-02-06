@@ -20,28 +20,28 @@
               "writer": "alpha",
               "value": 1
             },
-            "descrips": ["alpha"]
+            "tags": ["alpha"]
           },
           {
             "data": {
               "writer": "beta",
               "value": 2
             },
-            "descrips": ["beta"]
+            "tags": ["beta"]
           },
           {
             "data": {
               "writer": "gamma",
               "value": 3
             },
-            "descrips": ["gamma"]
+            "tags": ["gamma"]
           },
           {
             "data": {
               "writer": "delta",
               "value": 4
             },
-            "descrips": ["delta"]
+            "tags": ["delta"]
           }
         ]
       }
@@ -60,28 +60,28 @@
               "writer": "alpha",
               "value": 1
             },
-            "descrips": ["alpha"]
+            "tags": ["alpha"]
           },
           {
             "data": {
               "writer": "beta",
               "value": 2
             },
-            "descrips": ["beta"]
+            "tags": ["beta"]
           },
           {
             "data": {
               "writer": "gamma",
               "value": 3
             },
-            "descrips": ["gamma"]
+            "tags": ["gamma"]
           },
           {
             "data": {
               "writer": "delta",
               "value": 4
             },
-            "descrips": ["delta"]
+            "tags": ["delta"]
           }
         ]
       }

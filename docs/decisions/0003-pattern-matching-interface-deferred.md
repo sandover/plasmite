@@ -20,5 +20,5 @@ Defer the exact CLI interface for pattern matching until we spend time on ergono
 
 Constraints to preserve:
 - The interface should remain **stateless** (callers supply range + filters each call).
-- Start narrow (likely `meta.descrips`) and remain extensible.
+- Start narrow (likely `meta.tags`) and remain extensible.
 

@@ -202,7 +202,7 @@ pub extern "C" fn plsm_pool_append_json(
     pool: *mut plsm_pool,
     json_bytes: *const u8,
     json_len: usize,
-    descrips: *const *const c_char,
+    tags: *const *const c_char,
     descrips_len: usize,
     durability: u32,
     out_message: *mut plsm_buf,
@@ -216,7 +216,7 @@ pub extern "C" fn plsm_pool_append_json(
         Ok(value) => value,
         Err(err) => return fail(out_err, err),
     };
-    let tags = match parse_descrips(descrips, descrips_len) {
+    let tags = match parse_descrips(tags, descrips_len) {
         Ok(tags) => tags,
         Err(err) => return fail(out_err, err),
     };
@@ -702,19 +702,19 @@ fn parse_json_bytes(bytes: *const u8, len: usize) -> Result<Value, Error> {
     })
 }
 
-fn parse_descrips(descrips: *const *const c_char, len: usize) -> Result<Vec<String>, Error> {
-    if descrips.is_null() {
+fn parse_descrips(tags: *const *const c_char, len: usize) -> Result<Vec<String>, Error> {
+    if tags.is_null() {
         return Ok(Vec::new());
     }
-    let slice = unsafe { std::slice::from_raw_parts(descrips, len) };
+    let slice = unsafe { std::slice::from_raw_parts(tags, len) };
     let mut out = Vec::with_capacity(len);
     for item in slice {
         if item.is_null() {
-            return Err(Error::new(ErrorKind::Usage).with_message("descrips contains null"));
+            return Err(Error::new(ErrorKind::Usage).with_message("tags contains null"));
         }
         let value = unsafe { CStr::from_ptr(*item) }
             .to_str()
-            .map_err(|_| Error::new(ErrorKind::Usage).with_message("descrips invalid UTF-8"))?
+            .map_err(|_| Error::new(ErrorKind::Usage).with_message("tags invalid UTF-8"))?
             .to_string();
         out.push(value);
     }
@@ -734,22 +734,22 @@ fn message_from_frame(frame: &crate::api::FrameRef<'_>) -> Result<crate::api::Me
         .key_offset("meta")
         .map_err(|err| err.with_message("missing meta"))?;
     let descrips_ofs = doc
-        .key_offset_at(meta_ofs, "descrips")
-        .map_err(|err| err.with_message("missing meta.descrips"))?;
+        .key_offset_at(meta_ofs, "tags")
+        .map_err(|err| err.with_message("missing meta.tags"))?;
     let descrips_json = doc.to_json_at(descrips_ofs, false)?;
     let descrips_value: Value = serde_json::from_str(&descrips_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
             .with_source(err)
     })?;
-    let descrips = descrips_value
+    let tags = descrips_value
         .as_array()
-        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("meta.descrips must be array"))?
+        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("meta.tags must be array"))?
         .iter()
         .map(|item| item.as_str().map(|s| s.to_string()))
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| {
-            Error::new(ErrorKind::Corrupt).with_message("meta.descrips must be string array")
+            Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
         })?;
 
     let data_ofs = doc
@@ -765,7 +765,7 @@ fn message_from_frame(frame: &crate::api::FrameRef<'_>) -> Result<crate::api::Me
     Ok(crate::api::Message {
         seq: frame.seq,
         time: format_ts(frame.timestamp_ns)?,
-        meta: crate::api::Meta { descrips },
+        meta: crate::api::Meta { tags },
         data,
     })
 }
@@ -780,7 +780,7 @@ fn write_message_buf(
     let json = serde_json::json!({
         "seq": message.seq,
         "time": message.time,
-        "meta": { "descrips": message.meta.descrips },
+        "meta": { "tags": message.meta.tags },
         "data": message.data,
     });
     let json_bytes = serde_json::to_vec(&json).map_err(|err| {

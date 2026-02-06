@@ -207,22 +207,23 @@ impl<'a> Lite3DocRef<'a> {
                 self.bytes.as_ptr(),
                 self.bytes.len(),
                 meta_ofs,
-                c_key("descrips").as_ptr(),
+                c_key("tags").as_ptr(),
             )
         };
         if descrips_type != sys::LITE3_TYPE_ARRAY {
-            return Err(Error::new(ErrorKind::Corrupt).with_message("meta.descrips must be array"));
+            return Err(Error::new(ErrorKind::Corrupt).with_message("meta.tags must be array"));
         }
 
-        let descrips_ofs = get_key_offset_at(self.bytes, meta_ofs, "descrips")
-            .map_err(|err| err.with_message("missing meta.descrips"))?;
+        let descrips_ofs = get_key_offset_at(self.bytes, meta_ofs, "tags")
+            .map_err(|err| err.with_message("missing meta.tags"))?;
 
         let count = array_count(self.bytes, descrips_ofs)?;
         for index in 0..count {
             let item_type = array_item_type(self.bytes, descrips_ofs, index)?;
             if item_type != sys::LITE3_TYPE_STRING {
-                return Err(Error::new(ErrorKind::Corrupt)
-                    .with_message("meta.descrips must be string array"));
+                return Err(
+                    Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
+                );
             }
         }
 
@@ -235,14 +236,14 @@ pub fn encode_message(meta_descrips: &[String], data: &Value) -> Result<Lite3Buf
         return Err(Error::new(ErrorKind::Usage).with_message("data must be object"));
     }
 
-    let descrips = meta_descrips
+    let tags = meta_descrips
         .iter()
         .cloned()
         .map(Value::String)
         .collect::<Vec<_>>();
 
     let mut meta = Map::new();
-    meta.insert("descrips".to_string(), Value::Array(descrips));
+    meta.insert("tags".to_string(), Value::Array(tags));
 
     let mut root = Map::new();
     root.insert("meta".to_string(), Value::Object(meta));
@@ -347,7 +348,7 @@ mod tests {
         let json = doc.to_json(false).expect("json");
         let value: serde_json::Value = serde_json::from_str(&json).expect("parse");
         assert_eq!(value["data"]["hello"], "world");
-        assert_eq!(value["meta"]["descrips"][0], "event");
+        assert_eq!(value["meta"]["tags"][0], "event");
     }
 
     #[test]

@@ -30,7 +30,7 @@ import (
 type message struct {
 	Seq  uint64 `json:"seq"`
 	Meta struct {
-		Descrips []string `json:"descrips"`
+		Tags []string `json:"tags"`
 	} `json:"meta"`
 	Data any `json:"data"`
 }
@@ -196,15 +196,15 @@ func runAppend(client *plasmite.Client, step map[string]any, index int, stepID *
 	if !ok {
 		return stepErr(index, stepID, "missing input.data")
 	}
-	var descrips []string
-	if raw, ok := input["descrips"].([]any); ok {
-		descrips, err = parseStringArray(raw)
+	var tags []string
+	if raw, ok := input["tags"].([]any); ok {
+		tags, err = parseStringArray(raw)
 		if err != nil {
 			return stepErr(index, stepID, err.Error())
 		}
 	}
 
-	messageBytes, err := pool.Append(data, descrips, plasmite.DurabilityFast)
+	messageBytes, err := pool.Append(data, tags, plasmite.DurabilityFast)
 	if err != nil {
 		return validateExpectError(step["expect"], err, index, stepID)
 	}
@@ -262,7 +262,7 @@ func runGet(client *plasmite.Client, step map[string]any, index int, stepID *str
 	if err := expectData(step, msg.Data, index, stepID); err != nil {
 		return err
 	}
-	if err := expectDescrips(step, msg.Meta.Descrips, index, stepID); err != nil {
+	if err := expectDescrips(step, msg.Meta.Tags, index, stepID); err != nil {
 		return err
 	}
 
@@ -346,8 +346,8 @@ func runTail(client *plasmite.Client, step map[string]any, index int, stepID *st
 			if !reflect.DeepEqual(expected.Data, actual.Data) {
 				return stepErr(index, stepID, "data mismatch")
 			}
-			if expected.Descrips != nil && !reflect.DeepEqual(expected.Descrips, actual.Meta.Descrips) {
-				return stepErr(index, stepID, "descrips mismatch")
+			if expected.Tags != nil && !reflect.DeepEqual(expected.Tags, actual.Meta.Tags) {
+				return stepErr(index, stepID, "tags mismatch")
 			}
 		}
 	} else {
@@ -361,7 +361,7 @@ func runTail(client *plasmite.Client, step map[string]any, index int, stepID *st
 				if !reflect.DeepEqual(expected.Data, actual.Data) {
 					continue
 				}
-				if expected.Descrips != nil && !reflect.DeepEqual(expected.Descrips, actual.Meta.Descrips) {
+				if expected.Tags != nil && !reflect.DeepEqual(expected.Tags, actual.Meta.Tags) {
 					continue
 				}
 				used[idx] = true
@@ -503,20 +503,20 @@ func runSpawnPoke(repoRoot string, workdirPath string, step map[string]any, inde
 		if err != nil {
 			return stepErr(index, stepID, fmt.Sprintf("encode payload failed: %v", err))
 		}
-		var descrips []string
-		if rawDescrips, ok := entry["descrips"].([]any); ok {
-			descrips, err = parseStringArray(rawDescrips)
+		var tags []string
+		if rawDescrips, ok := entry["tags"].([]any); ok {
+			tags, err = parseStringArray(rawDescrips)
 			if err != nil {
 				return stepErr(index, stepID, err.Error())
 			}
 		}
 
 		wg.Add(1)
-		go func(payload string, descrips []string) {
+		go func(payload string, tags []string) {
 			defer wg.Done()
 			args := []string{"--dir", workdirPath, "poke", pool, payload}
-			for _, descrip := range descrips {
-				args = append(args, "--descrip", descrip)
+			for _, tag := range tags {
+				args = append(args, "--tag", tag)
 			}
 			cmd := exec.Command(bin, args...)
 			cmd.Stdout = os.Stdout
@@ -524,7 +524,7 @@ func runSpawnPoke(repoRoot string, workdirPath string, step map[string]any, inde
 			if err := cmd.Run(); err != nil {
 				errs <- err
 			}
-		}(string(payload), descrips)
+		}(string(payload), tags)
 	}
 
 	wg.Wait()
@@ -893,12 +893,12 @@ func expectedMessages(step map[string]any, index int, stepID *string) ([]message
 			return nil, false, stepErr(index, stepID, "message must be object")
 		}
 		messages[i] = messageExpectation{Data: entry["data"]}
-		if rawDescrips, ok := entry["descrips"].([]any); ok {
-			descrips, err := parseStringArray(rawDescrips)
+		if rawDescrips, ok := entry["tags"].([]any); ok {
+			tags, err := parseStringArray(rawDescrips)
 			if err != nil {
 				return nil, false, stepErr(index, stepID, err.Error())
 			}
-			messages[i].Descrips = descrips
+			messages[i].Tags = tags
 		}
 	}
 	return messages, ordered, nil
@@ -917,7 +917,7 @@ func resolvePlasmiteBin(repoRoot string) (string, error) {
 
 type messageExpectation struct {
 	Data     any
-	Descrips []string
+	Tags []string
 }
 
 func expectData(step map[string]any, actual any, index int, stepID *string) error {
@@ -938,17 +938,17 @@ func expectDescrips(step map[string]any, actual []string, index int, stepID *str
 	if !ok {
 		return nil
 	}
-	if expectedRaw, ok := expect["descrips"]; ok {
+	if expectedRaw, ok := expect["tags"]; ok {
 		expectedList, ok := expectedRaw.([]any)
 		if !ok {
-			return stepErr(index, stepID, "descrips must be array")
+			return stepErr(index, stepID, "tags must be array")
 		}
 		expected, err := parseStringArray(expectedList)
 		if err != nil {
 			return stepErr(index, stepID, err.Error())
 		}
 		if !reflect.DeepEqual(expected, actual) {
-			return stepErr(index, stepID, "descrips mismatch")
+			return stepErr(index, stepID, "tags mismatch")
 		}
 	}
 	return nil

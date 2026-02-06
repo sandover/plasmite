@@ -79,12 +79,12 @@ Constraints:
 - Mirrors the CLI message schema:
   - `seq: u64`
   - `time: RFC3339 UTC string` (or `SystemTime` in languages that strongly prefer it, but serialized as RFC3339)
-  - `meta.descrips: []string`
+  - `meta.tags: []string`
   - `data: JSON value (object recommended; any JSON allowed if CLI allows it)`
 - API must preserve the invariant: `seq` is monotonically increasing per pool.
 
 **Meta**
-- Starts with `descrips` (tags).
+- Starts with `tags` (tags).
 - Future additive fields must be namespaced or carefully versioned.
 
 **Cursor**
@@ -162,7 +162,7 @@ let client = LocalClient::new().with_pool_dir("~/.plasmite/pools")?;
 let pool = client.open(PoolRef::name("chat")).create_if_missing(true).open()?;
 
 let msg = pool.append_json(r#"{"from":"alice","msg":"hi"}"#)
-  .descrip("important")
+  .tag("important")
   .durability(AppendOptions::FAST)
   .commit()?;
 
@@ -263,7 +263,7 @@ Recommended structure:
 - A small runner per language that maps manifest operations to API calls.
 
 The conformance suite should validate at minimum:
-- message envelope shape (`seq`, `time`, `meta.descrips`, `data`)
+- message envelope shape (`seq`, `time`, `meta.tags`, `data`)
 - monotonic `seq` behavior
 - durability mode semantics (at least “fast” vs “flush”)
 - multi-process writer safety (serialized appends)

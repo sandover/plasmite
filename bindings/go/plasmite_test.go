@@ -23,7 +23,7 @@ import (
 type message struct {
 	Seq  uint64 `json:"seq"`
 	Meta struct {
-		Descrips []string `json:"descrips"`
+		Tags []string `json:"tags"`
 	} `json:"meta"`
 	Data map[string]any `json:"data"`
 }
@@ -48,8 +48,8 @@ func TestAppendGetLargePayload(t *testing.T) {
 
 	payload := strings.Repeat("x", 64*1024)
 	data := map[string]any{"blob": payload}
-	descrips := []string{"alpha", "beta", "gamma"}
-	msgBytes, err := pool.Append(data, descrips, DurabilityFast)
+	tags := []string{"alpha", "beta", "gamma"}
+	msgBytes, err := pool.Append(data, tags, DurabilityFast)
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
@@ -60,8 +60,8 @@ func TestAppendGetLargePayload(t *testing.T) {
 	if msg.Data["blob"] != payload {
 		t.Fatalf("append payload mismatch")
 	}
-	if len(msg.Meta.Descrips) != len(descrips) {
-		t.Fatalf("descrips mismatch")
+	if len(msg.Meta.Tags) != len(tags) {
+		t.Fatalf("tags mismatch")
 	}
 
 	getBytes, err := pool.Get(msg.Seq)

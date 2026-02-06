@@ -588,28 +588,28 @@ mod tests {
     #[test]
     fn filter_matches_simple_equality() {
         let preds = compile_filters(&[r#".data.x == 1"#.to_string()]).unwrap();
-        let msg = json!({"seq":1,"time":"t","meta":{"descrips":[]},"data":{"x":1}});
+        let msg = json!({"seq":1,"time":"t","meta":{"tags":[]},"data":{"x":1}});
         assert!(matches_all(&preds, &msg).unwrap());
     }
 
     #[test]
     fn filter_runtime_error_is_false() {
         let preds = compile_filters(&[r#".data.missing == 1"#.to_string()]).unwrap();
-        let msg = json!({"seq":1,"time":"t","meta":{"descrips":[]},"data":{"x":1}});
+        let msg = json!({"seq":1,"time":"t","meta":{"tags":[]},"data":{"x":1}});
         assert!(!matches_all(&preds, &msg).unwrap());
     }
 
     #[test]
     fn filter_non_boolean_output_is_usage_error() {
         let preds = compile_filters(&[r#".data"#.to_string()]).unwrap();
-        let msg = json!({"seq":1,"time":"t","meta":{"descrips":[]},"data":{"x":1}});
+        let msg = json!({"seq":1,"time":"t","meta":{"tags":[]},"data":{"x":1}});
         assert!(matches_all(&preds, &msg).is_err());
     }
 
     #[test]
     fn filter_any_true_across_multiple_outputs() {
-        let preds = compile_filters(&[r#".meta.descrips[]? == "ping""#.to_string()]).unwrap();
-        let msg = json!({"seq":1,"time":"t","meta":{"descrips":["foo","ping"]},"data":{}});
+        let preds = compile_filters(&[r#".meta.tags[]? == "ping""#.to_string()]).unwrap();
+        let msg = json!({"seq":1,"time":"t","meta":{"tags":["foo","ping"]},"data":{}});
         assert!(matches_all(&preds, &msg).unwrap());
     }
 
@@ -624,14 +624,14 @@ mod tests {
             r#".data.x != 9"#.to_string(),
         ];
         let preds = compile_filters(&exprs).unwrap();
-        let msg = json!({"seq":1,"time":"t","meta":{"descrips":[]},"data":{"x":10}});
+        let msg = json!({"seq":1,"time":"t","meta":{"tags":[]},"data":{"x":10}});
         assert!(matches_all(&preds, &msg).unwrap());
     }
 
     #[test]
     fn filter_null_handling() {
         let filter = JqFilter::compile(r#".data.missing == null"#).unwrap();
-        let msg = json!({"seq":1,"time":"t","meta":{"descrips":[]},"data":{"missing":null}});
+        let msg = json!({"seq":1,"time":"t","meta":{"tags":[]},"data":{"missing":null}});
         assert!(filter.matches(&msg).unwrap());
     }
 
@@ -641,7 +641,7 @@ mod tests {
         let msg = json!({
             "seq":1,
             "time":"t",
-            "meta":{"descrips":[]},
+            "meta":{"tags":[]},
             "data":{"id":18446744073709551615u64}
         });
         assert!(!matches_all(&preds, &msg).unwrap());
