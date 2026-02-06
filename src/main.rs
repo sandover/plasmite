@@ -26,8 +26,8 @@ use ingest::{ErrorPolicy, IngestConfig, IngestFailure, IngestMode, IngestOutcome
 use jq_filter::{JqFilter, compile_filters, matches_all};
 use plasmite::api::{
     AppendOptions, Cursor, CursorResult, Durability, Error, ErrorKind, FrameRef, Lite3DocRef,
-    LocalClient, Pool, PoolOptions, PoolRef, ValidationIssue, ValidationReport, ValidationStatus,
-    lite3,
+    LocalClient, Pool, PoolOptions, PoolRef, RemoteClient, RemotePool, ValidationIssue,
+    ValidationReport, ValidationStatus, lite3,
     notify::{self, NotifyWait},
     to_exit_code,
 };
@@ -279,16 +279,6 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             errors,
         } => {
             let target = resolve_poke_target(&pool, &pool_dir)?;
-            let path = match target {
-                PokeTarget::LocalPath(path) => path,
-                PokeTarget::Remote { .. } => {
-                    return Err(Error::new(ErrorKind::Usage)
-                        .with_message("remote pool refs are not implemented for poke")
-                        .with_hint(
-                            "Use curl for now, or continue after resolver task implementation.",
-                        ));
-                }
-            };
             if create_size.is_some() && !create {
                 return Err(Error::new(ErrorKind::Usage)
                     .with_message("--create-size requires --create")
@@ -299,21 +289,6 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                     .with_message("--retry-delay requires --retry")
                     .with_hint("Add --retry or remove --retry-delay."));
             }
-            let mut pool_handle = match Pool::open(&path) {
-                Ok(pool) => pool,
-                Err(err) if create && err.kind() == ErrorKind::NotFound => {
-                    ensure_pool_dir(&pool_dir)?;
-                    let size = create_size
-                        .as_deref()
-                        .map(parse_size)
-                        .transpose()?
-                        .unwrap_or(DEFAULT_POOL_SIZE);
-                    Pool::create(&path, PoolOptions::new(size))?
-                }
-                Err(err) => {
-                    return Err(add_missing_pool_hint(err, &pool, &pool));
-                }
-            };
             let durability = parse_durability(&durability)?;
             let retry_config = parse_retry_config(retry, retry_delay.as_deref())?;
             if data.is_some() && file.is_some() {
@@ -321,44 +296,114 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                     .with_message("multiple data inputs provided")
                     .with_hint("Use only one of DATA, --file, or stdin."));
             }
-
-            if data.is_some() || file.is_some() || io::stdin().is_terminal() {
-                let data = read_data_single(data, file)?;
-                let payload = lite3::encode_message(&descrip, &data)?;
-                let (seq, timestamp_ns) = retry_with_config(retry_config, || {
-                    let timestamp_ns = now_ns()?;
-                    let options = AppendOptions::new(timestamp_ns, durability);
-                    let seq = pool_handle.append_with_options(payload.as_slice(), options)?;
-                    Ok((seq, timestamp_ns))
-                })?;
-                emit_json(
-                    message_json(seq, timestamp_ns, &descrip, &data)?,
-                    color_mode,
-                );
-            } else {
-                let outcome = ingest_from_stdin(
-                    io::stdin().lock(),
-                    PokeIngestContext {
-                        pool_ref: &pool,
-                        pool_path: &path,
-                        descrips: &descrip,
-                        durability,
-                        retry_config,
-                        pool_handle: &mut pool_handle,
-                        color_mode,
-                        input,
-                        errors,
-                    },
-                )?;
-                if outcome.records_total == 0 {
-                    return Err(Error::new(ErrorKind::Usage)
-                        .with_message("missing data input")
-                        .with_hint("Provide JSON via DATA, --file, or pipe JSON to stdin."));
+            let single_input = data.is_some() || file.is_some() || io::stdin().is_terminal();
+            match target {
+                PokeTarget::LocalPath(path) => {
+                    let mut pool_handle = match Pool::open(&path) {
+                        Ok(pool) => pool,
+                        Err(err) if create && err.kind() == ErrorKind::NotFound => {
+                            ensure_pool_dir(&pool_dir)?;
+                            let size = create_size
+                                .as_deref()
+                                .map(parse_size)
+                                .transpose()?
+                                .unwrap_or(DEFAULT_POOL_SIZE);
+                            Pool::create(&path, PoolOptions::new(size))?
+                        }
+                        Err(err) => {
+                            return Err(add_missing_pool_hint(err, &pool, &pool));
+                        }
+                    };
+                    if single_input {
+                        let data = read_data_single(data, file)?;
+                        let payload = lite3::encode_message(&descrip, &data)?;
+                        let (seq, timestamp_ns) = retry_with_config(retry_config, || {
+                            let timestamp_ns = now_ns()?;
+                            let options = AppendOptions::new(timestamp_ns, durability);
+                            let seq =
+                                pool_handle.append_with_options(payload.as_slice(), options)?;
+                            Ok((seq, timestamp_ns))
+                        })?;
+                        emit_json(
+                            message_json(seq, timestamp_ns, &descrip, &data)?,
+                            color_mode,
+                        );
+                    } else {
+                        let pool_path_label = path.display().to_string();
+                        let outcome = ingest_from_stdin(
+                            io::stdin().lock(),
+                            PokeIngestContext {
+                                pool_ref: &pool,
+                                pool_path_label: &pool_path_label,
+                                descrips: &descrip,
+                                durability,
+                                retry_config,
+                                pool_handle: &mut pool_handle,
+                                color_mode,
+                                input,
+                                errors,
+                            },
+                        )?;
+                        if outcome.records_total == 0 {
+                            return Err(Error::new(ErrorKind::Usage)
+                                .with_message("missing data input")
+                                .with_hint(
+                                    "Provide JSON via DATA, --file, or pipe JSON to stdin.",
+                                ));
+                        }
+                        if outcome.failed > 0 {
+                            return Ok(RunOutcome::with_code(1));
+                        }
+                    }
                 }
-                if outcome.failed > 0 {
-                    return Ok(RunOutcome::with_code(1));
+                PokeTarget::Remote {
+                    base_url,
+                    pool: name,
+                } => {
+                    if create {
+                        return Err(Error::new(ErrorKind::Usage)
+                            .with_message("remote poke does not support --create")
+                            .with_hint("Create remote pools with server-side tooling, not poke."));
+                    }
+                    let client = RemoteClient::new(base_url)?;
+                    let remote_pool = client
+                        .open_pool(&PoolRef::name(name.clone()))
+                        .map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
+                    if single_input {
+                        let data = read_data_single(data, file)?;
+                        let message = retry_with_config(retry_config, || {
+                            remote_pool.append_json_now(&data, &descrip, durability)
+                        })?;
+                        emit_json(message_to_json(&message), color_mode);
+                    } else {
+                        let pool_path_label = format!("{}/{}", client.base_url(), name);
+                        let outcome = ingest_from_stdin_remote(
+                            io::stdin().lock(),
+                            RemotePokeIngestContext {
+                                pool_ref: &pool,
+                                pool_path_label: &pool_path_label,
+                                descrips: &descrip,
+                                durability,
+                                retry_config,
+                                remote_pool: &remote_pool,
+                                color_mode,
+                                input,
+                                errors,
+                            },
+                        )?;
+                        if outcome.records_total == 0 {
+                            return Err(Error::new(ErrorKind::Usage)
+                                .with_message("missing data input")
+                                .with_hint(
+                                    "Provide JSON via DATA, --file, or pipe JSON to stdin.",
+                                ));
+                        }
+                        if outcome.failed > 0 {
+                            return Ok(RunOutcome::with_code(1));
+                        }
+                    }
                 }
-            }
+            };
             Ok(RunOutcome::ok())
         }
         Command::Get { pool, seq } => {
@@ -1758,17 +1803,14 @@ fn error_policy_to_ingest(policy: ErrorPolicyCli) -> ErrorPolicy {
 fn ingest_failure_notice(
     failure: &IngestFailure,
     pool_ref: &str,
-    pool_path: &Path,
+    pool_path_label: &str,
     color_mode: ColorMode,
 ) {
     let mut details = Map::new();
     details.insert("mode".to_string(), json!(mode_label(failure.mode)));
     details.insert("index".to_string(), json!(failure.index));
     details.insert("error_kind".to_string(), json!(failure.error_kind));
-    details.insert(
-        "pool_path".to_string(),
-        json!(pool_path.display().to_string()),
-    );
+    details.insert("pool_path".to_string(), json!(pool_path_label));
     if let Some(line) = failure.line {
         details.insert("line".to_string(), json!(line));
     }
@@ -1789,17 +1831,14 @@ fn ingest_failure_notice(
 fn ingest_summary_notice(
     outcome: &IngestOutcome,
     pool_ref: &str,
-    pool_path: &Path,
+    pool_path_label: &str,
     color_mode: ColorMode,
 ) {
     let mut details = Map::new();
     details.insert("total".to_string(), json!(outcome.records_total));
     details.insert("ok".to_string(), json!(outcome.ok));
     details.insert("failed".to_string(), json!(outcome.failed));
-    details.insert(
-        "pool_path".to_string(),
-        json!(pool_path.display().to_string()),
-    );
+    details.insert("pool_path".to_string(), json!(pool_path_label));
     let notice = Notice {
         kind: "ingest_summary".to_string(),
         time: notice_time_now().unwrap_or_else(|| "unknown".to_string()),
@@ -1824,11 +1863,23 @@ fn mode_label(mode: IngestMode) -> &'static str {
 
 struct PokeIngestContext<'a> {
     pool_ref: &'a str,
-    pool_path: &'a Path,
+    pool_path_label: &'a str,
     descrips: &'a [String],
     durability: Durability,
     retry_config: Option<RetryConfig>,
     pool_handle: &'a mut Pool,
+    color_mode: ColorMode,
+    input: InputMode,
+    errors: ErrorPolicyCli,
+}
+
+struct RemotePokeIngestContext<'a> {
+    pool_ref: &'a str,
+    pool_path_label: &'a str,
+    descrips: &'a [String],
+    durability: Durability,
+    retry_config: Option<RetryConfig>,
+    remote_pool: &'a RemotePool,
     color_mode: ColorMode,
     input: InputMode,
     errors: ErrorPolicyCli,
@@ -1867,11 +1918,49 @@ fn ingest_from_stdin<R: Read>(
             );
             Ok(())
         },
-        |failure| ingest_failure_notice(&failure, ctx.pool_ref, ctx.pool_path, ctx.color_mode),
+        |failure| {
+            ingest_failure_notice(&failure, ctx.pool_ref, ctx.pool_path_label, ctx.color_mode)
+        },
     )?;
 
     if ctx.errors == ErrorPolicyCli::Skip && outcome.failed > 0 {
-        ingest_summary_notice(&outcome, ctx.pool_ref, ctx.pool_path, ctx.color_mode);
+        ingest_summary_notice(&outcome, ctx.pool_ref, ctx.pool_path_label, ctx.color_mode);
+    }
+
+    Ok(outcome)
+}
+
+fn ingest_from_stdin_remote<R: Read>(
+    reader: R,
+    ctx: RemotePokeIngestContext<'_>,
+) -> Result<IngestOutcome, Error> {
+    let ingest_config = IngestConfig {
+        mode: input_mode_to_ingest(ctx.input),
+        errors: error_policy_to_ingest(ctx.errors),
+        sniff_bytes: DEFAULT_SNIFF_BYTES,
+        sniff_lines: DEFAULT_SNIFF_LINES,
+        max_record_bytes: DEFAULT_MAX_RECORD_BYTES,
+        max_snippet_bytes: DEFAULT_MAX_SNIPPET_BYTES,
+    };
+
+    let outcome = ingest(
+        reader,
+        ingest_config,
+        |data| {
+            let message = retry_with_config(ctx.retry_config, || {
+                ctx.remote_pool
+                    .append_json_now(&data, ctx.descrips, ctx.durability)
+            })?;
+            emit_message(message_to_json(&message), false, ctx.color_mode);
+            Ok(())
+        },
+        |failure| {
+            ingest_failure_notice(&failure, ctx.pool_ref, ctx.pool_path_label, ctx.color_mode)
+        },
+    )?;
+
+    if ctx.errors == ErrorPolicyCli::Skip && outcome.failed > 0 {
+        ingest_summary_notice(&outcome, ctx.pool_ref, ctx.pool_path_label, ctx.color_mode);
     }
 
     Ok(outcome)
@@ -1916,6 +2005,17 @@ fn message_json(
         "meta": meta,
         "data": data,
     }))
+}
+
+fn message_to_json(message: &plasmite::api::Message) -> Value {
+    json!({
+        "seq": message.seq,
+        "time": message.time,
+        "meta": {
+            "descrips": message.meta.descrips,
+        },
+        "data": message.data,
+    })
 }
 
 fn message_from_frame(frame: &FrameRef<'_>) -> Result<Value, Error> {

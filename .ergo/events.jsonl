@@ -1298,3 +1298,7 @@
 {"type":"state","ts":"2026-02-06T01:58:23.09329Z","data":{"id":"LJ4NXT","state":"doing","ts":"2026-02-06T01:58:23.09329Z"}}
 {"type":"result","ts":"2026-02-06T02:02:01.391166Z","data":{"task_id":"LJ4NXT","summary":"Added explicit poke target resolver with shorthand URL validation and edge-case tests","path":"src/main.rs","sha256_at_attach":"5d1e981d934f7fecc29508abb99533d9b089ac52ada185c37dce1a1444e393c5","mtime_at_attach":"2026-02-06T02:01:55.277464448Z","git_commit_at_attach":"ea215c33b0d8d46df1e425819efff582b0f1d22d","ts":"2026-02-06T02:02:01.391166Z"}}
 {"type":"state","ts":"2026-02-06T02:02:01.397759Z","data":{"id":"LJ4NXT","state":"done","ts":"2026-02-06T02:02:01.397759Z"}}
+{"type":"claim","ts":"2026-02-06T02:02:25.300617Z","data":{"id":"R6WMU2","agent_id":"codex@brandon-mbp","ts":"2026-02-06T02:02:25.300617Z"}}
+{"type":"state","ts":"2026-02-06T02:02:25.300617Z","data":{"id":"R6WMU2","state":"doing","ts":"2026-02-06T02:02:25.300617Z"}}
+{"type":"result","ts":"2026-02-06T02:04:16.753879Z","data":{"task_id":"R6WMU2","summary":"Implemented remote poke dispatch via RemoteClient with shorthand URL support and remote --create rejection","path":"src/main.rs","sha256_at_attach":"54b433b41dcf6a039ef0e09e7c97dc98c64b5729de9b9398028f46d032c76064","mtime_at_attach":"2026-02-06T02:04:11.583513774Z","git_commit_at_attach":"0316d24b05ec070177ffde6a4caef0e9e6f07875","ts":"2026-02-06T02:04:16.753879Z"}}
+{"type":"state","ts":"2026-02-06T02:04:16.7605Z","data":{"id":"R6WMU2","state":"done","ts":"2026-02-06T02:04:16.7605Z"}}
