@@ -477,6 +477,63 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             let outcome = peek(&pool_handle, &pool, &path, cfg)?;
             Ok(outcome)
         }
+        Command::Replay {
+            pool,
+            tail,
+            speed,
+            one,
+            data_only,
+            format,
+            jsonl,
+            since,
+            where_expr,
+        } => {
+            if speed <= 0.0 {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("--speed must be positive")
+                    .with_hint("Use --speed 1 for realtime, --speed 2 for 2x, etc."));
+            }
+            if !speed.is_finite() {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("--speed must be a finite number")
+                    .with_hint("Use --speed 1 for realtime, --speed 2 for 2x, etc."));
+            }
+            let path = resolve_poolref(&pool, &pool_dir)?;
+            let pool_handle =
+                Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
+            if jsonl && format.is_some() {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("conflicting output options")
+                    .with_hint("Use --format jsonl (or --jsonl), but not both."));
+            }
+            let format = format.unwrap_or(if jsonl {
+                PeekFormat::Jsonl
+            } else {
+                PeekFormat::Pretty
+            });
+            let pretty = matches!(format, PeekFormat::Pretty);
+            let now = now_ns()?;
+            let since_ns = since
+                .as_deref()
+                .map(|value| parse_since(value, now))
+                .transpose()?;
+            if let Some(since_ns) = since_ns {
+                if since_ns > now {
+                    return Ok(RunOutcome::ok());
+                }
+            }
+            let cfg = ReplayConfig {
+                tail,
+                speed,
+                pretty,
+                one,
+                data_only,
+                since_ns,
+                where_predicates: compile_filters(&where_expr)?,
+                color_mode,
+            };
+            replay(&pool_handle, cfg)
+        }
     })();
 
     result
@@ -858,6 +915,68 @@ NOTES
         quiet_drops: bool,
         #[arg(long = "no-notify", help = "Disable semaphore wakeups (poll only)")]
         no_notify: bool,
+    },
+    #[command(
+        about = "Replay messages with original timing",
+        long_about = r#"Play back pool messages at the pace they were originally written,
+or at a configurable speed multiplier.
+
+Replay is a bounded operation: it emits the selected messages with
+inter-message delays derived from their timestamps, then exits."#,
+        after_help = r#"EXAMPLES
+  # Replay all messages at original timing
+  $ plasmite replay foo
+
+  # Replay last 100 messages at 2x speed
+  $ plasmite replay foo --tail 100 --speed 2
+
+  # Replay at half speed
+  $ plasmite replay foo --speed 0.5
+
+  # Replay with a filter
+  $ plasmite replay foo --where '.data.level == "error"' --speed 1
+
+NOTES
+  - Default speed is 1 (realtime); omitting --speed is the same as --speed 1
+  - Replay exits when all selected messages have been emitted
+  - Inter-message delays are faithful: no gap compression"#
+    )]
+    Replay {
+        #[arg(help = "Pool name or path")]
+        pool: String,
+        #[arg(
+            long = "tail",
+            short = 'n',
+            default_value_t = 0,
+            help = "Replay the last N messages"
+        )]
+        tail: u64,
+        #[arg(
+            long,
+            default_value_t = 1.0,
+            help = "Speed multiplier (1 = realtime, 2 = 2x faster, 0.5 = half speed)"
+        )]
+        speed: f64,
+        #[arg(long, help = "Exit after emitting one matching message")]
+        one: bool,
+        #[arg(long, help = "Emit only the .data payload")]
+        data_only: bool,
+        #[arg(long, value_enum, help = "Output format: pretty|jsonl")]
+        format: Option<PeekFormat>,
+        #[arg(long, help = "Emit JSON Lines (one object per line)")]
+        jsonl: bool,
+        #[arg(
+            long,
+            help = "Only emit messages at or after this time (RFC 3339 or relative like 5m)",
+            conflicts_with = "tail"
+        )]
+        since: Option<String>,
+        #[arg(
+            long = "where",
+            value_name = "EXPR",
+            help = "Filter messages by boolean expression (repeatable; AND across repeats)"
+        )]
+        where_expr: Vec<String>,
     },
     #[command(
         about = "Diagnose pool health",
@@ -2392,6 +2511,98 @@ fn peek(
             }
         }
     }
+}
+
+struct ReplayConfig {
+    tail: u64,
+    speed: f64,
+    pretty: bool,
+    one: bool,
+    data_only: bool,
+    since_ns: Option<u64>,
+    where_predicates: Vec<JqFilter>,
+    color_mode: ColorMode,
+}
+
+fn replay(pool: &Pool, cfg: ReplayConfig) -> Result<RunOutcome, Error> {
+    let mut cursor = Cursor::new();
+    let mut header = pool.header_from_mmap()?;
+    let mut collected: Vec<(u64, Value)> = Vec::new();
+
+    if let Some(since_ns) = cfg.since_ns {
+        cursor.seek_to(header.tail_off as usize);
+        loop {
+            match cursor.next(pool)? {
+                CursorResult::Message(frame) => {
+                    if frame.timestamp_ns >= since_ns {
+                        let message = message_from_frame(&frame)?;
+                        if matches_all(cfg.where_predicates.as_slice(), &message)? {
+                            collected.push((frame.timestamp_ns, message));
+                        }
+                    }
+                }
+                CursorResult::WouldBlock => break,
+                CursorResult::FellBehind => {
+                    header = pool.header_from_mmap()?;
+                    cursor.seek_to(header.tail_off as usize);
+                }
+            }
+        }
+    } else {
+        cursor.seek_to(header.tail_off as usize);
+        let mut buffer: VecDeque<(u64, Value)> = VecDeque::new();
+        loop {
+            match cursor.next(pool)? {
+                CursorResult::Message(frame) => {
+                    let message = message_from_frame(&frame)?;
+                    if matches_all(cfg.where_predicates.as_slice(), &message)? {
+                        if cfg.tail > 0 {
+                            buffer.push_back((frame.timestamp_ns, message));
+                            while buffer.len() > cfg.tail as usize {
+                                buffer.pop_front();
+                            }
+                        } else {
+                            collected.push((frame.timestamp_ns, message));
+                        }
+                    }
+                }
+                CursorResult::WouldBlock => break,
+                CursorResult::FellBehind => {
+                    header = pool.header_from_mmap()?;
+                    cursor.seek_to(header.tail_off as usize);
+                }
+            }
+        }
+        if cfg.tail > 0 {
+            collected = buffer.into_iter().collect();
+        }
+    }
+
+    if collected.is_empty() {
+        return Ok(RunOutcome::ok());
+    }
+
+    let mut prev_ts = collected[0].0;
+    for (i, (ts, message)) in collected.into_iter().enumerate() {
+        if i > 0 {
+            let delta_ns = ts.saturating_sub(prev_ts);
+            let delay_ns = (delta_ns as f64 / cfg.speed) as u64;
+            if delay_ns > 0 {
+                std::thread::sleep(Duration::from_nanos(delay_ns));
+            }
+        }
+        emit_message(
+            output_value(message, cfg.data_only),
+            cfg.pretty,
+            cfg.color_mode,
+        );
+        prev_ts = ts;
+        if cfg.one {
+            return Ok(RunOutcome::ok());
+        }
+    }
+
+    Ok(RunOutcome::ok())
 }
 
 #[cfg(test)]

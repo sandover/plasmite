@@ -3309,3 +3309,422 @@ fn completion_invalid_shell_fails() {
         "completion with unsupported shell should fail"
     );
 }
+
+#[test]
+fn replay_emits_messages_in_order() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rp"])
+        .output()
+        .expect("create");
+    for i in 1..=3 {
+        cmd()
+            .args([
+                "--dir",
+                pool_dir.to_str().unwrap(),
+                "poke",
+                "rp",
+                &format!("{{\"i\":{i}}}"),
+            ])
+            .output()
+            .expect("poke");
+        sleep(Duration::from_millis(20));
+    }
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "replay",
+            "rp",
+            "--speed",
+            "100",
+            "--jsonl",
+        ])
+        .output()
+        .expect("replay");
+    assert!(output.status.success());
+    let messages = parse_json_lines(&output.stdout);
+    assert_eq!(messages.len(), 3);
+    assert_eq!(messages[0]["data"]["i"], 1);
+    assert_eq!(messages[1]["data"]["i"], 2);
+    assert_eq!(messages[2]["data"]["i"], 3);
+}
+
+#[test]
+fn replay_tail_limits_messages() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rpt"])
+        .output()
+        .expect("create");
+    for i in 1..=5 {
+        cmd()
+            .args([
+                "--dir",
+                pool_dir.to_str().unwrap(),
+                "poke",
+                "rpt",
+                &format!("{{\"i\":{i}}}"),
+            ])
+            .output()
+            .expect("poke");
+    }
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "replay",
+            "rpt",
+            "--tail",
+            "2",
+            "--speed",
+            "100",
+            "--jsonl",
+        ])
+        .output()
+        .expect("replay");
+    assert!(output.status.success());
+    let messages = parse_json_lines(&output.stdout);
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0]["data"]["i"], 4);
+    assert_eq!(messages[1]["data"]["i"], 5);
+}
+
+#[test]
+fn replay_respects_speed_timing() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rps"])
+        .output()
+        .expect("create");
+    cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "rps",
+            "{\"i\":1}",
+        ])
+        .output()
+        .expect("poke");
+    sleep(Duration::from_millis(200));
+    cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "rps",
+            "{\"i\":2}",
+        ])
+        .output()
+        .expect("poke");
+
+    let start = Instant::now();
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "replay",
+            "rps",
+            "--speed",
+            "1",
+            "--jsonl",
+        ])
+        .output()
+        .expect("replay");
+    let elapsed = start.elapsed();
+    assert!(output.status.success());
+    let messages = parse_json_lines(&output.stdout);
+    assert_eq!(messages.len(), 2);
+    assert!(
+        elapsed >= Duration::from_millis(150),
+        "replay at 1x should wait ~200ms between messages, took {elapsed:?}"
+    );
+}
+
+#[test]
+fn replay_speed_2x_halves_delay() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "rps2",
+        ])
+        .output()
+        .expect("create");
+    cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "rps2",
+            "{\"i\":1}",
+        ])
+        .output()
+        .expect("poke");
+    sleep(Duration::from_millis(400));
+    cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "rps2",
+            "{\"i\":2}",
+        ])
+        .output()
+        .expect("poke");
+
+    let start = Instant::now();
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "replay",
+            "rps2",
+            "--speed",
+            "2",
+            "--jsonl",
+        ])
+        .output()
+        .expect("replay");
+    let elapsed = start.elapsed();
+    assert!(output.status.success());
+    let messages = parse_json_lines(&output.stdout);
+    assert_eq!(messages.len(), 2);
+    assert!(
+        elapsed >= Duration::from_millis(150),
+        "replay at 2x of 400ms gap should wait ~200ms, took {elapsed:?}"
+    );
+    assert!(
+        elapsed < Duration::from_millis(500),
+        "replay at 2x should be faster than 1x, took {elapsed:?}"
+    );
+}
+
+#[test]
+fn replay_rejects_zero_speed() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rpz"])
+        .output()
+        .expect("create");
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "replay",
+            "rpz",
+            "--speed",
+            "0",
+        ])
+        .output()
+        .expect("replay");
+    assert!(!output.status.success());
+}
+
+#[test]
+fn replay_rejects_negative_speed() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rpn"])
+        .output()
+        .expect("create");
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "replay",
+            "rpn",
+            "--speed",
+            "-1",
+        ])
+        .output()
+        .expect("replay");
+    assert!(!output.status.success());
+}
+
+#[test]
+fn replay_where_filters_messages() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rpw"])
+        .output()
+        .expect("create");
+    cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "rpw",
+            r#"{"level":"info"}"#,
+        ])
+        .output()
+        .expect("poke");
+    cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "rpw",
+            r#"{"level":"error"}"#,
+        ])
+        .output()
+        .expect("poke");
+    cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "rpw",
+            r#"{"level":"info"}"#,
+        ])
+        .output()
+        .expect("poke");
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "replay",
+            "rpw",
+            "--speed",
+            "100",
+            "--jsonl",
+            "--where",
+            r#".data.level == "error""#,
+        ])
+        .output()
+        .expect("replay");
+    assert!(output.status.success());
+    let messages = parse_json_lines(&output.stdout);
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["data"]["level"], "error");
+}
+
+#[test]
+fn replay_one_exits_after_first_message() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rpo"])
+        .output()
+        .expect("create");
+    for i in 1..=3 {
+        cmd()
+            .args([
+                "--dir",
+                pool_dir.to_str().unwrap(),
+                "poke",
+                "rpo",
+                &format!("{{\"i\":{i}}}"),
+            ])
+            .output()
+            .expect("poke");
+    }
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "replay",
+            "rpo",
+            "--speed",
+            "100",
+            "--jsonl",
+            "--one",
+        ])
+        .output()
+        .expect("replay");
+    assert!(output.status.success());
+    let messages = parse_json_lines(&output.stdout);
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["data"]["i"], 1);
+}
+
+#[test]
+fn replay_empty_pool_exits_ok() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rpe"])
+        .output()
+        .expect("create");
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "replay",
+            "rpe",
+            "--speed",
+            "100",
+            "--jsonl",
+        ])
+        .output()
+        .expect("replay");
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn replay_data_only_emits_payload() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rpd"])
+        .output()
+        .expect("create");
+    cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "rpd",
+            r#"{"x":42}"#,
+        ])
+        .output()
+        .expect("poke");
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "replay",
+            "rpd",
+            "--speed",
+            "100",
+            "--jsonl",
+            "--data-only",
+        ])
+        .output()
+        .expect("replay");
+    assert!(output.status.success());
+    let messages = parse_json_lines(&output.stdout);
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0], json!({"x": 42}));
+    assert!(messages[0].get("seq").is_none());
+}
