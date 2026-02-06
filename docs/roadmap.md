@@ -18,6 +18,7 @@ This roadmap is outcome-oriented. Design details live in ADRs; compatibility pro
 - ✓ Remote protocol spec (HTTP/JSON)
 - ✓ Conformance test suite (cross-language)
 - ✓ Remote `poke` via shorthand URLs (`http://host:port/pool`)
+- ✓ Inline seq->offset index for fast `get(seq)` lookups
 
 ## In progress
 

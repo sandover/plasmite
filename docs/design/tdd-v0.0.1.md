@@ -50,7 +50,7 @@ Proposed module layout:
   * `pool` (open/create, header parsing, locking)
   * `ring` (frame layout, append, wrap/drop)
   * `cursor` (read iteration, seek-by-seq)
-  * `toc` (optional persistent index)
+  * `index` (inline seq->offset index region)
   * `validate` (scan + repair advice)
   * `error` (typed error mapping + CLI exit code mapping)
 * `lite3`
@@ -85,13 +85,13 @@ Keep the variants coarse; attach rich context for logs/debug output, not for the
 +----------------------+  0
 | PoolHeader (fixed)   |
 +----------------------+
-| TOC region (optional, fixed-size)   |
+| Index region (optional, fixed-size) |
 +----------------------+
 | Ring region (variable-length frames)|
 +----------------------+  file_size
 ```
 
-**Key property:** only the ring region changes frequently; header + TOC are updated in small atomic writes under the writer lock.
+**Key property:** only the ring region changes frequently; header + index slots are updated in small atomic writes under the writer lock.
 
 ### Alignment & endianness
 
@@ -117,8 +117,8 @@ Fields (conceptual; exact sizing TBD):
 * Layout:
 
   * `file_size: u64`
-  * `toc_offset: u64`
-  * `toc_capacity: u32` (0 => no TOC)
+  * `index_offset: u64`
+  * `index_capacity: u32` (0 => no index)
   * `ring_offset: u64`
   * `ring_size: u64`
 * Options:
@@ -363,44 +363,16 @@ Under writer lock:
 
 ---
 
-## Optional persistent TOC (recommended)
+## Inline index status
 
-Without a TOC, `get(seq)` and `tail N` can devolve to O(n) scans. A small persistent TOC gives “good enough” random access without reintroducing complexity.
+Persistent TOC as described in earlier drafts is superseded by the inline seq->offset index design.
+See ADR `docs/decisions/0005-inline-seq-index.md`.
 
-### TOC region
-
-A fixed-size circular array of `TocEntry` structs, `toc_capacity` entries.
-
-`TocEntry` fields:
-
-* `seq: u64`
-* `offset: u64` (ring-relative)
-* `payload_len: u32`
-* `timestamp_ns: u64`
-* `flags: u32`
-* `crc32c: u32` (optional)
-* `state: u32` (valid bit)
-
-Header has:
-
-* `toc_head: AtomicU32` (next write index)
-* `toc_tail: AtomicU32` (oldest entry index)
-
-Writer append:
-
-* write entry at `toc_head`
-* advance `toc_head` (wrap)
-* if overwriting, advance `toc_tail`
-
-Reader operations:
-
-* `get(seq)`: scan TOC ring (O(capacity)) or build an in-memory hash map lazily
-* `tail N`: walk backwards from newest toc entries
-
-v0.1 recommendation:
-
-* Keep TOC scan linear; cap default to something reasonable (e.g. 4096–65536).
-* Later: build an in-memory index cache per process.
+Current direction:
+- Fixed-width slots `(seq, offset)` stored inline in the pool file.
+- Slot selection by modulo (`seq % index_capacity`).
+- Collisions and stale slots are expected; `get(seq)` validates and falls back to scan.
+- `index_capacity=0` is supported for scan-only behavior.
 
 ---
 
@@ -456,7 +428,7 @@ Operations:
 
 * `seek_to_seq(seq)`:
 
-  * If TOC present: find offset by TOC; else scan forward from tail until seq match.
+  * If index probe hits: seek directly to the slot offset; else scan forward from tail until seq match.
 * `next()`:
 
   * Read frame at `next_off`:
@@ -714,9 +686,8 @@ Spawn multiple OS processes (not threads):
 1. **Default overwrite policy**
 
    * Drop-oldest (recommended) vs block-writers (could be optional).
-2. **Default TOC capacity**
-
-   * None (simpler, slower random access) vs modest default (better UX).
+2. **Default index capacity**
+   * Resolved by inline index autosizing; tune defaults via `index_capacity`.
 3. **Checksum default**
 
    * Off by default for speed, but easy to enable per pool.

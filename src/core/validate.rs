@@ -349,6 +349,8 @@ mod tests {
         let ring_size = FRAME_HEADER_LEN * 2;
         let header = PoolHeader {
             file_size: ring_size as u64,
+            index_offset: 4096,
+            index_capacity: 0,
             ring_offset: 0,
             ring_size: ring_size as u64,
             flags: 0,

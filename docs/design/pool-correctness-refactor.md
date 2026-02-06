@@ -38,8 +38,11 @@ Core invariants (selected)
 - Header:
   - header size and ring size are valid; head offset is derivable from newest
     frame metadata if a full scan is done.
+  - `ring_offset == header_size + index_capacity * 16` and index region stays in-bounds.
   - header includes `tail_next_off` (offset after the tail frame) to reduce
     planning overhead under overwrite pressure.
+  - index slot `seq % index_capacity` is either a matching `(seq, offset)` pair
+    or a stale entry that must safely fall back to scan.
 
 State transition API (pure)
 - fn plan_append(state: PoolState, payload_len: u32) -> Result<AppendPlan>
@@ -53,8 +56,9 @@ IO application order (append)
 3) Write payload bytes.
 4) Write commit marker for the frame (written after payload).
 5) Flip frame header state to `Committed`.
-6) Update header (newest seq, head offset, possibly oldest seq if empty).
-7) Persist ordering as needed (fsync/flush decisions stay in IO layer).
+6) Write index slot `(seq, offset)` at `seq % index_capacity` (if index enabled).
+7) Update header (newest seq, head offset, possibly oldest seq if empty).
+8) Persist ordering as needed (fsync/flush decisions stay in IO layer).
 
 Decision: dual-header + checksum scheme
 - Not now.
@@ -65,9 +69,11 @@ Decision: dual-header + checksum scheme
 Crash consistency ordering contract
 - If a crash occurs before the commit marker, the frame is treated as
   uncommitted and ignored by readers/validators.
-- If a crash occurs after the commit marker but before header update, readers
-  may see a valid frame beyond header newest; this is ignored by default and
-  can be surfaced by full validation only.
+- If a crash occurs after frame commit but before index write, the index may be
+  stale; `get(seq)` falls back to scan.
+- If a crash occurs after index write but before header update, readers may see
+  a valid frame beyond header newest; this is ignored by default and can be
+  surfaced by full validation only.
 - Header is the source of truth for visible data; ring data beyond newest is
   considered garbage unless revalidated.
 
@@ -87,7 +93,8 @@ Failure-mode table
 |--------------------------------------------|-----------------------------------------|-------------------|
 | Crash during payload write                 | Partial frame, no commit marker         | Ignore frame      |
 | Crash after commit marker, before commit   | Marker present, state still `Writing`   | Ignore frame      |
-| Crash after commit, before header          | Frame committed, header newest old      | Header wins       |
+| Crash after commit, before index           | Frame committed, index stale            | Scan fallback     |
+| Crash after index, before header           | Frame committed, header newest old      | Header wins       |
 | Crash during header write                  | Header may be partially updated         | Header validation fails, report error |
 | Crash during wrap marker write             | Partial wrap marker                     | Treat as invalid, stop scan |
 | Power loss during fsync                    | Header/ring out of sync                 | Read with header; validator reports |
@@ -97,4 +104,5 @@ Crash test phases
 - AfterWrite: frame header in Writing state + payload bytes written; header unchanged.
 - AfterMarker: commit marker written; frame header still Writing; header unchanged.
 - AfterCommit: frame header updated to Committed; header unchanged.
+- AfterIndex: index slot written for seq; header unchanged.
 - AfterHeader: pool header updated to new head/tail/seqs (fully visible).

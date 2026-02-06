@@ -25,10 +25,15 @@ use crate::core::validate;
 const MAGIC: [u8; 4] = *b"PLSM";
 const ENDIANNESS_LE: u8 = 1;
 const HEADER_SIZE: usize = 4096;
+const INDEX_SLOT_BYTES: u64 = 16;
+const MAX_AUTO_INDEX_CAPACITY: u64 = 65_536;
+const MIN_RING_SIZE_FOR_INDEX: u64 = 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PoolHeader {
     pub file_size: u64,
+    pub index_offset: u64,
+    pub index_capacity: u32,
     pub ring_offset: u64,
     pub ring_size: u64,
     pub flags: u64,
@@ -40,16 +45,23 @@ pub struct PoolHeader {
 }
 
 impl PoolHeader {
-    fn new(file_size: u64) -> Result<Self, Error> {
-        let ring_offset = HEADER_SIZE as u64;
+    fn new(file_size: u64, index_capacity: u32) -> Result<Self, Error> {
+        let index_offset = HEADER_SIZE as u64;
+        let index_bytes = (index_capacity as u64)
+            .checked_mul(INDEX_SLOT_BYTES)
+            .ok_or_else(|| Error::new(ErrorKind::Usage).with_message("index capacity too large"))?;
+        let ring_offset = index_offset
+            .checked_add(index_bytes)
+            .ok_or_else(|| Error::new(ErrorKind::Usage).with_message("index capacity too large"))?;
         if file_size <= ring_offset {
-            return Err(
-                Error::new(ErrorKind::Usage).with_message("file_size must exceed header size")
-            );
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("file_size must exceed header and index size"));
         }
         let ring_size = file_size - ring_offset;
         Ok(Self {
             file_size,
+            index_offset,
+            index_capacity,
             ring_offset,
             ring_size,
             flags: 0,
@@ -68,14 +80,16 @@ impl PoolHeader {
         buf[8] = ENDIANNESS_LE;
 
         write_u64(&mut buf, 16, self.file_size);
-        write_u64(&mut buf, 24, self.ring_offset);
-        write_u64(&mut buf, 32, self.ring_size);
-        write_u64(&mut buf, 40, self.flags);
-        write_u64(&mut buf, 48, self.head_off);
-        write_u64(&mut buf, 56, self.tail_off);
-        write_u64(&mut buf, 64, self.tail_next_off);
-        write_u64(&mut buf, 72, self.oldest_seq);
-        write_u64(&mut buf, 80, self.newest_seq);
+        write_u64(&mut buf, 24, self.index_offset);
+        write_u32(&mut buf, 32, self.index_capacity);
+        write_u64(&mut buf, 40, self.ring_offset);
+        write_u64(&mut buf, 48, self.ring_size);
+        write_u64(&mut buf, 56, self.flags);
+        write_u64(&mut buf, 64, self.head_off);
+        write_u64(&mut buf, 72, self.tail_off);
+        write_u64(&mut buf, 80, self.tail_next_off);
+        write_u64(&mut buf, 88, self.oldest_seq);
+        write_u64(&mut buf, 96, self.newest_seq);
 
         buf
     }
@@ -96,17 +110,21 @@ impl PoolHeader {
         }
 
         let file_size = read_u64(buf, 16);
-        let ring_offset = read_u64(buf, 24);
-        let ring_size = read_u64(buf, 32);
-        let flags = read_u64(buf, 40);
-        let head_off = read_u64(buf, 48);
-        let tail_off = read_u64(buf, 56);
-        let tail_next_off = read_u64(buf, 64);
-        let oldest_seq = read_u64(buf, 72);
-        let newest_seq = read_u64(buf, 80);
+        let index_offset = read_u64(buf, 24);
+        let index_capacity = read_u32(buf, 32);
+        let ring_offset = read_u64(buf, 40);
+        let ring_size = read_u64(buf, 48);
+        let flags = read_u64(buf, 56);
+        let head_off = read_u64(buf, 64);
+        let tail_off = read_u64(buf, 72);
+        let tail_next_off = read_u64(buf, 80);
+        let oldest_seq = read_u64(buf, 88);
+        let newest_seq = read_u64(buf, 96);
 
         Ok(Self {
             file_size,
+            index_offset,
+            index_capacity,
             ring_offset,
             ring_size,
             flags,
@@ -125,8 +143,21 @@ impl PoolHeader {
         if self.file_size != actual_file_size {
             return Err(Error::new(ErrorKind::Corrupt).with_message("invalid file size"));
         }
+        if self.index_offset != HEADER_SIZE as u64 {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("invalid index offset"));
+        }
+        let index_bytes = (self.index_capacity as u64)
+            .checked_mul(INDEX_SLOT_BYTES)
+            .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("index size overflow"))?;
+        let expected_ring_offset = self
+            .index_offset
+            .checked_add(index_bytes)
+            .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("ring offset overflow"))?;
         if self.ring_offset < HEADER_SIZE as u64 {
             return Err(Error::new(ErrorKind::Corrupt).with_message("invalid ring offset"));
+        }
+        if self.ring_offset != expected_ring_offset {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("ring offset mismatch"));
         }
         if self.ring_offset + self.ring_size != self.file_size {
             return Err(Error::new(ErrorKind::Corrupt).with_message("ring bounds mismatch"));
@@ -170,6 +201,12 @@ fn read_u64(buf: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(read_8(buf, offset))
 }
 
+fn read_u32(buf: &[u8], offset: usize) -> u32 {
+    let mut out = [0u8; 4];
+    out.copy_from_slice(&buf[offset..offset + 4]);
+    u32::from_le_bytes(out)
+}
+
 fn read_8(buf: &[u8], offset: usize) -> [u8; 8] {
     let mut out = [0u8; 8];
     out.copy_from_slice(&buf[offset..offset + 8]);
@@ -180,14 +217,42 @@ fn write_u64(buf: &mut [u8], offset: usize, value: u64) {
     buf[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
 }
 
+fn write_u32(buf: &mut [u8], offset: usize, value: u32) {
+    buf[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct PoolOptions {
     pub file_size: u64,
+    pub index_capacity: Option<u32>,
 }
 
 impl PoolOptions {
     pub fn new(file_size: u64) -> Self {
-        Self { file_size }
+        Self {
+            file_size,
+            index_capacity: None,
+        }
+    }
+
+    pub fn with_index_capacity(mut self, index_capacity: u32) -> Self {
+        self.index_capacity = Some(index_capacity);
+        self
+    }
+
+    fn resolved_index_capacity(&self) -> u32 {
+        if let Some(explicit) = self.index_capacity {
+            return explicit;
+        }
+        let candidate = (self.file_size / 256).min(MAX_AUTO_INDEX_CAPACITY);
+        if candidate == 0 {
+            return 0;
+        }
+        let usable_for_index = self
+            .file_size
+            .saturating_sub(HEADER_SIZE as u64 + MIN_RING_SIZE_FOR_INDEX);
+        let max_by_budget = usable_for_index / INDEX_SLOT_BYTES;
+        candidate.min(max_by_budget) as u32
     }
 }
 
@@ -309,6 +374,9 @@ pub struct Bounds {
 pub struct PoolInfo {
     pub path: PathBuf,
     pub file_size: u64,
+    pub index_offset: u64,
+    pub index_capacity: u32,
+    pub index_size_bytes: u64,
     pub ring_offset: u64,
     pub ring_size: u64,
     pub bounds: Bounds,
@@ -359,7 +427,8 @@ impl Pool {
         file.set_len(options.file_size)
             .map_err(|err| Error::new(ErrorKind::Io).with_path(&path).with_source(err))?;
 
-        let header = PoolHeader::new(options.file_size)?;
+        let index_capacity = options.resolved_index_capacity();
+        let header = PoolHeader::new(options.file_size, index_capacity)?;
         write_header(&mut file, &header, &path)?;
 
         let mmap = unsafe {
@@ -367,12 +436,16 @@ impl Pool {
                 .map_err(|err| Error::new(ErrorKind::Io).with_path(&path).with_source(err))?
         };
 
-        Ok(Self {
+        let mut pool = Self {
             path,
             file,
             mmap,
             header,
-        })
+        };
+        let index_start = pool.header.index_offset as usize;
+        let index_end = pool.header.ring_offset as usize;
+        pool.mmap[index_start..index_end].fill(0);
+        Ok(pool)
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
@@ -444,6 +517,9 @@ impl Pool {
         Ok(PoolInfo {
             path: self.path.clone(),
             file_size: header.file_size,
+            index_offset: header.index_offset,
+            index_capacity: header.index_capacity,
+            index_size_bytes: header.index_capacity as u64 * INDEX_SLOT_BYTES,
             ring_offset: header.ring_offset,
             ring_size: header.ring_size,
             bounds,
@@ -467,6 +543,10 @@ impl Pool {
             return Err(Error::new(ErrorKind::NotFound)
                 .with_message("message not found")
                 .with_seq(seq));
+        }
+
+        if let Some(frame) = self.get_via_index(header, seq) {
+            return Ok(frame);
         }
 
         let mut cursor = crate::core::cursor::Cursor::new();
@@ -499,6 +579,45 @@ impl Pool {
                     cursor.seek_to(header.tail_off as usize);
                 }
             }
+        }
+    }
+
+    fn get_via_index(
+        &self,
+        header: PoolHeader,
+        seq: u64,
+    ) -> Option<crate::core::cursor::FrameRef<'_>> {
+        let index_capacity = header.index_capacity as u64;
+        if index_capacity == 0 {
+            return None;
+        }
+
+        let slot = (seq % index_capacity) as usize;
+        let start = header.index_offset as usize + slot * INDEX_SLOT_BYTES as usize;
+        let end = start + INDEX_SLOT_BYTES as usize;
+        if end > self.mmap.len() {
+            return None;
+        }
+        let stored_seq = read_u64(self.mmap(), start);
+        let stored_offset = read_u64(self.mmap(), start + 8);
+        if stored_seq != seq {
+            return None;
+        }
+        let ring_size = header.ring_size as usize;
+        if stored_offset as usize >= ring_size {
+            return None;
+        }
+        let ring_offset = header.ring_offset as usize;
+        match crate::core::cursor::read_frame_at(
+            self.mmap(),
+            ring_offset,
+            ring_size,
+            stored_offset as usize,
+        ) {
+            Ok(crate::core::cursor::ReadResult::Message { frame, .. }) if frame.seq == seq => {
+                Some(frame)
+            }
+            _ => None,
         }
     }
 
@@ -647,6 +766,19 @@ impl Pool {
                     "failed to flush wrap marker",
                 )?;
             }
+            if let Some((index_start, index_len)) = index_slot_range(
+                plan.next_header.index_offset,
+                plan.next_header.index_capacity,
+                plan.seq,
+            ) {
+                flush_mmap_range(
+                    &self.mmap,
+                    index_start,
+                    index_len,
+                    &self.path,
+                    "failed to flush index slot",
+                )?;
+            }
             flush_mmap_range(
                 &self.mmap,
                 0,
@@ -787,14 +919,16 @@ fn write_pool_header(mmap: &mut MmapMut, header: &PoolHeader) {
     mmap[4..8].copy_from_slice(&format::POOL_FORMAT_VERSION.to_le_bytes());
     mmap[8] = ENDIANNESS_LE;
     write_u64(mmap, 16, header.file_size);
-    write_u64(mmap, 24, header.ring_offset);
-    write_u64(mmap, 32, header.ring_size);
-    write_u64(mmap, 40, header.flags);
-    write_u64(mmap, 48, header.head_off);
-    write_u64(mmap, 56, header.tail_off);
-    write_u64(mmap, 64, header.tail_next_off);
-    write_u64(mmap, 72, header.oldest_seq);
-    write_u64(mmap, 80, header.newest_seq);
+    write_u64(mmap, 24, header.index_offset);
+    write_u32(mmap, 32, header.index_capacity);
+    write_u64(mmap, 40, header.ring_offset);
+    write_u64(mmap, 48, header.ring_size);
+    write_u64(mmap, 56, header.flags);
+    write_u64(mmap, 64, header.head_off);
+    write_u64(mmap, 72, header.tail_off);
+    write_u64(mmap, 80, header.tail_next_off);
+    write_u64(mmap, 88, header.oldest_seq);
+    write_u64(mmap, 96, header.newest_seq);
 }
 
 fn flush_mmap_range(
@@ -934,9 +1068,43 @@ fn apply_append(
     committed.state = FrameState::Committed;
     write_frame_header(mmap, ring_offset, plan.frame_offset, &committed)?;
 
+    write_index_slot(
+        mmap,
+        plan.next_header.index_offset,
+        plan.next_header.index_capacity,
+        plan.seq,
+        plan.frame_offset as u64,
+    );
+
     write_pool_header(mmap, &plan.next_header);
 
     Ok(())
+}
+
+fn write_index_slot(
+    mmap: &mut [u8],
+    index_offset: u64,
+    index_capacity: u32,
+    seq: u64,
+    ring_relative_offset: u64,
+) {
+    if index_capacity == 0 {
+        return;
+    }
+    let slot = (seq % index_capacity as u64) as usize;
+    let start = index_offset as usize + slot * INDEX_SLOT_BYTES as usize;
+    let end = start + INDEX_SLOT_BYTES as usize;
+    mmap[start..start + 8].copy_from_slice(&seq.to_le_bytes());
+    mmap[start + 8..end].copy_from_slice(&ring_relative_offset.to_le_bytes());
+}
+
+fn index_slot_range(index_offset: u64, index_capacity: u32, seq: u64) -> Option<(usize, usize)> {
+    if index_capacity == 0 {
+        return None;
+    }
+    let slot = (seq % index_capacity as u64) as usize;
+    let start = index_offset as usize + slot * INDEX_SLOT_BYTES as usize;
+    Some((start, INDEX_SLOT_BYTES as usize))
 }
 
 #[cfg(test)]
@@ -1002,7 +1170,7 @@ mod tests {
             .expect("create");
         file.set_len(1024 * 1024).expect("len");
 
-        let header = super::PoolHeader::new(1024 * 1024).expect("header");
+        let header = super::PoolHeader::new(1024 * 1024, 0).expect("header");
         let mut buf = header.encode();
         buf[4..8].copy_from_slice(&42u32.to_le_bytes());
         file.seek(SeekFrom::Start(0)).expect("seek");
@@ -1016,7 +1184,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::Usage);
         let message = err.message().unwrap_or("");
         assert!(message.contains("42"));
-        assert!(message.contains("2"));
+        assert!(message.contains("3"));
     }
 
     #[test]
@@ -1026,8 +1194,11 @@ mod tests {
         let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
         let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("len");
         let ring_size = frame_len * 4;
-        let mut pool =
-            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool = Pool::create(
+            &path,
+            PoolOptions::new(4096 + ring_size as u64).with_index_capacity(0),
+        )
+        .expect("create");
 
         for _ in 0..20 {
             pool.append(payload.as_slice()).expect("append");
@@ -1044,8 +1215,11 @@ mod tests {
         let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
         let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("len");
         let ring_size = frame_len * 4;
-        let mut pool =
-            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool = Pool::create(
+            &path,
+            PoolOptions::new(4096 + ring_size as u64).with_index_capacity(0),
+        )
+        .expect("create");
 
         for _ in 0..4 {
             pool.append(payload.as_slice()).expect("append");
@@ -1067,8 +1241,11 @@ mod tests {
         let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
         let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("len");
         let ring_size = frame_len * 4;
-        let mut pool =
-            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool = Pool::create(
+            &path,
+            PoolOptions::new(4096 + ring_size as u64).with_index_capacity(0),
+        )
+        .expect("create");
 
         for _ in 0..3 {
             pool.append(payload.as_slice()).expect("append");
@@ -1100,8 +1277,11 @@ mod tests {
         let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
         let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("len");
         let ring_size = frame_len * 8;
-        let mut pool =
-            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool = Pool::create(
+            &path,
+            PoolOptions::new(4096 + ring_size as u64).with_index_capacity(0),
+        )
+        .expect("create");
 
         for _ in 0..3 {
             pool.append(payload.as_slice()).expect("append");
@@ -1142,7 +1322,7 @@ mod tests {
         file.set_len(1024 * 1024).expect("len");
         file.seek(SeekFrom::Start(0)).expect("seek");
 
-        let header = super::PoolHeader::new(512 * 1024).expect("header");
+        let header = super::PoolHeader::new(512 * 1024, 0).expect("header");
         let buf = header.encode();
         file.write_all(&buf).expect("write");
         file.flush().expect("flush");
@@ -1222,6 +1402,13 @@ mod tests {
             &header,
             payload_len,
         );
+        super::write_index_slot(
+            storage,
+            plan.next_header.index_offset,
+            plan.next_header.index_capacity,
+            plan.seq,
+            plan.frame_offset as u64,
+        );
         let encoded = plan.next_header.encode();
         storage[0..HEADER_SIZE].copy_from_slice(&encoded);
     }
@@ -1242,6 +1429,15 @@ mod tests {
         let marker_start = payload_end;
         let marker_end = marker_start + frame::FRAME_COMMIT_MARKER_LEN;
         storage[marker_start..marker_end].copy_from_slice(&frame::FRAME_COMMIT_MARKER);
+    }
+
+    fn read_index_entry(mmap: &[u8], index_offset: usize, slot: usize) -> (u64, u64) {
+        let start = index_offset + slot * 16;
+        let mut seq_bytes = [0u8; 8];
+        let mut off_bytes = [0u8; 8];
+        seq_bytes.copy_from_slice(&mmap[start..start + 8]);
+        off_bytes.copy_from_slice(&mmap[start + 8..start + 16]);
+        (u64::from_le_bytes(seq_bytes), u64::from_le_bytes(off_bytes))
     }
 
     fn scan_frames(mmap: &[u8], header: PoolHeader) -> Vec<(usize, u64, u32)> {
@@ -1294,8 +1490,11 @@ mod tests {
         let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
         let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("frame len");
         let ring_size = frame_len * 3 + FRAME_HEADER_LEN;
-        let mut pool =
-            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool = Pool::create(
+            &path,
+            PoolOptions::new(4096 + ring_size as u64).with_index_capacity(0),
+        )
+        .expect("create");
         pool.append(payload.as_slice()).expect("append 1");
         pool.append(payload.as_slice()).expect("append 2");
         pool.append(payload.as_slice()).expect("append 3");
@@ -1318,8 +1517,11 @@ mod tests {
         let payload = lite3::encode_message(&[], &serde_json::json!({"x": 2})).expect("payload");
         let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("frame len");
         let ring_size = frame_len * 2 + FRAME_HEADER_LEN;
-        let mut pool =
-            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool = Pool::create(
+            &path,
+            PoolOptions::new(4096 + ring_size as u64).with_index_capacity(0),
+        )
+        .expect("create");
         pool.append(payload.as_slice()).expect("append 1");
         pool.append(payload.as_slice()).expect("append 2");
         pool.append(payload.as_slice()).expect("append 3");
@@ -1335,7 +1537,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
         let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
-        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 2048)).expect("create");
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 2048).with_index_capacity(0))
+            .expect("create");
 
         crate::core::notify::force_unavailable_for_tests(true);
         let result = pool.append(payload.as_slice());
@@ -1349,8 +1552,11 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
         let ring_size = 512;
-        let mut pool =
-            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool = Pool::create(
+            &path,
+            PoolOptions::new(4096 + ring_size as u64).with_index_capacity(0),
+        )
+        .expect("create");
 
         let payload_a = vec![1u8; 100];
         pool.append(payload_a.as_slice()).expect("append 1");
@@ -1387,8 +1593,11 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
         let ring_size = 512;
-        let mut pool =
-            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool = Pool::create(
+            &path,
+            PoolOptions::new(4096 + ring_size as u64).with_index_capacity(0),
+        )
+        .expect("create");
 
         let payload_a = vec![1u8; 100];
         for _ in 0..3 {
@@ -1425,7 +1634,8 @@ mod tests {
     fn bounds_and_get_scan_by_seq() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
-        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 2048)).expect("create");
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 2048).with_index_capacity(0))
+            .expect("create");
 
         for value in 1..=3 {
             let payload =
@@ -1448,10 +1658,54 @@ mod tests {
     }
 
     #[test]
+    fn get_falls_back_when_index_slot_overwritten() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(1024 * 1024).with_index_capacity(2))
+            .expect("create");
+
+        for value in 1..=3 {
+            let payload =
+                lite3::encode_message(&[], &serde_json::json!({"x": value})).expect("payload");
+            pool.append(payload.as_slice()).expect("append");
+        }
+
+        let frame = pool.get(1).expect("fallback get");
+        let doc = Lite3DocRef::new(frame.payload);
+        let json = doc.to_json(false).expect("json");
+        let value: serde_json::Value = serde_json::from_str(&json).expect("parse");
+        assert_eq!(value["data"]["x"], 1);
+    }
+
+    #[test]
+    fn get_falls_back_when_index_slot_offset_is_stale() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(1024 * 1024).with_index_capacity(8))
+            .expect("create");
+
+        for value in 1..=3 {
+            let payload =
+                lite3::encode_message(&[], &serde_json::json!({"x": value})).expect("payload");
+            pool.append(payload.as_slice()).expect("append");
+        }
+
+        let header = pool.header_from_mmap().expect("header");
+        let slot = (2 % header.index_capacity as u64) as usize;
+        let slot_start = header.index_offset as usize + slot * 16;
+        pool.mmap[slot_start..slot_start + 8].copy_from_slice(&2u64.to_le_bytes());
+        pool.mmap[slot_start + 8..slot_start + 16].copy_from_slice(&0u64.to_le_bytes());
+
+        let frame = pool.get(2).expect("fallback get");
+        assert_eq!(frame.seq, 2);
+    }
+
+    #[test]
     fn write_pool_header_partial_updates() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
-        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 2048)).expect("create");
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 2048).with_index_capacity(0))
+            .expect("create");
         let mut header = pool.header_from_mmap().expect("header");
         header.flags = 1;
         header.head_off = 128;
@@ -1467,10 +1721,60 @@ mod tests {
     }
 
     #[test]
+    fn append_writes_index_slot_with_seq_and_offset() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(1024 * 1024).with_index_capacity(8))
+            .expect("create");
+        let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
+
+        let seq = pool.append(payload.as_slice()).expect("append");
+        let header = pool.header_from_mmap().expect("header");
+        let slot = (seq % header.index_capacity as u64) as usize;
+        let (stored_seq, stored_off) =
+            read_index_entry(&pool.mmap, header.index_offset as usize, slot);
+        assert_eq!(stored_seq, seq);
+
+        let frame =
+            super::read_frame_header(&pool.mmap, header.ring_offset as usize, stored_off as usize)
+                .expect("frame");
+        assert_eq!(frame.seq, seq);
+        assert_eq!(frame.state, FrameState::Committed);
+    }
+
+    #[test]
+    fn append_overwrites_index_slot_on_collision() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(1024 * 1024).with_index_capacity(2))
+            .expect("create");
+        let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
+
+        for _ in 0..3 {
+            pool.append(payload.as_slice()).expect("append");
+        }
+        let header = pool.header_from_mmap().expect("header");
+        let (slot0_seq, slot0_off) = read_index_entry(&pool.mmap, header.index_offset as usize, 0);
+        let (slot1_seq, slot1_off) = read_index_entry(&pool.mmap, header.index_offset as usize, 1);
+        assert_eq!(slot0_seq, 2);
+        assert_eq!(slot1_seq, 3);
+
+        let frame0 =
+            super::read_frame_header(&pool.mmap, header.ring_offset as usize, slot0_off as usize)
+                .expect("frame");
+        let frame1 =
+            super::read_frame_header(&pool.mmap, header.ring_offset as usize, slot1_off as usize)
+                .expect("frame");
+        assert_eq!(frame0.seq, slot0_seq);
+        assert_eq!(frame1.seq, slot1_seq);
+    }
+
+    #[test]
     fn get_with_cache_hits() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
-        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 2048)).expect("create");
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 2048).with_index_capacity(0))
+            .expect("create");
 
         for value in 1..=3 {
             let payload =
@@ -1494,8 +1798,11 @@ mod tests {
         let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
         let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("frame len");
         let ring_size = frame_len * 2 + FRAME_HEADER_LEN;
-        let mut pool =
-            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool = Pool::create(
+            &path,
+            PoolOptions::new(4096 + ring_size as u64).with_index_capacity(0),
+        )
+        .expect("create");
 
         pool.append(payload.as_slice()).expect("append 1");
         pool.append(payload.as_slice()).expect("append 2");
@@ -1597,7 +1904,11 @@ mod tests {
     fn crash_append_phases_preserve_invariants() {
         let dir = tempfile::tempdir().expect("tempdir");
         let base_path = dir.path().join("base.plasmite");
-        let mut base = Pool::create(&base_path, PoolOptions::new(4096 + 1024)).expect("create");
+        let mut base = Pool::create(
+            &base_path,
+            PoolOptions::new(4096 + 1024).with_index_capacity(0),
+        )
+        .expect("create");
         let payload_a = vec![7u8; 100];
         base.append(payload_a.as_slice()).expect("append 1");
         base.append(payload_a.as_slice()).expect("append 2");
@@ -1667,6 +1978,14 @@ mod tests {
             return Ok(());
         }
 
+        super::write_index_slot(
+            &mut pool.mmap,
+            plan.next_header.index_offset,
+            plan.next_header.index_capacity,
+            plan.seq,
+            plan.frame_offset as u64,
+        );
+
         super::write_pool_header(&mut pool.mmap, &plan.next_header);
         if matches!(phase, CrashPhase::Header) {
             return Ok(());
@@ -1678,7 +1997,8 @@ mod tests {
     fn bounds_empty_pool_returns_none() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
-        let pool = Pool::create(&path, PoolOptions::new(4096 + 1024)).expect("create");
+        let pool = Pool::create(&path, PoolOptions::new(4096 + 1024).with_index_capacity(0))
+            .expect("create");
 
         let bounds = pool.bounds().expect("bounds");
         assert_eq!(bounds.oldest_seq, None);
@@ -1689,7 +2009,8 @@ mod tests {
     fn info_metrics_empty_pool() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
-        let pool = Pool::create(&path, PoolOptions::new(4096 + 1024)).expect("create");
+        let pool = Pool::create(&path, PoolOptions::new(4096 + 1024).with_index_capacity(0))
+            .expect("create");
 
         let info = pool.info().expect("info");
         let metrics = info.metrics.expect("metrics");
@@ -1707,7 +2028,8 @@ mod tests {
     fn info_metrics_non_empty_pool() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
-        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 4096)).expect("create");
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 4096).with_index_capacity(0))
+            .expect("create");
         let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
         pool.append(payload.as_slice()).expect("append 1");
         pool.append(payload.as_slice()).expect("append 2");

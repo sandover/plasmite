@@ -42,7 +42,7 @@ Only these commands are in-scope for v0.0.1:
 Minimal, explicit flag set for v0.0.1:
 
 * Global: `--dir`
-* `pool create`: `--size`
+* `pool create`: `--size`, `--index-capacity`
 * `pool list`: no flags
 * `poke`: `DATA`, `--file FILE`, `--in`, `--errors`, `--descrip`, `--durability fast|flush`, `--create`, `--create-size`, `--retry`, `--retry-delay`
 * `peek`: `--tail`, `--since`, `--where`, `--format pretty|jsonl`, `--jsonl`, `--quiet-drops`
@@ -89,6 +89,7 @@ The CLI message schema is fixed and versioned by convention:
 
 * Pool files include an on-disk format version in the header.
 * Incompatible format changes MUST bump the on-disk version.
+* Current pool format version is `3` (adds inline index metadata/region).
 * Older binaries MUST refuse to open newer formats with a Usage error that includes:
   * the detected version
   * the supported versions
@@ -313,6 +314,7 @@ plasmite pool create [OPTIONS] NAME [NAME...]
 **Options**
 
 * `--size SIZE` (default: `1M`)
+* `--index-capacity N` (optional; number of index slots, `0` disables index)
 * `--force` : if exists, delete and recreate (legacy `-z`)
 * `--if-missing` : don’t error if exists (legacy `-q`)
 * `--checksum` : enable per-message checksum/CRC (debuggability; default: off)
@@ -322,6 +324,7 @@ plasmite pool create [OPTIONS] NAME [NAME...]
 
 * If both `--force` and `--if-missing` are specified, `--force` wins.
 * Creates “single-file pools” by default (no pool format variants exposed).
+* When `--index-capacity` is omitted, index capacity is auto-sized from pool size.
 * Under the default resolution rule, `plasmite pool create NAME` creates `POOL_DIR/NAME.plasmite`.
 * Pool file permissions are determined by the pool directory + process umask (use `--dir` to target a shared location if desired).
 
@@ -448,7 +451,7 @@ plasmite pool info NAME [--json]
 **Behavior**
 
 * Default output is human-readable for interactive use.
-* `--json` emits a JSON object with stable base fields (`name`, `path`, `file_size`, `ring_offset`, `ring_size`, `bounds`).
+* `--json` emits a JSON object with stable base fields (`name`, `path`, `file_size`, `index_capacity`, `index_size_bytes`, `ring_offset`, `ring_size`, `bounds`).
 * Metrics are exposed under an additive `metrics` object.
 * Backward compatibility: clients MUST treat missing `metrics` or missing metric subfields as "unavailable", not errors.
 * Throughput (`messages/sec`) is intentionally out of scope for v0 `pool info` output (see notes below).
@@ -463,6 +466,8 @@ plasmite pool info NAME [--json]
 * `name` (string): pool name or provided pool reference.
 * `path` (string): absolute pool path.
 * `file_size` (number): pool file size in bytes.
+* `index_capacity` (number): inline index slot count (`0` means scan-only mode).
+* `index_size_bytes` (number): bytes reserved for the inline index region.
 * `ring_offset` (number): start offset of ring region in bytes.
 * `ring_size` (number): ring region size in bytes.
 * `bounds` (object): sequence bounds.
@@ -488,8 +493,10 @@ plasmite pool info NAME [--json]
   "name": "demo",
   "path": "/Users/me/.plasmite/pools/demo.plasmite",
   "file_size": 1048576,
-  "ring_offset": 4096,
-  "ring_size": 1044480,
+  "index_capacity": 4096,
+  "index_size_bytes": 65536,
+  "ring_offset": 69632,
+  "ring_size": 979944,
   "bounds": { "oldest": 41, "newest": 42 },
   "metrics": {
     "message_count": 2,
@@ -722,6 +729,10 @@ plasmite get POOLREF SEQ [OPTIONS]
 * `--format json|bin` (default depends on `--out`)
 
 This replaces `p-nth` with a clearer primitive.
+
+Lookup behavior:
+- Uses inline index-assisted lookup when index entries are available and valid.
+- Falls back to scan when index slots are stale/collided/unavailable (`index_capacity=0`).
 
 ---
 

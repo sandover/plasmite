@@ -105,6 +105,12 @@ struct RemotePoolInfo {
     name: Option<String>,
     path: String,
     file_size: u64,
+    #[serde(default)]
+    index_offset: u64,
+    #[serde(default)]
+    index_capacity: u32,
+    #[serde(default)]
+    index_size_bytes: u64,
     ring_offset: u64,
     ring_size: u64,
     #[serde(default)]
@@ -792,6 +798,9 @@ fn pool_info_from_remote(pool_ref: &str, pool: RemotePoolInfo) -> PoolInfo {
     PoolInfo {
         path,
         file_size: pool.file_size,
+        index_offset: pool.index_offset,
+        index_capacity: pool.index_capacity,
+        index_size_bytes: pool.index_size_bytes,
         ring_offset: pool.ring_offset,
         ring_size: pool.ring_size,
         bounds: Bounds {

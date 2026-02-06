@@ -44,33 +44,12 @@ jobs:
           fi
       - run: cargo audit --db .scratch/advisory-db --no-fetch
       - run: cargo test --all --locked
-      - run: cargo build --bin plasmite
-      - name: Rust conformance (sample)
-        run: cargo run --bin plasmite-conformance -- conformance/sample-v0.json
-      - name: Rust conformance (negative)
-        run: cargo run --bin plasmite-conformance -- conformance/negative-v0.json
-      - name: Rust conformance (multiprocess)
-        run: cargo run --bin plasmite-conformance -- conformance/multiprocess-v0.json
-      - name: Rust conformance (pool admin)
-        run: cargo run --bin plasmite-conformance -- conformance/pool-admin-v0.json
-      - name: Go conformance
-        shell: bash
-        run: |
-          cargo build --lib
-          if [[ "${RUNNER_OS}" == "macOS" ]]; then
-            export DYLD_LIBRARY_PATH="$PWD/target/debug"
-          else
-            export LD_LIBRARY_PATH="$PWD/target/debug"
-          fi
-          cd bindings/go
-          CGO_LDFLAGS="-L$PWD/../../target/debug" go run ./cmd/plasmite-conformance ../../conformance/sample-v0.json
-          CGO_LDFLAGS="-L$PWD/../../target/debug" go run ./cmd/plasmite-conformance ../../conformance/negative-v0.json
-          CGO_LDFLAGS="-L$PWD/../../target/debug" go run ./cmd/plasmite-conformance ../../conformance/multiprocess-v0.json
-          CGO_LDFLAGS="-L$PWD/../../target/debug" go run ./cmd/plasmite-conformance ../../conformance/pool-admin-v0.json
+      - name: Conformance all languages
+        run: ./scripts/conformance_all.sh
       - name: Go tests
         shell: bash
         run: |
-          cargo build --lib
+          cargo rustc --lib --crate-type=staticlib
           mkdir -p .scratch/go-build
           if [[ "${RUNNER_OS}" == "macOS" ]]; then
             export DYLD_LIBRARY_PATH="$PWD/target/debug"
@@ -79,32 +58,8 @@ jobs:
           fi
           cd bindings/go
           GOCACHE="$PWD/../../.scratch/go-build" LIBRARY_PATH="$PWD/../../target/debug" go test ./...
-      - name: Node conformance
-        shell: bash
-        run: |
-          if [[ "${RUNNER_OS}" == "macOS" ]]; then
-            export DYLD_LIBRARY_PATH="$PWD/target/debug"
-          else
-            export LD_LIBRARY_PATH="$PWD/target/debug"
-          fi
-          export PLASMITE_LIB_DIR="$PWD/target/debug"
-          export PLASMITE_BIN="$PWD/target/debug/plasmite"
-          cd bindings/node
-          npm install --no-package-lock
-          npm test
-      - name: Python conformance
-        shell: bash
-        run: |
-          if [[ "${RUNNER_OS}" == "macOS" ]]; then
-            export DYLD_LIBRARY_PATH="$PWD/target/debug"
-          else
-            export LD_LIBRARY_PATH="$PWD/target/debug"
-          fi
-          export PLASMITE_LIB_DIR="$PWD/target/debug"
-          export PLASMITE_BIN="$PWD/target/debug/plasmite"
-          cd bindings/python
-          python -m pip install -e .
-          python -m unittest
+      - name: Cross artifact smoke
+        run: ./scripts/cross_artifact_smoke.sh
       - name: ABI smoke test
         run: |
           cargo build --lib

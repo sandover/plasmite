@@ -303,6 +303,8 @@ fn pool_info_json_includes_metrics() {
         .expect("info");
     assert!(info.status.success());
     let info_json = parse_json(std::str::from_utf8(&info.stdout).expect("utf8"));
+    assert!(info_json["index_capacity"].as_u64().unwrap() > 0);
+    assert!(info_json["index_size_bytes"].as_u64().unwrap() > 0);
     let metrics = info_json.get("metrics").expect("metrics");
     assert_eq!(metrics["message_count"], 2);
     assert_eq!(metrics["seq_span"], 2);
@@ -313,6 +315,113 @@ fn pool_info_json_includes_metrics() {
     assert!(metrics["age"]["newest_time"].is_string());
     assert!(metrics["age"]["oldest_age_ms"].is_number());
     assert!(metrics["age"]["newest_age_ms"].is_number());
+}
+
+#[test]
+fn pool_create_supports_explicit_and_zero_index_capacity() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create_explicit = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "--size",
+            "1M",
+            "--index-capacity",
+            "1024",
+            "indexed",
+        ])
+        .output()
+        .expect("create");
+    assert!(create_explicit.status.success());
+
+    let info_explicit = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "info",
+            "indexed",
+            "--json",
+        ])
+        .output()
+        .expect("info");
+    assert!(info_explicit.status.success());
+    let json_explicit = parse_json(std::str::from_utf8(&info_explicit.stdout).expect("utf8"));
+    assert_eq!(json_explicit["index_capacity"], json!(1024));
+    assert_eq!(json_explicit["index_size_bytes"], json!(1024 * 16));
+
+    let create_scan_only = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "--size",
+            "1M",
+            "--index-capacity",
+            "0",
+            "scanonly",
+        ])
+        .output()
+        .expect("create");
+    assert!(create_scan_only.status.success());
+
+    let info_scan_only = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "info",
+            "scanonly",
+            "--json",
+        ])
+        .output()
+        .expect("info");
+    assert!(info_scan_only.status.success());
+    let json_scan_only = parse_json(std::str::from_utf8(&info_scan_only.stdout).expect("utf8"));
+    assert_eq!(json_scan_only["index_capacity"], json!(0));
+    assert_eq!(json_scan_only["index_size_bytes"], json!(0));
+    assert_eq!(json_scan_only["ring_offset"], json!(4096));
+}
+
+#[test]
+fn pool_create_rejects_oversized_index_capacity() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "--size",
+            "64K",
+            "--index-capacity",
+            "5000",
+            "too-big",
+        ])
+        .output()
+        .expect("create");
+    assert!(!create.status.success());
+
+    let err = parse_error_json(&create.stderr);
+    assert_eq!(
+        err.get("error")
+            .and_then(|v| v.get("kind"))
+            .and_then(|v| v.as_str()),
+        Some("Usage")
+    );
+    let message = err
+        .get("error")
+        .and_then(|v| v.get("message"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(message.contains("index capacity"));
 }
 
 #[test]

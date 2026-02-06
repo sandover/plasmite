@@ -265,7 +265,7 @@ function runPoolInfo(repoRoot, workdirPath, step, index, stepId) {
   const plasmiteBin = resolvePlasmiteBin(repoRoot);
   const result = spawnSync(
     plasmiteBin,
-    ["--dir", workdirPath, "pool", "info", pool],
+    ["--dir", workdirPath, "pool", "info", pool, "--json"],
     { encoding: "utf8" }
   );
   if (result.status !== 0) {

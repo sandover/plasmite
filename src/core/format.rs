@@ -6,7 +6,7 @@
 
 use crate::core::error::{Error, ErrorKind};
 
-pub const POOL_FORMAT_VERSION: u32 = 2;
+pub const POOL_FORMAT_VERSION: u32 = 3;
 pub const SUPPORTED_POOL_FORMAT_VERSIONS: &[u32] = &[POOL_FORMAT_VERSION];
 
 pub fn pool_version_error(detected: u32) -> Error {

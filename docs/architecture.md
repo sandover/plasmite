@@ -36,6 +36,7 @@ Core should be callable from:
 ### Storage format (on disk)
 
 At the CLI boundary messages are JSON; on disk the payload is a compact binary encoding of `{meta,data}`.
+Pool files use `header | index region | ring` layout; the inline index provides fast seq->offset lookup with scan fallback for stale/collided slots.
 
 Key invariants:
 - Every committed message has a monotonically increasing `seq`.

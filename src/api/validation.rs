@@ -280,7 +280,11 @@ pub(crate) fn validate_pool_state_report(
         steps += 1;
     }
 
-    ValidationReport::ok(path.to_path_buf()).set_last_good(last_good_seq)
+    let mut report = ValidationReport::ok(path.to_path_buf()).set_last_good(last_good_seq);
+    for warning in spot_check_index_warnings(header, mmap) {
+        report.remediation_hints.push(format!("warning: {warning}"));
+    }
+    report
 }
 
 fn issue(code: &str, message: &str, seq: Option<u64>, offset: Option<u64>) -> ValidationIssue {
@@ -296,6 +300,56 @@ fn read_frame_header(mmap: &[u8], ring_offset: usize, head: usize) -> Result<Fra
     let start = ring_offset + head;
     let end = start + FRAME_HEADER_LEN;
     FrameHeader::decode(&mmap[start..end]).map_err(|err| err.to_string())
+}
+
+fn spot_check_index_warnings(header: PoolHeader, mmap: &[u8]) -> Vec<String> {
+    if header.index_capacity == 0 {
+        return Vec::new();
+    }
+
+    let ring_offset = header.ring_offset as usize;
+    let ring_size = header.ring_size as usize;
+    let index_offset = header.index_offset as usize;
+    let index_slots = header.index_capacity as usize;
+    let index_bytes = index_slots.saturating_mul(16);
+    if index_offset + index_bytes > ring_offset {
+        return vec!["index bounds overlap ring".to_string()];
+    }
+
+    let mut sample_slots = vec![0usize];
+    if index_slots > 1 {
+        sample_slots.push(index_slots / 2);
+        sample_slots.push(index_slots - 1);
+    }
+    sample_slots.sort_unstable();
+    sample_slots.dedup();
+
+    let mut warnings = Vec::new();
+    for slot in sample_slots {
+        let entry_off = index_offset + slot * 16;
+        let seq = u64::from_le_bytes(mmap[entry_off..entry_off + 8].try_into().unwrap_or([0; 8]));
+        let offset = u64::from_le_bytes(
+            mmap[entry_off + 8..entry_off + 16]
+                .try_into()
+                .unwrap_or([0; 8]),
+        );
+        if seq == 0 {
+            continue;
+        }
+        if offset as usize >= ring_size {
+            warnings.push(format!(
+                "index slot {slot} seq {seq} points outside ring at offset {offset}"
+            ));
+            continue;
+        }
+        let frame = read_frame_header(mmap, ring_offset, offset as usize);
+        match frame {
+            Ok(frame) if frame.state == FrameState::Committed && frame.seq == seq => {}
+            _ => warnings.push(format!("index slot {slot} seq {seq} is stale or invalid")),
+        }
+    }
+
+    warnings
 }
 
 #[cfg(test)]

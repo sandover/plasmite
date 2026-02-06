@@ -14,7 +14,7 @@ clippy:
 test:
 	cargo test
 
-ci: fmt clippy test abi-smoke
+ci: fmt clippy test abi-smoke conformance-all cross-artifact-smoke
 
 abi:
 	cargo build --lib
@@ -29,6 +29,12 @@ abi-test: abi
 
 abi-smoke: abi
 	./scripts/abi_smoke.sh
+
+conformance-all:
+	./scripts/conformance_all.sh
+
+cross-artifact-smoke:
+	./scripts/cross_artifact_smoke.sh
 
 scratch:
 	mkdir -p .scratch

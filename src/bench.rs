@@ -134,14 +134,27 @@ pub fn run_bench(args: BenchArgs, program_version: &str) -> Result<(), Error> {
                 )?;
                 results.push(follow);
 
-                let get_scan = bench_get_scan(
+                let get_indexed = bench_get_scan(
                     &pool_path,
                     *pool_size,
                     *payload_bytes,
                     args.messages,
                     *durability,
+                    None,
+                    "indexed",
                 )?;
-                results.extend(get_scan);
+                results.extend(get_indexed);
+
+                let get_scan_only = bench_get_scan(
+                    &pool_path,
+                    *pool_size,
+                    *payload_bytes,
+                    args.messages,
+                    *durability,
+                    Some(0),
+                    "scan_only",
+                )?;
+                results.extend(get_scan_only);
 
                 for writers in &args.writers {
                     if *writers <= 1 {
@@ -402,11 +415,17 @@ impl BenchRow {
                 if self.notes.is_empty() {
                     "get_scan".to_string()
                 } else {
-                    match self.notes.as_str() {
-                        "near_newest" => "get_scan:newest".to_string(),
-                        "near_oldest" => "get_scan:oldest".to_string(),
-                        "mid" => "get_scan:mid".to_string(),
-                        other => format!("get_scan:{other}"),
+                    let (mode, position) = parse_get_scan_note(&self.notes);
+                    let position_label = match position {
+                        "near_newest" => "newest",
+                        "near_oldest" => "oldest",
+                        "mid" => "mid",
+                        other => other,
+                    };
+                    match mode {
+                        "indexed" => format!("get_idx:{position_label}"),
+                        "scan_only" => format!("get_scan:{position_label}"),
+                        _ => format!("get_scan:{position_label}"),
                     }
                 }
             }
@@ -427,7 +446,14 @@ impl BenchRow {
                     self.notes.clone()
                 }
             }
-            "get_scan" => String::new(),
+            "get_scan" => {
+                let (mode, _) = parse_get_scan_note(&self.notes);
+                match mode {
+                    "indexed" => "index-assisted".to_string(),
+                    "scan_only" => "scan-only (index=0)".to_string(),
+                    _ => String::new(),
+                }
+            }
             "multi_writer" => "cross-process".to_string(),
             "follow" => "writer+follower".to_string(),
             _ => self.notes.clone(),
@@ -461,6 +487,16 @@ fn format_rate(ms_per_msg: f64, msgs_per_sec: f64) -> (String, String) {
         return ("<0.001".to_string(), "-".to_string());
     }
     (format!("{ms_per_msg:.3}"), format!("{msgs_per_sec:.0}"))
+}
+
+fn parse_get_scan_note(note: &str) -> (&str, &str) {
+    if let Some((mode, position)) = note.split_once(':') {
+        match mode {
+            "indexed" | "scan_only" => return (mode, position),
+            _ => {}
+        }
+    }
+    ("legacy", note)
 }
 
 fn bench_append(
@@ -613,9 +649,15 @@ fn bench_get_scan(
     payload_bytes: usize,
     messages: u64,
     durability: Durability,
+    index_capacity: Option<u32>,
+    mode_label: &str,
 ) -> Result<Vec<Value>, Error> {
     let _ = std::fs::remove_file(pool_path);
-    let mut pool = Pool::create(pool_path, PoolOptions::new(pool_size))?;
+    let mut options = PoolOptions::new(pool_size);
+    if let Some(index_capacity) = index_capacity {
+        options = options.with_index_capacity(index_capacity);
+    }
+    let mut pool = Pool::create(pool_path, options)?;
 
     let payload_once = payload_for_bytes(payload_bytes, None, false)?;
     for _ in 0..messages {
@@ -650,7 +692,7 @@ fn bench_get_scan(
             1,
             dur,
             durability,
-            Some(label),
+            Some(&format!("{mode_label}:{label}")),
         ));
     }
     Ok(out)

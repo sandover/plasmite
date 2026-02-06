@@ -29,10 +29,15 @@ A conformance runner:
 
 ## Runners
 
+- Unified local/CI runner: `./scripts/conformance_all.sh`
 - Rust: `cargo run --bin plasmite-conformance -- conformance/sample-v0.json`
 - Go: `cd bindings/go && go run ./cmd/plasmite-conformance ../../conformance/sample-v0.json`
 - Node: `cd bindings/node && npm test`
 - Python: `cd bindings/python && python -m unittest`
+
+Cross-surface compatibility smoke:
+
+- `./scripts/cross_artifact_smoke.sh`
 
 ## Manifest Files
 

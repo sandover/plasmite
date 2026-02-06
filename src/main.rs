@@ -215,7 +215,11 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             }
         },
         Command::Pool { command } => match command {
-            PoolCommand::Create { names, size } => {
+            PoolCommand::Create {
+                names,
+                size,
+                index_capacity,
+            } => {
                 let size = size
                     .as_deref()
                     .map(parse_size)
@@ -233,7 +237,19 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                                 "Choose a different name or remove the existing pool file.",
                             ));
                     }
-                    let pool = Pool::create(&path, PoolOptions::new(size))?;
+                    let mut options = PoolOptions::new(size);
+                    if let Some(index_capacity) = index_capacity {
+                        let index_size_bytes = index_capacity as u64 * 16;
+                        if index_size_bytes > size / 2 {
+                            return Err(Error::new(ErrorKind::Usage)
+                                .with_message("index capacity is too large for pool size")
+                                .with_hint(
+                                    "Reduce --index-capacity or increase --size (index region must be <= 50% of the pool file).",
+                                ));
+                        }
+                        options = options.with_index_capacity(index_capacity);
+                    }
+                    let pool = Pool::create(&path, options)?;
                     let info = pool.info()?;
                     results.push(pool_info_json(&name, &info));
                 }
@@ -953,10 +969,13 @@ impl From<AccessModeCli> for serve::AccessMode {
 enum PoolCommand {
     #[command(
         about = "Create one or more pools",
-        long_about = r#"Create pool files. Default size is 1MB (use --size for larger)."#,
+        long_about = r#"Create pool files. Default size is 1MB (use --size for larger).
+
+Pools include an inline sequence index by default for fast `get(seq)` lookups."#,
         after_help = r#"EXAMPLES
   $ plasmite pool create foo
   $ plasmite pool create --size 8M bar baz quux
+  $ plasmite pool create --size 8M --index-capacity 4096 indexed
 
 NOTES
   - Sizes: 64K, 1M, 8M, 1G (K/M/G are 1024-based)"#
@@ -966,6 +985,11 @@ NOTES
         names: Vec<String>,
         #[arg(long, help = "Pool size (bytes or K/M/G)")]
         size: Option<String>,
+        #[arg(
+            long = "index-capacity",
+            help = "Inline index slot count (default: auto-size; 0 disables index)"
+        )]
+        index_capacity: Option<u32>,
     },
     #[command(
         about = "Show pool metadata and bounds",
@@ -1996,6 +2020,9 @@ fn pool_info_json(pool_ref: &str, info: &plasmite::api::PoolInfo) -> Value {
     map.insert("name".to_string(), json!(pool_ref));
     map.insert("path".to_string(), json!(info.path.display().to_string()));
     map.insert("file_size".to_string(), json!(info.file_size));
+    map.insert("index_offset".to_string(), json!(info.index_offset));
+    map.insert("index_capacity".to_string(), json!(info.index_capacity));
+    map.insert("index_size_bytes".to_string(), json!(info.index_size_bytes));
     map.insert("ring_offset".to_string(), json!(info.ring_offset));
     map.insert("ring_size".to_string(), json!(info.ring_size));
     map.insert("bounds".to_string(), bounds_json(info.bounds));
@@ -2009,8 +2036,13 @@ fn emit_pool_info_pretty(pool_ref: &str, info: &plasmite::api::PoolInfo) {
     println!("Pool: {pool_ref}");
     println!("Path: {}", info.path.display());
     println!(
-        "Size: {} bytes (ring: offset={} size={})",
-        info.file_size, info.ring_offset, info.ring_size
+        "Size: {} bytes (index: offset={} slots={} bytes={}, ring: offset={} size={})",
+        info.file_size,
+        info.index_offset,
+        info.index_capacity,
+        info.index_size_bytes,
+        info.ring_offset,
+        info.ring_size
     );
 
     let oldest = info

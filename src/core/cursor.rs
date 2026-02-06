@@ -293,8 +293,11 @@ mod tests {
         let payload = lite3::encode_message(&[], &json!({"x": 2})).expect("payload");
         let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("len");
         let ring_size = frame_len + FRAME_HEADER_LEN;
-        let mut pool =
-            Pool::create(&path, PoolOptions::new(4096 + ring_size as u64)).expect("create");
+        let mut pool = Pool::create(
+            &path,
+            PoolOptions::new(4096 + ring_size as u64).with_index_capacity(0),
+        )
+        .expect("create");
         pool.append(payload.as_slice()).expect("append 1");
         let mut cursor = Cursor::new();
         let result = cursor.next(&pool).expect("next");

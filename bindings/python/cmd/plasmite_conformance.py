@@ -226,7 +226,7 @@ def run_pool_info(
     pool = require_pool(step, index, step_id)
     plasmite_bin = resolve_plasmite_bin(repo_root)
     result = subprocess.run(
-        [plasmite_bin, "--dir", str(workdir_path), "pool", "info", pool],
+        [plasmite_bin, "--dir", str(workdir_path), "pool", "info", pool, "--json"],
         capture_output=True,
         text=True,
     )

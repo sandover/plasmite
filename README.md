@@ -4,6 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Persistent JSON message queues backed by plain files, making interprocess communication easy and inspectable. Multiple processes can write and read concurrently. Message queues are ring buffers, so writes almost always succeed.
+Plasmite also supports fast random access by sequence number (`plasmite get`) via an inline on-disk index.
 
 Use Plasmite via the CLI, native bindings (Go, Python, Node), or the HTTP API.
 

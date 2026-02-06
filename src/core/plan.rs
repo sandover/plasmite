@@ -369,6 +369,8 @@ mod tests {
     ) -> PoolHeader {
         PoolHeader {
             file_size: (RING_OFFSET + ring_size) as u64,
+            index_offset: RING_OFFSET as u64,
+            index_capacity: 0,
             ring_offset: RING_OFFSET as u64,
             ring_size: ring_size as u64,
             flags: 0,
@@ -482,6 +484,8 @@ mod tests {
             let mut storage = vec![0u8; RING_OFFSET + ring_size];
             let mut header = PoolHeader {
                 file_size: (RING_OFFSET + ring_size) as u64,
+                index_offset: RING_OFFSET as u64,
+                index_capacity: 0,
                 ring_offset: RING_OFFSET as u64,
                 ring_size: ring_size as u64,
                 flags: 0,
@@ -539,6 +543,8 @@ mod tests {
 
         let header = PoolHeader {
             file_size: (RING_OFFSET + ring_size) as u64,
+            index_offset: RING_OFFSET as u64,
+            index_capacity: 0,
             ring_offset: RING_OFFSET as u64,
             ring_size: ring_size as u64,
             flags: 0,

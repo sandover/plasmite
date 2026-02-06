@@ -1083,6 +1083,9 @@ fn pool_info_json(pool_ref: &str, info: &PoolInfo) -> serde_json::Value {
     map.insert("name".to_string(), json!(pool_ref));
     map.insert("path".to_string(), json!(info.path.display().to_string()));
     map.insert("file_size".to_string(), json!(info.file_size));
+    map.insert("index_offset".to_string(), json!(info.index_offset));
+    map.insert("index_capacity".to_string(), json!(info.index_capacity));
+    map.insert("index_size_bytes".to_string(), json!(info.index_size_bytes));
     map.insert("ring_offset".to_string(), json!(info.ring_offset));
     map.insert("ring_size".to_string(), json!(info.ring_size));
     map.insert("bounds".to_string(), bounds_json(info.bounds));

@@ -11,6 +11,8 @@ Plasmite is intentionally simple and local-first, but we still want to know what
 This repo includes a small benchmark suite to establish a baseline and to quantify improvements
 over time.
 
+For the inline index before/after comparison, see `docs/benchmarks/get-scan-baseline-pre-index.md`.
+
 ## Run
 
 Default suite (JSON to stdout, table to stderr):
@@ -54,7 +56,9 @@ Use a specific work directory (keeps pool files/artifacts around):
   - “core payload reused”
   - “includes Lite3 encode per msg”
 - `follow`: follow-style read throughput/latency (spawns a writer + follower process)
-- `get_scan`: scan-based `get` cost for `seq` near newest / middle / oldest
+- `get_scan`: `get` cost for `seq` near newest / middle / oldest in two modes:
+  - index-assisted (`index_capacity` auto/default)
+  - scan-only on new format (`index_capacity=0`)
 - `multi_writer`: contention overhead with multiple writer processes appending concurrently
 - Each result includes a `durability` field to distinguish `fast` vs `flush`.
 - The table groups by pool/payload and includes an `x_fast` ratio when a fast baseline exists.

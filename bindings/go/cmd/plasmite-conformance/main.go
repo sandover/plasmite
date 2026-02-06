@@ -417,7 +417,7 @@ func runPoolInfo(repoRoot string, workdirPath string, step map[string]any, index
 	if err != nil {
 		return stepErr(index, stepID, err.Error())
 	}
-	cmd := exec.Command(bin, "--dir", workdirPath, "pool", "info", pool)
+	cmd := exec.Command(bin, "--dir", workdirPath, "pool", "info", pool, "--json")
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
