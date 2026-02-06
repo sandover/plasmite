@@ -1506,3 +1506,15 @@
 {"type":"link","ts":"2026-02-06T19:22:43.724392Z","data":{"from_id":"UIE5FA","to_id":"2FFYXK","type":"depends"}}
 {"type":"result","ts":"2026-02-06T19:31:09.642369Z","data":{"task_id":"6R45M5","summary":"Docs updated: README examples, commands table, binding examples, design doc","path":"README.md","sha256_at_attach":"c0d35fab13acd646103493f5548a7f5fd0a64a8b44fa484d46e9ca64e6eccacf","mtime_at_attach":"2026-02-06T19:30:55.047799035Z","git_commit_at_attach":"d3256ef7d6603b4eac553fcb8fd949bf34ec1dd2","ts":"2026-02-06T19:31:09.642369Z"}}
 {"type":"state","ts":"2026-02-06T19:31:09.649921Z","data":{"id":"6R45M5","state":"done","ts":"2026-02-06T19:31:09.649921Z"}}
+{"type":"claim","ts":"2026-02-06T19:29:05.304813Z","data":{"id":"IWZIIU","agent_id":"gpt5@bbook","ts":"2026-02-06T19:29:05.304813Z"}}
+{"type":"state","ts":"2026-02-06T19:29:05.304813Z","data":{"id":"IWZIIU","state":"doing","ts":"2026-02-06T19:29:05.304813Z"}}
+{"type":"result","ts":"2026-02-06T19:31:05.709565Z","data":{"task_id":"IWZIIU","summary":"Defined additive pool info metrics schema, human-readable mapping, and throughput exclusion rationale for v0.","path":"spec/v0/SPEC.md","sha256_at_attach":"61c641403e508c297321f058dc725f77aa25d0a632dd5d310903de17eaa9bc09","mtime_at_attach":"2026-02-06T19:30:09.470532233Z","ts":"2026-02-06T19:31:05.709565Z"}}
+{"type":"state","ts":"2026-02-06T19:31:05.718217Z","data":{"id":"IWZIIU","state":"done","ts":"2026-02-06T19:31:05.718217Z"}}
+{"type":"claim","ts":"2026-02-06T19:31:10.597729Z","data":{"id":"ERYVIV","agent_id":"gpt5@bbook","ts":"2026-02-06T19:31:10.597729Z"}}
+{"type":"state","ts":"2026-02-06T19:31:10.597729Z","data":{"id":"ERYVIV","state":"doing","ts":"2026-02-06T19:31:10.597729Z"}}
+{"type":"result","ts":"2026-02-06T19:34:56.419008Z","data":{"task_id":"ERYVIV","summary":"Added pool info metrics in core/API, CLI/serve JSON output wiring, and integration/unit tests for metrics fields.","path":"src/core/pool.rs","sha256_at_attach":"5f6447c6e9ed41aafa7d677785c2ad00b0cea680d56524135033aea06447efaa","mtime_at_attach":"2026-02-06T19:33:57.857433635Z","ts":"2026-02-06T19:34:56.419008Z"}}
+{"type":"state","ts":"2026-02-06T19:34:56.42868Z","data":{"id":"ERYVIV","state":"done","ts":"2026-02-06T19:34:56.42868Z"}}
+{"type":"claim","ts":"2026-02-06T19:35:00.315196Z","data":{"id":"UN4FZV","agent_id":"gpt5@bbook","ts":"2026-02-06T19:35:00.315196Z"}}
+{"type":"state","ts":"2026-02-06T19:35:00.315196Z","data":{"id":"UN4FZV","state":"doing","ts":"2026-02-06T19:35:00.315196Z"}}
+{"type":"result","ts":"2026-02-06T19:36:03.235713Z","data":{"task_id":"UN4FZV","summary":"Updated README/API quickstart for pool info metrics; validated docs with cargo doc.","path":"docs/api-quickstart.md","sha256_at_attach":"a78bae7b48efc29719885b9c809942855fd935ef44f5f15e546423350cdbc372","mtime_at_attach":"2026-02-06T19:35:31.971373807Z","ts":"2026-02-06T19:36:03.235713Z"}}
+{"type":"state","ts":"2026-02-06T19:36:03.244499Z","data":{"id":"UN4FZV","state":"done","ts":"2026-02-06T19:36:03.244499Z"}}

@@ -9,6 +9,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use fs2::FileExt;
 use libc::{EACCES, EPERM};
@@ -311,6 +312,30 @@ pub struct PoolInfo {
     pub ring_offset: u64,
     pub ring_size: u64,
     pub bounds: Bounds,
+    pub metrics: Option<PoolMetrics>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PoolMetrics {
+    pub message_count: u64,
+    pub seq_span: u64,
+    pub utilization: PoolUtilization,
+    pub age: PoolAgeMetrics,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PoolUtilization {
+    pub used_bytes: u64,
+    pub free_bytes: u64,
+    pub used_percent_hundredths: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PoolAgeMetrics {
+    pub oldest_time: Option<String>,
+    pub newest_time: Option<String>,
+    pub oldest_age_ms: Option<u64>,
+    pub newest_age_ms: Option<u64>,
 }
 
 pub struct Pool {
@@ -415,12 +440,14 @@ impl Pool {
 
     pub fn info(&self) -> Result<PoolInfo, Error> {
         let header = self.header_from_mmap()?;
+        let bounds = bounds_from_header(header);
         Ok(PoolInfo {
             path: self.path.clone(),
             file_size: header.file_size,
             ring_offset: header.ring_offset,
             ring_size: header.ring_size,
-            bounds: bounds_from_header(header),
+            bounds,
+            metrics: Some(self.metrics_from_header(header, bounds)),
         })
     }
 
@@ -642,6 +669,61 @@ impl Pool {
 
         Ok(plan.seq)
     }
+
+    fn metrics_from_header(&self, header: PoolHeader, bounds: Bounds) -> PoolMetrics {
+        let message_count = match (bounds.oldest_seq, bounds.newest_seq) {
+            (Some(oldest), Some(newest)) => newest.saturating_sub(oldest).saturating_add(1),
+            _ => 0,
+        };
+        let seq_span = message_count;
+
+        let used_bytes = used_ring_bytes(header);
+        let free_bytes = header.ring_size.saturating_sub(used_bytes);
+        let used_percent_hundredths = if header.ring_size == 0 {
+            0
+        } else {
+            used_bytes.saturating_mul(10_000) / header.ring_size
+        };
+
+        let (oldest_timestamp_ns, newest_timestamp_ns) = self.boundary_timestamps(bounds);
+        let now_ns = unix_now_ns();
+        let oldest_age_ms = oldest_timestamp_ns.map(|ts| now_ns.saturating_sub(ts) / 1_000_000);
+        let newest_age_ms = newest_timestamp_ns.map(|ts| now_ns.saturating_sub(ts) / 1_000_000);
+
+        PoolMetrics {
+            message_count,
+            seq_span,
+            utilization: PoolUtilization {
+                used_bytes,
+                free_bytes,
+                used_percent_hundredths,
+            },
+            age: PoolAgeMetrics {
+                oldest_time: oldest_timestamp_ns.and_then(format_timestamp_ns),
+                newest_time: newest_timestamp_ns.and_then(format_timestamp_ns),
+                oldest_age_ms,
+                newest_age_ms,
+            },
+        }
+    }
+
+    fn boundary_timestamps(&self, bounds: Bounds) -> (Option<u64>, Option<u64>) {
+        let (Some(oldest), Some(newest)) = (bounds.oldest_seq, bounds.newest_seq) else {
+            return (None, None);
+        };
+        if oldest == newest {
+            let ts = self.frame_timestamp_ns_for_seq(oldest);
+            return (ts, ts);
+        }
+        (
+            self.frame_timestamp_ns_for_seq(oldest),
+            self.frame_timestamp_ns_for_seq(newest),
+        )
+    }
+
+    fn frame_timestamp_ns_for_seq(&self, seq: u64) -> Option<u64> {
+        self.get(seq).ok().map(|frame| frame.timestamp_ns)
+    }
 }
 
 pub struct AppendLock {
@@ -742,6 +824,38 @@ fn bounds_from_header(header: PoolHeader) -> Bounds {
             newest_seq: Some(header.newest_seq),
         }
     }
+}
+
+fn used_ring_bytes(header: PoolHeader) -> u64 {
+    let head = header.head_off;
+    let tail = header.tail_off;
+    if head == tail {
+        return if header.oldest_seq == 0 {
+            0
+        } else {
+            header.ring_size
+        };
+    }
+    if head > tail {
+        head - tail
+    } else {
+        header.ring_size.saturating_sub(tail - head)
+    }
+}
+
+fn unix_now_ns() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or(0)
+}
+
+fn format_timestamp_ns(timestamp_ns: u64) -> Option<String> {
+    use time::format_description::well_known::Rfc3339;
+    time::OffsetDateTime::from_unix_timestamp_nanos(timestamp_ns as i128)
+        .ok()?
+        .format(&Rfc3339)
+        .ok()
 }
 
 #[cfg(test)]
@@ -1569,5 +1683,44 @@ mod tests {
         let bounds = pool.bounds().expect("bounds");
         assert_eq!(bounds.oldest_seq, None);
         assert_eq!(bounds.newest_seq, None);
+    }
+
+    #[test]
+    fn info_metrics_empty_pool() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let pool = Pool::create(&path, PoolOptions::new(4096 + 1024)).expect("create");
+
+        let info = pool.info().expect("info");
+        let metrics = info.metrics.expect("metrics");
+        assert_eq!(metrics.message_count, 0);
+        assert_eq!(metrics.seq_span, 0);
+        assert_eq!(metrics.utilization.used_bytes, 0);
+        assert_eq!(metrics.utilization.free_bytes, info.ring_size);
+        assert_eq!(metrics.age.oldest_time, None);
+        assert_eq!(metrics.age.newest_time, None);
+        assert_eq!(metrics.age.oldest_age_ms, None);
+        assert_eq!(metrics.age.newest_age_ms, None);
+    }
+
+    #[test]
+    fn info_metrics_non_empty_pool() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 4096)).expect("create");
+        let payload = lite3::encode_message(&[], &serde_json::json!({"x": 1})).expect("payload");
+        pool.append(payload.as_slice()).expect("append 1");
+        pool.append(payload.as_slice()).expect("append 2");
+
+        let info = pool.info().expect("info");
+        let metrics = info.metrics.expect("metrics");
+        assert_eq!(metrics.message_count, 2);
+        assert_eq!(metrics.seq_span, 2);
+        assert!(metrics.utilization.used_bytes > 0);
+        assert!(metrics.utilization.free_bytes < info.ring_size);
+        assert!(metrics.age.oldest_time.is_some());
+        assert!(metrics.age.newest_time.is_some());
+        assert!(metrics.age.oldest_age_ms.is_some());
+        assert!(metrics.age.newest_age_ms.is_some());
     }
 }

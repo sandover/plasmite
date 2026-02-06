@@ -1,6 +1,7 @@
 //! Purpose: `plasmite` CLI entry point and v0.0.1 command dispatch.
 //! Role: Binary crate root; parses args, runs commands, emits JSON on stdout.
-//! Invariants: Successful command output is JSON on stdout; errors are JSON on stderr.
+//! Invariants: Commands emit stable stdout formats (human or JSON by command/flags).
+//! Invariants: Non-interactive errors are emitted as JSON on stderr.
 //! Invariants: Process exit code is derived from `api::to_exit_code`.
 //! Invariants: All pool mutations go through `api::Pool` (locks + mmap safety).
 #![allow(clippy::result_large_err)]
@@ -233,12 +234,16 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 emit_json(json!({ "created": results }), color_mode);
                 Ok(RunOutcome::ok())
             }
-            PoolCommand::Info { name } => {
+            PoolCommand::Info { name, json } => {
                 let path = resolve_poolref(&name, &pool_dir)?;
                 let pool =
                     Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &name, &name))?;
                 let info = pool.info()?;
-                emit_json(pool_info_json(&name, &info), color_mode);
+                if json {
+                    emit_json(pool_info_json(&name, &info), color_mode);
+                } else {
+                    emit_pool_info_pretty(&name, &info);
+                }
                 Ok(RunOutcome::ok())
             }
             PoolCommand::Delete { name } => {
@@ -973,13 +978,16 @@ NOTES
     },
     #[command(
         about = "Show pool metadata and bounds",
-        long_about = r#"Show pool size, message count, and sequence bounds as JSON."#,
-        after_help = r#"EXAMPLE
-  $ plasmite pool info foo"#
+        long_about = r#"Show pool size, bounds, and metrics in human-readable format by default."#,
+        after_help = r#"EXAMPLES
+  $ plasmite pool info foo
+  $ plasmite pool info foo --json"#
     )]
     Info {
         #[arg(help = "Pool name or path")]
         name: String,
+        #[arg(long, help = "Emit JSON instead of human-readable output")]
+        json: bool,
     },
     #[command(
         about = "Delete a pool file",
@@ -1568,6 +1576,24 @@ fn bounds_json(bounds: plasmite::api::Bounds) -> Value {
     Value::Object(map)
 }
 
+fn pool_metrics_json(metrics: &plasmite::api::PoolMetrics) -> Value {
+    json!({
+        "message_count": metrics.message_count,
+        "seq_span": metrics.seq_span,
+        "utilization": {
+            "used_bytes": metrics.utilization.used_bytes,
+            "free_bytes": metrics.utilization.free_bytes,
+            "used_percent": (metrics.utilization.used_percent_hundredths as f64) / 100.0,
+        },
+        "age": {
+            "oldest_time": metrics.age.oldest_time,
+            "newest_time": metrics.age.newest_time,
+            "oldest_age_ms": metrics.age.oldest_age_ms,
+            "newest_age_ms": metrics.age.newest_age_ms,
+        },
+    })
+}
+
 fn pool_info_json(pool_ref: &str, info: &plasmite::api::PoolInfo) -> Value {
     let mut map = Map::new();
     map.insert("name".to_string(), json!(pool_ref));
@@ -1576,7 +1602,73 @@ fn pool_info_json(pool_ref: &str, info: &plasmite::api::PoolInfo) -> Value {
     map.insert("ring_offset".to_string(), json!(info.ring_offset));
     map.insert("ring_size".to_string(), json!(info.ring_size));
     map.insert("bounds".to_string(), bounds_json(info.bounds));
+    if let Some(metrics) = &info.metrics {
+        map.insert("metrics".to_string(), pool_metrics_json(metrics));
+    }
     Value::Object(map)
+}
+
+fn emit_pool_info_pretty(pool_ref: &str, info: &plasmite::api::PoolInfo) {
+    println!("Pool: {pool_ref}");
+    println!("Path: {}", info.path.display());
+    println!(
+        "Size: {} bytes (ring: offset={} size={})",
+        info.file_size, info.ring_offset, info.ring_size
+    );
+
+    let oldest = info
+        .bounds
+        .oldest_seq
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-".to_string());
+    let newest = info
+        .bounds
+        .newest_seq
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-".to_string());
+    let count = info
+        .metrics
+        .as_ref()
+        .map(|metrics| metrics.message_count)
+        .unwrap_or_else(|| match (info.bounds.oldest_seq, info.bounds.newest_seq) {
+            (Some(oldest), Some(newest)) => newest.saturating_sub(oldest).saturating_add(1),
+            _ => 0,
+        });
+    println!("Bounds: oldest={oldest} newest={newest} count={count}");
+
+    if let Some(metrics) = &info.metrics {
+        let whole = metrics.utilization.used_percent_hundredths / 100;
+        let frac = metrics.utilization.used_percent_hundredths % 100;
+        println!(
+            "Utilization: used={}B free={}B ({}.{:02}%)",
+            metrics.utilization.used_bytes, metrics.utilization.free_bytes, whole, frac
+        );
+        println!(
+            "Oldest: {} ({})",
+            metrics.age.oldest_time.as_deref().unwrap_or("-"),
+            human_age(metrics.age.oldest_age_ms),
+        );
+        println!(
+            "Newest: {} ({})",
+            metrics.age.newest_time.as_deref().unwrap_or("-"),
+            human_age(metrics.age.newest_age_ms),
+        );
+    }
+}
+
+fn human_age(age_ms: Option<u64>) -> String {
+    let Some(age_ms) = age_ms else {
+        return "-".to_string();
+    };
+    if age_ms < 1_000 {
+        return format!("{age_ms}ms ago");
+    }
+    if age_ms < 60_000 {
+        let tenths = (age_ms as f64) / 1_000.0;
+        return format!("{tenths:.1}s ago");
+    }
+    let seconds = age_ms / 1_000;
+    format!("{seconds}s ago")
 }
 
 fn emit_json(value: serde_json::Value, color_mode: ColorMode) {

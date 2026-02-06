@@ -198,7 +198,7 @@ See [Go quickstart](docs/go-quickstart.md), [bindings/python](bindings/python/RE
 | `get POOL SEQ` | Fetch one message by seq number |
 | `pool create NAME` | Create a pool (`--size 8M` for larger) |
 | `pool list` | List pools |
-| `pool info NAME` | Show pool metadata |
+| `pool info NAME [--json]` | Show pool metadata, bounds, and metrics |
 | `pool delete NAME` | Delete a pool |
 | `doctor POOL` | Validate pool health (`--all` for all pools) |
 | `serve` | Serve pools over HTTP (loopback default; non-loopback opt-in) |
@@ -250,6 +250,32 @@ Plasmite is built for scripts:
 - **TTY**: Human-readable errors with hints
 - **Pipes**: JSON errors on stderr, stable exit codes
 - See [docs/exit-codes.md](docs/exit-codes.md) for the full list
+
+Inspect pool diagnostics as JSON:
+
+```bash
+pls pool info foo | jq '.metrics'
+```
+
+Example metrics object:
+
+```json
+{
+  "message_count": 42,
+  "seq_span": 42,
+  "utilization": {
+    "used_bytes": 48128,
+    "free_bytes": 996352,
+    "used_percent": 4.61
+  },
+  "age": {
+    "oldest_time": "2026-02-06T18:58:01Z",
+    "newest_time": "2026-02-06T18:58:07Z",
+    "oldest_age_ms": 93000,
+    "newest_age_ms": 87000
+  }
+}
+```
 
 ## Advanced
 

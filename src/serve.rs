@@ -969,13 +969,34 @@ fn message_json(message: &plasmite::api::Message) -> serde_json::Value {
 }
 
 fn pool_info_json(pool_ref: &str, info: &PoolInfo) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    map.insert("name".to_string(), json!(pool_ref));
+    map.insert("path".to_string(), json!(info.path.display().to_string()));
+    map.insert("file_size".to_string(), json!(info.file_size));
+    map.insert("ring_offset".to_string(), json!(info.ring_offset));
+    map.insert("ring_size".to_string(), json!(info.ring_size));
+    map.insert("bounds".to_string(), bounds_json(info.bounds));
+    if let Some(metrics) = &info.metrics {
+        map.insert("metrics".to_string(), pool_metrics_json(metrics));
+    }
+    serde_json::Value::Object(map)
+}
+
+fn pool_metrics_json(metrics: &plasmite::api::PoolMetrics) -> serde_json::Value {
     json!({
-        "name": pool_ref,
-        "path": info.path.display().to_string(),
-        "file_size": info.file_size,
-        "ring_offset": info.ring_offset,
-        "ring_size": info.ring_size,
-        "bounds": bounds_json(info.bounds),
+        "message_count": metrics.message_count,
+        "seq_span": metrics.seq_span,
+        "utilization": {
+            "used_bytes": metrics.utilization.used_bytes,
+            "free_bytes": metrics.utilization.free_bytes,
+            "used_percent": (metrics.utilization.used_percent_hundredths as f64) / 100.0,
+        },
+        "age": {
+            "oldest_time": metrics.age.oldest_time,
+            "newest_time": metrics.age.newest_time,
+            "oldest_age_ms": metrics.age.oldest_age_ms,
+            "newest_age_ms": metrics.age.newest_age_ms,
+        },
     })
 }
 

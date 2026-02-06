@@ -16,7 +16,8 @@ pub use crate::core::error::to_exit_code;
 pub use crate::core::error::{Error, ErrorKind};
 pub use crate::core::lite3::{self, Lite3DocRef};
 pub use crate::core::pool::{
-    AppendOptions, Bounds, Durability, Pool, PoolInfo, PoolOptions, SeqOffsetCache,
+    AppendOptions, Bounds, Durability, Pool, PoolAgeMetrics, PoolInfo, PoolMetrics, PoolOptions,
+    PoolUtilization, SeqOffsetCache,
 };
 pub use client::{LocalClient, PoolRef};
 pub use message::{Lite3Tail, Message, Meta, PoolApiExt, Replay, ReplayOptions, Tail, TailOptions};

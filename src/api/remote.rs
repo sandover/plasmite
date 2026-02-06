@@ -8,7 +8,10 @@
 
 use super::{Message, Meta, PoolRef, TailOptions};
 use crate::core::error::{Error, ErrorKind};
-use crate::core::pool::{AppendOptions, Bounds, Durability, PoolInfo, PoolOptions};
+use crate::core::pool::{
+    AppendOptions, Bounds, Durability, PoolAgeMetrics, PoolInfo, PoolMetrics, PoolOptions,
+    PoolUtilization,
+};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -106,12 +109,37 @@ struct RemotePoolInfo {
     ring_size: u64,
     #[serde(default)]
     bounds: RemoteBounds,
+    #[serde(default)]
+    metrics: Option<RemotePoolMetrics>,
 }
 
 #[derive(Deserialize, Default)]
 struct RemoteBounds {
     oldest: Option<u64>,
     newest: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct RemotePoolMetrics {
+    message_count: u64,
+    seq_span: u64,
+    utilization: RemotePoolUtilization,
+    age: RemotePoolAgeMetrics,
+}
+
+#[derive(Deserialize)]
+struct RemotePoolUtilization {
+    used_bytes: u64,
+    free_bytes: u64,
+    used_percent: f64,
+}
+
+#[derive(Deserialize)]
+struct RemotePoolAgeMetrics {
+    oldest_time: Option<String>,
+    newest_time: Option<String>,
+    oldest_age_ms: Option<u64>,
+    newest_age_ms: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -769,6 +797,31 @@ fn pool_info_from_remote(pool_ref: &str, pool: RemotePoolInfo) -> PoolInfo {
         bounds: Bounds {
             oldest_seq: pool.bounds.oldest,
             newest_seq: pool.bounds.newest,
+        },
+        metrics: pool.metrics.map(pool_metrics_from_remote),
+    }
+}
+
+fn pool_metrics_from_remote(metrics: RemotePoolMetrics) -> PoolMetrics {
+    let used_percent_hundredths = if metrics.utilization.used_percent.is_finite() {
+        let rounded = (metrics.utilization.used_percent * 100.0).round();
+        rounded.clamp(0.0, 10_000.0) as u64
+    } else {
+        0
+    };
+    PoolMetrics {
+        message_count: metrics.message_count,
+        seq_span: metrics.seq_span,
+        utilization: PoolUtilization {
+            used_bytes: metrics.utilization.used_bytes,
+            free_bytes: metrics.utilization.free_bytes,
+            used_percent_hundredths,
+        },
+        age: PoolAgeMetrics {
+            oldest_time: metrics.age.oldest_time,
+            newest_time: metrics.age.newest_time,
+            oldest_age_ms: metrics.age.oldest_age_ms,
+            newest_age_ms: metrics.age.newest_age_ms,
         },
     }
 }

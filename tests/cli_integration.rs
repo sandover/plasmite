@@ -249,6 +249,121 @@ fn create_poke_get_peek_flow() {
 }
 
 #[test]
+fn pool_info_json_includes_metrics() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "metrics",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke_one = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "metrics",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke_one.status.success());
+
+    let poke_two = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "metrics",
+            "{\"x\":2}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke_two.status.success());
+
+    let info = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "info",
+            "metrics",
+            "--json",
+        ])
+        .output()
+        .expect("info");
+    assert!(info.status.success());
+    let info_json = parse_json(std::str::from_utf8(&info.stdout).expect("utf8"));
+    let metrics = info_json.get("metrics").expect("metrics");
+    assert_eq!(metrics["message_count"], 2);
+    assert_eq!(metrics["seq_span"], 2);
+    assert!(metrics["utilization"]["used_bytes"].as_u64().unwrap() > 0);
+    assert!(metrics["utilization"]["free_bytes"].as_u64().unwrap() > 0);
+    assert!(metrics["utilization"]["used_percent"].is_number());
+    assert!(metrics["age"]["oldest_time"].is_string());
+    assert!(metrics["age"]["newest_time"].is_string());
+    assert!(metrics["age"]["oldest_age_ms"].is_number());
+    assert!(metrics["age"]["newest_age_ms"].is_number());
+}
+
+#[test]
+fn pool_info_default_is_human_readable() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "pretty",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "pretty",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let info = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "info",
+            "pretty",
+        ])
+        .output()
+        .expect("info");
+    assert!(info.status.success());
+    let stdout = std::str::from_utf8(&info.stdout).expect("utf8");
+    assert!(stdout.contains("Pool: pretty"));
+    assert!(stdout.contains("Path: "));
+    assert!(stdout.contains("Bounds: "));
+    assert!(stdout.contains("Utilization: "));
+    assert!(stdout.contains("Oldest: "));
+    assert!(stdout.contains("Newest: "));
+}
+
+#[test]
 fn readme_quickstart_flow() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
@@ -1476,6 +1591,7 @@ fn color_always_colorizes_pretty_stdout() {
             "pool",
             "info",
             "demo",
+            "--json",
         ])
         .output()
         .expect("info");
@@ -1510,6 +1626,7 @@ fn color_never_does_not_emit_ansi() {
             "pool",
             "info",
             "demo",
+            "--json",
         ])
         .output()
         .expect("info");

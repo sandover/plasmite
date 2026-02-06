@@ -442,12 +442,93 @@ Detailed info for one pool.
 **Synopsis**
 
 ```bash
-plasmite pool info NAME
+plasmite pool info NAME [--json]
 ```
+
+**Behavior**
+
+* Default output is human-readable for interactive use.
+* `--json` emits a JSON object with stable base fields (`name`, `path`, `file_size`, `ring_offset`, `ring_size`, `bounds`).
+* Metrics are exposed under an additive `metrics` object.
+* Backward compatibility: clients MUST treat missing `metrics` or missing metric subfields as "unavailable", not errors.
+* Throughput (`messages/sec`) is intentionally out of scope for v0 `pool info` output (see notes below).
 
 **Output**
 
-* Default: JSON object to stdout (pretty if TTY, compact otherwise).
+* Default mode: stable human-readable summary lines.
+* JSON mode (`--json`): object to stdout (pretty if TTY, compact otherwise).
+
+**JSON fields**
+
+* `name` (string): pool name or provided pool reference.
+* `path` (string): absolute pool path.
+* `file_size` (number): pool file size in bytes.
+* `ring_offset` (number): start offset of ring region in bytes.
+* `ring_size` (number): ring region size in bytes.
+* `bounds` (object): sequence bounds.
+  * `oldest` (number, optional)
+  * `newest` (number, optional)
+* `metrics` (object, optional): additive diagnostics; omitted when unavailable.
+  * `message_count` (number): `newest - oldest + 1` when bounds exist, else `0`.
+  * `seq_span` (number): inclusive seq distance (`message_count` in v0 semantics).
+  * `utilization` (object):
+    * `used_bytes` (number)
+    * `free_bytes` (number)
+    * `used_percent` (number): closed interval `[0.0, 100.0]`
+  * `age` (object):
+    * `oldest_time` (string or null): RFC3339 UTC timestamp from oldest retained message.
+    * `newest_time` (string or null): RFC3339 UTC timestamp from newest retained message.
+    * `oldest_age_ms` (number or null): age of oldest retained message at render time.
+    * `newest_age_ms` (number or null): age of newest retained message at render time.
+
+**Example**
+
+```json
+{
+  "name": "demo",
+  "path": "/Users/me/.plasmite/pools/demo.plasmite",
+  "file_size": 1048576,
+  "ring_offset": 4096,
+  "ring_size": 1044480,
+  "bounds": { "oldest": 41, "newest": 42 },
+  "metrics": {
+    "message_count": 2,
+    "seq_span": 2,
+    "utilization": {
+      "used_bytes": 48128,
+      "free_bytes": 996352,
+      "used_percent": 4.61
+    },
+    "age": {
+      "oldest_time": "2026-02-06T18:58:01Z",
+      "newest_time": "2026-02-06T18:58:07Z",
+      "oldest_age_ms": 93000,
+      "newest_age_ms": 87000
+    }
+  }
+}
+```
+
+**Human-readable mapping (for docs and future renderers)**
+
+When rendered for humans, use this field order and labels:
+
+```text
+Pool: demo
+Path: /Users/me/.plasmite/pools/demo.plasmite
+Size: 1048576 bytes (ring: offset=4096 size=1044480)
+Bounds: oldest=41 newest=42 count=2
+Utilization: used=48128B free=996352B (4.61%)
+Age: oldest=2026-02-06T18:58:01Z (93s ago), newest=2026-02-06T18:58:07Z (87s ago)
+```
+
+**Throughput decision (v0)**
+
+`messages/sec` is not included in `pool info` output for v0:
+
+* Computing accurate throughput requires history not present in the current pool header, which would imply a format change.
+* Sampling during a single `pool info` call is noisy/misleading and conflates read latency with write rate.
+* Recommended approach: derive throughput externally by diffing `message_count` or `newest` across repeated observations.
 
 ---
 

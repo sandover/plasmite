@@ -46,6 +46,19 @@ let fetched = pool.get_message(1)?;
 println!("{}", fetched.time);
 ```
 
+## Inspect pool metrics
+
+```rust
+let info = pool.info()?;
+if let Some(metrics) = info.metrics {
+    println!("messages={}", metrics.message_count);
+    println!(
+        "used_percent={:.2}",
+        (metrics.utilization.used_percent_hundredths as f64) / 100.0
+    );
+}
+```
+
 ## Tail messages
 
 ```rust
