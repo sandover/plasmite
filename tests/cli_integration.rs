@@ -3311,7 +3311,7 @@ fn completion_invalid_shell_fails() {
 }
 
 #[test]
-fn replay_emits_messages_in_order() {
+fn peek_replay_emits_messages_in_order() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -3337,14 +3337,16 @@ fn replay_emits_messages_in_order() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "replay",
+            "peek",
             "rp",
-            "--speed",
+            "--tail",
             "100",
+            "--replay",
+            "0",
             "--jsonl",
         ])
         .output()
-        .expect("replay");
+        .expect("peek --replay");
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
     assert_eq!(messages.len(), 3);
@@ -3354,7 +3356,7 @@ fn replay_emits_messages_in_order() {
 }
 
 #[test]
-fn replay_tail_limits_messages() {
+fn peek_replay_tail_limits_messages() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -3379,16 +3381,16 @@ fn replay_tail_limits_messages() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "replay",
+            "peek",
             "rpt",
             "--tail",
             "2",
-            "--speed",
-            "100",
+            "--replay",
+            "0",
             "--jsonl",
         ])
         .output()
-        .expect("replay");
+        .expect("peek --replay");
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
     assert_eq!(messages.len(), 2);
@@ -3397,7 +3399,7 @@ fn replay_tail_limits_messages() {
 }
 
 #[test]
-fn replay_respects_speed_timing() {
+fn peek_replay_respects_speed_timing() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -3432,14 +3434,16 @@ fn replay_respects_speed_timing() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "replay",
+            "peek",
             "rps",
-            "--speed",
+            "--tail",
+            "100",
+            "--replay",
             "1",
             "--jsonl",
         ])
         .output()
-        .expect("replay");
+        .expect("peek --replay");
     let elapsed = start.elapsed();
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
@@ -3451,7 +3455,7 @@ fn replay_respects_speed_timing() {
 }
 
 #[test]
-fn replay_speed_2x_halves_delay() {
+fn peek_replay_speed_2x_halves_delay() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -3492,14 +3496,16 @@ fn replay_speed_2x_halves_delay() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "replay",
+            "peek",
             "rps2",
-            "--speed",
+            "--tail",
+            "100",
+            "--replay",
             "2",
             "--jsonl",
         ])
         .output()
-        .expect("replay");
+        .expect("peek --replay");
     let elapsed = start.elapsed();
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
@@ -3515,7 +3521,7 @@ fn replay_speed_2x_halves_delay() {
 }
 
 #[test]
-fn replay_rejects_zero_speed() {
+fn peek_replay_rejects_without_tail_or_since() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -3528,18 +3534,18 @@ fn replay_rejects_zero_speed() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "replay",
+            "peek",
             "rpz",
-            "--speed",
-            "0",
+            "--replay",
+            "1",
         ])
         .output()
-        .expect("replay");
+        .expect("peek --replay");
     assert!(!output.status.success());
 }
 
 #[test]
-fn replay_rejects_negative_speed() {
+fn peek_replay_rejects_negative_speed() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -3552,18 +3558,20 @@ fn replay_rejects_negative_speed() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "replay",
+            "peek",
             "rpn",
-            "--speed",
+            "--tail",
+            "5",
+            "--replay",
             "-1",
         ])
         .output()
-        .expect("replay");
+        .expect("peek --replay");
     assert!(!output.status.success());
 }
 
 #[test]
-fn replay_where_filters_messages() {
+fn peek_replay_where_filters_messages() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -3606,16 +3614,18 @@ fn replay_where_filters_messages() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "replay",
+            "peek",
             "rpw",
-            "--speed",
+            "--tail",
             "100",
+            "--replay",
+            "0",
             "--jsonl",
             "--where",
             r#".data.level == "error""#,
         ])
         .output()
-        .expect("replay");
+        .expect("peek --replay");
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
     assert_eq!(messages.len(), 1);
@@ -3623,7 +3633,7 @@ fn replay_where_filters_messages() {
 }
 
 #[test]
-fn replay_one_exits_after_first_message() {
+fn peek_replay_one_exits_after_first_message() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -3648,15 +3658,17 @@ fn replay_one_exits_after_first_message() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "replay",
+            "peek",
             "rpo",
-            "--speed",
+            "--tail",
             "100",
+            "--replay",
+            "0",
             "--jsonl",
             "--one",
         ])
         .output()
-        .expect("replay");
+        .expect("peek --replay");
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
     assert_eq!(messages.len(), 1);
@@ -3664,7 +3676,7 @@ fn replay_one_exits_after_first_message() {
 }
 
 #[test]
-fn replay_empty_pool_exits_ok() {
+fn peek_replay_empty_pool_exits_ok() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -3677,20 +3689,22 @@ fn replay_empty_pool_exits_ok() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "replay",
+            "peek",
             "rpe",
-            "--speed",
+            "--tail",
             "100",
+            "--replay",
+            "0",
             "--jsonl",
         ])
         .output()
-        .expect("replay");
+        .expect("peek --replay");
     assert!(output.status.success());
     assert!(output.stdout.is_empty());
 }
 
 #[test]
-fn replay_data_only_emits_payload() {
+fn peek_replay_data_only_emits_payload() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -3713,18 +3727,76 @@ fn replay_data_only_emits_payload() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "replay",
+            "peek",
             "rpd",
-            "--speed",
+            "--tail",
             "100",
+            "--replay",
+            "0",
             "--jsonl",
             "--data-only",
         ])
         .output()
-        .expect("replay");
+        .expect("peek --replay");
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0], json!({"x": 42}));
     assert!(messages[0].get("seq").is_none());
+}
+
+#[test]
+fn peek_replay_zero_speed_emits_without_delay() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "rp0"])
+        .output()
+        .expect("create");
+    cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "rp0",
+            "{\"i\":1}",
+        ])
+        .output()
+        .expect("poke");
+    sleep(Duration::from_millis(200));
+    cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "rp0",
+            "{\"i\":2}",
+        ])
+        .output()
+        .expect("poke");
+
+    let start = Instant::now();
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "rp0",
+            "--tail",
+            "100",
+            "--replay",
+            "0",
+            "--jsonl",
+        ])
+        .output()
+        .expect("peek --replay 0");
+    let elapsed = start.elapsed();
+    assert!(output.status.success());
+    let messages = parse_json_lines(&output.stdout);
+    assert_eq!(messages.len(), 2);
+    assert!(
+        elapsed < Duration::from_millis(100),
+        "--replay 0 should emit without delay, took {elapsed:?}"
+    );
 }

@@ -436,7 +436,27 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             format,
             since,
             where_expr,
+            replay,
         } => {
+            if let Some(speed) = replay {
+                if speed < 0.0 {
+                    return Err(Error::new(ErrorKind::Usage)
+                        .with_message("--replay speed must be non-negative")
+                        .with_hint("Use --replay 1 for realtime, --replay 2 for 2x, --replay 0 for no delay."));
+                }
+                if !speed.is_finite() {
+                    return Err(Error::new(ErrorKind::Usage)
+                        .with_message("--replay speed must be a finite number")
+                        .with_hint("Use --replay 1 for realtime, --replay 2 for 2x, --replay 0 for no delay."));
+                }
+                if tail == 0 && since.is_none() {
+                    return Err(Error::new(ErrorKind::Usage)
+                        .with_message("--replay requires --tail or --since")
+                        .with_hint(
+                            "Replay needs historical messages. Use --tail N or --since DURATION.",
+                        ));
+                }
+            }
             let path = resolve_poolref(&pool, &pool_dir)?;
             let pool_handle =
                 Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
@@ -473,66 +493,10 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 quiet_drops,
                 notify: !no_notify,
                 color_mode,
+                replay_speed: replay,
             };
             let outcome = peek(&pool_handle, &pool, &path, cfg)?;
             Ok(outcome)
-        }
-        Command::Replay {
-            pool,
-            tail,
-            speed,
-            one,
-            data_only,
-            format,
-            jsonl,
-            since,
-            where_expr,
-        } => {
-            if speed <= 0.0 {
-                return Err(Error::new(ErrorKind::Usage)
-                    .with_message("--speed must be positive")
-                    .with_hint("Use --speed 1 for realtime, --speed 2 for 2x, etc."));
-            }
-            if !speed.is_finite() {
-                return Err(Error::new(ErrorKind::Usage)
-                    .with_message("--speed must be a finite number")
-                    .with_hint("Use --speed 1 for realtime, --speed 2 for 2x, etc."));
-            }
-            let path = resolve_poolref(&pool, &pool_dir)?;
-            let pool_handle =
-                Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
-            if jsonl && format.is_some() {
-                return Err(Error::new(ErrorKind::Usage)
-                    .with_message("conflicting output options")
-                    .with_hint("Use --format jsonl (or --jsonl), but not both."));
-            }
-            let format = format.unwrap_or(if jsonl {
-                PeekFormat::Jsonl
-            } else {
-                PeekFormat::Pretty
-            });
-            let pretty = matches!(format, PeekFormat::Pretty);
-            let now = now_ns()?;
-            let since_ns = since
-                .as_deref()
-                .map(|value| parse_since(value, now))
-                .transpose()?;
-            if let Some(since_ns) = since_ns {
-                if since_ns > now {
-                    return Ok(RunOutcome::ok());
-                }
-            }
-            let cfg = ReplayConfig {
-                tail,
-                speed,
-                pretty,
-                one,
-                data_only,
-                since_ns,
-                where_predicates: compile_filters(&where_expr)?,
-                color_mode,
-            };
-            replay(&pool_handle, cfg)
         }
     })();
 
@@ -838,7 +802,8 @@ NOTES
         long_about = r#"Watch a pool and stream messages as they arrive.
 
 By default, `peek` waits for new messages forever (Ctrl-C to stop).
-Use `--tail N` to see recent history first, then keep watching."#,
+Use `--tail N` to see recent history first, then keep watching.
+Use `--replay N` with `--tail` or `--since` to replay with timing."#,
         after_help = r#"EXAMPLES
   # Watch for new messages
   $ plasmite peek foo
@@ -852,11 +817,17 @@ Use `--tail N` to see recent history first, then keep watching."#,
   # Messages from the last 5 minutes
   $ plasmite peek foo --since 5m
 
+  # Replay last 100 messages at original timing
+  $ plasmite peek foo --tail 100 --replay 1
+
+  # Replay at 2x speed
+  $ plasmite peek foo --tail 50 --replay 2
+
+  # Replay at half speed
+  $ plasmite peek foo --since 5m --replay 0.5
+
   # Filter by tag (descrip)
   $ plasmite peek foo --where '.meta.descrips[]? == "ping"'
-
-  # Filter by data field
-  $ plasmite peek foo --where '.data.status == "error"'
 
   # Pipe to jq
   $ plasmite peek foo --format jsonl | jq -r '.data.msg'
@@ -870,7 +841,9 @@ Use `--tail N` to see recent history first, then keep watching."#,
 NOTES
   - Use `--format jsonl` for scripts (one JSON object per line)
   - `--where` uses jq-style expressions; repeat for AND
-  - `--since 5m` and `--since 2026-01-15T10:00:00Z` both work"#
+  - `--since 5m` and `--since 2026-01-15T10:00:00Z` both work
+  - `--replay N` exits when all selected messages are emitted (no live follow)
+  - `--replay 0` emits as fast as possible (same as peek, but bounded)"#
     )]
     Peek {
         #[arg(help = "Pool name or path")]
@@ -915,68 +888,12 @@ NOTES
         quiet_drops: bool,
         #[arg(long = "no-notify", help = "Disable semaphore wakeups (poll only)")]
         no_notify: bool,
-    },
-    #[command(
-        about = "Replay messages with original timing",
-        long_about = r#"Play back pool messages at the pace they were originally written,
-or at a configurable speed multiplier.
-
-Replay is a bounded operation: it emits the selected messages with
-inter-message delays derived from their timestamps, then exits."#,
-        after_help = r#"EXAMPLES
-  # Replay all messages at original timing
-  $ plasmite replay foo
-
-  # Replay last 100 messages at 2x speed
-  $ plasmite replay foo --tail 100 --speed 2
-
-  # Replay at half speed
-  $ plasmite replay foo --speed 0.5
-
-  # Replay with a filter
-  $ plasmite replay foo --where '.data.level == "error"' --speed 1
-
-NOTES
-  - Default speed is 1 (realtime); omitting --speed is the same as --speed 1
-  - Replay exits when all selected messages have been emitted
-  - Inter-message delays are faithful: no gap compression"#
-    )]
-    Replay {
-        #[arg(help = "Pool name or path")]
-        pool: String,
         #[arg(
-            long = "tail",
-            short = 'n',
-            default_value_t = 0,
-            help = "Replay the last N messages"
+            long = "replay",
+            value_name = "SPEED",
+            help = "Replay with timing (1 = realtime, 2 = 2x, 0.5 = half; 0 = no delay). Requires --tail or --since"
         )]
-        tail: u64,
-        #[arg(
-            long,
-            default_value_t = 1.0,
-            help = "Speed multiplier (1 = realtime, 2 = 2x faster, 0.5 = half speed)"
-        )]
-        speed: f64,
-        #[arg(long, help = "Exit after emitting one matching message")]
-        one: bool,
-        #[arg(long, help = "Emit only the .data payload")]
-        data_only: bool,
-        #[arg(long, value_enum, help = "Output format: pretty|jsonl")]
-        format: Option<PeekFormat>,
-        #[arg(long, help = "Emit JSON Lines (one object per line)")]
-        jsonl: bool,
-        #[arg(
-            long,
-            help = "Only emit messages at or after this time (RFC 3339 or relative like 5m)",
-            conflicts_with = "tail"
-        )]
-        since: Option<String>,
-        #[arg(
-            long = "where",
-            value_name = "EXPR",
-            help = "Filter messages by boolean expression (repeatable; AND across repeats)"
-        )]
-        where_expr: Vec<String>,
+        replay: Option<f64>,
     },
     #[command(
         about = "Diagnose pool health",
@@ -2255,6 +2172,7 @@ struct PeekConfig {
     quiet_drops: bool,
     notify: bool,
     color_mode: ColorMode,
+    replay_speed: Option<f64>,
 }
 
 fn peek(
@@ -2263,6 +2181,10 @@ fn peek(
     pool_path: &Path,
     cfg: PeekConfig,
 ) -> Result<RunOutcome, Error> {
+    if cfg.replay_speed.is_some() {
+        return peek_replay(pool, &cfg);
+    }
+
     let mut cursor = Cursor::new();
     let mut header = pool.header_from_mmap()?;
     let mut emit = VecDeque::new();
@@ -2513,18 +2435,8 @@ fn peek(
     }
 }
 
-struct ReplayConfig {
-    tail: u64,
-    speed: f64,
-    pretty: bool,
-    one: bool,
-    data_only: bool,
-    since_ns: Option<u64>,
-    where_predicates: Vec<JqFilter>,
-    color_mode: ColorMode,
-}
-
-fn replay(pool: &Pool, cfg: ReplayConfig) -> Result<RunOutcome, Error> {
+fn peek_replay(pool: &Pool, cfg: &PeekConfig) -> Result<RunOutcome, Error> {
+    let speed = cfg.replay_speed.unwrap_or(0.0);
     let mut cursor = Cursor::new();
     let mut header = pool.header_from_mmap()?;
     let mut collected: Vec<(u64, Value)> = Vec::new();
@@ -2584,9 +2496,9 @@ fn replay(pool: &Pool, cfg: ReplayConfig) -> Result<RunOutcome, Error> {
 
     let mut prev_ts = collected[0].0;
     for (i, (ts, message)) in collected.into_iter().enumerate() {
-        if i > 0 {
+        if i > 0 && speed > 0.0 {
             let delta_ns = ts.saturating_sub(prev_ts);
-            let delay_ns = (delta_ns as f64 / cfg.speed) as u64;
+            let delay_ns = (delta_ns as f64 / speed) as u64;
             if delay_ns > 0 {
                 std::thread::sleep(Duration::from_nanos(delay_ns));
             }
