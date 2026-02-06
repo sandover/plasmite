@@ -253,35 +253,29 @@ Skip bad records with `--errors skip` (exit 1 if any skipped).
 
 Serve pools over HTTP for access from other machines or containers.
 
-### Local development
+### Starting the server
 
 ```bash
+# Local-only (default, for dev)
 pls serve
-# Listening on 127.0.0.1:9700
-```
 
-That's it. Now other processes on this machine can read and write:
-
-```bash
-# Append via CLI (shorthand URL)
-pls poke http://127.0.0.1:9700/demo '{"msg": "hello"}'
-
-# Tail via curl (streams until Ctrl-C)
-curl -N http://127.0.0.1:9700/v0/pools/demo/tail
-```
-
-### Exposing to LAN
-
-Non-loopback binds require explicit opt-in and security:
-
-```bash
-# Read-only (safe for dashboards, no auth required)
+# Expose to LAN read-only (no auth required)
 pls serve --bind 0.0.0.0:9700 --allow-non-loopback --access read-only
 
-# Read-write with TLS + token auth
+# Expose to LAN read-write (requires TLS + token)
 pls serve --bind 0.0.0.0:9700 --allow-non-loopback \
   --token-file ~/.plasmite/token \
   --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
+```
+
+### From another machine
+
+```bash
+# Append from a remote host
+pls poke http://server:9700/events '{"sensor": "temp", "value": 23.5}'
+
+# Tail from a remote host
+pls peek http://server:9700/events
 ```
 
 ### From code
@@ -289,12 +283,12 @@ pls serve --bind 0.0.0.0:9700 --allow-non-loopback \
 ```javascript
 // Node.js
 const { RemoteClient } = require("plasmite-node")
-const client = new RemoteClient("http://127.0.0.1:9700")
-const pool = await client.openPool("demo")
-await pool.append({ msg: "hello" }, ["remote"])
+const client = new RemoteClient("http://server:9700")
+const pool = await client.openPool("events")
+await pool.append({ sensor: "temp", value: 23.5 }, [])
 ```
 
-> **Notes:** Remote `poke` uses shorthand URLs (`http://host:port/pool`). Pool creation is local-only by design. See [Remote protocol spec](spec/remote/v0/SPEC.md) for the full API.
+> **Notes:** Remote `poke`/`peek` use shorthand URLs (`http://host:port/pool`). Pool creation is local-only. See [Remote protocol spec](spec/remote/v0/SPEC.md).
 
 ## Performance
 

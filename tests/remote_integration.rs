@@ -10,7 +10,7 @@ use plasmite::api::{
     RemoteClient, TailOptions,
 };
 use serde_json::{Value, json};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener};
 use std::process::{Child, Command, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -444,10 +444,15 @@ fn pick_port() -> TestResult<u16> {
 }
 
 fn wait_for_server(addr: SocketAddr) -> TestResult<()> {
+    // Use healthz endpoint - it's not subject to access control and works for all modes
+    let url = format!("http://{addr}/healthz");
     let start = Instant::now();
     loop {
-        if TcpStream::connect(addr).is_ok() {
-            return Ok(());
+        if let Ok(resp) = ureq::get(&url).call() {
+            // Verify it's a Plasmite server via the version header
+            if resp.header("plasmite-version").is_some() {
+                return Ok(());
+            }
         }
         if start.elapsed() > Duration::from_secs(5) {
             return Err("server did not start in time".into());
