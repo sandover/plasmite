@@ -251,57 +251,50 @@ Skip bad records with `--errors skip` (exit 1 if any skipped).
 
 ## Remote Access
 
-Serve pools over HTTP for access from other processes or machines:
+Serve pools over HTTP for access from other machines or containers.
+
+### Local development
 
 ```bash
-# Loopback dev (default)
-pls serve --bind 127.0.0.1:9700
-
-# LAN read-only (no auth)
-pls serve --bind 0.0.0.0:9700 --allow-non-loopback --access read-only
-
-# LAN write with TLS + token
-pls serve --bind 0.0.0.0:9700 --allow-non-loopback \
-  --token-file /path/to/token \
-  --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
-
-# Use curl to append a message
-curl -X POST http://127.0.0.1:9700/v0/pools/demo/append \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat /path/to/token)" \
-  -d '{"data": {"msg": "hello from curl"}, "descrips": ["remote"]}'
-
-# Tail messages (JSON Lines stream)
-curl -N http://127.0.0.1:9700/v0/pools/demo/tail
-
-# Ergonomic CLI shorthand for remote append
-pls poke http://127.0.0.1:9700/demo --descrip ping '{"x":1}'
-
-# Rejected: API-shaped URL (use shorthand above)
-pls poke http://127.0.0.1:9700/v0/pools/demo/append '{"x":1}'
-
-# Rejected: remote create is not allowed via poke
-pls poke http://127.0.0.1:9700/demo --create '{"x":1}'
+pls serve
+# Listening on 127.0.0.1:9700
 ```
 
-Notes:
-- Non-loopback binds require `--allow-non-loopback`.
-- Non-loopback writes require `--token-file` and TLS (or `--insecure-no-tls` for demos).
-- Remote `poke` refs must be shorthand `http(s)://host:port/<pool>` (no trailing slash).
-- Remote `poke` does not create pools; `--create` is local-only by design.
-- Access modes: `read-only`, `write-only`, `read-write`.
-- `--tls-self-signed` is for local demos; prefer real certs or a reverse proxy for LAN.
+That's it. Now other processes on this machine can read and write:
 
-The Node.js binding includes a `RemoteClient` for programmatic access:
+```bash
+# Append via CLI (shorthand URL)
+pls poke http://127.0.0.1:9700/demo '{"msg": "hello"}'
+
+# Tail via curl (streams until Ctrl-C)
+curl -N http://127.0.0.1:9700/v0/pools/demo/tail
+```
+
+### Exposing to LAN
+
+Non-loopback binds require explicit opt-in and security:
+
+```bash
+# Read-only (safe for dashboards, no auth required)
+pls serve --bind 0.0.0.0:9700 --allow-non-loopback --access read-only
+
+# Read-write with TLS + token auth
+pls serve --bind 0.0.0.0:9700 --allow-non-loopback \
+  --token-file ~/.plasmite/token \
+  --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
+```
+
+### From code
 
 ```javascript
+// Node.js
 const { RemoteClient } = require("plasmite-node")
 const client = new RemoteClient("http://127.0.0.1:9700")
 const pool = await client.openPool("demo")
 await pool.append({ msg: "hello" }, ["remote"])
 ```
 
-See [Remote protocol spec](spec/remote/v0/SPEC.md) for the full API.
+> **Notes:** Remote `poke` uses shorthand URLs (`http://host:port/pool`). Pool creation is local-only by design. See [Remote protocol spec](spec/remote/v0/SPEC.md) for the full API.
 
 ## Performance
 
