@@ -17,11 +17,12 @@ This roadmap is outcome-oriented. Design details live in ADRs; compatibility pro
 - ✓ Public Rust API (`plasmite::api`)
 - ✓ Remote protocol spec (HTTP/JSON)
 - ✓ Conformance test suite (cross-language)
+- ✓ Remote `poke` via shorthand URLs (`http://host:port/pool`)
 
 ## In progress
 
 - Shell completion
-- Remote pool refs in CLI (using `plasmite serve` as backend)
+- Remote `peek`/`get` via shorthand URLs
 
 ## Future
 

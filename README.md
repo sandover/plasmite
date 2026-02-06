@@ -273,10 +273,9 @@ pls serve --bind 0.0.0.0:9700 --allow-non-loopback \
 ```bash
 # Append from a remote host
 pls poke http://server:9700/events '{"sensor": "temp", "value": 23.5}'
-
-# Tail from a remote host
-pls peek http://server:9700/events
 ```
+
+> **Note:** Remote `peek` is not yet supported via shorthand URLs. Use the HTTP API directly or the Node.js `RemoteClient` for remote tailing.
 
 ### From code
 
@@ -288,7 +287,7 @@ const pool = await client.openPool("events")
 await pool.append({ sensor: "temp", value: 23.5 }, [])
 ```
 
-> **Notes:** Remote `poke`/`peek` use shorthand URLs (`http://host:port/pool`). Pool creation is local-only. See [Remote protocol spec](spec/remote/v0/SPEC.md).
+> **Notes:** Remote `poke` uses shorthand URLs (`http://host:port/pool`). Pool creation is local-only. See [Remote protocol spec](spec/remote/v0/SPEC.md).
 
 ## Performance
 

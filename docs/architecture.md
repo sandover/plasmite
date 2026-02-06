@@ -45,7 +45,7 @@ Key invariants:
 ## Remote access
 
 Plasmite is **transport-agnostic**:
-- The `PoolRef` model represents local names/paths now and can represent URI-based refs later.
+- The `PoolRef` model represents local names/paths; remote shorthand URLs are supported for `poke` (and more commands soon).
 - Message streams use the same logical format whether over stdin, file, HTTP, or future transports.
 - `plasmite serve` is a thin adapter: HTTP ↔ framing ↔ core operations.
 
