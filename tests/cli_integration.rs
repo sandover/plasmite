@@ -3230,3 +3230,82 @@ fn serve_tls_allows_healthz_with_trusted_cert() {
     let body: Value = serde_json::from_str(&response.into_string().expect("body")).expect("json");
     assert_eq!(body.get("ok").and_then(|value| value.as_bool()), Some(true));
 }
+
+// --- Shell completion tests ---
+
+#[test]
+fn completion_bash_generates_valid_output() {
+    let output = cmd()
+        .args(["completion", "bash"])
+        .output()
+        .expect("completion bash");
+    assert!(output.status.success(), "completion bash should succeed");
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+    assert!(!stdout.is_empty(), "bash completion should produce output");
+    assert!(
+        stdout.contains("_plasmite"),
+        "bash should define _plasmite function"
+    );
+    assert!(
+        stdout.contains("pool"),
+        "bash should include pool subcommand"
+    );
+    assert!(
+        stdout.contains("poke"),
+        "bash should include poke subcommand"
+    );
+    assert!(
+        stdout.contains("peek"),
+        "bash should include peek subcommand"
+    );
+}
+
+#[test]
+fn completion_zsh_generates_valid_output() {
+    let output = cmd()
+        .args(["completion", "zsh"])
+        .output()
+        .expect("completion zsh");
+    assert!(output.status.success(), "completion zsh should succeed");
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+    assert!(!stdout.is_empty(), "zsh completion should produce output");
+    assert!(
+        stdout.contains("#compdef") || stdout.contains("_plasmite"),
+        "zsh should contain #compdef or _plasmite"
+    );
+    assert!(
+        stdout.contains("pool"),
+        "zsh should include pool subcommand"
+    );
+}
+
+#[test]
+fn completion_fish_generates_valid_output() {
+    let output = cmd()
+        .args(["completion", "fish"])
+        .output()
+        .expect("completion fish");
+    assert!(output.status.success(), "completion fish should succeed");
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+    assert!(!stdout.is_empty(), "fish completion should produce output");
+    assert!(
+        stdout.contains("complete"),
+        "fish should use 'complete' command"
+    );
+    assert!(
+        stdout.contains("plasmite"),
+        "fish should reference plasmite"
+    );
+}
+
+#[test]
+fn completion_invalid_shell_fails() {
+    let output = cmd()
+        .args(["completion", "fake-shell"])
+        .output()
+        .expect("completion fake-shell");
+    assert!(
+        !output.status.success(),
+        "completion with unsupported shell should fail"
+    );
+}
