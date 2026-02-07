@@ -23,5 +23,6 @@ Use ergo for all planning, so that your plans can be stored in the repo. Run "er
 
 # Other Guidance
 - For temporary work and experiments, use tmp/ or .scratch/, not /tmp, so that I am not prompted for permissions
+- When you have been working for a long time, I may have gone away to do other things and I have lost context on what we were working. So end your long work sessions with a helpful situation report and summary.
 
 If you have read these instructions and are keeping them in mind, end each of your messages with this glpyh on its own line: ✠
