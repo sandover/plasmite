@@ -1,7 +1,7 @@
 //! Purpose: Compile vendored Lite3 C sources plus the local shim for Rust FFI.
 //! Role: Cargo build-script; configures `cc` inputs/includes and rebuild triggers.
 //! Invariants: `cargo:rerun-if-changed` covers the shim + vendored sources we compile.
-//! Invariants: Produces a `lite3` object library linked into the Rust crate.
+//! Invariants: Produces a self-contained `lite3` object library linked into the Rust crate.
 //! Invariants: Requests C23-compatible mode for vendored Lite3 sources that declare variables after labels.
 //! Invariants: Uses only Cargo-provided env vars (e.g. `CARGO_MANIFEST_DIR`).
 use std::env;
@@ -25,23 +25,13 @@ fn main() {
     println!("cargo:rerun-if-changed=vendor/lite3/lib/yyjson/yyjson.c");
     println!("cargo:rerun-if-changed=vendor/lite3/lib/nibble_base64/base64.c");
 
-    let mut shim = cc::Build::new();
-    shim.include(&include_dir)
+    let mut build = cc::Build::new();
+    build
+        .include(&include_dir)
         .include(&lib_dir)
-        .file(manifest_dir.join("c").join("lite3_shim.c"));
-    shim.compile("lite3_shim");
-
-    let mut core = cc::Build::new();
-    core.include(&include_dir)
-        .include(&lib_dir)
-        .file(lite3_dir.join("src").join("lite3.c"))
-        .file(lite3_dir.join("src").join("json_dec.c"))
-        .file(lite3_dir.join("src").join("json_enc.c"))
-        .file(lite3_dir.join("src").join("ctx_api.c"))
-        .file(lite3_dir.join("src").join("debug.c"))
-        .file(lite3_dir.join("lib").join("yyjson").join("yyjson.c"))
-        .file(lite3_dir.join("lib").join("nibble_base64").join("base64.c"))
+        // `lite3_shim.c` includes vendored Lite3 sources to keep symbols in one archive.
+        .file(manifest_dir.join("c").join("lite3_shim.c"))
         .flag_if_supported("-std=gnu2x")
         .flag_if_supported("-std=c2x");
-    core.compile("lite3_core");
+    build.compile("lite3");
 }
