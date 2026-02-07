@@ -46,10 +46,3 @@ export declare class Lite3Stream {
   next(): Lite3Frame | null
   close(): void
 }
-export interface ReplayOptions {
-  speed?: number
-  sinceSeq?: number | bigint
-  maxMessages?: number | bigint
-  timeoutMs?: number | bigint
-}
-export function replay(pool: Pool, options?: ReplayOptions): AsyncGenerator<Buffer>

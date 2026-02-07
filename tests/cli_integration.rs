@@ -3228,6 +3228,54 @@ fn doctor_all_reports_mixed_ok_and_corrupt() {
 }
 
 #[test]
+fn doctor_requires_pool_or_all() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let doctor = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "doctor"])
+        .output()
+        .expect("doctor");
+    assert!(!doctor.status.success());
+    let err = parse_error_json(&doctor.stderr);
+    let inner = err
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
+    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Usage"));
+    let message = inner.get("message").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(message.contains("requires a pool name or --all"));
+    let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(hint.contains("doctor <pool>") || hint.contains("doctor --all"));
+}
+
+#[test]
+fn doctor_rejects_pool_with_all() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let doctor = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "doctor",
+            "foo",
+            "--all",
+        ])
+        .output()
+        .expect("doctor");
+    assert!(!doctor.status.success());
+    let err = parse_error_json(&doctor.stderr);
+    let inner = err
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
+    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Usage"));
+    let message = inner.get("message").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(message.contains("--all cannot be combined"));
+}
+
+#[test]
 fn doctor_missing_pool_reports_not_found() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");

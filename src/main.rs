@@ -122,6 +122,11 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                     .with_message("--all cannot be combined with a pool name")
                     .with_hint("Use --all by itself, or provide a single pool."));
             }
+            if !all && pool.is_none() {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("doctor requires a pool name or --all")
+                    .with_hint("Use `plasmite doctor <pool>` or `plasmite doctor --all`."));
+            }
             let client = LocalClient::new().with_pool_dir(&pool_dir);
             let reports = if let Some(pool) = pool {
                 let path = resolve_poolref(&pool, &pool_dir)?;

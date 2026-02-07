@@ -17,6 +17,10 @@ plasmite doctor <POOL>
 plasmite doctor --all
 ```
 
+Exactly one scope selector is required:
+- pass a pool name/path (`<POOL>`), or
+- pass `--all` (but not both).
+
 ## Output
 
 - On TTY: human-friendly lines (`OK` or `CORRUPT`).
@@ -26,6 +30,7 @@ plasmite doctor --all
 
 - `0` when all pools are healthy.
 - `7` when any pool is corrupt.
+- `2` for usage errors (for example, missing scope or conflicting args).
 
 ## JSON shape (non-normative)
 

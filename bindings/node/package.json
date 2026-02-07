@@ -5,13 +5,15 @@
   "description": "Plasmite Node bindings (C ABI-based)",
   "license": "MIT",
   "main": "index.js",
-  "types": "index.d.ts",
+  "types": "types.d.ts",
   "scripts": {
     "build": "napi build --cargo-cwd native",
     "test": "npm run build && node --test test/*.test.js"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^2.18.0"
+    "@napi-rs/cli": "^2.18.0",
+    "@types/node": "^25.2.1",
+    "typescript": "^5.9.3"
   },
   "engines": {
     "node": ">=20"

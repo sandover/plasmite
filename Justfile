@@ -14,6 +14,21 @@ clippy:
 test:
 	cargo test
 
+bindings-go-test:
+	cargo build -p plasmite
+	mkdir -p tmp/go-cache tmp/go-tmp
+	cd bindings/go && GOCACHE="$(pwd)/../../tmp/go-cache" GOTMPDIR="$(pwd)/../../tmp/go-tmp" CGO_LDFLAGS="-L$(pwd)/../../target/debug" go test ./...
+
+bindings-python-test:
+	cargo build -p plasmite
+	cd bindings/python && PLASMITE_LIB_DIR="$(pwd)/../../target/debug" PLASMITE_BIN="$(pwd)/../../target/debug/plasmite" python3 -m unittest discover -s tests
+
+bindings-node-test:
+	cargo build -p plasmite
+	cd bindings/node && PLASMITE_LIB_DIR="$(pwd)/../../target/debug" npm test
+
+bindings-test: bindings-go-test bindings-python-test bindings-node-test
+
 ci: fmt clippy test abi-smoke conformance-all cross-artifact-smoke
 
 abi:
