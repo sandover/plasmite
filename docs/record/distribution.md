@@ -74,8 +74,10 @@ Targets:
 
 ## Decisions (Consult-Me)
 
-These are intentionally not decided in this doc until confirmed:
-- npm naming/structure: publish canonical `plasmite` vs keep `plasmite-node` and add a meta-package
-- CLI bundling policy for Python/Node: bundle Rust CLI binary vs require separate CLI install
-- Version coupling: lockstep versions across cargo/PyPI/npm vs compatible ranges
-- Static lib shipping: include `libplasmite.a` in release artifacts or shared-only
+Decided:
+- npm naming/structure: publish canonical `plasmite` on npm (migrate from `plasmite-node`)
+- CLI bundling policy for Python/Node: bundle the Rust `plasmite` CLI binary in wheels/npm packages
+- Version coupling: lockstep versions across cargo/PyPI/npm and GitHub tags
+
+Open:
+- Static lib shipping: include `libplasmite.a` in release artifacts or ship shared-only
