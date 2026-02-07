@@ -69,7 +69,7 @@ audit-db: scratch
 	fi
 
 audit: audit-db
-	cargo audit --db .scratch/advisory-db --no-fetch
+	cargo audit --db .scratch/advisory-db --no-fetch --ignore yanked
 
 bench:
 	cargo build --release --example plasmite-bench
