@@ -25,12 +25,15 @@ fn main() {
     println!("cargo:rerun-if-changed=vendor/lite3/lib/yyjson/yyjson.c");
     println!("cargo:rerun-if-changed=vendor/lite3/lib/nibble_base64/base64.c");
 
-    let mut build = cc::Build::new();
-    build
-        .include(&include_dir)
+    let mut shim = cc::Build::new();
+    shim.include(&include_dir)
         .include(&lib_dir)
-        // Put shim first so archive member ordering works with one-pass linkers.
-        .file(manifest_dir.join("c").join("lite3_shim.c"))
+        .file(manifest_dir.join("c").join("lite3_shim.c"));
+    shim.compile("lite3_shim");
+
+    let mut core = cc::Build::new();
+    core.include(&include_dir)
+        .include(&lib_dir)
         .file(lite3_dir.join("src").join("lite3.c"))
         .file(lite3_dir.join("src").join("json_dec.c"))
         .file(lite3_dir.join("src").join("json_enc.c"))
@@ -40,6 +43,5 @@ fn main() {
         .file(lite3_dir.join("lib").join("nibble_base64").join("base64.c"))
         .flag_if_supported("-std=gnu2x")
         .flag_if_supported("-std=c2x");
-
-    build.compile("lite3");
+    core.compile("lite3_core");
 }
