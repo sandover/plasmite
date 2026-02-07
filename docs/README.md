@@ -32,6 +32,7 @@ Plasmite documentation is intentionally split into:
 
 ## Reference docs of record
 
+- Build system + vendoring: `docs/building.md`
 - Rust API quickstart: `docs/record/api-quickstart.md`
 - Go quickstart: `docs/record/go-quickstart.md`
 - Exit codes: `docs/record/exit-codes.md`

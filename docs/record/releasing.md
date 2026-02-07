@@ -56,8 +56,9 @@ This checklist keeps releases reproducible and ensures CI gates are green before
 
 3. **Monitor the release workflow**:
    - Watch https://github.com/sandover/plasmite/actions
-   - Verify artifacts for all 4 platforms (darwin arm64/amd64, linux amd64/arm64)
+   - Verify artifacts for the 3 supported release platforms (darwin arm64/amd64, linux amd64)
    - Verify `sha256sums.txt` is published
+   - Linux arm64 (`aarch64-unknown-linux-gnu`) is best-effort from source builds and is not a release gate
 
 4. **Update Homebrew tap**:
    ```bash
