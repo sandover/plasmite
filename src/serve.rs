@@ -503,6 +503,7 @@ struct TailQuery {
     since_seq: Option<u64>,
     max: Option<u64>,
     timeout_ms: Option<u64>,
+    tag: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -831,6 +832,7 @@ async fn tail_messages(
         }
     }
     let timeout_ms = query.timeout_ms.unwrap_or(state.max_tail_timeout_ms);
+    let tags = parse_tag_query(query.tag.as_deref());
 
     let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
     tokio::task::spawn_blocking(move || {
@@ -839,6 +841,7 @@ async fn tail_messages(
             let options = TailOptions {
                 since_seq: query.since_seq,
                 max_messages: query.max.map(|value| value as usize),
+                tags,
                 timeout: Some(std::time::Duration::from_millis(timeout_ms)),
                 ..TailOptions::default()
             };
@@ -929,6 +932,7 @@ async fn tail_lite3(
         }
     }
     let timeout_ms = query.timeout_ms.unwrap_or(state.max_tail_timeout_ms);
+    let tags = parse_tag_query(query.tag.as_deref());
 
     let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
     tokio::task::spawn_blocking(move || {
@@ -937,6 +941,7 @@ async fn tail_lite3(
             let options = TailOptions {
                 since_seq: query.since_seq,
                 max_messages: query.max.map(|value| value as usize),
+                tags,
                 timeout: Some(std::time::Duration::from_millis(timeout_ms)),
                 ..TailOptions::default()
             };
@@ -1005,6 +1010,7 @@ async fn ui_events(
         }
     }
     let timeout_ms = query.timeout_ms.unwrap_or(state.max_tail_timeout_ms);
+    let tags = parse_tag_query(query.tag.as_deref());
     let client = state.client.clone();
     let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
 
@@ -1014,6 +1020,7 @@ async fn ui_events(
             let options = TailOptions {
                 since_seq: query.since_seq,
                 max_messages: query.max.map(|value| value as usize),
+                tags,
                 timeout: Some(std::time::Duration::from_millis(timeout_ms)),
                 ..TailOptions::default()
             };
@@ -1076,6 +1083,18 @@ fn message_json(message: &plasmite::api::Message) -> serde_json::Value {
         "meta": { "tags": message.meta.tags.clone() },
         "data": message.data.clone(),
     })
+}
+
+fn parse_tag_query(raw: Option<&str>) -> Vec<String> {
+    raw.map(|value| {
+        value
+            .split(',')
+            .map(str::trim)
+            .filter(|tag| !tag.is_empty())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_default()
 }
 
 fn pool_info_json(pool_ref: &str, info: &PoolInfo) -> serde_json::Value {
@@ -1207,7 +1226,7 @@ fn is_access_forbidden(err: &Error) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{AccessMode, ErrorKind, ServeConfig, serve, validate_config};
+    use super::{AccessMode, ErrorKind, ServeConfig, parse_tag_query, serve, validate_config};
 
     #[tokio::test]
     async fn serve_rejects_non_loopback_bind() {
@@ -1338,5 +1357,19 @@ mod tests {
         };
         let err = validate_config(&config).expect_err("expected usage error");
         assert_eq!(err.kind(), ErrorKind::Usage);
+    }
+
+    #[test]
+    fn parse_tag_query_splits_comma_separated_values() {
+        assert_eq!(
+            parse_tag_query(Some("keep, prod,critical")),
+            vec![
+                "keep".to_string(),
+                "prod".to_string(),
+                "critical".to_string()
+            ]
+        );
+        assert!(parse_tag_query(Some(" , , ")).is_empty());
+        assert!(parse_tag_query(None).is_empty());
     }
 }

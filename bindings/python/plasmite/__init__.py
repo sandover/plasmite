@@ -311,6 +311,37 @@ def _descrip_array(values: Iterable[str]) -> tuple[POINTER(c_char_p), list[bytes
     return arr, encoded
 
 
+def _closed_error(target: str) -> PlasmiteError:
+    return PlasmiteError(ErrorKind.USAGE, f"plasmite: {target} is closed")
+
+
+def _require_open(ptr: object, target: str) -> None:
+    if not ptr:
+        raise _closed_error(target)
+
+
+def _ensure_bytes(payload: bytes | bytearray | memoryview, name: str) -> bytes:
+    if isinstance(payload, bytes):
+        return payload
+    if isinstance(payload, (bytearray, memoryview)):
+        return bytes(payload)
+    raise TypeError(f"{name} must be bytes-like")
+
+
+def _ensure_non_negative_int(value: int, name: str) -> int:
+    if not isinstance(value, int):
+        raise TypeError(f"{name} must be an int")
+    if value < 0:
+        raise ValueError(f"{name} must be >= 0")
+    return value
+
+
+def _optional_non_negative_int(value: Optional[int], name: str) -> Optional[int]:
+    if value is None:
+        return None
+    return _ensure_non_negative_int(value, name)
+
+
 class Client:
     def __init__(self, pool_dir: str) -> None:
         if not pool_dir:
@@ -323,6 +354,10 @@ class Client:
         self._ptr = out_client
 
     def create_pool(self, pool_ref: str, size_bytes: int) -> Pool:
+        _require_open(self._ptr, "client")
+        if not pool_ref:
+            raise ValueError("pool_ref is required")
+        size_bytes = _ensure_non_negative_int(size_bytes, "size_bytes")
         out_pool = POINTER(plsm_pool_t)()
         out_err = POINTER(plsm_error_t)()
         rc = _LIB.plsm_pool_create(
@@ -337,6 +372,9 @@ class Client:
         return Pool(out_pool)
 
     def open_pool(self, pool_ref: str) -> Pool:
+        _require_open(self._ptr, "client")
+        if not pool_ref:
+            raise ValueError("pool_ref is required")
         out_pool = POINTER(plsm_pool_t)()
         out_err = POINTER(plsm_error_t)()
         rc = _LIB.plsm_pool_open(
@@ -353,6 +391,13 @@ class Client:
         if getattr(self, "_ptr", None):
             _LIB.plsm_client_free(self._ptr)
             self._ptr = None
+
+    def __enter__(self) -> Client:
+        _require_open(self._ptr, "client")
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb) -> None:
+        self.close()
 
     def __del__(self) -> None:
         self.close()
@@ -371,6 +416,10 @@ class Pool:
         self._ptr = ptr
 
     def append_json(self, payload: bytes, tags: Iterable[str], durability: Durability) -> bytes:
+        _require_open(self._ptr, "pool")
+        payload = _ensure_bytes(payload, "payload")
+        if not payload:
+            raise ValueError("payload is required")
         buf = plsm_buf_t()
         out_err = POINTER(plsm_error_t)()
         arr, _keep = _descrip_array(tags)
@@ -390,6 +439,8 @@ class Pool:
         return _buf_to_bytes(buf)
 
     def append_lite3(self, payload: bytes, durability: Durability) -> int:
+        _require_open(self._ptr, "pool")
+        payload = _ensure_bytes(payload, "payload")
         if not payload:
             raise ValueError("payload is required")
         out_seq = c_uint64()
@@ -408,6 +459,8 @@ class Pool:
         return int(out_seq.value)
 
     def get_json(self, seq: int) -> bytes:
+        _require_open(self._ptr, "pool")
+        seq = _ensure_non_negative_int(seq, "seq")
         buf = plsm_buf_t()
         out_err = POINTER(plsm_error_t)()
         rc = _LIB.plsm_pool_get_json(self._ptr, c_uint64(seq), byref(buf), byref(out_err))
@@ -416,6 +469,8 @@ class Pool:
         return _buf_to_bytes(buf)
 
     def get_lite3(self, seq: int) -> Lite3Frame:
+        _require_open(self._ptr, "pool")
+        seq = _ensure_non_negative_int(seq, "seq")
         frame = plsm_lite3_frame_t()
         out_err = POINTER(plsm_error_t)()
         rc = _LIB.plsm_pool_get_lite3(self._ptr, c_uint64(seq), byref(frame), byref(out_err))
@@ -429,6 +484,10 @@ class Pool:
         max_messages: Optional[int] = None,
         timeout_ms: Optional[int] = None,
     ) -> Stream:
+        _require_open(self._ptr, "pool")
+        since_seq = _optional_non_negative_int(since_seq, "since_seq")
+        max_messages = _optional_non_negative_int(max_messages, "max_messages")
+        timeout_ms = _optional_non_negative_int(timeout_ms, "timeout_ms")
         out_stream = POINTER(plsm_stream_t)()
         out_err = POINTER(plsm_error_t)()
         rc = _LIB.plsm_stream_open(
@@ -452,6 +511,10 @@ class Pool:
         max_messages: Optional[int] = None,
         timeout_ms: Optional[int] = None,
     ) -> Lite3Stream:
+        _require_open(self._ptr, "pool")
+        since_seq = _optional_non_negative_int(since_seq, "since_seq")
+        max_messages = _optional_non_negative_int(max_messages, "max_messages")
+        timeout_ms = _optional_non_negative_int(timeout_ms, "timeout_ms")
         out_stream = POINTER(plsm_lite3_stream_t)()
         out_err = POINTER(plsm_error_t)()
         rc = _LIB.plsm_lite3_stream_open(
@@ -475,16 +538,19 @@ class Pool:
         since_seq: Optional[int] = None,
         max_messages: Optional[int] = None,
         timeout_ms: Optional[int] = None,
+        tags: Optional[Iterable[str]] = None,
     ) -> Generator[bytes, None, None]:
         """Replay messages with original timing scaled by speed.
 
         Yields bytes (JSON messages) with inter-message delays derived from
-        each message's ``time`` field.  The first message is yielded
+        each message's ``time`` field. The first message is yielded
         immediately; subsequent messages are delayed by
         ``(current_time - prev_time) / speed``.
         """
         if speed <= 0:
             raise ValueError("speed must be positive")
+
+        required_tags = list(tags or [])
 
         stream = self.open_stream(
             since_seq=since_seq,
@@ -498,6 +564,8 @@ class Pool:
                 if msg is None:
                     break
                 parsed = json.loads(msg)
+                if not _message_has_tags(parsed, required_tags):
+                    continue
                 raw_time = parsed.get("time")
                 cur_dt: Optional[datetime] = None
                 if raw_time is not None:
@@ -514,10 +582,47 @@ class Pool:
         finally:
             stream.close()
 
+    def tail(
+        self,
+        since_seq: Optional[int] = None,
+        max_messages: Optional[int] = None,
+        timeout_ms: Optional[int] = None,
+        tags: Optional[Iterable[str]] = None,
+    ) -> Generator[bytes, None, None]:
+        """Tail JSON messages and optionally filter by exact tags."""
+        required_tags = list(tags or [])
+        stream = self.open_stream(
+            since_seq=since_seq,
+            max_messages=max_messages,
+            timeout_ms=timeout_ms,
+        )
+        try:
+            delivered = 0
+            while True:
+                msg = stream.next_json()
+                if msg is None:
+                    break
+                parsed = json.loads(msg)
+                if not _message_has_tags(parsed, required_tags):
+                    continue
+                delivered += 1
+                yield msg
+                if max_messages is not None and delivered >= max_messages:
+                    break
+        finally:
+            stream.close()
+
     def close(self) -> None:
         if getattr(self, "_ptr", None):
             _LIB.plsm_pool_free(self._ptr)
             self._ptr = None
+
+    def __enter__(self) -> Pool:
+        _require_open(self._ptr, "pool")
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb) -> None:
+        self.close()
 
     def __del__(self) -> None:
         self.close()
@@ -528,6 +633,7 @@ class Stream:
         self._ptr = ptr
 
     def next_json(self) -> Optional[bytes]:
+        _require_open(self._ptr, "stream")
         buf = plsm_buf_t()
         out_err = POINTER(plsm_error_t)()
         rc = _LIB.plsm_stream_next(self._ptr, byref(buf), byref(out_err))
@@ -542,6 +648,13 @@ class Stream:
             _LIB.plsm_stream_free(self._ptr)
             self._ptr = None
 
+    def __enter__(self) -> Stream:
+        _require_open(self._ptr, "stream")
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb) -> None:
+        self.close()
+
     def __del__(self) -> None:
         self.close()
 
@@ -551,6 +664,7 @@ class Lite3Stream:
         self._ptr = ptr
 
     def next(self) -> Optional[Lite3Frame]:
+        _require_open(self._ptr, "stream")
         frame = plsm_lite3_frame_t()
         out_err = POINTER(plsm_error_t)()
         rc = _LIB.plsm_lite3_stream_next(self._ptr, byref(frame), byref(out_err))
@@ -565,12 +679,28 @@ class Lite3Stream:
             _LIB.plsm_lite3_stream_free(self._ptr)
             self._ptr = None
 
+    def __enter__(self) -> Lite3Stream:
+        _require_open(self._ptr, "stream")
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb) -> None:
+        self.close()
+
     def __del__(self) -> None:
         self.close()
 
 
 def parse_message(payload: bytes) -> dict:
     return json.loads(payload.decode("utf-8"))
+
+
+def _message_has_tags(message: dict, required_tags: list[str]) -> bool:
+    if not required_tags:
+        return True
+    message_tags = message.get("meta", {}).get("tags")
+    if not isinstance(message_tags, list):
+        return False
+    return all(tag in message_tags for tag in required_tags)
 
 
 __all__ = [

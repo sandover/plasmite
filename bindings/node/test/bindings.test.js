@@ -12,7 +12,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 
-const { Client, Durability } = require("../index.js");
+const {
+  Client,
+  Durability,
+  PlasmiteNativeError,
+  RemoteClient,
+  RemotePool,
+} = require("../index.js");
 
 function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "plasmite-node-"));
@@ -75,6 +81,25 @@ test("closed pool/client reject operations", () => {
   assert.throws(() => client.createPool("other", 1024 * 1024));
 });
 
+test("native errors expose structured metadata", () => {
+  const temp = makeTempDir();
+  const poolDir = path.join(temp, "pools");
+  fs.mkdirSync(poolDir, { recursive: true });
+  const client = new Client(poolDir);
+  client.close();
+
+  let captured;
+  try {
+    client.createPool("other", 1024 * 1024);
+  } catch (err) {
+    captured = err;
+  }
+
+  assert.ok(captured instanceof PlasmiteNativeError);
+  assert.equal(captured.kind, "Usage");
+  assert.match(captured.message, /kind=Usage/);
+});
+
 test("lite3 append/get/tail round-trips bytes", () => {
   const temp = makeTempDir();
   const poolDir = path.join(temp, "pools");
@@ -119,4 +144,46 @@ test("lite3 append rejects invalid payloads", () => {
 
   pool.close();
   client.close();
+});
+
+test("remote tail passes repeated tag query params", async () => {
+  const originalFetch = global.fetch;
+  let capturedUrl = null;
+
+  global.fetch = async (input) => {
+    capturedUrl = new URL(String(input));
+    return {
+      ok: true,
+      status: 200,
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(
+              '{"seq":1,"time":"2026-01-01T00:00:00Z","meta":{"tags":["keep","prod"]},"data":{}}\n'
+            )
+          );
+          controller.close();
+        },
+      }),
+    };
+  };
+
+  try {
+    const client = new RemoteClient("http://127.0.0.1:9700");
+    const pool = new RemotePool(client, "demo");
+    const tail = await pool.tail({
+      tags: ["keep", "prod"],
+      maxMessages: 1,
+      timeoutMs: 10,
+    });
+    tail.cancel();
+
+    assert.ok(capturedUrl, "expected fetch URL to be captured");
+    assert.equal(capturedUrl.pathname, "/v0/pools/demo/tail");
+    assert.equal(capturedUrl.searchParams.get("tag"), "keep,prod");
+    assert.equal(capturedUrl.searchParams.get("max"), "1");
+    assert.equal(capturedUrl.searchParams.get("timeout_ms"), "10");
+  } finally {
+    global.fetch = originalFetch;
+  }
 });

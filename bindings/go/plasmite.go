@@ -47,6 +47,11 @@ type Error struct {
 	Offset  *uint64
 }
 
+var (
+	ErrClosed          = errors.New("plasmite: closed")
+	ErrInvalidArgument = errors.New("plasmite: invalid argument")
+)
+
 func (e *Error) Error() string {
 	if e == nil {
 		return "plasmite: <nil error>"
@@ -97,7 +102,7 @@ type Lite3Frame struct {
 
 func NewClient(poolDir string) (*Client, error) {
 	if poolDir == "" {
-		return nil, errors.New("plasmite: poolDir is required")
+		return nil, invalidArgumentError("poolDir is required")
 	}
 	cPoolDir := C.CString(poolDir)
 	defer C.free(unsafe.Pointer(cPoolDir))
@@ -121,10 +126,10 @@ func (c *Client) Close() {
 
 func (c *Client) CreatePool(ref PoolRef, sizeBytes uint64) (*Pool, error) {
 	if c == nil || c.ptr == nil {
-		return nil, errors.New("plasmite: client is closed")
+		return nil, closedError("client")
 	}
 	if ref == "" {
-		return nil, errors.New("plasmite: pool ref is required")
+		return nil, invalidArgumentError("pool ref is required")
 	}
 	cRef := C.CString(string(ref))
 	defer C.free(unsafe.Pointer(cRef))
@@ -140,10 +145,10 @@ func (c *Client) CreatePool(ref PoolRef, sizeBytes uint64) (*Pool, error) {
 
 func (c *Client) OpenPool(ref PoolRef) (*Pool, error) {
 	if c == nil || c.ptr == nil {
-		return nil, errors.New("plasmite: client is closed")
+		return nil, closedError("client")
 	}
 	if ref == "" {
-		return nil, errors.New("plasmite: pool ref is required")
+		return nil, invalidArgumentError("pool ref is required")
 	}
 	cRef := C.CString(string(ref))
 	defer C.free(unsafe.Pointer(cRef))
@@ -167,10 +172,10 @@ func (p *Pool) Close() {
 
 func (p *Pool) AppendJSON(payload []byte, tags []string, durability Durability) ([]byte, error) {
 	if p == nil || p.ptr == nil {
-		return nil, errors.New("plasmite: pool is closed")
+		return nil, closedError("pool")
 	}
 	if len(payload) == 0 {
-		return nil, errors.New("plasmite: payload is required")
+		return nil, invalidArgumentError("payload is required")
 	}
 	cPayload := (*C.uint8_t)(unsafe.Pointer(&payload[0]))
 	cLen := C.size_t(len(payload))
@@ -208,10 +213,10 @@ func (p *Pool) Append(value any, tags []string, durability Durability) ([]byte, 
 // AppendLite3 appends a pre-encoded Lite3 payload without JSON encoding.
 func (p *Pool) AppendLite3(payload []byte, durability Durability) (uint64, error) {
 	if p == nil || p.ptr == nil {
-		return 0, errors.New("plasmite: pool is closed")
+		return 0, closedError("pool")
 	}
 	if len(payload) == 0 {
-		return 0, errors.New("plasmite: payload is required")
+		return 0, invalidArgumentError("payload is required")
 	}
 	cPayload := (*C.uint8_t)(unsafe.Pointer(&payload[0]))
 	cLen := C.size_t(len(payload))
@@ -235,7 +240,7 @@ func (p *Pool) AppendLite3(payload []byte, durability Durability) (uint64, error
 
 func (p *Pool) GetJSON(seq uint64) ([]byte, error) {
 	if p == nil || p.ptr == nil {
-		return nil, errors.New("plasmite: pool is closed")
+		return nil, closedError("pool")
 	}
 	var cBuf C.plsm_buf_t
 	var cErr *C.plsm_error_t
@@ -253,7 +258,7 @@ func (p *Pool) Get(seq uint64) ([]byte, error) {
 // GetLite3 returns the raw Lite3 payload and metadata for the given sequence.
 func (p *Pool) GetLite3(seq uint64) (*Lite3Frame, error) {
 	if p == nil || p.ptr == nil {
-		return nil, errors.New("plasmite: pool is closed")
+		return nil, closedError("pool")
 	}
 	var cFrame C.plsm_lite3_frame_t
 	var cErr *C.plsm_error_t
@@ -266,7 +271,7 @@ func (p *Pool) GetLite3(seq uint64) (*Lite3Frame, error) {
 
 func (p *Pool) OpenStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (*Stream, error) {
 	if p == nil || p.ptr == nil {
-		return nil, errors.New("plasmite: pool is closed")
+		return nil, closedError("pool")
 	}
 	var sinceVal C.uint64_t
 	var hasSince C.uint32_t
@@ -308,7 +313,7 @@ func (p *Pool) OpenStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint
 
 func (p *Pool) OpenLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (*Lite3Stream, error) {
 	if p == nil || p.ptr == nil {
-		return nil, errors.New("plasmite: pool is closed")
+		return nil, closedError("pool")
 	}
 	var sinceVal C.uint64_t
 	var hasSince C.uint32_t
@@ -350,7 +355,7 @@ func (p *Pool) OpenLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs 
 
 func (s *Stream) NextJSON() ([]byte, error) {
 	if s == nil || s.ptr == nil {
-		return nil, errors.New("plasmite: stream is closed")
+		return nil, closedError("stream")
 	}
 	var cBuf C.plsm_buf_t
 	var cErr *C.plsm_error_t
@@ -367,7 +372,7 @@ func (s *Stream) NextJSON() ([]byte, error) {
 
 func (s *Lite3Stream) Next() (*Lite3Frame, error) {
 	if s == nil || s.ptr == nil {
-		return nil, errors.New("plasmite: stream is closed")
+		return nil, closedError("stream")
 	}
 	var cFrame C.plsm_lite3_frame_t
 	var cErr *C.plsm_error_t
@@ -401,6 +406,7 @@ func (s *Lite3Stream) Close() {
 type TailOptions struct {
 	SinceSeq    *uint64
 	MaxMessages *uint64
+	Tags        []string
 	Timeout     time.Duration
 	Buffer      int
 }
@@ -461,22 +467,19 @@ func (p *Pool) Tail(ctx context.Context, opts TailOptions) (<-chan []byte, <-cha
 					errs <- err
 					return
 				}
-				delivered++
-				if opts.MaxMessages != nil && delivered >= *opts.MaxMessages {
-					stream.Close()
-					select {
-					case out <- msg:
-					case <-ctx.Done():
-						errs <- ctx.Err()
-					}
-					return
+				if seq, err := extractSeq(msg); err == nil {
+					next := seq + 1
+					since = &next
 				}
+				if !messageHasTags(msg, opts.Tags) {
+					continue
+				}
+				delivered++
 				select {
 				case out <- msg:
-					seq, err := extractSeq(msg)
-					if err == nil {
-						next := seq + 1
-						since = &next
+					if opts.MaxMessages != nil && delivered >= *opts.MaxMessages {
+						stream.Close()
+						return
 					}
 				case <-ctx.Done():
 					stream.Close()
@@ -756,4 +759,36 @@ func extractSeq(message []byte) (uint64, error) {
 		return 0, err
 	}
 	return payload.Seq, nil
+}
+
+func messageHasTags(message []byte, required []string) bool {
+	if len(required) == 0 {
+		return true
+	}
+	var payload struct {
+		Meta struct {
+			Tags []string `json:"tags"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(message, &payload); err != nil {
+		return false
+	}
+	have := make(map[string]struct{}, len(payload.Meta.Tags))
+	for _, tag := range payload.Meta.Tags {
+		have[tag] = struct{}{}
+	}
+	for _, requiredTag := range required {
+		if _, ok := have[requiredTag]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func closedError(target string) error {
+	return fmt.Errorf("%w: %s is closed", ErrClosed, target)
+}
+
+func invalidArgumentError(message string) error {
+	return fmt.Errorf("%w: %s", ErrInvalidArgument, message)
 }

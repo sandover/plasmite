@@ -31,6 +31,7 @@ pub struct Message {
 pub struct TailOptions {
     pub since_seq: Option<u64>,
     pub max_messages: Option<usize>,
+    pub tags: Vec<String>,
     pub poll_interval: Duration,
     pub timeout: Option<Duration>,
     pub notify: bool,
@@ -41,6 +42,7 @@ impl TailOptions {
         Self {
             since_seq: None,
             max_messages: None,
+            tags: Vec::new(),
             poll_interval: Duration::from_millis(50),
             timeout: None,
             notify: true,
@@ -198,6 +200,9 @@ impl<'a> Tail<'a> {
                         }
                     }
                     let message = message_from_frame(&frame)?;
+                    if !has_required_tags(&message.meta.tags, self.options.tags.as_slice()) {
+                        continue;
+                    }
                     self.seen += 1;
                     return Ok(Some(message));
                 }
@@ -266,6 +271,10 @@ impl<'a> Lite3Tail<'a> {
                             continue;
                         }
                     }
+                    let (meta, _) = decode_payload(frame.payload)?;
+                    if !has_required_tags(&meta.tags, self.options.tags.as_slice()) {
+                        continue;
+                    }
                     self.seen += 1;
                     return Ok(Some(frame));
                 }
@@ -293,6 +302,12 @@ impl<'a> Lite3Tail<'a> {
             }
         }
     }
+}
+
+fn has_required_tags(message_tags: &[String], required_tags: &[String]) -> bool {
+    required_tags
+        .iter()
+        .all(|required| message_tags.iter().any(|tag| tag == required))
 }
 
 fn wait_interval(deadline: Option<Instant>, poll_interval: Duration) -> Duration {
@@ -559,6 +574,37 @@ mod tests {
         options.notify = false;
         let tail = pool.tail(options);
         assert!(tail.notify.is_none());
+    }
+
+    #[test]
+    fn tail_filters_by_required_tags() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
+
+        let first = pool
+            .append_json_now(
+                &json!({"n": 1}),
+                &["drop".to_string()],
+                crate::core::pool::Durability::Fast,
+            )
+            .expect("append");
+        let second = pool
+            .append_json_now(
+                &json!({"n": 2}),
+                &["keep".to_string()],
+                crate::core::pool::Durability::Fast,
+            )
+            .expect("append");
+
+        let mut options = TailOptions::new();
+        options.since_seq = Some(first.seq);
+        options.max_messages = Some(1);
+        options.tags = vec!["keep".to_string()];
+        let mut tail = pool.tail(options);
+        let message = tail.next_message().expect("tail").expect("message");
+        assert_eq!(message.seq, second.seq);
+        assert_eq!(message.data, json!({"n": 2}));
     }
 
     #[test]

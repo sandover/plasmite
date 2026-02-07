@@ -154,6 +154,17 @@ class RemotePool {
     if (options.timeoutMs !== undefined) {
       url.searchParams.set("timeout_ms", String(options.timeoutMs));
     }
+    if (options.tags !== undefined) {
+      const tags = Array.isArray(options.tags) ? options.tags : [options.tags];
+      if (tags.length > 0) {
+        url.searchParams.set(
+          "tag",
+          tags
+            .map((tag) => String(tag))
+            .join(",")
+        );
+      }
+    }
 
     const controller = new AbortController();
     const response = await this.client._requestStream(url, controller);

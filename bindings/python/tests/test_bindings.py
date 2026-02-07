@@ -65,6 +65,21 @@ class BindingTests(unittest.TestCase):
         pool.close()
         client.close()
 
+    def test_tail_filters_by_tags(self) -> None:
+        client = Client(str(self.pool_dir))
+        pool = client.create_pool("tail-tags", 1024 * 1024)
+
+        pool.append_json(b'{"kind":"drop"}', ["drop"], Durability.FAST)
+        pool.append_json(b'{"kind":"keep"}', ["keep"], Durability.FAST)
+
+        results = list(pool.tail(max_messages=2, timeout_ms=50, tags=["keep"]))
+        self.assertEqual(len(results), 1)
+        message = parse_message(results[0])
+        self.assertEqual(message["data"]["kind"], "keep")
+
+        pool.close()
+        client.close()
+
     def test_closed_handles_error(self) -> None:
         client = Client(str(self.pool_dir))
         pool = client.create_pool("closed", 1024 * 1024)
@@ -114,6 +129,33 @@ class BindingTests(unittest.TestCase):
 
         pool.close()
         client.close()
+
+    def test_context_manager_lifecycle(self) -> None:
+        with Client(str(self.pool_dir)) as client:
+            with client.create_pool("ctx", 1024 * 1024) as pool:
+                msg = pool.append_json(b'{"x":1}', [], Durability.FAST)
+                parsed = parse_message(msg)
+                with pool.open_stream(
+                    since_seq=parsed["seq"], max_messages=1, timeout_ms=50
+                ) as stream:
+                    self.assertIsNotNone(stream.next_json())
+
+        with self.assertRaises(PlasmiteError):
+            client.create_pool("after-close", 1024 * 1024)
+
+    def test_validation_errors_are_deterministic(self) -> None:
+        with Client(str(self.pool_dir)) as client:
+            pool = client.create_pool("validation", 1024 * 1024)
+            with self.assertRaises(ValueError):
+                pool.append_json(b"", [], Durability.FAST)
+            invalid_payload = "{}"
+            with self.assertRaises(TypeError):
+                pool.append_json(invalid_payload, [], Durability.FAST)
+            with self.assertRaises(ValueError):
+                pool.get_json(-1)
+            pool.close()
+            with self.assertRaises(PlasmiteError):
+                pool.get_json(1)
 
 
 if __name__ == "__main__":

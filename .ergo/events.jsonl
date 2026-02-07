@@ -1790,3 +1790,7 @@
 {"type":"state","ts":"2026-02-07T00:25:30.77076Z","data":{"id":"CKEQRP","state":"doing","ts":"2026-02-07T00:25:30.77076Z"}}
 {"type":"result","ts":"2026-02-07T00:26:08.462783Z","data":{"task_id":"CKEQRP","summary":"Implemented peek --tag exact-match filtering with AND composition and remote parity, validated by CLI tests","path":"src/main.rs","sha256_at_attach":"4fb59a7862f3bb5c25a178dd6fb9d510e90d738bf7df632864e2a14134935946","mtime_at_attach":"2026-02-07T00:11:33.332676974Z","git_commit_at_attach":"904e7cd5e873bea3a3f94027582b79f082bceb71","ts":"2026-02-07T00:26:08.462783Z"}}
 {"type":"state","ts":"2026-02-07T00:26:08.478797Z","data":{"id":"CKEQRP","state":"done","ts":"2026-02-07T00:26:08.478797Z"}}
+{"type":"claim","ts":"2026-02-07T00:26:53.127699Z","data":{"id":"EOQCYX","agent_id":"codex@local","ts":"2026-02-07T00:26:53.127699Z"}}
+{"type":"state","ts":"2026-02-07T00:26:53.127699Z","data":{"id":"EOQCYX","state":"doing","ts":"2026-02-07T00:26:53.127699Z"}}
+{"type":"result","ts":"2026-02-07T00:37:50.838277Z","data":{"task_id":"EOQCYX","summary":"Implemented tag filtering for tail across API, remote server/client, and language bindings with tests","path":"src/api/message.rs","sha256_at_attach":"1f9d87113ce8f908b8eb56c1b29c443810c20d6960d200711f7d1b9d78b44c7a","mtime_at_attach":"2026-02-07T00:35:40.42335079Z","git_commit_at_attach":"75b2915bf56eee3c0dba9c24348db582e483a653","ts":"2026-02-07T00:37:50.838277Z"}}
+{"type":"state","ts":"2026-02-07T00:37:50.853961Z","data":{"id":"EOQCYX","state":"done","ts":"2026-02-07T00:37:50.853961Z"}}

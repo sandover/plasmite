@@ -136,6 +136,56 @@ func TestTailCancelAndResume(t *testing.T) {
 	}
 }
 
+func TestTailFiltersByTags(t *testing.T) {
+	temp := t.TempDir()
+	poolDir := filepath.Join(temp, "pools")
+	if err := os.MkdirAll(poolDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	client, err := NewClient(poolDir)
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	defer client.Close()
+
+	pool, err := client.CreatePool(PoolRefName("tagged"), 1024*1024)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer pool.Close()
+
+	if _, err := pool.Append(map[string]any{"kind": "drop"}, []string{"drop"}, DurabilityFast); err != nil {
+		t.Fatalf("append drop: %v", err)
+	}
+	if _, err := pool.Append(map[string]any{"kind": "keep"}, []string{"keep"}, DurabilityFast); err != nil {
+		t.Fatalf("append keep: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	out, errs := pool.Tail(ctx, TailOptions{
+		Tags:        []string{"keep"},
+		MaxMessages: uint64Ptr(1),
+		Timeout:     50 * time.Millisecond,
+	})
+
+	select {
+	case msg := <-out:
+		var parsed message
+		if err := json.Unmarshal(msg, &parsed); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if parsed.Data["kind"] != "keep" {
+			t.Fatalf("expected keep message, got %v", parsed.Data["kind"])
+		}
+	case err := <-errs:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("tail did not yield filtered message")
+	}
+}
+
 func TestCloseIdempotent(t *testing.T) {
 	temp := t.TempDir()
 	poolDir := filepath.Join(temp, "pools")
@@ -157,6 +207,9 @@ func TestCloseIdempotent(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error on closed pool")
 	}
+	if !errors.Is(err, ErrClosed) {
+		t.Fatalf("expected ErrClosed, got %v", err)
+	}
 
 	client.Close()
 	client.Close()
@@ -164,9 +217,39 @@ func TestCloseIdempotent(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error on closed client")
 	}
-	var perr *Error
-	if !errors.As(err, &perr) {
-		// errors from closed client are plain errors
+	if !errors.Is(err, ErrClosed) {
+		t.Fatalf("expected ErrClosed, got %v", err)
+	}
+}
+
+func TestArgumentErrorsUseSentinel(t *testing.T) {
+	if _, err := NewClient(""); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument for empty poolDir, got %v", err)
+	}
+
+	temp := t.TempDir()
+	poolDir := filepath.Join(temp, "pools")
+	if err := os.MkdirAll(poolDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	client, err := NewClient(poolDir)
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	defer client.Close()
+
+	if _, err := client.CreatePool(PoolRefName(""), 1024*1024); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument for empty pool ref, got %v", err)
+	}
+
+	pool, err := client.CreatePool(PoolRefName("args"), 1024*1024)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer pool.Close()
+
+	if _, err := pool.AppendJSON(nil, nil, DurabilityFast); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument for empty payload, got %v", err)
 	}
 }
 

@@ -384,6 +384,40 @@ fn remote_tail_respects_limits_and_timeouts() -> TestResult<()> {
 }
 
 #[test]
+fn remote_tail_filters_by_tags() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::start(temp_dir.path())?;
+    let client = server.client()?;
+    let pool_ref = PoolRef::name("tail-tags");
+
+    client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
+    let pool = client.open_pool(&pool_ref)?;
+    let first = pool.append_json_now(
+        &json!({"kind": "drop"}),
+        &["drop".to_string()],
+        Durability::Fast,
+    )?;
+    let second = pool.append_json_now(
+        &json!({"kind": "keep"}),
+        &["keep".to_string()],
+        Durability::Fast,
+    )?;
+
+    let options = TailOptions {
+        since_seq: Some(first.seq),
+        max_messages: Some(1),
+        tags: vec!["keep".to_string()],
+        timeout: Some(Duration::from_millis(500)),
+        ..TailOptions::default()
+    };
+    let mut tail = pool.tail(options)?;
+    let msg = tail.next_message()?.expect("filtered message");
+    assert_eq!(msg.seq, second.seq);
+    assert_eq!(msg.data, json!({"kind": "keep"}));
+    Ok(())
+}
+
+#[test]
 fn remote_ui_routes_serve_single_page_html() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::start(temp_dir.path())?;
