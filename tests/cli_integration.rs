@@ -1084,6 +1084,146 @@ fn peek_where_filters_messages() {
 }
 
 #[test]
+fn peek_tag_filters_messages() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":1}",
+            "--tag",
+            "drop",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":2}",
+            "--tag",
+            "keep",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
+
+    let mut peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "10",
+            "--jsonl",
+            "--tag",
+            "keep",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("peek");
+    let stdout = peek.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let read = reader.read_line(&mut line).expect("read line");
+    assert!(read > 0, "expected a line from peek output");
+    let value = parse_json(line.trim());
+    assert_eq!(value.get("data").unwrap()["x"], 2);
+    let _ = peek.kill();
+    let _ = peek.wait();
+}
+
+#[test]
+fn peek_tag_and_where_compose_with_and() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let events = [
+        (r#"{"service":"billing","level":"warn"}"#, "keep"),
+        (r#"{"service":"billing","level":"error"}"#, "keep"),
+        (r#"{"service":"payments","level":"error"}"#, "keep"),
+    ];
+    for (payload, tag) in events {
+        let poke = cmd()
+            .args([
+                "--dir",
+                pool_dir.to_str().unwrap(),
+                "poke",
+                "demo",
+                payload,
+                "--tag",
+                tag,
+            ])
+            .output()
+            .expect("poke");
+        assert!(poke.status.success());
+    }
+
+    let mut peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "demo",
+            "--tail",
+            "10",
+            "--jsonl",
+            "--tag",
+            "keep",
+            "--where",
+            r#".data.level == "error""#,
+            "--where",
+            r#".data.service == "billing""#,
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("peek");
+    let stdout = peek.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let read = reader.read_line(&mut line).expect("read line");
+    assert!(read > 0, "expected a line from peek output");
+    let value = parse_json(line.trim());
+    assert_eq!(value["data"]["service"], "billing");
+    assert_eq!(value["data"]["level"], "error");
+    let _ = peek.kill();
+    let _ = peek.wait();
+}
+
+#[test]
 fn peek_where_multiple_predicates_and() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
@@ -3290,7 +3430,7 @@ fn peek_remote_url_happy_path_reads_recent_messages() {
             "peek",
             &pool_url,
             "--tail",
-            "2",
+            "1",
             "--one",
             "--jsonl",
             "--timeout",
@@ -3306,6 +3446,59 @@ fn peek_remote_url_happy_path_reads_recent_messages() {
     let value = parse_json(std::str::from_utf8(&peek.stdout).expect("utf8").trim());
     assert_eq!(value.get("seq").and_then(|v| v.as_u64()), Some(2));
     assert_eq!(value.get("data").and_then(|v| v.get("x")), Some(&json!(2)));
+}
+
+#[test]
+fn peek_remote_url_supports_tag_filter() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    for (payload, tag) in [("{\"x\":1}", "drop"), ("{\"x\":2}", "keep")] {
+        let poke = cmd()
+            .args([
+                "--dir",
+                pool_dir.to_str().unwrap(),
+                "poke",
+                "demo",
+                payload,
+                "--tag",
+                tag,
+            ])
+            .output()
+            .expect("poke");
+        assert!(poke.status.success());
+    }
+
+    let server = ServeProcess::start(&pool_dir);
+    let pool_url = format!("{}/demo", server.base_url);
+    let mut peek = cmd()
+        .args([
+            "peek", &pool_url, "--tail", "10", "--jsonl", "--tag", "keep",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("peek");
+    let stdout = peek.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let read = reader.read_line(&mut line).expect("read line");
+    assert!(read > 0, "expected a line from peek output");
+    let value = parse_json(line.trim());
+    assert_eq!(value.get("data").and_then(|v| v.get("x")), Some(&json!(2)));
+    let _ = peek.kill();
+    let _ = peek.wait();
 }
 
 #[test]

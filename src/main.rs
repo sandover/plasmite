@@ -493,6 +493,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             format,
             since,
             where_expr,
+            tags,
             replay,
         } => {
             if jsonl && format.is_some() {
@@ -519,6 +520,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 timeout,
                 data_only,
                 since_ns,
+                required_tags: tags,
                 where_predicates: compile_filters(&where_expr)?,
                 quiet_drops,
                 notify: !no_notify,
@@ -848,6 +850,9 @@ Use `--replay N` with `--tail` or `--since` to replay with timing."#,
   # Emit one matching message, then exit
   $ plasmite peek foo --where '.data.status == "error"' --one
 
+  # Exact tag filter shortcut
+  $ plasmite peek foo --tag ping --one
+
   # Messages from the last 5 minutes
   $ plasmite peek foo --since 5m
 
@@ -860,8 +865,8 @@ Use `--replay N` with `--tail` or `--since` to replay with timing."#,
   # Replay at half speed
   $ plasmite peek foo --since 5m --replay 0.5
 
-  # Filter by tag (tag)
-  $ plasmite peek foo --where '.meta.tags[]? == "ping"'
+  # Filter by tag with --tag
+  $ plasmite peek foo --tag ping
 
   # Pipe to jq
   $ plasmite peek foo --format jsonl | jq -r '.data.msg'
@@ -877,10 +882,11 @@ Use `--replay N` with `--tail` or `--since` to replay with timing."#,
 
 NOTES
   - Use `--format jsonl` for scripts (one JSON object per line)
+  - `--tag` matches exact tags; repeat for AND
   - `--where` uses jq-style expressions; repeat for AND
   - `--since 5m` and `--since 2026-01-15T10:00:00Z` both work
   - Remote refs must be shorthand: http(s)://host:port/<pool> (no trailing slash)
-  - Remote `peek` supports `--tail`, `--where`, `--one`, `--timeout`, `--data-only`, and `--format`
+  - Remote `peek` supports `--tail`, `--tag`, `--where`, `--one`, `--timeout`, `--data-only`, and `--format`
   - Remote `peek` rejects `--since` and `--replay` with actionable guidance
   - `--replay N` exits when all selected messages are emitted (no live follow)
   - `--replay 0` emits as fast as possible (same as peek, but bounded)"#
@@ -924,6 +930,12 @@ NOTES
             help = "Filter messages by boolean expression (repeatable; AND across repeats)"
         )]
         where_expr: Vec<String>,
+        #[arg(
+            long = "tag",
+            value_name = "TAG",
+            help = "Filter messages by exact tag (repeatable; AND across repeats)"
+        )]
+        tags: Vec<String>,
         #[arg(long = "quiet-drops", help = "Suppress drop notices on stderr")]
         quiet_drops: bool,
         #[arg(long = "no-notify", help = "Disable semaphore wakeups (poll only)")]
@@ -2725,11 +2737,29 @@ struct PeekConfig {
     timeout: Option<Duration>,
     data_only: bool,
     since_ns: Option<u64>,
+    required_tags: Vec<String>,
     where_predicates: Vec<JqFilter>,
     quiet_drops: bool,
     notify: bool,
     color_mode: ColorMode,
     replay_speed: Option<f64>,
+}
+
+fn matches_required_tags(required_tags: &[String], message: &Value) -> bool {
+    if required_tags.is_empty() {
+        return true;
+    }
+    let Some(tags) = message
+        .get("meta")
+        .and_then(|meta| meta.get("tags"))
+        .and_then(Value::as_array)
+    else {
+        return false;
+    };
+    required_tags.iter().all(|required| {
+        tags.iter()
+            .any(|tag| tag.as_str().is_some_and(|value| value == required))
+    })
 }
 
 fn peek_remote(base_url: &str, pool: &str, cfg: &PeekConfig) -> Result<RunOutcome, Error> {
@@ -2782,7 +2812,9 @@ fn peek_remote(base_url: &str, pool: &str, cfg: &PeekConfig) -> Result<RunOutcom
         while let Some(message) = tail.next_message()? {
             next_since_seq = Some(message.seq.saturating_add(1));
             let value = message_to_json(&message);
-            if !matches_all(cfg.where_predicates.as_slice(), &value)? {
+            if !matches_required_tags(cfg.required_tags.as_slice(), &value)
+                || !matches_all(cfg.where_predicates.as_slice(), &value)?
+            {
                 continue;
             }
 
@@ -2856,7 +2888,9 @@ fn peek(
                 CursorResult::Message(frame) => {
                     if frame.timestamp_ns >= since_ns {
                         let message = message_from_frame(&frame)?;
-                        if matches_all(cfg.where_predicates.as_slice(), &message)? {
+                        if matches_required_tags(cfg.required_tags.as_slice(), &message)
+                            && matches_all(cfg.where_predicates.as_slice(), &message)?
+                        {
                             emit_message(
                                 output_value(message, cfg.data_only),
                                 cfg.pretty,
@@ -2883,7 +2917,9 @@ fn peek(
             match cursor.next(pool)? {
                 CursorResult::Message(frame) => {
                     let message = message_from_frame(&frame)?;
-                    if matches_all(cfg.where_predicates.as_slice(), &message)? {
+                    if matches_required_tags(cfg.required_tags.as_slice(), &message)
+                        && matches_all(cfg.where_predicates.as_slice(), &message)?
+                    {
                         emit.push_back(message);
                     }
                     last_seen_seq = Some(frame.seq);
@@ -3005,7 +3041,9 @@ fn peek(
                     }
                 }
                 let message = message_from_frame(&frame)?;
-                if matches_all(cfg.where_predicates.as_slice(), &message)? {
+                if matches_required_tags(cfg.required_tags.as_slice(), &message)
+                    && matches_all(cfg.where_predicates.as_slice(), &message)?
+                {
                     if tail_wait {
                         emit.push_back(message);
                         while emit.len() > cfg.tail as usize {
@@ -3095,7 +3133,9 @@ fn peek_replay(pool: &Pool, cfg: &PeekConfig) -> Result<RunOutcome, Error> {
                 CursorResult::Message(frame) => {
                     if frame.timestamp_ns >= since_ns {
                         let message = message_from_frame(&frame)?;
-                        if matches_all(cfg.where_predicates.as_slice(), &message)? {
+                        if matches_required_tags(cfg.required_tags.as_slice(), &message)
+                            && matches_all(cfg.where_predicates.as_slice(), &message)?
+                        {
                             collected.push((frame.timestamp_ns, message));
                         }
                     }
@@ -3114,7 +3154,9 @@ fn peek_replay(pool: &Pool, cfg: &PeekConfig) -> Result<RunOutcome, Error> {
             match cursor.next(pool)? {
                 CursorResult::Message(frame) => {
                     let message = message_from_frame(&frame)?;
-                    if matches_all(cfg.where_predicates.as_slice(), &message)? {
+                    if matches_required_tags(cfg.required_tags.as_slice(), &message)
+                        && matches_all(cfg.where_predicates.as_slice(), &message)?
+                    {
                         if cfg.tail > 0 {
                             buffer.push_back((frame.timestamp_ns, message));
                             while buffer.len() > cfg.tail as usize {
@@ -3167,8 +3209,8 @@ fn peek_replay(pool: &Pool, cfg: &PeekConfig) -> Result<RunOutcome, Error> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Error, ErrorKind, PoolTarget, error_text, parse_duration, parse_size, read_token_file,
-        resolve_pool_target,
+        Error, ErrorKind, PoolTarget, error_text, matches_required_tags, parse_duration,
+        parse_size, read_token_file, resolve_pool_target,
     };
     use serde_json::json;
     use std::io::Cursor;
@@ -3230,6 +3272,29 @@ mod tests {
         .expect("stream parse");
         assert_eq!(count, 3);
         assert_eq!(values, vec![json!({"a":1}), json!({"b":2}), json!({"c":3})]);
+    }
+
+    #[test]
+    fn required_tags_match_all_requested_tags() {
+        let message = json!({
+            "meta": {
+                "tags": ["error", "billing", "prod"]
+            }
+        });
+        assert!(matches_required_tags(
+            &["error".to_string(), "billing".to_string()],
+            &message
+        ));
+        assert!(!matches_required_tags(
+            &["error".to_string(), "missing".to_string()],
+            &message
+        ));
+    }
+
+    #[test]
+    fn required_tags_returns_false_on_missing_meta_tags() {
+        let message = json!({"data": {"x": 1}});
+        assert!(!matches_required_tags(&["error".to_string()], &message));
     }
 
     #[test]
