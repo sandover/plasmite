@@ -1,0 +1,81 @@
+<!--
+Purpose: Define what each install channel provides (CLI + bindings) and the stable SDK layout.
+Exports: N/A (documentation).
+Role: Single source of truth for distribution promises and artifact structure.
+Invariants: Docs must match what release artifacts and package managers actually ship.
+Notes: Platform scope is intentionally limited (no Windows yet).
+-->
+
+# Distribution Contract (v0.1.x)
+
+This document defines:
+- What users get from each install channel (CLI and/or language bindings)
+- The stable on-disk layout for release artifacts ("the SDK layout")
+- Supported platforms and explicit non-goals
+
+## Supported Platforms
+
+- macOS: `aarch64-apple-darwin`, `x86_64-apple-darwin`
+- Linux: `x86_64-unknown-linux-gnu`
+
+Non-goals for now:
+- Windows
+- `aarch64-unknown-linux-gnu`
+- Linux distro packages (`apt`, `yum`, `pacman`, etc.)
+- `cargo-binstall` / other binary installer channels
+
+## Install Matrix
+
+| Channel | Install Command | Provides CLI | Provides Library | Notes |
+| --- | --- | --- | --- | --- |
+| Homebrew (macOS) | `brew install sandover/tap/plasmite` | Yes | Yes (system SDK) | Installs `bin/`, `lib/`, `include/`, `pkg-config` metadata. |
+| crates.io (Rust) | `cargo install plasmite` | Yes | No | Installs binaries into Cargo bin dir. |
+| crates.io (Rust) | `cargo add plasmite` | No | Yes (Rust crate) | Standard Rust dependency. |
+| PyPI (Python) | `uv tool install plasmite` | TBD | Yes (Python bindings) | Goal: "one command" on supported platforms via wheels. |
+| npm (Node) | `npm i -g plasmite` | TBD | Yes (Node bindings) | Goal: "one command" on supported platforms via prebuilt addons. |
+| Go module | `go get ...` | No | Yes (Go bindings) | Requires system SDK installed (brew/manual) for cgo. |
+
+## SDK Layout (Release Artifacts)
+
+GitHub release tarballs are the single source of truth for the SDK layout. The root directory contains:
+
+```text
+bin/
+  plasmite
+  pls
+include/
+  plasmite.h
+lib/
+  libplasmite.(dylib|so)
+  libplasmite.a              (optional; see Decisions)
+  pkgconfig/
+    plasmite.pc
+```
+
+### pkg-config Contract
+
+The `plasmite.pc` file must:
+- Be named `plasmite` (not `libplasmite`)
+- Provide `Cflags: -I...` for `include/plasmite.h`
+- Provide `Libs: -L... -lplasmite`
+- Provide any required runtime rpath guidance where feasible (see Loader Notes)
+
+## Loader Notes (Hard Part)
+
+The hardest part of a batteries-included SDK is dynamic loader correctness across:
+- system installs (Homebrew in `/opt/homebrew` or `/usr/local`)
+- bundled installs (Python wheels / npm packages with package-local native libs)
+
+Targets:
+- macOS: prefer a shared library identity that can be rewritten by packagers
+  - recommended: dylib id `@rpath/libplasmite.dylib` for release artifacts
+  - Homebrew formula may patch the id to an absolute path under `#{lib}`
+- Linux: decide between a stable SONAME scheme or `$ORIGIN`-based rpaths for bundled installs
+
+## Decisions (Consult-Me)
+
+These are intentionally not decided in this doc until confirmed:
+- npm naming/structure: publish canonical `plasmite` vs keep `plasmite-node` and add a meta-package
+- CLI bundling policy for Python/Node: bundle Rust CLI binary vs require separate CLI install
+- Version coupling: lockstep versions across cargo/PyPI/npm vs compatible ranges
+- Static lib shipping: include `libplasmite.a` in release artifacts or shared-only

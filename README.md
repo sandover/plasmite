@@ -185,7 +185,7 @@ Default pool directory: `~/.plasmite/pools/`.
 
 **Specs**: [CLI](spec/v0/SPEC.md) | [API](spec/api/v0/SPEC.md) | [Remote protocol](spec/remote/v0/SPEC.md)
 
-**Guides**: [Rust API quickstart](docs/record/api-quickstart.md) | [Go quickstart](docs/record/go-quickstart.md) | [libplasmite C ABI](docs/record/libplasmite.md) | [Exit codes](docs/record/exit-codes.md) | [Diagnostics](docs/record/doctor.md)
+**Guides**: [Rust API quickstart](docs/record/api-quickstart.md) | [Go quickstart](docs/record/go-quickstart.md) | [libplasmite C ABI](docs/record/libplasmite.md) | [Distribution](docs/record/distribution.md) | [Exit codes](docs/record/exit-codes.md) | [Diagnostics](docs/record/doctor.md)
 
 [Changelog](CHANGELOG.md) | Inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma).
 
