@@ -10,6 +10,35 @@ Notes: Requires libplasmite to be built and discoverable.
 
 These bindings wrap the `libplasmite` C ABI via `ctypes`.
 
+## Installation
+
+**Note**: Pre-built wheels are not yet available. Installation from PyPI currently requires having the `plasmite` CLI already installed (which provides `libplasmite`).
+
+### Using pip
+
+```bash
+# First install the CLI (provides libplasmite)
+cargo install plasmite
+# or: brew install sandover/tap/plasmite
+
+# Then install the Python binding
+pip install plasmite
+```
+
+### Using uv
+
+```bash
+# Install the CLI first
+cargo install plasmite
+
+# Then install with uv
+uv pip install plasmite
+```
+
+The Python package uses ctypes to load the shared library built by the CLI. Ensure `libplasmite.dylib` (macOS) or `libplasmite.so` (Linux) is in a standard library search path or set `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH`.
+
+For development/testing from this repo, see Install & Test below.
+
 ## Build Requirements
 
 - Python 3.10+

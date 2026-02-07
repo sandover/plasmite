@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-02-06
+
+### Added
+- `plasmite serve` - HTTP/JSON server with TLS + token auth
+- `plasmite doctor` - Pool validation and diagnostics
+- Language bindings: Go, Python, Node.js (via libplasmite C ABI)
+- Public Rust API (`plasmite::api`)
+- Remote protocol spec (HTTP/JSON)
+- Conformance test suite (cross-language)
+- Remote `poke`/`peek` via shorthand URLs
+- Inline seq→offset index for fast `get(seq)` lookups
+- `peek --where` filtering with jq predicates
+- `peek --tag` filtering with exact tag match
+- `peek --replay` for timed playback at configurable speeds
+- `peek --one`, `peek --timeout`, `peek --data-only` for scripting
+- Shell completion (bash/zsh/fish)
+- Web UI (zero-build single-page app) at `/ui`
+- Binary releases for macOS (arm64/amd64) and Linux (amd64/arm64)
+
+### Changed
+- Pool format: added inline index region (requires pool recreation from v0.0.1)
+- Improved CLI help text and error messages
+- Performance: 600k+ msg/sec append, sub-ms follow latency
+
 ## [0.0.1] - 2026-01-30
 
 ### Added

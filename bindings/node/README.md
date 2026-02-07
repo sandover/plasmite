@@ -10,6 +10,20 @@ Notes: Requires libplasmite to be built and discoverable.
 
 These bindings wrap the `libplasmite` C ABI via a N-API addon.
 
+## Installation
+
+**Note**: Pre-built binaries are not yet available. Installation from npm requires a Rust toolchain.
+
+```bash
+npm install plasmite-node
+```
+
+This will compile the native addon during install. Ensure you have:
+- Node 20+
+- Rust toolchain (1.88.0+)
+
+For development/testing from this repo, see Build & Test below.
+
 ## Build Requirements
 
 - Node 20+

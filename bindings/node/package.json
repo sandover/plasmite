@@ -1,15 +1,35 @@
 {
   "name": "plasmite-node",
-  "version": "0.0.1",
-  "private": true,
-  "description": "Plasmite Node bindings (C ABI-based)",
+  "version": "0.1.0",
+  "description": "Persistent JSON message queues for Node.js - native bindings for local and remote IPC",
   "license": "MIT",
   "main": "index.js",
   "types": "types.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "types.d.ts",
+    "remote.js"
+  ],
+  "keywords": [
+    "ipc",
+    "queue",
+    "json",
+    "messaging",
+    "pubsub",
+    "napi",
+    "native"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sandover/plasmite.git",
+    "directory": "bindings/node"
+  },
   "scripts": {
     "build": "napi build --cargo-cwd native",
     "test": "npm run build && node --test test/*.test.js",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "prepublishOnly": "npm run typecheck"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0",
