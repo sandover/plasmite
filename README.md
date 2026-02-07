@@ -191,7 +191,7 @@ for await (const msg of replay(pool, { speed: 0.5 })) {
 }
 ```
 
-See [Go quickstart](docs/go-quickstart.md), [bindings/python](bindings/python/README.md), and [bindings/node](bindings/node/README.md) for full documentation.
+See [Go quickstart](docs/record/go-quickstart.md), [bindings/python](bindings/python/README.md), and [bindings/node](bindings/node/README.md) for full documentation.
 
 Binding validation from repo root:
 
@@ -283,14 +283,14 @@ pls peek foo --tag error --tag db
 pls peek foo --tag error --where '.data.service == "billing"'
 ```
 
-See [docs/design/pattern-matching-v0-iterative-spec.md](docs/design/pattern-matching-v0-iterative-spec.md) and [docs/pattern-matching.md](docs/pattern-matching.md) for a deeper guide.
+See [docs/planning/design/pattern-matching-v0-iterative-spec.md](docs/planning/design/pattern-matching-v0-iterative-spec.md) and [docs/record/pattern-matching.md](docs/record/pattern-matching.md) for a deeper guide.
 
 ### Scripting
 
 Plasmite is built for scripts:
 - **TTY**: Human-readable errors with hints
 - **Pipes**: JSON errors on stderr, stable exit codes
-- See [docs/exit-codes.md](docs/exit-codes.md) for the full list
+- See [docs/record/exit-codes.md](docs/record/exit-codes.md) for the full list
 
 Inspect pool diagnostics as JSON:
 
@@ -448,7 +448,7 @@ Benchmarks on a laptop (M-series Mac, release build, 256-byte payloads):
 - **Follow latency**: sub-millisecond typical, ~3ms worst case
 - **Concurrent writers**: scales to 8+ with graceful degradation
 
-See [docs/perf.md](docs/perf.md) for the full benchmark suite.
+See [docs/planning/perf.md](docs/planning/perf.md) for the full benchmark suite.
 
 ### SIMD JSON Parsing
 
@@ -474,14 +474,14 @@ Inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma)
 - [Remote spec](spec/remote/v0/SPEC.md) - HTTP/JSON remote protocol
 
 **Guides**:
-- [API quickstart](docs/api-quickstart.md) - Embedding in Rust
-- [Go quickstart](docs/go-quickstart.md) - Using the Go bindings
-- [libplasmite](docs/libplasmite.md) - Building the C ABI
+- [API quickstart](docs/record/api-quickstart.md) - Embedding in Rust
+- [Go quickstart](docs/record/go-quickstart.md) - Using the Go bindings
+- [libplasmite](docs/record/libplasmite.md) - Building the C ABI
 
 **Reference**:
-- [Architecture](docs/architecture.md) - How it's built
-- [Exit codes](docs/exit-codes.md) - For robust error handling
-- [Diagnostics](docs/doctor.md) - Pool validation
+- [Architecture](docs/record/architecture.md) - How it's built
+- [Exit codes](docs/record/exit-codes.md) - For robust error handling
+- [Diagnostics](docs/record/doctor.md) - Pool validation
 - [Changelog](CHANGELOG.md) - Version history
 
 ## License

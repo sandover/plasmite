@@ -64,7 +64,7 @@ Errors:
 * Non-streaming: JSON only (when output is enabled).
 * Streaming: default is pretty JSON per message; `--format jsonl` (or `--jsonl`) emits one object per line.
 * Errors are JSON objects on stderr when stderr is not a TTY; otherwise concise text is used.
-* Exit codes are stable and match the core error kinds (see `docs/exit-codes.md`).
+* Exit codes are stable and match the core error kinds (see `docs/record/exit-codes.md`).
 
 ### Message schema (fixed)
 
@@ -110,7 +110,7 @@ Supported in v0.0.1: **macOS** and **Linux**.
 The following are implemented but not yet part of the frozen v0.0.1 contract (their APIs may evolve):
 
 * `plasmite serve` - HTTP server for remote access (loopback default; non-loopback requires explicit flags; see `spec/remote/v0/SPEC.md`)
-* `plasmite doctor` - Pool validation (see `docs/doctor.md`)
+* `plasmite doctor` - Pool validation (see `docs/record/doctor.md`)
 * Remote refs (`tcp(s)://...`) - planned for future versions
 
 ---
@@ -880,7 +880,7 @@ plasmite completion bash|zsh|fish
 
 ## `plasmite doctor`
 
-Pool validation and diagnostics. See `docs/doctor.md` for full documentation.
+Pool validation and diagnostics. See `docs/record/doctor.md` for full documentation.
 
 ```bash
 plasmite doctor <POOL>    # validate one pool

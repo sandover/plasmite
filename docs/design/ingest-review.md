@@ -1,11 +1,10 @@
-# Ingest review (post-implementation)
+<!--
+Purpose: Preserve a stable pointer from the legacy docs path to the canonical location.
+Exports: N/A (documentation).
+Role: Redirect stub.
+Invariants: Canonical content lives at `docs/planning/design/ingest-review.md`.
+-->
 
-## Summary
-Focused cleanup pass to reduce duplication and keep the ingestion pipeline small and explicit.
+# Document moved
 
-## Changes
-- Extracted JSON-seq record handling into a single helper to avoid duplicated parse/oversize paths.
-
-## Rationale
-Keeping each mode’s control flow clear while sharing small, localized helpers prevents subtle
-divergence across record-boundary parsers without introducing heavyweight abstractions.
+This document moved to `docs/planning/design/ingest-review.md`.

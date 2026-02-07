@@ -9,7 +9,7 @@ Invariants: Describes the chosen design and supersedes deferred persistent TOC i
 
 - Status: Accepted
 - Date: 2026-02-06
-- Supersedes: Deferred persistent TOC notes in `docs/design/tdd-v0.0.1.md`
+- Supersedes: Deferred persistent TOC notes in `docs/planning/design/tdd-v0.0.1.md`
 - Related trail: historical planning epics `HT2QNJ` and `R5PFIA` discussed TOC/perf options
 
 ## Context

@@ -1,18 +1,32 @@
 <!--
-Purpose: Provide a single entry point to Plasmite documentation and keep the doc set discoverable as it grows.
+Purpose: Define Plasmite documentation taxonomy and provide a canonical index.
 Exports: N/A (documentation).
-Role: Docs index (non-normative); links to the spec and supporting docs.
-Invariants: Normative contracts live under spec/; this file must not restate versioned guarantees.
+Role: Docs entrypoint describing where planning/design docs live vs docs of record.
+Invariants: Normative contracts remain in `spec/`; docs-of-record live in `docs/record/` and `docs/decisions/`.
 -->
 
 # Docs
 
+Plasmite docs are split into two categories:
+
+- `docs/record/`: canonical docs of record (current operational/reference truth)
+- `docs/planning/`: in-progress strategy, proposals, design drafts, and spikes
+
+`docs/decisions/` (ADRs) are also docs of record.
+
+## Promotion lifecycle
+
+1. Draft in `docs/planning/`.
+2. Review and accept.
+3. Promote accepted content into `docs/record/` (or `docs/decisions/` for ADRs).
+4. Keep temporary stubs at old paths when needed for link compatibility.
+
 ## Start here
 
-- Vision: `docs/vision.md`
-- Architecture: `docs/architecture.md`
-- Roadmap: `docs/roadmap.md`
+- Docs of record index: `docs/record/README.md`
+- Planning/design index: `docs/planning/README.md`
 - Decisions (ADRs): `docs/decisions/README.md`
+- Taxonomy migration map: `docs/planning/docs-taxonomy-migration-map.md`
 
 ## Normative specs
 
@@ -20,13 +34,17 @@ Invariants: Normative contracts live under spec/; this file must not restate ver
 - v0 public API contract: `spec/api/v0/SPEC.md`
 - v0 remote protocol: `spec/remote/v0/SPEC.md`
 
-## Quickstart guides
+## Key docs of record
 
-- CLI usage: see the [root README](../README.md)
-- Rust API: `docs/api-quickstart.md`
-- Go bindings: `docs/go-quickstart.md`
-- Python bindings: `bindings/python/README.md`
-- Node.js bindings: `bindings/node/README.md`
+- Architecture: `docs/record/architecture.md`
+- Rust API quickstart: `docs/record/api-quickstart.md`
+- Go quickstart: `docs/record/go-quickstart.md`
+- Exit codes: `docs/record/exit-codes.md`
+- Diagnostics (`doctor`): `docs/record/doctor.md`
+- Testing: `docs/record/TESTING.md`
+- Releasing: `docs/record/releasing.md`
+- Homebrew packaging: `docs/record/homebrew.md`
+- C ABI guide: `docs/record/libplasmite.md`
 
 ## Language bindings
 
@@ -38,37 +56,11 @@ Official bindings for embedding Plasmite without the CLI:
 | Python | `bindings/python/` | ctypes wrapper over libplasmite |
 | Node.js | `bindings/node/` | N-API wrapper; includes `RemoteClient` |
 
-All bindings use the C ABI (`libplasmite`). See `docs/libplasmite.md` for build/link instructions.
+All bindings use the C ABI (`libplasmite`). See `docs/record/libplasmite.md`.
 
-## Remote access
+## Planning highlights
 
-Plasmite includes an HTTP server (`plasmite serve`) for remote pool access:
-
-- Protocol spec: `spec/remote/v0/SPEC.md`
-- Node.js `RemoteClient`: `bindings/node/README.md`
-- Deployment + security notes: see “Remote Access” in `README.md`
-
-## CLI reference
-
-- Exit codes: `docs/exit-codes.md`
-- Diagnostics (`doctor`): `docs/doctor.md`
-
-## Development
-
-- Testing: `docs/TESTING.md`
-- Releasing: `docs/releasing.md`
-- Homebrew packaging: `docs/homebrew.md`
-- Performance baselines: `docs/perf.md`
-- Conformance suite: `conformance/README.md`
-
-## C ABI (libplasmite)
-
-- Build and link guide: `docs/libplasmite.md`
-- Header: `include/plasmite.h`
-
-## Design notes
-
-- Storage + concurrency TDD: `docs/design/tdd-v0.0.1.md`
-- Public API TDD (proposal): `docs/design/tdd-public-api-v0.md`
-- Correctness refactor notes: `docs/design/pool-correctness-refactor.md`
-- Snapshot notes: `docs/design/pool-snapshots.md`
+- Vision: `docs/planning/vision.md`
+- Roadmap: `docs/planning/roadmap.md`
+- Performance baselines and investigations: `docs/planning/perf.md`
+- Design drafts and spikes: `docs/planning/design/`
