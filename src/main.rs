@@ -755,7 +755,7 @@ NOTES
         pool: String,
         #[arg(help = "Inline JSON value")]
         data: Option<String>,
-        #[arg(long, help = "Repeatable tag/descriptor for the message")]
+        #[arg(long, help = "Repeatable tag for the message")]
         tag: Vec<String>,
         #[arg(
             long = "file",

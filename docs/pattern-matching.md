@@ -42,7 +42,8 @@ pls peek demo --tail 50 \
 
 ## Local and remote parity
 
-`--tag` and `--where` behave the same for local and remote `peek`.
+`--tag` and `--where` filter semantics are the same for local and remote `peek`.
+Remote `peek` still has its own surface constraints (notably no `--since` or `--replay`).
 
 ```bash
 # local
@@ -57,9 +58,10 @@ pls peek http://127.0.0.1:9700/demo --tail 20 --tag error --where '.data.code ==
 ### Go
 
 ```go
+maxMessages := uint64(10)
 out, errs := pool.Tail(ctx, plasmite.TailOptions{
     Tags:        []string{"error", "billing"},
-    MaxMessages: uint64Ptr(10),
+    MaxMessages: &maxMessages,
     Timeout:     100 * time.Millisecond,
 })
 _ = out

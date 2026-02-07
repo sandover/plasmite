@@ -153,18 +153,18 @@ pool.Append(map[string]any{"from": "go"}, nil, plasmite.DurabilityFast)
 
 ```python
 # Python
-from plasmite import Client
+from plasmite import Client, Durability
 client = Client("./data")
 pool = client.create_pool("foo", 1024*1024)
-pool.append_json(b'{"from": "python"}', [], "fast")
+pool.append_json(b'{"from": "python"}', [], Durability.FAST)
 ```
 
 ```javascript
 // Node.js
-const { Client } = require("plasmite-node")
+const { Client, Durability } = require("plasmite-node")
 const client = new Client("./data")
 const pool = client.createPool("foo", 1024 * 1024)
-pool.appendJson(Buffer.from('{"from": "node"}'), [], "fast")
+pool.appendJson(Buffer.from('{"from": "node"}'), [], Durability.Fast)
 ```
 
 **Replay from code** (all bindings support replay with speed control):
