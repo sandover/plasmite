@@ -3,7 +3,7 @@
 [![CI](https://github.com/sandover/plasmite/actions/workflows/ci.yml/badge.svg)](https://github.com/sandover/plasmite/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Persistent JSON message pools backed by plain files. Multiple processes write and read concurrently — no daemon, no config.
+Persistent JSON message pools backed by plain files. Multiple processes write and read concurrently â no daemon, no config.
 
 ```bash
 pls poke chat --create '{"from": "alice", "msg": "hello bob"}'
@@ -20,11 +20,14 @@ pls peek chat
 ## Install
 
 ```bash
-brew install sandover/tap/plasmite    # macOS and Linux
-cargo install plasmite                # from source
+brew install sandover/tap/plasmite
+cargo install --git https://github.com/sandover/plasmite --tag v0.1.0 plasmite
 ```
 
 Installs both `plasmite` and the `pls` alias.
+
+Prefer manual binaries? Download your platform tarball from the
+[v0.1.0 release](https://github.com/sandover/plasmite/releases/tag/v0.1.0).
 
 ## Why Plasmite?
 
@@ -42,7 +45,7 @@ Pools are regular files you can `ls` and `rm`. Messages are JSON, so you can fil
 
 ### Watch your CI from the couch
 
-**Terminal 1** — build script:
+**Terminal 1** â build script:
 ```bash
 pls poke build --create '{"step": "compile", "status": "running"}'
 sleep 2
@@ -50,7 +53,7 @@ pls poke build '{"step": "compile", "status": "done"}'
 pls poke build '{"step": "test", "status": "running"}'
 ```
 
-**Terminal 2** — you, watching:
+**Terminal 2** â you, watching:
 ```bash
 pls peek build
 ```
@@ -58,11 +61,11 @@ pls peek build
 ### Gate one script on another
 
 ```bash
-# deploy.sh — wait for tests to pass
+# deploy.sh â wait for tests to pass
 pls peek ci --where '.data.status == "green"' --one > /dev/null
 echo "Tests passed, deploying..."
 
-# test-runner.sh — signal when done
+# test-runner.sh â signal when done
 pls poke ci --create '{"status": "green", "commit": "abc123"}'
 ```
 
@@ -114,7 +117,7 @@ See the [remote protocol spec](spec/remote/v0/SPEC.md) for the full HTTP/JSON AP
 
 ## Bindings
 
-Native bindings — no subprocess overhead:
+Native bindings â no subprocess overhead:
 
 ```go
 client, _ := plasmite.NewClient("./data")
@@ -142,7 +145,7 @@ npm install plasmite-node
 go get github.com/sandover/plasmite/bindings/go/plasmite
 ```
 
-Python and Node bindings are source-only for v0.1.0 (Rust toolchain required — `brew install rust` on macOS, [rustup](https://rustup.rs) on Linux). Pre-built binaries coming soon.
+Python and Node bindings are source-only for v0.1.0 (Rust toolchain required â `brew install rust` on macOS, [rustup](https://rustup.rs) on Linux). Pre-built binaries coming soon.
 
 See [Go quickstart](docs/record/go-quickstart.md), [Python docs](bindings/python/README.md), and [Node docs](bindings/node/README.md).
 
@@ -164,12 +167,12 @@ See [Go quickstart](docs/record/go-quickstart.md), [Python docs](bindings/python
 
 ## How It Works
 
-A pool is a **persistent ring buffer** — one `.plasmite` file:
+A pool is a **persistent ring buffer** â one `.plasmite` file:
 
 - **Multiple writers** append concurrently (serialized via OS file locks)
 - **Multiple readers** watch concurrently (lock-free, zero-copy)
-- **Bounded retention** — old messages overwritten when full (default 1MB, configurable)
-- **Crash-safe** — torn writes never propagate
+- **Bounded retention** â old messages overwritten when full (default 1MB, configurable)
+- **Crash-safe** â torn writes never propagate
 
 Every message has a **seq** (auto-incrementing), a **time** (nanosecond-precision), optional **tags**, and your JSON **data**. Tags and `--where` (jq predicates) compose for filtering. See [pattern matching guide](docs/record/pattern-matching.md).
 
@@ -177,11 +180,11 @@ Default pool directory: `~/.plasmite/pools/`.
 
 ## More Info
 
-**Specs**: [CLI](spec/v0/SPEC.md) · [API](spec/api/v0/SPEC.md) · [Remote protocol](spec/remote/v0/SPEC.md)
+**Specs**: [CLI](spec/v0/SPEC.md) Â· [API](spec/api/v0/SPEC.md) Â· [Remote protocol](spec/remote/v0/SPEC.md)
 
-**Guides**: [Rust API quickstart](docs/record/api-quickstart.md) · [Go quickstart](docs/record/go-quickstart.md) · [libplasmite C ABI](docs/record/libplasmite.md) · [Exit codes](docs/record/exit-codes.md) · [Diagnostics](docs/record/doctor.md)
+**Guides**: [Rust API quickstart](docs/record/api-quickstart.md) Â· [Go quickstart](docs/record/go-quickstart.md) Â· [libplasmite C ABI](docs/record/libplasmite.md) Â· [Exit codes](docs/record/exit-codes.md) Â· [Diagnostics](docs/record/doctor.md)
 
-[Changelog](CHANGELOG.md) · Inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma).
+[Changelog](CHANGELOG.md) Â· Inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma).
 
 ## License
 

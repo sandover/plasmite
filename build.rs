@@ -2,6 +2,7 @@
 //! Role: Cargo build-script; configures `cc` inputs/includes and rebuild triggers.
 //! Invariants: `cargo:rerun-if-changed` covers the shim + vendored sources we compile.
 //! Invariants: Produces a `lite3` object library linked into the Rust crate.
+//! Invariants: Avoids forcing a strict C standard so cross toolchains can compile vendored Lite3 sources.
 //! Invariants: Uses only Cargo-provided env vars (e.g. `CARGO_MANIFEST_DIR`).
 use std::env;
 use std::path::PathBuf;
@@ -35,9 +36,7 @@ fn main() {
         .file(lite3_dir.join("src").join("debug.c"))
         .file(lite3_dir.join("lib").join("yyjson").join("yyjson.c"))
         .file(lite3_dir.join("lib").join("nibble_base64").join("base64.c"))
-        .file(manifest_dir.join("c").join("lite3_shim.c"))
-        .flag_if_supported("-std=c11")
-        .flag_if_supported("-Wno-c23-extensions");
+        .file(manifest_dir.join("c").join("lite3_shim.c"));
 
     build.compile("lite3");
 }
