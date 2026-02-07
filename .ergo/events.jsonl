@@ -1794,3 +1794,7 @@
 {"type":"state","ts":"2026-02-07T00:26:53.127699Z","data":{"id":"EOQCYX","state":"doing","ts":"2026-02-07T00:26:53.127699Z"}}
 {"type":"result","ts":"2026-02-07T00:37:50.838277Z","data":{"task_id":"EOQCYX","summary":"Implemented tag filtering for tail across API, remote server/client, and language bindings with tests","path":"src/api/message.rs","sha256_at_attach":"1f9d87113ce8f908b8eb56c1b29c443810c20d6960d200711f7d1b9d78b44c7a","mtime_at_attach":"2026-02-07T00:35:40.42335079Z","git_commit_at_attach":"75b2915bf56eee3c0dba9c24348db582e483a653","ts":"2026-02-07T00:37:50.838277Z"}}
 {"type":"state","ts":"2026-02-07T00:37:50.853961Z","data":{"id":"EOQCYX","state":"done","ts":"2026-02-07T00:37:50.853961Z"}}
+{"type":"claim","ts":"2026-02-07T00:39:11.533463Z","data":{"id":"HAYVTJ","agent_id":"codex@local","ts":"2026-02-07T00:39:11.533463Z"}}
+{"type":"state","ts":"2026-02-07T00:39:11.533463Z","data":{"id":"HAYVTJ","state":"doing","ts":"2026-02-07T00:39:11.533463Z"}}
+{"type":"result","ts":"2026-02-07T00:40:39.009412Z","data":{"task_id":"HAYVTJ","summary":"Added pattern matching guide and updated README/binding docs for --tag and --where semantics","path":"docs/pattern-matching.md","sha256_at_attach":"f9ec490b08bd6733544b2637f099d61bf13fc51ffa2273b1996a5601651890ba","mtime_at_attach":"2026-02-07T00:39:55.007501376Z","git_commit_at_attach":"f9907709c8ade14128d0bf5452908df2d9897491","ts":"2026-02-07T00:40:39.009412Z"}}
+{"type":"state","ts":"2026-02-07T00:40:39.024404Z","data":{"id":"HAYVTJ","state":"done","ts":"2026-02-07T00:40:39.024404Z"}}

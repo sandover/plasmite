@@ -15,7 +15,13 @@ From the repo root:
 cargo build -p plasmite
 ```
 
-Then from `bindings/go`:
+Canonical repo-root command:
+
+```bash
+just bindings-go-test
+```
+
+Equivalent manual command (from `bindings/go`):
 
 ```bash
 CGO_LDFLAGS="-L$(pwd)/../../target/debug" go test ./...
@@ -51,4 +57,14 @@ if err != nil {
     // handle err
 }
 _ = frame
+
+ctx := context.Background()
+tail, errs := pool.Tail(ctx, plasmite.TailOptions{
+    Tags:        []string{"note"},
+    Timeout:     100 * time.Millisecond,
+})
+_ = tail
+_ = errs
 ```
+
+`TailOptions.Tags` applies exact tag matching and composes with other filters via AND semantics.

@@ -23,11 +23,17 @@ From the repo root:
 cargo build -p plasmite
 ```
 
-Then from `bindings/python`:
+Canonical repo-root command:
+
+```bash
+just bindings-python-test
+```
+
+Equivalent manual commands (from `bindings/python`):
 
 ```bash
 PLASMITE_LIB_DIR="$(pwd)/../../target/debug" python -m pip install -e .
-PLASMITE_LIB_DIR="$(pwd)/../../target/debug" PLASMITE_BIN="$(pwd)/../../target/debug/plasmite" python -m unittest
+PLASMITE_LIB_DIR="$(pwd)/../../target/debug" PLASMITE_BIN="$(pwd)/../../target/debug/plasmite" python3 -m unittest discover -s tests
 ```
 
 On macOS, ensure `DYLD_LIBRARY_PATH` includes the same directory.
@@ -38,14 +44,25 @@ On Linux, set `LD_LIBRARY_PATH`.
 ```python
 from plasmite import Client, Durability
 
-client = Client("./data")
-pool = client.create_pool("docs", 64 * 1024 * 1024)
-message = pool.append_json(b'{"kind":"note","text":"hi"}', ["note"], Durability.FAST)
-print(message.decode("utf-8"))
+with Client("./data") as client:
+    with client.create_pool("docs", 64 * 1024 * 1024) as pool:
+        message = pool.append_json(
+            b'{"kind":"note","text":"hi"}',
+            ["note"],
+            Durability.FAST,
+        )
+        print(message.decode("utf-8"))
 
-frame = pool.get_lite3(1)
-print(len(frame.payload))
+        frame = pool.get_lite3(1)
+        print(len(frame.payload))
 
-pool.close()
-client.close()
+        for item in pool.tail(tags=["note"], max_messages=1, timeout_ms=100):
+            print(item.decode("utf-8"))
 ```
+
+`Pool.tail(..., tags=[...])` uses exact tag matching and composes with other filters using AND semantics.
+
+## Error behavior
+
+- Invalid local arguments raise `ValueError` / `TypeError`.
+- ABI/runtime failures raise `PlasmiteError` with `kind`, `path`, `seq`, and `offset` when present.

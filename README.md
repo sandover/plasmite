@@ -119,8 +119,11 @@ pls peek events --tail 100 --replay 0
 # Only errors
 pls peek foo --where '.data.level == "error"'
 
-# Only messages tagged "important"
-pls peek foo --where '.meta.tags[]? == "important"'
+# Only messages tagged "important" (exact tag match)
+pls peek foo --tag important
+
+# Tags compose with jq predicates via AND
+pls peek foo --tag important --where '.data.level == "error"'
 
 # Pipe to jq for transformation
 pls peek foo --format jsonl | jq -r '.data.msg'
@@ -190,6 +193,15 @@ for await (const msg of replay(pool, { speed: 0.5 })) {
 
 See [Go quickstart](docs/go-quickstart.md), [bindings/python](bindings/python/README.md), and [bindings/node](bindings/node/README.md) for full documentation.
 
+Binding validation from repo root:
+
+```bash
+just bindings-go-test
+just bindings-python-test
+just bindings-node-test
+just bindings-test
+```
+
 ## Commands
 
 | Command | Description |
@@ -201,7 +213,7 @@ See [Go quickstart](docs/go-quickstart.md), [bindings/python](bindings/python/RE
 | `pool list` | List pools |
 | `pool info NAME [--json]` | Show pool metadata, bounds, and metrics |
 | `pool delete NAME...` | Delete one or more pools |
-| `doctor POOL` | Validate pool health (`--all` for all pools) |
+| `doctor <POOL> \| --all` | Validate one pool or all pools |
 | `serve` | Serve pools over HTTP (loopback default; non-loopback opt-in) |
 
 Both `pls` and `plasmite` commands are supported.
@@ -254,7 +266,7 @@ Default location: `~/.plasmite/pools/`. Create explicitly or use `--create` on f
 
 - **seq** - auto-incrementing ID (for ordering, deduplication, `plasmite get`)
 - **time** - when it was written (RFC 3339, nanosecond precision)
-- **meta.tags** - tags you add with `--tag` (for filtering with `--where`)
+- **meta.tags** - tags you add with `--tag` (for filtering with `--tag` and/or `--where`)
 - **data** - your JSON payload
 
 Tag messages when you poke them:
@@ -264,8 +276,14 @@ pls poke foo --tag error --tag db '{"msg": "connection lost"}'
 
 Filter by tag when you peek:
 ```bash
-pls peek foo --where '.meta.tags[]? == "error"'
+pls peek foo --tag error
+# exact match, repeat for AND semantics
+pls peek foo --tag error --tag db
+# combine with jq predicates
+pls peek foo --tag error --where '.data.service == "billing"'
 ```
+
+See [docs/design/pattern-matching-v0-iterative-spec.md](docs/design/pattern-matching-v0-iterative-spec.md) and [docs/pattern-matching.md](docs/pattern-matching.md) for a deeper guide.
 
 ### Scripting
 
@@ -408,7 +426,7 @@ pls poke http://server:9700/events '{"sensor": "temp", "value": 23.5}'
 pls peek http://server:9700/events --tail 20 --format jsonl
 ```
 
-> **Note:** Remote `peek` supports shorthand refs (`http://host:port/<pool>`) with `--tail`, `--where`, `--one`, `--timeout`, `--data-only`, and `--format`. `--since` and `--replay` are local-only.
+> **Note:** Remote `peek` supports shorthand refs (`http://host:port/<pool>`) with `--tail`, `--tag`, `--where`, `--one`, `--timeout`, `--data-only`, and `--format`. `--since` and `--replay` are local-only.
 
 ### From code
 

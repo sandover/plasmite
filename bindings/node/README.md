@@ -24,7 +24,13 @@ From the repo root:
 cargo build -p plasmite
 ```
 
-Then from `bindings/node`:
+Canonical repo-root command:
+
+```bash
+just bindings-node-test
+```
+
+Equivalent manual command (from `bindings/node`):
 
 ```bash
 PLASMITE_LIB_DIR="$(pwd)/../../target/debug" npm test
@@ -51,6 +57,8 @@ pool.close()
 client.close()
 ```
 
+Local binding failures throw `PlasmiteNativeError` with structured metadata fields (`kind`, `path`, `seq`, `offset`) when available.
+
 ## Remote Client (HTTP/JSON)
 
 ```js
@@ -61,7 +69,14 @@ const pool = await client.openPool("docs")
 const message = await pool.append({ kind: "note", text: "hi" }, ["note"])
 console.log(message.seq, message.data)
 
-const tail = await pool.tail({ sinceSeq: message.seq, maxMessages: 1, timeoutMs: 500 })
+const tail = await pool.tail({
+  sinceSeq: message.seq,
+  tags: ["note"],
+  maxMessages: 1,
+  timeoutMs: 500,
+})
 console.log(await tail.next())
 tail.cancel()
 ```
+
+`tail({ tags: [...] })` performs exact tag matching and composes with other filters via AND semantics.
