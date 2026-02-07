@@ -283,7 +283,7 @@ pls peek foo --tag error --tag db
 pls peek foo --tag error --where '.data.service == "billing"'
 ```
 
-See [docs/planning/design/pattern-matching-v0-iterative-spec.md](docs/planning/design/pattern-matching-v0-iterative-spec.md) and [docs/record/pattern-matching.md](docs/record/pattern-matching.md) for a deeper guide.
+See [docs/record/pattern-matching.md](docs/record/pattern-matching.md) for a deeper guide.
 
 ### Scripting
 
@@ -448,8 +448,6 @@ Benchmarks on a laptop (M-series Mac, release build, 256-byte payloads):
 - **Follow latency**: sub-millisecond typical, ~3ms worst case
 - **Concurrent writers**: scales to 8+ with graceful degradation
 
-See [docs/planning/perf.md](docs/planning/perf.md) for the full benchmark suite.
-
 ### SIMD JSON Parsing
 
 For higher throughput, build with the `simd` feature to enable [simd-json](https://github.com/simd-lite/simd-json) for JSON parsing:
@@ -479,6 +477,7 @@ Inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma)
 - [libplasmite](docs/record/libplasmite.md) - Building the C ABI
 
 **Reference**:
+- [Vision](docs/record/vision.md) - Product direction and scope boundaries
 - [Architecture](docs/record/architecture.md) - How it's built
 - [Exit codes](docs/record/exit-codes.md) - For robust error handling
 - [Diagnostics](docs/record/doctor.md) - Pool validation

@@ -1,62 +1,107 @@
 <!--
-Purpose: Describe Plasmite’s internal boundaries so contributors can extend it without coupling UX, storage, and transport concerns.
+Purpose: Define Plasmite's core architecture so contributors can change internals without breaking user contracts.
 Exports: N/A (documentation).
-Role: Architectural guide (non-normative) that complements the spec and ADRs.
-Invariants: The CLI contract remains transport-agnostic; storage integrity errors are surfaced consistently.
+Role: Keystone technical reference for system boundaries, data flow, and invariants.
+Invariants: Specs define external contracts; this doc explains implementation structure that must preserve those contracts.
 -->
 
 # Architecture
 
-This document explains how Plasmite is structured and where responsibilities live.
-It is **not** a CLI contract; the normative contract for v0 lives in `spec/v0/SPEC.md`.
+This is the implementation architecture for Plasmite.
+Normative behavior lives in:
 
-## Layers
+- `spec/v0/SPEC.md` (CLI contract)
+- `spec/api/v0/SPEC.md` (public API)
+- `spec/remote/v0/SPEC.md` (HTTP protocol)
 
-### Contract surface (CLI)
+## Design principles
 
-The `plasmite` binary is JSON-first and Unix-friendly:
-- Reads JSON from args / stdin.
-- Writes JSON to stdout (JSONL for streams).
-- Writes human-readable errors to stderr on TTY; JSON errors on non-TTY stderr.
+- Local-first: pool storage correctness does not depend on external services.
+- Contract-first: CLI/API/protocol stability is preserved while internals evolve.
+- Shared core: CLI, bindings, and server reuse the same pool/message logic.
+- Explicit failure modes: errors map to stable kinds and scriptable exit codes.
 
-This layer should not “know” about networking beyond resolving a pool reference and invoking core operations.
+## Layer model
 
-### Core operations (pool + messages)
+1. Interface layer
+- CLI (`src/main.rs`), API (`src/api/*`), and HTTP server (`src/serve.rs`).
+- Responsibilities: parse/validate inputs, invoke core operations, map results to user-facing formats.
 
-Core logic owns:
-- Pool file layout and invariants (append-only log with bounded retention).
-- Locking and concurrency semantics.
-- Encoding/decoding the stored payload.
-- Stable error kinds (mapped to stable exit codes in the CLI).
+2. Core domain layer
+- Pool format and operations (`src/core/*`).
+- Responsibilities: append/get/tail semantics, validation, sequencing, corruption detection.
 
-Core should be callable from:
-- CLI commands (local use).
-- Future servers (remote access) without re-implementing correctness rules.
+3. Platform layer
+- File mapping, file locking, and notify primitives.
+- Responsibilities: concurrency and durability primitives across supported OSes.
 
-### Storage format (on disk)
+Rule: interface layers do not implement storage correctness logic themselves.
 
-At the CLI boundary messages are JSON; on disk the payload is a compact binary encoding of `{meta,data}`.
-Pool files use `header | index region | ring` layout; the inline index provides fast seq->offset lookup with scan fallback for stale/collided slots.
+## Data model and on-disk layout
+
+A pool file is:
+
+`header | index_region | ring`
+
+- Header: metadata, bounds, and offsets.
+- Index region: optional fixed-size seq->offset slots (`(u64 seq, u64 offset)`).
+- Ring: append log frames containing encoded `{meta, data}` payloads.
 
 Key invariants:
-- Every committed message has a monotonically increasing `seq`.
-- Every committed message has an RFC 3339 `time` (UTC).
-- Corruption is detected and reported as an “invalid/corrupt pool” error kind.
 
-## Remote access
+- Sequence numbers are monotonically increasing for committed messages.
+- Frame commit state is validated before exposure to readers.
+- Corrupt/torn/stale reads do not silently return invalid payloads.
+- Index mismatches always fall back to scan for correctness.
 
-Plasmite is **transport-agnostic**:
-- The `PoolRef` model represents local names/paths; remote shorthand URLs are supported for `poke` (and more commands soon).
-- Message streams use the same logical format whether over stdin, file, HTTP, or future transports.
-- `plasmite serve` is a thin adapter: HTTP ↔ framing ↔ core operations.
+## Write/read paths
 
-### Current: HTTP/JSON (v0)
+Append (high level):
 
-`plasmite serve` exposes pools over HTTP with JSON request/response bodies:
-- Loopback by default in v0; non-loopback binds require explicit opt-in
-- See `spec/remote/v0/SPEC.md` for the protocol contract
-- Node.js `RemoteClient` provides a typed client
+1. Validate input and prepare frame.
+2. Acquire writer lock.
+3. Plan placement in ring (including overwrite/wrap decisions).
+4. Commit frame bytes.
+5. Update index slot (when enabled).
+6. Publish header updates and notify waiters.
 
-### Future: QUIC transport
+Get-by-seq path:
 
-"UDP access" will be delivered via **QUIC** (UDP-based transport with streams, reliability, and TLS), not bespoke unreliable UDP. This will enable lower-latency streaming and better handling of unreliable networks.
+1. Validate requested seq is in visible bounds.
+2. Probe index slot.
+3. If probe fails validation, fall back to scan.
+4. Return decoded message envelope.
+
+Tail path:
+
+1. Resolve start position (`tail`, `since`, `from`).
+2. Stream committed messages in order.
+3. Use notify + bounded polling fallback for low-latency follow mode.
+
+## Transport architecture
+
+Plasmite is transport-agnostic at the core.
+
+- Local mode: CLI/API calls directly into core operations.
+- Remote mode: `plasmite serve` adapts HTTP request/response into the same core calls.
+- Future transports (for example QUIC) should be adapters, not alternate correctness engines.
+
+## Extension seams
+
+- New interfaces should reuse `PoolRef` and core message operations.
+- New payload conventions should preserve existing envelope semantics (`seq`, `time`, `meta`, `data`).
+- Performance work must preserve crash-safety and fallback correctness paths.
+
+## Operational guarantees vs non-goals
+
+Guaranteed:
+
+- Stable error-kind surface and exit-code mapping.
+- Durable pool file invariants under normal crash and restart scenarios.
+- Cross-surface behavior parity (CLI/API/HTTP) for the same operation class.
+
+Not guaranteed:
+
+- Hard real-time latency.
+- Infinite retention (ring buffers are bounded).
+- Backward compatibility for undocumented internal file details outside versioned formats.

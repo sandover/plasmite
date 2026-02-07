@@ -1,22 +1,23 @@
 <!--
-Purpose: Define the planning namespace for proposals, designs, and in-flight strategy docs.
+Purpose: Define the single planning namespace and keep active planning artifacts minimal.
 Exports: N/A (documentation).
-Role: Planning-doc index and lifecycle policy.
-Invariants: Planning docs are non-authoritative until promoted to docs of record.
+Role: Planning policy and index.
+Invariants: Planning docs are temporary and non-authoritative until promoted to docs-of-record.
 -->
 
-# Planning and Design
+# Planning
 
-Place in-progress artifacts here:
+`docs/planning/` is the only planning namespace.
 
-- proposals and spikes
-- design drafts and technical design docs
-- roadmap and strategy notes
-- benchmark investigations and temporary analysis
+Use it only for active, in-flight planning artifacts.
+Stale plans, spikes, and superseded drafts should be deleted.
+
+## Active planning docs
+
+- Roadmap: `docs/planning/roadmap.md`
 
 Promotion workflow:
 
 1. Draft/update in `docs/planning/`.
 2. Review and accept.
-3. Promote the accepted content into `docs/record/` (or `docs/decisions/` for ADRs).
-4. Leave a compatibility stub if old links are already in use.
+3. Promote accepted content to `docs/record/` (or `docs/decisions/` for ADRs).

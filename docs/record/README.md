@@ -1,18 +1,30 @@
 <!--
-Purpose: Define the canonical docs-of-record namespace for Plasmite documentation.
+Purpose: Define what belongs in docs-of-record and provide a compact index for canonical docs.
 Exports: N/A (documentation).
-Role: Record-doc index and placement policy.
-Invariants: Stable operational/reference docs live here; planning drafts do not.
+Role: Record-doc policy and navigation hub.
+Invariants: Content here is the current authoritative reference unless superseded by versioned specs/ADRs.
 -->
 
 # Docs of Record
 
-Place stable, canonical documentation here:
+Use this namespace for canonical, current truth documentation.
 
-- operator/developer references
-- usage guides and quickstarts
-- maintenance and release procedures
-- architecture/reference docs intended as current truth
+## Keystone docs
+
+- Vision: `docs/record/vision.md`
+- Architecture: `docs/record/architecture.md`
+
+## Reference and operations
+
+- API quickstart: `docs/record/api-quickstart.md`
+- Go quickstart: `docs/record/go-quickstart.md`
+- Exit codes: `docs/record/exit-codes.md`
+- Diagnostics: `docs/record/doctor.md`
+- Testing: `docs/record/TESTING.md`
+- Releasing: `docs/record/releasing.md`
+- Homebrew packaging: `docs/record/homebrew.md`
+- C ABI guide: `docs/record/libplasmite.md`
+- Pattern matching guide: `docs/record/pattern-matching.md`
 
 Do not place proposals, exploratory design drafts, or roadmap notes here.
-Those belong in `docs/planning/` until promoted.
+Those belong in `docs/planning/` until accepted and promoted.

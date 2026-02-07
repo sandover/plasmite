@@ -1,33 +1,29 @@
 <!--
-Purpose: Track planned capabilities and sequencing without turning it into a binding spec.
+Purpose: Track active and near-term planning priorities without creating normative compatibility promises.
 Exports: N/A (documentation).
-Role: Product/engineering roadmap (non-normative); links to ADRs for design details.
-Invariants: v0 contract remains stable; roadmap items are non-binding until promoted into a spec version.
+Role: Living planning artifact for product and engineering sequencing.
+Invariants: Items here are directional only until captured in specs/ADRs or promoted into docs-of-record.
 -->
 
 # Roadmap
 
-This roadmap is outcome-oriented. Design details live in ADRs; compatibility promises live in versioned specs.
+This roadmap lists active and near-term priorities.
+It is intentionally short and should only include work that is currently relevant.
 
-## Completed (post v0.0.1)
+## Active now
 
-- ✓ `plasmite serve` - HTTP/JSON server (loopback by default; non-loopback opt-in)
-- ✓ `plasmite doctor` - Pool validation and diagnostics
-- ✓ Language bindings - Go, Python, Node.js (via libplasmite C ABI)
-- ✓ Public Rust API (`plasmite::api`)
-- ✓ Remote protocol spec (HTTP/JSON)
-- ✓ Conformance test suite (cross-language)
-- ✓ Remote `poke` via shorthand URLs (`http://host:port/pool`)
-- ✓ Inline seq->offset index for fast `get(seq)` lookups
+- Distribution and release channel setup
+  - first public release versioning decision
+  - CI release workflow for binary artifacts
+  - Homebrew tap publishing path
 
-## In progress
+## Next
 
-- Shell completion
-- Remote `peek`/`get` via shorthand URLs
+- Binary payload conventions (inline blobs/chunking)
+- Windows platform support milestones
 
-## Future
+## Later (candidate)
 
-- Per-entry checksums (opt-in)
-- Binary payload conventions (inline blobs/chunking) + optional blob store
-- Pattern matching / filtering interface (stateless; interface TBD)
-- QUIC transport ("UDP access" via QUIC streams + TLS)
+- Optional per-entry checksums
+- Optional `.NET` bindings
+- Additional remote transport work beyond HTTP/JSON (for example QUIC)
