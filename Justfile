@@ -32,7 +32,11 @@ bindings-node-typecheck:
 
 bindings-test: bindings-go-test bindings-python-test bindings-node-test bindings-node-typecheck
 
-ci: fmt clippy test abi-smoke conformance-all cross-artifact-smoke bindings-node-typecheck
+ci-fast: fmt clippy test bindings-node-typecheck
+
+ci-full: fmt clippy test abi-smoke conformance-all cross-artifact-smoke bindings-node-typecheck
+
+ci: ci-full
 
 abi:
 	cargo build --lib
