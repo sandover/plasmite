@@ -551,14 +551,18 @@ class Pool:
             raise ValueError("speed must be positive")
 
         required_tags = list(tags or [])
+        stream_max_messages = (
+            None if (max_messages is not None and required_tags) else max_messages
+        )
 
         stream = self.open_stream(
             since_seq=since_seq,
-            max_messages=max_messages,
+            max_messages=stream_max_messages,
             timeout_ms=timeout_ms,
         )
         try:
             prev_dt: Optional[datetime] = None
+            delivered = 0
             while True:
                 msg = stream.next_json()
                 if msg is None:
@@ -578,7 +582,10 @@ class Pool:
                         _time.sleep(delta)
                 if cur_dt is not None:
                     prev_dt = cur_dt
+                delivered += 1
                 yield msg
+                if max_messages is not None and delivered >= max_messages:
+                    break
         finally:
             stream.close()
 
@@ -591,9 +598,12 @@ class Pool:
     ) -> Generator[bytes, None, None]:
         """Tail JSON messages and optionally filter by exact tags."""
         required_tags = list(tags or [])
+        stream_max_messages = (
+            None if (max_messages is not None and required_tags) else max_messages
+        )
         stream = self.open_stream(
             since_seq=since_seq,
-            max_messages=max_messages,
+            max_messages=stream_max_messages,
             timeout_ms=timeout_ms,
         )
         try:

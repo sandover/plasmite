@@ -146,7 +146,7 @@ test("lite3 append rejects invalid payloads", () => {
   client.close();
 });
 
-test("remote tail passes repeated tag query params", async () => {
+test("remote tail encodes tags as repeated tag query params", async () => {
   const originalFetch = global.fetch;
   let capturedUrl = null;
 
@@ -180,7 +180,7 @@ test("remote tail passes repeated tag query params", async () => {
 
     assert.ok(capturedUrl, "expected fetch URL to be captured");
     assert.equal(capturedUrl.pathname, "/v0/pools/demo/tail");
-    assert.equal(capturedUrl.searchParams.get("tag"), "keep,prod");
+    assert.deepEqual(capturedUrl.searchParams.getAll("tag"), ["keep", "prod"]);
     assert.equal(capturedUrl.searchParams.get("max"), "1");
     assert.equal(capturedUrl.searchParams.get("timeout_ms"), "10");
   } finally {

@@ -72,7 +72,22 @@ class BindingTests(unittest.TestCase):
         pool.append_json(b'{"kind":"drop"}', ["drop"], Durability.FAST)
         pool.append_json(b'{"kind":"keep"}', ["keep"], Durability.FAST)
 
-        results = list(pool.tail(max_messages=2, timeout_ms=50, tags=["keep"]))
+        results = list(pool.tail(max_messages=1, timeout_ms=50, tags=["keep"]))
+        self.assertEqual(len(results), 1)
+        message = parse_message(results[0])
+        self.assertEqual(message["data"]["kind"], "keep")
+
+        pool.close()
+        client.close()
+
+    def test_replay_filters_by_tags_before_max_messages(self) -> None:
+        client = Client(str(self.pool_dir))
+        pool = client.create_pool("replay-tags", 1024 * 1024)
+
+        pool.append_json(b'{"kind":"drop"}', ["drop"], Durability.FAST)
+        pool.append_json(b'{"kind":"keep"}', ["keep"], Durability.FAST)
+
+        results = list(pool.replay(speed=1.0, max_messages=1, timeout_ms=50, tags=["keep"]))
         self.assertEqual(len(results), 1)
         message = parse_message(results[0])
         self.assertEqual(message["data"]["kind"], "keep")

@@ -156,13 +156,8 @@ class RemotePool {
     }
     if (options.tags !== undefined) {
       const tags = Array.isArray(options.tags) ? options.tags : [options.tags];
-      if (tags.length > 0) {
-        url.searchParams.set(
-          "tag",
-          tags
-            .map((tag) => String(tag))
-            .join(",")
-        );
+      for (const tag of tags) {
+        url.searchParams.append("tag", String(tag));
       }
     }
 

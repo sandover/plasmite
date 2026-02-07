@@ -6,7 +6,7 @@
 //! Notes: Streaming uses JSONL or framed Lite3; tail is at-least-once and resumable.
 
 use axum::body::Body;
-use axum::extract::{DefaultBodyLimit, Path as AxumPath, Query, State};
+use axum::extract::{DefaultBodyLimit, Path as AxumPath, Query, RawQuery, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
@@ -503,7 +503,6 @@ struct TailQuery {
     since_seq: Option<u64>,
     max: Option<u64>,
     timeout_ms: Option<u64>,
-    tag: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -800,6 +799,7 @@ async fn tail_messages(
     headers: HeaderMap,
     AxumPath(pool): AxumPath<String>,
     Query(query): Query<TailQuery>,
+    RawQuery(raw_query): RawQuery,
 ) -> Response {
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
@@ -832,7 +832,7 @@ async fn tail_messages(
         }
     }
     let timeout_ms = query.timeout_ms.unwrap_or(state.max_tail_timeout_ms);
-    let tags = parse_tag_query(query.tag.as_deref());
+    let tags = parse_tags_from_query(raw_query.as_deref());
 
     let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
     tokio::task::spawn_blocking(move || {
@@ -888,6 +888,7 @@ async fn tail_lite3(
     headers: HeaderMap,
     AxumPath(pool): AxumPath<String>,
     Query(query): Query<TailQuery>,
+    RawQuery(raw_query): RawQuery,
 ) -> Response {
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
@@ -932,7 +933,7 @@ async fn tail_lite3(
         }
     }
     let timeout_ms = query.timeout_ms.unwrap_or(state.max_tail_timeout_ms);
-    let tags = parse_tag_query(query.tag.as_deref());
+    let tags = parse_tags_from_query(raw_query.as_deref());
 
     let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
     tokio::task::spawn_blocking(move || {
@@ -979,6 +980,7 @@ async fn ui_events(
     headers: HeaderMap,
     AxumPath(pool): AxumPath<String>,
     Query(query): Query<TailQuery>,
+    RawQuery(raw_query): RawQuery,
 ) -> Response {
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
@@ -1010,7 +1012,7 @@ async fn ui_events(
         }
     }
     let timeout_ms = query.timeout_ms.unwrap_or(state.max_tail_timeout_ms);
-    let tags = parse_tag_query(query.tag.as_deref());
+    let tags = parse_tags_from_query(raw_query.as_deref());
     let client = state.client.clone();
     let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
 
@@ -1085,16 +1087,21 @@ fn message_json(message: &plasmite::api::Message) -> serde_json::Value {
     })
 }
 
-fn parse_tag_query(raw: Option<&str>) -> Vec<String> {
-    raw.map(|value| {
-        value
-            .split(',')
-            .map(str::trim)
-            .filter(|tag| !tag.is_empty())
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-    })
-    .unwrap_or_default()
+fn normalize_tags(raw: Vec<String>) -> Vec<String> {
+    raw.into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|tag| !tag.is_empty())
+        .collect()
+}
+
+fn parse_tags_from_query(raw_query: Option<&str>) -> Vec<String> {
+    let Some(raw_query) = raw_query else {
+        return Vec::new();
+    };
+    let tags = url::form_urlencoded::parse(raw_query.as_bytes())
+        .filter_map(|(key, value)| (key == "tag").then(|| value.into_owned()))
+        .collect::<Vec<_>>();
+    normalize_tags(tags)
 }
 
 fn pool_info_json(pool_ref: &str, info: &PoolInfo) -> serde_json::Value {
@@ -1226,7 +1233,10 @@ fn is_access_forbidden(err: &Error) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{AccessMode, ErrorKind, ServeConfig, parse_tag_query, serve, validate_config};
+    use super::{
+        AccessMode, ErrorKind, ServeConfig, normalize_tags, parse_tags_from_query, serve,
+        validate_config,
+    };
 
     #[tokio::test]
     async fn serve_rejects_non_loopback_bind() {
@@ -1360,16 +1370,30 @@ mod tests {
     }
 
     #[test]
-    fn parse_tag_query_splits_comma_separated_values() {
+    fn normalize_tags_keeps_exact_values_and_drops_empty_entries() {
         assert_eq!(
-            parse_tag_query(Some("keep, prod,critical")),
-            vec![
+            normalize_tags(vec![
                 "keep".to_string(),
-                "prod".to_string(),
-                "critical".to_string()
-            ]
+                " prod ".to_string(),
+                "a,b".to_string(),
+                "".to_string()
+            ]),
+            vec!["keep".to_string(), "prod".to_string(), "a,b".to_string()]
         );
-        assert!(parse_tag_query(Some(" , , ")).is_empty());
-        assert!(parse_tag_query(None).is_empty());
+        assert!(normalize_tags(vec![" ".to_string()]).is_empty());
+        assert!(normalize_tags(Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn parse_tags_from_query_reads_repeated_values() {
+        assert_eq!(
+            parse_tags_from_query(Some("tag=keep&tag=prod&max=1")),
+            vec!["keep".to_string(), "prod".to_string()]
+        );
+        assert_eq!(
+            parse_tags_from_query(Some("tag=keep%2Cprod")),
+            vec!["keep,prod".to_string()]
+        );
+        assert!(parse_tags_from_query(None).is_empty());
     }
 }

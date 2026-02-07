@@ -508,8 +508,8 @@ impl RemotePool {
             if let Some(timeout) = options.timeout {
                 pairs.append_pair("timeout_ms", &timeout.as_millis().to_string());
             }
-            if !options.tags.is_empty() {
-                pairs.append_pair("tag", &options.tags.join(","));
+            for tag in &options.tags {
+                pairs.append_pair("tag", tag);
             }
         }
 
@@ -535,8 +535,8 @@ impl RemotePool {
             if let Some(timeout) = options.timeout {
                 pairs.append_pair("timeout_ms", &timeout.as_millis().to_string());
             }
-            if !options.tags.is_empty() {
-                pairs.append_pair("tag", &options.tags.join(","));
+            for tag in &options.tags {
+                pairs.append_pair("tag", tag);
             }
         }
 
