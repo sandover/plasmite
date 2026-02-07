@@ -7,7 +7,6 @@ description = "Persistent JSON message queues backed by plain files for local an
 repository = "https://github.com/sandover/plasmite"
 readme = "README.md"
 build = "build.rs"
-rust-version = "1.88"
 keywords = ["ipc", "queue", "json", "messaging", "pubsub"]
 categories = ["command-line-utilities", "development-tools", "data-structures"]
 
