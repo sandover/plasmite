@@ -8,7 +8,8 @@
   "types": "types.d.ts",
   "scripts": {
     "build": "napi build --cargo-cwd native",
-    "test": "npm run build && node --test test/*.test.js"
+    "test": "npm run build && node --test test/*.test.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0",

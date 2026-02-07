@@ -27,9 +27,12 @@ bindings-node-test:
 	cargo build -p plasmite
 	cd bindings/node && PLASMITE_LIB_DIR="$(pwd)/../../target/debug" npm test
 
-bindings-test: bindings-go-test bindings-python-test bindings-node-test
+bindings-node-typecheck:
+	cd bindings/node && npm run typecheck
 
-ci: fmt clippy test abi-smoke conformance-all cross-artifact-smoke
+bindings-test: bindings-go-test bindings-python-test bindings-node-test bindings-node-typecheck
+
+ci: fmt clippy test abi-smoke conformance-all cross-artifact-smoke bindings-node-typecheck
 
 abi:
 	cargo build --lib
