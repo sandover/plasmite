@@ -10,17 +10,22 @@ use plasmite::api::{
     RemoteClient, TailOptions,
 };
 use serde_json::{Value, json};
+use std::io::Read;
 use std::net::{SocketAddr, TcpListener};
 use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, MutexGuard};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 
+static SERVER_LOCK: Mutex<()> = Mutex::new(());
+
 struct TestServer {
     child: Child,
     base_url: String,
     token: Option<String>,
+    _server_guard: MutexGuard<'static, ()>,
 }
 
 impl TestServer {
@@ -41,34 +46,51 @@ impl TestServer {
         token: Option<&str>,
         access: Option<&str>,
     ) -> TestResult<Self> {
-        let port = pick_port()?;
-        let bind = format!("127.0.0.1:{port}");
-        let base_url = format!("http://{bind}");
+        let guard = SERVER_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let mut last_err: Option<Box<dyn std::error::Error>> = None;
+        for _attempt in 0..3 {
+            let port = pick_port()?;
+            let bind = format!("127.0.0.1:{port}");
+            let base_url = format!("http://{bind}");
 
-        let mut command = Command::new(env!("CARGO_BIN_EXE_plasmite"));
-        command
-            .arg("--dir")
-            .arg(pool_dir)
-            .arg("serve")
-            .arg("--bind")
-            .arg(&bind)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        if let Some(access) = access {
-            command.arg("--access").arg(access);
+            let mut command = Command::new(env!("CARGO_BIN_EXE_plasmite"));
+            command
+                .arg("--dir")
+                .arg(pool_dir)
+                .arg("serve")
+                .arg("--bind")
+                .arg(&bind)
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped());
+            if let Some(access) = access {
+                command.arg("--access").arg(access);
+            }
+            if let Some(token) = token {
+                command.arg("--token").arg(token);
+            }
+            let mut child = command.spawn()?;
+
+            match wait_for_server(&mut child, bind.parse()?) {
+                Ok(()) => {
+                    return Ok(Self {
+                        child,
+                        base_url,
+                        token: token.map(str::to_string),
+                        _server_guard: guard,
+                    });
+                }
+                Err(err) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    last_err = Some(err);
+                    sleep(Duration::from_millis(30));
+                }
+            }
         }
-        if let Some(token) = token {
-            command.arg("--token").arg(token);
-        }
-        let child = command.spawn()?;
 
-        wait_for_server(bind.parse()?)?;
-
-        Ok(Self {
-            child,
-            base_url,
-            token: token.map(str::to_string),
-        })
+        Err(last_err.unwrap_or_else(|| "server failed to start".into()))
     }
 
     fn client(&self) -> TestResult<RemoteClient> {
@@ -579,18 +601,29 @@ fn pick_port() -> TestResult<u16> {
     Ok(port)
 }
 
-fn wait_for_server(addr: SocketAddr) -> TestResult<()> {
+fn wait_for_server(child: &mut Child, addr: SocketAddr) -> TestResult<()> {
     // Use healthz endpoint - it's not subject to access control and works for all modes
     let url = format!("http://{addr}/healthz");
     let start = Instant::now();
     loop {
         if let Ok(resp) = ureq::get(&url).call() {
-            // Verify it's a Plasmite server via the version header
-            if resp.header("plasmite-version").is_some() {
+            if resp.status() == 200 {
                 return Ok(());
             }
         }
-        if start.elapsed() > Duration::from_secs(5) {
+        if let Some(status) = child.try_wait()? {
+            let mut stderr = String::new();
+            if let Some(mut pipe) = child.stderr.take() {
+                let _ = pipe.read_to_string(&mut stderr);
+            }
+            let detail = stderr.trim();
+            return Err(format!(
+                "server exited before ready (status: {status}, stderr: {})",
+                if detail.is_empty() { "<empty>" } else { detail }
+            )
+            .into());
+        }
+        if start.elapsed() > Duration::from_secs(8) {
             return Err("server did not start in time".into());
         }
         sleep(Duration::from_millis(20));

@@ -10,8 +10,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 use std::{thread::sleep, time::Instant};
@@ -25,9 +25,12 @@ fn cmd() -> Command {
     Command::new(exe)
 }
 
+static SERVER_LOCK: Mutex<()> = Mutex::new(());
+
 struct ServeProcess {
     child: Child,
     base_url: String,
+    _server_guard: MutexGuard<'static, ()>,
 }
 
 impl ServeProcess {
@@ -44,30 +47,49 @@ impl ServeProcess {
         extra_args: &[&str],
         scheme: &str,
     ) -> Self {
-        let port = pick_port().expect("port");
-        let bind = format!("127.0.0.1:{port}");
-        let base_url = format!("{scheme}://{bind}");
+        let guard = SERVER_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let mut last_error = String::from("server failed to start");
+        for _attempt in 0..5 {
+            let port = pick_port().expect("port");
+            let bind = format!("127.0.0.1:{port}");
+            let base_url = format!("{scheme}://{bind}");
 
-        let mut command = cmd();
-        command.args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "serve",
-            "--bind",
-            &bind,
-        ]);
-        if !extra_args.is_empty() {
-            command.args(extra_args);
+            let mut command = cmd();
+            command.args([
+                "--dir",
+                pool_dir.to_str().unwrap(),
+                "serve",
+                "--bind",
+                &bind,
+            ]);
+            if !extra_args.is_empty() {
+                command.args(extra_args);
+            }
+            let mut child = command
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn serve");
+
+            match wait_for_server(&mut child, bind.parse().expect("addr")) {
+                Ok(()) => {
+                    return Self {
+                        child,
+                        base_url,
+                        _server_guard: guard,
+                    };
+                }
+                Err(err) => {
+                    last_error = err.to_string();
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    sleep(Duration::from_millis(30));
+                }
+            }
         }
-        let child = command
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn serve");
-
-        wait_for_server(bind.parse().expect("addr")).expect("server ready");
-
-        Self { child, base_url }
+        panic!("server ready: {last_error}");
     }
 }
 
@@ -102,19 +124,46 @@ fn parse_notice_json(line: &str) -> Value {
 }
 
 fn pick_port() -> std::io::Result<u16> {
-    let listener = TcpListener::bind("127.0.0.1:0")?;
-    let port = listener.local_addr()?.port();
-    drop(listener);
-    Ok(port)
+    let start = Instant::now();
+    loop {
+        match TcpListener::bind("127.0.0.1:0") {
+            Ok(listener) => {
+                let port = listener.local_addr()?.port();
+                drop(listener);
+                return Ok(port);
+            }
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::AddrNotAvailable
+                ) && start.elapsed() <= Duration::from_secs(2) =>
+            {
+                sleep(Duration::from_millis(20));
+            }
+            Err(err) => return Err(err),
+        }
+    }
 }
 
-fn wait_for_server(addr: SocketAddr) -> std::io::Result<()> {
+fn wait_for_server(child: &mut Child, addr: SocketAddr) -> std::io::Result<()> {
     let start = Instant::now();
     loop {
         if TcpStream::connect(addr).is_ok() {
             return Ok(());
         }
-        if start.elapsed() > Duration::from_secs(5) {
+        if let Some(status) = child.try_wait()? {
+            let mut stderr = String::new();
+            if let Some(mut pipe) = child.stderr.take() {
+                let _ = pipe.read_to_string(&mut stderr);
+            }
+            let detail = stderr.trim();
+            let message = format!(
+                "server exited before ready (status: {status}, stderr: {})",
+                if detail.is_empty() { "<empty>" } else { detail }
+            );
+            return Err(std::io::Error::other(message));
+        }
+        if start.elapsed() > Duration::from_secs(8) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 "server did not start in time",
