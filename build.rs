@@ -9,6 +9,8 @@ use std::path::PathBuf;
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    let target = env::var("TARGET").unwrap_or_default();
     let lite3_dir = manifest_dir.join("vendor").join("lite3");
     let include_dir = lite3_dir.join("include");
     let lib_dir = lite3_dir.join("lib");
@@ -34,4 +36,17 @@ fn main() {
         .flag_if_supported("-std=gnu2x")
         .flag_if_supported("-std=c2x");
     build.compile("lite3");
+
+    // Ensure bins force-link the archive so shim-referenced Lite3 symbols are retained.
+    let archive = out_dir.join("liblite3.a");
+    if target.contains("apple") {
+        println!(
+            "cargo:rustc-link-arg-bins=-Wl,-force_load,{}",
+            archive.display()
+        );
+    } else {
+        println!("cargo:rustc-link-arg-bins=-Wl,--whole-archive");
+        println!("cargo:rustc-link-arg-bins={}", archive.display());
+        println!("cargo:rustc-link-arg-bins=-Wl,--no-whole-archive");
+    }
 }
