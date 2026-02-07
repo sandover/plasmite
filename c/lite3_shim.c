@@ -11,19 +11,6 @@ Invariants: This file should not contain business logic; it only forwards to Lit
 
 #include "lite3.h"
 
-/*
-Build vendored Lite3 implementation units directly into this translation unit.
-This avoids archive extraction-order differences across linkers when producing
-Rust rlibs that are later linked by multiple binaries in this crate.
-*/
-#include "../vendor/lite3/src/lite3.c"
-#include "../vendor/lite3/src/json_dec.c"
-#include "../vendor/lite3/src/json_enc.c"
-#include "../vendor/lite3/src/ctx_api.c"
-#include "../vendor/lite3/src/debug.c"
-#include "../vendor/lite3/lib/yyjson/yyjson.c"
-#include "../vendor/lite3/lib/nibble_base64/base64.c"
-
 int plasmite_lite3_json_dec(
         const char *json_str,
         size_t json_len,

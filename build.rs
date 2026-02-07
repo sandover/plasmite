@@ -1,7 +1,7 @@
 //! Purpose: Compile vendored Lite3 C sources plus the local shim for Rust FFI.
 //! Role: Cargo build-script; configures `cc` inputs/includes and rebuild triggers.
 //! Invariants: `cargo:rerun-if-changed` covers the shim + vendored sources we compile.
-//! Invariants: Produces a self-contained `lite3` object library linked into the Rust crate.
+//! Invariants: Produces a `lite3` object library linked into the Rust crate.
 //! Invariants: Requests C23-compatible mode for vendored Lite3 sources that declare variables after labels.
 //! Invariants: Uses only Cargo-provided env vars (e.g. `CARGO_MANIFEST_DIR`).
 use std::env;
@@ -9,8 +9,6 @@ use std::path::PathBuf;
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
-    let target = env::var("TARGET").unwrap_or_default();
     let lite3_dir = manifest_dir.join("vendor").join("lite3");
     let include_dir = lite3_dir.join("include");
     let lib_dir = lite3_dir.join("lib");
@@ -31,22 +29,16 @@ fn main() {
     build
         .include(&include_dir)
         .include(&lib_dir)
-        // `lite3_shim.c` includes vendored Lite3 sources to keep symbols in one archive.
+        .file(lite3_dir.join("src").join("lite3.c"))
+        .file(lite3_dir.join("src").join("json_dec.c"))
+        .file(lite3_dir.join("src").join("json_enc.c"))
+        .file(lite3_dir.join("src").join("ctx_api.c"))
+        .file(lite3_dir.join("src").join("debug.c"))
+        .file(lite3_dir.join("lib").join("yyjson").join("yyjson.c"))
+        .file(lite3_dir.join("lib").join("nibble_base64").join("base64.c"))
         .file(manifest_dir.join("c").join("lite3_shim.c"))
         .flag_if_supported("-std=gnu2x")
         .flag_if_supported("-std=c2x");
-    build.compile("lite3");
 
-    // Ensure bins force-link the archive so shim-referenced Lite3 symbols are retained.
-    let archive = out_dir.join("liblite3.a");
-    if target.contains("apple") {
-        println!(
-            "cargo:rustc-link-arg-bins=-Wl,-force_load,{}",
-            archive.display()
-        );
-    } else {
-        println!("cargo:rustc-link-arg-bins=-Wl,--whole-archive");
-        println!("cargo:rustc-link-arg-bins={}", archive.display());
-        println!("cargo:rustc-link-arg-bins=-Wl,--no-whole-archive");
-    }
+    build.compile("lite3");
 }
