@@ -70,7 +70,7 @@ This checklist keeps releases reproducible and ensures CI gates are green before
    ```
 
 5. **Publish to registries**:
-   - crates.io: Auto-published via CI
+   - crates.io: Published by CI only when `CARGO_REGISTRY_TOKEN` is set; otherwise publish manually (`cargo publish`)
    - npm (manual):
      ```bash
      cd bindings/node
@@ -95,7 +95,7 @@ Before the first release, configure GitHub secrets:
 ## Post-release
 
 1. **Verify install paths**:
-   - `cargo install plasmite` (crates.io auto-publishes via CI)
+   - `cargo install plasmite` (after crates.io publish succeeds)
    - `brew install sandover/tap/plasmite` (after tap is pushed)
    - `npm install plasmite-node` (after npm publish)
    - `pip install plasmite` (after PyPI publish)

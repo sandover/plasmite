@@ -31,8 +31,8 @@ brew install plasmite
 
 Each `v*` tag triggers the release workflow and uploads assets:
 
-- `plasmite-x86_64-apple-darwin.tar.gz`
-- `plasmite-aarch64-apple-darwin.tar.gz`
-- `plasmite-x86_64-unknown-linux-gnu.tar.gz`
+- `plasmite_<version>_darwin_amd64.tar.gz`
+- `plasmite_<version>_darwin_arm64.tar.gz`
+- `plasmite_<version>_linux_amd64.tar.gz`
 
 Update the formula URLs and SHA256 values to match the new release assets.
