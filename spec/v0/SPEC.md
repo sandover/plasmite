@@ -45,7 +45,7 @@ Minimal, explicit flag set for v0.0.1:
 * `pool create`: `--size`, `--index-capacity`
 * `pool list`: no flags
 * `poke`: `DATA`, `--file FILE`, `--in`, `--errors`, `--tag`, `--durability fast|flush`, `--create`, `--create-size`, `--retry`, `--retry-delay`
-* `peek`: `--tail`, `--since`, `--where`, `--format pretty|jsonl`, `--jsonl`, `--quiet-drops`
+* `peek`: `--tail`, `--since`, `--tag`, `--where`, `--format pretty|jsonl`, `--jsonl`, `--quiet-drops`
 
 JSON output is the default for commands that print; `poke` always emits committed message JSON.
 
@@ -583,6 +583,7 @@ Rejected remote forms:
 
 * `--tail N` (or `-n N`): print the last N messages first, then keep watching.
 * `--since TIME`: only emit messages at/after TIME (RFC 3339 or relative `5m`, `2h`, `1d`).
+* `--tag TAG` (repeatable): exact-match tag filter (AND across repeats).
 * `--where EXPR` (repeatable): filter messages by boolean expression (AND across repeats).
 * `--format pretty|jsonl`: select output format (default: `pretty`).
 * `--jsonl`: alias for `--format jsonl` (compatibility).
@@ -601,6 +602,12 @@ Rejected remote forms:
 * If `--since` is in the future, `peek` exits with no output.
 * `--timeout` counts since the last emitted message; it exits 124 after the interval with no output.
 * Relative `--since` uses UTC now; RFC 3339 offsets are honored.
+* Pattern matching (v0):
+  * `--tag` is an additive shortcut; `--where` remains the canonical expression path.
+  * `--tag` matches exact strings in `meta.tags` (case-sensitive, no glob/regex).
+  * repeated `--tag` flags are ANDed.
+  * `--tag` and `--where` compose with AND.
+  * missing/non-array `meta.tags` means no `--tag` match.
 * `--data-only` still evaluates `--where` against the full message envelope.
 * `--where` is evaluated against the full message JSON object (`.seq`, `.time`, `.meta`, `.data`).
   * Non-boolean results are a usage error.
@@ -608,8 +615,30 @@ Rejected remote forms:
 * If the reader falls behind and messages are overwritten, a non-fatal drop notice is emitted on
   stderr (see “Notices”). Use `--quiet-drops` to suppress.
 * Remote-mode flag behavior:
-  * Supported: `--tail`, `--where`, `--one`, `--timeout`, `--data-only`, `--format`/`--jsonl`
+  * Supported: `--tail`, `--tag`, `--where`, `--one`, `--timeout`, `--data-only`, `--format`/`--jsonl`
   * Rejected with usage guidance: `--since`, `--replay`, `--quiet-drops`, `--no-notify`
+
+**Examples (pattern matching)**
+
+```bash
+# Exact tag shortcut
+plasmite peek demo --tag error
+
+# Multiple tags (AND)
+plasmite peek demo --tag prod --tag billing
+
+# Tag + jq expression (AND)
+plasmite peek demo --tag error --where '.data.service == "payments"'
+
+# Equivalent jq-only form
+plasmite peek demo --where '.meta.tags[]? == "error"'
+```
+
+**Edge cases**
+
+* Empty `--tag ""` is accepted and matches only messages with an empty-string tag.
+* A malformed `--where` expression is a `Usage` error.
+* `--tag` is additive and backward-compatible; existing `--where` scripts continue to work unchanged.
 
 ---
 
@@ -822,7 +851,7 @@ Remote pool refs in CLI commands are partially implemented:
 * `plasmite peek` supports shorthand remote refs:
   * `http(s)://host:port/<pool>` (no trailing slash)
   * API-shaped URLs are rejected as `POOLREF` input
-  * remote mode supports `--tail`, `--where`, `--one`, `--timeout`, `--data-only`, and `--format`
+  * remote mode supports `--tail`, `--tag`, `--where`, `--one`, `--timeout`, `--data-only`, and `--format`
   * remote `--since` and `--replay` are rejected with guidance
 
 Additional command coverage is still planned:
