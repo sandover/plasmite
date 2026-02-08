@@ -11,7 +11,6 @@ use crate::core::error::{Error, ErrorKind};
 use crate::core::lite3::{Lite3DocRef, sys, validate_bytes};
 use crate::core::notify::{NotifyError, PoolSemaphore, WaitOutcome, open_for_path};
 use crate::core::pool::{AppendOptions, Durability, Pool};
-use crate::json::parse;
 use serde_json::Value;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -451,7 +450,7 @@ fn decode_payload(payload: &[u8]) -> Result<(Meta, Value), Error> {
         .key_offset_at(meta_ofs, "tags")
         .map_err(|err| err.with_message("missing meta.tags"))?;
     let descrips_json = doc.to_json_at(descrips_ofs, false)?;
-    let descrips_value: Value = parse::from_str(&descrips_json).map_err(|err| {
+    let descrips_value: Value = serde_json::from_str(&descrips_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
             .with_source(err)
@@ -470,7 +469,7 @@ fn decode_payload(payload: &[u8]) -> Result<(Meta, Value), Error> {
         .key_offset("data")
         .map_err(|err| err.with_message("missing data"))?;
     let data_json = doc.to_json_at(data_ofs, false)?;
-    let data: Value = parse::from_str(&data_json).map_err(|err| {
+    let data: Value = serde_json::from_str(&data_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
             .with_source(err)

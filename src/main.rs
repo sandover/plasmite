@@ -2685,7 +2685,7 @@ fn read_data_single(data: Option<String>, file: Option<String>) -> Result<Value,
             .with_hint("Provide JSON via DATA, --file, or pipe JSON to stdin."));
     };
 
-    crate::json::parse::from_str(&json_str).map_err(|err| {
+    serde_json::from_str(&json_str).map_err(|err| {
         Error::new(ErrorKind::Usage)
             .with_message("invalid json")
             .with_hint("Provide a single JSON value (e.g. '{\"x\":1}').")
@@ -2977,7 +2977,7 @@ fn decode_payload(payload: &[u8]) -> Result<(Value, Value), Error> {
         .key_offset_at(meta_ofs, "tags")
         .map_err(|err| err.with_message("missing meta.tags"))?;
     let descrips_json = doc.to_json_at(descrips_ofs, false)?;
-    let descrips_value: Value = crate::json::parse::from_str(&descrips_json).map_err(|err| {
+    let descrips_value: Value = serde_json::from_str(&descrips_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
             .with_source(err)
@@ -2997,7 +2997,7 @@ fn decode_payload(payload: &[u8]) -> Result<(Value, Value), Error> {
         .key_offset("data")
         .map_err(|err| err.with_message("missing data"))?;
     let data_json = doc.to_json_at(data_ofs, false)?;
-    let data: Value = crate::json::parse::from_str(&data_json).map_err(|err| {
+    let data: Value = serde_json::from_str(&data_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
             .with_source(err)

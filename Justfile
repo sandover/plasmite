@@ -14,15 +14,6 @@ clippy:
 test:
 	cargo test
 
-<<<<<<< HEAD
-check-json-parser-invariant:
-	bash scripts/check-json-parser-invariant.sh
-
-check-version-alignment:
-	bash scripts/check-version-alignment.sh
-
-=======
->>>>>>> parent of f495fbe (ci(json): enforce parser-boundary invariant guard)
 bindings-go-test:
 	cargo build -p plasmite
 	mkdir -p tmp/go-cache tmp/go-tmp
@@ -41,15 +32,9 @@ bindings-node-typecheck:
 
 bindings-test: bindings-go-test bindings-python-test bindings-node-test bindings-node-typecheck
 
-<<<<<<< HEAD
-ci-fast: fmt clippy check-json-parser-invariant check-version-alignment test bindings-node-typecheck
-
-ci-full: fmt clippy check-json-parser-invariant check-version-alignment test abi-smoke conformance-all cross-artifact-smoke bindings-node-typecheck
-=======
 ci-fast: fmt clippy test bindings-node-typecheck
 
 ci-full: fmt clippy test abi-smoke conformance-all cross-artifact-smoke bindings-node-typecheck
->>>>>>> parent of f495fbe (ci(json): enforce parser-boundary invariant guard)
 
 ci: ci-full
 
