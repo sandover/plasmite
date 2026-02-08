@@ -43,6 +43,23 @@ Notes: Target baseline is intentionally conservative until broader coverage is v
 - Known gaps for initial rollout:
   - no guaranteed SIMD parity validation on every non-primary architecture per PR.
 
+## parse-failure categories in diagnostics
+
+Runtime parse failures are categorized for operator diagnostics and incident triage.
+
+- Stable category labels:
+  - `syntax`
+  - `utf8`
+  - `numeric-range`
+  - `depth-limit`
+  - `unknown`
+- Surface behavior:
+  - CLI/ABI/runtime parse errors may include hints with `parse category: <label>`.
+  - Hints also include a context identifier (for example ingest mode or remote endpoint seam).
+- Scope:
+  - Categories are diagnostics-facing and implementation-stable for rollout tracking.
+  - They are not currently a versioned external schema contract.
+
 ## rollback and mitigation policy
 
 - If architecture-specific parser failures appear on supported targets:

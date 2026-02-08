@@ -2047,3 +2047,7 @@
 {"type":"link","ts":"2026-02-08T00:29:08.403996Z","data":{"from_id":"U5POML","to_id":"UT7ZOP","type":"depends"}}
 {"type":"result","ts":"2026-02-08T00:32:04.658016Z","data":{"task_id":"BWLSYD","summary":"Added stable parse-failure categorization and runtime context hints with regression tests.","path":"tests/json_parse_errors.rs","sha256_at_attach":"bac5335d942e87504a050778325cee81c1368bdb5fa789d6ce69ddb3c6d62949","mtime_at_attach":"2026-02-08T00:31:45.714423976Z","git_commit_at_attach":"4e7b4f9390a5bcd8e2cc3d8685363cf8caa02cd1","ts":"2026-02-08T00:32:04.658016Z"}}
 {"type":"state","ts":"2026-02-08T00:32:04.672118Z","data":{"id":"BWLSYD","state":"done","ts":"2026-02-08T00:32:04.672118Z"}}
+{"type":"claim","ts":"2026-02-08T00:34:36.345907Z","data":{"id":"YZH2BV","agent_id":"codex@bbook","ts":"2026-02-08T00:34:36.345907Z"}}
+{"type":"state","ts":"2026-02-08T00:34:36.345907Z","data":{"id":"YZH2BV","state":"doing","ts":"2026-02-08T00:34:36.345907Z"}}
+{"type":"result","ts":"2026-02-08T00:35:09.56068Z","data":{"task_id":"YZH2BV","summary":"Finalized simd-json-only rollout messaging in docs and verified hygiene gates are green.","path":"README.md","sha256_at_attach":"1dd11358b980e3f4ed439748132b2826a456f2dfd3004f486f471e1567f0097f","mtime_at_attach":"2026-02-08T00:34:50.969188588Z","git_commit_at_attach":"e88a25e8a3a3d15af5e39083876088f3215e4220","ts":"2026-02-08T00:35:09.56068Z"}}
+{"type":"state","ts":"2026-02-08T00:35:09.5732Z","data":{"id":"YZH2BV","state":"done","ts":"2026-02-08T00:35:09.5732Z"}}
