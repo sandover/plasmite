@@ -47,7 +47,7 @@ Minimal, explicit flag set for v0.0.1:
 * `poke`: `DATA`, `--file FILE`, `--in`, `--errors`, `--tag`, `--durability fast|flush`, `--create`, `--create-size`, `--retry`, `--retry-delay`
 * `peek`: `--tail`, `--since`, `--tag`, `--where`, `--format pretty|jsonl`, `--jsonl`, `--quiet-drops`
 
-JSON output is the default for commands that print; `poke` always emits committed message JSON.
+JSON output is the default for commands that print; `poke` emits append receipts (`seq`, `time`, `meta`) and does not echo `data`.
 
 Errors:
 - On TTY, emit concise human text (single summary line + hint).
@@ -718,6 +718,16 @@ This gives you the classic pattern:
 ```bash
 seq=$(plasmite poke mypool '{"x":1}' --tag event | jq -r '.seq')
 plasmite get mypool "$seq" | jq .
+```
+
+`poke` stdout is an append receipt object:
+
+```json
+{
+  "seq": 12345,
+  "time": "2026-01-28T18:06:00.123Z",
+  "meta": { "tags": ["event"] }
+}
 ```
 
 **Examples (stdin)**

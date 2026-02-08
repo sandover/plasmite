@@ -7,12 +7,12 @@ use serde_json::Value;
 
 const INDENT: &str = "  ";
 
-const COLOR_KEY: &str = "36";
-const COLOR_STRING: &str = "32";
-const COLOR_NUMBER: &str = "33";
-const COLOR_BOOL: &str = "35";
-const COLOR_NULL: &str = "90";
-const COLOR_PUNCT: &str = "90";
+const COLOR_KEY: &str = "96";
+const COLOR_STRING: &str = "92";
+const COLOR_NUMBER: &str = "93";
+const COLOR_BOOL: &str = "95";
+const COLOR_NULL: &str = "37";
+const COLOR_PUNCT: &str = "37";
 
 pub fn colorize_json(value: &Value, use_color: bool) -> String {
     let mut out = String::new();
@@ -124,10 +124,10 @@ mod tests {
         let value = json!({"k":"v","n":1,"b":true,"z":null});
         let colored = colorize_json(&value, true);
         assert!(colored.contains("\u{1b}["));
-        assert!(colored.contains("\u{1b}[36m\"k\"\u{1b}[0m"));
-        assert!(colored.contains("\u{1b}[32m\"v\"\u{1b}[0m"));
-        assert!(colored.contains("\u{1b}[33m1\u{1b}[0m"));
-        assert!(colored.contains("\u{1b}[35mtrue\u{1b}[0m"));
-        assert!(colored.contains("\u{1b}[90mnull\u{1b}[0m"));
+        assert!(colored.contains("\u{1b}[96m\"k\"\u{1b}[0m"));
+        assert!(colored.contains("\u{1b}[92m\"v\"\u{1b}[0m"));
+        assert!(colored.contains("\u{1b}[93m1\u{1b}[0m"));
+        assert!(colored.contains("\u{1b}[95mtrue\u{1b}[0m"));
+        assert!(colored.contains("\u{1b}[37mnull\u{1b}[0m"));
     }
 }

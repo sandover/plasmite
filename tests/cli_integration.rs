@@ -257,7 +257,7 @@ fn create_poke_get_peek_flow() {
     let seq = poke_json.get("seq").unwrap().as_u64().unwrap();
     assert!(poke_json.get("time").is_some());
     assert_eq!(poke_json.get("meta").unwrap()["tags"][0], "ping");
-    assert_eq!(poke_json.get("data").unwrap()["x"], 1);
+    assert!(poke_json.get("data").is_none());
 
     let get = cmd()
         .args([
@@ -1896,7 +1896,7 @@ fn color_always_colorizes_pretty_stdout() {
         .expect("info");
     assert!(info.status.success());
     let stdout = String::from_utf8_lossy(&info.stdout);
-    assert!(stdout.contains("\u{1b}[36m\"name\"\u{1b}[0m"));
+    assert!(stdout.contains("\u{1b}[96m\"name\"\u{1b}[0m"));
 }
 
 #[test]
@@ -2024,7 +2024,8 @@ fn poke_auto_handles_pretty_json() {
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0].get("data").unwrap()["x"], 1);
+    assert!(lines[0].get("seq").is_some());
+    assert!(lines[0].get("data").is_none());
 }
 
 #[test]
@@ -2060,7 +2061,8 @@ fn poke_auto_handles_event_stream() {
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 2);
-    assert_eq!(lines[1].get("data").unwrap()["x"], 2);
+    assert!(lines[1].get("seq").is_some());
+    assert!(lines[1].get("data").is_none());
 }
 
 #[test]
@@ -2096,7 +2098,8 @@ fn poke_auto_detects_json_seq() {
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 2);
-    assert_eq!(lines[0].get("data").unwrap()["x"], 1);
+    assert!(lines[0].get("seq").is_some());
+    assert!(lines[0].get("data").is_none());
 }
 
 #[test]
@@ -2193,7 +2196,8 @@ fn poke_seq_mode_parses_rs_records() {
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 2);
-    assert_eq!(lines[0].get("data").unwrap()["x"], 1);
+    assert!(lines[0].get("seq").is_some());
+    assert!(lines[0].get("data").is_none());
 }
 
 #[test]
@@ -2357,7 +2361,8 @@ fn poke_in_json_accepts_pretty_json() {
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0].get("data").unwrap()["x"], 1);
+    assert!(lines[0].get("seq").is_some());
+    assert!(lines[0].get("data").is_none());
 }
 
 #[test]
@@ -2446,7 +2451,8 @@ fn poke_event_stream_flushes_trailing_event() {
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0].get("data").unwrap()["x"], 1);
+    assert!(lines[0].get("seq").is_some());
+    assert!(lines[0].get("data").is_none());
 }
 
 #[test]
@@ -3051,6 +3057,20 @@ fn clap_errors_are_concise_in_json() {
 }
 
 #[test]
+fn peek_missing_pool_has_actionable_hint() {
+    let output = cmd().args(["peek", "-n", "1"]).output().expect("peek");
+    assert_eq!(output.status.code().unwrap(), 2);
+    let err = parse_error_json(&output.stderr);
+    let hint = err
+        .get("error")
+        .and_then(|v| v.get("hint"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(hint.contains("pool ref"));
+    assert!(hint.contains("plasmite peek chat -n 1"));
+}
+
+#[test]
 fn already_exists_has_hint_and_path() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
@@ -3377,7 +3397,7 @@ fn poke_remote_url_happy_path_appends_message() {
     assert!(poke.status.success());
     let value = parse_json(std::str::from_utf8(&poke.stdout).expect("utf8"));
     assert_eq!(value.get("seq").and_then(|v| v.as_u64()), Some(1));
-    assert_eq!(value.get("data").and_then(|v| v.get("x")), Some(&json!(1)));
+    assert!(value.get("data").is_none());
     assert_eq!(
         value.get("meta").and_then(|v| v.get("tags")),
         Some(&json!(["ping"]))
@@ -3708,8 +3728,10 @@ fn poke_streams_json_values_from_stdin() {
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 2);
-    assert_eq!(lines[0].get("data").unwrap()["x"], 1);
-    assert_eq!(lines[1].get("data").unwrap()["x"], 2);
+    assert!(lines[0].get("seq").is_some());
+    assert!(lines[1].get("seq").is_some());
+    assert!(lines[0].get("data").is_none());
+    assert!(lines[1].get("data").is_none());
 
     let mut peek = cmd()
         .args([

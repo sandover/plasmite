@@ -397,7 +397,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                                 pool_handle.append_with_options(payload.as_slice(), options)?;
                             Ok((seq, timestamp_ns))
                         })?;
-                        emit_json(message_json(seq, timestamp_ns, &tag, &data)?, color_mode);
+                        emit_json(poke_receipt_json(seq, timestamp_ns, &tag)?, color_mode);
                     } else {
                         let pool_path_label = path.display().to_string();
                         let outcome = ingest_from_stdin(
@@ -444,7 +444,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                         let message = retry_with_config(retry_config, || {
                             remote_pool.append_json_now(&data, &tag, durability)
                         })?;
-                        emit_json(message_to_json(&message), color_mode);
+                        emit_json(poke_receipt_from_message(&message), color_mode);
                     } else {
                         let pool_path_label = format!("{}/{}", client.base_url(), name);
                         let outcome = ingest_from_stdin_remote(
@@ -2358,6 +2358,8 @@ fn clap_error_summary(err: &clap::Error) -> String {
 
 fn clap_error_hint(err: &clap::Error) -> String {
     let rendered = err.to_string();
+    let missing_required = rendered.contains("required arguments were not provided")
+        || rendered.contains("required argument was not provided");
     let usage = rendered
         .lines()
         .find_map(|line| line.trim().strip_prefix("Usage: "))
@@ -2382,6 +2384,21 @@ fn clap_error_hint(err: &clap::Error) -> String {
 
     if parts.is_empty() {
         return "Try `plasmite --help`.".to_string();
+    }
+
+    let required_tokens: Vec<&str> = tokens
+        .iter()
+        .skip(pos + 1 + parts.len())
+        .copied()
+        .filter(|token| token.starts_with('<') && token.ends_with('>'))
+        .collect();
+    if missing_required
+        && parts.as_slice() == ["peek"]
+        && required_tokens
+            .iter()
+            .any(|token| token.contains("POOL") || token.contains("pool"))
+    {
+        return "Provide a pool ref, for example: `plasmite peek chat -n 1`.".to_string();
     }
 
     format!("Try `plasmite {} --help`.", parts.join(" "))
@@ -2554,7 +2571,7 @@ fn ingest_from_stdin<R: Read>(
                 Ok((seq, timestamp_ns))
             })?;
             emit_message(
-                message_json(seq, timestamp_ns, ctx.tags, &data)?,
+                poke_receipt_json(seq, timestamp_ns, ctx.tags)?,
                 false,
                 ctx.color_mode,
             );
@@ -2593,7 +2610,7 @@ fn ingest_from_stdin_remote<R: Read>(
                 ctx.remote_pool
                     .append_json_now(&data, ctx.tags, ctx.durability)
             })?;
-            emit_message(message_to_json(&message), false, ctx.color_mode);
+            emit_message(poke_receipt_from_message(&message), false, ctx.color_mode);
             Ok(())
         },
         |failure| {
@@ -2634,19 +2651,24 @@ fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
     })
 }
 
-fn message_json(
-    seq: u64,
-    timestamp_ns: u64,
-    tags: &[String],
-    data: &Value,
-) -> Result<Value, Error> {
-    let meta = json!({ "tags": tags });
+fn poke_receipt_json(seq: u64, timestamp_ns: u64, tags: &[String]) -> Result<Value, Error> {
     Ok(json!({
         "seq": seq,
         "time": format_ts(timestamp_ns)?,
-        "meta": meta,
-        "data": data,
+        "meta": {
+            "tags": tags,
+        },
     }))
+}
+
+fn poke_receipt_from_message(message: &plasmite::api::Message) -> Value {
+    json!({
+        "seq": message.seq,
+        "time": message.time,
+        "meta": {
+            "tags": message.meta.tags,
+        },
+    })
 }
 
 fn message_to_json(message: &plasmite::api::Message) -> Value {
