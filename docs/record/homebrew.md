@@ -8,7 +8,12 @@ Invariants: Steps must match the repo’s `homebrew/` formula and release artifa
 # Homebrew tap setup
 
 This repo ships release artifacts. Use a separate tap repo (recommended name: `homebrew-tap`) to publish the formula.
-The formula installs both `plasmite` and the short alias `pls`.
+The formula installs the full SDK layout:
+
+- `bin/plasmite` and `bin/pls`
+- `lib/libplasmite.(dylib|so)` (+ `libplasmite.a` when shipped)
+- `include/plasmite.h`
+- `lib/pkgconfig/plasmite.pc`
 
 ## 1) Create the tap repo
 
@@ -18,13 +23,15 @@ The formula installs both `plasmite` and the short alias `pls`.
 ## 2) Add the formula
 
 Copy `homebrew/plasmite.rb` into the tap repo at `Formula/plasmite.rb`.
-Update `url` and `sha256` to match the release assets for each target.
+Update `url` and `sha256` to match the release assets for each target.  
+The asset tarball root must contain `bin/`, `lib/`, `include/`, and `lib/pkgconfig/`.
 
 ## 3) Install from the tap
 
 ```bash
 brew tap YOUR_GITHUB/tap
 brew install plasmite
+pkg-config --modversion plasmite
 ```
 
 ## 4) Update on release

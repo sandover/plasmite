@@ -12,37 +12,34 @@ These bindings wrap the `libplasmite` C ABI via `ctypes`.
 
 ## Installation
 
-**Note**: Pre-built wheels are not yet available. Installation from PyPI currently requires having the `plasmite` CLI already installed (which provides `libplasmite`).
+Wheels are designed to bundle native assets under `plasmite/_native/`:
+
+- `libplasmite.(dylib|so)` for ctypes loading
+- `plasmite` CLI binary (invoked via Python console script entrypoint)
 
 ### Using pip
 
 ```bash
-# First install the CLI (provides libplasmite)
-cargo install plasmite
-# or: brew install sandover/tap/plasmite
-
-# Then install the Python binding
 pip install plasmite
 ```
 
 ### Using uv
 
 ```bash
-# Install the CLI first
-cargo install plasmite
-
-# Then install with uv
-uv pip install plasmite
+uv tool install plasmite
 ```
 
-The Python package uses ctypes to load the shared library built by the CLI. Ensure `libplasmite.dylib` (macOS) or `libplasmite.so` (Linux) is in a standard library search path or set `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH`.
+Runtime load order is:
+1. `PLASMITE_LIB_DIR` override (development escape hatch)
+2. Bundled `plasmite/_native/libplasmite.(dylib|so)` absolute path
+3. System linker fallback (`plasmite` / `libplasmite`)
 
 For development/testing from this repo, see Install & Test below.
 
 ## Build Requirements
 
 - Python 3.10+
-- `libplasmite` built from this repo (`cargo build -p plasmite`)
+- `libplasmite` built from this repo (`cargo build -p plasmite`) for local development
 
 ## Install & Test
 
@@ -65,8 +62,11 @@ PLASMITE_LIB_DIR="$(pwd)/../../target/debug" python -m pip install -e .
 PLASMITE_LIB_DIR="$(pwd)/../../target/debug" PLASMITE_BIN="$(pwd)/../../target/debug/plasmite" python3 -m unittest discover -s tests
 ```
 
-On macOS, ensure `DYLD_LIBRARY_PATH` includes the same directory.
-On Linux, set `LD_LIBRARY_PATH`.
+Build a wheel with bundled native assets from a specific SDK directory:
+
+```bash
+PLASMITE_SDK_DIR=/path/to/sdk python -m build
+```
 
 ## Usage
 

@@ -2067,3 +2067,39 @@
 {"type":"claim","ts":"2026-02-08T00:44:30.626707Z","data":{"id":"3UZLKA","agent_id":"codex@bbook","ts":"2026-02-08T00:44:30.626707Z"}}
 {"type":"state","ts":"2026-02-08T00:44:30.626707Z","data":{"id":"3UZLKA","state":"doing","ts":"2026-02-08T00:44:30.626707Z"}}
 {"type":"state","ts":"2026-02-08T00:49:00.629161Z","data":{"id":"3UZLKA","state":"done","ts":"2026-02-08T00:49:00.629161Z"}}
+{"type":"claim","ts":"2026-02-08T01:29:02.538843Z","data":{"id":"OUYNRE","agent_id":"gpt5@bbook","ts":"2026-02-08T01:29:02.538843Z"}}
+{"type":"state","ts":"2026-02-08T01:29:02.538843Z","data":{"id":"OUYNRE","state":"doing","ts":"2026-02-08T01:29:02.538843Z"}}
+{"type":"result","ts":"2026-02-08T01:36:52.664987Z","data":{"task_id":"OUYNRE","summary":"Added SDK tarball packager and release smoke checks","path":"scripts/package_release_sdk.sh","sha256_at_attach":"4c8bcb38ec7d074f8aedbe3b4f817c3c325f26988eb49a1aa600d2476d0627d4","mtime_at_attach":"2026-02-08T01:30:19.438709765Z","git_commit_at_attach":"5b5a0f8ee98b2d13876339d8901484a0e6851d42","ts":"2026-02-08T01:36:52.664987Z"}}
+{"type":"state","ts":"2026-02-08T01:36:52.686291Z","data":{"id":"OUYNRE","state":"done","ts":"2026-02-08T01:36:52.686291Z"}}
+{"type":"claim","ts":"2026-02-08T01:44:28.354388Z","data":{"id":"2WZCZG","agent_id":"gpt5@bbook","ts":"2026-02-08T01:44:28.354388Z"}}
+{"type":"state","ts":"2026-02-08T01:44:28.354388Z","data":{"id":"2WZCZG","state":"doing","ts":"2026-02-08T01:44:28.354388Z"}}
+{"type":"result","ts":"2026-02-08T01:45:30.20183Z","data":{"task_id":"2WZCZG","summary":"Formula now installs SDK files (bin/lib/include/pkgconfig) and validates pkg-config in test","path":"homebrew/plasmite.rb","sha256_at_attach":"4c512d822266f6cfcb089aff6c9b7869b538f8cdde15cbbf8868a391c626e339","mtime_at_attach":"2026-02-08T01:44:48.176106106Z","git_commit_at_attach":"5b5a0f8ee98b2d13876339d8901484a0e6851d42","ts":"2026-02-08T01:45:30.20183Z"}}
+{"type":"state","ts":"2026-02-08T01:45:30.222545Z","data":{"id":"2WZCZG","state":"done","ts":"2026-02-08T01:45:30.222545Z"}}
+{"type":"claim","ts":"2026-02-08T01:45:33.947725Z","data":{"id":"5CWIHQ","agent_id":"gpt5@bbook","ts":"2026-02-08T01:45:33.947725Z"}}
+{"type":"state","ts":"2026-02-08T01:45:33.947725Z","data":{"id":"5CWIHQ","state":"doing","ts":"2026-02-08T01:45:33.947725Z"}}
+{"type":"result","ts":"2026-02-08T01:49:10.670953Z","data":{"task_id":"5CWIHQ","summary":"Go bindings now default to pkg-config with documented local override path","path":"bindings/go/plasmite.go","sha256_at_attach":"af293a0c1bf8154a87550c21a3fcb65fc83874ad9aab09489135dc5dbb99bfbd","mtime_at_attach":"2026-02-08T01:46:17.017581589Z","git_commit_at_attach":"5b5a0f8ee98b2d13876339d8901484a0e6851d42","ts":"2026-02-08T01:49:10.670953Z"}}
+{"type":"state","ts":"2026-02-08T01:49:10.691718Z","data":{"id":"5CWIHQ","state":"done","ts":"2026-02-08T01:49:10.691718Z"}}
+{"type":"claim","ts":"2026-02-08T01:49:18.751471Z","data":{"id":"SP7URT","agent_id":"gpt5@bbook","ts":"2026-02-08T01:49:18.751471Z"}}
+{"type":"state","ts":"2026-02-08T01:49:18.751471Z","data":{"id":"SP7URT","state":"doing","ts":"2026-02-08T01:49:18.751471Z"}}
+{"type":"result","ts":"2026-02-08T01:52:11.402087Z","data":{"task_id":"SP7URT","summary":"Python packaging now bundles native lib+CLI and runtime loads package-local lib","path":"bindings/python/setup.py","sha256_at_attach":"736d334698fd1f9c9b290b029ada96d31a0e02d7f49351027f314100c86c9b16","mtime_at_attach":"2026-02-08T01:49:58.767994696Z","git_commit_at_attach":"5b5a0f8ee98b2d13876339d8901484a0e6851d42","ts":"2026-02-08T01:52:11.402087Z"}}
+{"type":"state","ts":"2026-02-08T01:52:11.420735Z","data":{"id":"SP7URT","state":"done","ts":"2026-02-08T01:52:11.420735Z"}}
+{"type":"claim","ts":"2026-02-08T01:52:23.697783Z","data":{"id":"NNTJVS","agent_id":"gpt5@bbook","ts":"2026-02-08T01:52:23.697783Z"}}
+{"type":"state","ts":"2026-02-08T01:52:23.697783Z","data":{"id":"NNTJVS","state":"doing","ts":"2026-02-08T01:52:23.697783Z"}}
+{"type":"result","ts":"2026-02-08T01:55:05.893406Z","data":{"task_id":"NNTJVS","summary":"Node package now bundles libplasmite+CLI with npm pack/install runtime smoke gate","path":"scripts/node_pack_smoke.sh","sha256_at_attach":"76bb1cacc0669b20a0327b58efd0024ef62e7e23407c07dd64e60c8997b9ff3b","mtime_at_attach":"2026-02-08T01:53:54.79336004Z","git_commit_at_attach":"5b5a0f8ee98b2d13876339d8901484a0e6851d42","ts":"2026-02-08T01:55:05.893406Z"}}
+{"type":"state","ts":"2026-02-08T01:55:05.912308Z","data":{"id":"NNTJVS","state":"done","ts":"2026-02-08T01:55:05.912308Z"}}
+{"type":"claim","ts":"2026-02-08T01:55:14.721466Z","data":{"id":"6JUV4K","agent_id":"gpt5@bbook","ts":"2026-02-08T01:55:14.721466Z"}}
+{"type":"state","ts":"2026-02-08T01:55:14.721466Z","data":{"id":"6JUV4K","state":"doing","ts":"2026-02-08T01:55:14.721466Z"}}
+{"type":"result","ts":"2026-02-08T01:59:49.536307Z","data":{"task_id":"6JUV4K","summary":"Updated install matrix and binding guides for Python/Node/Go distribution channels","path":"README.md","sha256_at_attach":"9441722f5ecfd3b322e3cfc5f7f5d2b22e83335a0f98dbd1c03569b0d1b31fe4","mtime_at_attach":"2026-02-08T01:55:33.152268027Z","git_commit_at_attach":"5b5a0f8ee98b2d13876339d8901484a0e6851d42","ts":"2026-02-08T01:59:49.536307Z"}}
+{"type":"state","ts":"2026-02-08T01:59:49.554606Z","data":{"id":"6JUV4K","state":"done","ts":"2026-02-08T01:59:49.554606Z"}}
+{"type":"claim","ts":"2026-02-08T02:00:23.952447Z","data":{"id":"LFHM5R","agent_id":"gpt5@bbook","ts":"2026-02-08T02:00:23.952447Z"}}
+{"type":"state","ts":"2026-02-08T02:00:23.952447Z","data":{"id":"LFHM5R","state":"doing","ts":"2026-02-08T02:00:23.952447Z"}}
+{"type":"result","ts":"2026-02-08T02:01:53.029305Z","data":{"task_id":"LFHM5R","summary":"Added PR dist-smoke matrix for npm pack and Python wheel install smoke tests","path":".github/workflows/ci.yml","sha256_at_attach":"de45dde67af9c9e163f62693246c52118452e5abceb203d0d8f440e3127c7a0a","mtime_at_attach":"2026-02-08T02:01:00.271399758Z","git_commit_at_attach":"5b5a0f8ee98b2d13876339d8901484a0e6851d42","ts":"2026-02-08T02:01:53.029305Z"}}
+{"type":"state","ts":"2026-02-08T02:01:53.04909Z","data":{"id":"LFHM5R","state":"done","ts":"2026-02-08T02:01:53.04909Z"}}
+{"type":"claim","ts":"2026-02-08T02:02:27.044691Z","data":{"id":"OEJQRM","agent_id":"gpt5@bbook","ts":"2026-02-08T02:02:27.044691Z"}}
+{"type":"state","ts":"2026-02-08T02:02:27.044691Z","data":{"id":"OEJQRM","state":"doing","ts":"2026-02-08T02:02:27.044691Z"}}
+{"type":"result","ts":"2026-02-08T02:03:27.941044Z","data":{"task_id":"OEJQRM","summary":"Added trusted-publishing PyPI wheel/sdist build and publish jobs on release tags","path":".github/workflows/release.yml","sha256_at_attach":"a32109b30140808fe4aa9ad66b533f0681057ee96a6d7e94d6ee66825118c90f","mtime_at_attach":"2026-02-08T02:02:50.153162893Z","git_commit_at_attach":"5b5a0f8ee98b2d13876339d8901484a0e6851d42","ts":"2026-02-08T02:03:27.941044Z"}}
+{"type":"state","ts":"2026-02-08T02:03:27.959014Z","data":{"id":"OEJQRM","state":"done","ts":"2026-02-08T02:03:27.959014Z"}}
+{"type":"claim","ts":"2026-02-08T02:03:32.688388Z","data":{"id":"UI4VMF","agent_id":"gpt5@bbook","ts":"2026-02-08T02:03:32.688388Z"}}
+{"type":"state","ts":"2026-02-08T02:03:32.688388Z","data":{"id":"UI4VMF","state":"doing","ts":"2026-02-08T02:03:32.688388Z"}}
+{"type":"result","ts":"2026-02-08T02:08:25.227417Z","data":{"task_id":"UI4VMF","summary":"Added node dist build artifact job and maintainer npm publish workflow docs","path":".github/workflows/release.yml","sha256_at_attach":"4e5a0000859a20ee3885311c6f38675630fd636712f08fe8695069a5d4a5e9f4","mtime_at_attach":"2026-02-08T02:03:57.218242323Z","git_commit_at_attach":"5b5a0f8ee98b2d13876339d8901484a0e6851d42","ts":"2026-02-08T02:08:25.227417Z"}}
+{"type":"state","ts":"2026-02-08T02:08:25.245476Z","data":{"id":"UI4VMF","state":"done","ts":"2026-02-08T02:08:25.245476Z"}}

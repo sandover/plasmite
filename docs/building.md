@@ -54,6 +54,9 @@ For full CI-parity checks in this repo, run:
 just ci
 ```
 
+Packaging smoke (npm pack + wheel install) is covered in CI pull requests by
+the `dist-smoke` job in `.github/workflows/ci.yml`.
+
 ## Release artifact matrix
 
 `.github/workflows/release.yml` builds and packages binaries for:
@@ -62,7 +65,18 @@ just ci
 - `x86_64-apple-darwin` (`darwin_amd64`)
 - `aarch64-apple-darwin` (`darwin_arm64`)
 
-The release workflow uploads tarballs and `sha256sums.txt` to the GitHub release.
+Each release tarball now follows the SDK layout contract:
+
+```text
+bin/plasmite
+bin/pls
+include/plasmite.h
+lib/libplasmite.(dylib|so)
+lib/libplasmite.a               # optional
+lib/pkgconfig/plasmite.pc
+```
+
+The release workflow uploads SDK tarballs and `sha256sums.txt` to the GitHub release.
 
 ## Linux arm64 policy
 

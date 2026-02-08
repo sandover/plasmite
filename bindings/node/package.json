@@ -1,15 +1,23 @@
 {
-  "name": "plasmite-node",
+  "name": "plasmite",
   "version": "0.1.0",
   "description": "Persistent JSON message queues for Node.js - native bindings for local and remote IPC",
   "license": "MIT",
   "main": "index.js",
   "types": "types.d.ts",
+  "bin": {
+    "plasmite": "bin/plasmite.js"
+  },
   "files": [
     "index.js",
+    "index.node",
     "index.d.ts",
     "types.d.ts",
-    "remote.js"
+    "remote.js",
+    "bin/plasmite.js",
+    "libplasmite.dylib",
+    "libplasmite.so",
+    "plasmite"
   ],
   "keywords": [
     "ipc",
@@ -26,9 +34,11 @@
     "directory": "bindings/node"
   },
   "scripts": {
+    "prepare-native": "node scripts/prepare_native_assets.js",
     "build": "napi build --cargo-cwd native",
     "test": "npm run build && node --test test/*.test.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "prepack": "npm run build && npm run prepare-native",
     "prepublishOnly": "npm run typecheck"
   },
   "devDependencies": {

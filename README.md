@@ -31,15 +31,62 @@ For IPC across machines, `pls serve` exposes your local pools, with TLS support 
 
 ## Install
 
+| Channel | Command | CLI | Library/Bindings | Notes |
+|---|---|---|---|---|
+| Homebrew | `brew install sandover/tap/plasmite` | Yes | Yes (`libplasmite`, header, pkg-config) | Recommended for macOS and Go users. |
+| Rust crate (CLI) | `cargo install plasmite` | Yes | No | Installs `plasmite` + `pls`. |
+| Rust crate (lib) | `cargo add plasmite` | No | Rust API | Use in Rust apps. |
+| Python | `uv tool install plasmite` | Yes | Python bindings | Wheel bundles native assets on supported targets. |
+| Python (project dep) | `uv pip install plasmite` | Optional | Python bindings | Use from existing env/project. |
+| Node | `npm i plasmite` | Optional | Node bindings | Bundles addon + native assets. |
+| Node global | `npm i -g plasmite` | Yes | Node bindings | Enables `plasmite` on PATH via npm bin. |
+| Go | `go get github.com/sandover/plasmite/bindings/go/plasmite` | No | Go bindings | Requires system SDK (`brew install ...` first). |
+| Release tarball | Download from [releases](https://github.com/sandover/plasmite/releases) | Yes | Yes (SDK layout) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |
+
+### Python quickstart
+
 ```bash
-brew install sandover/tap/plasmite    # macOS
-cargo install plasmite                # anywhere with Rust
+uv tool install plasmite
+python - <<'PY'
+from plasmite import Client, Durability
+c = Client("./data")
+p = c.create_pool("events", 1024 * 1024)
+p.append_json(b'{"ok":true}', [], Durability.FAST)
+print("python-ok")
+p.close(); c.close()
+PY
+plasmite --version
 ```
 
-Installs both `plasmite` and the `pls` shorthand.
+### Node quickstart
 
-Prefer manual binaries? Grab your platform tarball from the
-[v0.1.0 release](https://github.com/sandover/plasmite/releases/tag/v0.1.0).
+```bash
+npm i plasmite
+node - <<'JS'
+const { Client, Durability } = require("plasmite");
+const c = new Client("./data");
+const p = c.createPool("events", 1024 * 1024);
+p.appendJson(Buffer.from('{"ok":true}'), [], Durability.Fast);
+console.log("node-ok");
+p.close(); c.close();
+JS
+npx plasmite --version
+```
+
+### Go quickstart
+
+```bash
+brew install sandover/tap/plasmite
+mkdir -p /tmp/plasmite-go && cd /tmp/plasmite-go
+go mod init example.com/plasmite-go
+go get github.com/sandover/plasmite/bindings/go/plasmite
+cat > main.go <<'EOF'
+package main
+import "github.com/sandover/plasmite/bindings/go/plasmite"
+func main() { c,_:=plasmite.NewClient("./data"); defer c.Close() }
+EOF
+go run .
+```
 
 ## Why not just...
 
@@ -188,19 +235,11 @@ pool.append_json(b'{"sensor": "temp", "value": 23.5}', [], Durability.FAST)
 ```
 
 ```javascript
-const { Client, Durability } = require("plasmite-node")
+const { Client, Durability } = require("plasmite")
 const client = new Client("./data")
 const pool = client.createPool("events", 1024 * 1024)
 pool.appendJson(Buffer.from('{"sensor": "temp", "value": 23.5}'), [], Durability.Fast)
 ```
-
-```bash
-pip install plasmite              # or: uv pip install plasmite
-npm install plasmite-node
-go get github.com/sandover/plasmite/bindings/go/plasmite
-```
-
-Python and Node bindings are source-only for v0.1.0 (Rust toolchain required — `brew install rust` on macOS, [rustup](https://rustup.rs) on Linux). Pre-built binaries coming soon.
 
 See [Go quickstart](docs/record/go-quickstart.md), [Python docs](bindings/python/README.md), and [Node docs](bindings/node/README.md).
 

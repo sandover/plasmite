@@ -15,6 +15,9 @@ fn main() {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if target_os == "macos" {
         println!("cargo:rustc-link-arg=-Wl,-undefined,dynamic_lookup");
+        println!("cargo:rustc-link-arg=-Wl,-rpath,@loader_path");
+    } else if target_os == "linux" {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
     }
 
     let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -49,5 +52,5 @@ fn main() {
     });
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
-    println!("cargo:rustc-link-lib=plasmite");
+    println!("cargo:rustc-link-lib=dylib=plasmite");
 }

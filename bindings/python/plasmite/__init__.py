@@ -26,6 +26,7 @@ from datetime import datetime
 from enum import IntEnum
 import json
 import os
+from pathlib import Path
 import sys
 import time as _time
 from typing import Generator, Iterable, Optional
@@ -117,6 +118,13 @@ def _load_lib() -> CDLL:
         for candidate in candidates:
             if os.path.exists(candidate):
                 return CDLL(candidate)
+    native_dir = Path(__file__).resolve().parent / "_native"
+    for candidate in (
+        native_dir / "libplasmite.dylib",
+        native_dir / "libplasmite.so",
+    ):
+        if candidate.exists():
+            return CDLL(str(candidate))
     for name in ("plasmite", "libplasmite"):
         try:
             return CDLL(name)

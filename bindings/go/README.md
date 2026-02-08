@@ -6,7 +6,8 @@ payload bytes.
 
 ## Build Requirements
 - Go 1.22+
-- `libplasmite` built from this repo (`cargo build -p plasmite`)
+- `pkg-config` (`pkgconf`) available on PATH
+- `libplasmite` SDK installed (recommended on macOS: `brew install sandover/tap/plasmite`)
 
 ## Build & Test
 From the repo root:
@@ -21,15 +22,24 @@ Canonical repo-root command:
 just bindings-go-test
 ```
 
-Equivalent manual command (from `bindings/go`):
+Equivalent system-SDK command (from `bindings/go`):
 
 ```bash
-CGO_LDFLAGS="-L$(pwd)/../../target/debug" go test ./...
+go test ./...
 ```
 
-For release builds, swap in `target/release` and run `cargo build -p plasmite --release`.
-On macOS, set `DYLD_LIBRARY_PATH` to the same directory when running binaries.
-On Linux, use `LD_LIBRARY_PATH`.
+Development override (repo-local library without Homebrew install):
+
+```bash
+cargo build -p plasmite
+PLASMITE_LIB_DIR="$(pwd)/../../target/debug" \
+PKG_CONFIG=/usr/bin/true \
+CGO_CFLAGS="-I$(pwd)/../../include" \
+CGO_LDFLAGS="-L$(pwd)/../../target/debug" \
+go test ./...
+```
+
+`just bindings-go-test` runs this override automatically for CI and local development.
 
 ## Usage
 

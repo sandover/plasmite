@@ -1,8 +1,9 @@
 class Plasmite < Formula
-  desc "Plasmite CLI"
+  desc "Plasmite CLI and C ABI SDK"
   homepage "https://github.com/sandover/plasmite"
   license "MIT"
   version "0.1.0"
+  depends_on "pkgconf" => :test
 
   on_macos do
     if Hardware::CPU.arm?
@@ -20,11 +21,21 @@ class Plasmite < Formula
   end
 
   def install
-    bin.install "plasmite"
-    bin.install "pls"
+    bin.install "bin/plasmite"
+    bin.install "bin/pls"
+    include.install "include/plasmite.h"
+    (lib/"pkgconfig").install "lib/pkgconfig/plasmite.pc"
+    if OS.mac?
+      lib.install "lib/libplasmite.dylib"
+    else
+      lib.install "lib/libplasmite.so"
+    end
+    lib.install "lib/libplasmite.a" if File.exist?("lib/libplasmite.a")
   end
 
   test do
-    assert_match "plasmite", shell_output("#{bin}/plasmite")
+    assert_match version.to_s, shell_output("#{bin}/plasmite --version")
+    pc_version = shell_output("PKG_CONFIG_PATH=#{lib}/pkgconfig pkg-config --modversion plasmite").strip
+    assert_equal version.to_s, pc_version
   end
 end

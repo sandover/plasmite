@@ -17,7 +17,7 @@ test:
 bindings-go-test:
 	cargo build -p plasmite
 	mkdir -p tmp/go-cache tmp/go-tmp
-	cd bindings/go && GOCACHE="$(pwd)/../../tmp/go-cache" GOTMPDIR="$(pwd)/../../tmp/go-tmp" CGO_LDFLAGS="-L$(pwd)/../../target/debug" go test ./...
+	cd bindings/go && GOCACHE="$(pwd)/../../tmp/go-cache" GOTMPDIR="$(pwd)/../../tmp/go-tmp" PLASMITE_LIB_DIR="$(pwd)/../../target/debug" PKG_CONFIG="/usr/bin/true" CGO_CFLAGS="-I$(pwd)/../../include" CGO_LDFLAGS="-L$(pwd)/../../target/debug" go test ./...
 
 bindings-python-test:
 	cargo build -p plasmite

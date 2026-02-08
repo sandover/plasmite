@@ -33,6 +33,12 @@ Homepage = "https://github.com/sandover/plasmite"
 Repository = "https://github.com/sandover/plasmite"
 Documentation = "https://github.com/sandover/plasmite#readme"
 
+[project.scripts]
+plasmite = "plasmite._cli:main"
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["plasmite"]
+
+[tool.setuptools.package-data]
+plasmite = ["_native/*"]

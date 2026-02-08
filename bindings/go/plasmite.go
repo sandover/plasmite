@@ -8,6 +8,7 @@ Notes: Uses cgo and links to -lplasmite; caller configures library search path.
 package plasmite
 
 /*
+#cgo pkg-config: plasmite
 #cgo CFLAGS: -I${SRCDIR}/../../include
 #cgo LDFLAGS: -lplasmite
 #include "plasmite.h"

@@ -58,6 +58,7 @@ This checklist keeps releases reproducible and ensures CI gates are green before
 3. **Monitor the release workflow**:
    - Watch https://github.com/sandover/plasmite/actions
    - Verify artifacts for the 3 supported release platforms (darwin arm64/amd64, linux amd64)
+   - Verify each tarball extracts with SDK layout (`bin/`, `include/`, `lib/`, `lib/pkgconfig/plasmite.pc`)
    - Verify `sha256sums.txt` is published
    - Linux arm64 (`aarch64-unknown-linux-gnu`) is best-effort from source builds and is not a release gate
 
@@ -72,18 +73,28 @@ This checklist keeps releases reproducible and ensures CI gates are green before
 
 5. **Publish to registries**:
    - crates.io: Published by CI only when `CARGO_REGISTRY_TOKEN` is set; otherwise publish manually (`cargo publish`)
-   - npm (manual):
+   - PyPI: Published by CI on tag via Trusted Publishing (`publish-pypi` job)
+     - CI builds platform wheels on linux amd64 + macOS amd64/arm64
+     - CI also uploads one sdist from linux
+   - npm (manual with provenance):
      ```bash
-     cd bindings/node
-     npm publish
-     ```
-   - PyPI (manual):
+      cd bindings/node
+      # optional rehearsal to a non-latest channel
+      npm publish --provenance --access public --tag next
+      # final release to latest
+      npm publish --provenance --access public
+      ```
+     Preconditions:
+     - `bindings/node/package.json` version matches `${GITHUB_REF_NAME#v}`
+     - local `./scripts/node_pack_smoke.sh` passes
+     - release workflow artifact `node-dist` exists for the tag
+   - PyPI manual fallback (only if Trusted Publishing is unavailable):
      ```bash
      cd bindings/python
      python -m build
-     python -m twine upload dist/*
+     twine check dist/*
+     TWINE_USERNAME=__token__ TWINE_PASSWORD="$PYPI_API_TOKEN" twine upload dist/*
      ```
-     Ensure you have `build` and `twine` installed: `pip install build twine`
 
 ## One-time setup
 
@@ -91,14 +102,16 @@ Before the first release, configure GitHub secrets:
 
 1. **CARGO_REGISTRY_TOKEN**: Create a token at https://crates.io/me/tokens, add it to GitHub repo secrets
 2. **NPM_TOKEN**: (For npm publish workflow - see npm task)
-3. **PYPI_TOKEN**: (For PyPI publish workflow - see PyPI task)
+3. **PyPI Trusted Publisher**:
+   - In PyPI project settings, add this GitHub repo/workflow (`release.yml`) as a trusted publisher.
+   - If using manual fallback instead, add `PYPI_API_TOKEN` secret.
 
 ## Post-release
 
 1. **Verify install paths**:
    - `cargo install plasmite` (after crates.io publish succeeds)
    - `brew install sandover/tap/plasmite` (after tap is pushed)
-   - `npm install plasmite-node` (after npm publish)
+   - `npm install plasmite` (after npm publish)
    - `pip install plasmite` (after PyPI publish)
 
 2. **Update README** if install instructions changed
