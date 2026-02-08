@@ -3173,6 +3173,52 @@ fn peek_missing_pool_has_actionable_hint() {
 }
 
 #[test]
+fn poke_missing_pool_hint_suggests_create() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "missing",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert_eq!(output.status.code(), Some(3));
+
+    let err = parse_error_json(&output.stderr);
+    let inner = err.get("error").and_then(|v| v.as_object()).expect("error");
+    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("NotFound"));
+    let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(hint.contains("--create"));
+    assert!(hint.contains("exact command"));
+    assert!(hint.contains("plasmite poke missing --create"));
+}
+
+#[test]
+fn peek_missing_pool_hint_suggests_create() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let output = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "peek", "missing"])
+        .output()
+        .expect("peek");
+    assert_eq!(output.status.code(), Some(3));
+
+    let err = parse_error_json(&output.stderr);
+    let inner = err.get("error").and_then(|v| v.as_object()).expect("error");
+    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("NotFound"));
+    let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(hint.contains("--create"));
+    assert!(hint.contains("exact command"));
+    assert!(hint.contains("plasmite peek missing --create"));
+}
+
+#[test]
 fn already_exists_has_hint_and_path() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
@@ -3567,6 +3613,34 @@ fn poke_remote_url_rejects_create_flag() {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     assert!(message.contains("does not support --create"));
+    let hint = err
+        .get("error")
+        .and_then(|v| v.get("hint"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(hint.contains("server-side"));
+}
+
+#[test]
+fn poke_remote_create_rejected() {
+    let output = cmd()
+        .args([
+            "poke",
+            "http://localhost:9170/demo",
+            "--create",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("poke");
+    assert_eq!(output.status.code(), Some(2));
+
+    let err = parse_error_json(&output.stderr);
+    let inner = err.get("error").and_then(|v| v.as_object()).expect("error");
+    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Usage"));
+    let message = inner.get("message").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(message.contains("does not support --create"));
+    let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(hint.contains("server-side"));
 }
 
 #[test]
