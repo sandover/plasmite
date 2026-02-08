@@ -1994,3 +1994,7 @@
 {"type":"state","ts":"2026-02-08T00:09:42.934887Z","data":{"id":"MYMLIW","state":"doing","ts":"2026-02-08T00:09:42.934887Z"}}
 {"type":"result","ts":"2026-02-08T00:10:13.344881Z","data":{"task_id":"MYMLIW","summary":"Made simd-json parser path unconditional and removed simd feature gates from Cargo manifest.","path":"src/ingest.rs","sha256_at_attach":"805b230c6e348e79f602988fef7153d409c7a54809077cd33b6c19fad7aab5e2","mtime_at_attach":"2026-02-08T00:09:59.293069397Z","git_commit_at_attach":"bcd5d21ce9273b03c146558e00649b723bb02f85","ts":"2026-02-08T00:10:13.344881Z"}}
 {"type":"state","ts":"2026-02-08T00:10:13.357378Z","data":{"id":"MYMLIW","state":"done","ts":"2026-02-08T00:10:13.357378Z"}}
+{"type":"claim","ts":"2026-02-08T00:10:47.342696Z","data":{"id":"XMJKKT","agent_id":"codex@bbook","ts":"2026-02-08T00:10:47.342696Z"}}
+{"type":"state","ts":"2026-02-08T00:10:47.342696Z","data":{"id":"XMJKKT","state":"doing","ts":"2026-02-08T00:10:47.342696Z"}}
+{"type":"result","ts":"2026-02-08T00:11:21.743952Z","data":{"task_id":"XMJKKT","summary":"Defined v0 support matrix, CI expectations, and mitigation policy for simd-json-only rollout.","path":"docs/record/simd-json-rollout.md","sha256_at_attach":"067ff8f7bf80ec568a2abe53a18b1132a33f5437e9fc2e8e21f2cd7408e905ec","mtime_at_attach":"2026-02-08T00:11:14.358379055Z","git_commit_at_attach":"d2bac3de2118b99104d6a1112ecdb86a7e1e4b69","ts":"2026-02-08T00:11:21.743952Z"}}
+{"type":"state","ts":"2026-02-08T00:11:21.756532Z","data":{"id":"XMJKKT","state":"done","ts":"2026-02-08T00:11:21.756532Z"}}
