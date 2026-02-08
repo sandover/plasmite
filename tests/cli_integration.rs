@@ -123,6 +123,43 @@ fn parse_notice_json(line: &str) -> Value {
     parse_json(line.trim())
 }
 
+fn assert_actionable_usage_feedback(
+    output: &std::process::Output,
+    expected_message_fragment: &str,
+    expected_hint_fragment: &str,
+) {
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "expected clap usage exit code, stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let err = parse_error_json(&output.stderr);
+    let inner = err
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
+    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Usage"));
+    let message = inner
+        .get("message")
+        .and_then(|v| v.as_str())
+        .expect("usage message");
+    assert!(
+        message.contains(expected_message_fragment),
+        "expected message to contain '{expected_message_fragment}', got '{message}'"
+    );
+    // Keep guidance concise so both TTY-oriented and JSON stderr outputs stay actionable.
+    assert!(!message.contains('\n'), "message should be single-line");
+    let hint = inner
+        .get("hint")
+        .and_then(|v| v.as_str())
+        .expect("usage hint");
+    assert!(
+        hint.contains(expected_hint_fragment),
+        "expected hint to contain '{expected_hint_fragment}', got '{hint}'"
+    );
+}
+
 fn pick_port() -> std::io::Result<u16> {
     let start = Instant::now();
     loop {
@@ -3054,6 +3091,49 @@ fn clap_errors_are_concise_in_json() {
     assert!(!message.contains("Usage:"));
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
     assert!(hint.contains("--help"));
+}
+
+#[test]
+fn misuse_feedback_matrix_is_actionable_across_command_families() {
+    let cases: [(&[&str], &str, &str); 8] = [
+        (&["pool", "info"], "required arguments", "pool info --help"),
+        (
+            &["poke", "demo", "{\"x\":1}", "--retry-delay", "1s"],
+            "--retry-delay requires --retry",
+            "Add --retry",
+        ),
+        (&["peek"], "required arguments", "plasmite peek chat -n 1"),
+        (
+            &["get", "demo"],
+            "required arguments",
+            "plasmite get --help",
+        ),
+        (
+            &["doctor", "demo", "--all"],
+            "--all cannot be combined",
+            "Use --all by itself",
+        ),
+        (
+            &["serve", "--bind", "nope", "check"],
+            "invalid bind address",
+            "host:port",
+        ),
+        (&["completion", "nope"], "invalid value", "plasmite --help"),
+        (
+            &["version", "extra"],
+            "unexpected argument",
+            "version --help",
+        ),
+    ];
+
+    for (args, expected_message_fragment, expected_hint_fragment) in cases {
+        let output = cmd().args(args).output().expect("command");
+        assert_actionable_usage_feedback(
+            &output,
+            expected_message_fragment,
+            expected_hint_fragment,
+        );
+    }
 }
 
 #[test]
