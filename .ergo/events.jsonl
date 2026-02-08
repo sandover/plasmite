@@ -1990,3 +1990,7 @@
 {"type":"state","ts":"2026-02-08T00:08:41.191161Z","data":{"id":"6LV3FF","state":"doing","ts":"2026-02-08T00:08:41.191161Z"}}
 {"type":"result","ts":"2026-02-08T00:09:16.210555Z","data":{"task_id":"6LV3FF","summary":"Defined simd-json parser contract with error taxonomy and canonical outcomes.","path":"docs/decisions/simd-json-parser-contract.md","sha256_at_attach":"ebf7affc70a031a9c6628f89011040b2887f2a65a80d95d41a09584cc6206bc2","mtime_at_attach":"2026-02-08T00:09:06.657644922Z","git_commit_at_attach":"dc20689e3224f76214248ed33bf980398aaa89a3","ts":"2026-02-08T00:09:16.210555Z"}}
 {"type":"state","ts":"2026-02-08T00:09:16.222745Z","data":{"id":"6LV3FF","state":"done","ts":"2026-02-08T00:09:16.222745Z"}}
+{"type":"claim","ts":"2026-02-08T00:09:42.934887Z","data":{"id":"MYMLIW","agent_id":"codex@bbook","ts":"2026-02-08T00:09:42.934887Z"}}
+{"type":"state","ts":"2026-02-08T00:09:42.934887Z","data":{"id":"MYMLIW","state":"doing","ts":"2026-02-08T00:09:42.934887Z"}}
+{"type":"result","ts":"2026-02-08T00:10:13.344881Z","data":{"task_id":"MYMLIW","summary":"Made simd-json parser path unconditional and removed simd feature gates from Cargo manifest.","path":"src/ingest.rs","sha256_at_attach":"805b230c6e348e79f602988fef7153d409c7a54809077cd33b6c19fad7aab5e2","mtime_at_attach":"2026-02-08T00:09:59.293069397Z","git_commit_at_attach":"bcd5d21ce9273b03c146558e00649b723bb02f85","ts":"2026-02-08T00:10:13.344881Z"}}
+{"type":"state","ts":"2026-02-08T00:10:13.357378Z","data":{"id":"MYMLIW","state":"done","ts":"2026-02-08T00:10:13.357378Z"}}

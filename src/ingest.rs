@@ -11,17 +11,11 @@ use plasmite::api::{Error, ErrorKind};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-/// Parse JSON from a string slice. When the `simd` feature is enabled, uses simd-json
-/// for faster parsing. simd-json requires mutable input, so we clone before parsing.
-#[cfg(feature = "simd")]
+/// Parse JSON from a string slice using simd-json.
+/// simd-json requires mutable input, so we clone before parsing.
 fn json_from_str<T: DeserializeOwned>(s: &str) -> Result<T, simd_json::Error> {
     let mut bytes = s.as_bytes().to_vec();
     simd_json::serde::from_slice(&mut bytes)
-}
-
-#[cfg(not(feature = "simd"))]
-fn json_from_str<T: DeserializeOwned>(s: &str) -> Result<T, serde_json::Error> {
-    serde_json::from_str(s)
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
