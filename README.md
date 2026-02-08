@@ -166,7 +166,7 @@ See [Go quickstart](docs/record/go-quickstart.md), [Python docs](bindings/python
 | Command | Description |
 |---------|-------------|
 | `poke POOL DATA` | Send a message (`--create` to auto-create pool) |
-| `peek POOL` | Watch messages (streams until Ctrl-C) |
+| `peek POOL` | Watch messages (`--create` auto-creates missing local pools) |
 | `get POOL SEQ` | Fetch one message by sequence number |
 | `pool create NAME` | Create a pool (`--size 8M` for larger) |
 | `pool list` | List pools |
@@ -176,6 +176,7 @@ See [Go quickstart](docs/record/go-quickstart.md), [Python docs](bindings/python
 | `serve` | HTTP server (loopback default; non-loopback opt-in) |
 
 `pls` and `plasmite` are interchangeable. Shell completion: `plasmite completion bash|zsh|fish`.
+Remote refs are read/write only; `--create` is local-only for `poke` and `peek`.
 
 ## How It Works
 

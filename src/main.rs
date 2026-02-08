@@ -943,6 +943,9 @@ Use `--replay N` with `--tail` or `--since` to replay with timing."#,
   # Emit only data payloads
   $ plasmite peek foo --data-only --format jsonl
 
+  # Create local pool on first peek, then watch
+  $ plasmite peek bar --create
+
   # Remote shorthand ref (serve must already expose the pool)
   $ plasmite peek http://127.0.0.1:9700/demo --tail 20 --format jsonl
 
@@ -953,6 +956,7 @@ NOTES
   - `--since 5m` and `--since 2026-01-15T10:00:00Z` both work
   - Remote refs must be shorthand: http(s)://host:port/<pool> (no trailing slash)
   - Remote `peek` supports `--tail`, `--tag`, `--where`, `--one`, `--timeout`, `--data-only`, and `--format`
+  - `--create` is local-only; remote peek never creates remote pools
   - Remote `peek` rejects `--since` and `--replay` with actionable guidance
   - `--replay N` exits when all selected messages are emitted (no live follow)
   - `--replay 0` emits as fast as possible (same as peek, but bounded)"#
