@@ -80,4 +80,4 @@ Decided:
 - Version coupling: lockstep versions across cargo/PyPI/npm and GitHub tags
 
 Open:
-- Static lib shipping: include `libplasmite.a` in release artifacts or ship shared-only
+- Static lib shipping: shared-only for now (no `libplasmite.a` guarantee in release artifacts)
