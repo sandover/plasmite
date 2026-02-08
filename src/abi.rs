@@ -9,6 +9,7 @@
 use crate::api::{LocalClient, PoolApiExt, PoolOptions, PoolRef};
 use crate::core::error::{Error, ErrorKind};
 use crate::core::pool::Pool;
+use crate::json::parse;
 use serde_json::Value;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
@@ -695,7 +696,7 @@ fn parse_json_bytes(bytes: *const u8, len: usize) -> Result<Value, Error> {
             .with_message("invalid json utf-8")
             .with_source(err)
     })?;
-    serde_json::from_str(text).map_err(|err| {
+    parse::from_str(text).map_err(|err| {
         Error::new(ErrorKind::Usage)
             .with_message("invalid json")
             .with_source(err)
@@ -737,7 +738,7 @@ fn message_from_frame(frame: &crate::api::FrameRef<'_>) -> Result<crate::api::Me
         .key_offset_at(meta_ofs, "tags")
         .map_err(|err| err.with_message("missing meta.tags"))?;
     let descrips_json = doc.to_json_at(descrips_ofs, false)?;
-    let descrips_value: Value = serde_json::from_str(&descrips_json).map_err(|err| {
+    let descrips_value: Value = parse::from_str(&descrips_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
             .with_source(err)
@@ -756,7 +757,7 @@ fn message_from_frame(frame: &crate::api::FrameRef<'_>) -> Result<crate::api::Me
         .key_offset("data")
         .map_err(|err| err.with_message("missing data"))?;
     let data_json = doc.to_json_at(data_ofs, false)?;
-    let data: Value = serde_json::from_str(&data_json).map_err(|err| {
+    let data: Value = parse::from_str(&data_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
             .with_source(err)
@@ -881,7 +882,8 @@ mod tests {
 
     fn parse_buf(buf: &plsm_buf) -> Value {
         let slice = unsafe { std::slice::from_raw_parts(buf.data, buf.len) };
-        serde_json::from_slice(slice).expect("valid json")
+        let text = std::str::from_utf8(slice).expect("utf8");
+        parse::from_str(text).expect("valid json")
     }
 
     fn take_lite3_payload(frame: &plsm_lite3_frame) -> Vec<u8> {
