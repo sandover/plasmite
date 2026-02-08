@@ -146,7 +146,10 @@ cat > "$WORKDIR/go-smoke.json" <<'JSON'
 JSON
 (
   cd "$ROOT/bindings/go"
-  CGO_LDFLAGS="-L$LIB_DIR" go run ./cmd/plasmite-conformance "$WORKDIR/go-smoke.json"
+  PKG_CONFIG=/usr/bin/true \
+    CGO_CFLAGS="-I$ROOT/include" \
+    CGO_LDFLAGS="-L$LIB_DIR" \
+    go run ./cmd/plasmite-conformance "$WORKDIR/go-smoke.json"
 )
 check_pool_version "$WORKDIR/go-work/go-pool.plasmite"
 "$PLASMITE_BIN" --dir "$WORKDIR/go-work" pool info go-pool --json >/dev/null
