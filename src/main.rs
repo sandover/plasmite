@@ -371,6 +371,20 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                     .with_hint("Use only one of DATA, --file, or stdin."));
             }
             let single_input = data.is_some() || file.is_some() || io::stdin().is_terminal();
+            let exact_create_hint = poke_exact_create_command_hint(
+                &pool,
+                PokeExactCreateHint {
+                    tags: &tag,
+                    data: &data,
+                    file: &file,
+                    durability,
+                    retry,
+                    retry_delay: retry_delay.as_deref(),
+                    input,
+                    errors,
+                    single_input,
+                },
+            );
             match target {
                 PoolTarget::LocalPath(path) => {
                     let mut pool_handle = match Pool::open(&path) {
@@ -385,7 +399,13 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                             Pool::create(&path, PoolOptions::new(size))?
                         }
                         Err(err) => {
-                            return Err(add_missing_pool_hint(err, &pool, &pool));
+                            return Err(add_missing_pool_create_hint(
+                                err,
+                                "poke",
+                                &pool,
+                                &pool,
+                                exact_create_hint,
+                            ));
                         }
                     };
                     if single_input {
@@ -489,6 +509,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
         }
         Command::Peek {
             pool,
+            create,
             jsonl,
             tail,
             one,
@@ -507,6 +528,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                     .with_message("conflicting output options")
                     .with_hint("Use --format jsonl (or --jsonl), but not both."));
             }
+            let format_flag = format;
             let format = format.unwrap_or(if jsonl {
                 PeekFormat::Jsonl
             } else {
@@ -518,7 +540,23 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 .as_deref()
                 .map(|value| parse_since(value, now))
                 .transpose()?;
-            let timeout = timeout.as_deref().map(parse_duration).transpose()?;
+            let timeout_input = timeout.as_deref();
+            let timeout = timeout_input.map(parse_duration).transpose()?;
+            let exact_peek_create_hint = peek_exact_create_command_hint(
+                &pool,
+                tail,
+                one,
+                jsonl,
+                timeout_input,
+                data_only,
+                format_flag,
+                since.as_deref(),
+                &where_expr,
+                &tags,
+                quiet_drops,
+                no_notify,
+                replay,
+            );
             let cfg = PeekConfig {
                 tail,
                 pretty,
@@ -536,6 +574,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             let target = resolve_pool_target(&pool, &pool_dir)?;
             match target {
                 PoolTarget::LocalPath(path) => {
+                    let exact_create_hint = Some(exact_peek_create_hint.clone());
                     if let Some(speed) = replay {
                         if speed < 0.0 {
                             return Err(Error::new(ErrorKind::Usage)
@@ -560,12 +599,33 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                             return Ok(RunOutcome::ok());
                         }
                     }
-                    let pool_handle = Pool::open(&path)
-                        .map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
+                    let pool_handle = match Pool::open(&path) {
+                        Ok(pool_handle) => pool_handle,
+                        Err(err) if create && err.kind() == ErrorKind::NotFound => {
+                            ensure_pool_dir(&pool_dir)?;
+                            Pool::create(&path, PoolOptions::new(DEFAULT_POOL_SIZE))?
+                        }
+                        Err(err) => {
+                            return Err(add_missing_pool_create_hint(
+                                err,
+                                "peek",
+                                &pool,
+                                &pool,
+                                exact_create_hint,
+                            ));
+                        }
+                    };
                     let outcome = peek(&pool_handle, &pool, &path, cfg)?;
                     Ok(outcome)
                 }
                 PoolTarget::Remote { base_url, pool } => {
+                    if create {
+                        return Err(Error::new(ErrorKind::Usage)
+                            .with_message("remote peek does not support --create")
+                            .with_hint(
+                                "Create remote pools with server-side tooling, then rerun peek.",
+                            ));
+                    }
                     let outcome = peek_remote(&base_url, &pool, &cfg)?;
                     Ok(outcome)
                 }
@@ -670,7 +730,7 @@ enum PeekFormat {
     Jsonl,
 }
 
-#[derive(Copy, Clone, Debug, ValueEnum)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 enum InputMode {
     Auto,
     Jsonl,
@@ -900,6 +960,8 @@ NOTES
     Peek {
         #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
         pool: String,
+        #[arg(long, help = "Create local pool if missing before watching")]
+        create: bool,
         #[arg(
             long = "tail",
             short = 'n',
@@ -1293,6 +1355,199 @@ fn add_missing_pool_hint(err: Error, pool_ref: &str, input: &str) -> Error {
     err.with_hint(format!(
         "Create it first: plasmite pool create {pool_ref} (or pass --dir for a different pool directory)."
     ))
+}
+
+fn add_missing_pool_create_hint(
+    err: Error,
+    command: &str,
+    pool_ref: &str,
+    input: &str,
+    exact_command: Option<String>,
+) -> Error {
+    if err.kind() != ErrorKind::NotFound || err.hint().is_some() {
+        return err;
+    }
+    if input.contains("://") {
+        return err.with_hint("Remote pool not found. Create it with server-side tooling first.");
+    }
+    if input.contains('/') {
+        return err.with_hint(
+            "Pool path not found. Check the path or pass --dir for a different pool directory.",
+        );
+    }
+    if let Some(exact_command) = exact_command {
+        return err.with_hint(format!(
+            "Pool is missing. Retry with exact command: {exact_command}"
+        ));
+    }
+    err.with_hint(format!(
+        "Pool is missing. Re-run with --create (local refs only), e.g. plasmite {command} {pool_ref} --create."
+    ))
+}
+
+fn render_shell_agnostic_token(token: &str) -> String {
+    if !token.is_empty()
+        && token
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '='))
+    {
+        token.to_string()
+    } else {
+        serde_json::to_string(token).unwrap_or_else(|_| format!("\"{token}\""))
+    }
+}
+
+fn render_shell_agnostic_command(tokens: &[String]) -> String {
+    tokens
+        .iter()
+        .map(|token| render_shell_agnostic_token(token))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+struct PokeExactCreateHint<'a> {
+    tags: &'a [String],
+    data: &'a Option<String>,
+    file: &'a Option<String>,
+    durability: Durability,
+    retry: u32,
+    retry_delay: Option<&'a str>,
+    input: InputMode,
+    errors: ErrorPolicyCli,
+    single_input: bool,
+}
+
+fn poke_exact_create_command_hint(pool: &str, options: PokeExactCreateHint<'_>) -> Option<String> {
+    if !options.single_input {
+        return None;
+    }
+    let mut tokens = vec![
+        "plasmite".to_string(),
+        "poke".to_string(),
+        pool.to_string(),
+        "--create".to_string(),
+    ];
+    for tag in options.tags {
+        tokens.push("--tag".to_string());
+        tokens.push(tag.clone());
+    }
+    if let Some(data) = options.data {
+        tokens.push(data.clone());
+    }
+    if let Some(file) = options.file {
+        tokens.push("--file".to_string());
+        tokens.push(file.clone());
+    }
+    if options.durability != Durability::Fast {
+        tokens.push("--durability".to_string());
+        tokens.push(
+            match options.durability {
+                Durability::Fast => "fast",
+                Durability::Flush => "flush",
+            }
+            .to_string(),
+        );
+    }
+    if options.retry > 0 {
+        tokens.push("--retry".to_string());
+        tokens.push(options.retry.to_string());
+    }
+    if let Some(delay) = options.retry_delay {
+        tokens.push("--retry-delay".to_string());
+        tokens.push(delay.to_string());
+    }
+    if options.input != InputMode::Auto {
+        tokens.push("--in".to_string());
+        tokens.push(
+            match options.input {
+                InputMode::Auto => "auto",
+                InputMode::Jsonl => "jsonl",
+                InputMode::Json => "json",
+                InputMode::Seq => "seq",
+                InputMode::Jq => "jq",
+            }
+            .to_string(),
+        );
+    }
+    if options.errors != ErrorPolicyCli::Stop {
+        tokens.push("--errors".to_string());
+        tokens.push("skip".to_string());
+    }
+    Some(render_shell_agnostic_command(&tokens))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn peek_exact_create_command_hint(
+    pool: &str,
+    tail: u64,
+    one: bool,
+    jsonl: bool,
+    timeout: Option<&str>,
+    data_only: bool,
+    format: Option<PeekFormat>,
+    since: Option<&str>,
+    where_expr: &[String],
+    tags: &[String],
+    quiet_drops: bool,
+    no_notify: bool,
+    replay: Option<f64>,
+) -> String {
+    let mut tokens = vec![
+        "plasmite".to_string(),
+        "peek".to_string(),
+        pool.to_string(),
+        "--create".to_string(),
+    ];
+    if tail > 0 {
+        tokens.push("--tail".to_string());
+        tokens.push(tail.to_string());
+    }
+    if one {
+        tokens.push("--one".to_string());
+    }
+    if jsonl {
+        tokens.push("--jsonl".to_string());
+    }
+    if let Some(timeout) = timeout {
+        tokens.push("--timeout".to_string());
+        tokens.push(timeout.to_string());
+    }
+    if data_only {
+        tokens.push("--data-only".to_string());
+    }
+    if let Some(format) = format {
+        tokens.push("--format".to_string());
+        tokens.push(
+            match format {
+                PeekFormat::Pretty => "pretty",
+                PeekFormat::Jsonl => "jsonl",
+            }
+            .to_string(),
+        );
+    }
+    if let Some(since) = since {
+        tokens.push("--since".to_string());
+        tokens.push(since.to_string());
+    }
+    for expr in where_expr {
+        tokens.push("--where".to_string());
+        tokens.push(expr.clone());
+    }
+    for tag in tags {
+        tokens.push("--tag".to_string());
+        tokens.push(tag.clone());
+    }
+    if quiet_drops {
+        tokens.push("--quiet-drops".to_string());
+    }
+    if no_notify {
+        tokens.push("--no-notify".to_string());
+    }
+    if let Some(replay) = replay {
+        tokens.push("--replay".to_string());
+        tokens.push(replay.to_string());
+    }
+    render_shell_agnostic_command(&tokens)
 }
 
 fn add_missing_seq_hint(err: Error, pool_ref: &str) -> Error {

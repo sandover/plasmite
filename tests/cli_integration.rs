@@ -2859,6 +2859,27 @@ fn poke_create_flag_creates_missing_pool() {
 }
 
 #[test]
+fn peek_create_flag_creates_missing_pool() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let peek = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "autopool",
+            "--create",
+            "--timeout",
+            "20ms",
+        ])
+        .output()
+        .expect("peek");
+    assert_eq!(peek.status.code(), Some(124));
+    assert!(pool_dir.join("autopool.plasmite").exists());
+}
+
+#[test]
 fn pool_delete_removes_pool_file() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
@@ -3060,7 +3081,7 @@ fn errors_are_json_on_non_tty_stderr() {
             .ends_with("missing.plasmite")
     );
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(hint.contains("pool create") || hint.contains("--dir"));
+    assert!(hint.contains("--create") || hint.contains("exact command"));
 }
 
 #[test]
@@ -3545,6 +3566,30 @@ fn poke_remote_url_rejects_create_flag() {
         .and_then(|v| v.get("message"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    assert!(message.contains("does not support --create"));
+}
+
+#[test]
+fn peek_remote_url_rejects_create_flag() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "peek",
+            "http://127.0.0.1:65535/demo",
+            "--create",
+        ])
+        .output()
+        .expect("peek");
+    assert_eq!(output.status.code(), Some(2));
+
+    let err = parse_error_json(&output.stderr);
+    let inner = err.get("error").and_then(|v| v.as_object()).expect("error");
+    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Usage"));
+    let message = inner.get("message").and_then(|v| v.as_str()).unwrap_or("");
     assert!(message.contains("does not support --create"));
 }
 
