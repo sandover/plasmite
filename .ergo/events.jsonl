@@ -2006,3 +2006,7 @@
 {"type":"state","ts":"2026-02-08T00:12:40.082612Z","data":{"id":"BJUSXJ","state":"doing","ts":"2026-02-08T00:12:40.082612Z"}}
 {"type":"result","ts":"2026-02-08T00:13:33.841483Z","data":{"task_id":"BJUSXJ","summary":"Added table-driven misuse feedback assertions and reusable helper across all CLI command families.","path":"tests/cli_integration.rs","sha256_at_attach":"82744578b60f5b3174a390d467244b57dfa67b0d86baacd79c6d5aa8eb89d51a","mtime_at_attach":"2026-02-08T00:13:28.150757937Z","git_commit_at_attach":"7122c7da9f4b2573030317cc444d6c6233ebf5b5","ts":"2026-02-08T00:13:33.841483Z"}}
 {"type":"state","ts":"2026-02-08T00:13:33.854127Z","data":{"id":"BJUSXJ","state":"done","ts":"2026-02-08T00:13:33.854127Z"}}
+{"type":"claim","ts":"2026-02-08T00:13:55.656048Z","data":{"id":"I72RJM","agent_id":"codex@bbook","ts":"2026-02-08T00:13:55.656048Z"}}
+{"type":"state","ts":"2026-02-08T00:13:55.656048Z","data":{"id":"I72RJM","state":"doing","ts":"2026-02-08T00:13:55.656048Z"}}
+{"type":"result","ts":"2026-02-08T00:14:33.847836Z","data":{"task_id":"I72RJM","summary":"Published CLI misuse-feedback audit report with prioritized findings and fix queue.","path":"docs/record/cli-usage-feedback-audit.md","sha256_at_attach":"1e6dca65cc1104f5d76b952f522c33c8bdfe92486006993e42938819c6d843b4","mtime_at_attach":"2026-02-08T00:14:25.636591303Z","git_commit_at_attach":"66dd9be7367e3e4e99c267ebebf426a514ce9385","ts":"2026-02-08T00:14:33.847836Z"}}
+{"type":"state","ts":"2026-02-08T00:14:33.859875Z","data":{"id":"I72RJM","state":"done","ts":"2026-02-08T00:14:33.859875Z"}}
