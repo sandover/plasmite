@@ -43,7 +43,10 @@ echo "[conformance] go runner"
 (
   cd "$ROOT/bindings/go"
   for manifest in "${MANIFESTS[@]}"; do
-    CGO_LDFLAGS="-L$LIB_DIR" go run ./cmd/plasmite-conformance "$ROOT/conformance/$manifest"
+    PKG_CONFIG=/usr/bin/true \
+      CGO_CFLAGS="-I$ROOT/include" \
+      CGO_LDFLAGS="-L$LIB_DIR" \
+      go run ./cmd/plasmite-conformance "$ROOT/conformance/$manifest"
   done
 )
 
