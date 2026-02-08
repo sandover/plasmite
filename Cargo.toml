@@ -48,8 +48,12 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tower-http = { version = "0.5", features = ["trace"] }
 bstr = "1"
-simd-json = { version = "0.14" }
+simd-json = { version = "0.14", optional = true }
 getrandom = "0.3"
+
+[features]
+default = []
+simd = ["dep:simd-json"]
 
 [dev-dependencies]
 tempfile = "3"
