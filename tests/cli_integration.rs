@@ -3138,6 +3138,7 @@ fn misuse_feedback_matrix_is_actionable_across_command_families() {
 
 #[test]
 fn peek_missing_pool_has_actionable_hint() {
+    // This assertion currently checks the fallback exact command hint text for missing pools.
     let output = cmd().args(["peek", "-n", "1"]).output().expect("peek");
     assert_eq!(output.status.code().unwrap(), 2);
     let err = parse_error_json(&output.stderr);

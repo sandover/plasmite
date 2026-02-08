@@ -1281,6 +1281,7 @@ const DEFAULT_MAX_TAIL_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_MAX_TAIL_CONCURRENCY: usize = 64;
 
 fn add_missing_pool_hint(err: Error, pool_ref: &str, input: &str) -> Error {
+    // Policy note: missing-pool remediation should offer an exact command when safe to render.
     if err.kind() != ErrorKind::NotFound || err.hint().is_some() {
         return err;
     }
