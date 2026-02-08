@@ -699,6 +699,7 @@ fn parse_json_bytes(bytes: *const u8, len: usize) -> Result<Value, Error> {
     parse::from_str(text).map_err(|err| {
         Error::new(ErrorKind::Usage)
             .with_message("invalid json")
+            .with_hint(parse::hint_for_error(&err, "abi.parse_json_bytes"))
             .with_source(err)
     })
 }
@@ -741,6 +742,10 @@ fn message_from_frame(frame: &crate::api::FrameRef<'_>) -> Result<crate::api::Me
     let descrips_value: Value = parse::from_str(&descrips_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
+            .with_hint(parse::hint_for_error(
+                &err,
+                "abi.message_from_frame.meta.tags",
+            ))
             .with_source(err)
     })?;
     let tags = descrips_value
@@ -760,6 +765,7 @@ fn message_from_frame(frame: &crate::api::FrameRef<'_>) -> Result<crate::api::Me
     let data: Value = parse::from_str(&data_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
+            .with_hint(parse::hint_for_error(&err, "abi.message_from_frame.data"))
             .with_source(err)
     })?;
 

@@ -454,6 +454,10 @@ fn decode_payload(payload: &[u8]) -> Result<(Meta, Value), Error> {
     let descrips_value: Value = parse::from_str(&descrips_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
+            .with_hint(parse::hint_for_error(
+                &err,
+                "api.message.decode_payload.meta.tags",
+            ))
             .with_source(err)
     })?;
     let tags = descrips_value
@@ -473,6 +477,10 @@ fn decode_payload(payload: &[u8]) -> Result<(Meta, Value), Error> {
     let data: Value = parse::from_str(&data_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
+            .with_hint(parse::hint_for_error(
+                &err,
+                "api.message.decode_payload.data",
+            ))
             .with_source(err)
     })?;
 

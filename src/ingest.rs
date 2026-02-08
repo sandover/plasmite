@@ -17,6 +17,11 @@ fn json_from_str<T: DeserializeOwned>(s: &str) -> Result<T, simd_json::Error> {
     crate::json::parse::from_str(s)
 }
 
+fn categorized_parse_message(base: &str, err: &simd_json::Error) -> String {
+    let category = crate::json::parse::category_label(crate::json::parse::categorize_error(err));
+    format!("{base} (category: {category})")
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum IngestMode {
     Auto,
@@ -282,7 +287,7 @@ where
                 on_value,
                 on_failure,
             )?,
-            Err(_) if allow_multiline && looks_like_json_start(trimmed) => {
+            Err(_err) if allow_multiline && looks_like_json_start(trimmed) => {
                 let mut buf = String::from(trimmed);
                 let mut record_line = line_no;
                 loop {
@@ -343,12 +348,12 @@ where
                     buf.push_str(line.as_str());
                 }
             }
-            Err(_) => {
+            Err(err) => {
                 on_failure(
                     index,
                     IngestMode::Jsonl,
                     Some(line_no),
-                    "invalid json input",
+                    &categorized_parse_message("invalid json input", &err),
                     "Parse",
                     Some(truncate_snippet(trimmed, config.max_snippet_bytes)),
                 )?;
@@ -400,12 +405,12 @@ where
                 on_failure,
             )?;
         }
-        Err(_) => {
+        Err(err) => {
             on_failure(
                 1,
                 IngestMode::Json,
                 None,
-                "invalid json input",
+                &categorized_parse_message("invalid json input", &err),
                 "Parse",
                 Some(truncate_snippet(&buf, config.max_snippet_bytes)),
             )?;
@@ -457,11 +462,11 @@ where
                 on_value,
                 on_failure,
             ),
-            Err(_) => on_failure(
+            Err(err) => on_failure(
                 index,
                 IngestMode::Seq,
                 None,
-                "invalid json input",
+                &categorized_parse_message("invalid json input", &err),
                 "Parse",
                 Some(truncate_bytes(record, config.max_snippet_bytes)),
             ),
@@ -587,11 +592,11 @@ where
                     on_value,
                     on_failure,
                 )?,
-                Err(_) => on_failure(
+                Err(err) => on_failure(
                     index,
                     IngestMode::Event,
                     Some(line_no),
-                    "invalid json input",
+                    &categorized_parse_message("invalid json input", &err),
                     "Parse",
                     Some(truncate_snippet(&payload, config.max_snippet_bytes)),
                 )?,
@@ -647,11 +652,11 @@ where
                     on_value,
                     on_failure,
                 )?,
-                Err(_) => on_failure(
+                Err(err) => on_failure(
                     index,
                     IngestMode::Event,
                     Some(line_no),
-                    "invalid json input",
+                    &categorized_parse_message("invalid json input", &err),
                     "Parse",
                     Some(truncate_snippet(&payload, config.max_snippet_bytes)),
                 )?,
