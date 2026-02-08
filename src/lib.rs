@@ -6,4 +6,5 @@
 mod abi;
 pub mod api;
 mod core;
+mod json;
 pub mod notice;

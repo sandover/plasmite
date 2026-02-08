@@ -24,6 +24,7 @@ use url::Url;
 mod color_json;
 mod ingest;
 mod jq_filter;
+mod json;
 mod serve;
 mod serve_init;
 

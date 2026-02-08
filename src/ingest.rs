@@ -14,8 +14,7 @@ use serde_json::Value;
 /// Parse JSON from a string slice using simd-json.
 /// simd-json requires mutable input, so we clone before parsing.
 fn json_from_str<T: DeserializeOwned>(s: &str) -> Result<T, simd_json::Error> {
-    let mut bytes = s.as_bytes().to_vec();
-    simd_json::serde::from_slice(&mut bytes)
+    crate::json::parse::from_str(s)
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
