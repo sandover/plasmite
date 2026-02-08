@@ -17,6 +17,9 @@ test:
 check-json-parser-invariant:
 	bash scripts/check-json-parser-invariant.sh
 
+check-version-alignment:
+	bash scripts/check-version-alignment.sh
+
 bindings-go-test:
 	cargo build -p plasmite
 	mkdir -p tmp/go-cache tmp/go-tmp
@@ -35,9 +38,9 @@ bindings-node-typecheck:
 
 bindings-test: bindings-go-test bindings-python-test bindings-node-test bindings-node-typecheck
 
-ci-fast: fmt clippy check-json-parser-invariant test bindings-node-typecheck
+ci-fast: fmt clippy check-json-parser-invariant check-version-alignment test bindings-node-typecheck
 
-ci-full: fmt clippy check-json-parser-invariant test abi-smoke conformance-all cross-artifact-smoke bindings-node-typecheck
+ci-full: fmt clippy check-json-parser-invariant check-version-alignment test abi-smoke conformance-all cross-artifact-smoke bindings-node-typecheck
 
 ci: ci-full
 

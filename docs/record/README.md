@@ -22,6 +22,7 @@ Use this namespace for canonical, current truth documentation.
 - Diagnostics: `docs/record/doctor.md`
 - Testing: `docs/record/TESTING.md`
 - Releasing: `docs/record/releasing.md`
+- Versioning policy: `docs/record/versioning.md`
 - Homebrew packaging: `docs/record/homebrew.md`
 - C ABI guide: `docs/record/libplasmite.md`
 - Pattern matching guide: `docs/record/pattern-matching.md`

@@ -16,14 +16,14 @@ This checklist keeps releases reproducible and ensures CI gates are green before
 - **Lock-step**: CLI and all bindings (Go, Python, Node) release together with the same version
 - **Tags**: `v0.1.0` format triggers the release workflow
 - **CHANGELOG**: Follow [keep-a-changelog](https://keepachangelog.com) format
+- See `docs/record/versioning.md` for manifest-level invariants and guardrails.
 
 ## Pre-flight
 
-1. **Update version numbers** (all must match):
-   - `Cargo.toml`: `version = "0.1.0"`
-   - `bindings/node/package.json`: `"version": "0.1.0"`
-   - `bindings/python/pyproject.toml`: `version = "0.1.0"`
-   - Go uses git tags, no file change needed
+1. **Update version numbers** (single-source workflow):
+   - Run `scripts/bump_version.sh 0.1.0`
+   - This updates Cargo/Python/Node/native/lockfile versions together
+   - Go uses git tags, no file version change needed
 
 2. **Update CHANGELOG.md**:
    - Move items from `[Unreleased]` to new `[0.1.0] - YYYY-MM-DD` section
@@ -35,6 +35,7 @@ This checklist keeps releases reproducible and ensures CI gates are green before
 
 4. **Run local gates**:
    - `just ci` (or `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test`)
+   - `just check-version-alignment` (included in `ci-fast`/`ci-full`)
 
 5. **Review CI status on `main`**:
    - Ensure the `ci` workflow is green on the latest commit
