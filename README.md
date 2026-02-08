@@ -3,61 +3,63 @@
 [![CI](https://github.com/sandover/plasmite/actions/workflows/ci.yml/badge.svg)](https://github.com/sandover/plasmite/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Persistent JSON message pools backed by plain files. Multiple processes write and read concurrently - no daemon, no config.
+**Easy interprocess communication.**
+
+Interprocess communication should not be hard!
+
+- messages should be durable -- they live on disk
+- readers and writers should come and go freely
+- you shouldn't need a server for local IPC
+- messages should be easy for humans to read
+- schemas should be optional
+- it should be fast
+- you should never fill your disk accidentally
+
+So, there's **Plasmite**.
 
 ```bash
-pls poke chat --create '{"from": "alice", "msg": "hello bob"}'
-pls poke chat '{"from": "alice", "msg": "you there?"}'
+pls poke chat --create '{"from": "alice", "msg": "hello world"}'
 
 # In another terminal:
 pls peek chat
-#   {"seq":1,"time":"...","meta":{"tags":[]},"data":{"from":"alice","msg":"hello bob"}}
-#   {"seq":2,"time":"...","meta":{"tags":[]},"data":{"from":"alice","msg":"you there?"}}
+#   {"seq":1,"time":"...","meta":{"tags":[]},"data":{"from":"alice","msg":"hello world"}}
 ```
 
-~600k messages/sec on a laptop. Pools are ring buffers, so writes almost always succeed.
+Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed ring buffers called "pools". No daemon, no broker, no config. ~600k msg/sec on a laptop. Crash-safe writes. Pools are bounded, so you can write forever without filling your disk.
+
+For IPC across machines, `pls serve` exposes your local pools, with TLS support and a little web UI too.
 
 ## Install
 
 ```bash
-cargo install plasmite
-cargo install --git https://github.com/sandover/plasmite --tag v0.1.0 plasmite
+brew install sandover/tap/plasmite    # macOS
+cargo install plasmite                # anywhere with Rust
 ```
 
-Installs both `plasmite` and the `pls` alias.
+Installs both `plasmite` and the `pls` shorthand.
 
-Homebrew formula updates are published via the separate tap repo. Verify availability before use:
-`brew info sandover/tap/plasmite`.
-
-Prefer manual binaries? Download your platform tarball from the
+Prefer manual binaries? Grab your platform tarball from the
 [v0.1.0 release](https://github.com/sandover/plasmite/releases/tag/v0.1.0).
 
-## Why Plasmite?
+## Why not just...
 
-| Alternative | Limitation | Plasmite |
-|-------------|------------|----------|
-| Temp files + locks | No watching, collision-prone | Multiple writers, real-time reads |
-| Named pipes | Blocks writers, one reader | Non-blocking, multiple readers |
-| Polling a directory | Busy loops, no ordering | Streaming with sequence numbers |
-| Redis | Requires daemon | Just files |
-| WebSockets | Requires server | No networking needed |
+| | The problem | Plasmite |
+|---|---|---|
+| **Log files / `tail -f`** | Unstructured, grow forever, no sequence numbers, fragile parsing | Plasmite messages are structured JSON with sequence numbers, and disk usage stays bounded, so you can filter with tags or jq and never worry about runaway logs. |
+| **Temp files + locks** | No streaming, easy to corrupt, readers block writers | Plasmite lets many writers append concurrently, and readers stream in real time without blocking, so you never have to worry about corruption or contention. |
+| **Redis / NATS** | Another server to run and monitor | Plasmite pools are just files on disk — no daemon, no ports, no config — so there's nothing to keep running. |
+| **SQLite as a queue** | Polling-based, write contention, schema and cleanup are on you | Plasmite readers stream without polling and writers don't contend. There's no schema or maintenance to think about. |
+| **Named pipes** | One reader at a time, writers block, nothing persists | Plasmite supports any number of reading and writing processes, and the messages persist on disk, so they survive restarts. |
+| **Unix domain sockets** | Stream-oriented, no message framing, no persistence, one-to-one | Plasmite messages have boundaries and sequence numbers built in, and any number of readers can watch the same pool, so fan-out is free. |
+| **Poll a directory** | Busy loops, no ordering, files accumulate forever | Plasmite streams messages to readers in sequence order, and the ring buffer has a known disk footprint, no files accumulating. |
+| **Shared memory** | No persistence, painful to coordinate, binary formats | Plasmite messages are durable JSON on disk, and readers are lock-free, so you get persistence and coordination without the pain. |
+| **ZeroMQ** | No persistence, complex pattern zoo, binary protocol, library in every process | Plasmite messages are durable and human-readable by default, and you can get started with one CLI command or library call, so there's no pattern vocabulary to learn. |
 
-Pools are regular files you can `ls` and `rm`. Messages are JSON, so you can filter with `jq`. Writes are crash-safe.
+## What it looks like
 
-## Runtime Parsing
+### Two terminals, two processes, one pool
 
-Plasmite v0 uses a **simd-json-only** runtime parser path (no optional fallback parser feature toggles).
-
-- Parsing behavior contract: [`docs/decisions/simd-json-parser-contract.md`](docs/decisions/simd-json-parser-contract.md)
-- Portability/support assumptions: [`docs/record/simd-json-rollout.md`](docs/record/simd-json-rollout.md)
-- Parse failures surface stable category labels in hints/notices (for example `syntax`,
-  `utf8`, `numeric-range`, `depth-limit`, `unknown`) plus context identifiers.
-
-## Examples
-
-### Watch your CI from the couch
-
-**Terminal 1** - build script:
+**Terminal 1** — your build script might write progress:
 ```bash
 pls poke build --create '{"step": "compile", "status": "running"}'
 sleep 2
@@ -65,7 +67,7 @@ pls poke build '{"step": "compile", "status": "done"}'
 pls poke build '{"step": "test", "status": "running"}'
 ```
 
-**Terminal 2** - you, watching:
+**Terminal 2** — you, watching:
 ```bash
 pls peek build
 ```
@@ -73,21 +75,23 @@ pls peek build
 ### Gate one script on another
 
 ```bash
-# deploy.sh - wait for tests to pass
+# deploy.sh — block until tests go green
 pls peek ci --where '.data.status == "green"' --one > /dev/null
 echo "Tests passed, deploying..."
 
-# test-runner.sh - signal when done
+# test-runner.sh — signal when done
 pls poke ci --create '{"status": "green", "commit": "abc123"}'
 ```
 
-### Funnel streams into one place
+Three lines of coordination. No polling, no lock files, no shared database.
+
+### Funnel anything into a pool
 
 ```bash
 # Ingest an API event stream
 curl -N https://api.example.com/events | pls poke events --create
 
-# Tee system logs into a pool
+# Tee system logs
 journalctl -o json-seq -f | pls poke syslog --create    # Linux
 /usr/bin/log stream --style ndjson | pls poke syslog --create  # macOS
 ```
@@ -95,41 +99,80 @@ journalctl -o json-seq -f | pls poke syslog --create    # Linux
 ### Filter, tag, replay
 
 ```bash
-# Tag messages when you write them
+# Tag on write
 pls poke incidents --tag sev1 --tag billing '{"msg": "payment gateway timeout"}'
 
-# Filter when you read
+# Filter on read
 pls peek incidents --tag sev1
 pls peek incidents --where '.data.msg | test("timeout")'
 
-# Replay the last hour at 10x speed
+# Replay the last hour at 10x
 pls peek incidents --since 1h --replay 10
 ```
 
 ### Go remote
 
 ```bash
-pls serve                          # start the server (local-only by default)
-pls serve init                     # or bootstrap TLS + token for LAN access
+pls serve                          # local-only by default
+pls serve init                     # bootstrap TLS + token for LAN access
 ```
 
 Same CLI, just pass a URL:
 
 ```bash
-# From another machine
 pls poke http://server:9700/events '{"sensor": "temp", "value": 23.5}'
 pls peek http://server:9700/events --tail 20
 ```
 
-A built-in web UI is always available at `/ui`:
+A built-in web UI lives at `/ui`:
 
 ![Plasmite UI pool watch](docs/images/ui/ui-pool-watch.png)
 
 See the [remote protocol spec](spec/remote/v0/SPEC.md) for the full HTTP/JSON API.
 
+## Commands
+
+| Command | What it does |
+|---|---|
+| `poke POOL DATA` | Send a message (`--create` to auto-create the pool) |
+| `peek POOL` | Watch messages (`--create` auto-creates missing local pools) |
+| `get POOL SEQ` | Fetch one message by sequence number |
+| `pool create NAME` | Create a pool (`--size 8M` for larger) |
+| `pool list` | List pools |
+| `pool info NAME` | Show pool metadata and metrics |
+| `pool delete NAME...` | Delete one or more pools |
+| `doctor POOL \| --all` | Validate pool integrity |
+| `serve` | HTTP server (loopback default; non-loopback opt-in) |
+
+`pls` and `plasmite` are the same binary. Shell completion: `plasmite completion bash|zsh|fish`.
+Remote pools support read and write; `--create` is local-only.
+
+## How it works
+
+A pool is a single `.plasmite` file containing a persistent ring buffer:
+
+- **Multiple writers** append concurrently (serialized via OS file locks)
+- **Multiple readers** watch concurrently (lock-free, zero-copy)
+- **Bounded retention** — old messages overwritten when full (default 1 MB, configurable)
+- **Crash-safe** — torn writes never propagate
+
+Every message carries a **seq** (monotonic), a **time** (nanosecond precision), optional **tags**, and your JSON **data**. Tags and `--where` (jq predicates) compose for filtering. See the [pattern matching guide](docs/record/pattern-matching.md).
+
+Default pool directory: `~/.plasmite/pools/`.
+
+## Performance
+
+| Metric | |
+|---|---|
+| Append throughput | ~600k msg/sec (single writer, M1 MacBook) |
+| Read | Lock-free, zero-copy via mmap |
+| Message overhead (framing) | 72-79 bytes per message (64B header + 8B commit marker + alignment) |
+| Default pool size | 1 MB (~20k messages) |
+| Max tested pool | 1 GB (local create+poke+get smoke test) |
+
 ## Bindings
 
-Native bindings - no subprocess overhead:
+Native bindings — no subprocess overhead, no serialization tax:
 
 ```go
 client, _ := plasmite.NewClient("./data")
@@ -157,41 +200,20 @@ npm install plasmite-node
 go get github.com/sandover/plasmite/bindings/go/plasmite
 ```
 
-Python and Node bindings are source-only for v0.1.0 (Rust toolchain required - `brew install rust` on macOS, [rustup](https://rustup.rs) on Linux). Pre-built binaries coming soon.
+Python and Node bindings are source-only for v0.1.0 (Rust toolchain required — `brew install rust` on macOS, [rustup](https://rustup.rs) on Linux). Pre-built binaries coming soon.
 
 See [Go quickstart](docs/record/go-quickstart.md), [Python docs](bindings/python/README.md), and [Node docs](bindings/node/README.md).
 
-## Commands
+## Runtime parsing
 
-| Command | Description |
-|---------|-------------|
-| `poke POOL DATA` | Send a message (`--create` to auto-create pool) |
-| `peek POOL` | Watch messages (`--create` auto-creates missing local pools) |
-| `get POOL SEQ` | Fetch one message by sequence number |
-| `pool create NAME` | Create a pool (`--size 8M` for larger) |
-| `pool list` | List pools |
-| `pool info NAME` | Show pool metadata and metrics |
-| `pool delete NAME...` | Delete one or more pools |
-| `doctor POOL \| --all` | Validate pool integrity |
-| `serve` | HTTP server (loopback default; non-loopback opt-in) |
+Plasmite v0 uses a **simd-json-only** runtime parser path (no optional fallback parser feature toggles).
 
-`pls` and `plasmite` are interchangeable. Shell completion: `plasmite completion bash|zsh|fish`.
-Remote refs are read/write only; `--create` is local-only for `poke` and `peek`.
+- Parsing behavior contract: [`docs/decisions/simd-json-parser-contract.md`](docs/decisions/simd-json-parser-contract.md)
+- Portability/support assumptions: [`docs/record/simd-json-rollout.md`](docs/record/simd-json-rollout.md)
+- Parse failures surface stable category labels in hints/notices (for example `syntax`,
+  `utf8`, `numeric-range`, `depth-limit`, `unknown`) plus context identifiers.
 
-## How It Works
-
-A pool is a **persistent ring buffer** - one `.plasmite` file:
-
-- **Multiple writers** append concurrently (serialized via OS file locks)
-- **Multiple readers** watch concurrently (lock-free, zero-copy)
-- **Bounded retention** - old messages overwritten when full (default 1MB, configurable)
-- **Crash-safe** - torn writes never propagate
-
-Every message has a **seq** (auto-incrementing), a **time** (nanosecond-precision), optional **tags**, and your JSON **data**. Tags and `--where` (jq predicates) compose for filtering. See [pattern matching guide](docs/record/pattern-matching.md).
-
-Default pool directory: `~/.plasmite/pools/`.
-
-## More Info
+## More
 
 **Specs**: [CLI](spec/v0/SPEC.md) | [API](spec/api/v0/SPEC.md) | [Remote protocol](spec/remote/v0/SPEC.md)
 
