@@ -572,7 +572,6 @@ impl RemoteTail {
             let message: RemoteMessage = parse::from_str(&line).map_err(|err| {
                 Error::new(ErrorKind::Internal)
                     .with_message("invalid tail message json")
-                    .with_hint(parse::hint_for_error(&err, "remote.tail.jsonl"))
                     .with_source(err)
             })?;
             return Ok(Some(message_from_remote(message)));
@@ -712,7 +711,6 @@ where
     parse::from_str(&body).map_err(|err| {
         Error::new(ErrorKind::Internal)
             .with_message("invalid response json")
-            .with_hint(parse::hint_for_error(&err, "remote.response.json"))
             .with_source(err)
     })
 }

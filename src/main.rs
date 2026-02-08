@@ -2688,10 +2688,7 @@ fn read_data_single(data: Option<String>, file: Option<String>) -> Result<Value,
     crate::json::parse::from_str(&json_str).map_err(|err| {
         Error::new(ErrorKind::Usage)
             .with_message("invalid json")
-            .with_hint(format!(
-                "Provide a single JSON value (e.g. '{{\"x\":1}}'). {}",
-                crate::json::parse::hint_for_error(&err, "poke.single-input")
-            ))
+            .with_hint("Provide a single JSON value (e.g. '{\"x\":1}').")
             .with_source(err)
     })
 }
@@ -2983,10 +2980,6 @@ fn decode_payload(payload: &[u8]) -> Result<(Value, Value), Error> {
     let descrips_value: Value = crate::json::parse::from_str(&descrips_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
-            .with_hint(crate::json::parse::hint_for_error(
-                &err,
-                "peek.decode_payload.meta.tags",
-            ))
             .with_source(err)
     })?;
     let tags = descrips_value
@@ -3007,10 +3000,6 @@ fn decode_payload(payload: &[u8]) -> Result<(Value, Value), Error> {
     let data: Value = crate::json::parse::from_str(&data_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
-            .with_hint(crate::json::parse::hint_for_error(
-                &err,
-                "peek.decode_payload.data",
-            ))
             .with_source(err)
     })?;
     Ok((meta, data))
