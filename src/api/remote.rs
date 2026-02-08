@@ -12,7 +12,6 @@ use crate::core::pool::{
     AppendOptions, Bounds, Durability, PoolAgeMetrics, PoolInfo, PoolMetrics, PoolOptions,
     PoolUtilization,
 };
-use crate::json::parse;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -569,7 +568,7 @@ impl RemoteTail {
             if line.trim().is_empty() {
                 continue;
             }
-            let message: RemoteMessage = parse::from_str(&line).map_err(|err| {
+            let message: RemoteMessage = serde_json::from_str(&line).map_err(|err| {
                 Error::new(ErrorKind::Internal)
                     .with_message("invalid tail message json")
                     .with_source(err)
@@ -708,7 +707,7 @@ where
             .with_message("failed to read response body")
             .with_source(err)
     })?;
-    parse::from_str(&body).map_err(|err| {
+    serde_json::from_str(&body).map_err(|err| {
         Error::new(ErrorKind::Internal)
             .with_message("invalid response json")
             .with_source(err)
@@ -717,7 +716,7 @@ where
 
 fn parse_error_response(status: u16, response: ureq::Response) -> Error {
     let body = response.into_string().unwrap_or_default();
-    if let Ok(envelope) = parse::from_str::<ErrorEnvelope>(&body) {
+    if let Ok(envelope) = serde_json::from_str::<ErrorEnvelope>(&body) {
         return error_from_remote(envelope.error);
     }
     let kind = error_kind_from_status(status);
