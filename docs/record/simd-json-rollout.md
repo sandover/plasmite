@@ -55,32 +55,6 @@ Notes: Target baseline is intentionally conservative until broader coverage is v
   2. Add explicit known-issue entry and workaround in release notes.
   3. Escalate target to supported only after CI signal is stable.
 
-## performance baseline (simd-json-only)
-
-- Artifact: `.scratch/bench/simd-json-only-baseline.json`
-- Command:
-  - `cargo build --release --example plasmite-bench`
-  - `./target/release/examples/plasmite-bench --format json > .scratch/bench/simd-json-only-baseline.json`
-- Environment notes:
-  - `os=macos`, `arch=aarch64`, `cpus=8`
-  - release profile, default benchmark parameter matrix from harness
-
-Top metrics (best observed run per bench in this artifact):
-
-- `append`: `74,812 msgs/sec` (`1,168.94 MB/sec`) at `payload=16,384B`, `pool=1MiB`, `writers=1`
-- `multi_writer`: `21,668 msgs/sec` (`338.58 MB/sec`) at `payload=16,384B`, `pool=1MiB`, `writers=2`
-- `get_scan`: `12,048,192 msgs/sec` (`188,253.01 MB/sec`) at `payload=16,384B`, `pool=64MiB`, `writers=1`
-
-Caveats and non-goals:
-
-- Single-host sample; values are baseline anchors, not SLO targets.
-- Harness includes very short-duration scans where timer granularity can inflate
-  apparent throughput (`get_scan` especially).
-- `follow` bench is latency-oriented in this harness and can emit null
-  throughput fields; do not compare it directly with append/scan throughput.
-- Cross-architecture comparisons are out of scope for this artifact; compare
-  only against later runs with matching hardware + benchmark parameters.
-
 ## Consult Me
 
 - Confirm whether Linux aarch64 should be upgraded from best effort to fully
