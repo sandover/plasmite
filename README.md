@@ -206,12 +206,7 @@ See [Go quickstart](docs/record/go-quickstart.md), [Python docs](bindings/python
 
 ## Runtime parsing
 
-Plasmite v0 uses a **simd-json-only** runtime parser path (no optional fallback parser feature toggles).
-
-- Parsing behavior contract: [`docs/decisions/simd-json-parser-contract.md`](docs/decisions/simd-json-parser-contract.md)
-- Portability/support assumptions: [`docs/record/simd-json-rollout.md`](docs/record/simd-json-rollout.md)
-- Parse failures surface stable category labels in hints/notices (for example `syntax`,
-  `utf8`, `numeric-range`, `depth-limit`, `unknown`) plus context identifiers.
+Plasmite v0 uses `serde_json` for runtime parsing.
 
 ## More
 
