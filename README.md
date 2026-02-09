@@ -170,15 +170,17 @@ Default pool directory: `~/.plasmite/pools/`.
 | Message overhead (framing) | 72-79 bytes per message (64B header + 8B commit marker + alignment) |
 | Default pool size | 1 MB |
 
-Algorithmic complexity (N = visible messages in the pool, M = `index_capacity` slots):
+**How lookups work**: By default each pool includes an inline index — a fixed-size hash table that maps sequence numbers to byte offsets. When you fetch a message by seq (`get POOL 42`), the index usually provides a direct jump to the right location. If that slot was overwritten by a newer message (hash collision) or is stale, the reader scans forward from the oldest message until it finds the target. You can set `--index-capacity` at pool creation time.
+
+Algorithmic complexity below uses **N** = visible messages in the pool (depends on message sizes and pool capacity), **M** = index slot count.
 
 | Operation | Complexity | Notes |
 |---|---|---|
-| Append | O(1) + O(payload bytes) | Writes a frame, updates one index slot, then publishes the header. `durability=flush` adds OS flush cost. |
-| Get by seq (`get POOL SEQ`) | O(1) for recent messages; O(N) fallback | The inline index is direct-mapped (`slot = seq % M`) and collisions overwrite older slots. If the index slot is stale/overwritten/invalid (or `M=0`), `get` scans forward from the tail until it finds (or passes) the target seq. |
-| Tail / peek (`peek`, `export --tail`) | O(k) to emit k messages; then O(1)/message | Filters add per-message work: tags are O(1)/message; `--where` runs a jq predicate per message. |
-| Export range (`export --from/--to`) | O(R) | R is the number of exported messages. |
-| Validate (`doctor`, `pool info` warnings) | O(N) | Validation does a full ring scan; index checks are best-effort and do not affect correctness. |
+| Append | O(1) + O(payload bytes) | Writes one frame, updates one index slot, publishes the header. `durability=flush` adds OS flush cost. |
+| Get by seq (`get POOL SEQ`) | Usually O(1); O(N) worst case | If the index slot matches, it's a direct jump. If the slot is overwritten/stale/invalid (or M=0), it scans forward from the tail until it finds (or passes) the target seq. |
+| Tail / peek (`peek`, `export --tail`) | O(k) to emit k; then O(1)/message | Steady-state work is per message. Tag filters are cheap; `--where` runs a jq predicate per message. |
+| Export range (`export --from/--to`) | O(R) | Linear in the number of exported messages. |
+| Validate (`doctor`, `pool info` warnings) | O(N) | Full ring scan. Index checks are sampled/best-effort diagnostics. |
 
 ## Bindings
 
