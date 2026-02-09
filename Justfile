@@ -14,6 +14,9 @@ clippy:
 test:
 	cargo test
 
+check-version-alignment:
+	./scripts/check-version-alignment.sh
+
 bindings-go-test:
 	cargo build -p plasmite
 	mkdir -p tmp/go-cache tmp/go-tmp
@@ -32,9 +35,9 @@ bindings-node-typecheck:
 
 bindings-test: bindings-go-test bindings-python-test bindings-node-test bindings-node-typecheck
 
-ci-fast: fmt clippy test bindings-node-typecheck
+ci-fast: fmt clippy test check-version-alignment bindings-node-typecheck
 
-ci-full: fmt clippy test abi-smoke conformance-all cross-artifact-smoke bindings-node-typecheck
+ci-full: fmt clippy test check-version-alignment abi-smoke conformance-all cross-artifact-smoke bindings-node-typecheck
 
 ci: ci-full
 

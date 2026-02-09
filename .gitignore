@@ -1,9 +1,15 @@
 /target
 bindings/node/index.node
 bindings/node/node_modules/
+bindings/node/libplasmite.dylib
+bindings/node/libplasmite.so
+bindings/node/libplasmite.dll
+bindings/node/plasmite
 bindings/node/native/target/
 bindings/node/native/Cargo.lock
 bindings/python/**/__pycache__/
+bindings/python/dist/
+bindings/python/*.egg-info/
 conformance/work*/
 conformance/work-*/
 **/*.rs.bk
