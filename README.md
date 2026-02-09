@@ -214,6 +214,8 @@ See [Go quickstart](docs/record/go-quickstart.md), [Python docs](bindings/python
 
 **Guides**: [Rust API quickstart](docs/record/api-quickstart.md) | [Go quickstart](docs/record/go-quickstart.md) | [libplasmite C ABI](docs/record/libplasmite.md) | [Distribution](docs/record/distribution.md) | [Exit codes](docs/record/exit-codes.md) | [Diagnostics](docs/record/doctor.md)
 
+**Contributing**: `docs/contributing.md`
+
 [Changelog](CHANGELOG.md) | Inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma).
 
 ## License

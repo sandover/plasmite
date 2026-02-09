@@ -18,6 +18,8 @@ Plasmite documentation is intentionally split into:
 - Docs of record: `docs/record/README.md`
 - Planning: `docs/planning/README.md`
 - Decisions (ADRs): `docs/decisions/README.md`
+- Contributing: `docs/contributing.md`
+- Suggested git hooks: `docs/suggested-hooks/README.md`
 
 ## Normative specs
 
