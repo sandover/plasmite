@@ -170,6 +170,16 @@ Default pool directory: `~/.plasmite/pools/`.
 | Message overhead (framing) | 72-79 bytes per message (64B header + 8B commit marker + alignment) |
 | Default pool size | 1 MB |
 
+Algorithmic complexity (N = visible messages in the pool, M = `index_capacity` slots):
+
+| Operation | Complexity | Notes |
+|---|---|---|
+| Append | O(1) + O(payload bytes) | Writes a frame, updates one index slot, then publishes the header. `durability=flush` adds OS flush cost. |
+| Get by seq (`get POOL SEQ`) | O(1) for recent messages; O(N) fallback | The inline index is direct-mapped (`slot = seq % M`) and collisions overwrite older slots. If the index slot is stale/overwritten/invalid (or `M=0`), `get` scans forward from the tail until it finds (or passes) the target seq. |
+| Tail / peek (`peek`, `export --tail`) | O(k) to emit k messages; then O(1)/message | Filters add per-message work: tags are O(1)/message; `--where` runs a jq predicate per message. |
+| Export range (`export --from/--to`) | O(R) | R is the number of exported messages. |
+| Validate (`doctor`, `pool info` warnings) | O(N) | Validation does a full ring scan; index checks are best-effort and do not affect correctness. |
+
 ## Bindings
 
 Native bindings — no subprocess overhead, no serialization tax:
