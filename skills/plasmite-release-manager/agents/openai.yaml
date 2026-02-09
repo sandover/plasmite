@@ -1,0 +1,4 @@
+interface:
+  display_name: "Plasmite Release Manager"
+  short_description: "Run fail-closed releases"
+  default_prompt: "Prepare or execute a Plasmite release with fail-closed QA gates, blocker filing via ergo, and post-release delivery verification."
