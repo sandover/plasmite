@@ -37,6 +37,13 @@ Inputs:
 - optional remote check:
   - verify tap update commit/tag is present for this release
 
+## Licensing and Notices
+
+Run a deterministic artifact check:
+- `bash skills/plasmite-release-manager/scripts/verify_licensing_notices.sh`
+- treat `exit 2` as incomplete evidence (no artifacts found locally yet)
+- treat `exit 1` as release-blocking notice/license drift
+
 ## Binding Install Sanity
 
 Use clean envs where practical:
@@ -56,4 +63,3 @@ File blocker task immediately if:
 - wrong version resolves from registry
 - package installs but fails basic smoke (`--version` or minimal operation)
 - release artifact missing required SDK contents
-

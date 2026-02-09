@@ -130,6 +130,7 @@ Block if:
 Evidence commands:
 - `cargo metadata --format-version 1 > .scratch/release/cargo-metadata.json`
 - `rg -n "License|MIT|Apache|GPL|BSD|MPL" THIRD_PARTY_NOTICES.md Cargo.toml bindings`
+- `bash skills/plasmite-release-manager/scripts/verify_licensing_notices.sh`
 - verify shipped notices match distributed artifacts
 
 Block if:
