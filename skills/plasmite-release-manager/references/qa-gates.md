@@ -7,6 +7,15 @@ For each gate:
 
 Use `release_target` and `base_tag` consistently.
 
+## Runtime Preflight (Before Gate 1)
+
+Required for trustworthy release evidence:
+- network access to GitHub and package registries
+- working `gh` host auth (`gh auth status`, `gh api user -q .login`)
+- writable local scratch/cache directories (use `.scratch/`)
+
+If runtime preflight fails, block release and file a blocker task before running gate checks.
+
 ## 1) Dependency & Vulnerability Monitoring
 
 Evidence commands:
@@ -94,6 +103,10 @@ Evidence commands:
 - `bash scripts/python_wheel_smoke.sh`
 - `just cross-artifact-smoke`
 
+Notes:
+- Python wheel smoke requires package-index access (or preinstalled build dependencies) to install the `build` backend.
+- Treat package-index/network failures as environment blockers, not as binding regressions.
+
 Block if:
 - behavior differs materially between bindings and core
 - packaging/install smoke fails for supported channels
@@ -122,4 +135,3 @@ Evidence commands:
 Block if:
 - required attribution/notice is missing
 - problematic license appears in release payload without policy decision
-

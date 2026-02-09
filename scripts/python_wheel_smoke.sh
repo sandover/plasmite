@@ -11,20 +11,30 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SDK_DIR="${PLASMITE_SDK_DIR:-$ROOT/target/release}"
 WORKDIR="$(mktemp -d "$ROOT/.scratch/python-wheel-smoke.XXXXXX")"
+UV_CACHE_DIR="$WORKDIR/uv-cache"
+PIP_CACHE_DIR="$WORKDIR/pip-cache"
 
 build_env="$WORKDIR/build-env"
 install_env="$WORKDIR/install-env"
 
 if command -v uv >/dev/null 2>&1; then
-  uv venv "$build_env"
+  uv venv "$build_env" --cache-dir "$UV_CACHE_DIR"
   # shellcheck disable=SC1091
   source "$build_env/bin/activate"
-  uv pip install build
+  if ! uv pip install --cache-dir "$UV_CACHE_DIR" build; then
+    echo "error: failed to install python build backend ('build') with uv."
+    echo "hint: ensure network access to package indexes (or preinstall build deps) before running python wheel smoke."
+    exit 2
+  fi
 else
   python3 -m venv "$build_env"
   # shellcheck disable=SC1091
   source "$build_env/bin/activate"
-  python -m pip install build
+  if ! PIP_CACHE_DIR="$PIP_CACHE_DIR" python -m pip install build; then
+    echo "error: failed to install python build backend ('build') with pip."
+    echo "hint: ensure network access to package indexes (or preinstall build deps) before running python wheel smoke."
+    exit 2
+  fi
 fi
 
 (
@@ -44,15 +54,15 @@ python3 -m zipfile -l "$wheel_file" | rg -q 'plasmite/_native/libplasmite\.(dyli
 python3 -m zipfile -l "$wheel_file" | rg -q 'plasmite/_native/plasmite'
 
 if command -v uv >/dev/null 2>&1; then
-  uv venv "$install_env"
+  uv venv "$install_env" --cache-dir "$UV_CACHE_DIR"
   # shellcheck disable=SC1091
   source "$install_env/bin/activate"
-  uv pip install "$wheel_file"
+  uv pip install --cache-dir "$UV_CACHE_DIR" "$wheel_file"
 else
   python3 -m venv "$install_env"
   # shellcheck disable=SC1091
   source "$install_env/bin/activate"
-  python -m pip install "$wheel_file"
+  PIP_CACHE_DIR="$PIP_CACHE_DIR" python -m pip install "$wheel_file"
 fi
 
 unset PLASMITE_LIB_DIR DYLD_LIBRARY_PATH LD_LIBRARY_PATH
