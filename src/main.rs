@@ -116,7 +116,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             emit_json(output, color_mode);
             Ok(RunOutcome::ok())
         }
-        Command::Doctor { pool, all } => {
+        Command::Doctor { pool, all, json } => {
             if all && pool.is_some() {
                 return Err(Error::new(ErrorKind::Usage)
                     .with_message("--all cannot be combined with a pool name")
@@ -142,14 +142,13 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 reports
             };
 
-            let is_tty = std::io::stdout().is_terminal();
-            if is_tty {
+            if json {
+                let values = reports.iter().map(report_json).collect::<Vec<_>>();
+                emit_json(json!({ "reports": values }), color_mode);
+            } else {
                 for report in &reports {
                     emit_doctor_human(report);
                 }
-            } else {
-                let values = reports.iter().map(report_json).collect::<Vec<_>>();
-                emit_json(json!({ "reports": values }), color_mode);
             }
 
             let has_corrupt = reports
@@ -197,10 +196,10 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 }
                 Ok(RunOutcome::ok())
             }
-            Some(ServeSubcommand::Check) => {
+            Some(ServeSubcommand::Check { json }) => {
                 let config = serve_config_from_run_args(run, &pool_dir)?;
                 serve::preflight_config(&config)?;
-                emit_serve_check_report(&config, color_mode);
+                emit_serve_check_report(&config, color_mode, json);
                 Ok(RunOutcome::ok())
             }
             None => {
@@ -224,6 +223,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 names,
                 size,
                 index_capacity,
+                json,
             } => {
                 let size = size
                     .as_deref()
@@ -258,7 +258,11 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                     let info = pool.info()?;
                     results.push(pool_info_json(&name, &info));
                 }
-                emit_json(json!({ "created": results }), color_mode);
+                if json {
+                    emit_json(json!({ "created": results }), color_mode);
+                } else {
+                    emit_pool_create_table(&results, &pool_dir);
+                }
                 Ok(RunOutcome::ok())
             }
             PoolCommand::Info { name, json } => {
@@ -273,9 +277,10 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 }
                 Ok(RunOutcome::ok())
             }
-            PoolCommand::Delete { names } => {
+            PoolCommand::Delete { names, json } => {
                 let mut deleted = Vec::new();
                 let mut failed = Vec::new();
+                let mut table_rows = Vec::new();
                 let mut first_error_kind = None;
 
                 for name in names {
@@ -303,38 +308,61 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                     };
 
                     match result {
-                        Ok(path) => deleted.push(json!({
-                            "pool": name,
-                            "path": path.display().to_string(),
-                        })),
+                        Ok(path) => {
+                            let display_path = short_display_path(path.as_path(), Some(&pool_dir));
+                            deleted.push(json!({
+                                "pool": name,
+                                "path": path.display().to_string(),
+                            }));
+                            table_rows.push(vec![
+                                name,
+                                "OK".to_string(),
+                                display_path,
+                                String::new(),
+                            ]);
+                        }
                         Err(err) => {
                             if first_error_kind.is_none() {
                                 first_error_kind = Some(err.kind());
                             }
+                            let display_path = err
+                                .path()
+                                .map(|path| short_display_path(path, Some(&pool_dir)))
+                                .unwrap_or_else(|| "-".to_string());
+                            let detail = err.message().unwrap_or("error").to_string();
                             failed.push(json!({
                                 "pool": name,
                                 "error": error_json(&err)["error"].clone(),
                             }));
+                            table_rows.push(vec![name, "ERR".to_string(), display_path, detail]);
                         }
                     }
                 }
 
-                emit_json(
-                    json!({
-                        "deleted": deleted,
-                        "failed": failed,
-                    }),
-                    color_mode,
-                );
+                if json {
+                    emit_json(
+                        json!({
+                            "deleted": deleted,
+                            "failed": failed,
+                        }),
+                        color_mode,
+                    );
+                } else {
+                    emit_table(&["NAME", "STATUS", "PATH", "DETAIL"], &table_rows);
+                }
                 if let Some(kind) = first_error_kind {
                     Ok(RunOutcome::with_code(to_exit_code(kind)))
                 } else {
                     Ok(RunOutcome::ok())
                 }
             }
-            PoolCommand::List => {
+            PoolCommand::List { json } => {
                 let pools = list_pools(&pool_dir);
-                emit_json(json!({ "pools": pools }), color_mode);
+                if json {
+                    emit_json(json!({ "pools": pools }), color_mode);
+                } else {
+                    emit_pool_list_table(&pools, &pool_dir);
+                }
                 Ok(RunOutcome::ok())
             }
         },
@@ -1026,9 +1054,11 @@ NOTES
         after_help = r#"EXAMPLES
   $ plasmite doctor foo
   $ plasmite doctor --all
+  $ plasmite doctor --all --json
 
 NOTES
-  - Outputs JSON when stdout is not a TTY.
+  - Human-readable output is the default.
+  - Use --json for machine-readable output.
   - Exits nonzero when corruption is detected."#
     )]
     Doctor {
@@ -1036,6 +1066,8 @@ NOTES
         pool: Option<String>,
         #[arg(long, help = "Validate all pools in the pool directory")]
         all: bool,
+        #[arg(long, help = "Emit JSON instead of human-readable output")]
+        json: bool,
     },
     #[command(
         about = "Print version info as JSON",
@@ -1092,6 +1124,7 @@ Pools include an inline sequence index by default for fast `get(seq)` lookups."#
   $ plasmite pool create foo
   $ plasmite pool create --size 8M bar baz quux
   $ plasmite pool create --size 8M --index-capacity 4096 indexed
+  $ plasmite pool create --json foo
 
 NOTES
   - Sizes: 64K, 1M, 8M, 1G (K/M/G are 1024-based)"#
@@ -1106,6 +1139,8 @@ NOTES
             help = "Inline index slot count (default: auto-size; 0 disables index)"
         )]
         index_capacity: Option<u32>,
+        #[arg(long, help = "Emit JSON instead of human-readable output")]
+        json: bool,
     },
     #[command(
         about = "Show pool metadata and bounds",
@@ -1126,27 +1161,39 @@ NOTES
         after_help = r#"EXAMPLES
   $ plasmite pool delete foo
   $ plasmite pool delete foo bar baz
+  $ plasmite pool delete --json foo bar
 
 NOTES
+  - Human-readable output is the default.
+  - Use --json for machine-readable output.
   - Best effort: attempts all deletes and reports per-pool failures.
   - Exits non-zero if any requested pool failed to delete."#
     )]
     Delete {
         #[arg(required = true, help = "Pool name(s) or path(s)")]
         names: Vec<String>,
+        #[arg(long, help = "Emit JSON instead of human-readable output")]
+        json: bool,
     },
     #[command(
         about = "List pools in the pool directory",
-        long_about = r#"List pools in the pool directory as JSON."#,
+        long_about = r#"List pools in the pool directory.
+
+Prints a human-readable table by default. Use --json for machine-readable output."#,
         after_help = r#"EXAMPLES
   $ plasmite pool list
+  $ plasmite pool list --json
 
 NOTES
-  - Output is JSON (pretty on TTY, compact when piped).
+  - Human-readable output is the default.
+  - Use --json for machine-readable output.
   - Non-.plasmite files are ignored.
   - Pools that cannot be read include an error field."#
     )]
-    List,
+    List {
+        #[arg(long, help = "Emit JSON instead of human-readable output")]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1174,9 +1221,13 @@ NOTES
 
 NOTES
   - Exits non-zero when config is invalid
-  - Does not bind sockets or start background tasks"#
+  - Does not bind sockets or start background tasks
+  - Human-readable output is the default; use --json for machine output"#
     )]
-    Check,
+    Check {
+        #[arg(long, help = "Emit JSON instead of human-readable output")]
+        json: bool,
+    },
 }
 
 #[derive(Args)]
@@ -1800,6 +1851,116 @@ fn list_pools(pool_dir: &Path) -> Vec<Value> {
     pools
 }
 
+fn emit_pool_list_table(pools: &[Value], pool_dir: &Path) {
+    let headers = [
+        "NAME", "STATUS", "SIZE", "OLDEST", "NEWEST", "MTIME", "PATH", "DETAIL",
+    ];
+    let rows = pools
+        .iter()
+        .map(|pool| {
+            let name = pool
+                .get("name")
+                .and_then(|value| value.as_str())
+                .unwrap_or("-")
+                .to_string();
+            let path_value = pool
+                .get("path")
+                .and_then(|value| value.as_str())
+                .unwrap_or("-");
+            let display_path = if path_value == "-" {
+                "-".to_string()
+            } else {
+                short_display_path(Path::new(path_value), Some(pool_dir))
+            };
+
+            if let Some(error) = pool.get("error").and_then(|value| value.get("error")) {
+                let detail = error
+                    .get("message")
+                    .and_then(|value| value.as_str())
+                    .or_else(|| error.get("kind").and_then(|value| value.as_str()))
+                    .unwrap_or("error")
+                    .to_string();
+                vec![
+                    name,
+                    "ERR".to_string(),
+                    "-".to_string(),
+                    "-".to_string(),
+                    "-".to_string(),
+                    "-".to_string(),
+                    display_path,
+                    detail,
+                ]
+            } else {
+                let size = pool
+                    .get("file_size")
+                    .and_then(|value| value.as_u64())
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                let oldest = pool
+                    .get("bounds")
+                    .and_then(|value| value.get("oldest"))
+                    .and_then(|value| value.as_u64())
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                let newest = pool
+                    .get("bounds")
+                    .and_then(|value| value.get("newest"))
+                    .and_then(|value| value.as_u64())
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                let mtime = pool
+                    .get("mtime")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("-")
+                    .to_string();
+                vec![
+                    name,
+                    "OK".to_string(),
+                    size,
+                    oldest,
+                    newest,
+                    mtime,
+                    display_path,
+                    String::new(),
+                ]
+            }
+        })
+        .collect::<Vec<_>>();
+
+    emit_table(&headers, &rows);
+}
+
+fn emit_pool_create_table(created: &[Value], pool_dir: &Path) {
+    let headers = ["NAME", "SIZE", "INDEX", "PATH"];
+    let rows = created
+        .iter()
+        .map(|pool| {
+            let name = pool
+                .get("name")
+                .and_then(|value| value.as_str())
+                .unwrap_or("-")
+                .to_string();
+            let size = pool
+                .get("file_size")
+                .and_then(|value| value.as_u64())
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string());
+            let index = pool
+                .get("index_capacity")
+                .and_then(|value| value.as_u64())
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string());
+            let path = pool
+                .get("path")
+                .and_then(|value| value.as_str())
+                .map(|value| short_display_path(Path::new(value), Some(pool_dir)))
+                .unwrap_or_else(|| "-".to_string());
+            vec![name, size, index, path]
+        })
+        .collect::<Vec<_>>();
+    emit_table(&headers, &rows);
+}
+
 fn pool_list_error(name: &str, path: &Path, err: Error) -> Value {
     let mut map = Map::new();
     map.insert("name".to_string(), json!(name));
@@ -1945,8 +2106,8 @@ fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<String> {
     lines
 }
 
-fn emit_serve_check_report(config: &serve::ServeConfig, color_mode: ColorMode) {
-    if io::stdout().is_terminal() {
+fn emit_serve_check_report(config: &serve::ServeConfig, color_mode: ColorMode, json: bool) {
+    if !json {
         for line in build_serve_check_lines(config) {
             println!("{line}");
         }
@@ -2423,6 +2584,80 @@ fn emit_pool_info_pretty(pool_ref: &str, info: &plasmite::api::PoolInfo) {
             human_age(metrics.age.newest_age_ms),
         );
     }
+}
+
+fn short_display_path(path: &Path, base_dir: Option<&Path>) -> String {
+    if let Some(base) = base_dir {
+        if let Ok(relative) = path.strip_prefix(base) {
+            if !relative.as_os_str().is_empty() {
+                return relative.display().to_string();
+            }
+        }
+    }
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+fn emit_table(headers: &[&str], rows: &[Vec<String>]) {
+    println!("{}", render_table(headers, rows));
+}
+
+fn render_table(headers: &[&str], rows: &[Vec<String>]) -> String {
+    if headers.is_empty() {
+        return String::new();
+    }
+    let column_count = headers.len();
+    let mut sanitized_rows = Vec::with_capacity(rows.len());
+    let mut widths = headers
+        .iter()
+        .map(|header| header.chars().count())
+        .collect::<Vec<_>>();
+
+    for row in rows {
+        let mut sanitized = Vec::with_capacity(column_count);
+        for (idx, width) in widths.iter_mut().enumerate() {
+            let value = row.get(idx).map(String::as_str).unwrap_or("");
+            let cleaned = sanitize_table_cell(value);
+            *width = (*width).max(cleaned.chars().count());
+            sanitized.push(cleaned);
+        }
+        sanitized_rows.push(sanitized);
+    }
+
+    let mut lines = Vec::with_capacity(sanitized_rows.len() + 1);
+    lines.push(format_table_line(
+        &headers
+            .iter()
+            .map(|header| header.to_string())
+            .collect::<Vec<_>>(),
+        &widths,
+    ));
+    for row in sanitized_rows {
+        lines.push(format_table_line(&row, &widths));
+    }
+    lines.join("\n")
+}
+
+fn sanitize_table_cell(value: &str) -> String {
+    value.replace('\n', "\\n").replace('\r', "\\r")
+}
+
+fn format_table_line(cells: &[String], widths: &[usize]) -> String {
+    let mut line = String::new();
+    for (idx, width) in widths.iter().enumerate() {
+        if idx > 0 {
+            line.push_str("  ");
+        }
+        let cell = cells.get(idx).map(String::as_str).unwrap_or("");
+        line.push_str(cell);
+        let cell_len = cell.chars().count();
+        if *width > cell_len {
+            line.push_str(&" ".repeat(*width - cell_len));
+        }
+    }
+    line
 }
 
 fn human_age(age_ms: Option<u64>) -> String {
@@ -3524,11 +3759,11 @@ fn peek_replay(pool: &Pool, cfg: &PeekConfig) -> Result<RunOutcome, Error> {
 mod tests {
     use super::{
         Error, ErrorKind, PoolTarget, error_text, matches_required_tags, parse_duration,
-        parse_size, read_token_file, resolve_pool_target,
+        parse_size, read_token_file, render_table, resolve_pool_target, short_display_path,
     };
     use serde_json::json;
     use std::io::Cursor;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::time::Duration;
     use tempfile::NamedTempFile;
 
@@ -3692,5 +3927,47 @@ mod tests {
         let err = resolve_pool_target("http://localhost:9170/demo#frag", Path::new("/tmp/pools"))
             .expect_err("err");
         assert_eq!(err.kind(), ErrorKind::Usage);
+    }
+
+    #[test]
+    fn render_table_aligns_and_sanitizes_cells() {
+        let output = render_table(
+            &["NAME", "DETAIL"],
+            &[
+                vec!["a".to_string(), "line1\nline2".to_string()],
+                vec!["long-name".to_string(), "ok".to_string()],
+            ],
+        );
+        let lines = output.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].starts_with("NAME"));
+        assert!(lines[0].contains("  DETAIL"));
+        assert!(lines[1].contains("line1\\nline2"));
+        assert!(lines[2].contains("long-name"));
+        assert!(!lines[1].ends_with(' '));
+    }
+
+    #[test]
+    fn short_display_path_prefers_relative_to_base_dir() {
+        let path = PathBuf::from("/tmp/pools/demo.plasmite");
+        let base = Path::new("/tmp/pools");
+        assert_eq!(
+            short_display_path(path.as_path(), Some(base)),
+            "demo.plasmite".to_string()
+        );
+    }
+
+    #[test]
+    fn short_display_path_falls_back_to_basename() {
+        let path = PathBuf::from("/tmp/pools/demo.plasmite");
+        let other_base = Path::new("/different");
+        assert_eq!(
+            short_display_path(path.as_path(), Some(other_base)),
+            "demo.plasmite".to_string()
+        );
+        assert_eq!(
+            short_display_path(path.as_path(), None),
+            "demo.plasmite".to_string()
+        );
     }
 }

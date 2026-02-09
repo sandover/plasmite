@@ -35,12 +35,15 @@ Only these commands are in-scope for v0.0.1:
 Minimal, explicit flag set for v0.0.1:
 
 * Global: `--dir`
-* `pool create`: `--size`, `--index-capacity`
-* `pool list`: no flags
+* `pool create`: `--size`, `--index-capacity`, `--json`
+* `pool list`: `--json`
+* `pool delete`: `--json`
+* `doctor`: `--all`, `--json`
+* `serve check`: `--json`
 * `poke`: `DATA`, `--file FILE`, `--in`, `--errors`, `--tag`, `--durability fast|flush`, `--create`, `--create-size`, `--retry`, `--retry-delay`
 * `peek`: `--tail`, `--since`, `--tag`, `--where`, `--format pretty|jsonl`, `--jsonl`, `--quiet-drops`
 
-JSON output is the default for commands that print; `poke` emits append receipts (`seq`, `time`, `meta`) and does not echo `data`.
+`pool create`, `pool list`, `pool delete`, `doctor`, and `serve check` print human-readable output by default and support `--json` for machine-readable output. `poke` emits append receipts (`seq`, `time`, `meta`) and does not echo `data`.
 
 Errors:
 - On TTY, emit concise human text (single summary line + hint).
@@ -54,7 +57,7 @@ Errors:
 
 ### Output formats
 
-* Non-streaming: JSON only (when output is enabled).
+* Non-streaming: command-defined human output by default, with explicit `--json` where supported.
 * Streaming: default is pretty JSON per message; `--format jsonl` (or `--jsonl`) emits one object per line.
 * Errors are JSON objects on stderr when stderr is not a TTY; otherwise concise text is used.
 * Exit codes are stable and match the core error kinds (see `docs/record/exit-codes.md`).
@@ -214,12 +217,12 @@ Streaming flags:
 * `--jsonl` : JSON Lines (one JSON object per message)
 * Default for streaming: pretty JSON per message unless `--jsonl` is specified.
 
-All pool/message commands emit JSON by default. The `completion` subcommand emits shell completion scripts (not JSON).
+Streaming commands emit JSON (pretty or JSONL). Non-streaming commands use human-readable defaults where documented; `--json` enables machine-readable output for selected commands. The `completion` subcommand emits shell completion scripts (not JSON).
 
 ### Color
 
-* On by default for TTY.
-* `--no-color` disables.
+* `--color auto|always|never`.
+* `auto` enables color on TTY; `always` forces color; `never` disables color.
 
 ### Sizes
 
@@ -323,7 +326,8 @@ plasmite pool create [OPTIONS] NAME [NAME...]
 
 **Output**
 
-* Default: JSON objects to stdout (pretty if TTY, compact otherwise).
+* Default: human-readable table to stdout.
+* `--json`: JSON object with `created` array (pretty if TTY, compact otherwise).
 
 ---
 
@@ -394,12 +398,13 @@ List pools.
 **Synopsis**
 
 ```bash
-plasmite pool list
+plasmite pool list [--json]
 ```
 
 **Behavior**
 
-* Output is JSON with a `pools` array.
+* Default output is a human-readable table.
+* `--json` output is a JSON object with a `pools` array.
 * Entries are sorted by `name` ascending.
 * Non-`.plasmite` files are ignored.
 * Unreadable pools are included with an `error` field instead of failing the command.
@@ -541,7 +546,7 @@ Delete a pool file (destructive).
 **Synopsis**
 
 ```bash
-plasmite pool delete NAME [NAME...]
+plasmite pool delete [--json] NAME [NAME...]
 ```
 
 **Behavior**
@@ -550,6 +555,11 @@ plasmite pool delete NAME [NAME...]
 * Reports per-pool success and failure details.
 * Exits non-zero if any requested pool fails to delete.
 * Remote/URI refs are rejected (`Usage`); local names/paths only.
+
+**Output**
+
+* Default: human-readable table.
+* `--json`: `{ "deleted": [...], "failed": [...] }`.
 
 ---
 
@@ -888,11 +898,24 @@ Pool validation and diagnostics. See `docs/record/doctor.md` for full documentat
 ```bash
 plasmite doctor <POOL>    # validate one pool
 plasmite doctor --all     # validate all pools
+plasmite doctor --json
 ```
 
-* On TTY: human-friendly lines (`OK` or `CORRUPT`)
-* On non-TTY: JSON output with a `reports` array
+* Default: human-friendly lines (`OK` or `CORRUPT`)
+* `--json`: JSON output with a `reports` array
 * Exits nonzero (7) when corruption is detected
+
+## `plasmite serve check`
+
+Validate serve configuration and print effective endpoints without starting the server.
+
+```bash
+plasmite serve check
+plasmite serve check --json
+```
+
+* Default: human-readable summary.
+* `--json`: structured check report object.
 
 ## `plasmite version`
 

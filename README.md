@@ -147,6 +147,7 @@ See the [remote protocol spec](spec/remote/v0/SPEC.md) for the full HTTP/JSON AP
 
 `pls` and `plasmite` are the same binary. Shell completion: `plasmite completion bash|zsh|fish`.
 Remote pools support read and write; `--create` is local-only.
+For scripting, use `--json` with `pool create`, `pool list`, `pool delete`, `doctor`, and `serve check`.
 
 ## How it works
 

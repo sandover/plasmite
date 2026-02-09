@@ -254,6 +254,7 @@ fn create_poke_get_peek_flow() {
             pool_dir.to_str().unwrap(),
             "pool",
             "create",
+            "--json",
             "testpool",
         ])
         .output()
@@ -333,6 +334,31 @@ fn create_poke_get_peek_flow() {
     assert_eq!(peek_json.get("seq").unwrap().as_u64().unwrap(), seq);
     let _ = peek.kill();
     let _ = peek.wait();
+}
+
+#[test]
+fn pool_create_defaults_to_table_output() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let stdout = std::str::from_utf8(&create.stdout).expect("utf8");
+    assert!(stdout.contains("NAME"));
+    assert!(stdout.contains("SIZE"));
+    assert!(stdout.contains("INDEX"));
+    assert!(stdout.contains("PATH"));
+    assert!(stdout.contains("demo"));
 }
 
 #[test]
@@ -1933,7 +1959,7 @@ fn color_always_colorizes_pretty_stdout() {
         .expect("info");
     assert!(info.status.success());
     let stdout = String::from_utf8_lossy(&info.stdout);
-    assert!(stdout.contains("\u{1b}[96m\"name\"\u{1b}[0m"));
+    assert!(stdout.contains("\u{1b}[36m\"name\"\u{1b}[0m"));
 }
 
 #[test]
@@ -2557,7 +2583,13 @@ fn pool_list_lists_pools_sorted_by_name() {
     assert!(create.status.success());
 
     let list = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "list"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "list",
+            "--json",
+        ])
         .output()
         .expect("list");
     assert!(list.status.success());
@@ -2570,6 +2602,43 @@ fn pool_list_lists_pools_sorted_by_name() {
     assert_eq!(pools.len(), 2);
     assert_eq!(pools[0].get("name").and_then(|v| v.as_str()), Some("alpha"));
     assert_eq!(pools[1].get("name").and_then(|v| v.as_str()), Some("beta"));
+}
+
+#[test]
+fn pool_list_defaults_to_table_output() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    std::fs::create_dir_all(&pool_dir).expect("mkdir");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "beta",
+            "alpha",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    std::fs::write(pool_dir.join("bad.plasmite"), b"NOPE").expect("write bad");
+
+    let list = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "list"])
+        .output()
+        .expect("list");
+    assert!(list.status.success());
+
+    let stdout = std::str::from_utf8(&list.stdout).expect("utf8");
+    assert!(stdout.contains("NAME"));
+    assert!(stdout.contains("STATUS"));
+    assert!(stdout.contains("DETAIL"));
+    assert!(stdout.contains("alpha"));
+    assert!(stdout.contains("beta"));
+    assert!(stdout.contains("bad"));
+    assert!(stdout.contains("ERR"));
 }
 
 #[test]
@@ -2902,6 +2971,7 @@ fn pool_delete_removes_pool_file() {
             pool_dir.to_str().unwrap(),
             "pool",
             "delete",
+            "--json",
             "deleteme",
         ])
         .output()
@@ -2950,6 +3020,7 @@ fn pool_delete_multiple_best_effort_mixed_results() {
             pool_dir.to_str().unwrap(),
             "pool",
             "delete",
+            "--json",
             "a",
             "missing",
             "b",
@@ -3007,6 +3078,7 @@ fn pool_delete_multiple_with_invalid_ref_continues() {
             pool_dir.to_str().unwrap(),
             "pool",
             "delete",
+            "--json",
             "ok",
             "http://127.0.0.1:9700/demo",
         ])
@@ -3037,6 +3109,41 @@ fn pool_delete_multiple_with_invalid_ref_continues() {
         .expect("error object");
     assert_eq!(error.get("kind").and_then(|v| v.as_str()), Some("Usage"));
     assert!(!pool_dir.join("ok.plasmite").exists());
+}
+
+#[test]
+fn pool_delete_defaults_to_table_output() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "ok"])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let delete = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "delete",
+            "ok",
+            "missing",
+        ])
+        .output()
+        .expect("delete");
+    assert_eq!(delete.status.code(), Some(3));
+
+    let stdout = std::str::from_utf8(&delete.stdout).expect("utf8");
+    assert!(stdout.contains("NAME"));
+    assert!(stdout.contains("STATUS"));
+    assert!(stdout.contains("PATH"));
+    assert!(stdout.contains("DETAIL"));
+    assert!(stdout.contains("ok"));
+    assert!(stdout.contains("missing"));
+    assert!(stdout.contains("OK"));
+    assert!(stdout.contains("ERR"));
 }
 
 #[test]
@@ -3372,7 +3479,13 @@ fn doctor_reports_ok_as_json() {
     assert!(create.status.success());
 
     let doctor = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "doctor", "doctorpool"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "doctor",
+            "doctorpool",
+            "--json",
+        ])
         .output()
         .expect("doctor");
     assert!(doctor.status.success());
@@ -3395,7 +3508,13 @@ fn doctor_reports_corrupt_and_exit_code() {
     std::fs::write(&pool_path, b"NOPE").expect("write");
 
     let doctor = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "doctor", "bad"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "doctor",
+            "bad",
+            "--json",
+        ])
         .output()
         .expect("doctor");
     assert_eq!(doctor.status.code().unwrap(), 7);
@@ -3427,7 +3546,13 @@ fn doctor_all_reports_mixed_ok_and_corrupt() {
     std::fs::write(&pool_path, b"NOPE").expect("write");
 
     let doctor = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "doctor", "--all"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "doctor",
+            "--all",
+            "--json",
+        ])
         .output()
         .expect("doctor");
     assert_eq!(doctor.status.code().unwrap(), 7);
@@ -3464,6 +3589,32 @@ fn doctor_requires_pool_or_all() {
     assert!(message.contains("requires a pool name or --all"));
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
     assert!(hint.contains("doctor <pool>") || hint.contains("doctor --all"));
+}
+
+#[test]
+fn doctor_defaults_to_human_output() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "doctorpool",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let doctor = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "doctor", "doctorpool"])
+        .output()
+        .expect("doctor");
+    assert!(doctor.status.success());
+    let stdout = std::str::from_utf8(&doctor.stdout).expect("utf8");
+    assert!(stdout.contains("OK: doctorpool"));
 }
 
 #[test]
@@ -4001,7 +4152,7 @@ fn serve_init_help_is_available() {
 #[test]
 fn serve_check_outputs_resolved_config() {
     let output = cmd()
-        .args(["serve", "check"])
+        .args(["serve", "check", "--json"])
         .output()
         .expect("serve check");
     assert!(output.status.success());
@@ -4012,6 +4163,17 @@ fn serve_check_outputs_resolved_config() {
     assert_eq!(status, "valid");
     let base_url = check.get("base_url").and_then(|v| v.as_str()).unwrap_or("");
     assert!(base_url.contains("127.0.0.1:9700"));
+}
+
+#[test]
+fn serve_check_defaults_to_human_output() {
+    let output = cmd()
+        .args(["serve", "check"])
+        .output()
+        .expect("serve check");
+    assert!(output.status.success());
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+    assert!(stdout.contains("plasmite serve check"));
 }
 
 #[test]
