@@ -31,9 +31,10 @@ Non-goals for now:
 | Homebrew (macOS) | `brew install sandover/tap/plasmite` | Yes | Yes (system SDK) | Installs `bin/`, `lib/`, `include/`, `pkg-config` metadata. |
 | crates.io (Rust) | `cargo install plasmite` | Yes | No | Installs binaries into Cargo bin dir. |
 | crates.io (Rust) | `cargo add plasmite` | No | Yes (Rust crate) | Standard Rust dependency. |
-| PyPI (Python) | `uv tool install plasmite` | TBD | Yes (Python bindings) | Goal: "one command" on supported platforms via wheels. |
-| npm (Node) | `npm i -g plasmite` | TBD | Yes (Node bindings) | Goal: "one command" on supported platforms via prebuilt addons. |
-| Go module | `go get ...` | No | Yes (Go bindings) | Requires system SDK installed (brew/manual) for cgo. |
+| PyPI (Python) | `uv tool install plasmite` | Yes | Yes (Python bindings) | Wheel bundles native assets and CLI on supported targets. |
+| npm (Node) | `npm i -g plasmite` | Yes | Yes (Node bindings) | Bundles addon, native assets, and CLI on supported targets. |
+| Go module | `go get github.com/sandover/plasmite/bindings/go/plasmite` | No | Yes (Go bindings) | Requires system SDK installed (brew/manual) for cgo. |
+| GitHub release tarball | Download from releases | Yes | Yes (SDK layout) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |
 
 ## SDK Layout (Release Artifacts)
 

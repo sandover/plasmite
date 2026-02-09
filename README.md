@@ -5,14 +5,14 @@
 
 **Easy interprocess communication.**
 
-Interprocess communication should not be hard!
+Interprocess communication should not be the hard part.
 
-- messages should be durable -- they live on disk
-- readers and writers should come and go freely
-- you shouldn't need a server for local IPC
-- messages should be easy for humans to read
+- readers and writers should be able to come and go freely
+- messages should be durably stored on disk
+- and yet it should be fast
+- you shouldn't need a server for local communication
+- messages should be inspectable for humans
 - schemas should be optional
-- it should be fast
 - you should never fill your disk accidentally
 
 So, there's **Plasmite**.
@@ -25,72 +25,13 @@ pls peek chat
 #   {"seq":1,"time":"...","meta":{"tags":[]},"data":{"from":"alice","msg":"hello world"}}
 ```
 
-Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed ring buffers called "pools". No daemon, no broker, no config. ~600k msg/sec on a laptop. Crash-safe writes. Pools are bounded, so you can write forever without filling your disk.
+Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed ring buffers called "pools". No daemon, no broker, no config. ~600k msg/sec on a laptop. Crash-safe writes.
 
-For IPC across machines, `pls serve` exposes your local pools, with TLS support and a little web UI too.
-
-## Install
-
-| Channel | Command | CLI | Library/Bindings | Notes |
-|---|---|---|---|---|
-| Homebrew | `brew install sandover/tap/plasmite` | Yes | Yes (`libplasmite`, header, pkg-config) | Recommended for macOS and Go users. |
-| Rust crate (CLI) | `cargo install plasmite` | Yes | No | Installs `plasmite` + `pls`. |
-| Rust crate (lib) | `cargo add plasmite` | No | Rust API | Use in Rust apps. |
-| Python | `uv tool install plasmite` | Yes | Python bindings | Wheel bundles native assets on supported targets. |
-| Python (project dep) | `uv pip install plasmite` | Optional | Python bindings | Use from existing env/project. |
-| Node | `npm i plasmite` | Optional | Node bindings | Bundles addon + native assets. |
-| Node global | `npm i -g plasmite` | Yes | Node bindings | Enables `plasmite` on PATH via npm bin. |
-| Go | `go get github.com/sandover/plasmite/bindings/go/plasmite` | No | Go bindings | Requires system SDK (`brew install ...` first). |
-| Release tarball | Download from [releases](https://github.com/sandover/plasmite/releases) | Yes | Yes (SDK layout) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |
-
-### Python quickstart
-
-```bash
-uv tool install plasmite
-python - <<'PY'
-from plasmite import Client, Durability
-c = Client("./data")
-p = c.create_pool("events", 1024 * 1024)
-p.append_json(b'{"ok":true}', [], Durability.FAST)
-print("python-ok")
-p.close(); c.close()
-PY
-plasmite --version
-```
-
-### Node quickstart
-
-```bash
-npm i plasmite
-node - <<'JS'
-const { Client, Durability } = require("plasmite");
-const c = new Client("./data");
-const p = c.createPool("events", 1024 * 1024);
-p.appendJson(Buffer.from('{"ok":true}'), [], Durability.Fast);
-console.log("node-ok");
-p.close(); c.close();
-JS
-npx plasmite --version
-```
-
-### Go quickstart
-
-```bash
-brew install sandover/tap/plasmite
-mkdir -p /tmp/plasmite-go && cd /tmp/plasmite-go
-go mod init example.com/plasmite-go
-go get github.com/sandover/plasmite/bindings/go/plasmite
-cat > main.go <<'EOF'
-package main
-import "github.com/sandover/plasmite/bindings/go/plasmite"
-func main() { c,_:=plasmite.NewClient("./data"); defer c.Close() }
-EOF
-go run .
-```
+For IPC across machines, `pls serve` exposes your local pools securely, and serves a minimal web UI too.
 
 ## Why not just...
 
-| | The problem | Plasmite |
+| | The problem you'll have | Plasmite |
 |---|---|---|
 | **Log files / `tail -f`** | Unstructured, grow forever, no sequence numbers, fragile parsing | Plasmite messages are structured JSON with sequence numbers, and disk usage stays bounded, so you can filter with tags or jq and never worry about runaway logs. |
 | **Temp files + locks** | No streaming, easy to corrupt, readers block writers | Plasmite lets many writers append concurrently, and readers stream in real time without blocking, so you never have to worry about corruption or contention. |
@@ -177,6 +118,19 @@ A built-in web UI lives at `/ui`:
 
 See the [remote protocol spec](spec/remote/v0/SPEC.md) for the full HTTP/JSON API.
 
+## Install
+
+| Channel | Command | CLI | Library/Bindings | Notes |
+|---|---|---|---|---|
+| Homebrew | `brew install sandover/tap/plasmite` | Yes | Yes (`libplasmite`, header, pkg-config) | Recommended for macOS and Go users. |
+| Rust crate (CLI) | `cargo install plasmite` | Yes | No | Installs `plasmite` + `pls`. |
+| Rust crate (lib) | `cargo add plasmite` | No | Rust API | Use in Rust apps. |
+| Python | `uv tool install plasmite` | Yes | Python bindings | Wheel bundles native assets on supported targets. |
+| Python (project dep) | `uv pip install plasmite` | Optional | Python bindings | Use from existing env/project. |
+| Node | `npm i -g plasmite` | Optional | Node bindings | Bundles addon + native assets. |
+| Go | `go get github.com/sandover/plasmite/bindings/go/plasmite` | No | Go bindings | Requires system SDK (`brew install ...` first). |
+| Release tarball | Download from [releases](https://github.com/sandover/plasmite/releases) | Yes | Yes (SDK layout) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |
+
 ## Commands
 
 | Command | What it does |
@@ -211,11 +165,10 @@ Default pool directory: `~/.plasmite/pools/`.
 
 | Metric | |
 |---|---|
-| Append throughput | ~600k msg/sec (single writer, M1 MacBook) |
+| Append throughput | ~600k msg/sec (single writer, M3 MacBook) |
 | Read | Lock-free, zero-copy via mmap |
 | Message overhead (framing) | 72-79 bytes per message (64B header + 8B commit marker + alignment) |
-| Default pool size | 1 MB (~20k messages) |
-| Max tested pool | 1 GB (local create+poke+get smoke test) |
+| Default pool size | 1 MB |
 
 ## Bindings
 
@@ -242,10 +195,6 @@ pool.appendJson(Buffer.from('{"sensor": "temp", "value": 23.5}'), [], Durability
 ```
 
 See [Go quickstart](docs/record/go-quickstart.md), [Python docs](bindings/python/README.md), and [Node docs](bindings/node/README.md).
-
-## Runtime parsing
-
-Plasmite v0 uses `serde_json` for runtime parsing.
 
 ## More
 

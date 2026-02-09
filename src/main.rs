@@ -679,7 +679,7 @@ Mental model:
   - `peek` watches messages (read/stream)
   - `get` fetches one message by seq
 "#,
-    after_help = r#"EXAMPLE
+    after_help = r#"EXAMPLES
   $ plasmite pool create chat
   $ plasmite peek chat              # Terminal 1: bob watches (waits for messages)
   $ plasmite poke chat '{"from": "alice", "msg": "hello"}'   # Terminal 2: alice sends
@@ -784,6 +784,10 @@ NOTES
 Accepts local pool refs (name/path), remote shorthand refs (http(s)://host:port/<pool>),
 inline JSON, a file (--file), or streams via stdin (auto-detected)."#,
         after_help = r#"EXAMPLES
+  $ plasmite poke foo '{"hello": "world"}'                      # inline JSON
+  $ plasmite poke foo --tag sev1 '{"msg": "alert"}'             # with tags
+  $ jq -c '.[]' data.json | plasmite poke foo                   # stream from pipe"#,
+        after_long_help = r#"EXAMPLES
   # Inline JSON
   $ plasmite poke foo '{"hello": "world"}'
 
@@ -842,7 +846,14 @@ NOTES
             long = "in",
             default_value = "auto",
             value_enum,
-            help = "Input mode for stdin streams"
+            help = "Input mode for stdin streams",
+            long_help = r#"Input mode for stdin streams
+
+  auto   Detect from stream prefix (JSONL, JSON-seq 0x1e, SSE data:)
+  jsonl  One JSON object per line
+  json   Single JSON value (object or array)
+  seq    RFC 7464 JSON Text Sequences (0x1e-delimited)
+  jq     jq --raw-output / --stream output"#
         )]
         input: InputMode,
         #[arg(
@@ -860,6 +871,10 @@ NOTES
 
 Implements the remote protocol spec under spec/remote/v0/SPEC.md."#,
         after_help = r#"EXAMPLES
+  $ plasmite serve                                              # loopback, no auth
+  $ plasmite serve init                                         # bootstrap TLS + token
+  $ plasmite serve check                                        # validate config"#,
+        after_long_help = r#"EXAMPLES
   $ plasmite serve
   $ plasmite serve --bind 127.0.0.1:9701 --token devtoken
   $ plasmite serve --token-file /path/to/token
@@ -906,6 +921,11 @@ By default, `peek` waits for new messages forever (Ctrl-C to stop).
 Use `--tail N` to see recent history first, then keep watching.
 Use `--replay N` with `--tail` or `--since` to replay with timing."#,
         after_help = r#"EXAMPLES
+  $ plasmite peek foo                                           # watch live
+  $ plasmite peek foo --tail 10                                 # last 10 + live
+  $ plasmite peek foo --where '.data.ok == true' --one          # match & exit
+  $ plasmite peek foo --format jsonl | jq '.data'               # pipe to jq"#,
+        after_long_help = r#"EXAMPLES
   # Watch for new messages
   $ plasmite peek foo
 
@@ -915,23 +935,14 @@ Use `--replay N` with `--tail` or `--since` to replay with timing."#,
   # Emit one matching message, then exit
   $ plasmite peek foo --where '.data.status == "error"' --one
 
-  # Exact tag filter shortcut
-  $ plasmite peek foo --tag ping --one
-
   # Messages from the last 5 minutes
   $ plasmite peek foo --since 5m
 
-  # Replay last 100 messages at original timing
+  # Replay at original timing (or 2x, 0.5x, 0 = instant)
   $ plasmite peek foo --tail 100 --replay 1
 
-  # Replay at 2x speed
-  $ plasmite peek foo --tail 50 --replay 2
-
-  # Replay at half speed
-  $ plasmite peek foo --since 5m --replay 0.5
-
-  # Filter by tag with --tag
-  $ plasmite peek foo --tag ping
+  # Filter by exact tag (repeat for AND)
+  $ plasmite peek foo --tag ping --one
 
   # Pipe to jq
   $ plasmite peek foo --format jsonl | jq -r '.data.msg'
@@ -939,26 +950,17 @@ Use `--replay N` with `--tail` or `--since` to replay with timing."#,
   # Wait up to 5 seconds for a message
   $ plasmite peek foo --timeout 5s
 
-  # Emit only data payloads
-  $ plasmite peek foo --data-only --format jsonl
-
-  # Create local pool on first peek, then watch
-  $ plasmite peek bar --create
-
   # Remote shorthand ref (serve must already expose the pool)
   $ plasmite peek http://127.0.0.1:9700/demo --tail 20 --format jsonl
 
 NOTES
   - Use `--format jsonl` for scripts (one JSON object per line)
-  - `--tag` matches exact tags; repeat for AND
-  - `--where` uses jq-style expressions; repeat for AND
+  - `--tag` matches exact tags; `--where` uses jq-style expressions; repeat either for AND
   - `--since 5m` and `--since 2026-01-15T10:00:00Z` both work
   - Remote refs must be shorthand: http(s)://host:port/<pool> (no trailing slash)
   - Remote `peek` supports `--tail`, `--tag`, `--where`, `--one`, `--timeout`, `--data-only`, and `--format`
   - `--create` is local-only; remote peek never creates remote pools
-  - Remote `peek` rejects `--since` and `--replay` with actionable guidance
-  - `--replay N` exits when all selected messages are emitted (no live follow)
-  - `--replay 0` emits as fast as possible (same as peek, but bounded)"#
+  - `--replay N` exits when all selected messages are emitted (no live follow); `--replay 0` emits instantly"#
     )]
     Peek {
         #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
@@ -1038,7 +1040,7 @@ NOTES
     #[command(
         about = "Print version info as JSON",
         long_about = r#"Emit version info as JSON (stable, machine-readable)."#,
-        after_help = r#"EXAMPLE
+        after_help = r#"EXAMPLES
   $ plasmite version"#
     )]
     Version,
@@ -1136,7 +1138,7 @@ NOTES
     #[command(
         about = "List pools in the pool directory",
         long_about = r#"List pools in the pool directory as JSON."#,
-        after_help = r#"EXAMPLE
+        after_help = r#"EXAMPLES
   $ plasmite pool list
 
 NOTES
@@ -1223,45 +1225,70 @@ struct ServeInitArgs {
 
 #[derive(Args)]
 struct ServeRunArgs {
-    #[arg(long, default_value = "127.0.0.1:9700", help = "Bind address")]
+    #[arg(
+        long,
+        default_value = "127.0.0.1:9700",
+        help = "Bind address",
+        help_heading = "Connection"
+    )]
     bind: String,
-    #[arg(long, help = "Bearer token for auth (dev-only; prefer --token-file)")]
-    token: Option<String>,
-    #[arg(long, value_name = "PATH", help = "Read bearer token from file", value_hint = ValueHint::FilePath)]
-    token_file: Option<PathBuf>,
-    #[arg(long, help = "Allow non-loopback binds (unsafe without TLS + token)")]
-    allow_non_loopback: bool,
-    #[arg(long, help = "Allow non-loopback writes without TLS (unsafe)")]
-    insecure_no_tls: bool,
-    #[arg(long, value_name = "PATH", help = "TLS certificate path (PEM)", value_hint = ValueHint::FilePath)]
-    tls_cert: Option<PathBuf>,
-    #[arg(long, value_name = "PATH", help = "TLS key path (PEM)", value_hint = ValueHint::FilePath)]
-    tls_key: Option<PathBuf>,
-    #[arg(long, help = "Generate a self-signed TLS cert for this run")]
-    tls_self_signed: bool,
     #[arg(
         long,
         value_enum,
         default_value = "read-write",
-        help = "Access mode: read-only|write-only|read-write"
+        help = "Access mode: read-only|write-only|read-write",
+        help_heading = "Connection"
     )]
     access: AccessModeCli,
     #[arg(
         long,
+        help = "Bearer token for auth (dev-only; prefer --token-file)",
+        help_heading = "Authentication"
+    )]
+    token: Option<String>,
+    #[arg(long, value_name = "PATH", help = "Read bearer token from file", value_hint = ValueHint::FilePath, help_heading = "Authentication")]
+    token_file: Option<PathBuf>,
+    #[arg(long, value_name = "PATH", help = "TLS certificate path (PEM)", value_hint = ValueHint::FilePath, help_heading = "TLS")]
+    tls_cert: Option<PathBuf>,
+    #[arg(long, value_name = "PATH", help = "TLS key path (PEM)", value_hint = ValueHint::FilePath, help_heading = "TLS")]
+    tls_key: Option<PathBuf>,
+    #[arg(
+        long,
+        help = "Generate a self-signed TLS cert for this run",
+        help_heading = "TLS"
+    )]
+    tls_self_signed: bool,
+    #[arg(
+        long,
+        help = "Allow non-loopback binds (unsafe without TLS + token)",
+        help_heading = "Safety"
+    )]
+    allow_non_loopback: bool,
+    #[arg(
+        long,
+        help = "Allow non-loopback writes without TLS (unsafe)",
+        help_heading = "Safety"
+    )]
+    insecure_no_tls: bool,
+    #[arg(
+        long,
         default_value_t = DEFAULT_MAX_BODY_BYTES,
-        help = "Max request body size in bytes"
+        help = "Max request body size in bytes",
+        help_heading = "Safety"
     )]
     max_body_bytes: u64,
     #[arg(
         long,
         default_value_t = DEFAULT_MAX_TAIL_TIMEOUT_MS,
-        help = "Max tail timeout in milliseconds"
+        help = "Max tail timeout in milliseconds",
+        help_heading = "Safety"
     )]
     max_tail_timeout_ms: u64,
     #[arg(
         long,
         default_value_t = DEFAULT_MAX_TAIL_CONCURRENCY,
-        help = "Max concurrent tail streams"
+        help = "Max concurrent tail streams",
+        help_heading = "Safety"
     )]
     max_tail_concurrency: usize,
 }
