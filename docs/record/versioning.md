@@ -1,11 +1,3 @@
-<!--
-Purpose: Define lockstep version policy across CLI and language bindings.
-Key exports: Compatibility rules, mapping table, and release invariants.
-Role: Source of truth for maintainers and automation scripts.
-Invariants: Cargo/Python/Node published artifacts share one exact version.
-Notes: Update this doc if ABI policy or release packaging changes.
--->
-
 # Versioning Policy
 
 ## Scope

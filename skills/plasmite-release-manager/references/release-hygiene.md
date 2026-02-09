@@ -1,11 +1,3 @@
-<!--
-Purpose: Define mechanical release steps for Plasmite using GitHub tooling.
-Key outputs: Tag/release artifacts and evidence of publish workflow completion.
-Role: Canonical runbook after QA gates pass.
-Invariants: Do not publish if any release blocker task is open.
-Notes: Prefer `gh` commands for repeatability and auditability.
--->
-
 # Release Hygiene (Mechanical Flow)
 
 Run this only after all required QA gates pass and no blocker tasks remain.

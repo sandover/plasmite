@@ -1,12 +1,3 @@
-<!--
-Purpose: Record prioritized findings from the CLI misuse-feedback audit.
-Exports: Coverage summary, reproducible findings, and fix queue priorities.
-Role: Canonical audit report for CLI guidance quality and follow-up planning.
-Invariants: Findings include reproducible commands and expected-helpfulness deltas.
-Invariants: First-wave queue includes only P0/P1 items by policy.
-Notes: Obsolete pre-release forms are intentionally excluded from scope.
--->
-
 # CLI usage feedback audit
 
 ## Scope

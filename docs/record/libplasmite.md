@@ -1,11 +1,3 @@
-<!--
-Purpose: Document how to build and link against libplasmite.
-Exports: N/A (documentation).
-Role: Guide for bindings and consumers of the C ABI.
-Invariants: Paths and artifact names match Cargo outputs.
-Notes: This document is non-normative; ABI details live in include/plasmite.h.
--->
-
 # libplasmite Build & Link Guide
 
 `libplasmite` is the C ABI library used by official bindings.

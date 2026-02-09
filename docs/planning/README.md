@@ -1,10 +1,3 @@
-<!--
-Purpose: Define the single planning namespace and keep active planning artifacts minimal.
-Exports: N/A (documentation).
-Role: Planning policy and index.
-Invariants: Planning docs are temporary and non-authoritative until promoted to docs-of-record.
--->
-
 # Planning
 
 `docs/planning/` is the only planning namespace.

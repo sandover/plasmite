@@ -1,11 +1,3 @@
-<!--
-Purpose: Define pre-release QA gates that must pass before release.
-Key outputs: Gate evidence, pass/fail decisions, and blocker filing requirements.
-Role: Operational checklist for release readiness.
-Invariants: Every gate is mandatory; failures or incomplete evidence block release.
-Notes: If a required tool is missing, treat gate as failed and file a blocker.
--->
-
 # Pre-Release QA Gates
 
 For each gate:

@@ -1,11 +1,3 @@
-<!--
-Purpose: Document how to build and use the Plasmite Node bindings.
-Exports: N/A (documentation).
-Role: Quickstart for Node/TypeScript users of libplasmite.
-Invariants: Uses the C ABI via N-API and matches v0 semantics.
-Notes: Runtime prefers bundled native assets shipped in the npm package.
--->
-
 # Plasmite Node Bindings (v0)
 
 These bindings wrap the `libplasmite` C ABI via a N-API addon.

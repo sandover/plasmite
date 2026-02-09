@@ -1,11 +1,3 @@
-<!--
-Purpose: Define the v0 remote protocol for Plasmite over HTTP/JSON.
-Exports: N/A (specification text).
-Role: Normative contract for remote servers and clients.
-Invariants: Message envelopes match spec/v0/SPEC.md; error kinds are stable.
-Notes: This spec is additive-only within v0.
--->
-
 # Plasmite Remote Protocol v0 (HTTP/JSON)
 
 ## Overview

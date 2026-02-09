@@ -1,10 +1,3 @@
-<!--
-Purpose: State Plasmite's long-term product direction and decision criteria.
-Exports: N/A (documentation).
-Role: Keystone product vision used to evaluate scope, tradeoffs, and roadmap priorities.
-Invariants: Plasmite remains local-first, JSON-first, and script-stable across releases.
--->
-
 # Vision
 
 Plasmite is the simplest reliable way to coordinate multiple processes with structured messages, without requiring external infrastructure.

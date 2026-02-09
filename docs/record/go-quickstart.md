@@ -1,11 +1,3 @@
-<!--
-Purpose: Quickstart guide for using Plasmite from Go.
-Exports: N/A (documentation).
-Role: Help Go users adopt the bindings without reading internal code.
-Invariants: Examples reflect the C ABI semantics and Go wrapper behavior.
-Notes: Assumes libplasmite is built locally.
--->
-
 # Go Quickstart
 
 This guide shows how to use the Go bindings in `bindings/go`.

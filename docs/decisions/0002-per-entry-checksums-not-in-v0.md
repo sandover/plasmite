@@ -1,10 +1,3 @@
-<!--
-Purpose: Capture the integrity motivation and scheduling for per-entry checksums.
-Exports: N/A (documentation).
-Role: ADR (Accepted).
-Invariants: Checksums provide integrity detection, not authenticity; enabling them must not weaken correctness guarantees.
--->
-
 # ADR 0002: Per-entry checksums (not in v0.0.1)
 
 - Date: 2026-02-01

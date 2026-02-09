@@ -1,11 +1,3 @@
-<!--
-Purpose: Describe the Plasmite conformance model and how runners execute manifests.
-Exports: N/A (documentation for harness implementers).
-Role: Canonical entry point for language binding conformance expectations.
-Invariants: Manifests are versioned; runners must be deterministic and side-effect scoped.
-Notes: This document is normative for conformance runner behavior.
--->
-
 # Conformance Suite
 
 This directory defines the **conformance model** for Plasmite bindings and the contract

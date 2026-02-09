@@ -1,11 +1,3 @@
-<!--
-Purpose: Provide a quickstart guide for the Rust public API.
-Exports: N/A (documentation).
-Role: Practical entry point for embedding Plasmite without the CLI.
-Invariants: Examples match spec/api/v0/SPEC.md and CLI semantics.
-Notes: This doc is non-normative; the API spec is authoritative.
--->
-
 # API Quickstart (Rust)
 
 This guide shows the basic flow using the Rust public API:

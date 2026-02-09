@@ -1,11 +1,3 @@
-<!--
-Purpose: Explain pattern matching and filtering workflows for `pls peek`.
-Key exports: N/A (documentation).
-Role: Practical guide for exact tag matching and jq predicate composition.
-Invariants: `--tag` is exact/case-sensitive; repeated filters compose with AND.
-Invariants: Local and remote `peek` use the same `--tag`/`--where` semantics.
--->
-
 # Pattern Matching Guide (v0)
 
 Pattern matching in Plasmite intentionally has two layers:

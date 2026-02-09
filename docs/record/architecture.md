@@ -1,10 +1,3 @@
-<!--
-Purpose: Define Plasmite's core architecture so contributors can change internals without breaking user contracts.
-Exports: N/A (documentation).
-Role: Keystone technical reference for system boundaries, data flow, and invariants.
-Invariants: Specs define external contracts; this doc explains implementation structure that must preserve those contracts.
--->
-
 # Architecture
 
 This is the implementation architecture for Plasmite.

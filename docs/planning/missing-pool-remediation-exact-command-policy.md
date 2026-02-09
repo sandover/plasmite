@@ -1,12 +1,3 @@
-<!--
-Purpose: Define exact-command rendering policy for missing-pool remediation hints.
-Exports: One canonical rendering approach with examples and fallback rules.
-Role: Decision artifact for implementing poke/peek missing-pool hints consistently.
-Invariants: Hint rendering must not claim exactness when safe reconstruction is impossible.
-Invariants: Policy is shell-agnostic and avoids shell-specific escaping assumptions.
-Notes: This policy unblocks implementation and test-case authoring for remediation UX.
--->
-
 # Missing-Pool Remediation Exact Command Policy
 
 ## Decision

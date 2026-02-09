@@ -1,12 +1,3 @@
-<!--
-Purpose: Explain how Plasmite builds Rust + vendored C code and how release artifacts are produced.
-Exports: N/A (documentation).
-Role: Contributor build/linker runbook for local development and CI.
-Invariants: Lite3 C sources remain vendored in-repo and are compiled via Cargo build script.
-Invariants: Official release artifacts are currently built for darwin arm64/amd64 and linux amd64.
-Invariants: Linux arm64 is best-effort via source builds, not a release-gating artifact target.
--->
-
 # Building Plasmite
 
 ## What gets built

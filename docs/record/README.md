@@ -1,10 +1,3 @@
-<!--
-Purpose: Define what belongs in docs-of-record and provide a compact index for canonical docs.
-Exports: N/A (documentation).
-Role: Record-doc policy and navigation hub.
-Invariants: Content here is the current authoritative reference unless superseded by versioned specs/ADRs.
--->
-
 # Docs of Record
 
 Use this namespace for canonical, current truth documentation.

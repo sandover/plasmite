@@ -1,11 +1,3 @@
-<!--
-Purpose: Record the decision to prototype a remote protocol using HTTP/JSON with token auth.
-Exports: N/A (documentation).
-Role: ADR (Accepted) for post-v0 remote access direction.
-Invariants: Local-first API remains the primary contract in v0.
-Notes: Details may evolve during implementation, but the default UX stays HTTP/JSON.
--->
-
 # ADR 0004: Remote protocol direction (HTTP/JSON + bearer tokens)
 
 - Date: 2026-02-04

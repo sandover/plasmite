@@ -1,11 +1,3 @@
-<!--
-Purpose: Define the normative, versioned public API contract for Plasmite v0.
-Key Exports: PoolRef, Client, Pool, Message, Meta, error kinds, and operation semantics.
-Role: Binding implementers and conformance tests must follow this spec; CLI spec remains authoritative for scripting.
-Invariants: Additive-only within v0; stable error kinds; streaming respects ordering, cancellation, backpressure.
-Notes: This document is normative and intended to be referenced by bindings and conformance tests.
--->
-
 # Plasmite Public API Spec v0
 
 This document is the **normative** contract for the Plasmite public API v0.

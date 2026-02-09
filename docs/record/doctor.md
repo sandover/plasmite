@@ -1,11 +1,3 @@
-<!--
-Purpose: Describe the plasmite doctor diagnostics command.
-Exports: N/A (documentation).
-Role: User-facing guidance for interpreting validation reports.
-Invariants: Exit codes and JSON output shapes match CLI behavior.
-Notes: This document is non-normative; the CLI spec is authoritative.
--->
-
 # Diagnostics: plasmite doctor
 
 `plasmite doctor` validates pools and reports corruption or structural issues.

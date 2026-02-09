@@ -1,11 +1,3 @@
-<!--
-Purpose: Verify that release artifacts and ecosystem packages are actually live.
-Key outputs: Per-channel delivery evidence and blocker filing on gaps.
-Role: Post-release verification checklist.
-Invariants: Treat missing/incorrect versions as release blockers.
-Notes: Prefer concrete version checks over inferred success from workflow status.
--->
-
 # Delivery Verification
 
 Use this after release workflows finish.

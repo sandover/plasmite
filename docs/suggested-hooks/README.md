@@ -1,11 +1,3 @@
-<!--
-Purpose: Explain the repo’s suggested local git hooks and how to install/uninstall them.
-Exports: N/A (documentation).
-Role: Contributor-facing entrypoint for local hygiene guardrails (hooks live alongside this file).
-Invariants: Hooks are optional; CI remains authoritative.
-Invariants: Hook scripts in this directory are the source of truth; `.git/hooks/*` should delegate to them.
--->
-
 # Suggested git hooks
 
 This repo includes a small set of **optional** local git hooks under `docs/suggested-hooks/`.

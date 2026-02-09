@@ -1,12 +1,3 @@
-<!--
-Purpose: Provide a complete CLI misuse taxonomy and feedback quality rubric.
-Exports: Command inventory, misuse classes, and scenario matrix for validation.
-Role: Planning artifact for consistent CLI error-message quality improvements.
-Invariants: Every current top-level command and pool/serve subcommand is covered.
-Invariants: Each command family includes required, invalid, conflicting, unsupported misuse paths.
-Notes: Obsolete/pre-release forms are listed explicitly as cruft-removal candidates.
--->
-
 # CLI Usage Audit Matrix
 
 ## Command Surface

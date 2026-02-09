@@ -1,10 +1,3 @@
-<!--
-Purpose: Record why Plasmite chose an inline seq->offset index in the pool format.
-Exports: N/A (documentation).
-Role: Accepted architectural decision for random-access lookup behavior.
-Invariants: Describes the chosen design and supersedes deferred persistent TOC ideas.
--->
-
 # ADR 0005: Inline seq->offset index in pool files
 
 - Status: Accepted

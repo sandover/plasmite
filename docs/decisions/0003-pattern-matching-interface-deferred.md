@@ -1,10 +1,3 @@
-<!--
-Purpose: Record that pattern matching is desired, but the interface is intentionally deferred.
-Exports: N/A (documentation).
-Role: ADR (Proposed).
-Invariants: The public interface should remain stateless; callers pass the range/filter parameters explicitly.
--->
-
 # ADR 0003: Pattern matching queries (interface deferred)
 
 - Date: 2026-02-01

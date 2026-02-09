@@ -1,10 +1,3 @@
-<!--
-Purpose: Record the decision to deliver remote access via TCP first and QUIC later, without baking transport details into the CLI contract.
-Exports: N/A (documentation).
-Role: ADR (Accepted).
-Invariants: Core operations remain transport-agnostic; framing is shared across transports.
--->
-
 # ADR 0001: Transport strategy (TCP now, QUIC later)
 
 - Date: 2026-02-01

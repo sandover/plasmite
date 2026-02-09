@@ -1,10 +1,3 @@
-<!--
-Purpose: Provide the authoritative docs index and taxonomy for Plasmite.
-Exports: N/A (documentation).
-Role: Primary docs entrypoint for contributors and users.
-Invariants: Normative contracts stay in `spec/`; docs-of-record live in `docs/record/` and ADRs in `docs/decisions/`.
--->
-
 # Docs
 
 Plasmite documentation is intentionally split into:

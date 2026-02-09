@@ -1,10 +1,3 @@
-<!--
-Purpose: Document how to package Plasmite via a Homebrew tap.
-Exports: N/A (documentation).
-Role: Maintainer/contributor guide for distribution.
-Invariants: Steps must match the repo’s `homebrew/` formula and release artifact naming.
--->
-
 # Homebrew tap setup
 
 This repo ships release artifacts. Use a separate tap repo (recommended name: `homebrew-tap`) to publish the formula.

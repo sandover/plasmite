@@ -1,11 +1,3 @@
-<!--
-Purpose: Define what each install channel provides (CLI + bindings) and the stable SDK layout.
-Exports: N/A (documentation).
-Role: Single source of truth for distribution promises and artifact structure.
-Invariants: Docs must match what release artifacts and package managers actually ship.
-Notes: Platform scope is intentionally limited (no Windows yet).
--->
-
 # Distribution Contract (v0.1.x)
 
 This document defines:

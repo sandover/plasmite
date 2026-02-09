@@ -1,11 +1,3 @@
-<!--
-Purpose: Document how to build and use the Plasmite Python bindings.
-Exports: N/A (documentation).
-Role: Quickstart for Python users of libplasmite.
-Invariants: Uses the C ABI via ctypes and matches v0 semantics.
-Notes: Requires libplasmite to be built and discoverable.
--->
-
 # Plasmite Python Bindings (v0)
 
 These bindings wrap the `libplasmite` C ABI via `ctypes`.

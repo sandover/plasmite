@@ -1,11 +1,3 @@
-<!--
-Purpose: Define the v0 conformance manifest format for Plasmite bindings.
-Exports: N/A (specification text).
-Role: Normative schema for manifests consumed by conformance runners.
-Invariants: Versioned schema; step order is significant and deterministic.
-Notes: Manifests are JSON to keep parsing consistent across languages.
--->
-
 # Conformance Manifest v0
 
 ## Top-Level Fields
