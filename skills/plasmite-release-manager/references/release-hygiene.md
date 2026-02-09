@@ -18,6 +18,14 @@ Run this only after all required QA gates pass and no blocker tasks remain.
 - Version alignment passes:
   - `bash scripts/check-version-alignment.sh`
 
+## Runtime Access Requirements
+
+- Use a runtime with network access and host-backed `gh` authentication.
+- If `gh` reports connection/auth errors in sandboxed mode, re-run unsandboxed/escalated and confirm with:
+  - `gh auth status`
+  - `gh api user -q .login`
+- Do not proceed with tag/release/publish steps unless these checks pass in the active runtime.
+
 ## Prepare Candidate
 
 1. Confirm version fields are aligned.
@@ -59,4 +67,3 @@ If any step fails:
 1. Stop the release sequence.
 2. File blocker task via `scripts/file_release_blocker.sh`.
 3. Attach exact failing command and output summary in blocker task.
-

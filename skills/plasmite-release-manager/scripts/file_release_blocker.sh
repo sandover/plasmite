@@ -83,8 +83,8 @@ fi
 
 epic_title="Release blockers: ${release_target}"
 
-items_json="$(ergo --json list --all)"
-epic_id="$(printf '%s\n' "$items_json" | jq -r --arg t "$epic_title" '.[] | select(.kind=="epic" and .title==$t) | .id' | head -n 1)"
+epics_json="$(ergo --json list --epics)"
+epic_id="$(printf '%s\n' "$epics_json" | jq -r --arg t "$epic_title" '.[] | select(.title==$t) | .id' | head -n 1)"
 
 epic_body=$(cat <<EOF
 ## Goal

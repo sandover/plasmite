@@ -21,6 +21,16 @@ Use this skill to run releases in a fail-closed way:
 - `agent_id`: `model@host` for `ergo` claims/ownership
 - `mode`: `dry-run` or `live`
 
+## Execution Permissions (Required)
+
+Request capable runtime access before starting release work:
+- network access for GitHub and package registries (`gh`, crates.io, npm, PyPI, Homebrew checks)
+- host auth/keychain access so `gh auth status` reflects the maintainer session
+- ability to run repo QA/build commands without sandbox write restrictions
+
+If commands fail due to sandbox/network, escalate immediately and re-run the same command.
+Do not continue with partial/offline release evidence when a gate requires remote verification.
+
 ## Non-Negotiable Gate Policy
 
 Any failed gate blocks release. Treat these as failures:
