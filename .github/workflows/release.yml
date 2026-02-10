@@ -68,6 +68,7 @@ jobs:
 
   publish-crates-io:
     runs-on: ubuntu-latest
+    needs: [build-native, build-python-dist, build-node-dist]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
