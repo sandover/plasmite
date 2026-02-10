@@ -7,6 +7,10 @@ Run this only after all required QA gates pass and no blocker tasks remain.
 - Working tree clean for release intent.
 - `gh auth status` is healthy.
 - `ergo --json list --epic <release-blocker-epic-id>` has no non-done blocker tasks.
+- Explicit release context is confirmed with maintainer:
+  - `release_target` (`vX.Y.Z`)
+  - `base_tag` (existing prior tag)
+  - `mode` (`dry-run` or `live`)
 - Version alignment passes:
   - `bash scripts/check-version-alignment.sh`
 
@@ -32,6 +36,8 @@ Run this only after all required QA gates pass and no blocker tasks remain.
 4. Verify release workflow configuration.
    - `gh workflow list`
    - ensure release workflow exists and references expected targets.
+   - verify publish jobs are gated by artifact jobs (`build-native`, `build-node-dist`, `build-python-dist`) via `needs` in `.github/workflows/release.yml`
+   - block release if any publish job can run before required artifact jobs succeed
 
 ## Tag + Release (Live Mode)
 
@@ -39,9 +45,11 @@ Run this only after all required QA gates pass and no blocker tasks remain.
    - `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
 2. Push tag:
    - `git push origin vX.Y.Z`
-3. Watch release workflow:
-   - `gh run list --branch main --limit 20`
-   - `gh run watch <run-id>`
+3. Track release workflow with concise polling (preferred over verbose streaming):
+   - `run_id=$(gh run list --workflow release --branch main --limit 1 --json databaseId,event,headBranch --jq '.[] | select(.event=="push" and .headBranch=="main") | .databaseId' | head -n1)`
+   - `gh run view "$run_id" --json status,conclusion,jobs --jq '{status,conclusion,jobs:[.jobs[]|{name,status,conclusion}]}'`
+   - repeat poll until `status=completed`
+   - require `conclusion=success` before proceeding to delivery verification
 4. Confirm GitHub release exists and artifacts are attached:
    - `gh release view vX.Y.Z`
    - `gh release verify-asset vX.Y.Z <artifact-name>` (if available in current gh version)
@@ -57,5 +65,8 @@ Use dry-run when validating process only:
 
 If any step fails:
 1. Stop the release sequence.
-2. File blocker task via `scripts/file_release_blocker.sh`.
-3. Attach exact failing command and output summary in blocker task.
+2. Capture machine-readable failure summary:
+   - `gh run view <run-id> --json url,jobs --jq '{url,jobs:[.jobs[]|select(.conclusion=="failure")|{name,url:.url}]}'`
+   - `gh run view <run-id> --log-failed`
+3. File blocker task(s) via `scripts/file_release_blocker.sh` (at least one per distinct failure class).
+4. Attach exact failing command/log lines and run URL in blocker summary.

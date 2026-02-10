@@ -63,3 +63,15 @@ File blocker task immediately if:
 - wrong version resolves from registry
 - package installs but fails basic smoke (`--version` or minimal operation)
 - release artifact missing required SDK contents
+- release is partially published (one or more channels live while others failed)
+
+## Partial Publish Incident Handling
+
+If any channel has published while release workflow conclusion is failure:
+- treat this as a release-blocking incident, not a transient warning
+- record exactly which channels are live vs missing
+- capture failed workflow evidence:
+  - `gh run view <run-id> --json url,jobs --jq '{url,jobs:[.jobs[]|{name,status,conclusion}]}'`
+  - `gh run view <run-id> --log-failed`
+- file/update a single `ergo` blocker summarizing channel asymmetry and recovery plan
+- do not re-tag; continue with corrective commits and a follow-up patch release target

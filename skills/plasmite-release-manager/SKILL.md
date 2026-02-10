@@ -21,6 +21,11 @@ Use this skill to run releases in a fail-closed way:
 - `agent_id`: `model@host` for `ergo` claims/ownership
 - `mode`: `dry-run` or `live`
 
+Input contract (required):
+- obtain all four inputs explicitly from the maintainer before execution
+- do not infer `release_target`, `base_tag`, or `mode` from local tags/files unless the maintainer confirms
+- if any input is missing or ambiguous, stop and ask before running gates
+
 ## Execution Permissions (Required)
 
 Request capable runtime access before starting release work:
@@ -46,7 +51,8 @@ When blocked:
 ## Workflow
 
 1. Capture release context
-   - Determine `release_target`, `base_tag`, and `mode`.
+   - Confirm explicit `release_target`, `base_tag`, and `mode` from maintainer input.
+   - Verify `release_target` uses `vX.Y.Z` tag format and `base_tag` exists remotely.
    - Ensure `gh auth status` and `ergo where` are healthy.
 2. Run pre-release QA
    - Execute all required gates from `references/qa-gates.md`.

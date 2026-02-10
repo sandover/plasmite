@@ -14,6 +14,14 @@ Required for trustworthy release evidence:
 - working `gh` host auth (`gh auth status`, `gh api user -q .login`)
 - writable local scratch/cache directories (use `.scratch/`)
 
+Preflight commands:
+- `mkdir -p .scratch .scratch/release`
+- `test -w .scratch`
+
+Clean-filesystem guard (required before release mechanics):
+- verify release helper scripts do not rely on pre-existing `.scratch` paths
+- if any script fails with `mktemp` / `mkdtemp` "No such file or directory", treat as release-blocking workflow defect
+
 If runtime preflight fails, block release and file a blocker task before running gate checks.
 
 ## 1) Dependency & Vulnerability Monitoring
@@ -67,8 +75,13 @@ Evidence commands:
 Optional stronger comparison:
 - check out `<base_tag>` in a detached worktree and capture baseline with same host/settings
 
+Comparison policy:
+- use same host and power mode for baseline/current
+- collect at least 3 runs per scenario and compare median `ms_per_msg`
+- ignore scenarios where both medians are below `0.0001 ms/msg` (timer quantization noise)
+
 Block if:
-- meaningful regression in core paths relative to baseline/change risk
+- median regression >= 15% in core scenarios (append, multi_writer, get_scan) without approved explanation
 - no trustworthy comparison could be produced
 
 ## 6) API/CLI Stability & Compatibility
