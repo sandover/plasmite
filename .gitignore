@@ -1,3 +1,4 @@
+.env
 /target
 dist/
 bindings/node/index.node
