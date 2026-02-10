@@ -22,7 +22,7 @@ pls poke chat --create '{"from": "alice", "msg": "hello world"}'
 
 # In another terminal:
 pls peek chat
-#   {"seq":1,"time":"...","meta":{"tags":[]},"data":{"from":"alice","msg":"hello world"}}
+#  { "data": {"from": "alice", "msg": "hello world"},"meta": {}, ... }
 ```
 
 Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed ring buffers called "pools". No daemon, no broker, no config. ~600k msg/sec on a laptop. Crash-safe writes.
