@@ -1,4 +1,5 @@
 /target
+dist/
 bindings/node/index.node
 bindings/node/node_modules/
 bindings/node/libplasmite.dylib
