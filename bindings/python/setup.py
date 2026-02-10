@@ -21,6 +21,11 @@ try:
 except ImportError:  # pragma: no cover - fallback for older setuptools
     from wheel.bdist_wheel import bdist_wheel
 
+try:
+    from setuptools.command.bdist_wheel import bdist_wheel
+except ImportError:  # pragma: no cover - fallback for older setuptools
+    from wheel.bdist_wheel import bdist_wheel
+
 
 class BuildPyWithNativeBundle(build_py):
     """Copy native artifacts into the package before wheel build."""
