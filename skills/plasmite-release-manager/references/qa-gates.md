@@ -3,7 +3,7 @@
 For each gate:
 - collect evidence
 - decide pass/fail
-- if fail or incomplete: file blocker task with `scripts/file_release_blocker.sh`
+- if fail or incomplete: file blocker task with `scripts/file_release_blocker.sh` (or `scripts/file_release_blocker_with_evidence.sh` for workflow failures)
 
 Use `release_target` and `base_tag` consistently.
 
@@ -17,12 +17,26 @@ Required for trustworthy release evidence:
 Preflight commands:
 - `mkdir -p .scratch .scratch/release`
 - `test -w .scratch`
+- `bash skills/plasmite-release-manager/scripts/check_release_tooling_contract.sh`
 
 Clean-filesystem guard (required before release mechanics):
 - verify release helper scripts do not rely on pre-existing `.scratch` paths
 - if any script fails with `mktemp` / `mkdtemp` "No such file or directory", treat as release-blocking workflow defect
 
 If runtime preflight fails, block release and file a blocker task before running gate checks.
+
+## 0) CI Tooling Compatibility Contract
+
+Goal:
+- prevent release workflow failures caused by runner tool mismatch (for example, scripts using `rg` when runners do not provide ripgrep)
+
+Evidence commands:
+- `bash skills/plasmite-release-manager/scripts/check_release_tooling_contract.sh`
+- `rg -n "ripgrep|rg " .github/workflows/release.yml`
+
+Block if:
+- release script tooling requirements are neither guarded by script fallback nor provisioned in workflow
+- the tooling contract check cannot run or returns non-zero
 
 ## 1) Dependency & Vulnerability Monitoring
 

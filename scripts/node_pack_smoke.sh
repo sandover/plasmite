@@ -13,6 +13,20 @@ NODE_DIR="$ROOT/bindings/node"
 mkdir -p "$ROOT/.scratch"
 WORKDIR="$(mktemp -d "$ROOT/.scratch/node-pack-smoke.XXXXXX")"
 SDK_DIR="${PLASMITE_SDK_DIR:-$ROOT/target/debug}"
+HAS_RG=0
+if command -v rg >/dev/null 2>&1; then
+  HAS_RG=1
+fi
+
+archive_has_member() {
+  local archive="$1"
+  local pattern="$2"
+  if [[ "$HAS_RG" -eq 1 ]]; then
+    tar -tzf "$archive" | rg -q "$pattern"
+  else
+    tar -tzf "$archive" | grep -Eq "$pattern"
+  fi
+}
 
 (
   cd "$NODE_DIR"
@@ -25,10 +39,10 @@ if [[ -z "$TARBALL" ]]; then
   exit 1
 fi
 
-tar -tzf "$NODE_DIR/$TARBALL" | rg -q 'package/index\.node'
-tar -tzf "$NODE_DIR/$TARBALL" | rg -q 'package/libplasmite\.(dylib|so)'
-tar -tzf "$NODE_DIR/$TARBALL" | rg -q 'package/plasmite'
-tar -tzf "$NODE_DIR/$TARBALL" | rg -q 'package/bin/plasmite\.js'
+archive_has_member "$NODE_DIR/$TARBALL" 'package/index\.node'
+archive_has_member "$NODE_DIR/$TARBALL" 'package/libplasmite\.(dylib|so)'
+archive_has_member "$NODE_DIR/$TARBALL" 'package/plasmite'
+archive_has_member "$NODE_DIR/$TARBALL" 'package/bin/plasmite\.js'
 
 mkdir -p "$WORKDIR/app"
 (

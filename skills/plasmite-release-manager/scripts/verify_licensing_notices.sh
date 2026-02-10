@@ -12,6 +12,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 PY_DIST_DIR="${PY_DIST_DIR:-$ROOT/bindings/python/dist}"
 NODE_DIR="${NODE_DIR:-$ROOT/bindings/node}"
 RELEASE_DIR="${RELEASE_DIR:-$ROOT/.scratch/release/downloaded}"
+HAS_RG=0
+if command -v rg >/dev/null 2>&1; then
+  HAS_RG=1
+fi
 
 failures=0
 checked=0
@@ -28,7 +32,21 @@ note_ok() {
 has_member() {
   local archive="$1"
   local pattern="$2"
-  tar -tzf "$archive" | rg -q "$pattern"
+  if [[ "$HAS_RG" -eq 1 ]]; then
+    tar -tzf "$archive" | rg -q "$pattern"
+  else
+    tar -tzf "$archive" | grep -Eq "$pattern"
+  fi
+}
+
+wheel_member() {
+  local wheel="$1"
+  local pattern="$2"
+  if [[ "$HAS_RG" -eq 1 ]]; then
+    python3 -m zipfile -l "$wheel" | rg -q "$pattern"
+  else
+    python3 -m zipfile -l "$wheel" | grep -Eq "$pattern"
+  fi
 }
 
 if [[ -f "$ROOT/LICENSE" && -f "$ROOT/THIRD_PARTY_NOTICES.md" ]]; then
@@ -56,12 +74,12 @@ fi
 if ls "$PY_DIST_DIR"/*.whl >/dev/null 2>&1; then
   for wheel in "$PY_DIST_DIR"/*.whl; do
     checked=$((checked + 1))
-    if python3 -m zipfile -l "$wheel" | rg -q 'dist-info/(licenses/)?LICENSE'; then
+    if wheel_member "$wheel" 'dist-info/(licenses/)?LICENSE'; then
       note_ok "python wheel includes LICENSE metadata ($(basename "$wheel"))"
     else
       note_fail "python wheel missing LICENSE metadata ($(basename "$wheel"))"
     fi
-    if python3 -m zipfile -l "$wheel" | rg -q 'THIRD_PARTY_NOTICES\.md'; then
+    if wheel_member "$wheel" 'THIRD_PARTY_NOTICES\.md'; then
       note_ok "python wheel includes THIRD_PARTY_NOTICES.md ($(basename "$wheel"))"
     else
       note_fail "python wheel missing THIRD_PARTY_NOTICES.md ($(basename "$wheel"))"

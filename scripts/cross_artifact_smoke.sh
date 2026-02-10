@@ -12,6 +12,19 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LIB_DIR="$ROOT/target/debug"
 mkdir -p "$ROOT/.scratch"
 WORKDIR="$(mktemp -d "$ROOT/.scratch/cross-artifact.XXXXXX")"
+HAS_RG=0
+if command -v rg >/dev/null 2>&1; then
+  HAS_RG=1
+fi
+
+stream_matches() {
+  local pattern="$1"
+  if [[ "$HAS_RG" -eq 1 ]]; then
+    rg -q "$pattern"
+  else
+    grep -Eq "$pattern"
+  fi
+}
 
 require_file() {
   local path="$1"
@@ -44,7 +57,7 @@ smoke_release_tarball() {
   elif [[ -f "$extract_dir/lib/libplasmite.so" ]]; then
     shared_lib="$extract_dir/lib/libplasmite.so"
     if command -v readelf >/dev/null 2>&1; then
-      if ! readelf -d "$shared_lib" | rg -q 'SONAME.*\[libplasmite\.so\]'; then
+      if ! readelf -d "$shared_lib" | stream_matches 'SONAME.*\[libplasmite\.so\]'; then
         echo "missing or unstable SONAME on $shared_lib"
         exit 1
       fi
@@ -59,9 +72,15 @@ smoke_release_tarball() {
     PKG_CONFIG_PATH="$extract_dir/lib/pkgconfig" pkg-config --cflags --libs plasmite >/dev/null
   else
     # Keep local smoke usable on minimal environments that lack pkg-config.
-    rg -q '^Name: plasmite$' "$extract_dir/lib/pkgconfig/plasmite.pc"
-    rg -q '^Libs: .* -lplasmite$' "$extract_dir/lib/pkgconfig/plasmite.pc"
-    rg -q '^Cflags: (-I|.* -I)' "$extract_dir/lib/pkgconfig/plasmite.pc"
+    if [[ "$HAS_RG" -eq 1 ]]; then
+      rg -q '^Name: plasmite$' "$extract_dir/lib/pkgconfig/plasmite.pc"
+      rg -q '^Libs: .* -lplasmite$' "$extract_dir/lib/pkgconfig/plasmite.pc"
+      rg -q '^Cflags: (-I|.* -I)' "$extract_dir/lib/pkgconfig/plasmite.pc"
+    else
+      grep -Eq '^Name: plasmite$' "$extract_dir/lib/pkgconfig/plasmite.pc"
+      grep -Eq '^Libs: .* -lplasmite$' "$extract_dir/lib/pkgconfig/plasmite.pc"
+      grep -Eq '^Cflags: (-I|.* -I)' "$extract_dir/lib/pkgconfig/plasmite.pc"
+    fi
   fi
   "$extract_dir/bin/plasmite" --version >/dev/null
   "$extract_dir/bin/pls" --help >/dev/null

@@ -11,6 +11,7 @@ Use this skill to run releases in a fail-closed way:
 - run required QA gates before release
 - stop on any failed or incomplete gate
 - file blocker tasks in `ergo` under one release-blocker epic
+- maintain one machine-readable evidence report through the full run
 - execute release mechanics with `gh`
 - verify that published packages are actually live
 
@@ -25,6 +26,8 @@ Input contract (required):
 - obtain all four inputs explicitly from the maintainer before execution
 - do not infer `release_target`, `base_tag`, or `mode` from local tags/files unless the maintainer confirms
 - if any input is missing or ambiguous, stop and ask before running gates
+- initialize or reopen the evidence report:
+  - `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --base-tag <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`
 
 ## Execution Permissions (Required)
 
@@ -48,12 +51,21 @@ When blocked:
 2. File an `ergo` blocker task with `scripts/file_release_blocker.sh`.
 3. Keep all blockers in one epic named `Release blockers: <release_target>`.
 
+## Interruption Resume Protocol
+
+If the run is interrupted (agent crash, user abort, runtime reset), do this before any new release action:
+1. Re-open the evidence report in `.scratch/release/`.
+2. Re-check current git/tag/workflow/blocker state using the checklist in `references/release-hygiene.md`.
+3. Record resumed context (timestamp + agent + current checkpoint) in the evidence report.
+4. Continue only from the first unchecked checkpoint; do not skip forward from memory.
+
 ## Workflow
 
 1. Capture release context
    - Confirm explicit `release_target`, `base_tag`, and `mode` from maintainer input.
    - Verify `release_target` uses `vX.Y.Z` tag format and `base_tag` exists remotely.
    - Ensure `gh auth status` and `ergo where` are healthy.
+   - Initialize/reopen evidence report with `scripts/init_release_evidence.sh`.
 2. Run pre-release QA
    - Execute all required gates from `references/qa-gates.md`.
    - File blockers for every failed/incomplete gate.
@@ -97,6 +109,21 @@ The script will:
 - create a task with required sections (goal/background/acceptance/gates/consult)
 - print created epic/task IDs
 
+When a GitHub run failed, prefer the evidence wrapper:
+
+```bash
+skills/plasmite-release-manager/scripts/file_release_blocker_with_evidence.sh \
+  --release-target "v0.1.1" \
+  --check "Binding parity & packaging health" \
+  --title "Fix runner tooling mismatch for release smoke scripts" \
+  --summary "release workflow failed in packaging smoke stage." \
+  --run-id "12345678901" \
+  --failing-command "bash scripts/node_pack_smoke.sh" \
+  --agent "codex@$(hostname -s)"
+```
+
+The wrapper enriches blocker summaries with run URL, failed job names, and optional log snippets.
+
 ## Bundled Resources
 
 - `references/qa-gates.md`
@@ -107,3 +134,9 @@ The script will:
   - verify packages are live post-release
 - `scripts/file_release_blocker.sh`
   - deterministic blocker filing into `ergo`
+- `scripts/file_release_blocker_with_evidence.sh`
+  - blocker filing with attached run metadata and log excerpt
+- `scripts/init_release_evidence.sh`
+  - creates/reopens the release evidence artifact used for resumes and handoffs
+- `scripts/check_release_tooling_contract.sh`
+  - enforces CI tooling compatibility for release scripts/workflow before tagging

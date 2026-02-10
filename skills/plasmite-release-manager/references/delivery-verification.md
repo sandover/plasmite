@@ -5,6 +5,7 @@ Use this after release workflows finish.
 Inputs:
 - `release_target` (for example `v0.1.1`)
 - `version` without `v` (for example `0.1.1`)
+- evidence report path (for example `.scratch/release/evidence-v0.1.1.md`)
 
 ## GitHub Release Artifacts
 
@@ -74,4 +75,6 @@ If any channel has published while release workflow conclusion is failure:
   - `gh run view <run-id> --json url,jobs --jq '{url,jobs:[.jobs[]|{name,status,conclusion}]}'`
   - `gh run view <run-id> --log-failed`
 - file/update a single `ergo` blocker summarizing channel asymmetry and recovery plan
+  - preferred:
+  - `bash skills/plasmite-release-manager/scripts/file_release_blocker_with_evidence.sh --release-target <release_target> --check "Delivery verification" --title "Resolve partial publish incident" --summary "Release channels are asymmetric after failed workflow." --run-id <run-id> --agent <model@host>`
 - do not re-tag; continue with corrective commits and a follow-up patch release target

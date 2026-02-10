@@ -13,6 +13,10 @@ mkdir -p "$ROOT/.scratch"
 WORKDIR="$(mktemp -d "$ROOT/.scratch/python-wheel-smoke.XXXXXX")"
 UV_CACHE_DIR="$WORKDIR/uv-cache"
 PIP_CACHE_DIR="$WORKDIR/pip-cache"
+HAS_RG=0
+if command -v rg >/dev/null 2>&1; then
+  HAS_RG=1
+fi
 
 build_env="$WORKDIR/build-env"
 install_env="$WORKDIR/install-env"
@@ -66,6 +70,16 @@ resolve_sdk_dir() {
 
 SDK_DIR="$(resolve_sdk_dir)"
 
+wheel_has_member() {
+  local wheel="$1"
+  local pattern="$2"
+  if [[ "$HAS_RG" -eq 1 ]]; then
+    python3 -m zipfile -l "$wheel" | rg -q "$pattern"
+  else
+    python3 -m zipfile -l "$wheel" | grep -Eq "$pattern"
+  fi
+}
+
 if command -v uv >/dev/null 2>&1; then
   uv venv "$build_env" --cache-dir "$UV_CACHE_DIR"
   # shellcheck disable=SC1091
@@ -99,8 +113,8 @@ if [[ -z "$wheel_file" ]]; then
   exit 1
 fi
 
-python3 -m zipfile -l "$wheel_file" | rg -q 'plasmite/_native/libplasmite\.(dylib|so)'
-python3 -m zipfile -l "$wheel_file" | rg -q 'plasmite/_native/plasmite'
+wheel_has_member "$wheel_file" 'plasmite/_native/libplasmite\.(dylib|so)'
+wheel_has_member "$wheel_file" 'plasmite/_native/plasmite'
 
 if command -v uv >/dev/null 2>&1; then
   uv venv "$install_env" --cache-dir "$UV_CACHE_DIR"

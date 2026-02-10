@@ -13,6 +13,22 @@ Run this only after all required QA gates pass and no blocker tasks remain.
   - `mode` (`dry-run` or `live`)
 - Version alignment passes:
   - `bash scripts/check-version-alignment.sh`
+- Evidence report exists and is current:
+  - `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --base-tag <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`
+
+## Resume Checklist (Required After Interruption)
+
+Run all of these before resuming any release mechanics:
+1. Verify local state:
+   - `git status --short --branch`
+   - `git tag --list "v*.*.*" --sort=-version:refname | head -n 5`
+2. Verify remote tag/workflow state:
+   - `git ls-remote --tags origin | rg "refs/tags/<release_target>$"`
+   - `gh run list --workflow release --limit 5`
+3. Verify blocker state:
+   - `ergo --json list --epics | jq -r '.[] | select(.title=="Release blockers: <release_target>") | .id'`
+   - `ergo --json list --epic <release-blocker-epic-id>`
+4. Update evidence report checkpoint fields before continuing.
 
 ## Runtime Access Requirements
 
@@ -26,14 +42,16 @@ Run this only after all required QA gates pass and no blocker tasks remain.
 
 1. Confirm version fields are aligned.
    - `bash scripts/check-version-alignment.sh`
-2. Run full required hygiene gates.
+2. Initialize or reopen release evidence report.
+   - `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --base-tag <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`
+3. Run full required hygiene gates.
    - `cargo fmt --all`
    - `cargo clippy --all-targets -- -D warnings`
    - `cargo test`
-3. Build and smoke release artifacts.
+4. Build and smoke release artifacts.
    - `bash scripts/package_release_sdk.sh`
    - `bash scripts/cross_artifact_smoke.sh`
-4. Verify release workflow configuration.
+5. Verify release workflow configuration.
    - `gh workflow list`
    - ensure release workflow exists and references expected targets.
    - verify publish jobs are gated by artifact jobs (`build-native`, `build-node-dist`, `build-python-dist`) via `needs` in `.github/workflows/release.yml`
@@ -50,6 +68,7 @@ Run this only after all required QA gates pass and no blocker tasks remain.
    - `gh run view "$run_id" --json status,conclusion,jobs --jq '{status,conclusion,jobs:[.jobs[]|{name,status,conclusion}]}'`
    - repeat poll until `status=completed`
    - require `conclusion=success` before proceeding to delivery verification
+   - write run ID and current status into the evidence report checkpoint
 4. Confirm GitHub release exists and artifacts are attached:
    - `gh release view vX.Y.Z`
    - `gh release verify-asset vX.Y.Z <artifact-name>` (if available in current gh version)
@@ -69,4 +88,6 @@ If any step fails:
    - `gh run view <run-id> --json url,jobs --jq '{url,jobs:[.jobs[]|select(.conclusion=="failure")|{name,url:.url}]}'`
    - `gh run view <run-id> --log-failed`
 3. File blocker task(s) via `scripts/file_release_blocker.sh` (at least one per distinct failure class).
+   - preferred for workflow failures:
+   - `bash skills/plasmite-release-manager/scripts/file_release_blocker_with_evidence.sh --release-target <release_target> --check "<gate>" --title "<title>" --summary "<summary>" --run-id <run-id> --failing-command "<command>" --agent <model@host>`
 4. Attach exact failing command/log lines and run URL in blocker summary.
