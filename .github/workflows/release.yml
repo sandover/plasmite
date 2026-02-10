@@ -79,7 +79,7 @@ jobs:
             echo "CARGO_REGISTRY_TOKEN not set; skipping crates.io publish."
             exit 0
           fi
-          cargo publish --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"
+          cargo publish --locked --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"
 
   build-python-dist:
     runs-on: ${{ matrix.os }}
@@ -164,6 +164,7 @@ jobs:
   publish-pypi:
     runs-on: ubuntu-latest
     needs: [build-python-dist]
+    environment: pypi
     permissions:
       id-token: write
     steps:
@@ -183,7 +184,7 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
-    needs: [build-native]
+    needs: [build-native, build-python-dist, build-node-dist, publish-pypi, publish-crates-io]
     steps:
       - uses: actions/download-artifact@v4
         with:
