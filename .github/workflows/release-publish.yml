@@ -175,8 +175,11 @@ jobs:
               preflight_fail "CARGO_REGISTRY_TOKEN not set for publish-preflight." "Set CARGO_REGISTRY_TOKEN, or re-run with skip_crates_io=true and allow_partial_release=true."
             fi
             crates_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: ${CARGO_REGISTRY_TOKEN}" https://crates.io/api/v1/me)"
-            if [[ "$crates_status" != "200" ]]; then
+            if [[ "$crates_status" == "401" ]]; then
               preflight_fail "crates.io authentication check failed with HTTP ${crates_status}." "Use a valid crates.io API token with publish rights and verify the token value is complete."
+            fi
+            if [[ "$crates_status" != "200" ]]; then
+              echo "warning: crates.io /me probe returned HTTP ${crates_status}; continuing to publish stage for final token validation." >&2
             fi
           fi
 
