@@ -33,11 +33,13 @@ Goal:
 Evidence commands:
 - `bash skills/plasmite-release-manager/scripts/check_release_tooling_contract.sh`
 - `rg -n "ripgrep|rg |publish-preflight|release-metadata|build_run_id|needs:" .github/workflows/release.yml .github/workflows/release-publish.yml`
+- `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <successful-release-run-id> --expect-tag <release_target>`
 
 Block if:
 - release script tooling requirements are neither guarded by script fallback nor provisioned in workflow
 - release-publish preflight diagnostics are missing actionable remediation for npm/PyPI/crates auth/policy failures
 - publish workflow can run release/publish jobs without validated build artifact provenance
+- release build metadata cannot be inspected or does not match `release_target`
 - the tooling contract check cannot run or returns non-zero
 
 ## 1) Dependency & Vulnerability Monitoring

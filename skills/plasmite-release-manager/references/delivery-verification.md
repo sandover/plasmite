@@ -7,6 +7,11 @@ Inputs:
 - `version` without `v` (for example `0.1.1`)
 - evidence report path (for example `.scratch/release/evidence-v0.1.1.md`)
 
+## Build Provenance
+
+Before verifying channels, confirm the publish run was sourced from a successful build run for the same tag:
+- `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <build-run-id> --expect-tag <release_target>`
+
 ## GitHub Release Artifacts
 
 - `gh release view vX.Y.Z`

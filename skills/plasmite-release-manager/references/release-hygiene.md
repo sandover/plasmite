@@ -33,6 +33,8 @@ Run all of these before resuming any release mechanics:
    - `git ls-remote --tags origin | rg "refs/tags/<release_target>$"`
    - `gh run list --workflow release --limit 5`
    - `gh run list --workflow release-publish --limit 5`
+   - for any candidate build rerun source:
+     - `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <build-run-id> --expect-tag <release_target>`
 3. Verify blocker state:
    - `ergo --json list --epics | jq -r '.[] | select(.title=="Release blockers: <release_target>") | .id'`
    - `ergo --json list --epic <release-blocker-epic-id>`
@@ -80,6 +82,8 @@ Run all of these before resuming any release mechanics:
    - require publish run `conclusion=success` before delivery verification
    - write both run IDs + status into the evidence report checkpoint
 4. Publish-only rerun after fixing credentials (no rebuild):
+   - validate candidate run provenance:
+   - `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <build-run-id> --expect-tag <release_target>`
    - `gh workflow run release-publish.yml -f build_run_id=<build-run-id> -f allow_partial_release=false`
    - for intentional channel bypass, set channel flag(s) and `allow_partial_release=true` in the same dispatch.
 5. Confirm GitHub release exists and artifacts are attached:
@@ -104,3 +108,16 @@ If any step fails:
    - preferred for workflow failures:
    - `bash skills/plasmite-release-manager/scripts/file_release_blocker_with_evidence.sh --release-target <release_target> --check "<gate>" --title "<title>" --summary "<summary>" --run-id <run-id> --failing-command "<command>" --agent <model@host>`
 4. Attach exact failing command/log lines and run URL in blocker summary.
+
+## High-Signal Failure Patterns
+
+- symptom: `release-publish` fails with run/workflow mismatch for `build_run_id`
+  - likely cause: provided run came from a workflow other than `release`
+  - immediate fix: choose a successful `release` run and validate with:
+    - `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <id> --expect-tag <release_target>`
+- symptom: `release-publish` preflight fails before any publish jobs
+  - likely cause: missing/invalid registry credentials or policy mismatch (npm OTP/2FA)
+  - immediate fix: follow preflight hint text, update secrets/policy, then run publish-only rerun
+- symptom: manual release build succeeds but version/tag artifacts are unexpected
+  - likely cause: dispatch target/tag mismatch
+  - immediate fix: confirm release workflow run metadata and artifact tag/version alignment before publish rerun

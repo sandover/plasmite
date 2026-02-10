@@ -1,6 +1,6 @@
 ---
 name: "plasmite-release-manager"
-description: "Carefully run Plasmite releases end-to-end with fail-closed pre-release QA, GitHub release mechanics, and post-release delivery verification across crates.io, npm, PyPI, Homebrew, and release artifacts. Use when asked to prepare, dry-run, execute, or audit a release."
+description: "Carefully run Plasmite releases end-to-end with fail-closed pre-release QA, split build/publish workflow mechanics, provenance validation, and post-release delivery verification across crates.io, npm, PyPI, Homebrew, and release artifacts. Use when asked to prepare, dry-run, execute, audit, or recover a release (including publish-only reruns after credential fixes)."
 ---
 
 # Plasmite Release Manager
@@ -15,6 +15,7 @@ Use this skill to run releases in a fail-closed way:
 - execute split release mechanics with `gh` (`release` build, then `release-publish`)
 - require publish preflight checks before any registry publish action
 - support publish-only reruns from a successful build run ID after credential fixes
+- verify build run provenance with `inspect_release_build_metadata.sh` before reruns
 - verify that published packages are actually live
 
 ## Inputs
@@ -74,6 +75,7 @@ If the run is interrupted (agent crash, user abort, runtime reset), do this befo
 3. Release only if zero blockers
    - Follow `references/release-hygiene.md`.
    - Use `gh` for split build/publish workflow handling and publish-only rerun dispatch when needed.
+   - For publish-only reruns, validate `build_run_id` provenance before dispatch.
 4. Verify delivery
    - Run checks from `references/delivery-verification.md`.
    - File blocker tasks for missing artifacts or version mismatches.
@@ -142,3 +144,5 @@ The wrapper enriches blocker summaries with run URL, failed job names, and optio
   - creates/reopens the release evidence artifact used for resumes and handoffs
 - `scripts/check_release_tooling_contract.sh`
   - enforces CI tooling compatibility for release scripts/workflow before tagging
+- `scripts/inspect_release_build_metadata.sh`
+  - validates release build run provenance and prints metadata for safe publish-only reruns
