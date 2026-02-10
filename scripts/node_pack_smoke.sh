@@ -21,10 +21,12 @@ fi
 archive_has_member() {
   local archive="$1"
   local pattern="$2"
+  local members
+  members="$(tar -tzf "$archive")"
   if [[ "$HAS_RG" -eq 1 ]]; then
-    tar -tzf "$archive" | rg -q "$pattern"
+    printf '%s\n' "$members" | rg -q "$pattern"
   else
-    tar -tzf "$archive" | grep -Eq "$pattern"
+    printf '%s\n' "$members" | grep -Eq "$pattern"
   fi
 }
 

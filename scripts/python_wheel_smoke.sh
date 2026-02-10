@@ -24,7 +24,39 @@ release_dir="$ROOT/target/release"
 
 resolve_sdk_dir() {
   if [[ -n "${PLASMITE_SDK_DIR:-}" ]]; then
-    echo "$PLASMITE_SDK_DIR"
+    local sdk_override="$PLASMITE_SDK_DIR"
+    # Accept either normalized SDK layout (bin/lib) or raw cargo release layout.
+    if [[ -d "$sdk_override/bin" && -d "$sdk_override/lib" ]]; then
+      echo "$sdk_override"
+      return
+    fi
+
+    local staged_sdk_override="$WORKDIR/sdk-from-env"
+    mkdir -p "$staged_sdk_override/bin" "$staged_sdk_override/lib"
+
+    if [[ -f "$sdk_override/plasmite" ]]; then
+      cp "$sdk_override/plasmite" "$staged_sdk_override/bin/plasmite"
+      chmod +x "$staged_sdk_override/bin/plasmite"
+    fi
+    if [[ -f "$sdk_override/libplasmite.dylib" ]]; then
+      cp "$sdk_override/libplasmite.dylib" "$staged_sdk_override/lib/libplasmite.dylib"
+    elif [[ -f "$sdk_override/libplasmite.so" ]]; then
+      cp "$sdk_override/libplasmite.so" "$staged_sdk_override/lib/libplasmite.so"
+    fi
+    if [[ -f "$sdk_override/libplasmite.a" ]]; then
+      cp "$sdk_override/libplasmite.a" "$staged_sdk_override/lib/libplasmite.a"
+    fi
+
+    if [[ ! -f "$staged_sdk_override/bin/plasmite" ]]; then
+      echo "error: PLASMITE_SDK_DIR is set but plasmite binary is missing at $sdk_override/plasmite" >&2
+      exit 1
+    fi
+    if [[ ! -f "$staged_sdk_override/lib/libplasmite.dylib" && ! -f "$staged_sdk_override/lib/libplasmite.so" ]]; then
+      echo "error: PLASMITE_SDK_DIR is set but shared library is missing under $sdk_override" >&2
+      exit 1
+    fi
+
+    echo "$staged_sdk_override"
     return
   fi
 
