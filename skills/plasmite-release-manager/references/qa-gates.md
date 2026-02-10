@@ -88,19 +88,17 @@ Block if:
 
 Evidence commands:
 - `git diff --name-only <base_tag>..HEAD`
-- `cargo build --release --example plasmite-bench`
-- `./target/release/examples/plasmite-bench --format json > .scratch/release/bench-current.json`
-
-Optional stronger comparison:
-- check out `<base_tag>` in a detached worktree and capture baseline with same host/settings
+- `bash skills/plasmite-release-manager/scripts/compare_local_benchmarks.sh --base-tag <base_tag> --runs 3`
 
 Comparison policy:
+- release-blocking performance decisions are local-only (same maintainer host, same power mode)
 - use same host and power mode for baseline/current
-- collect at least 3 runs per scenario and compare median `ms_per_msg`
+- collect at least 3 runs per scenario and compare median `ms_per_msg` (script does this)
 - ignore scenarios where both medians are below `0.0001 ms/msg` (timer quantization noise)
+- CI `perf-monitor` data is advisory and non-blocking; do not substitute it for local release gating
 
 Block if:
-- median regression >= 15% in core scenarios (append, multi_writer, get_scan) without approved explanation
+- local benchmark comparison reports median regression >= 15% in core scenarios (append, multi_writer, get_scan) without approved explanation
 - no trustworthy comparison could be produced
 
 ## 6) API/CLI Stability & Compatibility

@@ -12,6 +12,7 @@ Use this skill to run releases in a fail-closed way:
 - stop on any failed or incomplete gate
 - file blocker tasks in `ergo` under one release-blocker epic
 - maintain one machine-readable evidence report through the full run
+- run release-blocking performance comparisons locally on the maintainer host
 - execute split release mechanics with `gh` (`release` build, then `release-publish`)
 - require publish preflight checks before any registry publish action
 - require Homebrew tap formula alignment before any registry publish action
@@ -150,6 +151,8 @@ The wrapper enriches blocker summaries with run URL, failed job names, and optio
   - enforces CI tooling compatibility for release scripts/workflow before tagging
 - `scripts/inspect_release_build_metadata.sh`
   - validates release build run provenance and prints metadata for safe publish-only reruns
+- `scripts/compare_local_benchmarks.sh`
+  - runs same-host benchmark medians for `base_tag` vs current release candidate and fails on unapproved regressions
 - `scripts/verify_homebrew_formula_alignment.sh`
   - validates Homebrew formula version/urls/checksums against release artifacts
 - `scripts/update_homebrew_formula.sh`

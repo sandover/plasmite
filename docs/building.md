@@ -92,6 +92,14 @@ If publish fails due to registry credentials, rerun only publish without rebuild
 gh workflow run release-publish.yml -f build_run_id=<successful-release-build-run-id> -f rehearsal=false -f allow_partial_release=false
 ```
 
+## Performance monitoring policy
+
+- Release-blocking performance checks are local-only and run on the maintainer host with the same power/runtime conditions for baseline and candidate.
+- Use:
+  - `bash skills/plasmite-release-manager/scripts/compare_local_benchmarks.sh --base-tag <vX.Y.Z> --runs 3`
+- CI benchmark monitoring is advisory and non-blocking via `.github/workflows/perf-monitor.yml` (scheduled + manual runs, artifact capture only).
+- Multi-platform performance sweeps are optional and should be run when platform-sensitive code changes (I/O, mmap, locking, FFI/bindings), not required for every patch release.
+
 ## Linux arm64 policy
 
 - `aarch64-unknown-linux-gnu` is currently best-effort.

@@ -29,10 +29,13 @@ If this file and the skill ever disagree, follow the skill and then update this 
 
 ```mermaid
 flowchart TD
-    A["Prepare candidate on main"] --> B["Tag push (vX.Y.Z)"]
+    A["Prepare candidate on main"] --> A1["Local benchmark compare vs base tag (3-run medians, same host)"]
+    A1 --> A2{"Local perf gate passes?"}
+    A2 -- "No" --> X["Stop and file blocker"]
+    A2 -- "Yes" --> B["Tag push (vX.Y.Z)"]
     B --> C["release.yml build run"]
     C --> D{"Build succeeded?"}
-    D -- "No" --> X["Stop and file blocker"]
+    D -- "No" --> X
     D -- "Yes" --> E["Update + push homebrew-tap formula from build artifacts"]
     E --> F["release-publish rehearsal (rehearsal=true)"]
     F --> G{"Rehearsal succeeded?"}
@@ -43,6 +46,7 @@ flowchart TD
     I -- "Yes" --> J["Publish crates.io + npm + PyPI"]
     J --> K["Create GitHub release assets"]
     K --> L["Delivery verification (registries + Homebrew)"]
+    M["CI perf-monitor (scheduled/manual, advisory only)"] -. "non-blocking signal" .-> A1
 ```
 
 ## Human Decisions to Make Per Release
@@ -60,10 +64,12 @@ The skill handles mechanics, but maintainers still decide:
 2. Ask Codex to run the `plasmite-release-manager` skill in `dry-run`.
 3. Resolve all blocker tasks created by the dry-run.
 4. Push all local commits you intend to ship, then confirm release source SHA is fully on origin.
-5. Ask Codex to run the skill in `live` mode.
-6. Update and push `../homebrew-tap` formula for this target using build artifacts.
-7. Confirm post-release delivery verification is complete on all channels.
-8. If publish fails due to credentials/policy, run publish-only rerun with the successful build run ID:
+5. Run local benchmark comparison against the prior tag:
+   - `bash skills/plasmite-release-manager/scripts/compare_local_benchmarks.sh --base-tag <base_tag> --runs 3`
+6. Ask Codex to run the skill in `live` mode.
+7. Update and push `../homebrew-tap` formula for this target using build artifacts.
+8. Confirm post-release delivery verification is complete on all channels.
+9. If publish fails due to credentials/policy, run publish-only rerun with the successful build run ID:
    - `gh workflow run release-publish.yml -f build_run_id=<build-run-id> -f rehearsal=false -f allow_partial_release=false`
 
 ## Versioning Notes

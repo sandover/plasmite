@@ -65,7 +65,10 @@ Run all of these before resuming any release mechanics:
 4. Build and smoke release-related artifacts locally.
    - `just bindings-test`
    - `bash scripts/cross_artifact_smoke.sh`
-5. Verify release workflow configuration.
+5. Run local benchmark regression guard (same host, same power mode).
+   - `bash skills/plasmite-release-manager/scripts/compare_local_benchmarks.sh --base-tag <base_tag> --runs 3`
+   - block release if script exits non-zero or comparison evidence is missing
+6. Verify release workflow configuration.
    - `gh workflow list`
    - ensure both workflows exist: `release` (build artifacts) and `release-publish` (registry publish + GitHub release).
    - verify `release-publish` requires successful build-run artifact provenance before publish/release jobs execute.
