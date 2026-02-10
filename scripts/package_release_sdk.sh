@@ -19,6 +19,7 @@ version="$3"
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 release_dir="$root_dir/target/$target/release"
+mkdir -p "$root_dir/.scratch"
 
 if [[ ! -d "$release_dir" ]]; then
   echo "release directory not found: $release_dir" >&2
