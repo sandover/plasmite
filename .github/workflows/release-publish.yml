@@ -200,6 +200,7 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ needs.resolve-build-run.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           shasum -a 256 release-inputs/dist/*.tar.gz > release-inputs/dist/sha256sums.txt
