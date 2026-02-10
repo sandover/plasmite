@@ -9,13 +9,61 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SDK_DIR="${PLASMITE_SDK_DIR:-$ROOT/target/release}"
 WORKDIR="$(mktemp -d "$ROOT/.scratch/python-wheel-smoke.XXXXXX")"
 UV_CACHE_DIR="$WORKDIR/uv-cache"
 PIP_CACHE_DIR="$WORKDIR/pip-cache"
 
 build_env="$WORKDIR/build-env"
 install_env="$WORKDIR/install-env"
+release_dir="$ROOT/target/release"
+
+resolve_sdk_dir() {
+  if [[ -n "${PLASMITE_SDK_DIR:-}" ]]; then
+    echo "$PLASMITE_SDK_DIR"
+    return
+  fi
+
+  # Prefer an already-normalized SDK layout under target/release.
+  if [[ -d "$release_dir/bin" && -d "$release_dir/lib" ]]; then
+    echo "$release_dir"
+    return
+  fi
+
+  # Convert raw cargo release outputs into the SDK layout expected by setup.py.
+  local staged_sdk="$WORKDIR/sdk"
+  mkdir -p "$staged_sdk/bin" "$staged_sdk/lib"
+
+  if [[ -f "$release_dir/plasmite" ]]; then
+    cp "$release_dir/plasmite" "$staged_sdk/bin/plasmite"
+    chmod +x "$staged_sdk/bin/plasmite"
+  fi
+
+  if [[ -f "$release_dir/libplasmite.dylib" ]]; then
+    cp "$release_dir/libplasmite.dylib" "$staged_sdk/lib/libplasmite.dylib"
+  elif [[ -f "$release_dir/libplasmite.so" ]]; then
+    cp "$release_dir/libplasmite.so" "$staged_sdk/lib/libplasmite.so"
+  fi
+
+  if [[ -f "$release_dir/libplasmite.a" ]]; then
+    cp "$release_dir/libplasmite.a" "$staged_sdk/lib/libplasmite.a"
+  fi
+
+  if [[ ! -f "$staged_sdk/bin/plasmite" ]]; then
+    echo "error: release binary not found at $release_dir/plasmite" >&2
+    echo "hint: run 'cargo build --release' before python wheel smoke." >&2
+    exit 1
+  fi
+
+  if [[ ! -f "$staged_sdk/lib/libplasmite.dylib" && ! -f "$staged_sdk/lib/libplasmite.so" ]]; then
+    echo "error: release shared library not found under $release_dir" >&2
+    echo "hint: build release artifacts that produce libplasmite before python wheel smoke." >&2
+    exit 1
+  fi
+
+  echo "$staged_sdk"
+}
+
+SDK_DIR="$(resolve_sdk_dir)"
 
 if command -v uv >/dev/null 2>&1; then
   uv venv "$build_env" --cache-dir "$UV_CACHE_DIR"
