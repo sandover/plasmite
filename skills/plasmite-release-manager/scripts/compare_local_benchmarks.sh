@@ -81,6 +81,7 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 OUT_ROOT="$ROOT/.scratch/release/bench-compare-${BASE_TAG}-$(date +%Y%m%d-%H%M%S)"
 BASE_WORKTREE="$OUT_ROOT/base-worktree"
+TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 mkdir -p "$OUT_ROOT/base" "$OUT_ROOT/current"
 
 cleanup() {
@@ -109,9 +110,9 @@ run_suite() {
 
   (
     cd "$repo_dir"
-    cargo build --release --example plasmite-bench
+    CARGO_TARGET_DIR="$TARGET_DIR" cargo build --release --example plasmite-bench
     for run in $(seq 1 "$RUNS"); do
-      ./target/release/examples/plasmite-bench \
+      "$TARGET_DIR/release/examples/plasmite-bench" \
         --messages "$MESSAGES" \
         --format json > "$out_dir/${label}-run-${run}.json"
     done
@@ -126,8 +127,13 @@ git -C "$ROOT" worktree add --detach "$BASE_WORKTREE" "$BASE_TAG" >/dev/null
 run_suite "$BASE_WORKTREE" "base" "$OUT_ROOT/base"
 
 aggregate_medians() {
-  local pattern="$1"
-  local out_json="$2"
+  local out_json="$1"
+  shift
+
+  if [[ "$#" -eq 0 ]]; then
+    echo "error: no benchmark JSON files were provided for aggregation." >&2
+    return 1
+  fi
 
   jq -s '
     def median:
@@ -160,7 +166,7 @@ aggregate_medians() {
         median_ms_per_msg: (map(.ms) | median),
         samples: length
       })
-  ' "$pattern" > "$out_json"
+  ' "$@" > "$out_json"
 }
 
 BASE_MEDIANS_JSON="$OUT_ROOT/base-medians.json"
@@ -168,8 +174,20 @@ CURRENT_MEDIANS_JSON="$OUT_ROOT/current-medians.json"
 SUMMARY_JSON="$OUT_ROOT/summary.json"
 SUMMARY_MD="$OUT_ROOT/summary.md"
 
-aggregate_medians "$OUT_ROOT/base/base-run-"*.json "$BASE_MEDIANS_JSON"
-aggregate_medians "$OUT_ROOT/current/current-run-"*.json "$CURRENT_MEDIANS_JSON"
+base_inputs=( "$OUT_ROOT"/base/base-run-*.json )
+current_inputs=( "$OUT_ROOT"/current/current-run-*.json )
+
+if [[ "${base_inputs[0]:-}" == "$OUT_ROOT/base/base-run-*.json" ]]; then
+  echo "error: base benchmark runs not found under $OUT_ROOT/base" >&2
+  exit 1
+fi
+if [[ "${current_inputs[0]:-}" == "$OUT_ROOT/current/current-run-*.json" ]]; then
+  echo "error: current benchmark runs not found under $OUT_ROOT/current" >&2
+  exit 1
+fi
+
+aggregate_medians "$BASE_MEDIANS_JSON" "${base_inputs[@]}"
+aggregate_medians "$CURRENT_MEDIANS_JSON" "${current_inputs[@]}"
 
 ENV_BASE_TAG="$BASE_TAG" \
 ENV_RUNS="$RUNS" \
