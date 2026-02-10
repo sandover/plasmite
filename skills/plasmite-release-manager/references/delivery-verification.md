@@ -32,16 +32,16 @@ Before verifying channels, confirm the publish run was sourced from a successful
 
 ## PyPI
 
-- `python3 -m pip index versions plasmite`
-- or `curl -sS https://pypi.org/pypi/plasmite/json | jq -r '.info.version'`
+- `curl -sS https://pypi.org/pypi/plasmite/json | jq -r '.info.version'`
 - verify current published version equals `X.Y.Z`
 
-## Homebrew Tap (if updated for this release)
+## Homebrew Tap (required)
 
-- confirm formula/tag update location and version fields:
-  - `rg -n "version|sha256|url" homebrew/plasmite.rb`
-- optional remote check:
-  - verify tap update commit/tag is present for this release
+- confirm published tap formula resolves to this release version:
+  - `gh api repos/sandover/homebrew-tap/contents/Formula/plasmite.rb -H "Accept: application/vnd.github.raw" | rg -n 'version|plasmite_[0-9.]+_(darwin_amd64|darwin_arm64|linux_amd64)|sha256'`
+- verify formula checksums/urls match release artifacts:
+  - `gh release download vX.Y.Z --pattern 'sha256sums.txt' --dir .scratch/release`
+  - `bash scripts/verify_homebrew_formula_alignment.sh --version X.Y.Z --sha256sums .scratch/release/sha256sums.txt`
 
 ## Licensing and Notices
 
@@ -70,6 +70,7 @@ File blocker task immediately if:
 - package installs but fails basic smoke (`--version` or minimal operation)
 - release artifact missing required SDK contents
 - release is partially published (one or more channels live while others failed)
+- Homebrew formula lags or mismatches this release version/checksums
 
 ## Partial Publish Incident Handling
 

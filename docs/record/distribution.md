@@ -20,7 +20,7 @@ Non-goals for now:
 
 | Channel | Install Command | Provides CLI | Provides Library | Notes |
 | --- | --- | --- | --- | --- |
-| Homebrew (macOS) | `brew install sandover/tap/plasmite` | Yes | Yes (system SDK) | Installs `bin/`, `lib/`, `include/`, `pkg-config` metadata. |
+| Homebrew (macOS and Linux) | `brew install sandover/tap/plasmite` | Yes | Yes (system SDK) | Installs `bin/`, `lib/`, `include/`, `pkg-config` metadata. |
 | crates.io (Rust) | `cargo install plasmite` | Yes | No | Installs binaries into Cargo bin dir. |
 | crates.io (Rust) | `cargo add plasmite` | No | Yes (Rust crate) | Standard Rust dependency. |
 | PyPI (Python) | `uv tool install plasmite` | Yes | Yes (Python bindings) | Wheel bundles native assets and CLI on supported targets. |

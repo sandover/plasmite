@@ -5,6 +5,7 @@ Run this only after all required QA gates pass and no blocker tasks remain.
 ## Preconditions
 
 - Working tree clean for release intent.
+- Release source is fully pushed (no `git status --short --branch` `ahead N` state).
 - `gh auth status` is healthy.
 - `ergo --json list --epic <release-blocker-epic-id>` has no non-done blocker tasks.
 - Required publish credentials are present in GitHub repo secrets:
@@ -20,6 +21,8 @@ Run this only after all required QA gates pass and no blocker tasks remain.
   - npm account/token can publish package name `plasmite`.
 - Version alignment passes:
   - `bash scripts/check-version-alignment.sh`
+- Homebrew tap path is known and writable (default sibling checkout):
+  - `../homebrew-tap`
 - Evidence report exists and is current:
   - `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --base-tag <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`
 
@@ -52,19 +55,21 @@ Run all of these before resuming any release mechanics:
 
 1. Confirm version fields are aligned.
    - `bash scripts/check-version-alignment.sh`
+   - `git status --short --branch` (must not show local commits ahead of origin)
 2. Initialize or reopen release evidence report.
    - `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --base-tag <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`
 3. Run full required hygiene gates.
    - `cargo fmt --all`
    - `cargo clippy --all-targets -- -D warnings`
    - `cargo test`
-4. Build and smoke release artifacts.
-   - `bash scripts/package_release_sdk.sh`
+4. Build and smoke release-related artifacts locally.
+   - `just bindings-test`
    - `bash scripts/cross_artifact_smoke.sh`
 5. Verify release workflow configuration.
    - `gh workflow list`
    - ensure both workflows exist: `release` (build artifacts) and `release-publish` (registry publish + GitHub release).
    - verify `release-publish` requires successful build-run artifact provenance before publish/release jobs execute.
+   - verify `release-publish` requires successful Homebrew tap alignment before publish jobs execute.
    - block release if publish/release can run without downloaded `release-metadata` from a successful `release` run.
 
 ## Tag + Release (Live Mode)
@@ -73,20 +78,30 @@ Run all of these before resuming any release mechanics:
    - `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
 2. Push tag:
    - `git push origin vX.Y.Z`
-3. Track build workflow first, then publish workflow:
+3. Track build workflow first:
    - `build_run_id=$(gh run list --workflow release --limit 1 --json databaseId,event,status,conclusion --jq '.[] | select(.event=="push") | .databaseId' | head -n1)`
    - `gh run view "$build_run_id" --json status,conclusion,jobs --jq '{status,conclusion,jobs:[.jobs[]|{name,status,conclusion}]}'`
-   - require build run `conclusion=success` before publish stage
+   - require build run `conclusion=success` before any publish stage
+4. Align Homebrew tap before final publish:
+   - `bash scripts/update_homebrew_formula.sh <release_target> ../homebrew-tap --build-run-id <build-run-id>`
+   - `cd ../homebrew-tap && git add Formula/plasmite.rb && git commit -m "plasmite: update to <X.Y.Z>" && git push`
+5. Rehearse publish workflow (recommended after workflow changes):
+   - `gh workflow run release-publish.yml -f build_run_id=<build-run-id> -f rehearsal=true`
+   - `rehearsal_run_id=$(gh run list --workflow release-publish --limit 1 --json databaseId,event --jq '.[0].databaseId')`
+   - `gh run view "$rehearsal_run_id" --json status,conclusion,jobs --jq '{status,conclusion,jobs:[.jobs[]|{name,status,conclusion}]}'`
+   - require rehearsal `conclusion=success` before live publish
+6. Dispatch live publish workflow:
+   - `gh workflow run release-publish.yml -f build_run_id=<build-run-id> -f rehearsal=false -f allow_partial_release=false`
    - `publish_run_id=$(gh run list --workflow release-publish --limit 1 --json databaseId,event,status,conclusion --jq '.[0].databaseId')`
    - `gh run view "$publish_run_id" --json status,conclusion,jobs --jq '{status,conclusion,jobs:[.jobs[]|{name,status,conclusion}]}'`
    - require publish run `conclusion=success` before delivery verification
-   - write both run IDs + status into the evidence report checkpoint
-4. Publish-only rerun after fixing credentials (no rebuild):
+   - write build/rehearsal/publish run IDs + status into evidence report checkpoint
+7. Publish-only rerun after fixing credentials (no rebuild):
    - validate candidate run provenance:
    - `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <build-run-id> --expect-tag <release_target>`
-   - `gh workflow run release-publish.yml -f build_run_id=<build-run-id> -f allow_partial_release=false`
+   - `gh workflow run release-publish.yml -f build_run_id=<build-run-id> -f rehearsal=false -f allow_partial_release=false`
    - for intentional channel bypass, set channel flag(s) and `allow_partial_release=true` in the same dispatch.
-5. Confirm GitHub release exists and artifacts are attached:
+8. Confirm GitHub release exists and artifacts are attached:
    - `gh release view vX.Y.Z`
    - `gh release verify-asset vX.Y.Z <artifact-name>` (if available in current gh version)
 
@@ -118,6 +133,9 @@ If any step fails:
 - symptom: `release-publish` preflight fails before any publish jobs
   - likely cause: missing/invalid registry credentials or policy mismatch (npm OTP/2FA)
   - immediate fix: follow preflight hint text, update secrets/policy, then run publish-only rerun
+- symptom: `verify-homebrew-tap` fails
+  - likely cause: tap formula version/sha/url is stale for the target tag
+  - immediate fix: run `scripts/update_homebrew_formula.sh <release_target> ../homebrew-tap --build-run-id <build-run-id>`, push tap commit, then rerun `release-publish`
 - symptom: manual release build succeeds but version/tag artifacts are unexpected
   - likely cause: dispatch target/tag mismatch
   - immediate fix: confirm release workflow run metadata and artifact tag/version alignment before publish rerun

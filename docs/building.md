@@ -48,6 +48,13 @@ just ci
 Packaging smoke (npm pack + wheel install) is covered in CI pull requests by
 the `dist-smoke` job in `.github/workflows/ci.yml`.
 
+## Python tooling policy
+
+Use `uv` for Python environment and package operations in this project.
+
+- Use `uv venv`, `uv pip`, and `uv tool` for local and CI automation.
+- Do not add direct `pip`-based commands to docs or release runbooks.
+
 ## Release artifact matrix
 
 `.github/workflows/release.yml` (build stage) builds and packages binaries for:
@@ -71,10 +78,18 @@ lib/pkgconfig/plasmite.pc
 
 `.github/workflows/release-publish.yml` (publish stage) consumes a successful build run's artifacts, runs registry preflight checks, publishes crates/npm/PyPI, and then creates/updates the GitHub release with SDK tarballs + `sha256sums.txt`.
 
+Before any registry publish steps run, `release-publish.yml` now also verifies Homebrew tap alignment (version + URLs + checksums). If tap alignment is stale, publish fails closed before crates/npm/PyPI.
+
+For low-risk workflow validation after release workflow changes, run a no-publish rehearsal:
+
+```bash
+gh workflow run release-publish.yml -f build_run_id=<successful-release-build-run-id> -f rehearsal=true
+```
+
 If publish fails due to registry credentials, rerun only publish without rebuilding matrix artifacts:
 
 ```bash
-gh workflow run release-publish.yml -f build_run_id=<successful-release-build-run-id> -f allow_partial_release=false
+gh workflow run release-publish.yml -f build_run_id=<successful-release-build-run-id> -f rehearsal=false -f allow_partial_release=false
 ```
 
 ## Linux arm64 policy

@@ -14,8 +14,10 @@ Use this skill to run releases in a fail-closed way:
 - maintain one machine-readable evidence report through the full run
 - execute split release mechanics with `gh` (`release` build, then `release-publish`)
 - require publish preflight checks before any registry publish action
+- require Homebrew tap formula alignment before any registry publish action
 - support publish-only reruns from a successful build run ID after credential fixes
 - verify build run provenance with `inspect_release_build_metadata.sh` before reruns
+- support safe publish workflow rehearsals (`release-publish` with `rehearsal=true`)
 - verify that published packages are actually live
 
 ## Inputs
@@ -67,6 +69,7 @@ If the run is interrupted (agent crash, user abort, runtime reset), do this befo
 1. Capture release context
    - Confirm explicit `release_target`, `base_tag`, and `mode` from maintainer input.
    - Verify `release_target` uses `vX.Y.Z` tag format and `base_tag` exists remotely.
+   - Verify local release source is fully pushed (no local-only commits left behind).
    - Ensure `gh auth status` and `ergo where` are healthy.
    - Initialize/reopen evidence report with `scripts/init_release_evidence.sh`.
 2. Run pre-release QA
@@ -75,6 +78,7 @@ If the run is interrupted (agent crash, user abort, runtime reset), do this befo
 3. Release only if zero blockers
    - Follow `references/release-hygiene.md`.
    - Use `gh` for split build/publish workflow handling and publish-only rerun dispatch when needed.
+   - Prefer one rehearsal dispatch (`rehearsal=true`) on the chosen build run ID before first live publish on newly changed workflow topology.
    - For publish-only reruns, validate `build_run_id` provenance before dispatch.
 4. Verify delivery
    - Run checks from `references/delivery-verification.md`.
@@ -146,3 +150,7 @@ The wrapper enriches blocker summaries with run URL, failed job names, and optio
   - enforces CI tooling compatibility for release scripts/workflow before tagging
 - `scripts/inspect_release_build_metadata.sh`
   - validates release build run provenance and prints metadata for safe publish-only reruns
+- `scripts/verify_homebrew_formula_alignment.sh`
+  - validates Homebrew formula version/urls/checksums against release artifacts
+- `scripts/update_homebrew_formula.sh`
+  - updates sibling homebrew-tap formula from release checksums or release build run artifacts

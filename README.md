@@ -126,7 +126,7 @@ See the [remote protocol spec](spec/remote/v0/SPEC.md) for the full HTTP/JSON AP
 | Rust crate (CLI) | `cargo install plasmite` | Yes | No | Installs `plasmite` + `pls`. |
 | Rust crate (lib) | `cargo add plasmite` | No | Rust API | Use in Rust apps. |
 | Python | `uv tool install plasmite` | Yes | Python bindings | Wheel bundles native assets on supported targets. |
-| Python (project dep) | `uv pip install plasmite` | Optional | Python bindings | Use from existing env/project. |
+| Python (project dep) | `uv add plasmite` | Optional | Python bindings | Use from existing uv-managed project. |
 | Node | `npm i -g plasmite` | Optional | Node bindings | Bundles addon + native assets. |
 | Go | `go get github.com/sandover/plasmite/bindings/go/plasmite` | No | Go bindings | Requires system SDK (`brew install ...` first). |
 | Release tarball | Download from [releases](https://github.com/sandover/plasmite/releases) | Yes | Yes (SDK layout) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |

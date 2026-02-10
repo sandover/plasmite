@@ -39,6 +39,7 @@ Block if:
 - release script tooling requirements are neither guarded by script fallback nor provisioned in workflow
 - release-publish preflight diagnostics are missing actionable remediation for npm/PyPI/crates auth/policy failures
 - publish workflow can run release/publish jobs without validated build artifact provenance
+- publish workflow can run registry publish jobs without verified Homebrew formula alignment
 - release build metadata cannot be inspected or does not match `release_target`
 - the tooling contract check cannot run or returns non-zero
 
@@ -47,7 +48,7 @@ Block if:
 Evidence commands:
 - `cargo audit --db .scratch/advisory-db --no-fetch --ignore yanked` (or `just audit` if available)
 - `cd bindings/node && npm audit --omit=dev`
-- `cd bindings/python && python3 -m pip list --format=json` (record dependency snapshot)
+- `cd bindings/python && uv pip list --format=json` (record dependency snapshot)
 - `cd bindings/go && go list -m -u all`
 
 Block if:
@@ -120,7 +121,7 @@ Block if:
 ## 7) Documentation Alignment (Docs Match Reality)
 
 Evidence commands:
-- `rg -n "install|quickstart|example|version|release|npm|pip|uv|brew|go get" README.md docs bindings`
+- `rg -n "install|quickstart|example|version|release|npm|uv|brew|go get" README.md docs bindings`
 - run representative quickstart snippets where feasible
 
 Block if:

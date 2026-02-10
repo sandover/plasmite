@@ -26,6 +26,10 @@ on:
         description: "Allow final GitHub release when one or more publish channels are skipped."
         type: boolean
         default: false
+      rehearsal:
+        description: "Run full preflight/provenance/tap checks without publishing to registries or GitHub Releases."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -42,6 +46,7 @@ jobs:
       skip_npm: ${{ steps.resolve.outputs.skip_npm }}
       skip_pypi: ${{ steps.resolve.outputs.skip_pypi }}
       skip_crates_io: ${{ steps.resolve.outputs.skip_crates_io }}
+      rehearsal: ${{ steps.resolve.outputs.rehearsal }}
     steps:
       - id: resolve
         shell: bash
@@ -59,11 +64,13 @@ jobs:
             skip_npm="false"
             skip_pypi="false"
             skip_crates_io="false"
+            rehearsal="false"
           else
             build_run_id="${{ inputs.build_run_id }}"
             skip_npm="${{ inputs.skip_npm }}"
             skip_pypi="${{ inputs.skip_pypi }}"
             skip_crates_io="${{ inputs.skip_crates_io }}"
+            rehearsal="${{ inputs.rehearsal }}"
             if [[ "${{ inputs.allow_partial_release }}" != "true" ]] && \
                ([[ "$skip_npm" == "true" ]] || [[ "$skip_pypi" == "true" ]] || [[ "$skip_crates_io" == "true" ]]); then
               echo "error: partial publish requested but allow_partial_release is false." >&2
@@ -109,6 +116,7 @@ jobs:
           echo "skip_npm=$skip_npm" >> "$GITHUB_OUTPUT"
           echo "skip_pypi=$skip_pypi" >> "$GITHUB_OUTPUT"
           echo "skip_crates_io=$skip_crates_io" >> "$GITHUB_OUTPUT"
+          echo "rehearsal=$rehearsal" >> "$GITHUB_OUTPUT"
 
   publish-preflight:
     runs-on: ubuntu-latest
@@ -172,6 +180,28 @@ jobs:
           fi
 
           echo "publish-preflight: all enabled registry checks passed."
+
+  verify-homebrew-tap:
+    runs-on: ubuntu-latest
+    needs: [resolve-build-run, collect-build-artifacts]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-build-run.outputs.tag }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-inputs
+          path: release-inputs
+      - name: Verify Homebrew tap alignment
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve-build-run.outputs.version }}
+        run: |
+          set -euo pipefail
+          shasum -a 256 release-inputs/dist/*.tar.gz > release-inputs/dist/sha256sums.txt
+          ./scripts/verify_homebrew_formula_alignment.sh \
+            --version "$VERSION" \
+            --sha256sums release-inputs/dist/sha256sums.txt
 
   collect-build-artifacts:
     runs-on: ubuntu-latest
@@ -244,7 +274,7 @@ jobs:
 
   publish-crates-io:
     runs-on: ubuntu-latest
-    needs: [resolve-build-run, publish-preflight, collect-build-artifacts]
+    needs: [resolve-build-run, publish-preflight, collect-build-artifacts, verify-homebrew-tap]
     steps:
       - uses: actions/checkout@v4
         if: needs.resolve-build-run.outputs.skip_crates_io != 'true'
@@ -255,8 +285,11 @@ jobs:
       - name: Check crates.io channel policy
         if: needs.resolve-build-run.outputs.skip_crates_io == 'true'
         run: 'echo "publish-crates-io bypassed: skip_crates_io=true"'
+      - name: Rehearsal mode
+        if: needs.resolve-build-run.outputs.skip_crates_io != 'true' && needs.resolve-build-run.outputs.rehearsal == 'true'
+        run: 'echo "publish-crates-io rehearsal: skipping cargo publish."'
       - name: Publish to crates.io
-        if: needs.resolve-build-run.outputs.skip_crates_io != 'true'
+        if: needs.resolve-build-run.outputs.skip_crates_io != 'true' && needs.resolve-build-run.outputs.rehearsal != 'true'
         shell: bash
         run: |
           if [ -z "${{ secrets.CARGO_REGISTRY_TOKEN }}" ]; then
@@ -267,7 +300,7 @@ jobs:
 
   publish-npm:
     runs-on: ubuntu-latest
-    needs: [resolve-build-run, publish-preflight, collect-build-artifacts]
+    needs: [resolve-build-run, publish-preflight, collect-build-artifacts, verify-homebrew-tap]
     steps:
       - uses: actions/download-artifact@v4
         if: needs.resolve-build-run.outputs.skip_npm != 'true'
@@ -282,8 +315,11 @@ jobs:
       - name: Check npm channel policy
         if: needs.resolve-build-run.outputs.skip_npm == 'true'
         run: 'echo "publish-npm bypassed: skip_npm=true"'
+      - name: Rehearsal mode
+        if: needs.resolve-build-run.outputs.skip_npm != 'true' && needs.resolve-build-run.outputs.rehearsal == 'true'
+        run: 'echo "publish-npm rehearsal: skipping npm publish."'
       - name: Publish to npm
-        if: needs.resolve-build-run.outputs.skip_npm != 'true'
+        if: needs.resolve-build-run.outputs.skip_npm != 'true' && needs.resolve-build-run.outputs.rehearsal != 'true'
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -300,7 +336,7 @@ jobs:
 
   publish-pypi:
     runs-on: ubuntu-latest
-    needs: [resolve-build-run, publish-preflight, collect-build-artifacts]
+    needs: [resolve-build-run, publish-preflight, collect-build-artifacts, verify-homebrew-tap]
     steps:
       - uses: actions/download-artifact@v4
         if: needs.resolve-build-run.outputs.skip_pypi != 'true'
@@ -310,8 +346,11 @@ jobs:
       - name: Check PyPI channel policy
         if: needs.resolve-build-run.outputs.skip_pypi == 'true'
         run: 'echo "publish-pypi bypassed: skip_pypi=true"'
+      - name: Rehearsal mode
+        if: needs.resolve-build-run.outputs.skip_pypi != 'true' && needs.resolve-build-run.outputs.rehearsal == 'true'
+        run: 'echo "publish-pypi rehearsal: skipping PyPI publish."'
       - name: Check PyPI token
-        if: needs.resolve-build-run.outputs.skip_pypi != 'true'
+        if: needs.resolve-build-run.outputs.skip_pypi != 'true' && needs.resolve-build-run.outputs.rehearsal != 'true'
         shell: bash
         run: |
           if [ -z "${{ secrets.PYPI_API_TOKEN }}" ]; then
@@ -319,7 +358,7 @@ jobs:
             exit 1
           fi
       - uses: pypa/gh-action-pypi-publish@release/v1
-        if: needs.resolve-build-run.outputs.skip_pypi != 'true'
+        if: needs.resolve-build-run.outputs.skip_pypi != 'true' && needs.resolve-build-run.outputs.rehearsal != 'true'
         with:
           user: __token__
           password: ${{ secrets.PYPI_API_TOKEN }}
@@ -329,7 +368,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     # Final release is gated by artifact provenance and all publish channels (or explicit bypasses).
-    needs: [resolve-build-run, publish-preflight, collect-build-artifacts, publish-pypi, publish-crates-io, publish-npm]
+    needs: [resolve-build-run, publish-preflight, collect-build-artifacts, verify-homebrew-tap, publish-pypi, publish-crates-io, publish-npm]
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -342,7 +381,11 @@ jobs:
           cd release-inputs/dist
           shasum -a 256 *.tar.gz > sha256sums.txt
           cat sha256sums.txt
+      - name: Rehearsal mode
+        if: needs.resolve-build-run.outputs.rehearsal == 'true'
+        run: 'echo "release rehearsal: skipping GitHub release publish."'
       - uses: softprops/action-gh-release@v2
+        if: needs.resolve-build-run.outputs.rehearsal != 'true'
         with:
           tag_name: ${{ needs.resolve-build-run.outputs.tag }}
           files: |

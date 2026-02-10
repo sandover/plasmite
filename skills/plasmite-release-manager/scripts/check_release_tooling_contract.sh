@@ -13,6 +13,7 @@ workflow_publish_file=".github/workflows/release-publish.yml"
 sdk_helper_file="scripts/normalize_sdk_layout.sh"
 node_smoke_file="scripts/node_pack_smoke.sh"
 python_smoke_file="scripts/python_wheel_smoke.sh"
+brew_verify_file="scripts/verify_homebrew_formula_alignment.sh"
 
 release_scripts=(
   "$node_smoke_file"
@@ -31,6 +32,10 @@ if [[ ! -f "$workflow_publish_file" ]]; then
 fi
 if [[ ! -f "$sdk_helper_file" ]]; then
   echo "error: missing shared SDK helper: $sdk_helper_file" >&2
+  exit 2
+fi
+if [[ ! -f "$brew_verify_file" ]]; then
+  echo "error: missing Homebrew alignment checker: $brew_verify_file" >&2
   exit 2
 fi
 
@@ -88,6 +93,10 @@ if ! grep -Eq "build_run_id:" "$workflow_publish_file"; then
   echo "error: release-publish workflow_dispatch must require build_run_id input." >&2
   exit 1
 fi
+if ! grep -Eq "rehearsal:" "$workflow_publish_file"; then
+  echo "error: release-publish workflow_dispatch must support rehearsal mode." >&2
+  exit 1
+fi
 if ! grep -Eq "github\\.event_name != 'workflow_run' \\|\\| github\\.event\\.workflow_run\\.conclusion == 'success'" "$workflow_publish_file"; then
   echo "error: release-publish must skip workflow_run invocations when source release build failed." >&2
   exit 1
@@ -126,9 +135,28 @@ if ! grep -Eq "workflowName.*release|belongs to workflow .*release" "$workflow_p
   echo "error: release-publish must verify build_run_id belongs to release build workflow." >&2
   exit 1
 fi
+if ! grep -Eq "verify-homebrew-tap:" "$workflow_publish_file"; then
+  echo "error: release-publish must include verify-homebrew-tap job." >&2
+  exit 1
+fi
+if ! grep -Eq "verify_homebrew_formula_alignment\\.sh" "$workflow_publish_file"; then
+  echo "error: release-publish must verify Homebrew formula alignment before publish." >&2
+  exit 1
+fi
 
-if ! grep -Eq "needs: \\[resolve-build-run, publish-preflight, collect-build-artifacts, publish-pypi, publish-crates-io, publish-npm\\]" "$workflow_publish_file"; then
-  echo "error: final release job must remain fail-closed on preflight, provenance, and publish jobs." >&2
+if ! grep -Eq "needs: \\[resolve-build-run, publish-preflight, collect-build-artifacts, verify-homebrew-tap, publish-pypi, publish-crates-io, publish-npm\\]" "$workflow_publish_file"; then
+  echo "error: final release job must remain fail-closed on preflight, provenance, Homebrew alignment, and publish jobs." >&2
+  exit 1
+fi
+
+publish_needs_count="$(grep -Fc "needs: [resolve-build-run, publish-preflight, collect-build-artifacts, verify-homebrew-tap]" "$workflow_publish_file")"
+if [[ "$publish_needs_count" -lt 3 ]]; then
+  echo "error: publish jobs must depend on verify-homebrew-tap." >&2
+  exit 1
+fi
+
+if ! grep -Eq "rehearsal == 'true'|rehearsal != 'true'" "$workflow_publish_file"; then
+  echo "error: release-publish must guard publish/release actions with rehearsal mode switches." >&2
   exit 1
 fi
 

@@ -9,16 +9,16 @@ Wheels are designed to bundle native assets under `plasmite/_native/`:
 - `libplasmite.(dylib|so)` for ctypes loading
 - `plasmite` CLI binary (invoked via Python console script entrypoint)
 
-### Using pip
-
-```bash
-pip install plasmite
-```
-
-### Using uv
+### Using uv (recommended)
 
 ```bash
 uv tool install plasmite
+```
+
+For project dependencies in a `uv`-managed workspace:
+
+```bash
+uv add plasmite
 ```
 
 Runtime load order is:
@@ -50,7 +50,9 @@ just bindings-python-test
 Equivalent manual commands (from `bindings/python`):
 
 ```bash
-PLASMITE_LIB_DIR="$(pwd)/../../target/debug" python -m pip install -e .
+uv venv
+source .venv/bin/activate
+PLASMITE_LIB_DIR="$(pwd)/../../target/debug" uv pip install -e .
 PLASMITE_LIB_DIR="$(pwd)/../../target/debug" PLASMITE_BIN="$(pwd)/../../target/debug/plasmite" python3 -m unittest discover -s tests
 ```
 

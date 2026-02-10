@@ -4,7 +4,7 @@
 # Role: CI/local guardrail for Python packaging install-time behavior.
 # Invariants: Uses a clean virtual environment for wheel install checks.
 # Invariants: Verifies import + bundled CLI execution from installed wheel.
-# Notes: Prefers uv for env/package management; falls back to pip when uv is unavailable.
+# Invariants: Requires uv for deterministic Python environment/package operations.
 
 set -euo pipefail
 
@@ -13,10 +13,15 @@ source "$ROOT/scripts/normalize_sdk_layout.sh"
 mkdir -p "$ROOT/.scratch"
 WORKDIR="$(mktemp -d "$ROOT/.scratch/python-wheel-smoke.XXXXXX")"
 UV_CACHE_DIR="$WORKDIR/uv-cache"
-PIP_CACHE_DIR="$WORKDIR/pip-cache"
 HAS_RG=0
 if command -v rg >/dev/null 2>&1; then
   HAS_RG=1
+fi
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "error: uv is required for python_wheel_smoke.sh." >&2
+  echo "hint: install uv and rerun (brew install uv)." >&2
+  exit 2
 fi
 
 build_env="$WORKDIR/build-env"
@@ -58,24 +63,13 @@ wheel_has_member() {
   fi
 }
 
-if command -v uv >/dev/null 2>&1; then
-  uv venv "$build_env" --cache-dir "$UV_CACHE_DIR"
-  # shellcheck disable=SC1091
-  source "$build_env/bin/activate"
-  if ! uv pip install --cache-dir "$UV_CACHE_DIR" build; then
-    echo "error: failed to install python build backend ('build') with uv."
-    echo "hint: ensure network access to package indexes (or preinstall build deps) before running python wheel smoke."
-    exit 2
-  fi
-else
-  python3 -m venv "$build_env"
-  # shellcheck disable=SC1091
-  source "$build_env/bin/activate"
-  if ! PIP_CACHE_DIR="$PIP_CACHE_DIR" python -m pip install build; then
-    echo "error: failed to install python build backend ('build') with pip."
-    echo "hint: ensure network access to package indexes (or preinstall build deps) before running python wheel smoke."
-    exit 2
-  fi
+uv venv "$build_env" --cache-dir "$UV_CACHE_DIR"
+# shellcheck disable=SC1091
+source "$build_env/bin/activate"
+if ! uv pip install --cache-dir "$UV_CACHE_DIR" build; then
+  echo "error: failed to install python build backend ('build') with uv."
+  echo "hint: ensure network access to package indexes (or preinstall build deps) before running python wheel smoke."
+  exit 2
 fi
 
 (
@@ -94,17 +88,10 @@ fi
 wheel_has_member "$wheel_file" 'plasmite/_native/libplasmite\.(dylib|so)'
 wheel_has_member "$wheel_file" 'plasmite/_native/plasmite'
 
-if command -v uv >/dev/null 2>&1; then
-  uv venv "$install_env" --cache-dir "$UV_CACHE_DIR"
-  # shellcheck disable=SC1091
-  source "$install_env/bin/activate"
-  uv pip install --cache-dir "$UV_CACHE_DIR" "$wheel_file"
-else
-  python3 -m venv "$install_env"
-  # shellcheck disable=SC1091
-  source "$install_env/bin/activate"
-  PIP_CACHE_DIR="$PIP_CACHE_DIR" python -m pip install "$wheel_file"
-fi
+uv venv "$install_env" --cache-dir "$UV_CACHE_DIR"
+# shellcheck disable=SC1091
+source "$install_env/bin/activate"
+uv pip install --cache-dir "$UV_CACHE_DIR" "$wheel_file"
 
 unset PLASMITE_LIB_DIR DYLD_LIBRARY_PATH LD_LIBRARY_PATH
 python -c 'import plasmite; from plasmite import Client; print("python-wheel-import-ok")'
