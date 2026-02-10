@@ -646,6 +646,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         /* ---- Pool list ---- */
 
         function renderPoolList(pools, error) {
+          app.classList.remove("app--watch");
           var listRows = pools
             .slice()
             .sort(function (a, b) { return a.name.localeCompare(b.name); })
