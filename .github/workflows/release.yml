@@ -189,7 +189,7 @@ jobs:
             ls -la node-dist || true
             exit 1
           fi
-          npm publish "${files[0]}" --access public
+          npm publish "./${files[0]}" --access public
 
   publish-pypi:
     runs-on: ubuntu-latest

@@ -16,6 +16,11 @@ from pathlib import Path
 from setuptools import setup
 from setuptools.command.build_py import build_py
 
+try:
+    from setuptools.command.bdist_wheel import bdist_wheel
+except ImportError:  # pragma: no cover - fallback for older setuptools
+    from wheel.bdist_wheel import bdist_wheel
+
 
 class BuildPyWithNativeBundle(build_py):
     """Copy native artifacts into the package before wheel build."""
@@ -69,4 +74,12 @@ class BuildPyWithNativeBundle(build_py):
         ]
 
 
-setup(cmdclass={"build_py": BuildPyWithNativeBundle})
+class BdistWheelWithNativeBundle(bdist_wheel):
+    """Emit platform-tagged wheels because bundled assets are platform-specific."""
+
+    def finalize_options(self) -> None:
+        super().finalize_options()
+        self.root_is_pure = False
+
+
+setup(cmdclass={"build_py": BuildPyWithNativeBundle, "bdist_wheel": BdistWheelWithNativeBundle})
