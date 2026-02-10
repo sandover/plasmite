@@ -156,7 +156,8 @@ jobs:
               if grep -qi "EOTP\\|one-time pass\\|otp" <<<"$npm_err"; then
                 preflight_fail "npm token requires OTP interaction and is not CI-publish-ready." "Create/use an automation token with bypass-2FA publishing permissions."
               fi
-              preflight_fail "npm authentication check failed during publish-preflight." "Verify npm token scope and org/package publish permissions."
+              echo "warning: npm whoami failed during publish-preflight; continuing to publish stage for final token validation." >&2
+              echo "warning: npm whoami stderr: ${npm_err}" >&2
             fi
           fi
 
