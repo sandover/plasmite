@@ -76,8 +76,8 @@ jobs:
         shell: bash
         run: |
           if [ -z "${{ secrets.CARGO_REGISTRY_TOKEN }}" ]; then
-            echo "CARGO_REGISTRY_TOKEN not set; skipping crates.io publish."
-            exit 0
+            echo "CARGO_REGISTRY_TOKEN not set; cannot publish crates.io package."
+            exit 1
           fi
           cargo publish --locked --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"
 
@@ -161,12 +161,39 @@ jobs:
           path: bindings/node/plasmite-*.tgz
           if-no-files-found: error
 
+  publish-npm:
+    runs-on: ubuntu-latest
+    needs: [build-node-dist]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: node-dist
+          path: node-dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Publish to npm
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "NPM_TOKEN not set; cannot publish npm package."
+            exit 1
+          fi
+          shopt -s nullglob
+          files=(node-dist/plasmite-*.tgz)
+          if [ "${#files[@]}" -ne 1 ]; then
+            echo "expected one npm tarball, found ${#files[@]}"
+            ls -la node-dist || true
+            exit 1
+          fi
+          npm publish "${files[0]}" --access public
+
   publish-pypi:
     runs-on: ubuntu-latest
     needs: [build-python-dist]
-    environment: pypi
-    permissions:
-      id-token: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -177,14 +204,23 @@ jobs:
         with:
           name: py-sdist
           path: py-dist
+      - name: Check PyPI token
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.PYPI_API_TOKEN }}" ]; then
+            echo "PYPI_API_TOKEN not set; cannot publish PyPI package."
+            exit 1
+          fi
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
           packages-dir: py-dist
           skip-existing: true
 
   release:
     runs-on: ubuntu-latest
-    needs: [build-native, build-python-dist, build-node-dist, publish-pypi, publish-crates-io]
+    needs: [build-native, build-python-dist, build-node-dist, publish-pypi, publish-crates-io, publish-npm]
     steps:
       - uses: actions/download-artifact@v4
         with:

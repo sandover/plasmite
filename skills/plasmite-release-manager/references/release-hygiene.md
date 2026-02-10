@@ -7,10 +7,17 @@ Run this only after all required QA gates pass and no blocker tasks remain.
 - Working tree clean for release intent.
 - `gh auth status` is healthy.
 - `ergo --json list --epic <release-blocker-epic-id>` has no non-done blocker tasks.
+- Required publish credentials are present in GitHub repo secrets:
+  - `CARGO_REGISTRY_TOKEN`
+  - `PYPI_API_TOKEN`
+  - `NPM_TOKEN`
 - Explicit release context is confirmed with maintainer:
   - `release_target` (`vX.Y.Z`)
   - `base_tag` (existing prior tag)
   - `mode` (`dry-run` or `live`)
+- Registry ownership/bootstrap checks are complete:
+  - PyPI account exists and token can publish package name `plasmite` (first upload creates the project if available).
+  - npm account/token can publish package name `plasmite`.
 - Version alignment passes:
   - `bash scripts/check-version-alignment.sh`
 - Evidence report exists and is current:

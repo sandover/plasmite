@@ -131,6 +131,20 @@ See the [remote protocol spec](spec/remote/v0/SPEC.md) for the full HTTP/JSON AP
 | Go | `go get github.com/sandover/plasmite/bindings/go/plasmite` | No | Go bindings | Requires system SDK (`brew install ...` first). |
 | Release tarball | Download from [releases](https://github.com/sandover/plasmite/releases) | Yes | Yes (SDK layout) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |
 
+### Maintainer Registry Setup (One-Time)
+
+Release automation publishes to crates.io, PyPI, and npm. Configure these repo secrets in GitHub before tagging:
+
+- `CARGO_REGISTRY_TOKEN`: crates.io API token with publish rights for `plasmite`.
+- `PYPI_API_TOKEN`: PyPI API token for publishing `plasmite`.
+- `NPM_TOKEN`: npm automation token with publish rights for `plasmite`.
+
+Notes:
+- PyPI project bootstrap: you do not manually create a project first. The first successful upload creates `plasmite` (if the name is available).
+- PyPI CLI: use `twine` (for example `uvx twine upload dist/*`) when testing manual publish.
+- npm CLI: `npm publish` publishes either from a package directory or a `.tgz` built by `npm pack`.
+- Go has no separate package registry publish step in this repo; users consume the module directly from GitHub.
+
 ## Commands
 
 | Command | What it does |
