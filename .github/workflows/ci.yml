@@ -75,6 +75,39 @@ jobs:
           PLASMITE_SDK_DIR: ${{ github.workspace }}/target/${{ matrix.target }}/release
         run: ./scripts/python_wheel_smoke.sh
 
+  release-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v5
+      - run: cd bindings/node && npm ci
+      - name: Validate release workflow/script contracts
+        run: bash skills/plasmite-release-manager/scripts/check_release_tooling_contract.sh
+      - name: Build host release SDK inputs for contract smokes
+        shell: bash
+        run: |
+          cargo build --release --bins
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            cargo rustc --release --lib --crate-type=cdylib -- -C link-arg=-Wl,-install_name,@rpath/libplasmite.dylib
+          else
+            cargo rustc --release --lib --crate-type=cdylib -- -C link-arg=-Wl,-soname,libplasmite.so
+          fi
+      - name: Node smoke with release SDK contract path
+        env:
+          PLASMITE_SDK_DIR: ${{ github.workspace }}/target/release
+        run: bash scripts/node_pack_smoke.sh
+      - name: Python smoke with release SDK contract path
+        env:
+          PLASMITE_SDK_DIR: ${{ github.workspace }}/target/release
+        run: bash scripts/python_wheel_smoke.sh
+
   full:
     if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}

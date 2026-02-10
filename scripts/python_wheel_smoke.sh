@@ -9,6 +9,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/normalize_sdk_layout.sh"
 mkdir -p "$ROOT/.scratch"
 WORKDIR="$(mktemp -d "$ROOT/.scratch/python-wheel-smoke.XXXXXX")"
 UV_CACHE_DIR="$WORKDIR/uv-cache"
@@ -24,80 +25,23 @@ release_dir="$ROOT/target/release"
 
 resolve_sdk_dir() {
   if [[ -n "${PLASMITE_SDK_DIR:-}" ]]; then
-    local sdk_override="$PLASMITE_SDK_DIR"
-    # Accept either normalized SDK layout (bin/lib) or raw cargo release layout.
-    if [[ -d "$sdk_override/bin" && -d "$sdk_override/lib" ]]; then
-      echo "$sdk_override"
-      return
-    fi
-
-    local staged_sdk_override="$WORKDIR/sdk-from-env"
-    mkdir -p "$staged_sdk_override/bin" "$staged_sdk_override/lib"
-
-    if [[ -f "$sdk_override/plasmite" ]]; then
-      cp "$sdk_override/plasmite" "$staged_sdk_override/bin/plasmite"
-      chmod +x "$staged_sdk_override/bin/plasmite"
-    fi
-    if [[ -f "$sdk_override/libplasmite.dylib" ]]; then
-      cp "$sdk_override/libplasmite.dylib" "$staged_sdk_override/lib/libplasmite.dylib"
-    elif [[ -f "$sdk_override/libplasmite.so" ]]; then
-      cp "$sdk_override/libplasmite.so" "$staged_sdk_override/lib/libplasmite.so"
-    fi
-    if [[ -f "$sdk_override/libplasmite.a" ]]; then
-      cp "$sdk_override/libplasmite.a" "$staged_sdk_override/lib/libplasmite.a"
-    fi
-
-    if [[ ! -f "$staged_sdk_override/bin/plasmite" ]]; then
-      echo "error: PLASMITE_SDK_DIR is set but plasmite binary is missing at $sdk_override/plasmite" >&2
-      exit 1
-    fi
-    if [[ ! -f "$staged_sdk_override/lib/libplasmite.dylib" && ! -f "$staged_sdk_override/lib/libplasmite.so" ]]; then
-      echo "error: PLASMITE_SDK_DIR is set but shared library is missing under $sdk_override" >&2
-      exit 1
-    fi
-
-    echo "$staged_sdk_override"
-    return
+    plasmite_normalize_sdk_dir "$PLASMITE_SDK_DIR" "$WORKDIR/sdk-from-env" "PLASMITE_SDK_DIR"
+    return 0
   fi
 
-  # Prefer an already-normalized SDK layout under target/release.
-  if [[ -d "$release_dir/bin" && -d "$release_dir/lib" ]]; then
-    echo "$release_dir"
-    return
-  fi
-
-  # Convert raw cargo release outputs into the SDK layout expected by setup.py.
-  local staged_sdk="$WORKDIR/sdk"
-  mkdir -p "$staged_sdk/bin" "$staged_sdk/lib"
-
-  if [[ -f "$release_dir/plasmite" ]]; then
-    cp "$release_dir/plasmite" "$staged_sdk/bin/plasmite"
-    chmod +x "$staged_sdk/bin/plasmite"
-  fi
-
-  if [[ -f "$release_dir/libplasmite.dylib" ]]; then
-    cp "$release_dir/libplasmite.dylib" "$staged_sdk/lib/libplasmite.dylib"
-  elif [[ -f "$release_dir/libplasmite.so" ]]; then
-    cp "$release_dir/libplasmite.so" "$staged_sdk/lib/libplasmite.so"
-  fi
-
-  if [[ -f "$release_dir/libplasmite.a" ]]; then
-    cp "$release_dir/libplasmite.a" "$staged_sdk/lib/libplasmite.a"
-  fi
-
-  if [[ ! -f "$staged_sdk/bin/plasmite" ]]; then
-    echo "error: release binary not found at $release_dir/plasmite" >&2
+  if [[ ! -d "$release_dir" ]]; then
+    echo "error: release directory not found: $release_dir" >&2
     echo "hint: run 'cargo build --release' before python wheel smoke." >&2
     exit 1
   fi
 
-  if [[ ! -f "$staged_sdk/lib/libplasmite.dylib" && ! -f "$staged_sdk/lib/libplasmite.so" ]]; then
-    echo "error: release shared library not found under $release_dir" >&2
+  local normalized_release_sdk
+  if ! normalized_release_sdk="$(plasmite_normalize_sdk_dir "$release_dir" "$WORKDIR/sdk" "Python smoke release SDK")"; then
     echo "hint: build release artifacts that produce libplasmite before python wheel smoke." >&2
     exit 1
   fi
 
-  echo "$staged_sdk"
+  echo "$normalized_release_sdk"
 }
 
 SDK_DIR="$(resolve_sdk_dir)"
@@ -105,10 +49,12 @@ SDK_DIR="$(resolve_sdk_dir)"
 wheel_has_member() {
   local wheel="$1"
   local pattern="$2"
+  local members
+  members="$(python3 -m zipfile -l "$wheel")"
   if [[ "$HAS_RG" -eq 1 ]]; then
-    python3 -m zipfile -l "$wheel" | rg -q "$pattern"
+    rg -q "$pattern" <<<"$members"
   else
-    python3 -m zipfile -l "$wheel" | grep -Eq "$pattern"
+    grep -Eq "$pattern" <<<"$members"
   fi
 }
 

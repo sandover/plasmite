@@ -32,6 +32,7 @@ Run all of these before resuming any release mechanics:
 2. Verify remote tag/workflow state:
    - `git ls-remote --tags origin | rg "refs/tags/<release_target>$"`
    - `gh run list --workflow release --limit 5`
+   - `gh run list --workflow release-publish --limit 5`
 3. Verify blocker state:
    - `ergo --json list --epics | jq -r '.[] | select(.title=="Release blockers: <release_target>") | .id'`
    - `ergo --json list --epic <release-blocker-epic-id>`
@@ -60,9 +61,9 @@ Run all of these before resuming any release mechanics:
    - `bash scripts/cross_artifact_smoke.sh`
 5. Verify release workflow configuration.
    - `gh workflow list`
-   - ensure release workflow exists and references expected targets.
-   - verify publish jobs are gated by artifact jobs (`build-native`, `build-node-dist`, `build-python-dist`) via `needs` in `.github/workflows/release.yml`
-   - block release if any publish job can run before required artifact jobs succeed
+   - ensure both workflows exist: `release` (build artifacts) and `release-publish` (registry publish + GitHub release).
+   - verify `release-publish` requires successful build-run artifact provenance before publish/release jobs execute.
+   - block release if publish/release can run without downloaded `release-metadata` from a successful `release` run.
 
 ## Tag + Release (Live Mode)
 
@@ -70,13 +71,18 @@ Run all of these before resuming any release mechanics:
    - `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
 2. Push tag:
    - `git push origin vX.Y.Z`
-3. Track release workflow with concise polling (preferred over verbose streaming):
-   - `run_id=$(gh run list --workflow release --branch main --limit 1 --json databaseId,event,headBranch --jq '.[] | select(.event=="push" and .headBranch=="main") | .databaseId' | head -n1)`
-   - `gh run view "$run_id" --json status,conclusion,jobs --jq '{status,conclusion,jobs:[.jobs[]|{name,status,conclusion}]}'`
-   - repeat poll until `status=completed`
-   - require `conclusion=success` before proceeding to delivery verification
-   - write run ID and current status into the evidence report checkpoint
-4. Confirm GitHub release exists and artifacts are attached:
+3. Track build workflow first, then publish workflow:
+   - `build_run_id=$(gh run list --workflow release --limit 1 --json databaseId,event,status,conclusion --jq '.[] | select(.event=="push") | .databaseId' | head -n1)`
+   - `gh run view "$build_run_id" --json status,conclusion,jobs --jq '{status,conclusion,jobs:[.jobs[]|{name,status,conclusion}]}'`
+   - require build run `conclusion=success` before publish stage
+   - `publish_run_id=$(gh run list --workflow release-publish --limit 1 --json databaseId,event,status,conclusion --jq '.[0].databaseId')`
+   - `gh run view "$publish_run_id" --json status,conclusion,jobs --jq '{status,conclusion,jobs:[.jobs[]|{name,status,conclusion}]}'`
+   - require publish run `conclusion=success` before delivery verification
+   - write both run IDs + status into the evidence report checkpoint
+4. Publish-only rerun after fixing credentials (no rebuild):
+   - `gh workflow run release-publish.yml -f build_run_id=<build-run-id> -f allow_partial_release=false`
+   - for intentional channel bypass, set channel flag(s) and `allow_partial_release=true` in the same dispatch.
+5. Confirm GitHub release exists and artifacts are attached:
    - `gh release view vX.Y.Z`
    - `gh release verify-asset vX.Y.Z <artifact-name>` (if available in current gh version)
 

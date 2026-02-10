@@ -28,14 +28,16 @@ If runtime preflight fails, block release and file a blocker task before running
 ## 0) CI Tooling Compatibility Contract
 
 Goal:
-- prevent release workflow failures caused by runner tool mismatch (for example, scripts using `rg` when runners do not provide ripgrep)
+- prevent release workflow failures caused by tooling, contract, or topology drift.
 
 Evidence commands:
 - `bash skills/plasmite-release-manager/scripts/check_release_tooling_contract.sh`
-- `rg -n "ripgrep|rg " .github/workflows/release.yml`
+- `rg -n "ripgrep|rg |publish-preflight|release-metadata|build_run_id|needs:" .github/workflows/release.yml .github/workflows/release-publish.yml`
 
 Block if:
 - release script tooling requirements are neither guarded by script fallback nor provisioned in workflow
+- release-publish preflight diagnostics are missing actionable remediation for npm/PyPI/crates auth/policy failures
+- publish workflow can run release/publish jobs without validated build artifact provenance
 - the tooling contract check cannot run or returns non-zero
 
 ## 1) Dependency & Vulnerability Monitoring

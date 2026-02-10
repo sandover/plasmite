@@ -1,0 +1,377 @@
+name: release-publish
+
+on:
+  workflow_run:
+    workflows: ["release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: "Successful release build workflow run ID to publish from."
+        required: true
+        type: string
+      skip_npm:
+        description: "Skip npm publish for this run (requires explicit opt-in)."
+        type: boolean
+        default: false
+      skip_pypi:
+        description: "Skip PyPI publish for this run (requires explicit opt-in)."
+        type: boolean
+        default: false
+      skip_crates_io:
+        description: "Skip crates.io publish for this run (requires explicit opt-in)."
+        type: boolean
+        default: false
+      allow_partial_release:
+        description: "Allow final GitHub release when one or more publish channels are skipped."
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  resolve-build-run:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      build_run_id: ${{ steps.resolve.outputs.build_run_id }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      skip_npm: ${{ steps.resolve.outputs.skip_npm }}
+      skip_pypi: ${{ steps.resolve.outputs.skip_pypi }}
+      skip_crates_io: ${{ steps.resolve.outputs.skip_crates_io }}
+    steps:
+      - id: resolve
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            if [[ "${{ github.event.workflow_run.conclusion }}" != "success" ]]; then
+              echo "error: source release build workflow was not successful." >&2
+              exit 1
+            fi
+            build_run_id="${{ github.event.workflow_run.id }}"
+            skip_npm="false"
+            skip_pypi="false"
+            skip_crates_io="false"
+          else
+            build_run_id="${{ inputs.build_run_id }}"
+            skip_npm="${{ inputs.skip_npm }}"
+            skip_pypi="${{ inputs.skip_pypi }}"
+            skip_crates_io="${{ inputs.skip_crates_io }}"
+            if [[ "${{ inputs.allow_partial_release }}" != "true" ]] && \
+               ([[ "$skip_npm" == "true" ]] || [[ "$skip_pypi" == "true" ]] || [[ "$skip_crates_io" == "true" ]]); then
+              echo "error: partial publish requested but allow_partial_release is false." >&2
+              echo "hint: set allow_partial_release=true when intentionally skipping publish channels." >&2
+              exit 1
+            fi
+          fi
+
+          run_json="$(gh run view "$build_run_id" --json workflowName,conclusion,url)"
+          workflow_name="$(jq -r '.workflowName' <<<"$run_json")"
+          run_conclusion="$(jq -r '.conclusion' <<<"$run_json")"
+          if [[ "$workflow_name" != "release" ]]; then
+            echo "error: build_run_id=$build_run_id belongs to workflow '$workflow_name', expected 'release'." >&2
+            exit 1
+          fi
+          if [[ "$run_conclusion" != "success" ]]; then
+            echo "error: build_run_id=$build_run_id is not successful (conclusion=$run_conclusion)." >&2
+            exit 1
+          fi
+
+          tmp_dir="$(mktemp -d)"
+          gh run download "$build_run_id" --name release-metadata --dir "$tmp_dir"
+          metadata_file="$(find "$tmp_dir" -name metadata.json | head -n 1)"
+          if [[ -z "$metadata_file" ]]; then
+            echo "error: release-metadata artifact missing metadata.json for run $build_run_id." >&2
+            exit 1
+          fi
+
+          tag="$(jq -r '.tag' "$metadata_file")"
+          version="$(jq -r '.version' "$metadata_file")"
+          if [[ -z "$tag" || "$tag" == "null" || "$tag" != v* ]]; then
+            echo "error: invalid tag in release metadata: '$tag'." >&2
+            exit 1
+          fi
+          if [[ "$version" != "${tag#v}" ]]; then
+            echo "error: metadata version '$version' does not match tag '$tag'." >&2
+            exit 1
+          fi
+
+          echo "build_run_id=$build_run_id" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "skip_npm=$skip_npm" >> "$GITHUB_OUTPUT"
+          echo "skip_pypi=$skip_pypi" >> "$GITHUB_OUTPUT"
+          echo "skip_crates_io=$skip_crates_io" >> "$GITHUB_OUTPUT"
+
+  publish-preflight:
+    runs-on: ubuntu-latest
+    needs: [resolve-build-run]
+    steps:
+      - uses: actions/setup-node@v4
+        if: needs.resolve-build-run.outputs.skip_npm != 'true'
+        with:
+          node-version: "20"
+      - name: Validate registry readiness
+        shell: bash
+        env:
+          SKIP_NPM: ${{ needs.resolve-build-run.outputs.skip_npm }}
+          SKIP_PYPI: ${{ needs.resolve-build-run.outputs.skip_pypi }}
+          SKIP_CRATES_IO: ${{ needs.resolve-build-run.outputs.skip_crates_io }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          preflight_fail() {
+            echo "error: $1" >&2
+            echo "hint: $2" >&2
+            exit 1
+          }
+
+          if [[ "$SKIP_NPM" != "true" ]]; then
+            if [[ -z "${NPM_TOKEN:-}" ]]; then
+              preflight_fail "NPM_TOKEN not set for publish-preflight." "Set NPM_TOKEN, or re-run with skip_npm=true and allow_partial_release=true."
+            fi
+            if [[ "${NPM_TOKEN}" != npm_* ]]; then
+              preflight_fail "NPM_TOKEN format does not match npm access token expectations." "Use an npm automation/granular publish token (commonly starts with 'npm_') and ensure bypass-2FA publishing is enabled."
+            fi
+            if ! NPM_CONFIG_TOKEN="$NPM_TOKEN" npm whoami >/tmp/npm-whoami.out 2>/tmp/npm-whoami.err; then
+              npm_err="$(cat /tmp/npm-whoami.err)"
+              if grep -qi "EOTP\\|one-time pass\\|otp" <<<"$npm_err"; then
+                preflight_fail "npm token requires OTP interaction and is not CI-publish-ready." "Create/use an automation token with bypass-2FA publishing permissions."
+              fi
+              preflight_fail "npm authentication check failed during publish-preflight." "Verify npm token scope and org/package publish permissions."
+            fi
+          fi
+
+          if [[ "$SKIP_PYPI" != "true" ]]; then
+            if [[ -z "${PYPI_API_TOKEN:-}" ]]; then
+              preflight_fail "PYPI_API_TOKEN not set for publish-preflight." "Set PYPI_API_TOKEN, or re-run with skip_pypi=true and allow_partial_release=true."
+            fi
+            if [[ "${PYPI_API_TOKEN}" != pypi-* ]]; then
+              preflight_fail "PYPI_API_TOKEN format is unexpected." "Use a PyPI API token from PyPI account settings (token value begins with 'pypi-')."
+            fi
+          fi
+
+          if [[ "$SKIP_CRATES_IO" != "true" ]]; then
+            if [[ -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
+              preflight_fail "CARGO_REGISTRY_TOKEN not set for publish-preflight." "Set CARGO_REGISTRY_TOKEN, or re-run with skip_crates_io=true and allow_partial_release=true."
+            fi
+            crates_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: ${CARGO_REGISTRY_TOKEN}" https://crates.io/api/v1/me)"
+            if [[ "$crates_status" != "200" ]]; then
+              preflight_fail "crates.io authentication check failed with HTTP ${crates_status}." "Use a valid crates.io API token with publish rights and verify the token value is complete."
+            fi
+          fi
+
+          echo "publish-preflight: all enabled registry checks passed."
+
+  collect-build-artifacts:
+    runs-on: ubuntu-latest
+    needs: [resolve-build-run, publish-preflight]
+    steps:
+      - name: Download artifacts from release build run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ needs.resolve-build-run.outputs.build_run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-inputs/raw
+          gh run download "$BUILD_RUN_ID" --dir release-inputs/raw
+
+      - name: Verify artifact provenance and completeness
+        shell: bash
+        env:
+          TAG: ${{ needs.resolve-build-run.outputs.tag }}
+          VERSION: ${{ needs.resolve-build-run.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          metadata_file="$(find release-inputs/raw -name metadata.json | head -n 1)"
+          if [[ -z "$metadata_file" ]]; then
+            echo "error: release metadata missing from downloaded artifacts." >&2
+            exit 1
+          fi
+
+          meta_tag="$(jq -r '.tag' "$metadata_file")"
+          meta_version="$(jq -r '.version' "$metadata_file")"
+          if [[ "$meta_tag" != "$TAG" || "$meta_version" != "$VERSION" ]]; then
+            echo "error: build artifact metadata mismatch (got tag=$meta_tag version=$meta_version, expected tag=$TAG version=$VERSION)." >&2
+            exit 1
+          fi
+
+          dist_count="$(find release-inputs/raw -name "plasmite_${VERSION}_*.tar.gz" | wc -l | tr -d ' ')"
+          node_count="$(find release-inputs/raw -name "plasmite-${VERSION}.tgz" | wc -l | tr -d ' ')"
+          wheel_count="$(find release-inputs/raw -name "*${VERSION}*.whl" | wc -l | tr -d ' ')"
+          sdist_count="$(find release-inputs/raw -name "plasmite-${VERSION}.tar.gz" | wc -l | tr -d ' ')"
+
+          if [[ "$dist_count" -lt 1 ]]; then
+            echo "error: no SDK dist tarballs found for version ${VERSION}." >&2
+            exit 1
+          fi
+          if [[ "$node_count" -ne 1 ]]; then
+            echo "error: expected exactly one npm tarball for version ${VERSION}, found ${node_count}." >&2
+            exit 1
+          fi
+          if [[ "$wheel_count" -lt 1 ]]; then
+            echo "error: no Python wheels found for version ${VERSION}." >&2
+            exit 1
+          fi
+          if [[ "$sdist_count" -lt 1 ]]; then
+            echo "error: no Python sdist found for version ${VERSION}." >&2
+            exit 1
+          fi
+
+          mkdir -p release-inputs/dist release-inputs/node-dist release-inputs/py-dist release-inputs/metadata
+          find release-inputs/raw -name "plasmite_${VERSION}_*.tar.gz" -exec cp {} release-inputs/dist/ \;
+          find release-inputs/raw -name "plasmite-${VERSION}.tgz" -exec cp {} release-inputs/node-dist/ \;
+          find release-inputs/raw -name "*${VERSION}*.whl" -exec cp {} release-inputs/py-dist/ \;
+          find release-inputs/raw -name "plasmite-${VERSION}.tar.gz" -exec cp {} release-inputs/py-dist/ \;
+          cp "$metadata_file" release-inputs/metadata/metadata.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-inputs
+          path: release-inputs
+          if-no-files-found: error
+
+  publish-crates-io:
+    runs-on: ubuntu-latest
+    needs: [resolve-build-run, publish-preflight, collect-build-artifacts]
+    steps:
+      - uses: actions/checkout@v4
+        if: needs.resolve-build-run.outputs.skip_crates_io != 'true'
+        with:
+          ref: ${{ needs.resolve-build-run.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+        if: needs.resolve-build-run.outputs.skip_crates_io != 'true'
+      - name: Check crates.io channel policy
+        if: needs.resolve-build-run.outputs.skip_crates_io == 'true'
+        run: 'echo "publish-crates-io bypassed: skip_crates_io=true"'
+      - name: Publish to crates.io
+        if: needs.resolve-build-run.outputs.skip_crates_io != 'true'
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.CARGO_REGISTRY_TOKEN }}" ]; then
+            echo "CARGO_REGISTRY_TOKEN not set; cannot publish crates.io package."
+            exit 1
+          fi
+          cargo publish --locked --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"
+
+  publish-npm:
+    runs-on: ubuntu-latest
+    needs: [resolve-build-run, publish-preflight, collect-build-artifacts]
+    steps:
+      - uses: actions/download-artifact@v4
+        if: needs.resolve-build-run.outputs.skip_npm != 'true'
+        with:
+          name: release-inputs
+          path: release-inputs
+      - uses: actions/setup-node@v4
+        if: needs.resolve-build-run.outputs.skip_npm != 'true'
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Check npm channel policy
+        if: needs.resolve-build-run.outputs.skip_npm == 'true'
+        run: 'echo "publish-npm bypassed: skip_npm=true"'
+      - name: Publish to npm
+        if: needs.resolve-build-run.outputs.skip_npm != 'true'
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(release-inputs/node-dist/plasmite-*.tgz)
+          if [ "${#files[@]}" -ne 1 ]; then
+            echo "expected one npm tarball, found ${#files[@]}"
+            ls -la release-inputs/node-dist || true
+            exit 1
+          fi
+          npm publish "${files[0]}" --access public
+
+  publish-pypi:
+    runs-on: ubuntu-latest
+    needs: [resolve-build-run, publish-preflight, collect-build-artifacts]
+    steps:
+      - uses: actions/download-artifact@v4
+        if: needs.resolve-build-run.outputs.skip_pypi != 'true'
+        with:
+          name: release-inputs
+          path: release-inputs
+      - name: Check PyPI channel policy
+        if: needs.resolve-build-run.outputs.skip_pypi == 'true'
+        run: 'echo "publish-pypi bypassed: skip_pypi=true"'
+      - name: Check PyPI token
+        if: needs.resolve-build-run.outputs.skip_pypi != 'true'
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.PYPI_API_TOKEN }}" ]; then
+            echo "PYPI_API_TOKEN not set; cannot publish PyPI package."
+            exit 1
+          fi
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        if: needs.resolve-build-run.outputs.skip_pypi != 'true'
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          packages-dir: release-inputs/py-dist
+          skip-existing: true
+
+  release:
+    runs-on: ubuntu-latest
+    # Final release is gated by artifact provenance and all publish channels (or explicit bypasses).
+    needs: [resolve-build-run, publish-preflight, collect-build-artifacts, publish-pypi, publish-crates-io, publish-npm]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-inputs
+          path: release-inputs
+      - name: Checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-inputs/dist
+          shasum -a 256 *.tar.gz > sha256sums.txt
+          cat sha256sums.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve-build-run.outputs.tag }}
+          files: |
+            release-inputs/dist/*
+          body: |
+            Release ${{ needs.resolve-build-run.outputs.tag }}
+
+            ## Install
+
+            ### Homebrew (macOS and Linux)
+            ```bash
+            brew install sandover/tap/plasmite
+            ```
+
+            ### Manual install
+            Download the appropriate tarball for your platform, extract it, and install the SDK layout:
+            ```bash
+            tar xzf plasmite_*_<your-platform>.tar.gz
+            sudo install -d /usr/local/bin /usr/local/lib /usr/local/include /usr/local/lib/pkgconfig
+            sudo cp -f bin/plasmite bin/pls /usr/local/bin/
+            sudo cp -f include/plasmite.h /usr/local/include/
+            sudo cp -f lib/pkgconfig/plasmite.pc /usr/local/lib/pkgconfig/
+            # macOS
+            sudo cp -f lib/libplasmite.dylib /usr/local/lib/ 2>/dev/null || true
+            # Linux
+            sudo cp -f lib/libplasmite.so /usr/local/lib/ 2>/dev/null || true
+            ```
+
+            ### From source
+            ```bash
+            cargo install --git https://github.com/sandover/plasmite --tag ${{ needs.resolve-build-run.outputs.tag }} plasmite
+            ```

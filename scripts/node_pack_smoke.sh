@@ -12,7 +12,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_DIR="$ROOT/bindings/node"
 mkdir -p "$ROOT/.scratch"
 WORKDIR="$(mktemp -d "$ROOT/.scratch/node-pack-smoke.XXXXXX")"
-SDK_DIR="${PLASMITE_SDK_DIR:-$ROOT/target/debug}"
+source "$ROOT/scripts/normalize_sdk_layout.sh"
+SDK_INPUT_DIR="${PLASMITE_SDK_DIR:-$ROOT/target/debug}"
+SDK_DIR="$(plasmite_normalize_sdk_dir "$SDK_INPUT_DIR" "$WORKDIR/sdk" "Node smoke SDK")"
 HAS_RG=0
 if command -v rg >/dev/null 2>&1; then
   HAS_RG=1
@@ -24,9 +26,9 @@ archive_has_member() {
   local members
   members="$(tar -tzf "$archive")"
   if [[ "$HAS_RG" -eq 1 ]]; then
-    printf '%s\n' "$members" | rg -q "$pattern"
+    rg -q "$pattern" <<<"$members"
   else
-    printf '%s\n' "$members" | grep -Eq "$pattern"
+    grep -Eq "$pattern" <<<"$members"
   fi
 }
 

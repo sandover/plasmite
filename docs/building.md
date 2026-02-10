@@ -50,7 +50,7 @@ the `dist-smoke` job in `.github/workflows/ci.yml`.
 
 ## Release artifact matrix
 
-`.github/workflows/release.yml` builds and packages binaries for:
+`.github/workflows/release.yml` (build stage) builds and packages binaries for:
 
 - `x86_64-unknown-linux-gnu` (`linux_amd64`)
 - `x86_64-apple-darwin` (`darwin_amd64`)
@@ -67,10 +67,18 @@ lib/libplasmite.a               # optional
 lib/pkgconfig/plasmite.pc
 ```
 
-The release workflow uploads SDK tarballs and `sha256sums.txt` to the GitHub release.
+`release.yml` uploads build artifacts only (SDK tarballs, Python dist artifacts, npm tarball, and release metadata).
+
+`.github/workflows/release-publish.yml` (publish stage) consumes a successful build run's artifacts, runs registry preflight checks, publishes crates/npm/PyPI, and then creates/updates the GitHub release with SDK tarballs + `sha256sums.txt`.
+
+If publish fails due to registry credentials, rerun only publish without rebuilding matrix artifacts:
+
+```bash
+gh workflow run release-publish.yml -f build_run_id=<successful-release-build-run-id> -f allow_partial_release=false
+```
 
 ## Linux arm64 policy
 
 - `aarch64-unknown-linux-gnu` is currently best-effort.
-- It is not a release-gating target in `release.yml`.
+- It is not a release-gating target in `release.yml` or `release-publish.yml`.
 - ARM64 Linux users should build from source unless/until gated support is reintroduced.

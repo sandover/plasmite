@@ -20,6 +20,8 @@ If this file and the skill ever disagree, follow the skill and then update this 
 - Every blocker is filed in `ergo` under one epic: `Release blockers: <release_target>`.
 - Do not tag or publish while blocker tasks remain open.
 - Use a runtime that can reach GitHub and registries and can use maintainer `gh` auth.
+- Release automation is split: `release.yml` builds artifacts, `release-publish.yml` performs preflight + registry publish + GitHub release.
+- Publish-only retry after credential fixes must re-use a successful build run ID (no matrix rebuild required).
 
 ## Human Decisions to Make Per Release
 
@@ -37,6 +39,8 @@ The skill handles mechanics, but maintainers still decide:
 3. Resolve all blocker tasks created by the dry-run.
 4. Ask Codex to run the skill in `live` mode.
 5. Confirm post-release delivery verification is complete on all channels.
+6. If publish fails due to credentials/policy, run publish-only rerun with the successful build run ID:
+   - `gh workflow run release-publish.yml -f build_run_id=<build-run-id> -f allow_partial_release=false`
 
 ## Versioning Notes
 

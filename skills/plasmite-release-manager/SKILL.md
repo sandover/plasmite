@@ -12,7 +12,9 @@ Use this skill to run releases in a fail-closed way:
 - stop on any failed or incomplete gate
 - file blocker tasks in `ergo` under one release-blocker epic
 - maintain one machine-readable evidence report through the full run
-- execute release mechanics with `gh`
+- execute split release mechanics with `gh` (`release` build, then `release-publish`)
+- require publish preflight checks before any registry publish action
+- support publish-only reruns from a successful build run ID after credential fixes
 - verify that published packages are actually live
 
 ## Inputs
@@ -71,7 +73,7 @@ If the run is interrupted (agent crash, user abort, runtime reset), do this befo
    - File blockers for every failed/incomplete gate.
 3. Release only if zero blockers
    - Follow `references/release-hygiene.md`.
-   - Use `gh` for tag/release workflow handling.
+   - Use `gh` for split build/publish workflow handling and publish-only rerun dispatch when needed.
 4. Verify delivery
    - Run checks from `references/delivery-verification.md`.
    - File blocker tasks for missing artifacts or version mismatches.

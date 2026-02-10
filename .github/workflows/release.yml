@@ -3,12 +3,68 @@ name: release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build artifacts for (format: vX.Y.Z)."
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  release-context:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.ctx.outputs.tag }}
+      version: ${{ steps.ctx.outputs.version }}
+    steps:
+      - id: ctx
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ -z "$tag" || "$tag" != v* ]]; then
+            echo "error: release tag must use vX.Y.Z format, got '$tag'." >&2
+            exit 1
+          fi
+
+          if ! git ls-remote --exit-code --tags "https://github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${tag}" >/dev/null; then
+            echo "error: requested tag '${tag}' does not exist on origin." >&2
+            echo "hint: create/push the tag first, then rerun release build." >&2
+            exit 1
+          fi
+
+          version="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          mkdir -p .scratch/release-metadata
+          cat > .scratch/release-metadata/metadata.json <<META
+          {
+            "tag": "${tag}",
+            "version": "${version}",
+            "source_sha": "${GITHUB_SHA}",
+            "source_ref": "${GITHUB_REF}",
+            "source_run_id": "${GITHUB_RUN_ID}",
+            "source_workflow": "${GITHUB_WORKFLOW}"
+          }
+          META
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-metadata
+          path: .scratch/release-metadata/metadata.json
+          if-no-files-found: error
+
   build-native:
+    needs: [release-context]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -26,6 +82,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-context.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -52,36 +110,18 @@ jobs:
         run: cargo rustc --release --target ${{ matrix.target }} --lib --crate-type=staticlib
       - name: Package SDK
         shell: bash
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          ./scripts/package_release_sdk.sh "${{ matrix.target }}" "${{ matrix.platform }}" "${version}"
+        run: ./scripts/package_release_sdk.sh "${{ matrix.target }}" "${{ matrix.platform }}" "${{ needs.release-context.outputs.version }}"
       - name: Smoke test packaged SDK
         shell: bash
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          ./scripts/cross_artifact_smoke.sh "dist/plasmite_${version}_${{ matrix.platform }}.tar.gz"
+        run: ./scripts/cross_artifact_smoke.sh "dist/plasmite_${{ needs.release-context.outputs.version }}_${{ matrix.platform }}.tar.gz"
       - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ matrix.target }}
           path: dist/*.tar.gz
           if-no-files-found: error
 
-  publish-crates-io:
-    runs-on: ubuntu-latest
-    needs: [build-native, build-python-dist, build-node-dist]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Publish to crates.io
-        shell: bash
-        run: |
-          if [ -z "${{ secrets.CARGO_REGISTRY_TOKEN }}" ]; then
-            echo "CARGO_REGISTRY_TOKEN not set; cannot publish crates.io package."
-            exit 1
-          fi
-          cargo publish --locked --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"
-
   build-python-dist:
+    needs: [release-context]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -104,6 +144,8 @@ jobs:
             upload_wheel: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-context.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -138,9 +180,12 @@ jobs:
           if-no-files-found: error
 
   build-node-dist:
+    needs: [release-context]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-context.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v4
         with:
@@ -164,106 +209,3 @@ jobs:
           name: node-dist
           path: bindings/node/plasmite-*.tgz
           if-no-files-found: error
-
-  publish-npm:
-    runs-on: ubuntu-latest
-    needs: [build-node-dist]
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: node-dist
-          path: node-dist
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          registry-url: "https://registry.npmjs.org"
-      - name: Publish to npm
-        shell: bash
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -z "${NODE_AUTH_TOKEN}" ]; then
-            echo "NPM_TOKEN not set; cannot publish npm package."
-            exit 1
-          fi
-          shopt -s nullglob
-          files=(node-dist/plasmite-*.tgz)
-          if [ "${#files[@]}" -ne 1 ]; then
-            echo "expected one npm tarball, found ${#files[@]}"
-            ls -la node-dist || true
-            exit 1
-          fi
-          npm publish "./${files[0]}" --access public
-
-  publish-pypi:
-    runs-on: ubuntu-latest
-    needs: [build-python-dist]
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: py-dist-*
-          path: py-dist
-          merge-multiple: true
-      - uses: actions/download-artifact@v4
-        with:
-          name: py-sdist
-          path: py-dist
-      - name: Check PyPI token
-        shell: bash
-        run: |
-          if [ -z "${{ secrets.PYPI_API_TOKEN }}" ]; then
-            echo "PYPI_API_TOKEN not set; cannot publish PyPI package."
-            exit 1
-          fi
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          user: __token__
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          packages-dir: py-dist
-          skip-existing: true
-
-  release:
-    runs-on: ubuntu-latest
-    needs: [build-native, build-python-dist, build-node-dist, publish-pypi, publish-crates-io, publish-npm]
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-      - name: Checksums
-        shell: bash
-        run: |
-          cd dist
-          shasum -a 256 *.tar.gz > sha256sums.txt
-          cat sha256sums.txt
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          body: |
-            Release ${{ github.ref_name }}
-
-            ## Install
-
-            ### Homebrew (macOS and Linux)
-            ```bash
-            brew install sandover/tap/plasmite
-            ```
-
-            ### Manual install
-            Download the appropriate tarball for your platform, extract it, and install the SDK layout:
-            ```bash
-            tar xzf plasmite_*_<your-platform>.tar.gz
-            sudo install -d /usr/local/bin /usr/local/lib /usr/local/include /usr/local/lib/pkgconfig
-            sudo cp -f bin/plasmite bin/pls /usr/local/bin/
-            sudo cp -f include/plasmite.h /usr/local/include/
-            sudo cp -f lib/pkgconfig/plasmite.pc /usr/local/lib/pkgconfig/
-            # macOS
-            sudo cp -f lib/libplasmite.dylib /usr/local/lib/ 2>/dev/null || true
-            # Linux
-            sudo cp -f lib/libplasmite.so /usr/local/lib/ 2>/dev/null || true
-            ```
-
-            ### From source
-            ```bash
-            cargo install --git https://github.com/sandover/plasmite --tag ${{ github.ref_name }} plasmite
-            ```
