@@ -79,7 +79,7 @@ jobs:
             fi
           fi
 
-          run_json="$(gh run view "$build_run_id" --json workflowName,conclusion,url)"
+          run_json="$(gh run view "$build_run_id" --repo "$GITHUB_REPOSITORY" --json workflowName,conclusion,url)"
           workflow_name="$(jq -r '.workflowName' <<<"$run_json")"
           run_conclusion="$(jq -r '.conclusion' <<<"$run_json")"
           if [[ "$workflow_name" != "release" ]]; then
@@ -92,7 +92,7 @@ jobs:
           fi
 
           tmp_dir="$(mktemp -d)"
-          gh run download "$build_run_id" --name release-metadata --dir "$tmp_dir"
+          gh run download "$build_run_id" --repo "$GITHUB_REPOSITORY" --name release-metadata --dir "$tmp_dir"
           metadata_file="$(find "$tmp_dir" -name metadata.json | head -n 1)"
           if [[ -z "$metadata_file" ]]; then
             echo "error: release-metadata artifact missing metadata.json for run $build_run_id." >&2
@@ -214,7 +214,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-inputs/raw
-          gh run download "$BUILD_RUN_ID" --dir release-inputs/raw
+          gh run download "$BUILD_RUN_ID" --repo "$GITHUB_REPOSITORY" --dir release-inputs/raw
 
       - name: Verify artifact provenance and completeness
         shell: bash
