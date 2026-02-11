@@ -261,8 +261,20 @@ jobs:
         with:
           name: node-native-darwin-arm64
           path: bindings/node/native/darwin-arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: node-native-linux-arm64
+          path: bindings/node/native/linux-arm64
+        continue-on-error: true
       - name: Restore native CLI execute bits
         run: find bindings/node/native -type f -name plasmite -exec chmod +x {} +
+      - name: Report assembled platforms
+        run: |
+          echo "Assembled platforms:"
+          ls -la bindings/node/native/
+          for dir in bindings/node/native/*/; do
+            echo "  $(basename "$dir"): $(ls "$dir" | wc -l) files"
+          done
       - name: npm pack + install smoke (linux-x64 runtime)
         env:
           PLASMITE_SDK_DIR: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release
