@@ -1,9 +1,6 @@
 name: release-publish
 
 on:
-  workflow_run:
-    workflows: ["release"]
-    types: [completed]
   workflow_dispatch:
     inputs:
       build_run_id:
@@ -21,7 +18,6 @@ permissions:
 
 jobs:
   resolve-build-run:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       build_run_id: ${{ steps.resolve.outputs.build_run_id }}
@@ -36,17 +32,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            if [[ "${{ github.event.workflow_run.conclusion }}" != "success" ]]; then
-              echo "error: source release build workflow was not successful." >&2
-              exit 1
-            fi
-            build_run_id="${{ github.event.workflow_run.id }}"
-            rehearsal="false"
-          else
-            build_run_id="${{ inputs.build_run_id }}"
-            rehearsal="${{ inputs.rehearsal }}"
-          fi
+          build_run_id="${{ inputs.build_run_id }}"
+          rehearsal="${{ inputs.rehearsal }}"
 
           run_json="$(gh run view "$build_run_id" --repo "$GITHUB_REPOSITORY" --json workflowName,conclusion,url)"
           workflow_name="$(jq -r '.workflowName' <<<"$run_json")"

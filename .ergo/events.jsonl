@@ -2648,3 +2648,19 @@
 {"type":"state","ts":"2026-02-11T04:44:24.285773Z","data":{"id":"LCZJXD","state":"done","ts":"2026-02-11T04:44:24.285773Z"}}
 {"type":"state","ts":"2026-02-11T04:49:22.044698Z","data":{"id":"YNJTDW","state":"done","ts":"2026-02-11T04:49:22.044698Z"}}
 {"type":"state","ts":"2026-02-11T04:49:22.106621Z","data":{"id":"2HUMKZ","state":"done","ts":"2026-02-11T04:49:22.106621Z"}}
+{"type":"state","ts":"2026-02-11T04:50:39.938072Z","data":{"id":"ZFIA7U","state":"done","ts":"2026-02-11T04:50:39.938072Z"}}
+{"type":"state","ts":"2026-02-11T04:53:49.986391Z","data":{"id":"KV66Q2","state":"done","ts":"2026-02-11T04:53:49.986391Z"}}
+{"type":"state","ts":"2026-02-11T04:55:23.501067Z","data":{"id":"R2CK43","state":"done","ts":"2026-02-11T04:55:23.501067Z"}}
+{"type":"state","ts":"2026-02-11T05:02:15.092249Z","data":{"id":"YTNBQX","state":"done","ts":"2026-02-11T05:02:15.092249Z"}}
+{"type":"state","ts":"2026-02-11T05:02:41.624626Z","data":{"id":"5EQIVX","state":"done","ts":"2026-02-11T05:02:41.624626Z"}}
+{"type":"state","ts":"2026-02-11T05:03:52.29843Z","data":{"id":"CS4SQ6","state":"done","ts":"2026-02-11T05:03:52.29843Z"}}
+{"type":"state","ts":"2026-02-11T05:04:12.959073Z","data":{"id":"I63JSB","state":"blocked","ts":"2026-02-11T05:04:12.959073Z"}}
+{"type":"state","ts":"2026-02-11T05:23:05.523278Z","data":{"id":"I63JSB","state":"todo","ts":"2026-02-11T05:23:05.523278Z"}}
+{"type":"claim","ts":"2026-02-11T14:37:10.247215Z","data":{"id":"I63JSB","agent_id":"codex@bbook","ts":"2026-02-11T14:37:10.247215Z"}}
+{"type":"state","ts":"2026-02-11T14:37:10.247215Z","data":{"id":"I63JSB","state":"doing","ts":"2026-02-11T14:37:10.247215Z"}}
+{"type":"state","ts":"2026-02-11T15:08:24.457039Z","data":{"id":"I63JSB","state":"done","ts":"2026-02-11T15:08:24.457039Z"}}
+{"type":"new_task","ts":"2026-02-11T15:08:33.78395Z","data":{"id":"PF3V53","uuid":"630277c7-9b89-4961-97b3-9d663ed46a0d","epic_id":"EOEJQW","state":"todo","title":"Remove auto-trigger from release-publish workflow","body":"The `release-publish.yml` workflow has a `workflow_run` trigger that fires automatically when the `release` build completes. This races ahead of the Homebrew formula update step, creating a guaranteed-to-fail run on every release.\n\nThe skill procedure assumes manual dispatch (steps 3.5/3.6). The auto-trigger contradicts this and produces noise in the run history.\n\nFix: remove the `on: workflow_run` trigger from `release-publish.yml`. Keep it manual-dispatch-only (`workflow_dispatch`). This also eliminates the need for a separate rehearsal step since you dispatch once when ready.\n\n## Files\n- Edit: `.github/workflows/release-publish.yml` (remove `workflow_run` trigger)\n- Edit: `skills/plasmite-release-manager/SKILL.md` (note publish is manual-dispatch-only)\n","created_at":"2026-02-11T15:08:33.78395Z"}}
+{"type":"claim","ts":"2026-02-11T15:10:20.345467Z","data":{"id":"PF3V53","agent_id":"claude@amp","ts":"2026-02-11T15:10:20.345467Z"}}
+{"type":"state","ts":"2026-02-11T15:10:20.345467Z","data":{"id":"PF3V53","state":"doing","ts":"2026-02-11T15:10:20.345467Z"}}
+{"type":"result","ts":"2026-02-11T15:11:07.007608Z","data":{"task_id":"PF3V53","summary":"Removed workflow_run auto-trigger; publish is now manual-dispatch-only","path":".github/workflows/release-publish.yml","sha256_at_attach":"bb4c418dfd68eb0a54a870c137573bc80ee2c3dc5d00d1b02b9acc4f2af7f18a","mtime_at_attach":"2026-02-11T15:10:39.745471337Z","git_commit_at_attach":"d93b581f08ead14862026de18feaa1d250f9664e","ts":"2026-02-11T15:11:07.007608Z"}}
+{"type":"state","ts":"2026-02-11T15:11:07.021824Z","data":{"id":"PF3V53","state":"done","ts":"2026-02-11T15:11:07.021824Z"}}

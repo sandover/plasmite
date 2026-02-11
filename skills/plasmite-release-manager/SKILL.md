@@ -78,6 +78,8 @@ Escalate to incident workflow only when short checkpoint reveals anomalies
 
 ### 3) Build And Publish Mechanics
 
+The `release-publish` workflow is manual-dispatch-only (`workflow_dispatch`). There is no automatic trigger from the `release` build workflow.
+
 1. Ensure release source is pushed and tag exists/planned.
 2. Run release build workflow (`release`):
    - push tag `vX.Y.Z` or dispatch `release.yml` with `tag`
