@@ -26,7 +26,7 @@ restore_native() {
 }
 trap restore_native EXIT
 
-rm -rf "$NODE_DIR/native/linux-x64" "$NODE_DIR/native/darwin-x64" "$NODE_DIR/native/darwin-arm64"
+rm -rf "$NODE_DIR/native/linux-x64" "$NODE_DIR/native/linux-arm64" "$NODE_DIR/native/darwin-x64" "$NODE_DIR/native/darwin-arm64"
 
 (
   cd "$NODE_DIR"
