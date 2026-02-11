@@ -250,6 +250,8 @@ jobs:
         with:
           name: node-native-darwin-arm64
           path: bindings/node/native/darwin-arm64
+      - name: Restore native CLI execute bits
+        run: find bindings/node/native -type f -name plasmite -exec chmod +x {} +
       - name: npm pack + install smoke (linux-x64 runtime)
         env:
           PLASMITE_SDK_DIR: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release
