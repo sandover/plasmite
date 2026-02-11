@@ -54,7 +54,7 @@ archive_has_member() {
     PLASMITE_LIB_DIR="$SDK_DIR/lib" npm run build >/dev/null
   fi
   "$ROOT/scripts/package_node_natives.sh" "$CURRENT_PLATFORM" "$SDK_DIR" "$NODE_DIR/index.node"
-  PLASMITE_SDK_DIR="$SDK_DIR" npm pack >/dev/null
+  PLASMITE_SDK_DIR="$SDK_DIR" PLASMITE_LIB_DIR="$SDK_DIR/lib" npm pack >/dev/null
 )
 
 TARBALL="$(cd "$NODE_DIR" && ls -1 plasmite-*.tgz | tail -n 1)"
