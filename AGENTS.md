@@ -1,29 +1,7 @@
-# When planning
-Use ergo for all planning, so that your plans can be stored in the repo. Run "ergo --help" and "ergo quickstart" now to learn this tool.
-
-# When coding
-- prefer a lightly functional style and prefer pure functions when it makes sense
-- Avoid hidden state and hidden variables -- make inputs and outputs explicit
-- Favor independent, testable components with loose coupling
-- Each code file should have top matter comments sufficient to allow agents to confidently understand and navigate the code file *without having to read the whole thing*. 
-- Prefer the simplest viable approach. Do not over-engineer solutions — I'm a solo maintainer. When in doubt, choose the approach with fewer moving parts, fewer dependencies, and less infrastructure. Ask before adding complexity.
-
-# When writing commit messages
-- Use Conventional Commits (type(scope): imperative summary; scope optional)
-- Body (a handful of lines) explains what/why/how plus constraints or invariants (and notable risks/tests if relevant)
-- When applicable, add trailers (one per line) for traceability: Fixes: #XYZ, Refs: PROJ-9, BREAKING CHANGE: ...
-
-# Invariants
-- **CI Stays Green**: Never tag a release without first verifying that the local code passes all linting & formatting checks and tests.
-- **Docs are Accurate**: When the code changes, docs (such as README, code comments, built-in help text, etc) must reflect it. Goal is perfect internal coherence in the project at all times.
+This repository inherits global agent policy from `/Users/brandonharvey/AGENTS.md`.
+Keep this file limited to plasmite-specific deltas.
 
 # CI hygiene (required before pushing code)
 - Run `cargo fmt --all`.
 - Run `cargo clippy --all-targets -- -D warnings`.
 - Do not add new `#[allow(clippy::...)]` without explicit justification in the commit body.
-
-# Other Guidance
-- For temporary work and experiments, use tmp/ or .scratch/, not /tmp, so that I am not prompted for permissions
-- When you have been working for a long time, I may have gone away to do other things and I have lost context on what we were working. So end your long work sessions with a helpful situation report and summary.
-
-If you have read these instructions and are keeping them in mind, end each of your messages with this glpyh on its own line: ✠
