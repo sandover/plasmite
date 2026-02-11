@@ -4533,15 +4533,24 @@ fn serve_rejects_excessive_tail_timeout() {
 
     let server = ServeProcess::start_with_args(&pool_dir, &["--max-tail-timeout-ms", "5"]);
     let tail_url = format!("{}/v0/pools/demo/tail?timeout_ms=10", server.base_url);
-    match ureq::get(&tail_url).call() {
-        Ok(_) => panic!("expected tail timeout rejection"),
-        Err(ureq::Error::Status(code, resp)) => {
-            assert_eq!(code, 400);
-            let body = resp.into_string().expect("body");
-            let value: Value = serde_json::from_str(&body).expect("json");
-            assert_eq!(value["error"]["kind"], "Usage");
+    let start = Instant::now();
+    loop {
+        match ureq::get(&tail_url).call() {
+            Ok(_) => panic!("expected tail timeout rejection"),
+            Err(ureq::Error::Status(code, resp)) => {
+                assert_eq!(code, 400);
+                let body = resp.into_string().expect("body");
+                let value: Value = serde_json::from_str(&body).expect("json");
+                assert_eq!(value["error"]["kind"], "Usage");
+                break;
+            }
+            Err(ureq::Error::Transport(err)) => {
+                if start.elapsed() >= Duration::from_millis(250) {
+                    panic!("request failed after startup retry window: {err:?}");
+                }
+                sleep(Duration::from_millis(25));
+            }
         }
-        Err(err) => panic!("request failed: {err:?}"),
     }
 }
 
