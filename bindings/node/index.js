@@ -12,7 +12,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const path = require("node:path");
 
 const PLATFORM_DIRS = Object.freeze({
-  linux: Object.freeze({ x64: "linux-x64" }),
+  linux: Object.freeze({ x64: "linux-x64", arm64: "linux-arm64" }),
   darwin: Object.freeze({ x64: "darwin-x64", arm64: "darwin-arm64" }),
 });
 
