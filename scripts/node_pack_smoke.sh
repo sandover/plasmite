@@ -21,6 +21,7 @@ platform_key() {
   arch="$(node -p 'process.arch')"
   case "${os}-${arch}" in
     linux-x64) echo "linux-x64" ;;
+    linux-arm64) echo "linux-arm64" ;;
     darwin-x64) echo "darwin-x64" ;;
     darwin-arm64) echo "darwin-arm64" ;;
     *)
@@ -49,6 +50,9 @@ archive_has_member() {
 
 (
   cd "$NODE_DIR"
+  if [[ ! -f "$NODE_DIR/index.node" ]]; then
+    npm run build >/dev/null
+  fi
   "$ROOT/scripts/package_node_natives.sh" "$CURRENT_PLATFORM" "$SDK_DIR" "$NODE_DIR/index.node"
   PLASMITE_SDK_DIR="$SDK_DIR" npm pack >/dev/null
 )
