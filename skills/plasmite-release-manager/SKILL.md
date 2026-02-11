@@ -5,155 +5,122 @@ description: "Carefully run Plasmite releases end-to-end with fail-closed pre-re
 
 # Plasmite Release Manager
 
-## Overview
+## Inputs And Preconditions
 
-Use this skill to run releases in a fail-closed way:
-- run required QA gates before release
-- stop on any failed or incomplete gate
-- file blocker tasks in `ergo` under one release-blocker epic
-- maintain one machine-readable evidence report through the full run
-- run release-blocking performance comparisons locally on the maintainer host
-- execute split release mechanics with `gh` (`release` build, then `release-publish`)
-- require publish preflight checks before any registry publish action
-- require Homebrew tap formula alignment before any registry publish action
-- support publish-only reruns from a successful build run ID after credential fixes
-- verify build run provenance with `inspect_release_build_metadata.sh` before reruns
-- support safe publish workflow rehearsals (`release-publish` with `rehearsal=true`)
-- verify that published packages are actually live
+Required inputs from maintainer:
+- `release_target` (for example `v0.1.10`)
+- `base_tag` (previous release tag)
+- `mode` (`dry-run` or `live`)
+- `agent_id` (`model@host`)
 
-## Inputs
+Before running any release step:
+1. Confirm all four inputs explicitly. Do not infer.
+2. Verify runtime access:
+   - `gh auth status`
+   - network access for GitHub + registries
+3. Verify version alignment:
+   - `bash scripts/check-version-alignment.sh`
+4. Open or initialize evidence report:
+   - `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --base-tag <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`
 
-- `release_target`: version or tag being prepared (for example `v0.1.1`)
-- `base_tag`: previous release tag used for regression comparisons
-- `agent_id`: `model@host` for `ergo` claims/ownership
-- `mode`: `dry-run` or `live`
+Release invariants (non-negotiable):
+1. Publish only from a successful `release` build run with verified metadata.
+2. Homebrew formula alignment must pass before registry publish.
+3. Release remains fail-closed: all channels publish or none do.
+4. Registry versions must align with `release_target`.
 
-Input contract (required):
-- obtain all four inputs explicitly from the maintainer before execution
-- do not infer `release_target`, `base_tag`, or `mode` from local tags/files unless the maintainer confirms
-- if any input is missing or ambiguous, stop and ask before running gates
-- initialize or reopen the evidence report:
-  - `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --base-tag <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`
+## Procedure
 
-## Execution Permissions (Required)
+### 1) Pre-release QA
 
-Request capable runtime access before starting release work:
-- network access for GitHub and package registries (`gh`, crates.io, npm, PyPI, Homebrew checks)
-- host auth/keychain access so `gh auth status` reflects the maintainer session
-- ability to run repo QA/build commands without sandbox write restrictions
+Always-run core gates:
+- `cargo fmt --all`
+- `cargo clippy --all-targets -- -D warnings`
+- `cargo test`
+- `just bindings-test`
+- `bash scripts/node_pack_smoke.sh`
+- `bash scripts/python_wheel_smoke.sh`
+- `bash scripts/check_release_workflow_topology.sh`
+- `bash skills/plasmite-release-manager/scripts/verify_licensing_notices.sh` (if artifacts exist)
 
-If commands fail due to sandbox/network, escalate immediately and re-run the same command.
-Do not continue with partial/offline release evidence when a gate requires remote verification.
+Conditional gates (run when corresponding files changed since `base_tag`):
+- Dependencies/security:
+  - trigger: lockfiles/dependency manifests changed
+  - command: `cargo audit --db .scratch/advisory-db --no-fetch --ignore yanked`
+- Performance:
+  - trigger: core hot path/storage code changed
+  - command: `bash skills/plasmite-release-manager/scripts/compare_local_benchmarks.sh --base-tag <base_tag> --runs 3`
+- Server/UI security:
+  - trigger: server/auth/UI/spec surface changed
+  - commands: `cargo test -q --test remote_integration` and focused source review
 
-## Non-Negotiable Gate Policy
+Gate policy:
+- Any failed required gate blocks release.
+- For ordinary test/tool failures: fix and rerun (no blocker task required).
+- File ergo blockers only for incidents:
+  - workflow failures requiring follow-up code changes
+  - partial-publish/channel asymmetry
+  - policy exceptions requiring maintainer decision
 
-Any failed gate blocks release. Treat these as failures:
-- explicit failing result
-- critical tooling missing for the gate
-- check not run / evidence incomplete
+### 2) Short Resume Checkpoint
 
-When blocked:
-1. Stop release mechanics immediately (no tagging/publish).
-2. File an `ergo` blocker task with `scripts/file_release_blocker.sh`.
-3. Keep all blockers in one epic named `Release blockers: <release_target>`.
-
-## Interruption Resume Protocol
-
-If the run is interrupted (agent crash, user abort, runtime reset), do this before any new release action:
-1. Re-open the evidence report in `.scratch/release/`.
-2. Re-check current git/tag/workflow/blocker state using the checklist in `references/release-hygiene.md`.
-3. Record resumed context (timestamp + agent + current checkpoint) in the evidence report.
-4. Continue only from the first unchecked checkpoint; do not skip forward from memory.
-
-## Workflow
-
-1. Capture release context
-   - Confirm explicit `release_target`, `base_tag`, and `mode` from maintainer input.
-   - Verify `release_target` uses `vX.Y.Z` tag format and `base_tag` exists remotely.
-   - Verify local release source is fully pushed (no local-only commits left behind).
-   - Ensure `gh auth status` and `ergo where` are healthy.
-   - Initialize/reopen evidence report with `scripts/init_release_evidence.sh`.
-2. Run pre-release QA
-   - Execute all required gates from `references/qa-gates.md`.
-   - File blockers for every failed/incomplete gate.
-3. Release only if zero blockers
-   - Follow `references/release-hygiene.md`.
-   - Use `gh` for split build/publish workflow handling and publish-only rerun dispatch when needed.
-   - Prefer one rehearsal dispatch (`rehearsal=true`) on the chosen build run ID before first live publish on newly changed workflow topology.
-   - For publish-only reruns, validate `build_run_id` provenance before dispatch.
-4. Verify delivery
-   - Run checks from `references/delivery-verification.md`.
-   - File blocker tasks for missing artifacts or version mismatches.
-
-## Required QA Gates
-
-Run all of these before release:
-1. Dependency & vulnerability monitoring
-2. Memory safety & unsafe boundaries
-3. Concurrency correctness & crash consistency
-5. Performance regression guard
-6. API/CLI stability & compatibility
-7. Documentation alignment (docs match reality)
-8. Binding parity & packaging health
-9. Server / web UI security review
-11. Licensing & notices
-
-Detailed commands, stop conditions, and evidence are in `references/qa-gates.md`.
-
-## Blocker Filing
-
-Use the helper script for every failed gate:
-
+If interrupted, run these four commands before resuming:
 ```bash
-skills/plasmite-release-manager/scripts/file_release_blocker.sh \
-  --release-target "v0.1.1" \
-  --check "Performance regression guard" \
-  --title "Investigate benchmark regression in get(seq)" \
-  --summary "Bench run is 18% slower than base tag v0.1.0 on same host." \
-  --agent "codex@$(hostname -s)"
+git status --short --branch
+gh run list --workflow release --limit 1 --json databaseId,conclusion
+gh run list --workflow release-publish --limit 1 --json databaseId,conclusion
+git -C ../homebrew-tap log --oneline -1
 ```
 
-The script will:
-- create/find epic `Release blockers: <release_target>`
-- create a task with required sections (goal/background/acceptance/gates/consult)
-- print created epic/task IDs
+Escalate to incident workflow only when short checkpoint reveals anomalies
+(partial publish, provenance mismatch, conflicting tags, failed rerun).
 
-When a GitHub run failed, prefer the evidence wrapper:
+### 3) Build And Publish Mechanics
 
-```bash
-skills/plasmite-release-manager/scripts/file_release_blocker_with_evidence.sh \
-  --release-target "v0.1.1" \
-  --check "Binding parity & packaging health" \
-  --title "Fix runner tooling mismatch for release smoke scripts" \
-  --summary "release workflow failed in packaging smoke stage." \
-  --run-id "12345678901" \
-  --failing-command "bash scripts/node_pack_smoke.sh" \
-  --agent "codex@$(hostname -s)"
-```
+1. Ensure release source is pushed and tag exists/planned.
+2. Run release build workflow (`release`):
+   - push tag `vX.Y.Z` or dispatch `release.yml` with `tag`
+   - require successful build run
+3. Verify build provenance for candidate `build_run_id`:
+   - `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <build_run_id> --expect-tag <release_target>`
+4. Align Homebrew formula using release artifacts:
+   - `bash scripts/update_homebrew_formula.sh <release_target> ../homebrew-tap --build-run-id <build_run_id>`
+5. Rehearsal publish run (recommended on workflow changes):
+   - `gh workflow run release-publish.yml -f build_run_id=<build_run_id> -f rehearsal=true`
+6. Live publish run:
+   - `gh workflow run release-publish.yml -f build_run_id=<build_run_id> -f rehearsal=false`
+7. For credential/transient failures, do publish-only rerun using same verified `build_run_id`.
 
-The wrapper enriches blocker summaries with run URL, failed job names, and optional log snippets.
+### 4) Failure Handling
 
-## Bundled Resources
+If any release workflow fails:
+1. Stop release progression.
+2. Capture machine-readable failure evidence:
+   - `gh run view <run-id> --json url,jobs --jq '{url,jobs:[.jobs[]|select(.conclusion=="failure")|{name,url:.url}]}'`
+   - `gh run view <run-id> --log-failed`
+3. If incident-class failure, file blocker:
+   - `bash skills/plasmite-release-manager/scripts/file_release_blocker_with_evidence.sh --release-target <release_target> --check "<gate>" --title "<title>" --summary "<summary>" --run-id <run-id> --agent <model@host>`
 
-- `references/qa-gates.md`
-  - gate-by-gate commands, evidence, and blocker criteria
-- `references/release-hygiene.md`
-  - mechanical release steps with `gh`
-- `references/delivery-verification.md`
-  - verify packages are live post-release
-- `scripts/file_release_blocker.sh`
-  - deterministic blocker filing into `ergo`
-- `scripts/file_release_blocker_with_evidence.sh`
-  - blocker filing with attached run metadata and log excerpt
-- `scripts/init_release_evidence.sh`
-  - creates/reopens the release evidence artifact used for resumes and handoffs
-- `scripts/check_release_tooling_contract.sh`
-  - enforces CI tooling compatibility for release scripts/workflow before tagging
-- `scripts/inspect_release_build_metadata.sh`
-  - validates release build run provenance and prints metadata for safe publish-only reruns
-- `scripts/compare_local_benchmarks.sh`
-  - runs same-host benchmark medians for `base_tag` vs current release candidate and fails on unapproved regressions
-- `scripts/verify_homebrew_formula_alignment.sh`
-  - validates Homebrew formula version/urls/checksums against release artifacts
-- `scripts/update_homebrew_formula.sh`
-  - updates sibling homebrew-tap formula from release checksums or release build run artifacts
+## Post-Release Verification
+
+Mandatory every release (fast checks):
+1. GitHub release exists with expected assets:
+   - `gh release view <release_target>`
+2. crates.io version:
+   - `cargo info plasmite`
+3. npm version:
+   - `npm view plasmite version`
+4. PyPI version:
+   - `curl -sS https://pypi.org/pypi/plasmite/json | jq -r '.info.version'`
+5. Homebrew formula alignment:
+   - `gh api repos/sandover/homebrew-tap/contents/Formula/plasmite.rb -H "Accept: application/vnd.github.raw"`
+
+Weekly scheduled checks (not release-blocking per release):
+- clean-environment install sanity for Node/Python/Go bindings
+- licensing/notices verification across local artifacts
+- implemented by `.github/workflows/weekly-install-sanity.yml`
+
+Block release immediately if:
+- any channel resolves the wrong version
+- release assets are missing/corrupt
+- channel publish asymmetry is detected

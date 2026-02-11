@@ -10,22 +10,6 @@ on:
         description: "Successful release build workflow run ID to publish from."
         required: true
         type: string
-      skip_npm:
-        description: "Skip npm publish for this run (requires explicit opt-in)."
-        type: boolean
-        default: false
-      skip_pypi:
-        description: "Skip PyPI publish for this run (requires explicit opt-in)."
-        type: boolean
-        default: false
-      skip_crates_io:
-        description: "Skip crates.io publish for this run (requires explicit opt-in)."
-        type: boolean
-        default: false
-      allow_partial_release:
-        description: "Allow final GitHub release when one or more publish channels are skipped."
-        type: boolean
-        default: false
       rehearsal:
         description: "Run full preflight/provenance/tap checks without publishing to registries or GitHub Releases."
         type: boolean
@@ -43,9 +27,6 @@ jobs:
       build_run_id: ${{ steps.resolve.outputs.build_run_id }}
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
-      skip_npm: ${{ steps.resolve.outputs.skip_npm }}
-      skip_pypi: ${{ steps.resolve.outputs.skip_pypi }}
-      skip_crates_io: ${{ steps.resolve.outputs.skip_crates_io }}
       rehearsal: ${{ steps.resolve.outputs.rehearsal }}
     steps:
       - id: resolve
@@ -61,22 +42,10 @@ jobs:
               exit 1
             fi
             build_run_id="${{ github.event.workflow_run.id }}"
-            skip_npm="false"
-            skip_pypi="false"
-            skip_crates_io="false"
             rehearsal="false"
           else
             build_run_id="${{ inputs.build_run_id }}"
-            skip_npm="${{ inputs.skip_npm }}"
-            skip_pypi="${{ inputs.skip_pypi }}"
-            skip_crates_io="${{ inputs.skip_crates_io }}"
             rehearsal="${{ inputs.rehearsal }}"
-            if [[ "${{ inputs.allow_partial_release }}" != "true" ]] && \
-               ([[ "$skip_npm" == "true" ]] || [[ "$skip_pypi" == "true" ]] || [[ "$skip_crates_io" == "true" ]]); then
-              echo "error: partial publish requested but allow_partial_release is false." >&2
-              echo "hint: set allow_partial_release=true when intentionally skipping publish channels." >&2
-              exit 1
-            fi
           fi
 
           run_json="$(gh run view "$build_run_id" --repo "$GITHUB_REPOSITORY" --json workflowName,conclusion,url)"
@@ -113,9 +82,6 @@ jobs:
           echo "build_run_id=$build_run_id" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "skip_npm=$skip_npm" >> "$GITHUB_OUTPUT"
-          echo "skip_pypi=$skip_pypi" >> "$GITHUB_OUTPUT"
-          echo "skip_crates_io=$skip_crates_io" >> "$GITHUB_OUTPUT"
           echo "rehearsal=$rehearsal" >> "$GITHUB_OUTPUT"
 
   publish-preflight:
@@ -123,15 +89,11 @@ jobs:
     needs: [resolve-build-run]
     steps:
       - uses: actions/setup-node@v4
-        if: needs.resolve-build-run.outputs.skip_npm != 'true'
         with:
           node-version: "20"
       - name: Validate registry readiness
         shell: bash
         env:
-          SKIP_NPM: ${{ needs.resolve-build-run.outputs.skip_npm }}
-          SKIP_PYPI: ${{ needs.resolve-build-run.outputs.skip_pypi }}
-          SKIP_CRATES_IO: ${{ needs.resolve-build-run.outputs.skip_crates_io }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
@@ -144,46 +106,40 @@ jobs:
             exit 1
           }
 
-          if [[ "$SKIP_NPM" != "true" ]]; then
-            if [[ -z "${NPM_TOKEN:-}" ]]; then
-              preflight_fail "NPM_TOKEN not set for publish-preflight." "Set NPM_TOKEN, or re-run with skip_npm=true and allow_partial_release=true."
+          if [[ -z "${NPM_TOKEN:-}" ]]; then
+            preflight_fail "NPM_TOKEN not set for publish-preflight." "Set NPM_TOKEN in repository secrets before running release-publish."
+          fi
+          if [[ "${NPM_TOKEN}" != npm_* ]]; then
+            preflight_fail "NPM_TOKEN format does not match npm access token expectations." "Use an npm automation/granular publish token (commonly starts with 'npm_') and ensure bypass-2FA publishing is enabled."
+          fi
+          if ! NPM_CONFIG_TOKEN="$NPM_TOKEN" npm whoami >/tmp/npm-whoami.out 2>/tmp/npm-whoami.err; then
+            npm_err="$(cat /tmp/npm-whoami.err)"
+            if grep -qi "EOTP\\|one-time pass\\|otp" <<<"$npm_err"; then
+              preflight_fail "npm token requires OTP interaction and is not CI-publish-ready." "Create/use an automation token with bypass-2FA publishing permissions."
             fi
-            if [[ "${NPM_TOKEN}" != npm_* ]]; then
-              preflight_fail "NPM_TOKEN format does not match npm access token expectations." "Use an npm automation/granular publish token (commonly starts with 'npm_') and ensure bypass-2FA publishing is enabled."
-            fi
-            if ! NPM_CONFIG_TOKEN="$NPM_TOKEN" npm whoami >/tmp/npm-whoami.out 2>/tmp/npm-whoami.err; then
-              npm_err="$(cat /tmp/npm-whoami.err)"
-              if grep -qi "EOTP\\|one-time pass\\|otp" <<<"$npm_err"; then
-                preflight_fail "npm token requires OTP interaction and is not CI-publish-ready." "Create/use an automation token with bypass-2FA publishing permissions."
-              fi
-              echo "warning: npm whoami failed during publish-preflight; continuing to publish stage for final token validation." >&2
-              echo "warning: npm whoami stderr: ${npm_err}" >&2
-            fi
+            echo "warning: npm whoami failed during publish-preflight; continuing to publish stage for final token validation." >&2
+            echo "warning: npm whoami stderr: ${npm_err}" >&2
           fi
 
-          if [[ "$SKIP_PYPI" != "true" ]]; then
-            if [[ -z "${PYPI_API_TOKEN:-}" ]]; then
-              preflight_fail "PYPI_API_TOKEN not set for publish-preflight." "Set PYPI_API_TOKEN, or re-run with skip_pypi=true and allow_partial_release=true."
-            fi
-            if [[ "${PYPI_API_TOKEN}" != pypi-* ]]; then
-              preflight_fail "PYPI_API_TOKEN format is unexpected." "Use a PyPI API token from PyPI account settings (token value begins with 'pypi-')."
-            fi
+          if [[ -z "${PYPI_API_TOKEN:-}" ]]; then
+            preflight_fail "PYPI_API_TOKEN not set for publish-preflight." "Set PYPI_API_TOKEN in repository secrets before running release-publish."
+          fi
+          if [[ "${PYPI_API_TOKEN}" != pypi-* ]]; then
+            preflight_fail "PYPI_API_TOKEN format is unexpected." "Use a PyPI API token from PyPI account settings (token value begins with 'pypi-')."
           fi
 
-          if [[ "$SKIP_CRATES_IO" != "true" ]]; then
-            if [[ -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
-              preflight_fail "CARGO_REGISTRY_TOKEN not set for publish-preflight." "Set CARGO_REGISTRY_TOKEN, or re-run with skip_crates_io=true and allow_partial_release=true."
-            fi
-            crates_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: ${CARGO_REGISTRY_TOKEN}" https://crates.io/api/v1/me)"
-            if [[ "$crates_status" == "401" ]]; then
-              preflight_fail "crates.io authentication check failed with HTTP ${crates_status}." "Use a valid crates.io API token with publish rights and verify the token value is complete."
-            fi
-            if [[ "$crates_status" != "200" ]]; then
-              echo "warning: crates.io /me probe returned HTTP ${crates_status}; continuing to publish stage for final token validation." >&2
-            fi
+          if [[ -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
+            preflight_fail "CARGO_REGISTRY_TOKEN not set for publish-preflight." "Set CARGO_REGISTRY_TOKEN in repository secrets before running release-publish."
+          fi
+          crates_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: ${CARGO_REGISTRY_TOKEN}" https://crates.io/api/v1/me)"
+          if [[ "$crates_status" == "401" ]]; then
+            preflight_fail "crates.io authentication check failed with HTTP ${crates_status}." "Use a valid crates.io API token with publish rights and verify the token value is complete."
+          fi
+          if [[ "$crates_status" != "200" ]]; then
+            echo "warning: crates.io /me probe returned HTTP ${crates_status}; continuing to publish stage for final token validation." >&2
           fi
 
-          echo "publish-preflight: all enabled registry checks passed."
+          echo "publish-preflight: all registry checks passed."
 
   verify-homebrew-tap:
     runs-on: ubuntu-latest
@@ -282,19 +238,14 @@ jobs:
     needs: [resolve-build-run, publish-preflight, collect-build-artifacts, verify-homebrew-tap]
     steps:
       - uses: actions/checkout@v4
-        if: needs.resolve-build-run.outputs.skip_crates_io != 'true'
         with:
           ref: ${{ needs.resolve-build-run.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
-        if: needs.resolve-build-run.outputs.skip_crates_io != 'true'
-      - name: Check crates.io channel policy
-        if: needs.resolve-build-run.outputs.skip_crates_io == 'true'
-        run: 'echo "publish-crates-io bypassed: skip_crates_io=true"'
       - name: Rehearsal mode
-        if: needs.resolve-build-run.outputs.skip_crates_io != 'true' && needs.resolve-build-run.outputs.rehearsal == 'true'
+        if: needs.resolve-build-run.outputs.rehearsal == 'true'
         run: 'echo "publish-crates-io rehearsal: skipping cargo publish."'
       - name: Publish to crates.io
-        if: needs.resolve-build-run.outputs.skip_crates_io != 'true' && needs.resolve-build-run.outputs.rehearsal != 'true'
+        if: needs.resolve-build-run.outputs.rehearsal != 'true'
         shell: bash
         run: |
           if [ -z "${{ secrets.CARGO_REGISTRY_TOKEN }}" ]; then
@@ -308,23 +259,18 @@ jobs:
     needs: [resolve-build-run, publish-preflight, collect-build-artifacts, verify-homebrew-tap]
     steps:
       - uses: actions/download-artifact@v4
-        if: needs.resolve-build-run.outputs.skip_npm != 'true'
         with:
           name: release-inputs
           path: release-inputs
       - uses: actions/setup-node@v4
-        if: needs.resolve-build-run.outputs.skip_npm != 'true'
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
-      - name: Check npm channel policy
-        if: needs.resolve-build-run.outputs.skip_npm == 'true'
-        run: 'echo "publish-npm bypassed: skip_npm=true"'
       - name: Rehearsal mode
-        if: needs.resolve-build-run.outputs.skip_npm != 'true' && needs.resolve-build-run.outputs.rehearsal == 'true'
+        if: needs.resolve-build-run.outputs.rehearsal == 'true'
         run: 'echo "publish-npm rehearsal: skipping npm publish."'
       - name: Publish to npm
-        if: needs.resolve-build-run.outputs.skip_npm != 'true' && needs.resolve-build-run.outputs.rehearsal != 'true'
+        if: needs.resolve-build-run.outputs.rehearsal != 'true'
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -344,18 +290,14 @@ jobs:
     needs: [resolve-build-run, publish-preflight, collect-build-artifacts, verify-homebrew-tap]
     steps:
       - uses: actions/download-artifact@v4
-        if: needs.resolve-build-run.outputs.skip_pypi != 'true'
         with:
           name: release-inputs
           path: release-inputs
-      - name: Check PyPI channel policy
-        if: needs.resolve-build-run.outputs.skip_pypi == 'true'
-        run: 'echo "publish-pypi bypassed: skip_pypi=true"'
       - name: Rehearsal mode
-        if: needs.resolve-build-run.outputs.skip_pypi != 'true' && needs.resolve-build-run.outputs.rehearsal == 'true'
+        if: needs.resolve-build-run.outputs.rehearsal == 'true'
         run: 'echo "publish-pypi rehearsal: skipping PyPI publish."'
       - name: Check PyPI token
-        if: needs.resolve-build-run.outputs.skip_pypi != 'true' && needs.resolve-build-run.outputs.rehearsal != 'true'
+        if: needs.resolve-build-run.outputs.rehearsal != 'true'
         shell: bash
         run: |
           if [ -z "${{ secrets.PYPI_API_TOKEN }}" ]; then
@@ -363,7 +305,7 @@ jobs:
             exit 1
           fi
       - uses: pypa/gh-action-pypi-publish@release/v1
-        if: needs.resolve-build-run.outputs.skip_pypi != 'true' && needs.resolve-build-run.outputs.rehearsal != 'true'
+        if: needs.resolve-build-run.outputs.rehearsal != 'true'
         with:
           user: __token__
           password: ${{ secrets.PYPI_API_TOKEN }}
@@ -372,7 +314,7 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
-    # Final release is gated by artifact provenance and all publish channels (or explicit bypasses).
+    # Final release is gated by artifact provenance and all publish channels.
     needs: [resolve-build-run, publish-preflight, collect-build-artifacts, verify-homebrew-tap, publish-pypi, publish-crates-io, publish-npm]
     steps:
       - uses: actions/download-artifact@v4

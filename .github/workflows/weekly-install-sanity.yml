@@ -1,0 +1,69 @@
+name: weekly-install-sanity
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+jobs:
+  node-install-sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Node package in clean global context
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install -g plasmite@latest
+          plasmite --version
+          npm uninstall -g plasmite
+
+  python-install-sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v5
+      - name: Install Python package in clean tool env
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv tool install plasmite
+          plasmite --version
+          uv tool uninstall plasmite
+
+  go-install-sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Resolve Go bindings module in clean temp module
+        shell: bash
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"' EXIT
+          cd "$workdir"
+          go mod init weekly-sanity >/dev/null
+          go get github.com/sandover/plasmite/bindings/go/plasmite@latest
+          go list -m all | grep -q 'github.com/sandover/plasmite/bindings/go'
+
+  notices-sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify licensing notices against available local artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=0
+          bash skills/plasmite-release-manager/scripts/verify_licensing_notices.sh || status=$?
+          if [[ "$status" -eq 2 ]]; then
+            echo "weekly notice check: no local artifacts; treating as informational pass."
+            exit 0
+          fi
+          exit "$status"

@@ -17,7 +17,7 @@ Required for trustworthy release evidence:
 Preflight commands:
 - `mkdir -p .scratch .scratch/release`
 - `test -w .scratch`
-- `bash skills/plasmite-release-manager/scripts/check_release_tooling_contract.sh`
+- `bash scripts/check_release_workflow_topology.sh`
 
 Clean-filesystem guard (required before release mechanics):
 - verify release helper scripts do not rely on pre-existing `.scratch` paths
@@ -25,23 +25,22 @@ Clean-filesystem guard (required before release mechanics):
 
 If runtime preflight fails, block release and file a blocker task before running gate checks.
 
-## 0) CI Tooling Compatibility Contract
+## 0) Release Workflow Topology Contract
 
 Goal:
 - prevent release workflow failures caused by tooling, contract, or topology drift.
 
 Evidence commands:
-- `bash skills/plasmite-release-manager/scripts/check_release_tooling_contract.sh`
-- `rg -n "ripgrep|rg |publish-preflight|release-metadata|build_run_id|needs:" .github/workflows/release.yml .github/workflows/release-publish.yml`
+- `bash scripts/check_release_workflow_topology.sh`
+- `rg -n "publish-preflight|release-metadata|build_run_id|needs:" .github/workflows/release.yml .github/workflows/release-publish.yml`
 - `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <successful-release-run-id> --expect-tag <release_target>`
 
 Block if:
-- release script tooling requirements are neither guarded by script fallback nor provisioned in workflow
 - release-publish preflight diagnostics are missing actionable remediation for npm/PyPI/crates auth/policy failures
 - publish workflow can run release/publish jobs without validated build artifact provenance
 - publish workflow can run registry publish jobs without verified Homebrew formula alignment
 - release build metadata cannot be inspected or does not match `release_target`
-- the tooling contract check cannot run or returns non-zero
+- the topology contract check cannot run or returns non-zero
 
 ## 1) Dependency & Vulnerability Monitoring
 

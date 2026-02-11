@@ -108,7 +108,7 @@ cat > "$out_path" <<EOF_REPORT
 - Open blocker count: _pending_
 
 ## QA Gate Evidence
-- Gate 0 CI tooling compatibility:
+- Gate 0 Release workflow topology:
 - Gate 1 Dependency/vulnerability:
 - Gate 2 Memory safety:
 - Gate 3 Concurrency/crash consistency:

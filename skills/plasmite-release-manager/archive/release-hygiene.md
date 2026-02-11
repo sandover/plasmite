@@ -94,7 +94,7 @@ Run all of these before resuming any release mechanics:
    - `gh run view "$rehearsal_run_id" --json status,conclusion,jobs --jq '{status,conclusion,jobs:[.jobs[]|{name,status,conclusion}]}'`
    - require rehearsal `conclusion=success` before live publish
 6. Dispatch live publish workflow:
-   - `gh workflow run release-publish.yml -f build_run_id=<build-run-id> -f rehearsal=false -f allow_partial_release=false`
+   - `gh workflow run release-publish.yml -f build_run_id=<build-run-id> -f rehearsal=false`
    - `publish_run_id=$(gh run list --workflow release-publish --limit 1 --json databaseId,event,status,conclusion --jq '.[0].databaseId')`
    - `gh run view "$publish_run_id" --json status,conclusion,jobs --jq '{status,conclusion,jobs:[.jobs[]|{name,status,conclusion}]}'`
    - require publish run `conclusion=success` before delivery verification
@@ -102,8 +102,8 @@ Run all of these before resuming any release mechanics:
 7. Publish-only rerun after fixing credentials (no rebuild):
    - validate candidate run provenance:
    - `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <build-run-id> --expect-tag <release_target>`
-   - `gh workflow run release-publish.yml -f build_run_id=<build-run-id> -f rehearsal=false -f allow_partial_release=false`
-   - for intentional channel bypass, set channel flag(s) and `allow_partial_release=true` in the same dispatch.
+   - `gh workflow run release-publish.yml -f build_run_id=<build-run-id> -f rehearsal=false`
+   - no partial-release bypass is supported; reruns always execute all publish channels.
 8. Confirm GitHub release exists and artifacts are attached:
    - `gh release view vX.Y.Z`
    - `gh release verify-asset vX.Y.Z <artifact-name>` (if available in current gh version)

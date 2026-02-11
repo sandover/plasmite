@@ -89,7 +89,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: cd bindings/node && npm ci
       - name: Validate release workflow/script contracts
-        run: bash skills/plasmite-release-manager/scripts/check_release_tooling_contract.sh
+        run: bash scripts/check_release_workflow_topology.sh
       - name: Build host release SDK inputs for contract smokes
         shell: bash
         run: |
