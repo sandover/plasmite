@@ -949,7 +949,7 @@ mod tests {
         };
         let rc = plsm_pool_append_json(
             pool,
-            payload.as_ptr() as *const u8,
+            payload.as_bytes().as_ptr(),
             payload.as_bytes().len(),
             tags.as_ptr(),
             tags.len(),
