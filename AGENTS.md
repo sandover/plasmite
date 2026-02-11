@@ -6,6 +6,7 @@ Use ergo for all planning, so that your plans can be stored in the repo. Run "er
 - Avoid hidden state and hidden variables -- make inputs and outputs explicit
 - Favor independent, testable components with loose coupling
 - Each code file should have top matter comments sufficient to allow agents to confidently understand and navigate the code file *without having to read the whole thing*. 
+- Prefer the simplest viable approach. Do not over-engineer solutions — I'm a solo maintainer. When in doubt, choose the approach with fewer moving parts, fewer dependencies, and less infrastructure. Ask before adding complexity.
 
 # When writing commit messages
 - Use Conventional Commits (type(scope): imperative summary; scope optional)
