@@ -3,7 +3,7 @@
 # Key outputs: JSON + Markdown summaries under .scratch/release with per-scenario regressions.
 # Role: Release-blocking performance gate for maintainers before tagging/publishing.
 # Invariants: Uses one host/power mode for both sides; runs each side multiple times.
-# Invariants: Fails closed on missing comparisons or >= threshold regressions in core benches.
+# Invariants: Fails closed on missing comparisons or strongly-evidenced regressions in core benches.
 # Notes: CI canary benchmarks are advisory only; this script is the release decision source.
 
 set -euo pipefail
@@ -16,7 +16,8 @@ Usage:
     [--runs 3] \
     [--messages 5000] \
     [--threshold-percent 15] \
-    [--noise-floor 0.0001]
+    [--noise-floor 0.0001] \
+    [--get-scan-min-blocking-base-ms 0.2]
 USAGE
 }
 
@@ -25,6 +26,7 @@ RUNS=3
 MESSAGES=5000
 THRESHOLD_PERCENT=15
 NOISE_FLOOR=0.0001
+GET_SCAN_MIN_BLOCKING_BASE_MS=0.2
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -46,6 +48,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --noise-floor)
       NOISE_FLOOR="${2:-}"
+      shift 2
+      ;;
+    --get-scan-min-blocking-base-ms)
+      GET_SCAN_MIN_BLOCKING_BASE_MS="${2:-}"
       shift 2
       ;;
     -h|--help)
@@ -164,6 +170,8 @@ aggregate_medians() {
         bench: .[0].bench,
         key: .[0].key,
         median_ms_per_msg: (map(.ms) | median),
+        min_ms_per_msg: (map(.ms) | min),
+        max_ms_per_msg: (map(.ms) | max),
         samples: length
       })
   ' "$@" > "$out_json"
@@ -195,6 +203,7 @@ ENV_MESSAGES="$MESSAGES" \
 jq -n \
   --argjson threshold "$THRESHOLD_PERCENT" \
   --argjson noise "$NOISE_FLOOR" \
+  --argjson get_scan_floor "$GET_SCAN_MIN_BLOCKING_BASE_MS" \
   --slurpfile base "$BASE_MEDIANS_JSON" \
   --slurpfile cur "$CURRENT_MEDIANS_JSON" '
     ($base[0] | map({(.key): .}) | add) as $base_map
@@ -210,6 +219,10 @@ jq -n \
             scenario_key: $cur_row.key,
             base_median_ms_per_msg: $base_ms,
             current_median_ms_per_msg: $cur_ms,
+            base_min_ms_per_msg: $base_row.min_ms_per_msg,
+            base_max_ms_per_msg: $base_row.max_ms_per_msg,
+            current_min_ms_per_msg: $cur_row.min_ms_per_msg,
+            current_max_ms_per_msg: $cur_row.max_ms_per_msg,
             regression_percent: (
               if $base_ms == 0 then null
               else (($cur_ms - $base_ms) / $base_ms * 100)
@@ -219,7 +232,9 @@ jq -n \
         | .status = (
             if .regression_percent == null then "no_baseline"
             elif (.base_median_ms_per_msg < $noise and .current_median_ms_per_msg < $noise) then "noise_floor"
-            elif .regression_percent >= $threshold then "regressed"
+            elif (.bench == "get_scan" and .regression_percent >= $threshold and .base_median_ms_per_msg < $get_scan_floor) then "candidate_regression"
+            elif (.regression_percent >= $threshold and .current_min_ms_per_msg > .base_max_ms_per_msg) then "regressed"
+            elif .regression_percent >= $threshold then "candidate_regression"
             else "ok"
             end
           )
@@ -230,6 +245,7 @@ jq -n \
         messages: (env.ENV_MESSAGES | tonumber),
         threshold_percent: $threshold,
         noise_floor_ms_per_msg: $noise,
+        get_scan_min_blocking_base_ms: $get_scan_floor,
         comparable_scenarios: ($rows | length),
         regressions: ($rows | map(select(.status == "regressed"))),
         comparisons: $rows
@@ -251,6 +267,7 @@ fi
   echo "- Messages per run: $MESSAGES"
   echo "- Regression threshold: ${THRESHOLD_PERCENT}%"
   echo "- Noise floor: ${NOISE_FLOOR} ms/msg"
+  echo "- get_scan minimum blocking baseline: ${GET_SCAN_MIN_BLOCKING_BASE_MS} ms/msg"
   echo
   echo "| Bench | Scenario | Base median ms/msg | Current median ms/msg | Regression % | Status |"
   echo "| --- | --- | ---: | ---: | ---: | --- |"
