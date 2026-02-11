@@ -216,6 +216,8 @@ jobs:
             cargo rustc --release --target "${{ matrix.target }}" --lib --crate-type=cdylib -- -C link-arg=-Wl,-soname,libplasmite.so
           fi
       - name: Build Node addon
+        env:
+          PLASMITE_LIB_DIR: ${{ github.workspace }}/target/${{ matrix.target }}/release
         run: cd bindings/node && npm run build
       - name: Stage node native payload
         run: ./scripts/package_node_natives.sh "${{ matrix.platform }}" "${{ github.workspace }}/target/${{ matrix.target }}/release" "${{ github.workspace }}/bindings/node/index.node"
