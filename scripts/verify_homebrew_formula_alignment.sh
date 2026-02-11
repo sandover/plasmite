@@ -3,7 +3,7 @@
 # Key exports: Exit 0 on exact match; prints actionable mismatch diagnostics on failure.
 # Role: Fail-closed guard to keep Homebrew distribution aligned with every release.
 # Invariants: Formula version must equal the release version under validation.
-# Invariants: Formula URLs and sha256 entries for darwin_amd64/darwin_arm64/linux_amd64 must match.
+# Invariants: Formula URLs and sha256 entries for darwin_amd64/darwin_arm64/linux_amd64/linux_arm64 must match.
 # Notes: Reads formula from a local file or directly from GitHub via gh api.
 
 set -euo pipefail
@@ -79,11 +79,6 @@ else
   formula_text="$(gh api "repos/${tap_repo}/contents/Formula/plasmite.rb" -H "Accept: application/vnd.github.raw")"
 fi
 
-if grep -q 'linux_arm64' <<<"$formula_text"; then
-  echo "error: formula contains linux_arm64 artifacts, which are unsupported for release gating." >&2
-  exit 1
-fi
-
 formula_version="$(sed -n 's/^[[:space:]]*version[[:space:]]*"\([^"]*\)".*/\1/p' <<<"$formula_text" | head -n1)"
 if [[ "$formula_version" != "$version" ]]; then
   echo "error: Homebrew formula version mismatch (formula=$formula_version expected=$version)." >&2
@@ -106,7 +101,7 @@ extract_formula_entry() {
   ' <<<"$formula_text"
 }
 
-for platform in darwin_amd64 darwin_arm64 linux_amd64; do
+for platform in darwin_amd64 darwin_arm64 linux_amd64 linux_arm64; do
   expected="$(expected_sha "$platform")"
   if [[ -z "$expected" ]]; then
     echo "error: missing expected checksum for ${platform} in ${sha_file}" >&2

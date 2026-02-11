@@ -2,8 +2,7 @@
 # Purpose: Update homebrew-tap Formula/plasmite.rb to match a specific release.
 # Key exports: Rewrites version, release URLs, and sha256 values for supported targets.
 # Role: Keep Homebrew distribution aligned with every Plasmite release.
-# Invariants: Requires darwin_amd64, darwin_arm64, and linux_amd64 checksums.
-# Invariants: Fails if formula still references unsupported linux_arm64 release artifacts.
+# Invariants: Requires darwin_amd64, darwin_arm64, linux_amd64, and linux_arm64 checksums.
 # Notes: Checksums can come from an existing GitHub release, a release build run ID, or a local sums file.
 
 set -euo pipefail
@@ -77,12 +76,6 @@ if [[ ! -f "$formula_file" ]]; then
   exit 1
 fi
 
-if grep -q 'linux_arm64' "$formula_file"; then
-  echo "error: formula still references linux_arm64 artifacts, which are not release-gating targets." >&2
-  echo "hint: remove linux_arm64 formula entries first, then rerun this script." >&2
-  exit 1
-fi
-
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 verification_sha_file=""
@@ -97,12 +90,14 @@ load_sha_from_file() {
   darwin_amd64_sha="$(grep "plasmite_${version}_darwin_amd64.tar.gz" "$file" | awk '{print $1}' | head -n1)"
   darwin_arm64_sha="$(grep "plasmite_${version}_darwin_arm64.tar.gz" "$file" | awk '{print $1}' | head -n1)"
   linux_amd64_sha="$(grep "plasmite_${version}_linux_amd64.tar.gz" "$file" | awk '{print $1}' | head -n1)"
+  linux_arm64_sha="$(grep "plasmite_${version}_linux_arm64.tar.gz" "$file" | awk '{print $1}' | head -n1)"
 
-  if [[ -z "$darwin_amd64_sha" || -z "$darwin_arm64_sha" || -z "$linux_amd64_sha" ]]; then
+  if [[ -z "$darwin_amd64_sha" || -z "$darwin_arm64_sha" || -z "$linux_amd64_sha" || -z "$linux_arm64_sha" ]]; then
     echo "error: failed to extract required checksums for v${version} from $file" >&2
     echo "  darwin_amd64: ${darwin_amd64_sha:-<missing>}" >&2
     echo "  darwin_arm64: ${darwin_arm64_sha:-<missing>}" >&2
     echo "  linux_amd64: ${linux_amd64_sha:-<missing>}" >&2
+    echo "  linux_arm64: ${linux_arm64_sha:-<missing>}" >&2
     exit 1
   fi
 }
@@ -127,7 +122,7 @@ else
   verification_sha_file="$tmp_dir/sha256sums.txt"
 fi
 
-export version version_tag darwin_amd64_sha darwin_arm64_sha linux_amd64_sha formula_file
+export version version_tag darwin_amd64_sha darwin_arm64_sha linux_amd64_sha linux_arm64_sha formula_file
 
 perl -0777 -i.bak -pe '
   s/version "\d+\.\d+\.\d+"/version "$ENV{version}"/g;
@@ -135,12 +130,15 @@ perl -0777 -i.bak -pe '
   s/plasmite_\d+\.\d+\.\d+_darwin_amd64\.tar\.gz/plasmite_$ENV{version}_darwin_amd64.tar.gz/g;
   s/plasmite_\d+\.\d+\.\d+_darwin_arm64\.tar\.gz/plasmite_$ENV{version}_darwin_arm64.tar.gz/g;
   s/plasmite_\d+\.\d+\.\d+_linux_amd64\.tar\.gz/plasmite_$ENV{version}_linux_amd64.tar.gz/g;
+  s/plasmite_\d+\.\d+\.\d+_linux_arm64\.tar\.gz/plasmite_$ENV{version}_linux_arm64.tar.gz/g;
   s/PLACEHOLDER_DARWIN_AMD64_SHA256/$ENV{darwin_amd64_sha}/g;
   s/PLACEHOLDER_DARWIN_ARM64_SHA256/$ENV{darwin_arm64_sha}/g;
   s/PLACEHOLDER_LINUX_AMD64_SHA256/$ENV{linux_amd64_sha}/g;
+  s/PLACEHOLDER_LINUX_ARM64_SHA256/$ENV{linux_arm64_sha}/g;
   s#(plasmite_$ENV{version}_darwin_amd64\.tar\.gz"\n\s*sha256 ")([^"]+)#$1$ENV{darwin_amd64_sha}#g;
   s#(plasmite_$ENV{version}_darwin_arm64\.tar\.gz"\n\s*sha256 ")([^"]+)#$1$ENV{darwin_arm64_sha}#g;
   s#(plasmite_$ENV{version}_linux_amd64\.tar\.gz"\n\s*sha256 ")([^"]+)#$1$ENV{linux_amd64_sha}#g;
+  s#(plasmite_$ENV{version}_linux_arm64\.tar\.gz"\n\s*sha256 ")([^"]+)#$1$ENV{linux_arm64_sha}#g;
 ' "$formula_file"
 
 rm -f "${formula_file}.bak"

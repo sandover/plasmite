@@ -16,8 +16,13 @@ class Plasmite < Formula
   end
 
   on_linux do
-    url "https://github.com/sandover/plasmite/releases/download/v0.1.0/plasmite_0.1.0_linux_amd64.tar.gz"
-    sha256 "74b60da6df31345580c4c805c187d47c6b5bef295fa9ba7cb13e08ba429a80c8"
+    if Hardware::CPU.arm?
+      url "https://github.com/sandover/plasmite/releases/download/v0.1.0/plasmite_0.1.0_linux_arm64.tar.gz"
+      sha256 "PLACEHOLDER_LINUX_ARM64_SHA256"
+    else
+      url "https://github.com/sandover/plasmite/releases/download/v0.1.0/plasmite_0.1.0_linux_amd64.tar.gz"
+      sha256 "74b60da6df31345580c4c805c187d47c6b5bef295fa9ba7cb13e08ba429a80c8"
+    end
   end
 
   def install
