@@ -1,10 +1,10 @@
 /*
-Purpose: Stage native SDK assets in the npm package root before packing.
+Purpose: Stage native SDK assets under native/{platform}/ before npm packing.
 Key Exports: Script entrypoint only.
-Role: Copy libplasmite + plasmite CLI beside index.node for install-time use.
+Role: Copy addon + shared library + CLI into platform-specific package subdir.
 Invariants: Prefers PLASMITE_SDK_DIR (SDK layout), then repo-local target/debug.
-Invariants: Removes stale bundled artifacts before copying new ones.
-Notes: Intended for prepack usage; fails fast if required assets are missing.
+Invariants: Fails when platform mapping or required artifacts are unavailable.
+Notes: Intended for prepack usage and local packaging workflows.
 */
 
 const fs = require("node:fs");
@@ -15,19 +15,16 @@ const repoRoot = path.resolve(packageRoot, "..", "..");
 const sdkRoot = process.env.PLASMITE_SDK_DIR
   ? path.resolve(process.env.PLASMITE_SDK_DIR)
   : path.join(repoRoot, "target", "debug");
+const platformByOsArch = {
+  "linux-x64": "linux-x64",
+  "darwin-x64": "darwin-x64",
+  "darwin-arm64": "darwin-arm64",
+};
+const runtimeKey = `${process.platform}-${process.arch}`;
+const platformDir = platformByOsArch[runtimeKey];
 
-const staleArtifacts = [
-  "libplasmite.dylib",
-  "libplasmite.so",
-  "libplasmite.a",
-  "plasmite",
-];
-
-for (const artifact of staleArtifacts) {
-  const candidate = path.join(packageRoot, artifact);
-  if (fs.existsSync(candidate)) {
-    fs.rmSync(candidate, { force: true });
-  }
+if (!platformDir) {
+  throw new Error(`Unsupported platform for native packaging: ${runtimeKey}`);
 }
 
 const libCandidates = [
@@ -40,6 +37,7 @@ const cliCandidates = [
   path.join(sdkRoot, "bin", "plasmite"),
   path.join(sdkRoot, "plasmite"),
 ];
+const addonCandidates = [path.join(packageRoot, "index.node")];
 
 function firstExisting(candidates) {
   return candidates.find((candidate) => fs.existsSync(candidate));
@@ -49,12 +47,23 @@ const libSource = firstExisting(libCandidates);
 if (!libSource) {
   throw new Error(`libplasmite not found in SDK root: ${sdkRoot}`);
 }
-fs.copyFileSync(libSource, path.join(packageRoot, path.basename(libSource)));
-
 const cliSource = firstExisting(cliCandidates);
 if (!cliSource) {
   throw new Error(`plasmite CLI not found in SDK root: ${sdkRoot}`);
 }
-const cliDest = path.join(packageRoot, "plasmite");
+const addonSource = firstExisting(addonCandidates);
+if (!addonSource) {
+  throw new Error(`index.node not found in package root: ${packageRoot}`);
+}
+
+const destination = path.join(packageRoot, "native", platformDir);
+if (fs.existsSync(destination)) {
+  fs.rmSync(destination, { recursive: true, force: true });
+}
+fs.mkdirSync(destination, { recursive: true });
+
+fs.copyFileSync(addonSource, path.join(destination, "index.node"));
+fs.copyFileSync(libSource, path.join(destination, path.basename(libSource)));
+const cliDest = path.join(destination, "plasmite");
 fs.copyFileSync(cliSource, cliDest);
 fs.chmodSync(cliDest, 0o755);

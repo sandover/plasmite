@@ -70,6 +70,8 @@ jobs:
         env:
           PLASMITE_SDK_DIR: ${{ github.workspace }}/target/${{ matrix.target }}/release
         run: ./scripts/node_pack_smoke.sh
+      - name: Node remote-only smoke
+        run: ./scripts/node_remote_only_smoke.sh
       - name: Python wheel build/install smoke
         env:
           PLASMITE_SDK_DIR: ${{ github.workspace }}/target/${{ matrix.target }}/release

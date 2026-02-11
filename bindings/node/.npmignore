@@ -1,0 +1,16 @@
+# Purpose: Keep npm payload focused on packaged runtime artifacts.
+# Role: Exclude native addon crate sources/build cache while including native/{platform}.
+# Invariants: Platform payload dirs must remain publishable despite .gitignore entries.
+
+native/Cargo.toml
+native/Cargo.lock
+native/build.rs
+native/src/
+native/target/
+
+!native/linux-x64/
+!native/linux-x64/**
+!native/darwin-x64/
+!native/darwin-x64/**
+!native/darwin-arm64/
+!native/darwin-arm64/**

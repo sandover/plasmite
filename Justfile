@@ -37,6 +37,8 @@ bindings-python-test:
 bindings-node-test:
 	cargo build -p plasmite
 	cd bindings/node && PLASMITE_LIB_DIR="$(pwd)/../../target/debug" npm test
+	bash scripts/node_pack_smoke.sh
+	bash scripts/node_remote_only_smoke.sh
 
 # Run Node bindings type checks.
 bindings-node-typecheck:

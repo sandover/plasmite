@@ -39,6 +39,7 @@ Always-run core gates:
 - `cargo test`
 - `just bindings-test`
 - `bash scripts/node_pack_smoke.sh`
+- `bash scripts/node_remote_only_smoke.sh`
 - `bash scripts/python_wheel_smoke.sh`
 - `bash scripts/check_release_workflow_topology.sh`
 - `bash skills/plasmite-release-manager/scripts/verify_licensing_notices.sh` (if artifacts exist)
@@ -110,6 +111,9 @@ Mandatory every release (fast checks):
    - `cargo info plasmite`
 3. npm version:
    - `npm view plasmite version`
+   - optional install verification:
+     - `npm pack plasmite@latest`
+     - install tarball in temp dir and verify `node_modules/plasmite/native/linux-x64/index.node` exists
 4. PyPI version:
    - `curl -sS https://pypi.org/pypi/plasmite/json | jq -r '.info.version'`
 5. Homebrew formula alignment:

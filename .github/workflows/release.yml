@@ -179,33 +179,93 @@ jobs:
           path: bindings/python/dist/*.tar.gz
           if-no-files-found: error
 
-  build-node-dist:
+  build-node-native:
     needs: [release-context]
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            platform: darwin-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: darwin-arm64
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.release-context.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
       - run: cd bindings/node && npm ci
-      - name: Build SDK artifacts for npm package bundling
+      - name: Build SDK artifacts for matrix platform
         shell: bash
         run: |
-          cargo build --release --bins
-          cargo rustc --release --lib --crate-type=cdylib -- -C link-arg=-Wl,-soname,libplasmite.so
-      - name: npm pack + install smoke
+          cargo build --release --target "${{ matrix.target }}" --bins
+          if [[ "${{ matrix.target }}" == *apple-darwin ]]; then
+            cargo rustc --release --target "${{ matrix.target }}" --lib --crate-type=cdylib -- -C link-arg=-Wl,-install_name,@rpath/libplasmite.dylib
+          else
+            cargo rustc --release --target "${{ matrix.target }}" --lib --crate-type=cdylib -- -C link-arg=-Wl,-soname,libplasmite.so
+          fi
+      - name: Build Node addon
+        run: cd bindings/node && npm run build
+      - name: Stage node native payload
+        run: ./scripts/package_node_natives.sh "${{ matrix.platform }}" "${{ github.workspace }}/target/${{ matrix.target }}/release" "${{ github.workspace }}/bindings/node/index.node"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: node-native-${{ matrix.platform }}
+          path: bindings/node/native/${{ matrix.platform }}/*
+          if-no-files-found: error
+
+  build-node-dist:
+    needs: [release-context, build-node-native]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-context.outputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: cd bindings/node && npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: node-native-linux-x64
+          path: bindings/node/native/linux-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: node-native-darwin-x64
+          path: bindings/node/native/darwin-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: node-native-darwin-arm64
+          path: bindings/node/native/darwin-arm64
+      - name: npm pack + install smoke (linux-x64 runtime)
         env:
-          PLASMITE_SDK_DIR: ${{ github.workspace }}/target/release
-        run: ./scripts/node_pack_smoke.sh
+          PLASMITE_SDK_DIR: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release
+        run: |
+          tarball="$(cd bindings/node && npm pack --ignore-scripts --silent)"
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"; rm -f "bindings/node/${tarball}"' EXIT
+          cd "$workdir"
+          npm init -y >/dev/null
+          npm install "${GITHUB_WORKSPACE}/bindings/node/${tarball}" >/dev/null
+          node -e 'const { Client, Durability, RemoteClient } = require("plasmite"); const os = require("node:os"); const fs = require("node:fs"); const path = require("node:path"); const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plasmite-node-release-")); const c = new Client(dir); const p = c.createPool("smoke", 1024*1024); p.appendJson(Buffer.from("{\"kind\":\"smoke\"}"), ["smoke"], Durability.Fast); p.close(); c.close(); const rc = new RemoteClient("http://127.0.0.1:9700"); if (!rc) throw new Error("missing remote");'
+          npx plasmite --version >/dev/null
+          mkdir -p "${GITHUB_WORKSPACE}/bindings/node/dist"
+          cp "${GITHUB_WORKSPACE}/bindings/node/${tarball}" "${GITHUB_WORKSPACE}/bindings/node/dist/"
       - name: Build npm publish artifact
-        env:
-          PLASMITE_SDK_DIR: ${{ github.workspace }}/target/release
-        run: cd bindings/node && npm pack
+        run: ls -la bindings/node/dist
       - uses: actions/upload-artifact@v4
         with:
           name: node-dist
-          path: bindings/node/plasmite-*.tgz
+          path: bindings/node/dist/plasmite-*.tgz
           if-no-files-found: error

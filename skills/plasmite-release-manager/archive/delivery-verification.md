@@ -29,6 +29,9 @@ Before verifying channels, confirm the publish run was sourced from a successful
 - `npm view plasmite version`
 - `npm view plasmite dist-tags --json`
 - verify `latest` (or intended dist-tag) resolves to `X.Y.Z`
+- optional bundled-native check:
+  - install latest tarball in a clean temp dir
+  - verify `node_modules/plasmite/native/linux-x64/index.node` exists
 
 ## PyPI
 

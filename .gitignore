@@ -8,6 +8,9 @@ bindings/node/libplasmite.so
 bindings/node/libplasmite.dll
 bindings/node/plasmite
 bindings/node/native/target/
+bindings/node/native/linux-x64/
+bindings/node/native/darwin-x64/
+bindings/node/native/darwin-arm64/
 bindings/node/native/Cargo.lock
 bindings/python/**/__pycache__/
 bindings/python/dist/

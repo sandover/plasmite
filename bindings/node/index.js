@@ -6,10 +6,55 @@ Invariants: Exports align with native symbols and v0 API semantics.
 Notes: Requires libplasmite to be discoverable at runtime.
 */
 
-const native = require("./index.node");
 const { RemoteClient, RemoteError, RemotePool, RemoteTail } = require("./remote");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const path = require("node:path");
+
+const PLATFORM_DIRS = Object.freeze({
+  linux: Object.freeze({ x64: "linux-x64" }),
+  darwin: Object.freeze({ x64: "darwin-x64", arm64: "darwin-arm64" }),
+});
+
+function resolvePlatformDir() {
+  const byArch = PLATFORM_DIRS[process.platform];
+  if (!byArch) {
+    return null;
+  }
+  return byArch[process.arch] ?? null;
+}
+
+function resolveNativeAddonPath() {
+  const platformDir = resolvePlatformDir();
+  if (!platformDir) {
+    return null;
+  }
+  return path.join(__dirname, "native", platformDir, "index.node");
+}
+
+let native = null;
+let nativeLoadError = null;
+let nativeAddonPath = null;
+
+try {
+  nativeAddonPath = resolveNativeAddonPath();
+  if (nativeAddonPath) {
+    native = require(nativeAddonPath);
+  } else {
+    nativeLoadError = new Error(`unsupported platform: ${process.platform}-${process.arch}`);
+  }
+} catch (err) {
+  nativeLoadError = err;
+}
+
+function makeNativeUnavailableError() {
+  const reason = nativeLoadError instanceof Error ? nativeLoadError.message : "unknown load error";
+  return new Error(
+    `plasmite native addon is unavailable for ${process.platform}-${process.arch} (${reason}). ` +
+      `expected addon path: ${nativeAddonPath ?? "unsupported platform"}. ` +
+      "RemoteClient remains supported without native artifacts.",
+  );
+}
 
 class PlasmiteNativeError extends Error {
   constructor(message, details = {}, cause = undefined) {
@@ -62,6 +107,9 @@ function wrapNativeError(err) {
 
 class Client {
   constructor(poolDir) {
+    if (!native) {
+      throw makeNativeUnavailableError();
+    }
     this._inner = new native.Client(poolDir);
   }
 
@@ -88,6 +136,9 @@ class Client {
 
 class Pool {
   constructor(inner) {
+    if (!native) {
+      throw makeNativeUnavailableError();
+    }
     this._inner = inner;
   }
 
@@ -148,6 +199,9 @@ class Pool {
 
 class Stream {
   constructor(inner) {
+    if (!native) {
+      throw makeNativeUnavailableError();
+    }
     this._inner = inner;
   }
 
@@ -166,6 +220,9 @@ class Stream {
 
 class Lite3Stream {
   constructor(inner) {
+    if (!native) {
+      throw makeNativeUnavailableError();
+    }
     this._inner = inner;
   }
 
@@ -222,8 +279,8 @@ module.exports = {
   Pool,
   Stream,
   Lite3Stream,
-  Durability: native.Durability,
-  ErrorKind: native.ErrorKind,
+  Durability: native ? native.Durability : Object.freeze({}),
+  ErrorKind: native ? native.ErrorKind : Object.freeze({}),
   PlasmiteNativeError,
   RemoteClient,
   RemoteError,

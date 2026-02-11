@@ -10,14 +10,13 @@
   },
   "files": [
     "index.js",
-    "index.node",
     "index.d.ts",
     "types.d.ts",
     "remote.js",
     "bin/plasmite.js",
-    "libplasmite.dylib",
-    "libplasmite.so",
-    "plasmite"
+    "native/linux-x64/**",
+    "native/darwin-x64/**",
+    "native/darwin-arm64/**"
   ],
   "keywords": [
     "ipc",
