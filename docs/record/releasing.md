@@ -9,9 +9,6 @@ The canonical procedural runbook (commands, exact sequencing, edge cases) lives 
 Use the release skill for all release execution details:
 
 - `skills/plasmite-release-manager/SKILL.md`
-- `skills/plasmite-release-manager/references/qa-gates.md`
-- `skills/plasmite-release-manager/references/release-hygiene.md`
-- `skills/plasmite-release-manager/references/delivery-verification.md`
 
 If this file and the skill ever disagree, follow the skill and then update this file or the skill to re-align.
 
@@ -25,7 +22,7 @@ Think of a Plasmite release as answering two questions:
 We split the work into two big stages so that “building” and “publishing” are decoupled:
 
 - **Build stage (GitHub)**: compile + package everything, and upload the results as artifacts.
-- **Publish stage (GitHub)**: take one *successful* build run, verify it’s the right one, verify Homebrew is aligned, then publish to registries and create the GitHub Release.
+- **Publish stage (GitHub)**: manually dispatch `release-publish.yml` with a successful build run ID, verify provenance and Homebrew alignment, then publish to registries and create the GitHub Release. There is no automatic trigger from the build workflow.
 
 This split is intentional: if a registry token is expired (or a policy check fails), we can re-run the publish stage without rebuilding the entire multi-platform build.
 
@@ -119,10 +116,11 @@ flowchart TD
     C --> D{"Build succeeded?"}
     D -- "No" --> X
     D -- "Yes" --> E["Update + push homebrew-tap formula from build artifacts"]
-    E --> F["release-publish rehearsal (rehearsal=true)"]
-    F --> G{"Rehearsal succeeded?"}
+    E -.-> F["release-publish rehearsal (optional, recommended on workflow changes)"]
+    F -.-> G{"Rehearsal succeeded?"}
     G -- "No" --> X
-    G -- "Yes" --> H["release-publish live (rehearsal=false)"]
+    E --> H["release-publish live (manual dispatch)"]
+    G -- "Yes" --> H
     H --> I{"Preflight + tap verification pass?"}
     I -- "No" --> X
     I -- "Yes" --> J["Publish crates.io + npm + PyPI"]
@@ -152,7 +150,7 @@ The skill handles mechanics, but maintainers still decide:
 7. Update and push `../homebrew-tap` formula for this target using build artifacts.
 8. Confirm post-release delivery verification is complete on all channels.
 9. If publish fails due to credentials/policy, run publish-only rerun with the successful build run ID:
-   - `gh workflow run release-publish.yml -f build_run_id=<build-run-id> -f rehearsal=false -f allow_partial_release=false`
+   - `gh workflow run release-publish.yml -f build_run_id=<build-run-id> -f rehearsal=false`
 
 ## Versioning Notes
 
