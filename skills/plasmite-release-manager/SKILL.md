@@ -98,6 +98,14 @@ The `release-publish` workflow is manual-dispatch-only (`workflow_dispatch`). Th
 
 If any release workflow fails:
 1. Stop release progression.
+2. If a matrix job fails while the overall run is still in progress, fetch job-level logs immediately (do not wait for run-level failed-log aggregation):
+   - list failed jobs:
+     - `gh run view <run-id> --json jobs --jq '.jobs[] | select(.status=="completed" and .conclusion=="failure") | {id:.databaseId,name}'`
+   - fetch logs per failed job:
+     - `gh api repos/sandover/plasmite/actions/jobs/<job-id>/logs`
+   - extract fast triage signals:
+     - `gh api repos/sandover/plasmite/actions/jobs/<job-id>/logs | rg -n "error:|Process completed with exit code|cannot find -lplasmite|linking with|unsupported platform"`
+   - this is triage-only; release gating decisions remain unchanged.
 2. Capture machine-readable failure evidence:
    - `gh run view <run-id> --json url,jobs --jq '{url,jobs:[.jobs[]|select(.conclusion=="failure")|{name,url:.url}]}'`
    - `gh run view <run-id> --log-failed`
