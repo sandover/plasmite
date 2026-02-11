@@ -687,8 +687,6 @@ fn peek_emits_new_messages() {
         .spawn()
         .expect("peek");
 
-    thread::sleep(Duration::from_millis(50));
-
     let poke = cmd()
         .args([
             "--dir",
@@ -757,18 +755,6 @@ fn peek_one_exits_after_first_match() {
         .expect("poke");
     assert!(poke.status.success());
 
-    let poke = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "poke",
-            "demo",
-            "{\"x\":2}",
-        ])
-        .output()
-        .expect("poke");
-    assert!(poke.status.success());
-
     let stdout = peek.stdout.take().expect("stdout");
     let (line_tx, line_rx) = mpsc::channel();
     thread::spawn(move || {
@@ -783,6 +769,20 @@ fn peek_one_exits_after_first_match() {
         .expect("peek output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 1);
+
+    // Send a second message after the first is observed so `--one` ordering
+    // is deterministic without relying on fixed startup sleeps.
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "{\"x\":2}",
+        ])
+        .output()
+        .expect("poke");
+    assert!(poke.status.success());
 
     let (exit_tx, exit_rx) = mpsc::channel();
     thread::spawn(move || {
