@@ -96,23 +96,51 @@ CGO_LDFLAGS="-L$(pwd)/../../target/debug" go run ./cmd/plasmite-conformance ../.
 
 ## Binding tests
 
+The recommended way to run all binding tests is via the Justfile:
+
+```bash
+just bindings-test
+```
+
 ### Go
+
+```bash
+just bindings-go-test
+```
+
+Or manually:
 
 ```bash
 cd bindings/go
 cargo build -p plasmite  # build libplasmite first
-CGO_LDFLAGS="-L$(pwd)/../../target/debug" go test ./...
+PLASMITE_LIB_DIR="$(pwd)/../../target/debug" \
+  PKG_CONFIG="/usr/bin/true" \
+  CGO_CFLAGS="-I$(pwd)/../../include" \
+  CGO_LDFLAGS="-L$(pwd)/../../target/debug" \
+  go test ./...
 ```
 
 ### Python
 
 ```bash
+just bindings-python-test
+```
+
+Or manually:
+
+```bash
 cd bindings/python
 cargo build -p plasmite
-PLASMITE_LIB_DIR="$(pwd)/../../target/debug" python -m unittest
+PLASMITE_LIB_DIR="$(pwd)/../../target/debug" python3 -m unittest discover -s tests
 ```
 
 ### Node.js
+
+```bash
+just bindings-node-test
+```
+
+Or manually:
 
 ```bash
 cd bindings/node

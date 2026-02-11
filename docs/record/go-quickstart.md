@@ -13,16 +13,28 @@ Build libplasmite:
 cargo build -p plasmite
 ```
 
-## Install / Build
+## Running Tests
 
-From `bindings/go`:
+The recommended way to run Go binding tests is via the Justfile recipe, which sets all required environment variables:
 
 ```bash
-CGO_LDFLAGS="-L$(pwd)/../../target/debug" go test ./...
+just bindings-go-test
 ```
 
-On macOS, set `DYLD_LIBRARY_PATH` to `target/debug` when running binaries.
-On Linux, set `LD_LIBRARY_PATH`.
+Or manually from `bindings/go`:
+
+```bash
+cd bindings/go
+PLASMITE_LIB_DIR="$(pwd)/../../target/debug" \
+  PKG_CONFIG="/usr/bin/true" \
+  CGO_CFLAGS="-I$(pwd)/../../include" \
+  CGO_LDFLAGS="-L$(pwd)/../../target/debug" \
+  go test ./...
+```
+
+When running compiled Go binaries that link libplasmite:
+- macOS: set `DYLD_LIBRARY_PATH` to `target/debug` (or `target/release`)
+- Linux: set `LD_LIBRARY_PATH` to `target/debug` (or `target/release`)
 
 ## Append Example
 

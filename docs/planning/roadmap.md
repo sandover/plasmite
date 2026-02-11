@@ -3,16 +3,19 @@
 This roadmap lists active and near-term priorities.
 It is intentionally short and should only include work that is currently relevant.
 
-## Active now
+## Done
 
 - Distribution and release channel setup
   - first public release versioning decision
-  - CI release workflow for binary artifacts
-  - Homebrew tap publishing path
+  - CI release workflow for binary artifacts (`release.yml`, `release-publish.yml`)
+  - Homebrew tap publishing (`sandover/tap/plasmite`)
+
+## Active now
+
+- Binary payload conventions (inline blobs/chunking)
 
 ## Next
 
-- Binary payload conventions (inline blobs/chunking)
 - Windows platform support milestones
 
 ## Later (candidate)
