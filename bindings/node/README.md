@@ -180,19 +180,6 @@ Pre-built binaries are included for Linux x86_64. macOS and Windows users
 should install via Homebrew (`brew install sandover/tap/plasmite`) or build
 from source.
 
-## Contributing
-
-Development requires a Rust toolchain to build the native addon:
-
-```bash
-# From the repo root
-cargo build -p plasmite
-cd bindings/node && PLASMITE_LIB_DIR=../../target/debug npm test
-```
-
-See the [main repo](https://github.com/sandover/plasmite) for full build
-instructions.
-
 ## License
 
 MIT

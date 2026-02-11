@@ -6,7 +6,8 @@
   "main": "index.js",
   "types": "types.d.ts",
   "bin": {
-    "plasmite": "bin/plasmite.js"
+    "plasmite": "bin/plasmite.js",
+    "pls": "bin/plasmite.js"
   },
   "files": [
     "index.js",
