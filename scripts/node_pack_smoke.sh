@@ -51,7 +51,7 @@ archive_has_member() {
 (
   cd "$NODE_DIR"
   if [[ ! -f "$NODE_DIR/index.node" ]]; then
-    npm run build >/dev/null
+    PLASMITE_LIB_DIR="$SDK_DIR/lib" npm run build >/dev/null
   fi
   "$ROOT/scripts/package_node_natives.sh" "$CURRENT_PLATFORM" "$SDK_DIR" "$NODE_DIR/index.node"
   PLASMITE_SDK_DIR="$SDK_DIR" npm pack >/dev/null
