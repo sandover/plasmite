@@ -5,3 +5,6 @@ Keep this file limited to plasmite-specific deltas.
 - Run `cargo fmt --all`.
 - Run `cargo clippy --all-targets -- -D warnings`.
 - Do not add new `#[allow(clippy::...)]` without explicit justification in the commit body.
+
+# Guidance
+- no pip in this project -- uv only
