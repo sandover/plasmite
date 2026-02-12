@@ -109,6 +109,18 @@ fn parse_json_lines(output: &[u8]) -> Vec<Value> {
     text.lines().map(parse_json).collect()
 }
 
+fn read_line_with_timeout<R: Read + Send + 'static>(reader: R, timeout: Duration) -> String {
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut reader = BufReader::new(reader);
+        let mut line = String::new();
+        let _ = reader.read_line(&mut line);
+        let _ = tx.send(line);
+    });
+    rx.recv_timeout(timeout)
+        .expect("timed out waiting for line")
+}
+
 fn read_json_value<R: Read>(reader: R) -> Value {
     let mut stream = serde_json::Deserializer::from_reader(reader).into_iter::<Value>();
     stream.next().expect("json value").expect("valid json")
@@ -326,10 +338,8 @@ fn create_poke_get_peek_flow() {
         .spawn()
         .expect("peek");
     let stdout = peek.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    let read = reader.read_line(&mut line).expect("read line");
-    assert!(read > 0, "expected a line from peek output");
+    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
+    assert!(!line.is_empty(), "expected a line from peek output");
     let peek_json = parse_json(line.trim());
     assert_eq!(peek_json.get("seq").unwrap().as_u64().unwrap(), seq);
     let _ = peek.kill();
@@ -648,10 +658,8 @@ fn readme_quickstart_flow() {
         .spawn()
         .expect("peek");
     let stdout = peek.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    let read = reader.read_line(&mut line).expect("read line");
-    assert!(read > 0, "expected a line from peek output");
+    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
+    assert!(!line.is_empty(), "expected a line from peek output");
     let peek_json = parse_json(line.trim());
     assert_eq!(peek_json.get("seq").unwrap().as_u64().unwrap(), seq);
     let _ = peek.kill();
@@ -681,11 +689,23 @@ fn peek_emits_new_messages() {
             pool_dir.to_str().unwrap(),
             "peek",
             "demo",
+            "--tail",
+            "1",
             "--jsonl",
+            "--one",
         ])
         .stdout(Stdio::piped())
         .spawn()
         .expect("peek");
+
+    let stdout = peek.stdout.take().expect("stdout");
+    let (line_tx, line_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        let _ = reader.read_line(&mut line);
+        let _ = line_tx.send(line);
+    });
 
     let poke = cmd()
         .args([
@@ -699,16 +719,14 @@ fn peek_emits_new_messages() {
         .expect("poke");
     assert!(poke.status.success());
 
-    let stdout = peek.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    let read = reader.read_line(&mut line).expect("read line");
-    assert!(read > 0, "expected a line from peek output");
+    let line = line_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("peek output");
+    assert!(!line.is_empty(), "expected a line from peek output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 42);
-
-    let _ = peek.kill();
-    let _ = peek.wait();
+    let status = peek.wait().expect("peek wait");
+    assert!(status.success(), "peek status={status:?}");
 }
 
 #[test]
@@ -1185,10 +1203,8 @@ fn peek_where_filters_messages() {
         .spawn()
         .expect("peek");
     let stdout = peek.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    let read = reader.read_line(&mut line).expect("read line");
-    assert!(read > 0, "expected a line from peek output");
+    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
+    assert!(!line.is_empty(), "expected a line from peek output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 2);
     let _ = peek.kill();
@@ -1256,10 +1272,8 @@ fn peek_tag_filters_messages() {
         .spawn()
         .expect("peek");
     let stdout = peek.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    let read = reader.read_line(&mut line).expect("read line");
-    assert!(read > 0, "expected a line from peek output");
+    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
+    assert!(!line.is_empty(), "expected a line from peek output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 2);
     let _ = peek.kill();
@@ -1324,10 +1338,8 @@ fn peek_tag_and_where_compose_with_and() {
         .spawn()
         .expect("peek");
     let stdout = peek.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    let read = reader.read_line(&mut line).expect("read line");
-    assert!(read > 0, "expected a line from peek output");
+    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
+    assert!(!line.is_empty(), "expected a line from peek output");
     let value = parse_json(line.trim());
     assert_eq!(value["data"]["service"], "billing");
     assert_eq!(value["data"]["level"], "error");
@@ -1398,10 +1410,8 @@ fn peek_where_multiple_predicates_and() {
         .spawn()
         .expect("peek");
     let stdout = peek.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    let read = reader.read_line(&mut line).expect("read line");
-    assert!(read > 0, "expected a line from peek output");
+    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
+    assert!(!line.is_empty(), "expected a line from peek output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["level"], 2);
     let _ = peek.kill();
@@ -1569,10 +1579,8 @@ fn peek_where_with_since_emits_matches() {
         .spawn()
         .expect("peek");
     let stdout = peek.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    let read = reader.read_line(&mut line).expect("read line");
-    assert!(read > 0, "expected a line from peek output");
+    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
+    assert!(!line.is_empty(), "expected a line from peek output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 5);
     let _ = peek.kill();
@@ -1679,10 +1687,8 @@ fn peek_where_with_quiet_drops_suppresses_notice() {
         .spawn()
         .expect("peek");
     let stdout = peek.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    let read = reader.read_line(&mut line).expect("read line");
-    assert!(read > 0, "expected a line from peek output");
+    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
+    assert!(!line.is_empty(), "expected a line from peek output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 1);
     let _ = peek.kill();
@@ -1756,10 +1762,8 @@ fn peek_where_multiple_predicates_with_since() {
         .spawn()
         .expect("peek");
     let stdout = peek.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    let read = reader.read_line(&mut line).expect("read line");
-    assert!(read > 0, "expected a line from peek output");
+    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
+    assert!(!line.is_empty(), "expected a line from peek output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 2);
     let _ = peek.kill();
@@ -2043,10 +2047,8 @@ fn color_always_does_not_color_jsonl() {
         .spawn()
         .expect("peek jsonl");
     let stdout = peek.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    let read = reader.read_line(&mut line).expect("read line");
-    assert!(read > 0, "expected a line from peek output");
+    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
+    assert!(!line.is_empty(), "expected a line from peek output");
     let line = line.trim_end();
     assert!(!line.contains("\u{1b}["));
     let _ = parse_json(line);
@@ -2717,10 +2719,8 @@ fn peek_format_jsonl_matches_jsonl_alias() {
         .spawn()
         .expect("peek format");
     let fmt_stdout = fmt.stdout.take().expect("stdout");
-    let mut fmt_reader = BufReader::new(fmt_stdout);
-    let mut fmt_line = String::new();
-    let read = fmt_reader.read_line(&mut fmt_line).expect("read line");
-    assert!(read > 0, "expected a line from peek output");
+    let fmt_line = read_line_with_timeout(fmt_stdout, Duration::from_secs(2));
+    assert!(!fmt_line.is_empty(), "expected a line from peek output");
     let fmt_line = fmt_line.trim_end();
     assert!(!fmt_line.contains('\n'));
     let _ = parse_json(fmt_line);
@@ -2741,10 +2741,8 @@ fn peek_format_jsonl_matches_jsonl_alias() {
         .spawn()
         .expect("peek jsonl");
     let alias_stdout = alias.stdout.take().expect("stdout");
-    let mut alias_reader = BufReader::new(alias_stdout);
-    let mut alias_line = String::new();
-    let read = alias_reader.read_line(&mut alias_line).expect("read line");
-    assert!(read > 0, "expected a line from peek output");
+    let alias_line = read_line_with_timeout(alias_stdout, Duration::from_secs(2));
+    assert!(!alias_line.is_empty(), "expected a line from peek output");
     let alias_line = alias_line.trim_end();
     assert!(!alias_line.contains('\n'));
     let _ = parse_json(alias_line);
@@ -3959,10 +3957,8 @@ fn peek_remote_url_supports_tag_filter() {
         .spawn()
         .expect("peek");
     let stdout = peek.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    let read = reader.read_line(&mut line).expect("read line");
-    assert!(read > 0, "expected a line from peek output");
+    let line = read_line_with_timeout(stdout, Duration::from_secs(2));
+    assert!(!line.is_empty(), "expected a line from peek output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").and_then(|v| v.get("x")), Some(&json!(2)));
     let _ = peek.kill();
