@@ -24,7 +24,6 @@ jobs:
   probe:
     name: probe (${{ matrix.strategy }})
     runs-on: windows-latest
-    if: ${{ inputs.strategy == 'all' || inputs.strategy == matrix.strategy }}
     strategy:
       fail-fast: false
       matrix:
@@ -35,6 +34,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Capture host compiler info
+        if: ${{ inputs.strategy == 'all' || inputs.strategy == matrix.strategy }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path ".scratch/windows-probe/${{ matrix.strategy }}" | Out-Null
@@ -52,7 +52,7 @@ jobs:
           }
 
       - name: Build release binaries (msvc-shim)
-        if: ${{ matrix.strategy == 'msvc-shim' }}
+        if: ${{ success() && (inputs.strategy == 'all' || inputs.strategy == matrix.strategy) && matrix.strategy == 'msvc-shim' }}
         shell: pwsh
         run: |
           $log = ".scratch/windows-probe/${{ matrix.strategy }}/cargo-build.log"
@@ -60,7 +60,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build release binaries (clang-cl)
-        if: ${{ matrix.strategy == 'clang-cl' }}
+        if: ${{ success() && (inputs.strategy == 'all' || inputs.strategy == matrix.strategy) && matrix.strategy == 'clang-cl' }}
         shell: pwsh
         run: |
           if (-not (Get-Command clang-cl -ErrorAction SilentlyContinue)) {
@@ -73,6 +73,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Smoke version command
+        if: ${{ success() && (inputs.strategy == 'all' || inputs.strategy == matrix.strategy) }}
         shell: pwsh
         run: |
           $log = ".scratch/windows-probe/${{ matrix.strategy }}/smoke.log"
@@ -80,7 +81,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Stage probe artifacts
-        if: ${{ always() }}
+        if: ${{ always() && (inputs.strategy == 'all' || inputs.strategy == matrix.strategy) }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path ".scratch/windows-probe/${{ matrix.strategy }}/bin" | Out-Null
@@ -89,7 +90,7 @@ jobs:
           if (Test-Path ".\target\release\plasmite.dll") { Copy-Item ".\target\release\plasmite.dll" ".scratch/windows-probe/${{ matrix.strategy }}/bin/plasmite.dll" -Force }
 
       - name: Upload strategy logs and binaries
-        if: ${{ always() }}
+        if: ${{ always() && (inputs.strategy == 'all' || inputs.strategy == matrix.strategy) }}
         uses: actions/upload-artifact@v4
         with:
           name: windows-probe-${{ matrix.strategy }}
