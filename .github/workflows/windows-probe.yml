@@ -1,0 +1,97 @@
+# Purpose: Provide a manual Windows compiler probe for Lite3 build strategy decisions.
+# Key jobs: probe (windows-latest matrix over msvc-shim and clang-cl strategies).
+# Role: Isolated empirical signal for strategy selection before modifying core CI/release flows.
+# Invariants: Always runs cargo build --release --bins and persists per-strategy logs.
+# Invariants: Supports targeted runs via workflow_dispatch input while retaining all-strategy mode.
+# Notes: This is a preview-only probe workflow and does not alter existing gating policy.
+
+name: windows-probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      strategy:
+        description: "Compiler strategy to run"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - msvc-shim
+          - clang-cl
+
+jobs:
+  probe:
+    name: probe (${{ matrix.strategy }})
+    runs-on: windows-latest
+    if: ${{ inputs.strategy == 'all' || inputs.strategy == matrix.strategy }}
+    strategy:
+      fail-fast: false
+      matrix:
+        strategy: [msvc-shim, clang-cl]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Capture host compiler info
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path ".scratch/windows-probe/${{ matrix.strategy }}" | Out-Null
+          $info = ".scratch/windows-probe/${{ matrix.strategy }}/toolchain-info.txt"
+          "strategy=${{ matrix.strategy }}" | Out-File -FilePath $info -Encoding utf8
+          "target=x86_64-pc-windows-msvc" | Out-File -FilePath $info -Encoding utf8 -Append
+          "host=$env:RUNNER_OS" | Out-File -FilePath $info -Encoding utf8 -Append
+          "rustc=$(rustc --version)" | Out-File -FilePath $info -Encoding utf8 -Append
+          "cargo=$(cargo --version)" | Out-File -FilePath $info -Encoding utf8 -Append
+          "cl=$(cl 2>&1 | Select-Object -First 1)" | Out-File -FilePath $info -Encoding utf8 -Append
+          if (Get-Command clang-cl -ErrorAction SilentlyContinue) {
+            "clang-cl=$(clang-cl --version | Select-Object -First 1)" | Out-File -FilePath $info -Encoding utf8 -Append
+          } else {
+            "clang-cl=missing" | Out-File -FilePath $info -Encoding utf8 -Append
+          }
+
+      - name: Build release binaries (msvc-shim)
+        if: ${{ matrix.strategy == 'msvc-shim' }}
+        shell: pwsh
+        run: |
+          $log = ".scratch/windows-probe/${{ matrix.strategy }}/cargo-build.log"
+          cargo build --release --bins *>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build release binaries (clang-cl)
+        if: ${{ matrix.strategy == 'clang-cl' }}
+        shell: pwsh
+        run: |
+          if (-not (Get-Command clang-cl -ErrorAction SilentlyContinue)) {
+            throw "clang-cl not found on runner PATH"
+          }
+          $env:CC_x86_64_pc_windows_msvc = "clang-cl"
+          $env:CFLAGS_x86_64_pc_windows_msvc = "-std=c11"
+          $log = ".scratch/windows-probe/${{ matrix.strategy }}/cargo-build.log"
+          cargo build --release --bins *>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Smoke version command
+        shell: pwsh
+        run: |
+          $log = ".scratch/windows-probe/${{ matrix.strategy }}/smoke.log"
+          & .\target\release\plasmite.exe --version *>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Stage probe artifacts
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path ".scratch/windows-probe/${{ matrix.strategy }}/bin" | Out-Null
+          if (Test-Path ".\target\release\plasmite.exe") { Copy-Item ".\target\release\plasmite.exe" ".scratch/windows-probe/${{ matrix.strategy }}/bin/plasmite.exe" -Force }
+          if (Test-Path ".\target\release\pls.exe") { Copy-Item ".\target\release\pls.exe" ".scratch/windows-probe/${{ matrix.strategy }}/bin/pls.exe" -Force }
+          if (Test-Path ".\target\release\plasmite.dll") { Copy-Item ".\target\release\plasmite.dll" ".scratch/windows-probe/${{ matrix.strategy }}/bin/plasmite.dll" -Force }
+
+      - name: Upload strategy logs and binaries
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-probe-${{ matrix.strategy }}
+          path: .scratch/windows-probe/${{ matrix.strategy }}
+          if-no-files-found: error
