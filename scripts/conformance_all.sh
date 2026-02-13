@@ -58,7 +58,9 @@ echo "[conformance] node runner/tests"
   else
     npm install --no-package-lock
   fi
-  npm test
+  npm run build
+  npm run prepare-native
+  node --test test/*.test.js
 )
 
 echo "[conformance] python runner/tests"
