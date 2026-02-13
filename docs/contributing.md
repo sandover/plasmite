@@ -7,20 +7,9 @@
 - `bindings/`: Go/Python/Node bindings
 - `scripts/`: CI and validation helpers (used by `just`)
 
-## Suggested git hooks (optional, recommended)
+## Local validation
 
-We provide a small set of local hooks under `docs/suggested-hooks/`:
-- `prepare-commit-msg`: appends a commented commit checklist in editor-driven commits
-- `pre-commit`: fast local hygiene + quick Rust checks (only when Rust-relevant paths are staged)
-- `pre-push`: runs `just ci` to match CI gating before pushing
-
-Install them with:
-
-```bash
-./docs/suggested-hooks/install.sh
-```
-
-Details: `docs/suggested-hooks/README.md`.
+Before push, run and pass `just ci-fast`; before merge/release, run and pass `just ci`.
 
 ## Releases
 
@@ -39,5 +28,4 @@ ln -snf "$(pwd)/skills/plasmite-release-manager" "${CODEX_HOME}/skills/plasmite-
 ```
 
 Then ask Codex to use the `plasmite-release-manager` skill for a dry-run release.
-
 

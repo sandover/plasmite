@@ -1,5 +1,0 @@
-plasmite local hooks reminder:
-- Prefer small, explicit, testable changes; avoid hidden state (env vars only for secrets).
-- Keep docs coherent with code changes.
-- Avoid destructive planning operations without explicit instruction.
-
