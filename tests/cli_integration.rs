@@ -1878,6 +1878,162 @@ fn poke_emits_json_by_default() {
 }
 
 #[test]
+fn poke_short_file_flag_reads_single_json_file() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let input_file = temp.path().join("one.json");
+    std::fs::write(&input_file, b"{\"x\":1}\n").expect("write input");
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "-f",
+            input_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("poke");
+    assert!(
+        poke.status.success(),
+        "{}",
+        String::from_utf8_lossy(&poke.stderr)
+    );
+    let receipts = parse_json_lines(&poke.stdout);
+    assert_eq!(receipts.len(), 1);
+
+    let get = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "get", "demo", "1"])
+        .output()
+        .expect("get");
+    assert!(get.status.success());
+    let value = parse_json(std::str::from_utf8(&get.stdout).expect("utf8"));
+    assert_eq!(value["data"]["x"], 1);
+}
+
+#[test]
+fn poke_file_jsonl_ingests_multiple_records() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let input_file = temp.path().join("events.jsonl");
+    std::fs::write(&input_file, b"{\"x\":1}\n{\"x\":2}\n").expect("write input");
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "--file",
+            input_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("poke");
+    assert!(
+        poke.status.success(),
+        "{}",
+        String::from_utf8_lossy(&poke.stderr)
+    );
+    let receipts = parse_json_lines(&poke.stdout);
+    assert_eq!(receipts.len(), 2);
+    assert_eq!(receipts[0]["seq"], 1);
+    assert_eq!(receipts[1]["seq"], 2);
+
+    let get_one = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "get", "demo", "1"])
+        .output()
+        .expect("get one");
+    assert!(get_one.status.success());
+    let first = parse_json(std::str::from_utf8(&get_one.stdout).expect("utf8"));
+    assert_eq!(first["data"]["x"], 1);
+
+    let get_two = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "get", "demo", "2"])
+        .output()
+        .expect("get two");
+    assert!(get_two.status.success());
+    let second = parse_json(std::str::from_utf8(&get_two.stdout).expect("utf8"));
+    assert_eq!(second["data"]["x"], 2);
+}
+
+#[test]
+fn poke_file_auto_handles_multiline_json() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let input_file = temp.path().join("pretty.json");
+    std::fs::write(&input_file, b"{\n  \"x\": 1,\n  \"y\": 2\n}\n").expect("write input");
+
+    let poke = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "poke",
+            "demo",
+            "--file",
+            input_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("poke");
+    assert!(
+        poke.status.success(),
+        "{}",
+        String::from_utf8_lossy(&poke.stderr)
+    );
+    let receipts = parse_json_lines(&poke.stdout);
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0]["seq"], 1);
+
+    let get = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "get", "demo", "1"])
+        .output()
+        .expect("get");
+    assert!(get.status.success());
+    let value = parse_json(std::str::from_utf8(&get.stdout).expect("utf8"));
+    assert_eq!(value["data"]["x"], 1);
+    assert_eq!(value["data"]["y"], 2);
+}
+
+#[test]
 fn poke_retries_when_pool_is_busy() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");

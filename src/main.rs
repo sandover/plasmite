@@ -380,6 +380,8 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             errors,
         } => {
             let target = resolve_pool_target(&pool, &pool_dir)?;
+            let data_arg = data;
+            let file_arg = file;
             if create_size.is_some() && !create {
                 return Err(Error::new(ErrorKind::Usage)
                     .with_message("--create-size requires --create")
@@ -392,18 +394,21 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             }
             let durability = parse_durability(&durability)?;
             let retry_config = parse_retry_config(retry, retry_delay.as_deref())?;
-            if data.is_some() && file.is_some() {
+            if data_arg.is_some() && file_arg.is_some() {
                 return Err(Error::new(ErrorKind::Usage)
                     .with_message("multiple data inputs provided")
                     .with_hint("Use only one of DATA, --file, or stdin."));
             }
-            let single_input = data.is_some() || file.is_some() || io::stdin().is_terminal();
+            let file = file_arg.as_deref();
+            let stdin_is_terminal = io::stdin().is_terminal();
+            let stdin_stream = data_arg.is_none() && file.is_none() && !stdin_is_terminal;
+            let single_input = data_arg.is_some() || file.is_some() || stdin_is_terminal;
             let exact_create_hint = poke_exact_create_command_hint(
                 &pool,
                 PokeExactCreateHint {
                     tags: &tag,
-                    data: &data,
-                    file: &file,
+                    data: &data_arg,
+                    file: &file_arg,
                     durability,
                     retry,
                     retry_delay: retry_delay.as_deref(),
@@ -435,8 +440,8 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                             ));
                         }
                     };
-                    if single_input {
-                        let data = read_data_single(data, file)?;
+                    if let Some(data) = data_arg.as_deref() {
+                        let data = parse_inline_json(data)?;
                         let payload = lite3::encode_message(&tag, &data)?;
                         let (seq, timestamp_ns) = retry_with_config(retry_config, || {
                             let timestamp_ns = now_ns()?;
@@ -448,26 +453,42 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                         emit_json(poke_receipt_json(seq, timestamp_ns, &tag)?, color_mode);
                     } else {
                         let pool_path_label = path.display().to_string();
-                        let outcome = ingest_from_stdin(
-                            io::stdin().lock(),
-                            PokeIngestContext {
-                                pool_ref: &pool,
-                                pool_path_label: &pool_path_label,
-                                tags: &tag,
-                                durability,
-                                retry_config,
-                                pool_handle: &mut pool_handle,
-                                color_mode,
-                                input,
-                                errors,
-                            },
-                        )?;
+                        let outcome = if let Some(file) = file {
+                            let reader = open_poke_reader(file)?;
+                            ingest_from_stdin(
+                                reader,
+                                PokeIngestContext {
+                                    pool_ref: &pool,
+                                    pool_path_label: &pool_path_label,
+                                    tags: &tag,
+                                    durability,
+                                    retry_config,
+                                    pool_handle: &mut pool_handle,
+                                    color_mode,
+                                    input,
+                                    errors,
+                                },
+                            )?
+                        } else if stdin_stream {
+                            ingest_from_stdin(
+                                io::stdin().lock(),
+                                PokeIngestContext {
+                                    pool_ref: &pool,
+                                    pool_path_label: &pool_path_label,
+                                    tags: &tag,
+                                    durability,
+                                    retry_config,
+                                    pool_handle: &mut pool_handle,
+                                    color_mode,
+                                    input,
+                                    errors,
+                                },
+                            )?
+                        } else {
+                            return Err(missing_poke_data_error());
+                        };
                         if outcome.records_total == 0 {
-                            return Err(Error::new(ErrorKind::Usage)
-                                .with_message("missing data input")
-                                .with_hint(
-                                    "Provide JSON via DATA, --file, or pipe JSON to stdin.",
-                                ));
+                            return Err(missing_poke_data_error());
                         }
                         if outcome.failed > 0 {
                             return Ok(RunOutcome::with_code(1));
@@ -487,34 +508,50 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                     let remote_pool = client
                         .open_pool(&PoolRef::name(name.clone()))
                         .map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
-                    if single_input {
-                        let data = read_data_single(data, file)?;
+                    if let Some(data) = data_arg.as_deref() {
+                        let data = parse_inline_json(data)?;
                         let message = retry_with_config(retry_config, || {
                             remote_pool.append_json_now(&data, &tag, durability)
                         })?;
                         emit_json(poke_receipt_from_message(&message), color_mode);
                     } else {
                         let pool_path_label = format!("{}/{}", client.base_url(), name);
-                        let outcome = ingest_from_stdin_remote(
-                            io::stdin().lock(),
-                            RemotePokeIngestContext {
-                                pool_ref: &pool,
-                                pool_path_label: &pool_path_label,
-                                tags: &tag,
-                                durability,
-                                retry_config,
-                                remote_pool: &remote_pool,
-                                color_mode,
-                                input,
-                                errors,
-                            },
-                        )?;
+                        let outcome = if let Some(file) = file {
+                            let reader = open_poke_reader(file)?;
+                            ingest_from_stdin_remote(
+                                reader,
+                                RemotePokeIngestContext {
+                                    pool_ref: &pool,
+                                    pool_path_label: &pool_path_label,
+                                    tags: &tag,
+                                    durability,
+                                    retry_config,
+                                    remote_pool: &remote_pool,
+                                    color_mode,
+                                    input,
+                                    errors,
+                                },
+                            )?
+                        } else if stdin_stream {
+                            ingest_from_stdin_remote(
+                                io::stdin().lock(),
+                                RemotePokeIngestContext {
+                                    pool_ref: &pool,
+                                    pool_path_label: &pool_path_label,
+                                    tags: &tag,
+                                    durability,
+                                    retry_config,
+                                    remote_pool: &remote_pool,
+                                    color_mode,
+                                    input,
+                                    errors,
+                                },
+                            )?
+                        } else {
+                            return Err(missing_poke_data_error());
+                        };
                         if outcome.records_total == 0 {
-                            return Err(Error::new(ErrorKind::Usage)
-                                .with_message("missing data input")
-                                .with_hint(
-                                    "Provide JSON via DATA, --file, or pipe JSON to stdin.",
-                                ));
+                            return Err(missing_poke_data_error());
                         }
                         if outcome.failed > 0 {
                             return Ok(RunOutcome::with_code(1));
@@ -810,7 +847,7 @@ NOTES
         long_about = r#"Send JSON messages to a pool.
 
 Accepts local pool refs (name/path), remote shorthand refs (http(s)://host:port/<pool>),
-inline JSON, a file (--file), or streams via stdin (auto-detected)."#,
+inline JSON, file input (-f/--file), or streams via stdin (auto-detected)."#,
         after_help = r#"EXAMPLES
   $ plasmite poke foo '{"hello": "world"}'                      # inline JSON
   $ plasmite poke foo --tag sev1 '{"msg": "alert"}'             # with tags
@@ -824,6 +861,9 @@ inline JSON, a file (--file), or streams via stdin (auto-detected)."#,
 
   # Pipe JSON Lines
   $ jq -c '.items[]' data.json | plasmite poke foo
+
+  # Replay a JSONL file
+  $ plasmite poke foo -f events.jsonl
 
   # Stream from curl (event streams auto-detected)
   $ curl -N https://api.example.com/events | plasmite poke events
@@ -850,8 +890,9 @@ NOTES
         #[arg(long, help = "Repeatable tag for the message")]
         tag: Vec<String>,
         #[arg(
+            short = 'f',
             long = "file",
-            help = "JSON file path (use - for stdin)",
+            help = "Input file path (JSON value or stream; use - for stdin)",
             conflicts_with = "data",
             value_hint = ValueHint::FilePath
         )]
@@ -920,6 +961,7 @@ NOTES
   - Use --access to restrict read/write operations
   - Non-loopback writes require TLS + --token-file (or --insecure-no-tls for demos)
   - --tls-self-signed is for demos; clients must trust the generated cert
+  - Use repeatable --cors-origin to allow browser clients from specific origins
   - Safety limits: --max-body-bytes, --max-tail-timeout-ms, --max-tail-concurrency"#
     )]
     Serve {
@@ -1291,6 +1333,13 @@ struct ServeRunArgs {
         help_heading = "Connection"
     )]
     access: AccessModeCli,
+    #[arg(
+        long = "cors-origin",
+        value_name = "ORIGIN",
+        help = "Allow browser requests from this origin (repeatable, explicit list)",
+        help_heading = "Connection"
+    )]
+    cors_origin: Vec<String>,
     #[arg(
         long,
         help = "Bearer token for auth (dev-only; prefer --token-file)",
@@ -2070,6 +2119,7 @@ fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<String> {
         serve::AccessMode::WriteOnly => "access: write-only",
         serve::AccessMode::ReadWrite => "access: read-write",
     };
+    let cors_line = serve_cors_line(config);
 
     let mut lines = vec![
         "plasmite serve".to_string(),
@@ -2080,6 +2130,7 @@ fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<String> {
         format!("  {auth_line}"),
         format!("  {tls_line}"),
         format!("  {access_line}"),
+        format!("  {cors_line}"),
         "  stop: press Ctrl-C".to_string(),
         "try:".to_string(),
         format!(
@@ -2142,6 +2193,7 @@ fn emit_serve_check_report(config: &serve::ServeConfig, color_mode: ColorMode, j
         serve::AccessMode::WriteOnly => "write-only",
         serve::AccessMode::ReadWrite => "read-write",
     };
+    let cors_origins = config.cors_allowed_origins.clone();
 
     emit_json(
         json!({
@@ -2154,6 +2206,7 @@ fn emit_serve_check_report(config: &serve::ServeConfig, color_mode: ColorMode, j
                 "auth": auth_mode,
                 "tls": tls_mode,
                 "access": access_mode,
+                "cors_allowed_origins": cors_origins,
                 "limits": {
                     "max_body_bytes": config.max_body_bytes,
                     "max_tail_timeout_ms": config.max_tail_timeout_ms,
@@ -2194,6 +2247,7 @@ fn build_serve_check_lines(config: &serve::ServeConfig) -> Vec<String> {
         serve::AccessMode::WriteOnly => "access: write-only",
         serve::AccessMode::ReadWrite => "access: read-write",
     };
+    let cors_line = serve_cors_line(config);
 
     let mut lines = vec![
         "plasmite serve check".to_string(),
@@ -2205,6 +2259,7 @@ fn build_serve_check_lines(config: &serve::ServeConfig) -> Vec<String> {
         format!("  {auth_line}"),
         format!("  {tls_line}"),
         format!("  {access_line}"),
+        format!("  {cors_line}"),
         format!(
             "  limits: body={}B tail_timeout={}ms tail_concurrency={}",
             config.max_body_bytes, config.max_tail_timeout_ms, config.max_concurrent_tails
@@ -2236,6 +2291,13 @@ fn serve_tls_enabled(config: &serve::ServeConfig) -> bool {
     config.tls_self_signed || (config.tls_cert.is_some() && config.tls_key.is_some())
 }
 
+fn serve_cors_line(config: &serve::ServeConfig) -> String {
+    if config.cors_allowed_origins.is_empty() {
+        return "cors: disabled (same-origin only)".to_string();
+    }
+    format!("cors: {}", config.cors_allowed_origins.join(", "))
+}
+
 fn serve_config_from_run_args(
     run: ServeRunArgs,
     pool_dir: &Path,
@@ -2255,10 +2317,12 @@ fn serve_config_from_run_args(
     } else {
         (run.token, false)
     };
+    let cors_allowed_origins = serve::normalize_cors_origins(&run.cors_origin)?;
     Ok(serve::ServeConfig {
         bind,
         pool_dir: pool_dir.to_path_buf(),
         token,
+        cors_allowed_origins,
         access_mode: run.access.into(),
         allow_non_loopback: run.allow_non_loopback,
         insecure_no_tls: run.insecure_no_tls,
@@ -2926,27 +2990,8 @@ fn clap_error_hint(err: &clap::Error) -> String {
     format!("Try `plasmite {} --help`.", parts.join(" "))
 }
 
-fn read_data_single(data: Option<String>, file: Option<String>) -> Result<Value, Error> {
-    let json_str = if let Some(data) = data {
-        data
-    } else if let Some(file) = file {
-        if file == "-" {
-            read_stdin()?
-        } else {
-            std::fs::read_to_string(&file).map_err(|err| {
-                Error::new(ErrorKind::Io)
-                    .with_message("failed to read data file")
-                    .with_path(file)
-                    .with_source(err)
-            })?
-        }
-    } else {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("missing data input")
-            .with_hint("Provide JSON via DATA, --file, or pipe JSON to stdin."));
-    };
-
-    serde_json::from_str(&json_str).map_err(|err| {
+fn parse_inline_json(data: &str) -> Result<Value, Error> {
+    serde_json::from_str(data).map_err(|err| {
         Error::new(ErrorKind::Usage)
             .with_message("invalid json")
             .with_hint("Provide a single JSON value (e.g. '{\"x\":1}').")
@@ -2954,14 +2999,23 @@ fn read_data_single(data: Option<String>, file: Option<String>) -> Result<Value,
     })
 }
 
-fn read_stdin() -> Result<String, Error> {
-    let mut buf = String::new();
-    io::stdin().read_to_string(&mut buf).map_err(|err| {
+fn missing_poke_data_error() -> Error {
+    Error::new(ErrorKind::Usage)
+        .with_message("missing data input")
+        .with_hint("Provide JSON via DATA, --file, or pipe JSON to stdin.")
+}
+
+fn open_poke_reader(path: &str) -> Result<Box<dyn Read>, Error> {
+    if path == "-" {
+        return Ok(Box::new(io::stdin()));
+    }
+    let reader = std::fs::File::open(path).map_err(|err| {
         Error::new(ErrorKind::Io)
-            .with_message("failed to read stdin")
+            .with_message("failed to read data file")
+            .with_path(path)
             .with_source(err)
     })?;
-    Ok(buf)
+    Ok(Box::new(reader))
 }
 
 fn input_mode_to_ingest(mode: InputMode) -> IngestMode {

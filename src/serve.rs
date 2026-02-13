@@ -7,7 +7,7 @@
 
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path as AxumPath, Query, RawQuery, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
@@ -20,6 +20,7 @@ use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashSet;
 use std::future::IntoFuture;
 use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -31,9 +32,11 @@ use tokio::time::Duration;
 use tokio_rustls::TlsAcceptor;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tower_service::Service;
 use tracing_subscriber::EnvFilter;
+use url::Url;
 
 use plasmite::api::{
     Bounds, Durability, Error, ErrorKind, LocalClient, PoolApiExt, PoolInfo, PoolOptions, PoolRef,
@@ -47,6 +50,7 @@ pub struct ServeConfig {
     pub bind: SocketAddr,
     pub pool_dir: PathBuf,
     pub token: Option<String>,
+    pub cors_allowed_origins: Vec<String>,
     pub access_mode: AccessMode,
     pub allow_non_loopback: bool,
     pub insecure_no_tls: bool,
@@ -96,6 +100,7 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
         .map_err(|_| Error::new(ErrorKind::Usage).with_message("--max-body-bytes is too large"))?;
 
     let tls_config = build_tls_config(&config).await?;
+    let cors_layer = build_cors_layer(&config)?;
 
     let state = Arc::new(AppState {
         client: LocalClient::new().with_pool_dir(config.pool_dir),
@@ -105,7 +110,7 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
         tail_semaphore: Arc::new(Semaphore::new(config.max_concurrent_tails)),
     });
 
-    let app = Router::new()
+    let mut app = Router::new()
         .route("/healthz", get(healthz))
         .route("/ui", get(ui_index))
         .route("/ui/pools/:pool", get(ui_pool))
@@ -122,9 +127,13 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
         .route("/v0/ui/pools", get(list_pools))
         .route("/v0/ui/pools/:pool/info", get(pool_info))
         .route("/v0/ui/pools/:pool/events", get(ui_events))
+        .with_state(state)
         .layer(DefaultBodyLimit::max(max_body_bytes))
-        .layer(TraceLayer::new_for_http())
-        .with_state(state);
+        .layer(TraceLayer::new_for_http());
+
+    if let Some(cors_layer) = cors_layer {
+        app = app.layer(cors_layer);
+    }
 
     if let Some(tls_config) = tls_config {
         return serve_tls(config.bind, app, tls_config).await;
@@ -144,6 +153,7 @@ fn is_loopback(ip: IpAddr) -> bool {
 }
 
 fn validate_config(config: &ServeConfig) -> Result<(), Error> {
+    let _ = normalize_cors_origins(&config.cors_allowed_origins)?;
     let is_loopback_bind = is_loopback(config.bind.ip());
     if !is_loopback_bind && !config.allow_non_loopback {
         return Err(Error::new(ErrorKind::Usage)
@@ -201,6 +211,96 @@ fn validate_config(config: &ServeConfig) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+pub fn normalize_cors_origins(raw: &[String]) -> Result<Vec<String>, Error> {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+    for entry in raw {
+        let origin = normalize_cors_origin(entry)?;
+        if seen.insert(origin.clone()) {
+            normalized.push(origin);
+        }
+    }
+    Ok(normalized)
+}
+
+fn normalize_cors_origin(raw: &str) -> Result<String, Error> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("CORS origin must not be empty")
+            .with_hint("Use --cors-origin with an explicit origin like https://demo.wratify.ai."));
+    }
+    if trimmed == "*" {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("CORS wildcard origin is not allowed")
+            .with_hint(
+                "Use explicit repeatable --cors-origin values (for example https://demo.wratify.ai).",
+            ));
+    }
+
+    let parsed = Url::parse(trimmed).map_err(|err| {
+        Error::new(ErrorKind::Usage)
+            .with_message("invalid CORS origin")
+            .with_hint("Use full origins like https://demo.wratify.ai or http://localhost:5173.")
+            .with_source(err)
+    })?;
+
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("CORS origin scheme must be http or https")
+            .with_hint("Use origins like https://demo.wratify.ai."));
+    }
+    if parsed.host_str().is_none() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("CORS origin must include a host")
+            .with_hint("Use origins like https://demo.wratify.ai."));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("CORS origin must not include userinfo")
+            .with_hint("Use origins like https://demo.wratify.ai."));
+    }
+    if parsed.path() != "/" {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("CORS origin must not include a path")
+            .with_hint("Specify only scheme + host + optional port (no trailing path)."));
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("CORS origin must not include query or fragment")
+            .with_hint("Specify only scheme + host + optional port."));
+    }
+    let origin = parsed.origin().ascii_serialization();
+    if origin == "null" {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("CORS origin is not allowed")
+            .with_hint("Use origins like https://demo.wratify.ai."));
+    }
+    Ok(origin)
+}
+
+fn build_cors_layer(config: &ServeConfig) -> Result<Option<CorsLayer>, Error> {
+    let origins = normalize_cors_origins(&config.cors_allowed_origins)?;
+    if origins.is_empty() {
+        return Ok(None);
+    }
+    let mut allow_origins = Vec::with_capacity(origins.len());
+    for origin in origins {
+        let value = HeaderValue::from_str(&origin).map_err(|err| {
+            Error::new(ErrorKind::Usage)
+                .with_message("invalid CORS origin header value")
+                .with_hint("Use origins like https://demo.wratify.ai.")
+                .with_source(err)
+        })?;
+        allow_origins.push(value);
+    }
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::list(allow_origins))
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
+    Ok(Some(cors))
 }
 
 fn tls_is_configured(config: &ServeConfig) -> bool {
@@ -1234,8 +1334,8 @@ fn is_access_forbidden(err: &Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccessMode, ErrorKind, ServeConfig, normalize_tags, parse_tags_from_query, serve,
-        validate_config,
+        AccessMode, ErrorKind, ServeConfig, build_cors_layer, normalize_cors_origins,
+        normalize_tags, parse_tags_from_query, serve, validate_config,
     };
 
     #[tokio::test]
@@ -1245,6 +1345,7 @@ mod tests {
             bind: "0.0.0.0:0".parse().expect("bind"),
             pool_dir: temp.path().to_path_buf(),
             token: None,
+            cors_allowed_origins: Vec::new(),
             access_mode: AccessMode::ReadWrite,
             allow_non_loopback: false,
             insecure_no_tls: false,
@@ -1267,6 +1368,7 @@ mod tests {
             bind: "0.0.0.0:0".parse().expect("bind"),
             pool_dir: temp.path().to_path_buf(),
             token: None,
+            cors_allowed_origins: Vec::new(),
             access_mode: AccessMode::ReadOnly,
             allow_non_loopback: false,
             insecure_no_tls: false,
@@ -1289,6 +1391,7 @@ mod tests {
             bind: "0.0.0.0:0".parse().expect("bind"),
             pool_dir: temp.path().to_path_buf(),
             token: None,
+            cors_allowed_origins: Vec::new(),
             access_mode: AccessMode::ReadOnly,
             allow_non_loopback: true,
             insecure_no_tls: false,
@@ -1310,6 +1413,7 @@ mod tests {
             bind: "0.0.0.0:0".parse().expect("bind"),
             pool_dir: temp.path().to_path_buf(),
             token: Some("dev".to_string()),
+            cors_allowed_origins: Vec::new(),
             access_mode: AccessMode::WriteOnly,
             allow_non_loopback: true,
             insecure_no_tls: true,
@@ -1332,6 +1436,7 @@ mod tests {
             bind: "0.0.0.0:0".parse().expect("bind"),
             pool_dir: temp.path().to_path_buf(),
             token: Some("dev".to_string()),
+            cors_allowed_origins: Vec::new(),
             access_mode: AccessMode::WriteOnly,
             allow_non_loopback: true,
             insecure_no_tls: false,
@@ -1354,6 +1459,7 @@ mod tests {
             bind: "127.0.0.1:0".parse().expect("bind"),
             pool_dir: temp.path().to_path_buf(),
             token: None,
+            cors_allowed_origins: Vec::new(),
             access_mode: AccessMode::ReadOnly,
             allow_non_loopback: false,
             insecure_no_tls: false,
@@ -1395,5 +1501,109 @@ mod tests {
             vec!["keep,prod".to_string()]
         );
         assert!(parse_tags_from_query(None).is_empty());
+    }
+
+    #[test]
+    fn normalize_cors_origins_dedupes_and_normalizes() {
+        let origins = normalize_cors_origins(&[
+            " https://demo.wratify.ai/ ".to_string(),
+            "http://localhost:5173".to_string(),
+            "https://demo.wratify.ai".to_string(),
+        ])
+        .expect("cors origins");
+        assert_eq!(
+            origins,
+            vec![
+                "https://demo.wratify.ai".to_string(),
+                "http://localhost:5173".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn normalize_cors_origins_rejects_wildcard() {
+        let err = normalize_cors_origins(&["*".to_string()]).expect_err("expected error");
+        assert_eq!(err.kind(), ErrorKind::Usage);
+    }
+
+    #[test]
+    fn cors_layer_builds_for_valid_origins() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = ServeConfig {
+            bind: "127.0.0.1:0".parse().expect("bind"),
+            pool_dir: temp.path().to_path_buf(),
+            token: None,
+            cors_allowed_origins: vec!["https://demo.wratify.ai".to_string()],
+            access_mode: AccessMode::ReadOnly,
+            allow_non_loopback: false,
+            insecure_no_tls: false,
+            token_file_used: false,
+            tls_cert: None,
+            tls_key: None,
+            tls_self_signed: false,
+            max_body_bytes: 1024 * 1024,
+            max_tail_timeout_ms: 30_000,
+            max_concurrent_tails: 64,
+        };
+        let layer = build_cors_layer(&config).expect("cors layer");
+        assert!(layer.is_some());
+    }
+
+    #[tokio::test]
+    async fn cors_preflight_includes_allow_origin_header() {
+        use axum::http::header;
+        use std::time::Duration;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = ServeConfig {
+            bind: "127.0.0.1:0".parse().expect("bind"),
+            pool_dir: temp.path().to_path_buf(),
+            token: None,
+            cors_allowed_origins: vec!["https://demo.wratify.ai".to_string()],
+            access_mode: AccessMode::ReadOnly,
+            allow_non_loopback: false,
+            insecure_no_tls: false,
+            token_file_used: false,
+            tls_cert: None,
+            tls_key: None,
+            tls_self_signed: false,
+            max_body_bytes: 1024 * 1024,
+            max_tail_timeout_ms: 30_000,
+            max_concurrent_tails: 64,
+        };
+        let cors_layer = build_cors_layer(&config)
+            .expect("cors layer")
+            .expect("configured");
+        let app = axum::Router::new()
+            .route("/healthz", axum::routing::get(super::healthz))
+            .layer(cors_layer);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("local addr");
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let url = format!("http://{addr}/healthz");
+        let response = tokio::task::spawn_blocking(move || {
+            ureq::request("OPTIONS", &url)
+                .set("Origin", "https://demo.wratify.ai")
+                .set("Access-Control-Request-Method", "GET")
+                .call()
+        })
+        .await
+        .expect("task join")
+        .expect("preflight response");
+
+        assert!(matches!(response.status(), 200 | 204));
+        assert_eq!(
+            response.header(header::ACCESS_CONTROL_ALLOW_ORIGIN.as_str()),
+            Some("https://demo.wratify.ai")
+        );
+
+        server.abort();
     }
 }

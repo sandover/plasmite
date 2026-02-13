@@ -82,6 +82,10 @@ curl -N https://api.example.com/events | pls poke events --create
 # Tee system logs
 journalctl -o json-seq -f | pls poke syslog --create    # Linux
 /usr/bin/log stream --style ndjson | pls poke syslog --create  # macOS
+
+# Save JSONL, then replay from file
+pls peek incidents --tail 100 --format jsonl --data-only > incidents.jsonl
+pls poke incidents-archive -f incidents.jsonl
 ```
 
 ### Filter, tag, replay
@@ -115,6 +119,26 @@ pls peek http://server:9700/events --tail 20
 A built-in web UI lives at `/ui`:
 
 ![Plasmite UI pool watch](docs/images/ui/ui-pool-watch.png)
+
+### Browser app on another origin (CORS)
+
+If your web app is not served by `pls serve` itself (for example `https://demo.wratify.ai`), the browser needs explicit CORS permission from the pool server.
+
+```bash
+# example: public read-only endpoint for one trusted web origin
+pls serve \
+  --bind 0.0.0.0:9100 \
+  --allow-non-loopback \
+  --access read-only \
+  --cors-origin https://demo.wratify.ai
+```
+
+Use `--cors-origin` multiple times to allow multiple origins.
+
+Important:
+- For HTTPS web apps, the pool endpoint must also be HTTPS.
+- `--cors-origin` expects exact origins only (`scheme://host[:port]`), no wildcard.
+- Avoid embedding long-lived bearer tokens in public frontend JavaScript.
 
 See the [remote protocol spec](spec/remote/v0/SPEC.md) for the full HTTP/JSON API.
 
