@@ -13,8 +13,10 @@ Pick the lowest-risk compiler path for Windows Lite3 compilation and validate it
 - Comparative run (both strategies): [22000655822](https://github.com/sandover/plasmite/actions/runs/22000655822)
   - `probe (msvc-shim)` job: [63572163384](https://github.com/sandover/plasmite/actions/runs/22000655822/job/63572163384)
   - `probe (clang-cl)` job: [63572163411](https://github.com/sandover/plasmite/actions/runs/22000655822/job/63572163411)
-- Confirmation run (selected strategy only): [22001090359](https://github.com/sandover/plasmite/actions/runs/22001090359)
+- Confirmation run (selected strategy after notify portability fix): [22001090359](https://github.com/sandover/plasmite/actions/runs/22001090359)
   - `probe (clang-cl)` job: [63573658728](https://github.com/sandover/plasmite/actions/runs/22001090359/job/63573658728)
+- Default-path validation run (selected strategy using `build.rs` default compiler selection): [22001410962](https://github.com/sandover/plasmite/actions/runs/22001410962)
+  - `probe (clang-cl)` job: [63574715719](https://github.com/sandover/plasmite/actions/runs/22001410962/job/63574715719)
 - Downloaded comparative artifacts:
   - `.scratch/windows-probe-run22000655822/msvc-shim/cargo-build.log`
   - `.scratch/windows-probe-run22000655822/clang-cl/cargo-build.log`
@@ -35,6 +37,11 @@ Pick the lowest-risk compiler path for Windows Lite3 compilation and validate it
   - `cargo build --release --bins` completed (`Finished release profile ... in 4m 10s`).
   - Smoke gate passed: `target\\release\\plasmite.exe --version` => `plasmite 0.1.14`.
   - Artifact uploaded: `windows-probe-clang-cl` (artifact ID `5505265001`, SHA256 zip digest `09f7515efd2335eb9da0e5060cd14a4b1b8f3baa07d46453f8528a114f9adb38`).
+- Default-path validation run result: **success**.
+  - `cargo build --release --bins` completed (`Finished release profile ... in 3m 38s`).
+  - Smoke gate passed: `target\\release\\plasmite.exe --version` => `plasmite 0.1.14`.
+  - Artifact uploaded: `windows-probe-clang-cl` (artifact ID `5505384168`, SHA256 zip digest `9b9c9551045a45257b3e23061f02c011f0f25d9a8f93483ae76c2ccf719145d5`).
+  - This run exercised the default Windows path in `build.rs` (no explicit `CC_x86_64_pc_windows_msvc=clang-cl` in workflow step).
 - Conclusion: this is the only path with a successful Windows release-bin build and smoke run.
 
 ## Decision
