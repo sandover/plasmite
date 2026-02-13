@@ -44,7 +44,11 @@ jobs:
           "host=$env:RUNNER_OS" | Out-File -FilePath $info -Encoding utf8 -Append
           "rustc=$(rustc --version)" | Out-File -FilePath $info -Encoding utf8 -Append
           "cargo=$(cargo --version)" | Out-File -FilePath $info -Encoding utf8 -Append
-          "cl=$(cl 2>&1 | Select-Object -First 1)" | Out-File -FilePath $info -Encoding utf8 -Append
+          if (Get-Command cl -ErrorAction SilentlyContinue) {
+            "cl=$(cl 2>&1 | Select-Object -First 1)" | Out-File -FilePath $info -Encoding utf8 -Append
+          } else {
+            "cl=missing" | Out-File -FilePath $info -Encoding utf8 -Append
+          }
           if (Get-Command clang-cl -ErrorAction SilentlyContinue) {
             "clang-cl=$(clang-cl --version | Select-Object -First 1)" | Out-File -FilePath $info -Encoding utf8 -Append
           } else {
