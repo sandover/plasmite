@@ -39,7 +39,7 @@ jobs:
     name: windows smoke trigger scope
     runs-on: ubuntu-latest
     outputs:
-      run_windows_smoke: ${{ steps.decide-pr.outputs.run_windows_smoke || steps.decide-non-pr.outputs.run_windows_smoke }}
+      run_windows_smoke: ${{ steps.resolve.outputs.run_windows_smoke }}
     steps:
       - uses: actions/checkout@v4
       - id: filter
@@ -59,18 +59,20 @@ jobs:
               - 'bindings/python/**'
               - 'scripts/**'
               - '.github/workflows/**'
-      - id: decide-pr
-        if: github.event_name == 'pull_request'
-        run: echo "run_windows_smoke=${{ steps.filter.outputs.windows_smoke }}" >> "$GITHUB_OUTPUT"
-      - id: decide-non-pr
-        if: github.event_name != 'pull_request'
-        run: echo "run_windows_smoke=true" >> "$GITHUB_OUTPUT"
+      - id: resolve
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "run_windows_smoke=${{ steps.filter.outputs.windows_smoke }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_windows_smoke=true" >> "$GITHUB_OUTPUT"
+          fi
 
   windows-smoke:
     name: windows smoke
     needs: [windows-preview-policy, windows-smoke-paths]
     if: ${{ needs.windows-smoke-paths.outputs.run_windows_smoke == 'true' }}
-    continue-on-error: ${{ env.WINDOWS_SMOKE_PREVIEW_CONTINUE_ON_ERROR == 'true' }}
+    continue-on-error: true
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
