@@ -35,6 +35,76 @@ jobs:
             echo "- Policy: docs/planning/windows-preview-rollback.md"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  windows-smoke-paths:
+    name: windows smoke trigger scope
+    runs-on: ubuntu-latest
+    outputs:
+      run_windows_smoke: ${{ steps.decide-pr.outputs.run_windows_smoke || steps.decide-non-pr.outputs.run_windows_smoke }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            windows_smoke:
+              - 'build.rs'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'c/**'
+              - 'vendor/lite3/**'
+              - 'src/**'
+              - 'tests/**'
+              - 'bindings/node/**'
+              - 'bindings/python/**'
+              - 'scripts/**'
+              - '.github/workflows/**'
+      - id: decide-pr
+        if: github.event_name == 'pull_request'
+        run: echo "run_windows_smoke=${{ steps.filter.outputs.windows_smoke }}" >> "$GITHUB_OUTPUT"
+      - id: decide-non-pr
+        if: github.event_name != 'pull_request'
+        run: echo "run_windows_smoke=true" >> "$GITHUB_OUTPUT"
+
+  windows-smoke:
+    name: windows smoke
+    needs: [windows-preview-policy, windows-smoke-paths]
+    if: ${{ needs.windows-smoke-paths.outputs.run_windows_smoke == 'true' }}
+    continue-on-error: ${{ env.WINDOWS_SMOKE_PREVIEW_CONTINUE_ON_ERROR == 'true' }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Announce preview gating mode
+        shell: pwsh
+        run: |
+          Write-Host "::notice title=Windows smoke gating mode::${env:WINDOWS_SMOKE_PREVIEW_MODE} (continue-on-error=${env:WINDOWS_SMOKE_PREVIEW_CONTINUE_ON_ERROR})"
+      - name: Build release binaries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo build --release --bins
+      - name: Smoke CLI version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          .\target\release\plasmite.exe --version
+      - name: Local pool roundtrip smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dir = ".scratch/windows-smoke"
+          $pool = "ci-smoke"
+          $exe = ".\target\release\plasmite.exe"
+          Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          & $exe --dir $dir pool create $pool
+          '{"ci":"windows-smoke","ok":true}' | & $exe --dir $dir poke $pool
+          $out = & $exe --dir $dir peek $pool --one --timeout 2s --data-only --format jsonl
+          if (-not ($out -match '"ci":"windows-smoke"')) {
+            throw "Roundtrip payload marker missing from peek output."
+          }
+
   pr-fast:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
