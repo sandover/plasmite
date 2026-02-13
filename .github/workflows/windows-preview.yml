@@ -53,8 +53,6 @@ jobs:
           echo "asset_base=${asset_base}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.target.outputs.tag }}
 
       - uses: dtolnay/rust-toolchain@stable
 
