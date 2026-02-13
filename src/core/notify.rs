@@ -5,12 +5,16 @@
 //! Invariants: Unsupported semaphore operations surface as `NotifyError::Unavailable`.
 
 use sha2::{Digest, Sha256};
-use std::ffi::CString;
 use std::io;
 use std::path::Path;
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
+
+#[cfg(unix)]
+use std::ffi::CString;
+#[cfg(unix)]
+use std::time::SystemTime;
 
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
@@ -66,6 +70,7 @@ impl<B: SemaphoreBackend> Drop for Semaphore<B> {
 #[derive(Clone)]
 pub(crate) struct OsSemaphoreBackend;
 
+#[cfg(unix)]
 impl SemaphoreBackend for OsSemaphoreBackend {
     type Handle = *mut libc::sem_t;
 
@@ -120,6 +125,29 @@ impl SemaphoreBackend for OsSemaphoreBackend {
     }
 }
 
+#[cfg(not(unix))]
+impl SemaphoreBackend for OsSemaphoreBackend {
+    type Handle = ();
+
+    fn open(&self, _name: &str) -> Result<Self::Handle, NotifyError> {
+        Err(NotifyError::Unavailable)
+    }
+
+    fn post(&self, _handle: &Self::Handle) -> Result<(), NotifyError> {
+        Err(NotifyError::Unavailable)
+    }
+
+    fn wait(
+        &self,
+        _handle: &Self::Handle,
+        _timeout: Duration,
+    ) -> Result<WaitOutcome, NotifyError> {
+        Err(NotifyError::Unavailable)
+    }
+
+    fn close(&self, _handle: &Self::Handle) {}
+}
+
 pub(crate) type PoolSemaphore = Semaphore<OsSemaphoreBackend>;
 
 pub(crate) fn pool_semaphore_name(path: &Path) -> String {
@@ -172,10 +200,12 @@ fn canonical_path_bytes(path: &Path) -> Vec<u8> {
     }
 }
 
+#[cfg(unix)]
 fn map_sem_error() -> NotifyError {
     map_sem_error_with(io::Error::last_os_error())
 }
 
+#[cfg(unix)]
 fn map_sem_error_with(err: io::Error) -> NotifyError {
     match err.raw_os_error() {
         Some(code) if code == libc::ENOSYS || code == libc::ENOTSUP => NotifyError::Unavailable,
