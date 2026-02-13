@@ -222,6 +222,27 @@ pls peek http://server:9700/events --tail 20
 
 A built-in web UI is available at `http://server:9700/ui`.
 
+### Browser page served separately (CORS)
+
+If your browser app is hosted on another origin (for example `https://demo.wratify.ai`), configure `pls serve` with an explicit allowlist:
+
+```bash
+pls serve \
+  --bind 0.0.0.0:9100 \
+  --allow-non-loopback \
+  --access read-only \
+  --cors-origin https://demo.wratify.ai
+```
+
+Then your page can:
+- List pools with `GET /v0/ui/pools`
+- Stream one pool with `GET /v0/ui/pools/<pool>/events`
+
+Operational notes:
+- For an HTTPS page, use HTTPS on the pool endpoint too (browser mixed-content rules).
+- `--cors-origin` is exact-match only and repeatable for multiple origins.
+- If you require bearer auth, avoid putting long-lived tokens in public frontend code.
+
 ---
 
 ## Ingest an API Event Stream
