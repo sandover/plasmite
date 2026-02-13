@@ -112,7 +112,7 @@ jobs:
           Compress-Archive -Path (Join-Path $stageDir '*') -DestinationPath $zipPath -CompressionLevel Optimal
 
           $hash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLower()
-          Set-Content -Path $shaPath -Value ("$hash  " + [System.IO.Path]::GetFileName($zipPath)) -Encoding Ascii -NoNewline
+          Set-Content -Path $shaPath -Value ("$hash  " + [System.IO.Path]::GetFileName($zipPath)) -Encoding Ascii
 
           "zip_path=$zipPath" >> $env:GITHUB_OUTPUT
           "sha_path=$shaPath" >> $env:GITHUB_OUTPUT
