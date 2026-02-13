@@ -36,3 +36,4 @@ Plasmite documentation is intentionally split into:
 - Homebrew packaging: `docs/record/homebrew.md`
 - C ABI guide: `docs/record/libplasmite.md`
 - Pattern matching guide: `docs/record/pattern-matching.md`
+- Browser CORS access guide: `docs/record/browser-cors.md`

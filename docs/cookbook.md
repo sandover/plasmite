@@ -242,6 +242,7 @@ Operational notes:
 - For an HTTPS page, use HTTPS on the pool endpoint too (browser mixed-content rules).
 - `--cors-origin` is exact-match only and repeatable for multiple origins.
 - If you require bearer auth, avoid putting long-lived tokens in public frontend code.
+- See `docs/record/browser-cors.md` for complete deployment and troubleshooting guidance.
 
 ---
 

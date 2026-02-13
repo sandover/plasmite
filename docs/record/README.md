@@ -19,6 +19,7 @@ Use this namespace for canonical, current truth documentation.
 - Homebrew packaging: `docs/record/homebrew.md`
 - C ABI guide: `docs/record/libplasmite.md`
 - Pattern matching guide: `docs/record/pattern-matching.md`
+- Browser CORS access guide: `docs/record/browser-cors.md`
 
 Do not place proposals, exploratory design drafts, or roadmap notes here.
 Those belong in `docs/planning/` until accepted and promoted.

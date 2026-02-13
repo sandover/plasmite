@@ -90,7 +90,7 @@ impl AccessMode {
 }
 
 pub async fn serve(config: ServeConfig) -> Result<(), Error> {
-    preflight_config(&config)?;
+    let cors_allowed_origins = preflight_config(&config)?;
 
     init_tracing();
 
@@ -100,7 +100,7 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
         .map_err(|_| Error::new(ErrorKind::Usage).with_message("--max-body-bytes is too large"))?;
 
     let tls_config = build_tls_config(&config).await?;
-    let cors_layer = build_cors_layer(&config)?;
+    let cors_layer = build_cors_layer(&cors_allowed_origins)?;
 
     let state = Arc::new(AppState {
         client: LocalClient::new().with_pool_dir(config.pool_dir),
@@ -141,7 +141,7 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
     serve_plain(config.bind, app).await
 }
 
-pub fn preflight_config(config: &ServeConfig) -> Result<(), Error> {
+pub fn preflight_config(config: &ServeConfig) -> Result<Vec<String>, Error> {
     validate_config(config)
 }
 
@@ -152,8 +152,8 @@ fn is_loopback(ip: IpAddr) -> bool {
     }
 }
 
-fn validate_config(config: &ServeConfig) -> Result<(), Error> {
-    let _ = normalize_cors_origins(&config.cors_allowed_origins)?;
+fn validate_config(config: &ServeConfig) -> Result<Vec<String>, Error> {
+    let cors_allowed_origins = normalize_cors_origins(&config.cors_allowed_origins)?;
     let is_loopback_bind = is_loopback(config.bind.ip());
     if !is_loopback_bind && !config.allow_non_loopback {
         return Err(Error::new(ErrorKind::Usage)
@@ -210,7 +210,7 @@ fn validate_config(config: &ServeConfig) -> Result<(), Error> {
         }
     }
 
-    Ok(())
+    Ok(cors_allowed_origins)
 }
 
 pub fn normalize_cors_origins(raw: &[String]) -> Result<Vec<String>, Error> {
@@ -281,14 +281,13 @@ fn normalize_cors_origin(raw: &str) -> Result<String, Error> {
     Ok(origin)
 }
 
-fn build_cors_layer(config: &ServeConfig) -> Result<Option<CorsLayer>, Error> {
-    let origins = normalize_cors_origins(&config.cors_allowed_origins)?;
+fn build_cors_layer(origins: &[String]) -> Result<Option<CorsLayer>, Error> {
     if origins.is_empty() {
         return Ok(None);
     }
     let mut allow_origins = Vec::with_capacity(origins.len());
     for origin in origins {
-        let value = HeaderValue::from_str(&origin).map_err(|err| {
+        let value = HeaderValue::from_str(origin.as_str()).map_err(|err| {
             Error::new(ErrorKind::Usage)
                 .with_message("invalid CORS origin header value")
                 .with_hint("Use origins like https://demo.wratify.ai.")
@@ -1403,7 +1402,8 @@ mod tests {
             max_tail_timeout_ms: 30_000,
             max_concurrent_tails: 64,
         };
-        validate_config(&config).expect("config ok");
+        let origins = validate_config(&config).expect("config ok");
+        assert!(origins.is_empty());
     }
 
     #[test]
@@ -1545,7 +1545,8 @@ mod tests {
             max_tail_timeout_ms: 30_000,
             max_concurrent_tails: 64,
         };
-        let layer = build_cors_layer(&config).expect("cors layer");
+        let origins = normalize_cors_origins(&config.cors_allowed_origins).expect("origins");
+        let layer = build_cors_layer(&origins).expect("cors layer");
         assert!(layer.is_some());
     }
 
@@ -1571,7 +1572,8 @@ mod tests {
             max_tail_timeout_ms: 30_000,
             max_concurrent_tails: 64,
         };
-        let cors_layer = build_cors_layer(&config)
+        let origins = normalize_cors_origins(&config.cors_allowed_origins).expect("origins");
+        let cors_layer = build_cors_layer(&origins)
             .expect("cors layer")
             .expect("configured");
         let app = axum::Router::new()

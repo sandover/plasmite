@@ -135,10 +135,8 @@ pls serve \
 
 Use `--cors-origin` multiple times to allow multiple origins.
 
-Important:
-- For HTTPS web apps, the pool endpoint must also be HTTPS.
-- `--cors-origin` expects exact origins only (`scheme://host[:port]`), no wildcard.
-- Avoid embedding long-lived bearer tokens in public frontend JavaScript.
+For full deployment, auth, and troubleshooting guidance, see
+`docs/record/browser-cors.md`.
 
 See the [remote protocol spec](spec/remote/v0/SPEC.md) for the full HTTP/JSON API.
 
@@ -251,7 +249,7 @@ See [Go quickstart](docs/record/go-quickstart.md), [Python docs](bindings/python
 
 **Specs**: [CLI](spec/v0/SPEC.md) | [API](spec/api/v0/SPEC.md) | [Remote protocol](spec/remote/v0/SPEC.md)
 
-**Guides**: [Rust API quickstart](docs/record/api-quickstart.md) | [Go quickstart](docs/record/go-quickstart.md) | [libplasmite C ABI](docs/record/libplasmite.md) | [Distribution](docs/record/distribution.md) | [Exit codes](docs/record/exit-codes.md) | [Diagnostics](docs/record/doctor.md)
+**Guides**: [Rust API quickstart](docs/record/api-quickstart.md) | [Go quickstart](docs/record/go-quickstart.md) | [Browser CORS access](docs/record/browser-cors.md) | [libplasmite C ABI](docs/record/libplasmite.md) | [Distribution](docs/record/distribution.md) | [Exit codes](docs/record/exit-codes.md) | [Diagnostics](docs/record/doctor.md)
 
 **Contributing**: `docs/contributing.md`
 

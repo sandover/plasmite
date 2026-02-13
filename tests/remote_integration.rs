@@ -30,21 +30,26 @@ struct TestServer {
 
 impl TestServer {
     fn start(pool_dir: &std::path::Path) -> TestResult<Self> {
-        Self::start_with_options(pool_dir, None, None)
+        Self::start_with_options(pool_dir, None, None, &[])
     }
 
     fn start_with_token(pool_dir: &std::path::Path, token: Option<&str>) -> TestResult<Self> {
-        Self::start_with_options(pool_dir, token, None)
+        Self::start_with_options(pool_dir, token, None, &[])
     }
 
     fn start_with_access(pool_dir: &std::path::Path, access: &str) -> TestResult<Self> {
-        Self::start_with_options(pool_dir, None, Some(access))
+        Self::start_with_options(pool_dir, None, Some(access), &[])
+    }
+
+    fn start_with_cors(pool_dir: &std::path::Path, cors_origins: &[&str]) -> TestResult<Self> {
+        Self::start_with_options(pool_dir, None, None, cors_origins)
     }
 
     fn start_with_options(
         pool_dir: &std::path::Path,
         token: Option<&str>,
         access: Option<&str>,
+        cors_origins: &[&str],
     ) -> TestResult<Self> {
         let guard = SERVER_LOCK
             .lock()
@@ -69,6 +74,9 @@ impl TestServer {
             }
             if let Some(token) = token {
                 command.arg("--token").arg(token);
+            }
+            for origin in cors_origins {
+                command.arg("--cors-origin").arg(origin);
             }
             let mut child = command.spawn()?;
 
@@ -538,6 +546,105 @@ fn remote_ui_events_stream_sends_sse_and_requires_auth() -> TestResult<()> {
     let body = response.into_string()?;
     assert!(body.contains("event: message"));
     assert!(body.contains("\"seq\":1"));
+    Ok(())
+}
+
+#[test]
+fn remote_ui_routes_emit_cors_headers_for_allowed_origin() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let origin = "https://demo.wratify.ai";
+    let server = TestServer::start_with_cors(temp_dir.path(), &[origin])?;
+    let client = server.client()?;
+    let pool_ref = PoolRef::name("cors-allowed");
+
+    client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
+    let pool = client.open_pool(&pool_ref)?;
+    let created =
+        pool.append_json_now(&json!({"kind": "cors", "ok": true}), &[], Durability::Fast)?;
+
+    let pools_resp = ureq::get(&format!("{}/v0/ui/pools", server.base_url))
+        .set("Origin", origin)
+        .call()
+        .expect("pools request");
+    assert_eq!(pools_resp.status(), 200);
+    assert_eq!(
+        pools_resp.header("access-control-allow-origin"),
+        Some(origin)
+    );
+
+    let preflight_resp = ureq::request(
+        "OPTIONS",
+        &format!("{}/v0/ui/pools/cors-allowed/events", server.base_url),
+    )
+    .set("Origin", origin)
+    .set("Access-Control-Request-Method", "GET")
+    .call()
+    .expect("preflight request");
+    assert!(matches!(preflight_resp.status(), 200 | 204));
+    assert_eq!(
+        preflight_resp.header("access-control-allow-origin"),
+        Some(origin)
+    );
+
+    let events_resp = ureq::get(&format!(
+        "{}/v0/ui/pools/cors-allowed/events?since_seq={}&max=1",
+        server.base_url, created.seq
+    ))
+    .set("Origin", origin)
+    .call()
+    .expect("events request");
+    assert_eq!(events_resp.status(), 200);
+    assert_eq!(
+        events_resp.header("access-control-allow-origin"),
+        Some(origin)
+    );
+    let body = events_resp.into_string()?;
+    assert!(body.contains("event: message"));
+    Ok(())
+}
+
+#[test]
+fn remote_ui_routes_reject_disallowed_preflight_origin() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let allowed_origin = "https://demo.wratify.ai";
+    let disallowed_origin = "https://evil.example";
+    let server = TestServer::start_with_cors(temp_dir.path(), &[allowed_origin])?;
+
+    let pools_resp = ureq::get(&format!("{}/v0/ui/pools", server.base_url))
+        .set("Origin", disallowed_origin)
+        .call()
+        .expect("pools request");
+    assert_eq!(pools_resp.status(), 200);
+    assert_ne!(
+        pools_resp.header("access-control-allow-origin"),
+        Some(disallowed_origin)
+    );
+
+    let preflight = ureq::request(
+        "OPTIONS",
+        &format!("{}/v0/ui/pools/demo/events", server.base_url),
+    )
+    .set("Origin", disallowed_origin)
+    .set("Access-Control-Request-Method", "GET")
+    .call();
+
+    match preflight {
+        Ok(resp) => {
+            assert!(matches!(resp.status(), 200 | 204));
+            assert_ne!(
+                resp.header("access-control-allow-origin"),
+                Some(disallowed_origin)
+            );
+        }
+        Err(ureq::Error::Status(code, resp)) => {
+            assert_eq!(code, 403);
+            assert_ne!(
+                resp.header("access-control-allow-origin"),
+                Some(disallowed_origin)
+            );
+        }
+        Err(err) => return Err(err.into()),
+    }
     Ok(())
 }
 

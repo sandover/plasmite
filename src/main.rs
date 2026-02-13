@@ -197,14 +197,13 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 Ok(RunOutcome::ok())
             }
             Some(ServeSubcommand::Check { json }) => {
-                let config = serve_config_from_run_args(run, &pool_dir)?;
-                serve::preflight_config(&config)?;
+                let mut config = serve_config_from_run_args(run, &pool_dir)?;
+                config.cors_allowed_origins = serve::preflight_config(&config)?;
                 emit_serve_check_report(&config, color_mode, json);
                 Ok(RunOutcome::ok())
             }
             None => {
                 let config = serve_config_from_run_args(run, &pool_dir)?;
-                serve::preflight_config(&config)?;
                 emit_serve_startup_guidance(&config);
                 let runtime = tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
@@ -2317,12 +2316,11 @@ fn serve_config_from_run_args(
     } else {
         (run.token, false)
     };
-    let cors_allowed_origins = serve::normalize_cors_origins(&run.cors_origin)?;
     Ok(serve::ServeConfig {
         bind,
         pool_dir: pool_dir.to_path_buf(),
         token,
-        cors_allowed_origins,
+        cors_allowed_origins: run.cors_origin,
         access_mode: run.access.into(),
         allow_non_loopback: run.allow_non_loopback,
         insecure_no_tls: run.insecure_no_tls,
