@@ -7,7 +7,34 @@ on:
   schedule:
     - cron: "0 8 * * *"
 
+env:
+  # Windows smoke preview policy defaults (used by the Windows gate rollout tasks).
+  WINDOWS_SMOKE_PREVIEW_MODE: non-blocking
+  WINDOWS_SMOKE_PREVIEW_CONTINUE_ON_ERROR: "true"
+  WINDOWS_SMOKE_PROMOTE_AFTER_GREEN_MAIN_RUNS: "10"
+  WINDOWS_SMOKE_ROLLBACK_FAILURES: "2"
+  WINDOWS_SMOKE_ROLLBACK_WINDOW_RUNS: "5"
+  WINDOWS_SMOKE_OWNER_PRIMARY: "@brandonharvey"
+  WINDOWS_SMOKE_OWNER_BACKUP: "release-owner-on-duty"
+
 jobs:
+  windows-preview-policy:
+    name: windows smoke preview policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish active windows smoke policy
+        run: |
+          echo "::notice title=Windows smoke preview mode::${WINDOWS_SMOKE_PREVIEW_MODE} (continue-on-error=${WINDOWS_SMOKE_PREVIEW_CONTINUE_ON_ERROR})"
+          {
+            echo "### Windows smoke preview policy"
+            echo ""
+            echo "- Mode: ${WINDOWS_SMOKE_PREVIEW_MODE} (continue-on-error=${WINDOWS_SMOKE_PREVIEW_CONTINUE_ON_ERROR})"
+            echo "- Promotion threshold: ${WINDOWS_SMOKE_PROMOTE_AFTER_GREEN_MAIN_RUNS} consecutive green \`main\` runs"
+            echo "- Rollback trigger: ${WINDOWS_SMOKE_ROLLBACK_FAILURES} failures in ${WINDOWS_SMOKE_ROLLBACK_WINDOW_RUNS} \`main\` runs"
+            echo "- Owners: ${WINDOWS_SMOKE_OWNER_PRIMARY} (primary), ${WINDOWS_SMOKE_OWNER_BACKUP} (backup)"
+            echo "- Policy: docs/planning/windows-preview-rollback.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   pr-fast:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
