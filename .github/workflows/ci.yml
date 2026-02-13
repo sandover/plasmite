@@ -102,7 +102,7 @@ jobs:
           Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
           & $exe --dir $dir pool create $pool
-          '{"ci":"windows-smoke","ok":true}' | & $exe --dir $dir poke $pool --in-json
+          & $exe --dir $dir poke $pool '{"ci":"windows-smoke","ok":true}'
           $out = & $exe --dir $dir peek $pool --one --timeout 2s --data-only --format jsonl
           if (-not ($out -match '"ci":"windows-smoke"')) {
             throw "Roundtrip payload marker missing from peek output."
