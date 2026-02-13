@@ -8,6 +8,7 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    let target = env::var("TARGET").unwrap_or_default();
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let lite3_dir = manifest_dir.join("vendor").join("lite3");
     let include_dir = lite3_dir.join("include");
@@ -37,9 +38,25 @@ fn main() {
         .file(lite3_dir.join("src").join("debug.c"))
         .file(lite3_dir.join("lib").join("yyjson").join("yyjson.c"))
         .file(lite3_dir.join("lib").join("nibble_base64").join("base64.c"))
-        .file(manifest_dir.join("c").join("lite3_shim.c"))
-        .flag_if_supported("-std=gnu2x")
-        .flag_if_supported("-std=c2x");
+        .file(manifest_dir.join("c").join("lite3_shim.c"));
+
+    if target.contains("windows-msvc") {
+        if !has_user_cc_override(&target) {
+            build.compiler("clang-cl");
+        }
+    } else {
+        build
+            .flag_if_supported("-std=gnu2x")
+            .flag_if_supported("-std=c2x");
+    }
 
     build.compile("lite3");
+}
+
+fn has_user_cc_override(target: &str) -> bool {
+    let target_cc = format!("CC_{target}");
+    let target_cc_underscored = format!("CC_{}", target.replace('-', "_"));
+    env::var_os("CC").is_some()
+        || env::var_os(target_cc).is_some()
+        || env::var_os(target_cc_underscored).is_some()
 }

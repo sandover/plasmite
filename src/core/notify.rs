@@ -137,11 +137,7 @@ impl SemaphoreBackend for OsSemaphoreBackend {
         Err(NotifyError::Unavailable)
     }
 
-    fn wait(
-        &self,
-        _handle: &Self::Handle,
-        _timeout: Duration,
-    ) -> Result<WaitOutcome, NotifyError> {
+    fn wait(&self, _handle: &Self::Handle, _timeout: Duration) -> Result<WaitOutcome, NotifyError> {
         Err(NotifyError::Unavailable)
     }
 

@@ -59,6 +59,8 @@ jobs:
         if: ${{ success() && (inputs.strategy == 'all' || inputs.strategy == matrix.strategy) && matrix.strategy == 'msvc-shim' }}
         shell: pwsh
         run: |
+          $env:CC_x86_64_pc_windows_msvc = "cl"
+          Remove-Item Env:CFLAGS_x86_64_pc_windows_msvc -ErrorAction SilentlyContinue
           $log = ".scratch/windows-probe/${{ matrix.strategy }}/cargo-build.log"
           cargo build --release --bins *>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -70,8 +72,6 @@ jobs:
           if (-not (Get-Command clang-cl -ErrorAction SilentlyContinue)) {
             throw "clang-cl not found on runner PATH"
           }
-          $env:CC_x86_64_pc_windows_msvc = "clang-cl"
-          $env:CFLAGS_x86_64_pc_windows_msvc = "-std=c11"
           $log = ".scratch/windows-probe/${{ matrix.strategy }}/cargo-build.log"
           cargo build --release --bins *>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
