@@ -84,6 +84,69 @@ jobs:
           & .\target\release\plasmite.exe --version *>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Probe local write path variants (clang-cl)
+        if: ${{ success() && (inputs.strategy == 'all' || inputs.strategy == matrix.strategy) && matrix.strategy == 'clang-cl' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+          $exe = ".\target\release\plasmite.exe"
+          $probeDir = ".scratch/windows-probe/${{ matrix.strategy }}/runtime-probe"
+          $pool = "probe"
+          New-Item -ItemType Directory -Force -Path $probeDir | Out-Null
+
+          $results = @()
+
+          function Invoke-Probe {
+            param(
+              [string]$Name,
+              [scriptblock]$Command
+            )
+            $logPath = Join-Path $probeDir "$Name.log"
+            & $Command *>&1 | Tee-Object -FilePath $logPath
+            $code = $LASTEXITCODE
+            $results += [pscustomobject]@{
+              name = $Name
+              exit_code = $code
+              log = $logPath
+            }
+          }
+
+          Invoke-Probe "pool-create" {
+            & $exe --dir $probeDir pool create $pool
+          }
+
+          Invoke-Probe "poke-inline" {
+            & $exe --dir $probeDir poke $pool '{"ci":"inline"}'
+          }
+
+          $utf8Path = Join-Path $probeDir "payload-utf8.json"
+          Set-Content -Path $utf8Path -Value '{"ci":"file-utf8"}' -Encoding utf8NoBOM -NoNewline
+          Invoke-Probe "poke-file-utf8" {
+            & $exe --dir $probeDir poke $pool -f $utf8Path
+          }
+
+          $defaultPath = Join-Path $probeDir "payload-default.json"
+          Set-Content -Path $defaultPath -Value '{"ci":"file-default"}' -NoNewline
+          Invoke-Probe "poke-file-default-encoding" {
+            & $exe --dir $probeDir poke $pool -f $defaultPath
+          }
+
+          Invoke-Probe "poke-stdin" {
+            '{"ci":"stdin"}' | & $exe --dir $probeDir poke $pool
+          }
+
+          Invoke-Probe "peek-tail" {
+            & $exe --dir $probeDir peek $pool --tail 10 --data-only --format jsonl
+          }
+
+          $jsonPath = Join-Path $probeDir "runtime-probe-results.json"
+          $results | ConvertTo-Json -Depth 3 | Set-Content -Path $jsonPath -Encoding utf8
+
+          "### Runtime probe (${{ matrix.strategy }})" >> $env:GITHUB_STEP_SUMMARY
+          foreach ($row in $results) {
+            "- $($row.name): exit=$($row.exit_code)" >> $env:GITHUB_STEP_SUMMARY
+          }
+
       - name: Stage probe artifacts
         if: ${{ always() && (inputs.strategy == 'all' || inputs.strategy == matrix.strategy) }}
         shell: pwsh
