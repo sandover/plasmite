@@ -135,8 +135,8 @@ jobs:
             '{"ci":"stdin"}' | & $exe --dir $probeDir poke $pool
           }
 
-          Invoke-Probe "peek-tail" {
-            & $exe --dir $probeDir peek $pool --tail 10 --data-only --format jsonl
+          Invoke-Probe "peek-one" {
+            & $exe --dir $probeDir peek $pool --one --timeout 2s --data-only --format jsonl
           }
 
           $jsonPath = Join-Path $probeDir "runtime-probe-results.json"
