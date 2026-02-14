@@ -105,3 +105,22 @@ gh workflow run release-publish.yml -f build_run_id=<successful-release-build-ru
 - `aarch64-unknown-linux-gnu` is currently best-effort.
 - It is not a release-gating target in `release.yml` or `release-publish.yml`.
 - ARM64 Linux users should build from source unless/until gated support is reintroduced.
+
+## Windows preview policy
+
+- Windows preview artifacts are published as release assets named:
+  - `plasmite_<version>_windows_amd64_preview.zip`
+  - `plasmite_<version>_windows_amd64_preview.zip.sha256`
+- Target: `x86_64-pc-windows-msvc` only.
+- Support level: best-effort preview (not yet release-gating/officially supported).
+- Delivery path is isolated in `.github/workflows/windows-preview.yml` and does not modify `release-publish.yml`.
+
+## Windows troubleshooting (preview)
+
+- **Source build fails with `cl.exe` errors (`__builtin_expect`, `__attribute__`, parsing errors in `lite3.h`)**
+  - Use the Windows preview release zip instead of local source build.
+- **`poke` fails with `failed to encode json as lite3`**
+  - Use remote refs (`http://host:port/<pool>`) so encoding occurs on the remote server.
+- **Verify artifact integrity**
+  - PowerShell: `Get-FileHash .\\plasmite_<version>_windows_amd64_preview.zip -Algorithm SHA256`
+  - Compare with the accompanying `.sha256` file.

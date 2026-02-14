@@ -152,6 +152,30 @@ See the [remote protocol spec](spec/remote/v0/SPEC.md) for the full HTTP/JSON AP
 | Node | `npm i -g plasmite` | Optional | Node bindings | Bundles addon + native assets. |
 | Go | `go get github.com/sandover/plasmite/bindings/go/plasmite` | No | Go bindings | Requires system SDK (`brew install ...` first). |
 | Release tarball | Download from [releases](https://github.com/sandover/plasmite/releases) | Yes | Yes (SDK layout) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |
+| Windows preview zip | Download `plasmite_<version>_windows_amd64_preview.zip` from [releases](https://github.com/sandover/plasmite/releases) | Yes | Partial SDK (`bin/`, `lib/`, `include/`) | Best-effort preview for `x86_64-pc-windows-msvc`; not yet an officially supported release channel. |
+
+### Windows preview support (best-effort)
+
+- Scope: `x86_64-pc-windows-msvc` preview binaries attached to GitHub releases as `*_windows_amd64_preview.zip` + `.sha256`.
+- Support level: best-effort preview. Windows is not yet promoted to fully supported release-gating status.
+- Recommended use today: prefer remote pool workflows (Windows CLI client + `plasmite serve` on Linux/macOS host) for higher reliability.
+
+Remote-only fallback pattern:
+
+```bash
+# Windows client example
+plasmite peek http://<host>:9700/events --tail 20 --format jsonl
+plasmite poke http://<host>:9700/events '{"kind":"win-preview","ok":true}'
+```
+
+Troubleshooting (Windows preview):
+
+- Source build fails with `cl.exe` errors like `__builtin_expect` / `__attribute__`:
+  - Use preview release assets instead of local source compilation.
+- Local write fails with `failed to encode json as lite3`:
+  - Use remote refs (`http://host:port/<pool>`) so encoding happens server-side.
+- Download integrity check:
+  - Run `certutil -hashfile plasmite_<version>_windows_amd64_preview.zip SHA256` and compare with the shipped `.sha256` file.
 
 ### Maintainer Registry Setup (One-Time)
 

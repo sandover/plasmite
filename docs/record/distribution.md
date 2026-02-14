@@ -9,9 +9,10 @@ This document defines:
 
 - macOS: `aarch64-apple-darwin`, `x86_64-apple-darwin`
 - Linux: `x86_64-unknown-linux-gnu`
+- Windows preview (best-effort): `x86_64-pc-windows-msvc` via GitHub release preview zip assets
 
 Non-goals for now:
-- Windows
+- Windows as a release-gating, fully supported channel
 - `aarch64-unknown-linux-gnu`
 - Linux distro packages (`apt`, `yum`, `pacman`, etc.)
 - `cargo-binstall` / other binary installer channels
@@ -27,6 +28,14 @@ Non-goals for now:
 | npm (Node) | `npm i -g plasmite` | Yes | Yes (Node bindings) | Bundles addon, native assets, and CLI on supported targets. |
 | Go module | `go get github.com/sandover/plasmite/bindings/go/plasmite` | No | Yes (Go bindings) | Requires system SDK installed (brew/manual) for cgo. |
 | GitHub release tarball | Download from releases | Yes | Yes (SDK layout) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |
+| GitHub Windows preview zip | Download `plasmite_<version>_windows_amd64_preview.zip` from releases | Yes | Partial SDK (`bin/`, `lib/`, `include/`) | Best-effort preview only; paired `.sha256` sidecar is published with each asset. |
+
+## Windows Preview Policy
+
+- Distribution mechanism: manual preview workflow (`.github/workflows/windows-preview.yml`) uploads Windows preview zip assets to an existing release tag.
+- Scope: this does not alter `release-publish.yml` or official release-gating channels.
+- Support level: best-effort preview for user convenience while runtime/CI hardening continues.
+- Fallback guidance: if local Windows write paths fail, use remote-only flows against `plasmite serve` on Linux/macOS.
 
 ## SDK Layout (Release Artifacts)
 
