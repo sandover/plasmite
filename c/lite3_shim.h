@@ -64,6 +64,8 @@ int plasmite_lite3_arr_get_type(
         uint32_t index,
         uint8_t *out_type);
 
+int plasmite_lite3_last_errno(void);
+
 void plasmite_lite3_free(void *ptr);
 
 #ifdef __cplusplus

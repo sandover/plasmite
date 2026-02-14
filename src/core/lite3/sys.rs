@@ -70,5 +70,7 @@ unsafe extern "C" {
         out_type: *mut c_uchar,
     ) -> c_int;
 
+    pub fn plasmite_lite3_last_errno() -> c_int;
+
     pub fn plasmite_lite3_free(ptr: *mut c_void);
 }

@@ -7,6 +7,7 @@ Invariants: This file should not contain business logic; it only forwards to Lit
 */
 #include "lite3_shim.h"
 
+#include <errno.h>
 #include <stdlib.h>
 
 #include "lite3.h"
@@ -18,6 +19,7 @@ int plasmite_lite3_json_dec(
         size_t *out_len,
         size_t buf_sz)
 {
+        errno = 0;
         return lite3_json_dec(buf, out_len, buf_sz, json_str, json_len);
 }
 
@@ -96,6 +98,11 @@ int plasmite_lite3_arr_get_type(
                 *out_type = (uint8_t)type;
         }
         return 0;
+}
+
+int plasmite_lite3_last_errno(void)
+{
+        return errno;
 }
 
 void plasmite_lite3_free(void *ptr)

@@ -54,11 +54,17 @@ impl Lite3Buf {
                 return Ok(Self { bytes: buf });
             }
 
-            let err = io::Error::last_os_error();
-            if err.raw_os_error() == Some(libc::ENOBUFS) {
+            let err_no = unsafe { sys::plasmite_lite3_last_errno() };
+            if err_no == libc::ENOBUFS {
                 buf_len = buf_len.saturating_mul(2);
                 continue;
             }
+
+            let err = if err_no != 0 {
+                io::Error::from_raw_os_error(err_no)
+            } else {
+                io::Error::other("unknown lite3 errno")
+            };
 
             return Err(Error::new(ErrorKind::Usage)
                 .with_message("failed to encode json as lite3")
