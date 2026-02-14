@@ -105,7 +105,7 @@ jobs:
           Set-Content -Path $payloadPath -Value '{"ci":"windows-smoke"}' -NoNewline
           & $exe --dir $dir pool create $pool
           & $exe --dir $dir poke $pool -f $payloadPath
-          $out = & $exe --dir $dir peek $pool --one --timeout 2s --data-only --format jsonl
+          $out = & $exe --dir $dir peek $pool --tail 1 --one --timeout 2s --data-only --format jsonl
           if (-not ($out -match '"ci":"windows-smoke"')) {
             throw "Roundtrip payload marker missing from peek output."
           }
