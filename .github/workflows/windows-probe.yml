@@ -136,7 +136,7 @@ jobs:
           }
 
           Invoke-Probe "peek-one" {
-            & $exe --dir $probeDir peek $pool --one --timeout 2s --data-only --format jsonl
+            & $exe --dir $probeDir peek $pool --tail 1 --one --timeout 2s --data-only --format jsonl
           }
 
           $jsonPath = Join-Path $probeDir "runtime-probe-results.json"
