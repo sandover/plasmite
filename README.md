@@ -17,19 +17,34 @@ Interprocess communication should not be the hard part.
 
 So, there's **Plasmite**.
 
-```bash
-# In terminal 1, Alice makes a pool
-pls pool create chat
-
-# In terminal 2, Bob watches it
-pls peek chat
-
-# Alice deposits a message in the pool
-pls poke chat '{"from": "alice", "msg": "hello world"}'
-
-# Bob sees it
-#  { "data": {"from": "alice", "msg": "hello world"}, "meta": {}, ... }
-```
+<table>
+<tr><th>Alice's terminal</th><th>Bob's terminal</th></tr>
+<tr>
+<td><pre lang="bash"># Alice creates a pool
+pls pool create chat</pre></td>
+<td></td>
+</tr>
+<tr>
+<td></td>
+<td><pre lang="bash"># Bob starts watching
+pls peek chat</pre></td>
+</tr>
+<tr>
+<td><pre lang="bash"># Alice sends a message
+pls poke chat \
+  '{"from": "alice",
+    "msg": "hello world"}'</pre></td>
+<td></td>
+</tr>
+<tr>
+<td></td>
+<td><pre># Bob sees it arrive
+{ "data":
+    {"from": "alice",
+     "msg": "hello world"},
+  ... }</pre></td>
+</tr>
+</table>
 
 Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed ring buffers called "pools". No daemon, no broker, no config. ~600k msg/sec on a laptop. Crash-safe writes.
 
