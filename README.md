@@ -31,17 +31,18 @@ For IPC across machines, `pls serve` exposes your local pools securely, and serv
 
 ## Why not just...
 
-| | The problem you'll have | Plasmite |
+| | Drawbacks | Plasmite |
 |---|---|---|
-| **Log files / `tail -f`** | Unstructured, grow forever, no sequence numbers, fragile parsing | Plasmite messages are structured JSON with sequence numbers, and disk usage stays bounded, so you can filter with tags or jq and never worry about runaway logs. |
-| **Temp files + locks** | No streaming, easy to corrupt, readers block writers | Plasmite lets many writers append concurrently, and readers stream in real time without blocking, so you never have to worry about corruption or contention. |
-| **Redis / NATS** | Another server to run and monitor | Plasmite pools are just files on disk — no daemon, no ports, no config — so there's nothing to keep running. |
-| **SQLite as a queue** | Polling-based, write contention, schema and cleanup are on you | Plasmite readers stream without polling and writers don't contend. There's no schema or maintenance to think about. |
-| **Named pipes** | One reader at a time, writers block, nothing persists | Plasmite supports any number of reading and writing processes, and the messages persist on disk, so they survive restarts. |
-| **Unix domain sockets** | Stream-oriented, no message framing, no persistence, one-to-one | Plasmite messages have boundaries and sequence numbers built in, and any number of readers can watch the same pool, so fan-out is free. |
-| **Poll a directory** | Busy loops, no ordering, files accumulate forever | Plasmite streams messages to readers in sequence order, and the ring buffer has a known disk footprint, no files accumulating. |
-| **Shared memory** | No persistence, painful to coordinate, binary formats | Plasmite messages are durable JSON on disk, and readers are lock-free, so you get persistence and coordination without the pain. |
-| **ZeroMQ** | No persistence, complex pattern zoo, binary protocol, library in every process | Plasmite messages are durable and human-readable by default, and you can get started with one CLI command or library call, so there's no pattern vocabulary to learn. |
+| **Log files / `tail -f`** | Unstructured, grow forever, no sequence numbers, fragile parsing | Structured JSON with sequence numbers and bounded disk usage. Filter with tags or jq; never worry about runaway logs. |
+| **Temp files + locks** | No streaming, easy to corrupt, readers block writers | Many writers append concurrently, readers stream in real time without blocking. No corruption or contention. |
+| **Redis / NATS** | Another server to run and monitor; overkill for single-host messaging | Just files on disk — no daemon, no ports, no config. If you only need local or host-adjacent messaging, don't introduce a broker. |
+| **SQLite as a queue** | Polling-based, write contention, schema and vacuuming are on you | Purpose-built message stream: follow/replay semantics, concurrent writers, no schema, no cleanup logic, no polling. |
+| **Named pipes** | One reader at a time, writers block, nothing persists | Any number of reading and writing processes; messages persist on disk and survive restarts. |
+| **Unix domain sockets** | Stream-oriented, no message framing, no persistence, one-to-one | Message boundaries and sequence numbers built in. Any number of readers can watch the same pool — fan-out is free. |
+| **Poll a directory** | Busy loops, no ordering, files accumulate forever | Messages stream to readers in sequence order; the ring buffer has a known disk footprint. |
+| **Shared memory** | No persistence, painful to coordinate, binary formats | Durable JSON on disk with lock-free readers. Persistence and coordination without the pain. |
+| **ZeroMQ** | No persistence, complex pattern zoo, binary protocol, library in every process | Durable and human-readable by default. One CLI command or library call to get started; no pattern vocabulary to learn. |
+| **Language-specific queue libs** | Tied to one runtime; no CLI, no cross-language story | Consistent CLI + multi-language bindings (Rust, Python, Go, Node, C) + versioned on-disk format. An ecosystem surface, not a single-language helper. |
 
 ## What it looks like
 
