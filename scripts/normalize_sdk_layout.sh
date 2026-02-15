@@ -3,6 +3,7 @@
 # Key exports: plasmite_normalize_sdk_dir <input-dir> <staging-dir> [context-label].
 # Role: Convert raw cargo output layouts into stable SDK bin/lib layout when needed.
 # Invariants: Returned directory always contains bin/plasmite(.exe) + lib shared library.
+# Invariants: Windows staged SDKs preserve import-library artifacts needed for relinking.
 # Invariants: Normalized SDK inputs are returned unchanged and are never copied.
 # Invariants: Staged outputs only include required runtime artifacts and optional static library.
 # Notes: Intended to be sourced by scripts; emits actionable errors to stderr.
@@ -59,6 +60,17 @@ plasmite_normalize_sdk_dir() {
 
   if [[ -f "$input_dir/plasmite.dll" ]]; then
     cp "$input_dir/plasmite.dll" "$staging_dir/lib/plasmite.dll"
+    if [[ -f "$input_dir/plasmite.dll.lib" ]]; then
+      cp "$input_dir/plasmite.dll.lib" "$staging_dir/lib/plasmite.dll.lib"
+    fi
+    if [[ -f "$input_dir/plasmite.lib" ]]; then
+      cp "$input_dir/plasmite.lib" "$staging_dir/lib/plasmite.lib"
+    fi
+    if [[ -f "$staging_dir/lib/plasmite.dll.lib" && ! -f "$staging_dir/lib/plasmite.lib" ]]; then
+      cp "$staging_dir/lib/plasmite.dll.lib" "$staging_dir/lib/plasmite.lib"
+    elif [[ -f "$staging_dir/lib/plasmite.lib" && ! -f "$staging_dir/lib/plasmite.dll.lib" ]]; then
+      cp "$staging_dir/lib/plasmite.lib" "$staging_dir/lib/plasmite.dll.lib"
+    fi
   elif [[ -f "$input_dir/libplasmite.dylib" ]]; then
     cp "$input_dir/libplasmite.dylib" "$staging_dir/lib/libplasmite.dylib"
   else
