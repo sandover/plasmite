@@ -48,7 +48,7 @@ For IPC across machines, `pls serve` exposes your local pools securely, and serv
 
 ### Build event bus
 
-Multiple build steps write progress into one pool; you watch from another terminal.
+Your build script writes progress to a pool. In another terminal, you watch it arrive in real time.
 
 ```bash
 pls poke build --create '{"step": "compile", "status": "done"}'
@@ -60,7 +60,7 @@ pls peek build
 
 ### CI gate
 
-A deploy script blocks until the test runner signals "green" — no polling, no lock files.
+Your deploy script waits for the test runner to say "green" — no polling loops, no lock files, no shared database.
 
 ```bash
 # deploy.sh
@@ -72,7 +72,7 @@ pls poke ci --create '{"status": "green", "commit": "abc123"}'
 
 ### System log intake
 
-Pipe structured logs into a bounded pool so they never fill your disk, then replay for debugging.
+Pipe your system logs into a bounded pool. It won't fill your disk, and you can replay anything later.
 
 ```bash
 journalctl -o json-seq -f | pls poke syslog --create       # Linux
@@ -81,7 +81,7 @@ pls peek syslog --since 30m --replay 1                       # replay last 30 mi
 
 ### Tagged incident stream
 
-Tag events on write, filter on read, replay at speed.
+Tag events when you write them, then filter and replay on the read side.
 
 ```bash
 pls poke incidents --create --tag sev1 '{"msg": "payment gateway timeout"}'
@@ -91,7 +91,7 @@ pls peek incidents --since 1h --replay 10
 
 ### Remote pools
 
-Expose local pools over HTTP; clients use the same CLI with a URL.
+Start a server and your pools are available over HTTP. Clients use the same CLI — just pass a URL.
 
 ```bash
 pls serve                          # loopback-only by default
@@ -109,6 +109,8 @@ For CORS, auth, and deployment details, see [Serving & remote access](docs/recor
 
 More examples — polyglot producer/consumer, multi-writer event bus, API stream ingest, CORS setup — in the **[Cookbook](docs/cookbook.md)**.
 
+Plasmite is designed for single-host and host-adjacent messaging. If you need multi-host cluster replication, schema registries, or workflow orchestration, see [When Plasmite Isn't the Right Fit](docs/cookbook.md#when-plasmite-isnt-the-right-fit).
+
 ## Install
 
 | Channel | Command | CLI | Library/Bindings | Notes |
@@ -121,44 +123,9 @@ More examples — polyglot producer/consumer, multi-writer event bus, API stream
 | Node | `npm i -g plasmite` | Optional | Node bindings | Bundles addon + native assets. |
 | Go | `go get github.com/sandover/plasmite/bindings/go/plasmite` | No | Go bindings | Requires system SDK (`brew install ...` first). |
 | Release tarball | Download from [releases](https://github.com/sandover/plasmite/releases) | Yes | Yes (SDK layout) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |
-| Windows preview zip | Download `plasmite_<version>_windows_amd64_preview.zip` from [releases](https://github.com/sandover/plasmite/releases) | Yes | Partial SDK (`bin/`, `lib/`, `include/`) | Best-effort preview for `x86_64-pc-windows-msvc`; not yet an officially supported release channel. |
+| Windows | Download from [releases](https://github.com/sandover/plasmite/releases) | Yes | Partial SDK | Best-effort preview (`x86_64-pc-windows-msvc`). See [distribution docs](docs/record/distribution.md). |
 
-### Windows preview support (best-effort)
-
-- Scope: `x86_64-pc-windows-msvc` preview binaries attached to GitHub releases as `*_windows_amd64_preview.zip` + `.sha256`.
-- Support level: best-effort preview. Windows is not yet promoted to fully supported release-gating status.
-- Recommended use today: prefer remote pool workflows (Windows CLI client + `plasmite serve` on Linux/macOS host) for higher reliability.
-
-Remote-only fallback pattern:
-
-```bash
-# Windows client example
-plasmite peek http://<host>:9700/events --tail 20 --format jsonl
-plasmite poke http://<host>:9700/events '{"kind":"win-preview","ok":true}'
-```
-
-Troubleshooting (Windows preview):
-
-- Source build fails with `cl.exe` errors like `__builtin_expect` / `__attribute__`:
-  - Use preview release assets instead of local source compilation.
-- Local write fails with `failed to encode json as lite3`:
-  - Use remote refs (`http://host:port/<pool>`) so encoding happens server-side.
-- Download integrity check:
-  - Run `certutil -hashfile plasmite_<version>_windows_amd64_preview.zip SHA256` and compare with the shipped `.sha256` file.
-
-### Maintainer Registry Setup (One-Time)
-
-Release automation publishes to crates.io, PyPI, and npm. Configure these repo secrets in GitHub before tagging:
-
-- `CARGO_REGISTRY_TOKEN`: crates.io API token with publish rights for `plasmite`.
-- `PYPI_API_TOKEN`: PyPI API token for publishing `plasmite`.
-- `NPM_TOKEN`: npm automation token with publish rights for `plasmite`.
-
-Notes:
-- PyPI project bootstrap: you do not manually create a project first. The first successful upload creates `plasmite` (if the name is available).
-- PyPI CLI: use `twine` (for example `uvx twine upload dist/*`) when testing manual publish.
-- npm CLI: `npm publish` publishes either from a package directory or a `.tgz` built by `npm pack`.
-- Go has no separate package registry publish step in this repo; users consume the module directly from GitHub.
+For Windows troubleshooting, registry setup, and release mechanics, see [Distribution](docs/record/distribution.md) and [Releasing](docs/record/releasing.md).
 
 ## Commands
 
