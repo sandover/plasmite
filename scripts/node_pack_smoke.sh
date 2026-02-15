@@ -24,6 +24,7 @@ platform_key() {
     linux-arm64) echo "linux-arm64" ;;
     darwin-x64) echo "darwin-x64" ;;
     darwin-arm64) echo "darwin-arm64" ;;
+    win32-x64) echo "win32-x64" ;;
     *)
       echo "unsupported platform for node_pack_smoke: ${os}-${arch}" >&2
       return 1
@@ -64,8 +65,13 @@ if [[ -z "$TARBALL" ]]; then
 fi
 
 archive_has_member "$NODE_DIR/$TARBALL" "package/native/${CURRENT_PLATFORM}/index\\.node"
-archive_has_member "$NODE_DIR/$TARBALL" "package/native/${CURRENT_PLATFORM}/libplasmite\\.(dylib|so)"
-archive_has_member "$NODE_DIR/$TARBALL" "package/native/${CURRENT_PLATFORM}/plasmite"
+if [[ "$CURRENT_PLATFORM" == "win32-x64" ]]; then
+  archive_has_member "$NODE_DIR/$TARBALL" "package/native/${CURRENT_PLATFORM}/plasmite\\.dll"
+  archive_has_member "$NODE_DIR/$TARBALL" "package/native/${CURRENT_PLATFORM}/plasmite\\.exe"
+else
+  archive_has_member "$NODE_DIR/$TARBALL" "package/native/${CURRENT_PLATFORM}/libplasmite\\.(dylib|so)"
+  archive_has_member "$NODE_DIR/$TARBALL" "package/native/${CURRENT_PLATFORM}/plasmite"
+fi
 archive_has_member "$NODE_DIR/$TARBALL" 'package/bin/plasmite\.js'
 
 mkdir -p "$WORKDIR/app"

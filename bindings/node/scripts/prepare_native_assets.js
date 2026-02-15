@@ -20,6 +20,7 @@ const platformByOsArch = {
   "linux-arm64": "linux-arm64",
   "darwin-x64": "darwin-x64",
   "darwin-arm64": "darwin-arm64",
+  "win32-x64": "win32-x64",
 };
 const runtimeKey = `${process.platform}-${process.arch}`;
 const platformDir = platformByOsArch[runtimeKey];
@@ -29,13 +30,17 @@ if (!platformDir) {
 }
 
 const libCandidates = [
+  path.join(sdkRoot, "lib", "plasmite.dll"),
   path.join(sdkRoot, "lib", "libplasmite.dylib"),
   path.join(sdkRoot, "lib", "libplasmite.so"),
+  path.join(sdkRoot, "plasmite.dll"),
   path.join(sdkRoot, "libplasmite.dylib"),
   path.join(sdkRoot, "libplasmite.so"),
 ];
 const cliCandidates = [
+  path.join(sdkRoot, "bin", "plasmite.exe"),
   path.join(sdkRoot, "bin", "plasmite"),
+  path.join(sdkRoot, "plasmite.exe"),
   path.join(sdkRoot, "plasmite"),
 ];
 const addonCandidates = [path.join(packageRoot, "index.node")];
@@ -64,7 +69,9 @@ if (fs.existsSync(destination)) {
 fs.mkdirSync(destination, { recursive: true });
 
 fs.copyFileSync(addonSource, path.join(destination, "index.node"));
-fs.copyFileSync(libSource, path.join(destination, path.basename(libSource)));
-const cliDest = path.join(destination, "plasmite");
+const libName = runtimeKey === "win32-x64" ? "plasmite.dll" : path.basename(libSource);
+fs.copyFileSync(libSource, path.join(destination, libName));
+const cliName = runtimeKey === "win32-x64" ? "plasmite.exe" : "plasmite";
+const cliDest = path.join(destination, cliName);
 fs.copyFileSync(cliSource, cliDest);
 fs.chmodSync(cliDest, 0o755);

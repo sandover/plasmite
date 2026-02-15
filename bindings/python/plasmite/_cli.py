@@ -17,7 +17,8 @@ import sys
 
 
 def _bundled_cli_path() -> Path:
-    return Path(__file__).resolve().parent / "_native" / "plasmite"
+    cli_name = "plasmite.exe" if os.name == "nt" else "plasmite"
+    return Path(__file__).resolve().parent / "_native" / cli_name
 
 
 def main() -> int:

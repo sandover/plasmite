@@ -36,9 +36,11 @@ class BuildPyWithNativeBundle(build_py):
     """Copy native artifacts into the package before wheel build."""
 
     _NATIVE_FILES = (
+        "plasmite.dll",
         "libplasmite.dylib",
         "libplasmite.so",
         "libplasmite.a",
+        "plasmite.exe",
         "plasmite",
     )
 
@@ -68,18 +70,22 @@ class BuildPyWithNativeBundle(build_py):
         if sdk_dir_env:
             sdk_dir = Path(sdk_dir_env)
             return [
+                sdk_dir / "lib" / "plasmite.dll",
                 sdk_dir / "lib" / "libplasmite.dylib",
                 sdk_dir / "lib" / "libplasmite.so",
                 sdk_dir / "lib" / "libplasmite.a",
+                sdk_dir / "bin" / "plasmite.exe",
                 sdk_dir / "bin" / "plasmite",
             ]
 
         repo_root = project_root.parent.parent
         target_debug = repo_root / "target" / "debug"
         return [
+            target_debug / "plasmite.dll",
             target_debug / "libplasmite.dylib",
             target_debug / "libplasmite.so",
             target_debug / "libplasmite.a",
+            target_debug / "plasmite.exe",
             target_debug / "plasmite",
         ]
 

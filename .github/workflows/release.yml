@@ -150,6 +150,11 @@ jobs:
             platform: darwin_arm64
             upload_sdist: false
             upload_wheel: true
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows_amd64
+            upload_sdist: false
+            upload_wheel: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -165,12 +170,15 @@ jobs:
         shell: bash
         run: |
           cargo build --release --target "${{ matrix.target }}" --bins
-          if [[ "${{ matrix.target }}" == *apple-darwin ]]; then
+          if [[ "${{ matrix.target }}" == *windows-msvc ]]; then
+            cargo rustc --release --target "${{ matrix.target }}" --lib --crate-type=cdylib
+          elif [[ "${{ matrix.target }}" == *apple-darwin ]]; then
             cargo rustc --release --target "${{ matrix.target }}" --lib --crate-type=cdylib -- -C link-arg=-Wl,-install_name,@rpath/libplasmite.dylib
           else
             cargo rustc --release --target "${{ matrix.target }}" --lib --crate-type=cdylib -- -C link-arg=-Wl,-soname,libplasmite.so
           fi
       - name: Build and smoke-test python wheel
+        shell: bash
         env:
           PLASMITE_SDK_DIR: ${{ github.workspace }}/target/${{ matrix.target }}/release
         run: ./scripts/python_wheel_smoke.sh
@@ -206,6 +214,9 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             platform: darwin-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: win32-x64
     steps:
       - uses: actions/checkout@v4
         with:
@@ -221,7 +232,9 @@ jobs:
         shell: bash
         run: |
           cargo build --release --target "${{ matrix.target }}" --bins
-          if [[ "${{ matrix.target }}" == *apple-darwin ]]; then
+          if [[ "${{ matrix.target }}" == *windows-msvc ]]; then
+            cargo rustc --release --target "${{ matrix.target }}" --lib --crate-type=cdylib
+          elif [[ "${{ matrix.target }}" == *apple-darwin ]]; then
             cargo rustc --release --target "${{ matrix.target }}" --lib --crate-type=cdylib -- -C link-arg=-Wl,-install_name,@rpath/libplasmite.dylib
           else
             cargo rustc --release --target "${{ matrix.target }}" --lib --crate-type=cdylib -- -C link-arg=-Wl,-soname,libplasmite.so
@@ -231,7 +244,14 @@ jobs:
           PLASMITE_LIB_DIR: ${{ github.workspace }}/target/${{ matrix.target }}/release
         run: cd bindings/node && npm run build
       - name: Stage node native payload
+        shell: bash
         run: ./scripts/package_node_natives.sh "${{ matrix.platform }}" "${{ github.workspace }}/target/${{ matrix.target }}/release" "${{ github.workspace }}/bindings/node/index.node"
+      - name: Windows node pack/install smoke
+        if: matrix.platform == 'win32-x64'
+        shell: bash
+        env:
+          PLASMITE_SDK_DIR: ${{ github.workspace }}/target/${{ matrix.target }}/release
+        run: ./scripts/node_pack_smoke.sh
       - uses: actions/upload-artifact@v4
         with:
           name: node-native-${{ matrix.platform }}
@@ -266,6 +286,10 @@ jobs:
           name: node-native-linux-arm64
           path: bindings/node/native/linux-arm64
         continue-on-error: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: node-native-win32-x64
+          path: bindings/node/native/win32-x64
       - name: Restore native CLI execute bits
         run: find bindings/node/native -type f -name plasmite -exec chmod +x {} +
       - name: Report assembled platforms

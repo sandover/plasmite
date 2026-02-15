@@ -43,8 +43,13 @@ fi
 
 if [[ "$platform" == darwin-* ]]; then
   lib_name="libplasmite.dylib"
+  cli_name="plasmite"
+elif [[ "$platform" == win32-* ]]; then
+  lib_name="plasmite.dll"
+  cli_name="plasmite.exe"
 else
   lib_name="libplasmite.so"
+  cli_name="plasmite"
 fi
 
 lib_candidates=(
@@ -52,7 +57,9 @@ lib_candidates=(
   "$sdk_dir/$lib_name"
 )
 cli_candidates=(
+  "$sdk_dir/bin/plasmite.exe"
   "$sdk_dir/bin/plasmite"
+  "$sdk_dir/plasmite.exe"
   "$sdk_dir/plasmite"
 )
 
@@ -82,7 +89,7 @@ rm -rf "$dest_dir"
 mkdir -p "$dest_dir"
 cp "$addon_path" "$dest_dir/index.node"
 cp "$lib_source" "$dest_dir/$lib_name"
-cp "$cli_source" "$dest_dir/plasmite"
-chmod +x "$dest_dir/plasmite"
+cp "$cli_source" "$dest_dir/$cli_name"
+chmod +x "$dest_dir/$cli_name"
 
 echo "ok: packaged node native artifacts into $dest_dir"

@@ -18,7 +18,8 @@
     "native/linux-x64/**",
     "native/linux-arm64/**",
     "native/darwin-x64/**",
-    "native/darwin-arm64/**"
+    "native/darwin-arm64/**",
+    "native/win32-x64/**"
   ],
   "keywords": [
     "ipc",

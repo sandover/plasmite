@@ -95,6 +95,7 @@ CI still runs a scheduled benchmark (`perf-monitor.yml`) to catch trend regressi
 
 ## Release Policy
 
+- `docs/record/distribution.md` is the source of truth for what is `official`, `preview`, or unsupported.
 - Releases are fail-closed: any failed or incomplete gate blocks release.
 - Every blocker is filed in `ergo` under one epic: `Release blockers: <release_target>`.
 - Do not tag or publish while blocker tasks remain open.
@@ -103,6 +104,15 @@ CI still runs a scheduled benchmark (`perf-monitor.yml`) to catch trend regressi
 - Release automation is split: `release.yml` builds artifacts, `release-publish.yml` performs preflight + registry publish + GitHub release.
 - Homebrew parity is mandatory: `release-publish.yml` must block registry publish until Homebrew formula version/URLs/checksums are aligned.
 - Publish-only retry after credential fixes must re-use a successful build run ID (no matrix rebuild required).
+
+## Support-tier enforcement
+
+- A platform/channel combination is `official` only if its idiomatic install command has a passing automated install/runtime smoke gate in release automation.
+- Preview artifacts (including manual zip/tar workflows) do not upgrade support tier by themselves.
+- Promotion from `preview` to `official` must include:
+  - an update to `docs/record/distribution.md`,
+  - release workflow coverage for that combination,
+  - delivery verification evidence in the promotion PR.
 
 ## Workflow Diagram
 
@@ -152,8 +162,45 @@ The skill handles mechanics, but maintainers still decide:
 9. If publish fails due to credentials/policy, run publish-only rerun with the successful build run ID:
    - `gh workflow run release-publish.yml -f build_run_id=<build-run-id> -f rehearsal=false`
 
-## Versioning Notes
+## Versioning Policy
+
+### Scope
+
+Plasmite ships one product line with multiple distribution surfaces:
+
+- Rust crate + CLI (`Cargo.toml`)
+- Python package (`bindings/python/pyproject.toml`)
+- Node package (`bindings/node/package.json`)
+- Node native crate (`bindings/node/native/Cargo.toml`)
+
+### Compatibility Definition
+
+- **CLI compatibility**: stable command behavior follows semantic versioning intent; breaking CLI behavior bumps major.
+- **Bindings compatibility**: Python/Node API behavior tracks the same semantic version as CLI releases.
+- **`libplasmite` ABI compatibility**: ABI changes are treated as release-significant and share the same version bump policy as CLI/bindings.
+
+Until explicitly revised, compatibility is managed in one lockstep release train.
+
+### Version Mapping (Lockstep)
+
+For every release, the following versions must be identical:
+
+- `Cargo.toml [package].version`
+- `bindings/python/pyproject.toml [project].version`
+- `bindings/node/package.json .version`
+- `bindings/node/package-lock.json .version`
+- `bindings/node/package-lock.json .packages[""].version`
+- `bindings/node/native/Cargo.toml [package].version`
+
+### Required Workflow
+
+1. Run `scripts/bump_version.sh <version>` to apply one version everywhere.
+2. Run `just check-version-alignment` (or `just ci-fast`) to verify no drift.
+3. Commit all manifest updates together.
+
+### Guardrails
 
 - Tags use `vX.Y.Z` format.
-- CLI and official bindings ship in lock-step versioning.
-- See `docs/record/versioning.md` for versioning invariants.
+- CI/local checks must fail when any mapped version drifts.
+- Do not manually edit one manifest in isolation for release bumps.
+- If policy changes away from lockstep, update this document and `scripts/check-version-alignment.sh` in the same change.

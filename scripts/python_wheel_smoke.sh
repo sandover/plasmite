@@ -85,8 +85,8 @@ if [[ -z "$wheel_file" ]]; then
   exit 1
 fi
 
-wheel_has_member "$wheel_file" 'plasmite/_native/libplasmite\.(dylib|so)'
-wheel_has_member "$wheel_file" 'plasmite/_native/plasmite'
+wheel_has_member "$wheel_file" 'plasmite/_native/(plasmite\.dll|libplasmite\.(dylib|so))'
+wheel_has_member "$wheel_file" 'plasmite/_native/plasmite(\.exe)?'
 
 uv venv "$install_env" --cache-dir "$UV_CACHE_DIR"
 # shellcheck disable=SC1091

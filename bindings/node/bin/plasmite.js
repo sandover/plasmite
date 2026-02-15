@@ -15,6 +15,7 @@ const path = require("node:path");
 const PLATFORM_DIRS = Object.freeze({
   linux: Object.freeze({ x64: "linux-x64", arm64: "linux-arm64" }),
   darwin: Object.freeze({ x64: "darwin-x64", arm64: "darwin-arm64" }),
+  win32: Object.freeze({ x64: "win32-x64" }),
 });
 
 function resolvePlatformDir() {
@@ -27,8 +28,9 @@ function resolvePlatformDir() {
 
 const packageRoot = path.resolve(__dirname, "..");
 const platformDir = resolvePlatformDir();
+const cliName = process.platform === "win32" ? "plasmite.exe" : "plasmite";
 const target = platformDir
-  ? path.join(packageRoot, "native", platformDir, "plasmite")
+  ? path.join(packageRoot, "native", platformDir, cliName)
   : null;
 
 if (!target || !fs.existsSync(target)) {

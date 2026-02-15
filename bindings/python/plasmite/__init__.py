@@ -113,19 +113,20 @@ def _load_lib() -> CDLL:
     if env_dir:
         candidates = [
             os.path.join(env_dir, name)
-            for name in ("libplasmite.dylib", "libplasmite.so")
+            for name in ("plasmite.dll", "libplasmite.dylib", "libplasmite.so")
         ]
         for candidate in candidates:
             if os.path.exists(candidate):
                 return CDLL(candidate)
     native_dir = Path(__file__).resolve().parent / "_native"
     for candidate in (
+        native_dir / "plasmite.dll",
         native_dir / "libplasmite.dylib",
         native_dir / "libplasmite.so",
     ):
         if candidate.exists():
             return CDLL(str(candidate))
-    for name in ("plasmite", "libplasmite"):
+    for name in ("plasmite.dll", "plasmite", "libplasmite"):
         try:
             return CDLL(name)
         except OSError:
