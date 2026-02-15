@@ -17,7 +17,7 @@ Interprocess communication should not be the hard part.
 
 So, there's **Plasmite**.
 
-<table>
+<table width="100%">
 <tr><th>Alice's terminal</th><th>Bob's terminal</th></tr>
 <tr>
 <td><pre lang="bash"># Alice creates a pool
