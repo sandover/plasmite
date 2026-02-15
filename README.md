@@ -31,18 +31,13 @@ pls peek chat</pre></td>
 </tr>
 <tr>
 <td><pre lang="bash"># Alice sends a message
-pls poke chat \
-  '{"from": "alice",
-    "msg": "hello world"}'</pre></td>
+pls poke chat '{"from": "alice", "msg": "hello world"}'</pre></td>
 <td></td>
 </tr>
 <tr>
 <td></td>
 <td><pre># Bob sees it arrive
-{ "data":
-    {"from": "alice",
-     "msg": "hello world"},
-  ... }</pre></td>
+{ "data": {"from": "alice", "msg": "hello world"}, ... }</pre></td>
 </tr>
 </table>
 
