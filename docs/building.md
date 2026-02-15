@@ -62,6 +62,7 @@ Use `uv` for Python environment and package operations in this project.
 - `x86_64-unknown-linux-gnu` (`linux_amd64`)
 - `x86_64-apple-darwin` (`darwin_amd64`)
 - `aarch64-apple-darwin` (`darwin_arm64`)
+- `x86_64-pc-windows-msvc` (`windows_amd64` for Python and `win32-x64` for Node)
 
 Each release tarball now follows the SDK layout contract:
 
@@ -106,21 +107,20 @@ gh workflow run release-publish.yml -f build_run_id=<successful-release-build-ru
 - It is not a release-gating target in `release.yml` or `release-publish.yml`.
 - ARM64 Linux users should build from source unless/until gated support is reintroduced.
 
-## Windows preview policy
+## Windows support policy
 
-- Windows preview artifacts are published as release assets named:
-  - `plasmite_<version>_windows_amd64_preview.zip`
-  - `plasmite_<version>_windows_amd64_preview.zip.sha256`
-- Target: `x86_64-pc-windows-msvc` only.
-- Support level: best-effort preview (not yet release-gating/officially supported).
-- Delivery path is isolated in `.github/workflows/windows-preview.yml` and does not modify `release-publish.yml`.
+- Windows (`x86_64-pc-windows-msvc`) is now an official release channel for:
+  - Python wheel delivery (`windows_amd64`)
+  - Node native delivery (`win32-x64`)
+- These channels are built and smoke-tested in `release.yml` and published through `release-publish.yml`.
+- `.github/workflows/windows-preview.yml` is retained only as a rollback-only fallback artifact path.
 
-## Windows troubleshooting (preview)
+## Windows troubleshooting
 
 - **Source build fails with `cl.exe` errors (`__builtin_expect`, `__attribute__`, parsing errors in `lite3.h`)**
-  - Use the Windows preview release zip instead of local source build.
+  - Prefer official install channels (`uv tool install plasmite`, `npm i -g plasmite`) over local source builds.
 - **`poke` fails with `failed to encode json as lite3`**
   - Use remote refs (`http://host:port/<pool>`) so encoding occurs on the remote server.
-- **Verify artifact integrity**
+- **Emergency fallback artifact integrity**
   - PowerShell: `Get-FileHash .\\plasmite_<version>_windows_amd64_preview.zip -Algorithm SHA256`
   - Compare with the accompanying `.sha256` file.

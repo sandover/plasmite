@@ -1,23 +1,31 @@
-# Purpose: Build and publish preview Windows artifacts to an existing GitHub release.
+# Purpose: Build and publish rollback-only Windows fallback artifacts to an existing GitHub release.
 # Exports: Manual workflow `windows-preview` with release asset upload.
-# Role: Isolated preview lane for prebuilt Windows delivery without touching release-publish.
+# Role: Emergency fallback lane for Windows delivery incidents after official channel promotion.
 # Invariants: Uploads only to an existing tag/release and always emits SHA256 sidecar.
 # Invariants: Artifact names are stable and include `_windows_amd64_preview` suffix.
-name: windows-preview
+name: windows-preview (rollback-only)
 
 on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Existing release tag to attach preview assets to (format: vX.Y.Z)."
+        description: "Existing release tag to attach rollback assets to (format: vX.Y.Z)."
         required: true
         type: string
+      rollback_reason:
+        description: "Incident/ticket reference for invoking rollback artifacts."
+        required: true
+        type: string
+      confirm_rollback:
+        description: "Must be true to acknowledge rollback-only usage."
+        required: true
+        type: boolean
 
 permissions:
   contents: write
 
 jobs:
-  windows-preview-artifact:
+  windows-rollback-artifact:
     runs-on: windows-latest
     steps:
       - name: Validate release target
@@ -27,6 +35,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+
+          if [[ "${{ inputs.confirm_rollback }}" != "true" ]]; then
+            echo "error: confirm_rollback must be true for rollback-only workflow usage." >&2
+            exit 1
+          fi
 
           tag="${{ inputs.release_tag }}"
           if [[ -z "$tag" || "$tag" != v* ]]; then
@@ -48,15 +61,22 @@ jobs:
 
           version="${tag#v}"
           asset_base="plasmite_${version}_windows_amd64_preview"
+          rollback_reason="${{ inputs.rollback_reason }}"
+          if [[ -z "$rollback_reason" ]]; then
+            echo "error: rollback_reason is required." >&2
+            exit 1
+          fi
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "asset_base=${asset_base}" >> "$GITHUB_OUTPUT"
+          echo "rollback_reason=${rollback_reason}" >> "$GITHUB_OUTPUT"
+          echo "::warning title=Rollback-only workflow::Using windows-preview fallback artifacts for '$rollback_reason'."
 
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Build Windows preview binaries
+      - name: Build Windows rollback binaries
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -69,7 +89,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           .\target\release\plasmite.exe --version
 
-      - name: Package preview zip and checksum
+      - name: Package rollback zip and checksum
         id: package
         shell: pwsh
         env:
@@ -118,12 +138,13 @@ jobs:
           "sha_path=$shaPath" >> $env:GITHUB_OUTPUT
           "sha256=$hash" >> $env:GITHUB_OUTPUT
 
-          "### Windows preview artifact" >> $env:GITHUB_STEP_SUMMARY
+          "### Windows rollback artifact" >> $env:GITHUB_STEP_SUMMARY
           "- Tag: ${{ steps.target.outputs.tag }}" >> $env:GITHUB_STEP_SUMMARY
+          "- Reason: ${{ steps.target.outputs.rollback_reason }}" >> $env:GITHUB_STEP_SUMMARY
           "- Zip: $(Split-Path -Leaf $zipPath)" >> $env:GITHUB_STEP_SUMMARY
           "- SHA256: $hash" >> $env:GITHUB_STEP_SUMMARY
 
-      - name: Upload preview assets to release
+      - name: Upload rollback assets to release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}

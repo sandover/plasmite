@@ -19,8 +19,7 @@ Manual archive downloads (tar/zip) are valid distribution artifacts, but they ar
 - Official:
   - macOS: `aarch64-apple-darwin`, `x86_64-apple-darwin`
   - Linux: `x86_64-unknown-linux-gnu`
-- Preview-only (not yet supported):
-  - Windows: `x86_64-pc-windows-msvc` via GitHub release preview zip assets
+  - Windows: `x86_64-pc-windows-msvc` via npm (`win32-x64`) and PyPI (`windows_amd64`) release artifacts
 
 Non-goals for now:
 - `aarch64-unknown-linux-gnu`
@@ -34,17 +33,17 @@ Non-goals for now:
 | Homebrew (macOS and Linux) | `brew install sandover/tap/plasmite` | Yes | Yes (system SDK) | `official` | Installs `bin/`, `lib/`, `include/`, `pkg-config` metadata. |
 | crates.io (Rust) | `cargo install plasmite` | Yes | No | `official` | Installs binaries into Cargo bin dir; source build path by design. |
 | crates.io (Rust) | `cargo add plasmite` | No | Yes (Rust crate) | `official` | Standard Rust dependency. |
-| PyPI (Python) | `uv tool install plasmite` | Yes | Yes (Python bindings) | `official` (macOS/Linux) | Wheel bundles native assets and CLI on official targets. |
-| npm (Node) | `npm i -g plasmite` | Yes | Yes (Node bindings) | `official` (macOS/Linux) | Bundles addon, native assets, and CLI on official targets. |
+| PyPI (Python) | `uv tool install plasmite` | Yes | Yes (Python bindings) | `official` (macOS/Linux/Windows x86_64) | Wheel bundles native assets and CLI on official targets. |
+| npm (Node) | `npm i -g plasmite` | Yes | Yes (Node bindings) | `official` (macOS/Linux/Windows x86_64) | Bundles addon, native assets, and CLI on official targets. |
 | Go module | `go get github.com/sandover/plasmite/bindings/go/plasmite` | No | Yes (Go bindings) | `official` (macOS/Linux) | Requires system SDK installed (brew/manual) for cgo. |
 | GitHub release tarball | Download from releases | Yes | Yes (SDK layout) | `official` (manual path) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |
-| GitHub Windows preview zip | Download `plasmite_<version>_windows_amd64_preview.zip` from releases | Yes | Partial SDK (`bin/`, `lib/`, `include/`) | `preview` | Transitional convenience path only; not an idiomatic supported install channel. |
+| GitHub Windows fallback zip | Download `plasmite_<version>_windows_amd64_preview.zip` from releases | Yes | Partial SDK (`bin/`, `lib/`, `include/`) | `rollback-only` | Emergency fallback path; not an official install channel. |
 
-## Windows Preview Policy
+## Windows Rollback Policy (Post-Promotion)
 
-- Distribution mechanism: manual preview workflow (`.github/workflows/windows-preview.yml`) uploads Windows preview zip assets to an existing release tag.
-- Scope: this does not alter `release-publish.yml` or official release-gating channels.
-- Support level: best-effort preview only while idiomatic Windows install channels are being implemented.
+- Official Windows delivery uses release automation (`release.yml` and `release-publish.yml`) for npm/PyPI artifacts.
+- The legacy workflow (`.github/workflows/windows-preview.yml`) is retained only for emergency rollback artifact production.
+- Rollback use must be explicitly acknowledged at dispatch time and does not alter official release gating.
 - Fallback guidance: if local Windows write paths fail, use remote-only flows against `plasmite serve` on Linux/macOS.
 
 ## Promotion rule (preview → official)
