@@ -13,9 +13,9 @@ usage() {
 Usage:
   init_release_evidence.sh \
     --release-target <vX.Y.Z> \
-    --base-tag <vX.Y.Z> \
     --mode <dry-run|live> \
     --agent <model@host> \
+    [--base-tag <vX.Y.Z>] \
     [--force]
 USAGE
 }
@@ -60,7 +60,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$release_target" || -z "$base_tag" || -z "$mode" || -z "$agent_id" ]]; then
+if [[ -z "$release_target" || -z "$mode" || -z "$agent_id" ]]; then
   echo "error: missing required args" >&2
   usage
   exit 2
@@ -73,6 +73,36 @@ fi
 
 if [[ "$mode" != "dry-run" && "$mode" != "live" ]]; then
   echo "error: mode must be dry-run or live" >&2
+  exit 2
+fi
+
+derive_base_tag() {
+  local target="$1"
+  local tags
+  local prev=""
+  tags="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -V || true)"
+  while IFS= read -r tag; do
+    [[ -z "$tag" ]] && continue
+    # Stop once we reach target or any newer/equal version.
+    if [[ "$(printf '%s\n%s\n' "$tag" "$target" | sort -V | head -n1)" == "$target" ]]; then
+      break
+    fi
+    prev="$tag"
+  done <<< "$tags"
+  if [[ -n "$prev" ]]; then
+    printf '%s\n' "$prev"
+    return 0
+  fi
+  echo "error: could not derive base tag below '$target'; pass --base-tag explicitly." >&2
+  return 1
+}
+
+if [[ -z "$base_tag" ]]; then
+  base_tag="$(derive_base_tag "$release_target")"
+fi
+
+if [[ ! "$base_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "error: base tag must match vX.Y.Z" >&2
   exit 2
 fi
 

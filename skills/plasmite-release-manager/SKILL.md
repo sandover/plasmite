@@ -9,19 +9,21 @@ description: "Carefully run Plasmite releases end-to-end with fail-closed pre-re
 
 Required inputs from maintainer:
 - `release_target` (for example `v0.1.10`)
-- `base_tag` (previous release tag)
 - `mode` (`dry-run` or `live`)
 - `agent_id` (`model@host`)
 
 Before running any release step:
-1. Confirm all four inputs explicitly. Do not infer.
+1. Confirm `release_target`, `mode`, and `agent_id` explicitly.
+2. Derive `base_tag` automatically as the highest semver tag lower than `release_target`:
+   - `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`
+   - Read `Base tag:` from the generated evidence report and reuse that value for any base-tag-driven commands.
 2. Verify runtime access:
    - `gh auth status`
    - network access for GitHub + registries
 3. Verify version alignment:
    - `bash scripts/check-version-alignment.sh`
-4. Open or initialize evidence report:
-   - `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --base-tag <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`
+4. Open or initialize evidence report (idempotent):
+   - `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`
 
 Release invariants (non-negotiable):
 1. Publish only from a successful `release` build run with verified metadata.
