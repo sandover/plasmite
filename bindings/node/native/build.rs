@@ -13,6 +13,12 @@ use std::path::PathBuf;
 fn main() {
     println!("cargo:rerun-if-env-changed=PLASMITE_LIB_DIR");
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let link_name = if target_os == "windows" {
+        // Rust cdylib builds on MSVC emit plasmite.dll + plasmite.dll.lib.
+        "plasmite.dll"
+    } else {
+        "plasmite"
+    };
     if target_os == "macos" {
         println!("cargo:rustc-link-arg=-Wl,-undefined,dynamic_lookup");
         println!("cargo:rustc-link-arg=-Wl,-rpath,@loader_path");
@@ -52,5 +58,5 @@ fn main() {
     });
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
-    println!("cargo:rustc-link-lib=dylib=plasmite");
+    println!("cargo:rustc-link-lib=dylib={link_name}");
 }

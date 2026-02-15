@@ -28,6 +28,20 @@ build_env="$WORKDIR/build-env"
 install_env="$WORKDIR/install-env"
 release_dir="$ROOT/target/release"
 
+activate_venv() {
+  local venv_dir="$1"
+  local activate_sh="$venv_dir/bin/activate"
+  if [[ ! -f "$activate_sh" ]]; then
+    activate_sh="$venv_dir/Scripts/activate"
+  fi
+  if [[ ! -f "$activate_sh" ]]; then
+    echo "error: virtualenv activation script not found under '$venv_dir'." >&2
+    exit 1
+  fi
+  # shellcheck disable=SC1090
+  source "$activate_sh"
+}
+
 resolve_sdk_dir() {
   if [[ -n "${PLASMITE_SDK_DIR:-}" ]]; then
     plasmite_normalize_sdk_dir "$PLASMITE_SDK_DIR" "$WORKDIR/sdk-from-env" "PLASMITE_SDK_DIR"
@@ -64,8 +78,7 @@ wheel_has_member() {
 }
 
 uv venv "$build_env" --cache-dir "$UV_CACHE_DIR"
-# shellcheck disable=SC1091
-source "$build_env/bin/activate"
+activate_venv "$build_env"
 if ! uv pip install --cache-dir "$UV_CACHE_DIR" build; then
   echo "error: failed to install python build backend ('build') with uv."
   echo "hint: ensure network access to package indexes (or preinstall build deps) before running python wheel smoke."
@@ -89,8 +102,7 @@ wheel_has_member "$wheel_file" 'plasmite/_native/(plasmite\.dll|libplasmite\.(dy
 wheel_has_member "$wheel_file" 'plasmite/_native/plasmite(\.exe)?'
 
 uv venv "$install_env" --cache-dir "$UV_CACHE_DIR"
-# shellcheck disable=SC1091
-source "$install_env/bin/activate"
+activate_venv "$install_env"
 uv pip install --cache-dir "$UV_CACHE_DIR" "$wheel_file"
 
 unset PLASMITE_LIB_DIR DYLD_LIBRARY_PATH LD_LIBRARY_PATH
