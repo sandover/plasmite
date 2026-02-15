@@ -1471,8 +1471,31 @@ const DEFAULT_MAX_BODY_BYTES: u64 = 1024 * 1024;
 const DEFAULT_MAX_TAIL_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_MAX_TAIL_CONCURRENCY: usize = 64;
 
+// ── Missing-pool remediation hint policy ──────────────────────────────────
+//
+// When a pool is not found, the CLI tries to suggest a retry command with
+// `--create`.  The rendering strategy is *shell-agnostic argv echo*:
+//
+//   • Render an exact command only when the CLI has a stable, unambiguous argv
+//     token sequence available at error time (inline JSON, --file, repeated
+//     flags, etc.).
+//   • When the data source is stdin/pipe, exact reconstruction is unsafe —
+//     fall back to generic wording ("add --create to your invocation").
+//   • Never infer data not present in argv context.
+//   • Tokens that contain special characters are JSON-escaped rather than
+//     shell-quoted, keeping the hint correct across bash/zsh/fish/PowerShell.
+//
+// Coverage checklist (each shape should have a matching integration test):
+//   1. Inline JSON payload         → exact command emitted
+//   2. Paths with spaces (--file)  → exact command with quoted path args
+//   3. Repeated flags (--tag …)    → exact command preserves repeated flags
+//   4. Stdin/pipe usage            → fallback wording (no exact command)
+//
+// See also: `render_shell_agnostic_token`, `render_shell_agnostic_command`,
+//           `poke_exact_create_command_hint`, `peek_exact_create_command_hint`.
+// ──────────────────────────────────────────────────────────────────────────
+
 fn add_missing_pool_hint(err: Error, pool_ref: &str, input: &str) -> Error {
-    // Policy note: missing-pool remediation should offer an exact command when safe to render.
     if err.kind() != ErrorKind::NotFound || err.hint().is_some() {
         return err;
     }

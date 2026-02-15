@@ -130,3 +130,37 @@ Stable kinds (v0):
 
 - A binding is conformant if it implements all core types and operations and preserves error kinds.
 - Conformance tests may use the CLI spec for message formatting details and validation rules.
+
+---
+
+## Quickstart (Rust)
+
+```rust
+use plasmite::api::{LocalClient, PoolRef, PoolOptions, PoolApiExt, Durability, TailOptions, ErrorKind};
+use serde_json::json;
+
+// Create a client and pool
+let client = LocalClient::new();
+let pool_ref = PoolRef::name("events");
+let _info = client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
+let mut pool = client.open_pool(&pool_ref)?;
+
+// Append
+let msg = pool.append_json_now(&json!({"msg": "hello"}), &["greeting".into()], Durability::Fast)?;
+println!("seq={}", msg.seq);
+
+// Get
+let fetched = pool.get_message(1)?;
+
+// Tail
+let mut tail = pool.tail(TailOptions::default());
+while let Some(message) = tail.next_message()? {
+    println!("{}", message.seq);
+}
+
+// Error handling by kind
+match pool.get_message(9999) {
+    Err(err) if err.kind() == ErrorKind::NotFound => { /* expected */ }
+    other => other.map(|_| ()),
+}?;
+```

@@ -136,7 +136,7 @@ pls serve \
 Use `--cors-origin` multiple times to allow multiple origins.
 
 For full deployment, auth, and troubleshooting guidance, see
-`docs/record/browser-cors.md`.
+`docs/record/serving.md`.
 
 See the [remote protocol spec](spec/remote/v0/SPEC.md) for the full HTTP/JSON API.
 
@@ -218,7 +218,7 @@ A pool is a single `.plasmite` file containing a persistent ring buffer:
 - **Bounded retention** — old messages overwritten when full (default 1 MB, configurable)
 - **Crash-safe** — torn writes never propagate
 
-Every message carries a **seq** (monotonic), a **time** (nanosecond precision), optional **tags**, and your JSON **data**. Tags and `--where` (jq predicates) compose for filtering. See the [pattern matching guide](docs/record/pattern-matching.md).
+Every message carries a **seq** (monotonic), a **time** (nanosecond precision), optional **tags**, and your JSON **data**. Tags and `--where` (jq predicates) compose for filtering. See the [CLI spec § pattern matching](spec/v0/SPEC.md).
 
 Default pool directory: `~/.plasmite/pools/`.
 
@@ -267,15 +267,16 @@ const pool = client.createPool("events", 1024 * 1024)
 pool.appendJson(Buffer.from('{"sensor": "temp", "value": 23.5}'), [], Durability.Fast)
 ```
 
-See [Go quickstart](docs/record/go-quickstart.md), [Python docs](bindings/python/README.md), and [Node docs](bindings/node/README.md).
+See [Go bindings](bindings/go/README.md), [Python bindings](bindings/python/README.md), and [Node bindings](bindings/node/README.md).
 
 ## More
 
 **Specs**: [CLI](spec/v0/SPEC.md) | [API](spec/api/v0/SPEC.md) | [Remote protocol](spec/remote/v0/SPEC.md)
 
-**Guides**: [Rust API quickstart](docs/record/api-quickstart.md) | [Go quickstart](docs/record/go-quickstart.md) | [Browser CORS access](docs/record/browser-cors.md) | [libplasmite C ABI](docs/record/libplasmite.md) | [Distribution](docs/record/distribution.md) | [Exit codes](docs/record/exit-codes.md) | [Diagnostics](docs/record/doctor.md)
+**Guides**: [Serving & remote access](docs/record/serving.md) | [Distribution](docs/record/distribution.md)
 
-**Contributing**: `docs/contributing.md`
+**Contributing**: See `AGENTS.md` for CI hygiene; `docs/record/releasing.md` for release process
+
 
 [Changelog](CHANGELOG.md) | Inspired by Oblong Industries' [Plasma](https://github.com/plasma-hamper/plasma).
 

@@ -2,9 +2,33 @@
 Purpose: C ABI for Plasmite bindings using libplasmite.
 Key Exports: Client/Pool/Stream handles, JSON + Lite3 append/get/tail functions, buffers, errors.
 Role: Stable boundary for official bindings (Go/Python/Node) in v0.
-Invariants: JSON bytes in/out; Lite3 bytes for fast paths; opaque handles; explicit free functions.
-Invariants: Error kinds are stable; remote refs return Usage in v0.
+
+ABI stability:
+  - Within a major version, this header is additive-only: no field removals,
+    no reordering of struct members, no changes to enum discriminant values.
+  - New functions and struct fields are appended at the end.
+  - If a breaking change is unavoidable, it bumps the major version and the
+    old symbols remain available via versioned symbol names (when supported).
+
+Ownership rules:
+  - Handles (plsm_client_t*, plsm_pool_t*, plsm_stream_t*) are opaque.
+    The caller receives ownership from *_new / *_open / *_create and must
+    pass the handle to the matching *_free when done.
+  - Buffers (plsm_buf_t) returned via out-parameters are caller-owned.
+    Free with plsm_buf_free.  Do not mix with malloc/free.
+  - Errors (plsm_error_t*) returned via out_err are caller-owned.
+    Free with plsm_error_free.  NULL means no error.
+  - String fields inside plsm_error_t are owned by the error struct;
+    they become invalid after plsm_error_free.
+
+Linking:
+  - Dynamic: link against libplasmite.dylib / .so / .dll.
+  - Static: link against libplasmite.a (include system libs: -lpthread -ldl -lm).
+  - pkg-config: `pkg-config --cflags --libs plasmite` (available when installed
+    via Homebrew tap or release SDK tarball).
+
 Notes: All allocations returned must be freed by the caller via provided free functions.
+Notes: Remote pool refs are not supported in v0 ABI; use CLI or HTTP API instead.
 */
 
 #ifndef PLASMITE_H

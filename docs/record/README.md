@@ -1,25 +1,18 @@
 # Docs of Record
 
-Use this namespace for canonical, current truth documentation.
+Canonical, current truth documentation for Plasmite.
 
-## Keystone docs
+For the full docs index (including specs, planning, and decisions), see `docs/README.md`.
 
-- Vision: `docs/record/vision.md`
-- Architecture: `docs/record/architecture.md`
+## Contents
 
-## Reference and operations
-
-- API quickstart: `docs/record/api-quickstart.md`
-- Go quickstart: `docs/record/go-quickstart.md`
-- Exit codes: `docs/record/exit-codes.md`
-- Diagnostics: `docs/record/doctor.md`
-- Testing: `docs/record/TESTING.md`
-- Releasing: `docs/record/releasing.md`
-- Versioning policy: `docs/record/versioning.md`
-- Homebrew packaging: `docs/record/homebrew.md`
-- C ABI guide: `docs/record/libplasmite.md`
-- Pattern matching guide: `docs/record/pattern-matching.md`
-- Browser CORS access guide: `docs/record/browser-cors.md`
+- Vision: `vision.md`
+- Architecture: `architecture.md`
+- Testing: `testing.md`
+- Releasing (includes versioning policy): `releasing.md`
+- Distribution contract: `distribution.md`
+- Serving & remote access: `serving.md`
+- C ABI header + stability contract: `../../include/plasmite.h`
 
 Do not place proposals, exploratory design drafts, or roadmap notes here.
 Those belong in `docs/planning/` until accepted and promoted.

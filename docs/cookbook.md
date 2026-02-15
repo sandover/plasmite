@@ -242,7 +242,7 @@ Operational notes:
 - For an HTTPS page, use HTTPS on the pool endpoint too (browser mixed-content rules).
 - `--cors-origin` is exact-match only and repeatable for multiple origins.
 - If you require bearer auth, avoid putting long-lived tokens in public frontend code.
-- See `docs/record/browser-cors.md` for complete deployment and troubleshooting guidance.
+- See `docs/record/serving.md` for complete deployment and troubleshooting guidance.
 
 ---
 
@@ -284,10 +284,9 @@ Plasmite is great for local and small-team IPC, but it's not the answer to every
 
 ## Next Steps
 
-- **Rust API**: [docs/record/api-quickstart.md](record/api-quickstart.md)
-- **Go bindings**: [docs/record/go-quickstart.md](record/go-quickstart.md)
-- **Python bindings**: [../bindings/python/README.md](../bindings/python/README.md)
+- **Rust API spec**: [spec/api/v0/SPEC.md](../spec/api/v0/SPEC.md)
+- **Go bindings**: [bindings/go/README.md](../bindings/go/README.md)
 - **Node bindings**: [../bindings/node/README.md](../bindings/node/README.md)
 - **CLI spec**: [../spec/v0/SPEC.md](../spec/v0/SPEC.md)
-- **Pattern matching & filtering**: [record/pattern-matching.md](record/pattern-matching.md)
+- **Pattern matching & filtering**: [spec/v0/SPEC.md § peek](../spec/v0/SPEC.md)
 - **README**: [../README.md](../README.md)

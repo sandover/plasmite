@@ -10,6 +10,14 @@ Use the release skill for all release execution details:
 
 - `skills/plasmite-release-manager/SKILL.md`
 
+To activate it locally, symlink the skill into your agent skills directory:
+
+```bash
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+mkdir -p "${CODEX_HOME}/skills"
+ln -snf "$(pwd)/skills/plasmite-release-manager" "${CODEX_HOME}/skills/plasmite-release-manager"
+```
+
 If this file and the skill ever disagree, follow the skill and then update this file or the skill to re-align.
 
 ## Build + Release, in Plain English

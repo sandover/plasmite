@@ -1,6 +1,11 @@
 //! Purpose: C ABI bridge for bindings (libplasmite).
 //! Exports: C-callable client/pool/stream functions and buffer/error helpers.
 //! Role: Stable ABI surface for non-Rust bindings in v0.
+//!
+//! ABI stability: additive-only within a major version — no field removals,
+//! no struct reordering, no enum discriminant changes.  See `include/plasmite.h`
+//! for the full stability contract, ownership rules, and linking notes.
+//!
 //! Invariants: JSON bytes in/out; Lite3 bytes for fast paths; explicit free functions.
 //! Invariants: Error kinds map 1:1 with core error kinds.
 //! Notes: Remote pool refs are not supported in v0.

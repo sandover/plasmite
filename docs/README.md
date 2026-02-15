@@ -11,7 +11,6 @@ Plasmite documentation is intentionally split into:
 - Docs of record: `docs/record/README.md`
 - Planning: `docs/planning/README.md`
 - Decisions (ADRs): `docs/decisions/README.md`
-- Contributing: `docs/contributing.md`
 
 ## Normative specs
 
@@ -27,13 +26,9 @@ Plasmite documentation is intentionally split into:
 ## Reference docs of record
 
 - Build system + vendoring: `docs/building.md`
-- Rust API quickstart: `docs/record/api-quickstart.md`
-- Go quickstart: `docs/record/go-quickstart.md`
-- Exit codes: `docs/record/exit-codes.md`
-- Diagnostics (`doctor`): `docs/record/doctor.md`
-- Testing: `docs/record/TESTING.md`
-- Releasing: `docs/record/releasing.md`
-- Homebrew packaging: `docs/record/homebrew.md`
-- C ABI guide: `docs/record/libplasmite.md`
-- Pattern matching guide: `docs/record/pattern-matching.md`
-- Browser CORS access guide: `docs/record/browser-cors.md`
+- Testing: `docs/record/testing.md`
+- Releasing (includes versioning policy): `docs/record/releasing.md`
+- Distribution contract: `docs/record/distribution.md`
+- C ABI header + stability contract: `include/plasmite.h`
+- Serving & remote access: `docs/record/serving.md`
+
