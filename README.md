@@ -44,75 +44,59 @@ For IPC across machines, `pls serve` exposes your local pools securely, and serv
 | **ZeroMQ** | No persistence, complex pattern zoo, binary protocol, library in every process | Durable and human-readable by default. One CLI command or library call to get started; no pattern vocabulary to learn. |
 | **Language-specific queue libs** | Tied to one runtime; no CLI, no cross-language story | Consistent CLI + multi-language bindings (Rust, Python, Go, Node, C) + versioned on-disk format. An ecosystem surface, not a single-language helper. |
 
-## What it looks like
+## Real world use cases
 
-### Two terminals, two processes, one pool
+### Build event bus
 
-**Terminal 1** — your build script might write progress:
+Multiple build steps write progress into one pool; you watch from another terminal.
+
 ```bash
-pls poke build --create '{"step": "compile", "status": "running"}'
-sleep 2
-pls poke build '{"step": "compile", "status": "done"}'
+pls poke build --create '{"step": "compile", "status": "done"}'
 pls poke build '{"step": "test", "status": "running"}'
-```
 
-**Terminal 2** — you, watching:
-```bash
+# elsewhere:
 pls peek build
 ```
 
-### Gate one script on another
+### CI gate
+
+A deploy script blocks until the test runner signals "green" — no polling, no lock files.
 
 ```bash
-# deploy.sh — block until tests go green
-pls peek ci --where '.data.status == "green"' --one > /dev/null
-echo "Tests passed, deploying..."
+# deploy.sh
+pls peek ci --where '.data.status == "green"' --one > /dev/null && ./deploy.sh
 
-# test-runner.sh — signal when done
+# test-runner.sh
 pls poke ci --create '{"status": "green", "commit": "abc123"}'
 ```
 
-Three lines of coordination. No polling, no lock files, no shared database.
+### System log intake
 
-### Funnel anything into a pool
+Pipe structured logs into a bounded pool so they never fill your disk, then replay for debugging.
 
 ```bash
-# Ingest an API event stream
-curl -N https://api.example.com/events | pls poke events --create
-
-# Tee system logs
-journalctl -o json-seq -f | pls poke syslog --create    # Linux
-/usr/bin/log stream --style ndjson | pls poke syslog --create  # macOS
-
-# Save JSONL, then replay from file
-pls peek incidents --tail 100 --format jsonl --data-only > incidents.jsonl
-pls poke incidents-archive -f incidents.jsonl
+journalctl -o json-seq -f | pls poke syslog --create       # Linux
+pls peek syslog --since 30m --replay 1                       # replay last 30 min
 ```
 
-### Filter, tag, replay
+### Tagged incident stream
+
+Tag events on write, filter on read, replay at speed.
 
 ```bash
-# Tag on write
-pls poke incidents --tag sev1 --tag billing '{"msg": "payment gateway timeout"}'
-
-# Filter on read
-pls peek incidents --tag sev1
-pls peek incidents --where '.data.msg | test("timeout")'
-
-# Replay the last hour at 10x
+pls poke incidents --create --tag sev1 '{"msg": "payment gateway timeout"}'
+pls peek incidents --tag sev1 --where '.data.msg | test("timeout")'
 pls peek incidents --since 1h --replay 10
 ```
 
-### Go remote
+### Remote pools
+
+Expose local pools over HTTP; clients use the same CLI with a URL.
 
 ```bash
-pls serve                          # local-only by default
+pls serve                          # loopback-only by default
 pls serve init                     # bootstrap TLS + token for LAN access
-```
 
-Same CLI, just pass a URL:
-
-```bash
 pls poke http://server:9700/events '{"sensor": "temp", "value": 23.5}'
 pls peek http://server:9700/events --tail 20
 ```
@@ -121,25 +105,9 @@ A built-in web UI lives at `/ui`:
 
 ![Plasmite UI pool watch](docs/images/ui/ui-pool-watch.png)
 
-### Browser app on another origin (CORS)
+For CORS, auth, and deployment details, see [Serving & remote access](docs/record/serving.md) and the [remote protocol spec](spec/remote/v0/SPEC.md).
 
-If your web app is not served by `pls serve` itself (for example `https://demo.wratify.ai`), the browser needs explicit CORS permission from the pool server.
-
-```bash
-# example: public read-only endpoint for one trusted web origin
-pls serve \
-  --bind 0.0.0.0:9100 \
-  --allow-non-loopback \
-  --access read-only \
-  --cors-origin https://demo.wratify.ai
-```
-
-Use `--cors-origin` multiple times to allow multiple origins.
-
-For full deployment, auth, and troubleshooting guidance, see
-`docs/record/serving.md`.
-
-See the [remote protocol spec](spec/remote/v0/SPEC.md) for the full HTTP/JSON API.
+More examples — polyglot producer/consumer, multi-writer event bus, API stream ingest, CORS setup — in the **[Cookbook](docs/cookbook.md)**.
 
 ## Install
 
