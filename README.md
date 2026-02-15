@@ -7,31 +7,31 @@
 
 Interprocess communication should not be the hard part.
 
-- readers and writers should be able to come and go freely
-- messages should be durably stored on disk
-- and yet it should be fast
-- you shouldn't need a server for local communication
-- messages should be inspectable for humans
-- schemas should be optional
-- you should never fill your disk accidentally
+- Processes crash and restart — message channels should be resilient to that
+- Messages should persist on disk so nothing ever gets lost
+- For local IPC, you shouldn't need a server
+- Messages should be human-inspectable at all times without ceremony
+- Schemas are great but should be optional
+- Disks should never fill up by surprise
+- It should be fast, ideally with zero-copy reads
 
 So, there's **Plasmite**.
 
 <table width="100%">
 <tr><th>Alice's terminal</th><th>Bob's terminal</th></tr>
 <tr>
-<td><pre lang="bash"># Alice creates a pool
-pls pool create chat</pre></td>
+<td><pre lang="bash"># Alice creates a channel
+pls pool create my-channel</pre></td>
 <td></td>
 </tr>
 <tr>
 <td></td>
 <td><pre lang="bash"># Bob starts watching
-pls peek chat</pre></td>
+pls peek my-channel</pre></td>
 </tr>
 <tr>
-<td><pre lang="bash"># Alice sends a message
-pls poke chat \
+<td><pre lang="bash"># Alice sends (aka "pokes") a message
+pls poke my-channel \
   '{"from": "alice",
     "msg": "hello world"}'</pre></td>
 <td></td>
@@ -43,7 +43,7 @@ pls poke chat \
 </tr>
 </table>
 
-Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed ring buffers called "pools". No daemon, no broker, no config. ~600k msg/sec on a laptop. Crash-safe writes.
+Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed channels called "pools", which are ring buffers. There's no daemon, no broker, and no fancy config required, and it's quick (~600k msg/sec on a laptop).
 
 For IPC across machines, `pls serve` exposes your local pools securely, and serves a minimal web UI too.
 
@@ -51,16 +51,16 @@ For IPC across machines, `pls serve` exposes your local pools securely, and serv
 
 | | Drawbacks | Plasmite |
 |---|---|---|
-| **Log files / `tail -f`** | Unstructured, grow forever, no sequence numbers, fragile parsing | Structured JSON with sequence numbers and bounded disk usage. Filter with tags or jq; never worry about runaway logs. |
-| **Temp files + locks** | No streaming, easy to corrupt, readers block writers | Many writers append concurrently, readers stream in real time without blocking. No corruption or contention. |
+| **Log files / `tail -f`** | Unstructured, grow forever, no sequence numbers, fragile parsing | Structured JSON with sequence numbers. Filter with tags or jq. Disk usage stays bounded. |
+| **Temp files + locks** | No streaming, easy to corrupt, readers block writers | Writers append concurrently, readers stream in real time. No corruption, no contention. |
 | **Redis / NATS** | Another server to run and monitor; overkill for single-host messaging | Just files on disk — no daemon, no ports, no config. If you only need local or host-adjacent messaging, don't introduce a broker. |
-| **SQLite as a queue** | Polling-based, write contention, schema and vacuuming are on you | Purpose-built message stream: follow/replay semantics, concurrent writers, no schema, no cleanup logic, no polling. |
-| **Named pipes** | One reader at a time, writers block, nothing persists | Any number of reading and writing processes; messages persist on disk and survive restarts. |
-| **Unix domain sockets** | Stream-oriented, no message framing, no persistence, one-to-one | Message boundaries and sequence numbers built in. Any number of readers can watch the same pool — fan-out is free. |
-| **Poll a directory** | Busy loops, no ordering, files accumulate forever | Messages stream to readers in sequence order; the ring buffer has a known disk footprint. |
-| **Shared memory** | No persistence, painful to coordinate, binary formats | Durable JSON on disk with lock-free readers. Persistence and coordination without the pain. |
-| **ZeroMQ** | No persistence, complex pattern zoo, binary protocol, library in every process | Durable and human-readable by default. One CLI command or library call to get started; no pattern vocabulary to learn. |
-| **Language-specific queue libs** | Tied to one runtime; no CLI, no cross-language story | Consistent CLI + multi-language bindings (Rust, Python, Go, Node, C) + versioned on-disk format. An ecosystem surface, not a single-language helper. |
+| **SQLite as a queue** | Polling-based, write contention, schema and vacuuming are on you | Built for message streams: follow/replay, concurrent writers, no schema, no cleanup, no polling. |
+| **Named pipes** | One reader at a time, writers block, nothing persists | Readers and writers come and go freely. Messages survive restarts. |
+| **Unix domain sockets** | Stream-oriented, no message framing, no persistence, one-to-one | Message boundaries and sequence numbers built in. Fan-out to any number of readers. |
+| **Poll a directory** | Busy loops, no ordering, files accumulate forever | Messages stream in order. The ring buffer won't fill your disk. |
+| **Shared memory** | No persistence, painful to coordinate, binary formats | Human-readable JSON on disk, zero-copy reads, no coordination pain. |
+| **ZeroMQ** | No persistence, complex pattern zoo, binary protocol, library in every process | Durable and human-readable by default. One CLI command or library call to get started. |
+| **Language-specific queue libs** | Tied to one runtime; no CLI, no cross-language story | Consistent CLI + multi-language bindings (Rust, Python, Go, Node, C) + versioned on-disk format. An ecosystem, not a single-language helper. |
 
 ## Real world use cases
 
@@ -170,7 +170,7 @@ A pool is a single `.plasmite` file containing a persistent ring buffer:
 - **Multiple writers** append concurrently (serialized via OS file locks)
 - **Multiple readers** watch concurrently (lock-free, zero-copy)
 - **Bounded retention** — old messages overwritten when full (default 1 MB, configurable)
-- **Crash-safe** — torn writes never propagate
+- **Crash-safe** — processes crash and restart; torn writes never propagate
 
 Every message carries a **seq** (monotonic), a **time** (nanosecond precision), optional **tags**, and your JSON **data**. Tags and `--where` (jq predicates) compose for filtering. See the [CLI spec § pattern matching](spec/v0/SPEC.md).
 
@@ -182,10 +182,15 @@ Default pool directory: `~/.plasmite/pools/`.
 |---|---|
 | Append throughput | ~600k msg/sec (single writer, M3 MacBook) |
 | Read | Lock-free, zero-copy via mmap |
+| On-disk format | [Lite3](https://github.com/fastserial/lite3) (zero-copy, JSON-compatible binary); field access without deserialization |
 | Message overhead (framing) | 72-79 bytes per message (64B header + 8B commit marker + alignment) |
 | Default pool size | 1 MB |
 
-**How lookups work**: By default each pool includes an inline index — a fixed-size hash table that maps sequence numbers to byte offsets. When you fetch a message by seq (`get POOL 42`), the index usually provides a direct jump to the right location. If that slot was overwritten by a newer message (hash collision) or is stale, the reader scans forward from the oldest message until it finds the target. You can set `--index-capacity` at pool creation time.
+**How reads work**: The pool file is memory-mapped. Readers walk committed frames directly from the mapped region — no read syscalls, no buffer copies. Payloads are stored in [Lite3](https://github.com/fastserial/lite3), a zero-copy binary format that is byte-for-byte JSON-compatible — every valid JSON document has an equivalent Lite3 representation and vice versa. Lite3 supports field lookup by offset, so tag filtering and `--where` predicates run without deserializing the full message. JSON conversion happens only at the output boundary.
+
+**How writes work**: Writers acquire an OS file lock, plan frame placement (including ring wrap), write the frame as `Writing`, then flip it to `Committed` and update the header. The lock is held only for the memcpy + header update — no allocation or encoding happens under the lock.
+
+**How lookups work**: Each pool includes an inline index — a fixed-size hash table mapping sequence numbers to byte offsets. `get POOL 42` usually jumps directly to the right frame. If the slot is stale or collided, the reader scans forward from the tail. You can tune this with `--index-capacity` at pool creation time.
 
 Algorithmic complexity below uses **N** = visible messages in the pool (depends on message sizes and pool capacity), **M** = index slot count.
 
@@ -199,7 +204,7 @@ Algorithmic complexity below uses **N** = visible messages in the pool (depends 
 
 ## Bindings
 
-Native bindings — no subprocess overhead, no serialization tax:
+Native bindings:
 
 ```go
 client, _ := plasmite.NewClient("./data")
