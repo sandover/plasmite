@@ -190,6 +190,68 @@ mod tests {
     use crate::core::lite3::encode_message;
     use serde_json::json;
 
+    const FRAME_MUTATION_SEED: u64 = 0xBADC0FFEE0DDF00D;
+
+    fn next_seed(seed: &mut u64) -> u64 {
+        *seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        *seed
+    }
+
+    fn mutate_frame_header(
+        mut source: [u8; FRAME_HEADER_LEN],
+        mut seed: u64,
+    ) -> [u8; FRAME_HEADER_LEN] {
+        let op = (next_seed(&mut seed) % 7) as u8;
+        let offset = ((next_seed(&mut seed) as usize) % FRAME_HEADER_LEN) as usize;
+        let value = (next_seed(&mut seed) & 0xFF) as u8;
+
+        match op {
+            0 => source[0] = !source[0],
+            1 => {
+                source[offset % 4] = value.wrapping_add(1);
+            }
+            2 => {
+                source[4..8].copy_from_slice(&7_979u32.to_le_bytes());
+            }
+            3 => source[12..16].copy_from_slice(&128u32.to_le_bytes()),
+            4 => {
+                source[36] = source[36].wrapping_add(1);
+            }
+            5 => {
+                source[32..36].copy_from_slice(&MAX_PAYLOAD_ABS.to_le_bytes()[..4]);
+            }
+            _ => {
+                source[0] = b'B';
+            }
+        }
+        source
+    }
+
+    fn make_mutated_headers() -> Vec<[u8; FRAME_HEADER_LEN]> {
+        let valid = FrameHeader::new(FrameState::Committed, 0, 1, 123, 8, 0).encode();
+        let mut seed = FRAME_MUTATION_SEED;
+        let mut headers = Vec::with_capacity(14);
+        for _ in 0..14 {
+            headers.push(mutate_frame_header(valid, next_seed(&mut seed)));
+        }
+        headers.push({
+            let mut custom = valid;
+            custom[0..4].copy_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+            custom
+        });
+        headers.push({
+            let mut custom = valid;
+            custom[4..8].copy_from_slice(&4u32.to_le_bytes());
+            custom
+        });
+        headers.push({
+            let mut custom = valid;
+            custom[36] = 0;
+            custom
+        });
+        headers
+    }
+
     #[test]
     fn alignment_is_8_bytes() {
         assert_eq!(align8(0), Some(0));
@@ -260,5 +322,87 @@ mod tests {
     fn frame_total_len_overflow_is_detected() {
         let total = frame_total_len(usize::MAX, 1);
         assert!(total.is_none());
+    }
+
+    #[test]
+    fn frame_decode_rejects_truncated_headers() {
+        let header = FrameHeader::new(FrameState::Committed, 0, 1, 1, 16, 0);
+        let encoded = header.encode();
+
+        for len in 0..=FRAME_HEADER_LEN {
+            let actual = FrameHeader::decode(&encoded[..len]);
+            if len < FRAME_HEADER_LEN {
+                assert!(actual.is_err(), "expected decode failure at len={len}");
+                assert_eq!(
+                    actual.expect_err("truncated should fail").kind(),
+                    ErrorKind::Corrupt
+                );
+            } else {
+                assert!(actual.is_ok());
+            }
+        }
+    }
+
+    #[test]
+    fn frame_header_mutation_matrix_rejects_malformed_values() {
+        let headers = make_mutated_headers();
+
+        for header_bytes in headers {
+            let header = FrameHeader::decode(&header_bytes);
+            let observed = match header {
+                Ok(valid) => valid.validate(16 * FRAME_HEADER_LEN),
+                Err(err) => Err(err),
+            };
+            let err = observed.expect_err("mutated frame should be rejected");
+            assert_eq!(err.kind(), ErrorKind::Corrupt);
+        }
+    }
+
+    #[test]
+    fn payload_validation_rejects_fixed_mutations() {
+        let message = encode_message(&["event".to_string()], &json!({"ok": true})).expect("encode");
+        let base = message.as_slice().to_vec();
+        let mut seed = FRAME_MUTATION_SEED ^ 0x1234_5678_9ABC_DEF0;
+
+        for _ in 0..16 {
+            let op = (next_seed(&mut seed) % 7) as u8;
+            let mut mutated = base.clone();
+            match op {
+                0 if !mutated.is_empty() => {
+                    mutated[0] = 0xC0;
+                }
+                1 => {
+                    if mutated.len() > 1 {
+                        mutated.truncate(mutated.len() - 2);
+                    }
+                }
+                2 => {
+                    mutated.push(0xC1);
+                }
+                3 => {
+                    let last = mutated.len() - 1;
+                    mutated[last] = 0xC1;
+                }
+                4 => {
+                    let pos = (next_seed(&mut seed) as usize) % mutated.len();
+                    mutated[pos] = 0x00;
+                }
+                5 => {
+                    mutated.push(0x00);
+                }
+                _ => {
+                    let pos = (next_seed(&mut seed) as usize) % (mutated.len() + 1);
+                    if pos >= mutated.len() {
+                        mutated.extend_from_slice(&[0x00, 0x00, 0x00]);
+                    } else {
+                        mutated[pos] = mutated[pos].wrapping_sub(1);
+                    }
+                }
+            }
+            if validate_payload(&mutated).is_ok() {
+                mutated[0] = 0xC0;
+            }
+            assert!(validate_payload(&mutated).is_err());
+        }
     }
 }

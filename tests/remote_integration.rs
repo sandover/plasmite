@@ -13,7 +13,8 @@ use serde_json::{Value, json};
 use std::io::Read;
 use std::net::{SocketAddr, TcpListener};
 use std::process::{Child, Command, Stdio};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, mpsc};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -245,6 +246,154 @@ fn remote_tail_streams_in_order() -> TestResult<()> {
     let msg2 = tail.next_message()?.expect("second message");
     assert_eq!(msg1.seq, first.seq);
     assert_eq!(msg2.seq, second.seq);
+    Ok(())
+}
+
+#[test]
+fn remote_tail_reconnects_with_stable_since_seq_without_duplicates() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::start(temp_dir.path())?;
+    let client = server.client()?;
+    let pool_ref = PoolRef::name("tail-reconnect");
+
+    client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
+    let pool = client.open_pool(&pool_ref)?;
+
+    let first = pool.append_json_now(&json!({"seq": 1}), &[], Durability::Fast)?;
+    let second = pool.append_json_now(&json!({"seq": 2}), &[], Durability::Fast)?;
+
+    let mut first_tail = pool.tail(TailOptions {
+        max_messages: Some(2),
+        timeout: Some(Duration::from_millis(150)),
+        ..TailOptions::default()
+    })?;
+    let message_one = first_tail.next_message()?.expect("first replay message");
+    let message_two = first_tail.next_message()?.expect("second replay message");
+    assert_eq!(message_one.seq, first.seq);
+    assert_eq!(message_two.seq, second.seq);
+    assert!(
+        first_tail.next_message()?.is_none(),
+        "replay tail should stop after max_messages"
+    );
+
+    let third = pool.append_json_now(&json!({"seq": 3}), &[], Durability::Fast)?;
+    let fourth = pool.append_json_now(&json!({"seq": 4}), &[], Durability::Fast)?;
+
+    let mut reconnect_tail = pool.tail(TailOptions {
+        since_seq: Some(message_two.seq + 1),
+        max_messages: Some(2),
+        timeout: Some(Duration::from_millis(300)),
+        ..TailOptions::default()
+    })?;
+    let resume_three = reconnect_tail
+        .next_message()?
+        .expect("first resumed message");
+    let resume_four = reconnect_tail
+        .next_message()?
+        .expect("second resumed message");
+    assert_eq!(resume_three.seq, third.seq);
+    assert_eq!(resume_four.seq, fourth.seq);
+    assert_ne!(resume_three.seq, message_one.seq);
+    assert!(
+        reconnect_tail.next_message()?.is_none(),
+        "resumed tail should stop after max_messages"
+    );
+    Ok(())
+}
+
+#[test]
+fn remote_tail_cancel_under_active_writes_is_prompt() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::start(temp_dir.path())?;
+    let base_client = server.client()?;
+    let pool_ref = PoolRef::name("tail-cancel-active");
+
+    base_client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
+
+    let append_client = base_client.clone();
+    let writer_pool = append_client.open_pool(&pool_ref)?;
+    let tail_pool = base_client.open_pool(&pool_ref)?;
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let done = Arc::new(AtomicBool::new(false));
+
+    let (tail_started_tx, tail_started_rx) = mpsc::channel::<()>();
+
+    let done_writer = Arc::clone(&done);
+    let writer = std::thread::spawn(move || -> Result<(), String> {
+        let mut seq = 0u64;
+        while !done_writer.load(Ordering::Acquire) {
+            let payload = json!({"seq": seq});
+            writer_pool
+                .append_json_now(&payload, &[], Durability::Fast)
+                .map(|_| ())
+                .map_err(|err| err.to_string())?;
+            seq += 1;
+            if seq > 1_000 {
+                break;
+            }
+            sleep(Duration::from_millis(10));
+        }
+        Ok(())
+    });
+
+    let cancel_tail = Arc::clone(&cancel);
+    let done_tail = Arc::clone(&done);
+    let reader = std::thread::spawn(move || -> Result<usize, String> {
+        let mut tail = tail_pool
+            .tail(TailOptions {
+                timeout: Some(Duration::from_millis(120)),
+                max_messages: Some(10_000),
+                ..TailOptions::default()
+            })
+            .map_err(|err| err.to_string())?;
+        tail_started_tx
+            .send(())
+            .map_err(|err| format!("failed to signal tail start: {err}"))?;
+        let mut observed = 0usize;
+        loop {
+            if cancel_tail.load(Ordering::Acquire) {
+                tail.cancel();
+                return Ok(observed);
+            }
+            if tail
+                .next_message()
+                .map_err(|err| err.to_string())?
+                .is_some()
+            {
+                observed += 1;
+            }
+            if observed > 2_000 || done_tail.load(Ordering::Acquire) {
+                return Ok(observed);
+            }
+        }
+    });
+
+    tail_started_rx
+        .recv_timeout(Duration::from_secs(1))
+        .map_err(|err| format!("tail failed to start: {err}"))?;
+    sleep(Duration::from_millis(120));
+
+    let start = Instant::now();
+    cancel.store(true, Ordering::Release);
+    done.store(true, Ordering::Release);
+    let observed = reader
+        .join()
+        .map_err(|_| std::io::Error::other("reader thread panicked"))?
+        .map_err(std::io::Error::other)?;
+    assert!(
+        start.elapsed() < Duration::from_secs(1),
+        "cancellation path was unexpectedly slow"
+    );
+
+    assert!(
+        observed > 0,
+        "expected at least one message before cancellation"
+    );
+    writer
+        .join()
+        .map_err(|_| std::io::Error::other("writer thread panicked"))?
+        .map_err(std::io::Error::other)?;
     Ok(())
 }
 

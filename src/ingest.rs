@@ -1,4 +1,4 @@
-//! Purpose: Parse stdin streams into JSON values for `poke` with explicit, testable modes.
+//! Purpose: Parse stdin streams into JSON values for `feed` with explicit, testable modes.
 //! Exports: `IngestMode`, `ErrorPolicy`, `IngestConfig`, `IngestOutcome`, `IngestFailure`, `ingest`.
 //! Role: Input ingestion engine used by the CLI; isolates streaming heuristics from main.
 //! Invariants: Auto detection is deterministic, bounded, and documented by config limits.
@@ -809,7 +809,7 @@ impl<R: Read> Read for PrefixReader<R> {
 #[cfg(test)]
 mod tests {
     use super::{ErrorPolicy, IngestConfig, IngestFailure, IngestMode, ingest, truncate_snippet};
-    use plasmite::api::Error;
+    use plasmite::api::{Error, ErrorKind};
 
     fn config(mode: IngestMode, errors: ErrorPolicy) -> IngestConfig {
         IngestConfig {
@@ -819,6 +819,177 @@ mod tests {
             sniff_lines: 4,
             max_record_bytes: 1024,
             max_snippet_bytes: 32,
+        }
+    }
+
+    const INGEST_MUTATION_SEED: u64 = 0x0BAD_F00D_BADC_0FFE;
+
+    fn next_seed(seed: &mut u64) -> u64 {
+        *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        *seed
+    }
+
+    fn deterministic_mutation_cases(input: &[u8], count: usize, seed: u64) -> Vec<Vec<u8>> {
+        let mut output = Vec::with_capacity(count);
+        let mut state = seed;
+        for _ in 0..count {
+            let op = (next_seed(&mut state) % 6) as u8;
+            let mut candidate = input.to_vec();
+            match op {
+                0 if !candidate.is_empty() => {
+                    candidate[0] ^= 0x80;
+                }
+                1 if candidate.len() > 1 => {
+                    let idx = (next_seed(&mut state) as usize) % candidate.len();
+                    candidate[idx] = candidate[idx].wrapping_add(0x80);
+                }
+                2 if candidate.len() > 2 => {
+                    candidate.truncate(candidate.len().saturating_sub(2));
+                }
+                3 => {
+                    candidate.push(0x80);
+                }
+                4 => {
+                    candidate.extend_from_slice(b"not-json");
+                }
+                _ => {
+                    candidate = b"\x1e{\"broken\": ".to_vec();
+                }
+            }
+            output.push(candidate);
+        }
+        output
+    }
+
+    #[test]
+    fn jsonl_mutation_matrix_rejects_malformed_records() {
+        let corpus: [&[u8]; 3] = [
+            b"{\"ok\": 1}\n{\"ok\": 2}\n",
+            b"[1, 2, 3]\n",
+            b"{\"nested\": {\"a\": 1}}\n{\"list\": []}\n",
+        ];
+        for (idx, base) in corpus.iter().enumerate() {
+            let mutated =
+                deterministic_mutation_cases(base, 6, INGEST_MUTATION_SEED ^ (idx as u64 * 0x1D));
+            let mut failures = 0u64;
+
+            for payload in mutated {
+                let stop_err = ingest(
+                    &payload[..],
+                    IngestConfig {
+                        mode: IngestMode::Jsonl,
+                        errors: ErrorPolicy::Stop,
+                        sniff_bytes: 128,
+                        sniff_lines: 4,
+                        max_record_bytes: 1024,
+                        max_snippet_bytes: 32,
+                    },
+                    |_| Ok(()),
+                    |_| {},
+                )
+                .expect_err("malformed jsonl should fail in stop mode");
+
+                assert!(matches!(
+                    stop_err.kind(),
+                    ErrorKind::Usage | ErrorKind::Corrupt | ErrorKind::Io
+                ));
+
+                match ingest(
+                    &payload[..],
+                    IngestConfig {
+                        mode: IngestMode::Jsonl,
+                        errors: ErrorPolicy::Skip,
+                        sniff_bytes: 128,
+                        sniff_lines: 4,
+                        max_record_bytes: 1024,
+                        max_snippet_bytes: 32,
+                    },
+                    |_| Ok(()),
+                    |_| {
+                        failures += 1;
+                    },
+                ) {
+                    Ok(outcome) => {
+                        failures = failures.saturating_add(outcome.failed);
+                        assert!(outcome.failed >= 1);
+                        assert_eq!(outcome.records_total, outcome.ok + outcome.failed);
+                    }
+                    Err(err) => {
+                        assert_eq!(err.kind(), ErrorKind::Io);
+                        failures = failures.saturating_add(1);
+                    }
+                }
+            }
+            assert!(failures >= 1);
+        }
+    }
+
+    #[test]
+    fn seq_mode_mutation_matrix_rejects_malformed_records() {
+        let base = b"\x1e{\"ok\": 1}\x1e{\"ok\": 2}\x1e{\"ok\": 3}";
+        let mutated = deterministic_mutation_cases(base, 8, INGEST_MUTATION_SEED ^ 0x00AA00AA);
+
+        for payload in mutated {
+            let skip_result = ingest(
+                &payload[..],
+                IngestConfig {
+                    mode: IngestMode::Seq,
+                    errors: ErrorPolicy::Skip,
+                    sniff_bytes: 128,
+                    sniff_lines: 4,
+                    max_record_bytes: 32,
+                    max_snippet_bytes: 32,
+                },
+                |_| Ok(()),
+                |_| {},
+            )
+            .expect("seq mode should continue in skip mode");
+            assert!(skip_result.failed >= 1);
+            let stop_err = ingest(
+                &payload[..],
+                IngestConfig {
+                    mode: IngestMode::Seq,
+                    errors: ErrorPolicy::Stop,
+                    sniff_bytes: 128,
+                    sniff_lines: 4,
+                    max_record_bytes: 32,
+                    max_snippet_bytes: 32,
+                },
+                |_| Ok(()),
+                |_| {},
+            )
+            .expect_err("malformed seq should fail in stop mode");
+            assert!(matches!(
+                stop_err.kind(),
+                ErrorKind::Usage | ErrorKind::Corrupt | ErrorKind::Io
+            ));
+        }
+    }
+
+    #[test]
+    fn auto_mode_mutation_matrix_rejects_malformed_chunks() {
+        let base = b"data: {\"x\": 1}\n\ndata: {\"x\": 2}\n\ndata: {\"x\": 3}";
+        let mutated = deterministic_mutation_cases(base, 6, INGEST_MUTATION_SEED ^ 0x55AA55AA);
+
+        for payload in mutated {
+            let outcome = ingest(
+                &payload[..],
+                IngestConfig {
+                    mode: IngestMode::Auto,
+                    errors: ErrorPolicy::Stop,
+                    sniff_bytes: 128,
+                    sniff_lines: 4,
+                    max_record_bytes: 1024,
+                    max_snippet_bytes: 32,
+                },
+                |_| Ok(()),
+                |_| {},
+            )
+            .expect_err("auto mode should fail with malformed chunk");
+            assert!(matches!(
+                outcome.kind(),
+                ErrorKind::Usage | ErrorKind::Corrupt | ErrorKind::Io
+            ));
         }
     }
 

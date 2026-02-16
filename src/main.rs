@@ -3833,8 +3833,9 @@ fn follow_replay(pool: &Pool, cfg: &FollowConfig) -> Result<RunOutcome, Error> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Error, ErrorKind, PoolTarget, error_text, matches_required_tags, parse_duration,
-        parse_size, read_token_file, render_table, resolve_pool_target, short_display_path,
+        Error, ErrorKind, PoolTarget, RetryConfig, error_text, matches_required_tags,
+        parse_duration, parse_size, read_token_file, render_table, resolve_pool_target,
+        retry_with_config, short_display_path,
     };
     use serde_json::json;
     use std::io::Cursor;
@@ -4002,6 +4003,47 @@ mod tests {
         let err = resolve_pool_target("http://localhost:9170/demo#frag", Path::new("/tmp/pools"))
             .expect_err("err");
         assert_eq!(err.kind(), ErrorKind::Usage);
+    }
+
+    #[test]
+    fn retry_with_config_retries_until_success() {
+        let mut attempts = 0u32;
+        let value = retry_with_config(
+            Some(RetryConfig {
+                retries: 2,
+                delay: Duration::from_millis(0),
+            }),
+            || {
+                attempts += 1;
+                if attempts < 2 {
+                    return Err(Error::new(ErrorKind::Busy));
+                }
+                Ok(21u8)
+            },
+        )
+        .expect("retry should succeed");
+        assert_eq!(attempts, 2);
+        assert_eq!(value, 21u8);
+    }
+
+    #[test]
+    fn retry_with_config_exhausts_when_still_retryable() {
+        let mut attempts = 0u32;
+        let result: Result<u8, Error> = retry_with_config(
+            Some(RetryConfig {
+                retries: 1,
+                delay: Duration::from_millis(0),
+            }),
+            || {
+                attempts += 1;
+                Err(Error::new(ErrorKind::Busy))
+            },
+        );
+        assert_eq!(attempts, 2);
+        let err = result.expect_err("expected retry exhaustion");
+        assert_eq!(err.kind(), ErrorKind::Busy);
+        let hint = err.hint().unwrap_or("");
+        assert!(hint.contains("Retry attempts: 2"));
     }
 
     #[test]
