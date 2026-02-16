@@ -53,7 +53,7 @@ def main() -> None:
             run_create_pool(client, step, index, step_id)
         elif op == "append":
             run_append(client, step, index, step_id)
-        elif op == "fetch":
+        elif op in ("fetch", "get"):
             run_get(client, step, index, step_id)
         elif op == "tail":
             run_tail(client, step, index, step_id)

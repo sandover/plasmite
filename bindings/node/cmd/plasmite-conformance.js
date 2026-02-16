@@ -49,6 +49,7 @@ async function main() {
         runAppend(client, step, index, stepId);
         break;
       case "fetch":
+      case "get":
         runGet(client, step, index, stepId);
         break;
       case "tail":
