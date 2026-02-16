@@ -436,6 +436,44 @@ fn remote_auth_requires_valid_token() -> TestResult<()> {
 }
 
 #[test]
+fn remote_auth_rejects_malformed_bearer_headers() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::start_with_token(temp_dir.path(), Some("secret"))?;
+    let list_url = format!("{}/v0/pools", server.base_url);
+
+    let malformed = ["", "Token secret"];
+
+    for token in malformed {
+        match ureq::get(&list_url).set("Authorization", token).call() {
+            Ok(_) => return Err("expected auth to fail".into()),
+            Err(ureq::Error::Status(code, resp)) => {
+                assert_eq!(code, 401);
+                let body = resp.into_string()?;
+                let value: Value = serde_json::from_str(&body)?;
+                assert_eq!(value["error"]["kind"], "Permission");
+            }
+            Err(err) => return Err(err.into()),
+        }
+    }
+
+    match ureq::get(&list_url)
+        .set("Authorization", "Bearer secret, Bearer evil")
+        .call()
+    {
+        Ok(_) => return Err("expected auth to fail".into()),
+        Err(ureq::Error::Status(code, resp)) => {
+            assert_eq!(code, 401);
+            let body = resp.into_string()?;
+            let value: Value = serde_json::from_str(&body)?;
+            assert_eq!(value["error"]["kind"], "Permission");
+        }
+        Err(err) => return Err(err.into()),
+    }
+
+    Ok(())
+}
+
+#[test]
 fn remote_rejects_path_pool_names() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::start(temp_dir.path())?;
@@ -794,6 +832,47 @@ fn remote_ui_routes_reject_disallowed_preflight_origin() -> TestResult<()> {
         }
         Err(err) => return Err(err.into()),
     }
+    Ok(())
+}
+
+#[test]
+fn remote_ui_routes_reject_wildcard_and_other_disallowed_origins() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let allowed_origin = "https://demo.wratify.ai";
+    let test_origins = ["*", "https://evil.example"];
+    let server = TestServer::start_with_cors(temp_dir.path(), &[allowed_origin])?;
+
+    for origin in test_origins {
+        let pools_resp = ureq::get(&format!("{}/v0/ui/pools", server.base_url))
+            .set("Origin", origin)
+            .call()
+            .expect("pools request");
+        assert_eq!(pools_resp.status(), 200);
+        assert_ne!(
+            pools_resp.header("access-control-allow-origin"),
+            Some(origin)
+        );
+
+        let preflight = ureq::request(
+            "OPTIONS",
+            &format!("{}/v0/ui/pools/demo/events", server.base_url),
+        )
+        .set("Origin", origin)
+        .set("Access-Control-Request-Method", "GET")
+        .call();
+        match preflight {
+            Ok(resp) => {
+                assert!(matches!(resp.status(), 200 | 204));
+                assert_ne!(resp.header("access-control-allow-origin"), Some(origin));
+            }
+            Err(ureq::Error::Status(code, resp)) => {
+                assert_eq!(code, 403);
+                assert_ne!(resp.header("access-control-allow-origin"), Some(origin));
+            }
+            Err(err) => return Err(err.into()),
+        }
+    }
+
     Ok(())
 }
 

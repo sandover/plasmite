@@ -4724,6 +4724,28 @@ fn serve_rejects_conflicting_tls_flags_with_init_hint() {
 }
 
 #[test]
+fn serve_rejects_wildcard_cors_origin() {
+    let serve = cmd()
+        .args(["serve", "--bind", "127.0.0.1:0", "--cors-origin", "*"])
+        .output()
+        .expect("serve");
+    assert!(!serve.status.success());
+    let err = parse_error_json(&serve.stderr);
+    let kind = err
+        .get("error")
+        .and_then(|v| v.get("kind"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert_eq!(kind, "Usage");
+    let message = err
+        .get("error")
+        .and_then(|v| v.get("message"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(message.contains("wildcard"));
+}
+
+#[test]
 fn serve_responses_include_version_header() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
