@@ -208,7 +208,7 @@ impl<'a> Lite3DocRef<'a> {
             Err(err) => return Err(err.with_message("missing meta")),
         };
 
-        let descrips_type = unsafe {
+        let tags_type = unsafe {
             sys::plasmite_lite3_get_type(
                 self.bytes.as_ptr(),
                 self.bytes.len(),
@@ -216,16 +216,16 @@ impl<'a> Lite3DocRef<'a> {
                 c_key("tags").as_ptr(),
             )
         };
-        if descrips_type != sys::LITE3_TYPE_ARRAY {
+        if tags_type != sys::LITE3_TYPE_ARRAY {
             return Err(Error::new(ErrorKind::Corrupt).with_message("meta.tags must be array"));
         }
 
-        let descrips_ofs = get_key_offset_at(self.bytes, meta_ofs, "tags")
+        let tags_ofs = get_key_offset_at(self.bytes, meta_ofs, "tags")
             .map_err(|err| err.with_message("missing meta.tags"))?;
 
-        let count = array_count(self.bytes, descrips_ofs)?;
+        let count = array_count(self.bytes, tags_ofs)?;
         for index in 0..count {
-            let item_type = array_item_type(self.bytes, descrips_ofs, index)?;
+            let item_type = array_item_type(self.bytes, tags_ofs, index)?;
             if item_type != sys::LITE3_TYPE_STRING {
                 return Err(
                     Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
@@ -237,12 +237,12 @@ impl<'a> Lite3DocRef<'a> {
     }
 }
 
-pub fn encode_message(meta_descrips: &[String], data: &Value) -> Result<Lite3Buf, Error> {
+pub fn encode_message(meta_tags: &[String], data: &Value) -> Result<Lite3Buf, Error> {
     if !matches!(data, Value::Object(_)) {
         return Err(Error::new(ErrorKind::Usage).with_message("data must be object"));
     }
 
-    let tags = meta_descrips
+    let tags = meta_tags
         .iter()
         .cloned()
         .map(Value::String)

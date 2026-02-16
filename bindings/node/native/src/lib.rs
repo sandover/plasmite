@@ -87,7 +87,7 @@ unsafe extern "C" {
         json_bytes: *const u8,
         json_len: usize,
         tags: *const *const c_char,
-        descrips_len: usize,
+        tags_len: usize,
         durability: u32,
         out_message: *mut plsm_buf_t,
         out_err: *mut *mut plsm_error_t,
@@ -257,7 +257,7 @@ pub struct Lite3Frame {
 impl Pool {
     #[napi]
     pub fn append_json(&self, payload: Buffer, tags: Vec<String>, durability: Durability) -> Result<Buffer> {
-        let c_descrips = CStringArray::new(&tags)?;
+        let c_tags = CStringArray::new(&tags)?;
         let mut out = plsm_buf_t { data: ptr::null_mut(), len: 0 };
         let mut err = ptr::null_mut();
         let rc = unsafe {
@@ -265,7 +265,7 @@ impl Pool {
                 self.ptr,
                 payload.as_ptr(),
                 payload.len(),
-                c_descrips.as_ptr(),
+                c_tags.as_ptr(),
                 tags.len(),
                 durability as u32,
                 &mut out,

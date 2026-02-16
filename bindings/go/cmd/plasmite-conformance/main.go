@@ -262,7 +262,7 @@ func runGet(client *plasmite.Client, step map[string]any, index int, stepID *str
 	if err := expectData(step, msg.Data, index, stepID); err != nil {
 		return err
 	}
-	if err := expectDescrips(step, msg.Meta.Tags, index, stepID); err != nil {
+	if err := expectTags(step, msg.Meta.Tags, index, stepID); err != nil {
 		return err
 	}
 
@@ -504,8 +504,8 @@ func runSpawnPoke(repoRoot string, workdirPath string, step map[string]any, inde
 			return stepErr(index, stepID, fmt.Sprintf("encode payload failed: %v", err))
 		}
 		var tags []string
-		if rawDescrips, ok := entry["tags"].([]any); ok {
-			tags, err = parseStringArray(rawDescrips)
+		if rawTags, ok := entry["tags"].([]any); ok {
+			tags, err = parseStringArray(rawTags)
 			if err != nil {
 				return stepErr(index, stepID, err.Error())
 			}
@@ -893,8 +893,8 @@ func expectedMessages(step map[string]any, index int, stepID *string) ([]message
 			return nil, false, stepErr(index, stepID, "message must be object")
 		}
 		messages[i] = messageExpectation{Data: entry["data"]}
-		if rawDescrips, ok := entry["tags"].([]any); ok {
-			tags, err := parseStringArray(rawDescrips)
+		if rawTags, ok := entry["tags"].([]any); ok {
+			tags, err := parseStringArray(rawTags)
 			if err != nil {
 				return nil, false, stepErr(index, stepID, err.Error())
 			}
@@ -933,7 +933,7 @@ func expectData(step map[string]any, actual any, index int, stepID *string) erro
 	return nil
 }
 
-func expectDescrips(step map[string]any, actual []string, index int, stepID *string) error {
+func expectTags(step map[string]any, actual []string, index int, stepID *string) error {
 	expect, ok := step["expect"].(map[string]any)
 	if !ok {
 		return nil

@@ -198,7 +198,7 @@ fn run_get(
         Ok(message) => {
             if let Some(expect) = step.get("expect") {
                 expect_data(expect, &message.data, index, step_id)?;
-                expect_descrips(expect, &message.meta.tags, index, step_id)?;
+                expect_tags(expect, &message.meta.tags, index, step_id)?;
             }
             validate_expect_error(step.get("expect"), &Ok(()), index, step_id)
         }
@@ -302,7 +302,7 @@ fn run_tail(
                 for (idx, expected) in expected_messages.iter().enumerate() {
                     let actual = &messages[idx];
                     expect_data(expected, &actual.data, index, step_id)?;
-                    expect_descrips(expected, &actual.meta.tags, index, step_id)?;
+                    expect_tags(expected, &actual.meta.tags, index, step_id)?;
                 }
             }
 
@@ -633,14 +633,14 @@ fn expect_data(
     Ok(())
 }
 
-fn expect_descrips(
+fn expect_tags(
     expect: &Value,
     actual: &[String],
     index: usize,
     step_id: &Option<String>,
 ) -> Result<(), String> {
-    if let Some(expected_descrips) = expect.get("tags") {
-        let expected = match expected_descrips.as_array() {
+    if let Some(expected_tags) = expect.get("tags") {
+        let expected = match expected_tags.as_array() {
             Some(values) => parse_string_array(values.as_slice())
                 .map_err(|err| step_err(index, step_id, &err))?,
             None => return Err(step_err(index, step_id, "tags must be array")),
@@ -719,8 +719,8 @@ fn matches_expected_message(
     if expected_data != &actual.data {
         return Ok(false);
     }
-    if let Some(expected_descrips) = expected.get("tags") {
-        let expected = match expected_descrips.as_array() {
+    if let Some(expected_tags) = expected.get("tags") {
+        let expected = match expected_tags.as_array() {
             Some(values) => parse_string_array(values.as_slice())?,
             None => return Err("tags must be array".to_string()),
         };

@@ -322,7 +322,7 @@ async function runSpawnPoke(repoRoot, workdirPath, step, index, stepId) {
     return new Promise((resolve, reject) => {
       const child = spawn(
         plasmiteBin,
-        ["--dir", workdirPath, "feed", pool, payload, ...flattenDescrips(tags)],
+        ["--dir", workdirPath, "feed", pool, payload, ...flattenTags(tags)],
         { stdio: "inherit" }
       );
       child.on("error", reject);
@@ -522,7 +522,7 @@ function resolvePlasmiteBin(repoRoot) {
   throw new Error("plasmite binary not found; set PLASMITE_BIN or build target/debug/plasmite");
 }
 
-function flattenDescrips(tags) {
+function flattenTags(tags) {
   const out = [];
   tags.forEach((value) => {
     out.push("--tag", value);

@@ -208,7 +208,7 @@ pub extern "C" fn plsm_pool_append_json(
     json_bytes: *const u8,
     json_len: usize,
     tags: *const *const c_char,
-    descrips_len: usize,
+    tags_len: usize,
     durability: u32,
     out_message: *mut plsm_buf,
     out_err: *mut *mut plsm_error,
@@ -221,7 +221,7 @@ pub extern "C" fn plsm_pool_append_json(
         Ok(value) => value,
         Err(err) => return fail(out_err, err),
     };
-    let tags = match parse_descrips(tags, descrips_len) {
+    let tags = match parse_tags(tags, tags_len) {
         Ok(tags) => tags,
         Err(err) => return fail(out_err, err),
     };
@@ -707,7 +707,7 @@ fn parse_json_bytes(bytes: *const u8, len: usize) -> Result<Value, Error> {
     })
 }
 
-fn parse_descrips(tags: *const *const c_char, len: usize) -> Result<Vec<String>, Error> {
+fn parse_tags(tags: *const *const c_char, len: usize) -> Result<Vec<String>, Error> {
     if tags.is_null() {
         return Ok(Vec::new());
     }
@@ -738,16 +738,16 @@ fn message_from_frame(frame: &crate::api::FrameRef<'_>) -> Result<crate::api::Me
     let meta_ofs = doc
         .key_offset("meta")
         .map_err(|err| err.with_message("missing meta"))?;
-    let descrips_ofs = doc
+    let tags_ofs = doc
         .key_offset_at(meta_ofs, "tags")
         .map_err(|err| err.with_message("missing meta.tags"))?;
-    let descrips_json = doc.to_json_at(descrips_ofs, false)?;
-    let descrips_value: Value = serde_json::from_str(&descrips_json).map_err(|err| {
+    let tags_json = doc.to_json_at(tags_ofs, false)?;
+    let tags_value: Value = serde_json::from_str(&tags_json).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid payload json")
             .with_source(err)
     })?;
-    let tags = descrips_value
+    let tags = tags_value
         .as_array()
         .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("meta.tags must be array"))?
         .iter()

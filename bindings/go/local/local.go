@@ -172,7 +172,7 @@ func (p *Pool) AppendJSON(payload []byte, tags []string, durability Durability) 
 	cPayload := (*C.uint8_t)(unsafe.Pointer(&payload[0]))
 	cLen := C.size_t(len(payload))
 
-	cDescrips, cleanup := cStringArray(tags)
+	cTags, cleanup := cStringArray(tags)
 	defer cleanup()
 
 	var cBuf C.plsm_buf_t
@@ -181,7 +181,7 @@ func (p *Pool) AppendJSON(payload []byte, tags []string, durability Durability) 
 		p.ptr,
 		cPayload,
 		cLen,
-		cDescrips,
+		cTags,
 		C.size_t(len(tags)),
 		C.uint32_t(durability),
 		&cBuf,
