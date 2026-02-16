@@ -175,7 +175,7 @@ Bindings only (no CLI). Links against `libplasmite` via cgo, so you'll need the 
 
 Tarballs for Linux and macOS are on [GitHub Releases](https://github.com/sandover/plasmite/releases). Each archive contains `bin/`, `lib/`, `include/`, and `lib/pkgconfig/`.
 
-Windows builds (`x86_64-pc-windows-msvc`) are best-effort for now. See the [distribution docs](docs/record/distribution.md) for details and troubleshooting.
+Windows builds (`x86_64-pc-windows-msvc`) are available via npm and PyPI. See the [distribution docs](docs/record/distribution.md) for the full install matrix.
 
 ## Commands
 

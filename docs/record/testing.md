@@ -28,21 +28,6 @@ release complexity or fragile gating.
 - **Lane C (manual/on-demand):** developer-invoked deep checks only.
   - Not part of required CI or release-publish automation.
 
-Current and planned hardening work from epic `I5PCAT` maps to lanes as follows:
-
-- Gap 1 (seeded parser/frame robustness): Lane A for core deterministic cases,
-  Lane B for broader deterministic corpus checks.
-- Gap 2 (fault-matrix I/O/process failures): Lane A for stable black-box
-  failures, Lane B for broader matrix coverage.
-- Gap 4 (remote adversarial stream lifecycle): Lane A for deterministic
-  reconnect/cancel boundary checks, Lane B for expanded matrix.
-- Gap 5 (auth/CORS abuse-negative matrix): Lane A for critical malformed-input
-  rejects, Lane B for broader edge matrix.
-- Cookbook executable examples: Lane A for golden local examples; Lane B for
-  expanded deterministic docs-smoke coverage.
-  - Golden sections in `docs/cookbook.md`: CI Gate, Live Build Progress,
-    Multi-Writer Event Bus, Replay & Debug, Remote Pool Access.
-
 ### Cookbook smoke checks
 
 Run:

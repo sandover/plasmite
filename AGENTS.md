@@ -16,7 +16,7 @@ docs/
 ├── record/architecture.md                      — Implementation architecture; read when changing internals or layering
 ├── record/testing.md                           — Test strategy + commands; read when adding/fixing tests
 ├── record/releasing.md                         — Release policy + versioning; read for what/why (mechanics live in release skill)
-├── record/distribution.md                      — Channel/install matrix + SDK (Software Development Kit) layout
+├── record/distribution.md                      — Supported platforms, install channels, and SDK layout; read when adding a channel or platform
 ├── ../include/plasmite.h                       — C ABI header; read for stability contract, ownership rules, linking
 ├── record/serving.md                           — Serving + remote access (TLS, auth, CORS, deployment)
 │
