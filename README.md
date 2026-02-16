@@ -5,15 +5,15 @@
 
 **Easy interprocess communication.**
 
-Interprocess communication should not be the hard part.
+What would it take to make IPC easier and more robust and more fun?
 
-- Processes crash and restart — message channels should be resilient to that
-- Messages should persist on disk so nothing ever gets lost
-- For local IPC, you shouldn't need a server
-- Messages should be human-inspectable at all times without ceremony
-- Schemas are great but should be optional
-- Disks should never fill up by surprise
-- It should be fast, ideally with zero-copy reads
+- Reading and writing processes come and go... so **message channels should outlast them**
+- Machines crash... so **channels should persist on disk**
+- Disks are finite... so **channels should be bounded in size**
+- Message brokers bring complexity and ceremony... so for local IPC, **don't require a broker**
+- Observability is crucial... so **messages must be inspectable**
+- Schemas are great... but **schemas should be optional**
+- Latency matters... so **IPC should be fast**, zero-copy wherever possible
 
 So, there's **Plasmite**.
 
@@ -26,11 +26,11 @@ pls pool create my-channel</pre></td>
 </tr>
 <tr>
 <td></td>
-<td><pre lang="bash"># Bob starts following
+<td><pre lang="bash"># Bob starts reading
 pls follow my-channel</pre></td>
 </tr>
 <tr>
-<td><pre lang="bash"># Alice feeds the channel
+<td><pre lang="bash"># Alice writes a message
 pls feed my-channel \
   '{"from": "alice",
     "msg": "hello world"}'</pre></td>
@@ -131,13 +131,13 @@ Plasmite is designed for single-host and host-adjacent messaging. If you need mu
 
 ## Install
 
-### macOS (recommended)
+### macOS
 
 ```bash
 brew install sandover/tap/plasmite
 ```
 
-Installs the CLI (`plasmite` + `pls`) and the full SDK (`libplasmite`, C header, pkg-config). Also required for Go bindings.
+Installs the CLI (`plasmite` + `pls`) and the full SDK (`libplasmite`, C header, pkg-config). Go bindings link against this SDK, so install Homebrew first if you're using Go.
 
 ### Rust
 
@@ -153,7 +153,7 @@ uv tool install plasmite   # standalone CLI + Python bindings
 uv add plasmite            # add to an existing uv-managed project
 ```
 
-Everything you need is included in the package — no separate compile step.
+The wheel includes pre-built native bindings.
 
 ### Node
 
@@ -161,7 +161,7 @@ Everything you need is included in the package — no separate compile step.
 npm i -g plasmite
 ```
 
-Everything you need is included in the package — no separate compile step.
+The package includes pre-built native bindings.
 
 ### Go
 
@@ -169,13 +169,13 @@ Everything you need is included in the package — no separate compile step.
 go get github.com/sandover/plasmite/bindings/go/plasmite
 ```
 
-Go bindings only (no CLI). Requires the system SDK — install via Homebrew first.
+Bindings only (no CLI). Links against `libplasmite` via cgo, so you'll need the SDK on your system first — via Homebrew on macOS, or from a [GitHub Releases](https://github.com/sandover/plasmite/releases) tarball on Linux.
 
 ### Pre-built binaries
 
-Download tarballs from [GitHub Releases](https://github.com/sandover/plasmite/releases). Each archive contains a full SDK layout: `bin/`, `lib/`, `include/`, and `lib/pkgconfig/`.
+Tarballs for Linux and macOS are on [GitHub Releases](https://github.com/sandover/plasmite/releases). Each archive contains `bin/`, `lib/`, `include/`, and `lib/pkgconfig/`.
 
-Windows builds (`x86_64-pc-windows-msvc`) are available as a best-effort preview. See the [distribution docs](docs/record/distribution.md) for details, troubleshooting, and registry setup.
+Windows builds (`x86_64-pc-windows-msvc`) are best-effort for now. See the [distribution docs](docs/record/distribution.md) for details and troubleshooting.
 
 ## Commands
 
