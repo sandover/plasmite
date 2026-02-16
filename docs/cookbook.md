@@ -238,6 +238,25 @@ Then your page can:
 - List pools with `GET /v0/ui/pools`
 - Stream one pool with `GET /v0/ui/pools/<pool>/events`
 
+## Cookbook Golden Checks
+
+The following sections are covered by `scripts/cookbook_smoke.sh` and enforced in
+`just ci-fast`:
+
+- CI Gate
+- Live Build Progress
+- Multi-Writer Event Bus
+- Replay & Debug
+- Remote Pool Access
+
+Non-gated sections in this pass:
+
+- System Log Intake
+- Ingest an API Event Stream
+- Polyglot Service Stitching
+- When Plasmite Isn't the Right Fit
+- Next Steps
+
 Operational notes:
 - For an HTTPS page, use HTTPS on the pool endpoint too (browser mixed-content rules).
 - `--cors-origin` is exact-match only and repeatable for multiple origins.

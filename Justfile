@@ -20,8 +20,12 @@ test:
 
 # Lane A: deterministic fast hardening checks for local iteration + PR CI.
 # Keep runtime bounded and avoid flaky timing-sensitive scenarios.
-hardening-fast: test
+hardening-fast: test cookbook-smoke
 	@echo "hardening-fast complete"
+
+cookbook-smoke:
+	bash scripts/cookbook_smoke.sh
+	@echo "cookbook-smoke complete"
 
 # Lane B: broader deterministic hardening checks for full/main CI.
 # This lane is intentionally broader than Lane A but still release-agnostic.

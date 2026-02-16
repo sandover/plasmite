@@ -20,6 +20,7 @@ release complexity or fragile gating.
   - Command: `just hardening-fast`
   - Included by: `just ci-fast` (and therefore PR CI)
   - Intended for deterministic checks with bounded runtime overhead.
+  - Includes `bash scripts/cookbook_smoke.sh` for golden cookbook coverage.
 - **Lane B (broad, deterministic):** main/scheduled full CI path.
   - Command: `just hardening-broad`
   - Included by: `just ci` / `just ci-full`
@@ -39,6 +40,25 @@ Current and planned hardening work from epic `I5PCAT` maps to lanes as follows:
   rejects, Lane B for broader edge matrix.
 - Cookbook executable examples: Lane A for golden local examples; Lane B for
   expanded deterministic docs-smoke coverage.
+  - Golden sections in `docs/cookbook.md`: CI Gate, Live Build Progress,
+    Multi-Writer Event Bus, Replay & Debug, Remote Pool Access.
+
+### Cookbook smoke checks
+
+Run:
+
+```bash
+bash scripts/cookbook_smoke.sh
+```
+
+The script validates a focused set of end-to-end cookbook examples using only local
+and loopback operations:
+
+- CI Gate
+- Live Build Progress
+- Multi-Writer Event Bus
+- Replay & Debug
+- Remote Pool Access
 
 Policy constraints:
 
