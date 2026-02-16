@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sandover/plasmite/bindings/go/plasmite"
+	plasmite "github.com/sandover/plasmite/bindings/go/plasmite/local"
 )
 
 type message struct {
@@ -916,7 +916,7 @@ func resolvePlasmiteBin(repoRoot string) (string, error) {
 }
 
 type messageExpectation struct {
-	Data     any
+	Data any
 	Tags []string
 }
 

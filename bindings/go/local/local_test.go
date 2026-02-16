@@ -5,7 +5,7 @@ Role: Exercise tail cancellation/timeout and large payload handling.
 Invariants: Requires libplasmite build output in library search path.
 Notes: Uses temporary directories; avoids global state.
 */
-package plasmite
+package local
 
 import (
 	"bytes"

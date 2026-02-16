@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Go binding package layout now uses `bindings/go/api` for pure contracts and `bindings/go/local` for cgo implementation details; this is an intentionally breaking import-path change with no compatibility shim.
+
 ## [0.1.0] - 2026-02-06
 
 ### Added

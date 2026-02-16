@@ -5,7 +5,7 @@ Role: Minimal, ergonomic wrapper around include/plasmite.h for Go users.
 Invariants: Caller must Close resources; JSON bytes in/out; errors returned as Go error.
 Notes: Uses cgo and links to -lplasmite; caller configures library search path.
 */
-package plasmite
+package local
 
 /*
 #cgo pkg-config: plasmite
@@ -19,64 +19,34 @@ import "C"
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"runtime"
 	"time"
 	"unsafe"
+
+	"github.com/sandover/plasmite/bindings/go/plasmite/api"
 )
 
-type ErrorKind int32
+type ErrorKind = api.ErrorKind
 
 const (
-	ErrorInternal      ErrorKind = C.PLSM_ERROR_INTERNAL
-	ErrorUsage         ErrorKind = C.PLSM_ERROR_USAGE
-	ErrorNotFound      ErrorKind = C.PLSM_ERROR_NOT_FOUND
-	ErrorAlreadyExists ErrorKind = C.PLSM_ERROR_ALREADY_EXISTS
-	ErrorBusy          ErrorKind = C.PLSM_ERROR_BUSY
-	ErrorPermission    ErrorKind = C.PLSM_ERROR_PERMISSION
-	ErrorCorrupt       ErrorKind = C.PLSM_ERROR_CORRUPT
-	ErrorIO            ErrorKind = C.PLSM_ERROR_IO
+	ErrorInternal      ErrorKind = api.ErrorInternal
+	ErrorUsage         ErrorKind = api.ErrorUsage
+	ErrorNotFound      ErrorKind = api.ErrorNotFound
+	ErrorAlreadyExists ErrorKind = api.ErrorAlreadyExists
+	ErrorBusy          ErrorKind = api.ErrorBusy
+	ErrorPermission    ErrorKind = api.ErrorPermission
+	ErrorCorrupt       ErrorKind = api.ErrorCorrupt
+	ErrorIO            ErrorKind = api.ErrorIO
 )
 
-type Error struct {
-	Kind    ErrorKind
-	Message string
-	Path    string
-	Seq     *uint64
-	Offset  *uint64
-}
+type Error = api.Error
 
 var (
-	ErrClosed          = errors.New("plasmite: closed")
-	ErrInvalidArgument = errors.New("plasmite: invalid argument")
+	ErrClosed          = api.ErrClosed
+	ErrInvalidArgument = api.ErrInvalidArgument
 )
-
-func (e *Error) Error() string {
-	if e == nil {
-		return "plasmite: <nil error>"
-	}
-	if e.Path != "" {
-		return fmt.Sprintf("plasmite: %s (%s)", e.Message, e.Path)
-	}
-	return fmt.Sprintf("plasmite: %s", e.Message)
-}
-
-type Durability uint32
-
-const (
-	DurabilityFast  Durability = 0
-	DurabilityFlush Durability = 1
-)
-
-type PoolRef string
-
-func PoolRefName(name string) PoolRef { return PoolRef(name) }
-
-func PoolRefPath(path string) PoolRef { return PoolRef(path) }
-
-func PoolRefURI(uri string) PoolRef { return PoolRef(uri) }
 
 type Client struct {
 	ptr *C.plsm_client_t
@@ -94,12 +64,33 @@ type Lite3Stream struct {
 	ptr *C.plsm_lite3_stream_t
 }
 
-type Lite3Frame struct {
-	Seq         uint64
-	TimestampNs uint64
-	Flags       uint32
-	Payload     []byte
-}
+type Durability = api.Durability
+
+const (
+	DurabilityFast  Durability = api.DurabilityFast
+	DurabilityFlush Durability = api.DurabilityFlush
+)
+
+type PoolRef = api.PoolRef
+
+func PoolRefName(name string) PoolRef { return api.PoolRefName(name) }
+
+func PoolRefPath(path string) PoolRef { return api.PoolRefPath(path) }
+
+func PoolRefURI(uri string) PoolRef { return api.PoolRefURI(uri) }
+
+type Lite3Frame = api.Lite3Frame
+
+type TailOptions = api.TailOptions
+
+type ReplayOptions = api.ReplayOptions
+
+var (
+	_ api.Client      = (*Client)(nil)
+	_ api.Pool        = (*Pool)(nil)
+	_ api.Stream      = (*Stream)(nil)
+	_ api.Lite3Stream = (*Lite3Stream)(nil)
+)
 
 func NewClient(poolDir string) (*Client, error) {
 	if poolDir == "" {
@@ -125,7 +116,7 @@ func (c *Client) Close() {
 	c.ptr = nil
 }
 
-func (c *Client) CreatePool(ref PoolRef, sizeBytes uint64) (*Pool, error) {
+func (c *Client) CreatePool(ref PoolRef, sizeBytes uint64) (api.Pool, error) {
 	if c == nil || c.ptr == nil {
 		return nil, closedError("client")
 	}
@@ -144,7 +135,7 @@ func (c *Client) CreatePool(ref PoolRef, sizeBytes uint64) (*Pool, error) {
 	return &Pool{ptr: cPool}, nil
 }
 
-func (c *Client) OpenPool(ref PoolRef) (*Pool, error) {
+func (c *Client) OpenPool(ref PoolRef) (api.Pool, error) {
 	if c == nil || c.ptr == nil {
 		return nil, closedError("client")
 	}
@@ -270,7 +261,7 @@ func (p *Pool) GetLite3(seq uint64) (*Lite3Frame, error) {
 	return copyAndFreeLite3Frame(&cFrame), nil
 }
 
-func (p *Pool) OpenStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (*Stream, error) {
+func (p *Pool) OpenStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (api.Stream, error) {
 	if p == nil || p.ptr == nil {
 		return nil, closedError("pool")
 	}
@@ -312,7 +303,7 @@ func (p *Pool) OpenStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint
 	return &Stream{ptr: cStream}, nil
 }
 
-func (p *Pool) OpenLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (*Lite3Stream, error) {
+func (p *Pool) OpenLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (api.Lite3Stream, error) {
 	if p == nil || p.ptr == nil {
 		return nil, closedError("pool")
 	}
@@ -402,14 +393,6 @@ func (s *Lite3Stream) Close() {
 	}
 	C.plsm_lite3_stream_free(s.ptr)
 	s.ptr = nil
-}
-
-type TailOptions struct {
-	SinceSeq    *uint64
-	MaxMessages *uint64
-	Tags        []string
-	Timeout     time.Duration
-	Buffer      int
 }
 
 // Tail streams JSON messages on a buffered channel.
@@ -574,14 +557,6 @@ func (p *Pool) TailLite3(ctx context.Context, opts TailOptions) (<-chan *Lite3Fr
 	}()
 
 	return out, errs
-}
-
-// ReplayOptions configures a bounded replay of pool messages with inter-message timing.
-type ReplayOptions struct {
-	Speed       float64       // Speed multiplier (1.0 = realtime)
-	SinceSeq    *uint64       // Optional: only messages at/after this seq
-	MaxMessages *uint64       // Optional: replay at most N messages
-	Timeout     time.Duration // Timeout for initial stream read
 }
 
 // Replay collects all messages from the pool, then yields them with inter-message delays

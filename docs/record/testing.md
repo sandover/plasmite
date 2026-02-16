@@ -163,6 +163,13 @@ just bindings-test
 just bindings-go-test
 ```
 
+CI also enforces a no-CGO API-contract validation:
+
+```bash
+cd bindings/go
+CGO_ENABLED=0 go test ./api/...
+```
+
 Or manually:
 
 ```bash

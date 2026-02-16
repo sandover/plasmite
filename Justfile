@@ -42,6 +42,10 @@ bindings-go-test:
 	mkdir -p tmp/go-cache tmp/go-tmp
 	cd bindings/go && GOCACHE="$(pwd)/../../tmp/go-cache" GOTMPDIR="$(pwd)/../../tmp/go-tmp" PLASMITE_LIB_DIR="$(pwd)/../../target/debug" PKG_CONFIG="/usr/bin/true" CGO_CFLAGS="-I$(pwd)/../../include" CGO_LDFLAGS="-L$(pwd)/../../target/debug" go test ./...
 
+# Run Go API contract tests without CGO.
+bindings-go-contract-test:
+	cd bindings/go && CGO_ENABLED=0 go test ./api/...
+
 # Run Python bindings unit tests.
 bindings-python-test:
 	cargo build -p plasmite
@@ -62,7 +66,7 @@ bindings-node-typecheck:
 bindings-test: bindings-go-test bindings-python-test bindings-node-test bindings-node-typecheck
 
 # Fast local CI parity gate used during iteration.
-ci-fast: fmt clippy hardening-fast check-version-alignment bindings-node-typecheck
+ci-fast: fmt clippy hardening-fast check-version-alignment bindings-go-contract-test bindings-node-typecheck
 
 # Full CI parity gate including ABI/conformance/cross-artifact checks.
 ci-full: fmt clippy hardening-fast check-version-alignment abi-smoke hardening-broad bindings-node-typecheck
