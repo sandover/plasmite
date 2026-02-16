@@ -74,7 +74,7 @@ Each step is a mapping with these fields:
 
 - `pool` (required).
 - `input.messages` (required): Array of message objects with `data` and optional `tags`.
-- Spawns separate processes that append concurrently via the CLI (`plasmite poke`).
+- Spawns separate processes that append concurrently via the CLI (`plasmite feed`).
 - Runners may honor `PLASMITE_BIN` to locate the CLI binary.
 
 ### `corrupt_pool_header`

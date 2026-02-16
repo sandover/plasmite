@@ -13,12 +13,12 @@ All notable changes to this project will be documented in this file.
 - Public Rust API (`plasmite::api`)
 - Remote protocol spec (HTTP/JSON)
 - Conformance test suite (cross-language)
-- Remote `poke`/`peek` via shorthand URLs
+- Remote `feed`/`follow` via shorthand URLs
 - Inline seq→offset index for fast `get(seq)` lookups
-- `peek --where` filtering with jq predicates
-- `peek --tag` filtering with exact tag match
-- `peek --replay` for timed playback at configurable speeds
-- `peek --one`, `peek --timeout`, `peek --data-only` for scripting
+- `follow --where` filtering with jq predicates
+- `follow --tag` filtering with exact tag match
+- `follow --replay` for timed playback at configurable speeds
+- `follow --one`, `follow --timeout`, `follow --data-only` for scripting
 - Shell completion (bash/zsh/fish)
 - Web UI (zero-build single-page app) at `/ui`
 - Binary releases for macOS (arm64/amd64) and Linux (amd64/arm64)

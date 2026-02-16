@@ -430,7 +430,7 @@ fn run_spawn_poke(
         let mut cmd = Command::new(&plasmite_bin);
         cmd.arg("--dir")
             .arg(workdir_path)
-            .arg("poke")
+            .arg("feed")
             .arg(pool)
             .arg(payload)
             .stdout(Stdio::null())
@@ -442,16 +442,16 @@ fn run_spawn_poke(
         }
         let child = cmd
             .spawn()
-            .map_err(|err| step_err(index, step_id, &format!("spawn poke failed: {err}")))?;
+            .map_err(|err| step_err(index, step_id, &format!("spawn feed failed: {err}")))?;
         children.push(child);
     }
 
     for mut child in children {
         let status = child
             .wait()
-            .map_err(|err| step_err(index, step_id, &format!("poke wait failed: {err}")))?;
+            .map_err(|err| step_err(index, step_id, &format!("feed wait failed: {err}")))?;
         if !status.success() {
-            return Err(step_err(index, step_id, "poke process failed"));
+            return Err(step_err(index, step_id, "feed process failed"));
         }
     }
 

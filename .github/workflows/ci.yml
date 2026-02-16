@@ -104,10 +104,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
           Set-Content -Path $payloadPath -Value '{"ci":"windows-smoke"}' -NoNewline
           & $exe --dir $dir pool create $pool
-          & $exe --dir $dir poke $pool -f $payloadPath
-          $out = & $exe --dir $dir peek $pool --tail 1 --one --timeout 2s --data-only --format jsonl
+          & $exe --dir $dir feed $pool -f $payloadPath
+          $out = & $exe --dir $dir follow $pool --tail 1 --one --timeout 2s --data-only --format jsonl
           if (-not ($out -match '"ci":"windows-smoke"')) {
-            throw "Roundtrip payload marker missing from peek output."
+            throw "Roundtrip payload marker missing from follow output."
           }
 
   pr-fast:

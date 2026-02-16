@@ -42,7 +42,7 @@ mod tests {
         let notice = Notice {
             kind: "drop".to_string(),
             time: "2026-02-01T00:00:00Z".to_string(),
-            cmd: "peek".to_string(),
+            cmd: "follow".to_string(),
             pool: "demo".to_string(),
             message: "dropped 3 messages".to_string(),
             details,
@@ -59,7 +59,7 @@ mod tests {
             obj.get("time").and_then(|v| v.as_str()),
             Some("2026-02-01T00:00:00Z")
         );
-        assert_eq!(obj.get("cmd").and_then(|v| v.as_str()), Some("peek"));
+        assert_eq!(obj.get("cmd").and_then(|v| v.as_str()), Some("follow"));
         assert_eq!(obj.get("pool").and_then(|v| v.as_str()), Some("demo"));
         assert_eq!(
             obj.get("message").and_then(|v| v.as_str()),

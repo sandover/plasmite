@@ -25,9 +25,9 @@ Only these commands are in-scope for v0.0.1:
 * `plasmite pool info`
 * `plasmite pool list`
 * `plasmite pool delete`
-* `plasmite poke`
-* `plasmite get`
-* `plasmite peek`
+* `plasmite feed`
+* `plasmite fetch`
+* `plasmite follow`
 * `plasmite version`
 
 ### Flags in scope
@@ -40,10 +40,10 @@ Minimal, explicit flag set for v0.0.1:
 * `pool delete`: `--json`
 * `doctor`: `--all`, `--json`
 * `serve check`: `--json`
-* `poke`: `DATA`, `--file FILE`, `--in`, `--errors`, `--tag`, `--durability fast|flush`, `--create`, `--create-size`, `--retry`, `--retry-delay`
-* `peek`: `--tail`, `--since`, `--tag`, `--where`, `--format pretty|jsonl`, `--jsonl`, `--quiet-drops`
+* `feed`: `DATA`, `--file FILE`, `--in`, `--errors`, `--tag`, `--durability fast|flush`, `--create`, `--create-size`, `--retry`, `--retry-delay`
+* `follow`: `--tail`, `--since`, `--tag`, `--where`, `--format pretty|jsonl`, `--jsonl`, `--quiet-drops`
 
-`pool create`, `pool list`, `pool delete`, `doctor`, and `serve check` print human-readable output by default and support `--json` for machine-readable output. `poke` emits append receipts (`seq`, `time`, `meta`) and does not echo `data`.
+`pool create`, `pool list`, `pool delete`, `doctor`, and `serve check` print human-readable output by default and support `--json` for machine-readable output. `feed` emits append receipts (`seq`, `time`, `meta`) and does not echo `data`.
 
 Errors:
 - On TTY, emit concise human text (single summary line + hint).
@@ -79,7 +79,7 @@ The CLI message schema is fixed and versioned by convention:
 
 * `meta.tags` is always present (empty array if unset).
 * On disk: the payload is Lite³ bytes for `{meta,data}`.
-* On the CLI: JSON in/out only (encode on `poke`, decode on reads).
+* On the CLI: JSON in/out only (encode on `feed`, decode on reads).
 
 ### Pool format versioning
 
@@ -134,7 +134,7 @@ When stderr is **not** a TTY, notices are JSON objects with a stable envelope:
   "notice": {
     "kind": "drop",
     "time": "2026-02-01T00:00:00Z",
-    "cmd": "peek",
+    "cmd": "follow",
     "name": "demo",
     "message": "dropped 3 messages",
     "details": {
@@ -162,15 +162,15 @@ Invariants:
 
 ### Notice kinds (current)
 
-* `drop` (from `peek` when messages are overwritten)
+* `drop` (from `follow` when messages are overwritten)
   * `details.dropped_count` (number)
-* `ingest_skip` (from `poke` when `--errors skip` drops a bad record)
+* `ingest_skip` (from `feed` when `--errors skip` drops a bad record)
   * `details.mode` (string): `auto|jsonl|json|seq|jq|event`
   * `details.index` (number): 1-based record index
   * `details.error_kind` (string): `Parse`, `Oversize`, or storage error kind
   * `details.line` (number, optional): line number for line-based modes
   * `details.snippet` (string, optional): truncated input excerpt
-* `ingest_summary` (from `poke` when `--errors skip` completes)
+* `ingest_summary` (from `feed` when `--errors skip` completes)
   * `details.total` (number)
   * `details.ok` (number)
   * `details.failed` (number)
@@ -231,7 +231,7 @@ Accept:
 * `64K`, `256M`, `2G` (K/M/G are 1024-based)
 * raw bytes: `1048576`
 
-### Time/ranges (for peek)
+### Time/ranges (for follow)
 
 * `--tail N` (last N currently available)
 * `--since TIME` (RFC 3339 or relative `5m`, `2h`, `1d`)
@@ -277,7 +277,7 @@ Canonical JSON rendering for tools:
 
 This makes `jq '.meta.tags[]?'` or `jq '.data'` straightforward.
 
-On disk, each message payload is stored as a **Lite³ document** (bytes). The CLI remains **JSON-in/JSON-out**: `poke` encodes JSON into Lite³, and read/stream commands decode Lite³ back to JSON for printing.
+On disk, each message payload is stored as a **Lite³ document** (bytes). The CLI remains **JSON-in/JSON-out**: `feed` encodes JSON into Lite³, and read/stream commands decode Lite³ back to JSON for printing.
 
 In v0.1, `pool` is the pool reference (either a name like `example` or an explicit path like `/abs/example.plasmite`).
 
@@ -288,9 +288,9 @@ In v0.1, `pool` is the pool reference (either a name like `example` or an explic
 Top-level groups:
 
 * `plasmite pool …` (pool lifecycle + info)
-* `plasmite peek …` (stream/read)
-* `plasmite poke …` (append/write)
-* `plasmite get …` (random access by seq)
+* `plasmite follow …` (stream/read)
+* `plasmite feed …` (append/write)
+* `plasmite fetch …` (random access by seq)
 * `plasmite export …` (bulk extract a range)
 * `plasmite msg …` (encode/decode/inspect message files)
 * `plasmite completion …`, `plasmite doctor`, `plasmite version`
@@ -563,17 +563,17 @@ plasmite pool delete [--json] NAME [NAME...]
 
 ---
 
-## `plasmite peek`
+## `plasmite follow`
 
 Stream messages from a pool.
 
 **Synopsis**
 
 ```bash
-plasmite peek POOLREF [OPTIONS]
+plasmite follow POOLREF [OPTIONS]
 ```
 
-POOLREF for `peek` supports:
+POOLREF for `follow` supports:
 - local name/path refs, and
 - remote shorthand refs: `http(s)://host:port/<pool>` (exactly one pool path segment, no trailing slash).
 
@@ -584,7 +584,7 @@ Rejected remote forms:
 
 **Options**
 
-* `--tail N` (or `-n N`): print the last N messages first, then keep watching.
+* `--tail N` (or `-n N`): print the last N messages first, then keep following.
 * `--since TIME`: only emit messages at/after TIME (RFC 3339 or relative `5m`, `2h`, `1d`).
 * `--tag TAG` (repeatable): exact-match tag filter (AND across repeats).
 * `--where EXPR` (repeatable): filter messages by boolean expression (AND across repeats).
@@ -599,10 +599,10 @@ Rejected remote forms:
 **Behavior**
 
 * Without `--tail`, starts at **newest+1** and waits for new messages.
-* With `--tail N`, prints the last N messages currently available, then waits for new ones.
+* With `--tail N`, prints the last N messages currently available, then follows new ones.
   * With `--tail N --one`, emits the Nth matching message (or waits for it) and exits.
 * `--since` cannot be combined with `--tail`.
-* If `--since` is in the future, `peek` exits with no output.
+* If `--since` is in the future, `follow` exits with no output.
 * `--timeout` counts since the last emitted message; it exits 124 after the interval with no output.
 * Relative `--since` uses UTC now; RFC 3339 offsets are honored.
 * Pattern matching (v0):
@@ -625,16 +625,16 @@ Rejected remote forms:
 
 ```bash
 # Exact tag shortcut
-plasmite peek demo --tag error
+plasmite follow demo --tag error
 
 # Multiple tags (AND)
-plasmite peek demo --tag prod --tag billing
+plasmite follow demo --tag prod --tag billing
 
 # Tag + jq expression (AND)
-plasmite peek demo --tag error --where '.data.service == "payments"'
+plasmite follow demo --tag error --where '.data.service == "payments"'
 
 # Equivalent jq-only form
-plasmite peek demo --where '.meta.tags[]? == "error"'
+plasmite follow demo --where '.meta.tags[]? == "error"'
 ```
 
 **Edge cases**
@@ -645,17 +645,17 @@ plasmite peek demo --where '.meta.tags[]? == "error"'
 
 ---
 
-## `plasmite poke`
+## `plasmite feed`
 
 Append a message to a pool.
 
 **Synopsis**
 
 ```bash
-plasmite poke POOLREF [DATA] [OPTIONS]
+plasmite feed POOLREF [DATA] [OPTIONS]
 ```
 
-POOLREF for `poke` supports:
+POOLREF for `feed` supports:
 - local name/path refs (existing behavior), and
 - remote shorthand refs: `http(s)://host:port/<pool>` (exactly one pool path segment, no trailing slash).
 
@@ -714,16 +714,16 @@ Rejected remote forms:
 
 * `--create` : create the pool if it is missing (**local refs only**)
 * `--create-size SIZE` : pool size for creation (bytes or K/M/G; requires `--create`)
-* Remote refs never create pools via `poke`; passing `--create` with a remote ref is a usage error.
+* Remote refs never create pools via `feed`; passing `--create` with a remote ref is a usage error.
 
 This gives you the classic pattern:
 
 ```bash
-seq=$(plasmite poke mypool '{"x":1}' --tag event | jq -r '.seq')
-plasmite get mypool "$seq" | jq .
+seq=$(plasmite feed mypool '{"x":1}' --tag event | jq -r '.seq')
+plasmite fetch mypool "$seq" | jq .
 ```
 
-`poke` stdout is an append receipt object:
+`feed` stdout is an append receipt object:
 
 ```json
 {
@@ -737,34 +737,34 @@ plasmite get mypool "$seq" | jq .
 
 ```bash
 # Single JSON document (pretty JSON ok)
-curl -s https://example.com/payload.json | plasmite poke demo --in json
+curl -s https://example.com/payload.json | plasmite feed demo --in json
 
 # Event-style stream (data: lines)
-curl -N https://example.com/stream | plasmite poke demo
+curl -N https://example.com/stream | plasmite feed demo
 
 # JSONL from jq
-jq -c '.items[]' data.json | plasmite poke demo
+jq -c '.items[]' data.json | plasmite feed demo
 
 # macOS unified log (ndjson)
-/usr/bin/log stream --style ndjson --level info | plasmite poke demo --tag log
+/usr/bin/log stream --style ndjson --level info | plasmite feed demo --tag log
 
 # systemd journal JSON
-journalctl -o json -f | plasmite poke demo --in jsonl
+journalctl -o json -f | plasmite feed demo --in jsonl
 
 # systemd journal JSON Sequence (RS-delimited)
-journalctl -o json-seq -f | plasmite poke demo --in seq
+journalctl -o json-seq -f | plasmite feed demo --in seq
 ```
 
 ---
 
-## `plasmite get`
+## `plasmite fetch`
 
 Fetch one message by seq.
 
 **Synopsis**
 
 ```bash
-plasmite get POOLREF SEQ [OPTIONS]
+plasmite fetch POOLREF SEQ [OPTIONS]
 ```
 
 **Options**
@@ -799,7 +799,7 @@ plasmite export POOLREF [--from SEQ] [--to SEQ] [--tail N] [OPTIONS]
 * `--compress zstd|gzip` (optional)
 * `--data-only` / `--meta-only`
 
-This is the “bulk” version of peek/get and is useful for debugging, backups, replay.
+This is the “bulk” version of follow/fetch and is useful for debugging, backups, replay.
 
 ---
 
@@ -857,11 +857,11 @@ Serve onboarding behavior in v0 includes:
 
 Remote pool refs in CLI commands are partially implemented:
 
-* `plasmite poke` supports shorthand remote refs:
+* `plasmite feed` supports shorthand remote refs:
   * `http(s)://host:port/<pool>` (no trailing slash)
   * API-shaped URLs are rejected as `POOLREF` input
-  * remote `--create` is rejected (no remote resource creation from `poke`)
-* `plasmite peek` supports shorthand remote refs:
+  * remote `--create` is rejected (no remote resource creation from `feed`)
+* `plasmite follow` supports shorthand remote refs:
   * `http(s)://host:port/<pool>` (no trailing slash)
   * API-shaped URLs are rejected as `POOLREF` input
   * remote mode supports `--tail`, `--tag`, `--where`, `--one`, `--timeout`, `--data-only`, and `--format`
@@ -869,7 +869,7 @@ Remote pool refs in CLI commands are partially implemented:
 
 Additional command coverage is still planned:
 
-* Subcommands that accept POOLREF should work remotely at least for: `get`, `export`, and `pool list`.
+* Subcommands that accept POOLREF should work remotely at least for: `fetch`, `export`, and `pool list`.
 
 ### Future serve enhancements
 
@@ -879,7 +879,7 @@ Additional command coverage is still planned:
 
 ## Raw bytes convenience
 
-If we need to store binary payloads, add an explicit, documented wrapper and a `plasmite poke --raw-bytes @FILE` convenience that maps bytes into `data` in a stable way.
+If we need to store binary payloads, add an explicit, documented wrapper and a `plasmite feed --raw-bytes @FILE` convenience that maps bytes into `data` in a stable way.
 
 ---
 
@@ -925,29 +925,29 @@ Print version/build info as JSON.
 
 # Golden workflows
 
-### 1) Watch a pool like `peek`
+### 1) Follow a pool like `follow`
 
 ```bash
-plasmite peek mypool
+plasmite follow mypool
 ```
 
 ### 2) Pipe into `jq`
 
 ```bash
-plasmite peek mypool --jsonl | jq -r '.meta.tags[]?'
+plasmite follow mypool --jsonl | jq -r '.meta.tags[]?'
 ```
 
-### 3) Inject like `poke`
+### 3) Inject like `feed`
 
 ```bash
-echo '{"type":"ping","t":123,"source":"cli"}' | plasmite poke mypool --tag ping
+echo '{"type":"ping","t":123,"source":"cli"}' | plasmite feed mypool --tag ping
 ```
 
 ### 4) Fetch by seq
 
 ```bash
-seq=$(plasmite poke mypool '{"x":1}' | jq -r '.seq')
-plasmite get mypool "$seq" | jq .
+seq=$(plasmite feed mypool '{"x":1}' | jq -r '.seq')
+plasmite fetch mypool "$seq" | jq .
 ```
 
 ### 5) Export last N for debugging
@@ -963,6 +963,6 @@ plasmite export mypool --tail 200 --jsonl > dump.jsonl
 * **One primary binary** (cleaner docs, completions, consistent flag parsing).
 * `p-info` becomes JSON-by-default.
 * `p-oldest-idx` / `p-newest-idx` removed; use `pool info` for bounds.
-* `p-await` becomes `peek` (no separate concept).
+* `p-await` becomes `follow` (no separate concept).
 * Remote shorthand refs reject trailing slashes (e.g. `/demo/` is invalid; use `/demo`).
 * “Pool sleep” becomes an advanced/maintenance concern; only add if actually needed.

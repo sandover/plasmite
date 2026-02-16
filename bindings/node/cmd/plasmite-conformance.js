@@ -48,7 +48,7 @@ async function main() {
       case "append":
         runAppend(client, step, index, stepId);
         break;
-      case "get":
+      case "fetch":
         runGet(client, step, index, stepId);
         break;
       case "tail":
@@ -321,7 +321,7 @@ async function runSpawnPoke(repoRoot, workdirPath, step, index, stepId) {
     return new Promise((resolve, reject) => {
       const child = spawn(
         plasmiteBin,
-        ["--dir", workdirPath, "poke", pool, payload, ...flattenDescrips(tags)],
+        ["--dir", workdirPath, "feed", pool, payload, ...flattenDescrips(tags)],
         { stdio: "inherit" }
       );
       child.on("error", reject);
@@ -330,7 +330,7 @@ async function runSpawnPoke(repoRoot, workdirPath, step, index, stepId) {
           resolve();
           return;
         }
-        reject(new Error(`poke process failed: ${code}`));
+        reject(new Error(`feed process failed: ${code}`));
       });
     });
   });

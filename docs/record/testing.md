@@ -11,6 +11,41 @@ Run everything (unit + integration):
 cargo test
 ```
 
+## Execution lanes (pragmatic policy)
+
+Plasmite uses three test lanes so we can add risk coverage without introducing
+release complexity or fragile gating.
+
+- **Lane A (fast, deterministic):** local MacBook + pull-request CI path.
+  - Command: `just hardening-fast`
+  - Included by: `just ci-fast` (and therefore PR CI)
+  - Intended for deterministic checks with bounded runtime overhead.
+- **Lane B (broad, deterministic):** main/scheduled full CI path.
+  - Command: `just hardening-broad`
+  - Included by: `just ci` / `just ci-full`
+  - Intended for broader deterministic compatibility checks.
+- **Lane C (manual/on-demand):** developer-invoked deep checks only.
+  - Not part of required CI or release-publish automation.
+
+Current and planned hardening work from epic `I5PCAT` maps to lanes as follows:
+
+- Gap 1 (seeded parser/frame robustness): Lane A for core deterministic cases,
+  Lane B for broader deterministic corpus checks.
+- Gap 2 (fault-matrix I/O/process failures): Lane A for stable black-box
+  failures, Lane B for broader matrix coverage.
+- Gap 4 (remote adversarial stream lifecycle): Lane A for deterministic
+  reconnect/cancel boundary checks, Lane B for expanded matrix.
+- Gap 5 (auth/CORS abuse-negative matrix): Lane A for critical malformed-input
+  rejects, Lane B for broader edge matrix.
+- Cookbook executable examples: Lane A for golden local examples; Lane B for
+  expanded deterministic docs-smoke coverage.
+
+Policy constraints:
+
+- Prefer deterministic tests; avoid flaky timing assumptions.
+- No new release workflow stages or release-publish gates for hardening tests.
+- Keep checks runnable on local macOS and standard GitHub CI runners.
+
 ## Test suites
 
 ### Unit tests (`src/`)
@@ -44,11 +79,11 @@ cargo test --test cli_integration
 ```
 
 What they cover (high level):
-- `pool create` / `poke` / `get` / `peek` minimal flows
+- `pool create` / `feed` / `fetch` / `follow` minimal flows
 - JSON-on-stdout success output shapes
 - JSON-on-stderr error output shapes + exit codes
-- Streaming JSON stdin behavior for `poke`
-- `peek` watch behavior (bounded waits)
+- Streaming JSON stdin behavior for `feed`
+- `follow` behavior (bounded waits)
 
 Run the multi-process lock smoke test:
 
@@ -57,7 +92,7 @@ cargo test --test lock_smoke
 ```
 
 What it covers:
-- Spawns multiple `plasmite poke` processes against one pool
+- Spawns multiple `plasmite feed` processes against one pool
 - Asserts writes are serialized (bounds reflect all writes)
 
 ## Security/advisory checks

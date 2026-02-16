@@ -365,7 +365,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 Ok(RunOutcome::ok())
             }
         },
-        Command::Poke {
+        Command::Feed {
             pool,
             tag,
             data,
@@ -402,9 +402,9 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             let stdin_is_terminal = io::stdin().is_terminal();
             let stdin_stream = data_arg.is_none() && file.is_none() && !stdin_is_terminal;
             let single_input = data_arg.is_some() || file.is_some() || stdin_is_terminal;
-            let exact_create_hint = poke_exact_create_command_hint(
+            let exact_create_hint = feed_exact_create_command_hint(
                 &pool,
-                PokeExactCreateHint {
+                FeedExactCreateHint {
                     tags: &tag,
                     data: &data_arg,
                     file: &file_arg,
@@ -432,7 +432,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                         Err(err) => {
                             return Err(add_missing_pool_create_hint(
                                 err,
-                                "poke",
+                                "feed",
                                 &pool,
                                 &pool,
                                 exact_create_hint,
@@ -449,14 +449,14 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                                 pool_handle.append_with_options(payload.as_slice(), options)?;
                             Ok((seq, timestamp_ns))
                         })?;
-                        emit_json(poke_receipt_json(seq, timestamp_ns, &tag)?, color_mode);
+                        emit_json(feed_receipt_json(seq, timestamp_ns, &tag)?, color_mode);
                     } else {
                         let pool_path_label = path.display().to_string();
                         let outcome = if let Some(file) = file {
-                            let reader = open_poke_reader(file)?;
+                            let reader = open_feed_reader(file)?;
                             ingest_from_stdin(
                                 reader,
-                                PokeIngestContext {
+                                FeedIngestContext {
                                     pool_ref: &pool,
                                     pool_path_label: &pool_path_label,
                                     tags: &tag,
@@ -471,7 +471,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                         } else if stdin_stream {
                             ingest_from_stdin(
                                 io::stdin().lock(),
-                                PokeIngestContext {
+                                FeedIngestContext {
                                     pool_ref: &pool,
                                     pool_path_label: &pool_path_label,
                                     tags: &tag,
@@ -484,10 +484,10 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                                 },
                             )?
                         } else {
-                            return Err(missing_poke_data_error());
+                            return Err(missing_feed_data_error());
                         };
                         if outcome.records_total == 0 {
-                            return Err(missing_poke_data_error());
+                            return Err(missing_feed_data_error());
                         }
                         if outcome.failed > 0 {
                             return Ok(RunOutcome::with_code(1));
@@ -500,8 +500,8 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 } => {
                     if create {
                         return Err(Error::new(ErrorKind::Usage)
-                            .with_message("remote poke does not support --create")
-                            .with_hint("Create remote pools with server-side tooling, not poke."));
+                            .with_message("remote feed does not support --create")
+                            .with_hint("Create remote pools with server-side tooling, not feed."));
                     }
                     let client = RemoteClient::new(base_url)?;
                     let remote_pool = client
@@ -512,14 +512,14 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                         let message = retry_with_config(retry_config, || {
                             remote_pool.append_json_now(&data, &tag, durability)
                         })?;
-                        emit_json(poke_receipt_from_message(&message), color_mode);
+                        emit_json(feed_receipt_from_message(&message), color_mode);
                     } else {
                         let pool_path_label = format!("{}/{}", client.base_url(), name);
                         let outcome = if let Some(file) = file {
-                            let reader = open_poke_reader(file)?;
+                            let reader = open_feed_reader(file)?;
                             ingest_from_stdin_remote(
                                 reader,
-                                RemotePokeIngestContext {
+                                RemoteFeedIngestContext {
                                     pool_ref: &pool,
                                     pool_path_label: &pool_path_label,
                                     tags: &tag,
@@ -534,7 +534,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                         } else if stdin_stream {
                             ingest_from_stdin_remote(
                                 io::stdin().lock(),
-                                RemotePokeIngestContext {
+                                RemoteFeedIngestContext {
                                     pool_ref: &pool,
                                     pool_path_label: &pool_path_label,
                                     tags: &tag,
@@ -547,10 +547,10 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                                 },
                             )?
                         } else {
-                            return Err(missing_poke_data_error());
+                            return Err(missing_feed_data_error());
                         };
                         if outcome.records_total == 0 {
-                            return Err(missing_poke_data_error());
+                            return Err(missing_feed_data_error());
                         }
                         if outcome.failed > 0 {
                             return Ok(RunOutcome::with_code(1));
@@ -560,7 +560,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             };
             Ok(RunOutcome::ok())
         }
-        Command::Get { pool, seq } => {
+        Command::Fetch { pool, seq } => {
             let path = resolve_poolref(&pool, &pool_dir)?;
             let pool_handle =
                 Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
@@ -570,7 +570,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             emit_json(message_from_frame(&frame)?, color_mode);
             Ok(RunOutcome::ok())
         }
-        Command::Peek {
+        Command::Follow {
             pool,
             create,
             jsonl,
@@ -593,11 +593,11 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             }
             let format_flag = format;
             let format = format.unwrap_or(if jsonl {
-                PeekFormat::Jsonl
+                FollowFormat::Jsonl
             } else {
-                PeekFormat::Pretty
+                FollowFormat::Pretty
             });
-            let pretty = matches!(format, PeekFormat::Pretty);
+            let pretty = matches!(format, FollowFormat::Pretty);
             let now = now_ns()?;
             let since_ns = since
                 .as_deref()
@@ -605,7 +605,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 .transpose()?;
             let timeout_input = timeout.as_deref();
             let timeout = timeout_input.map(parse_duration).transpose()?;
-            let exact_peek_create_hint = peek_exact_create_command_hint(
+            let exact_follow_create_hint = follow_exact_create_command_hint(
                 &pool,
                 tail,
                 one,
@@ -620,7 +620,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                 no_notify,
                 replay,
             );
-            let cfg = PeekConfig {
+            let cfg = FollowConfig {
                 tail,
                 pretty,
                 one,
@@ -637,7 +637,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
             let target = resolve_pool_target(&pool, &pool_dir)?;
             match target {
                 PoolTarget::LocalPath(path) => {
-                    let exact_create_hint = Some(exact_peek_create_hint.clone());
+                    let exact_create_hint = Some(exact_follow_create_hint.clone());
                     if let Some(speed) = replay {
                         if speed < 0.0 {
                             return Err(Error::new(ErrorKind::Usage)
@@ -671,25 +671,25 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                         Err(err) => {
                             return Err(add_missing_pool_create_hint(
                                 err,
-                                "peek",
+                                "follow",
                                 &pool,
                                 &pool,
                                 exact_create_hint,
                             ));
                         }
                     };
-                    let outcome = peek(&pool_handle, &pool, &path, cfg)?;
+                    let outcome = follow_pool(&pool_handle, &pool, &path, cfg)?;
                     Ok(outcome)
                 }
                 PoolTarget::Remote { base_url, pool } => {
                     if create {
                         return Err(Error::new(ErrorKind::Usage)
-                            .with_message("remote peek does not support --create")
+                            .with_message("remote follow does not support --create")
                             .with_hint(
-                                "Create remote pools with server-side tooling, then rerun peek.",
+                                "Create remote pools with server-side tooling, then rerun follow.",
                             ));
                     }
-                    let outcome = peek_remote(&base_url, &pool, &cfg)?;
+                    let outcome = follow_remote(&base_url, &pool, &cfg)?;
                     Ok(outcome)
                 }
             }
@@ -739,14 +739,14 @@ OPTIONS
     before_help = r#"Multiple processes can write and read concurrently. Messages are JSON.
 
 Mental model:
-  - `poke` sends messages (write)
-  - `peek` watches messages (read/stream)
-  - `get` fetches one message by seq
+  - `feed` sends messages (write)
+  - `follow` follows messages (read/stream)
+  - `fetch` fetches one message by seq
 "#,
     after_help = r#"EXAMPLES
   $ plasmite pool create chat
-  $ plasmite peek chat              # Terminal 1: bob watches (waits for messages)
-  $ plasmite poke chat '{"from": "alice", "msg": "hello"}'   # Terminal 2: alice sends
+  $ plasmite follow chat              # Terminal 1: bob follows (waits for messages)
+  $ plasmite feed chat '{"from": "alice", "msg": "hello"}'   # Terminal 2: alice sends
   # bob sees: {"seq":1,"time":"...","meta":{"tags":[]},"data":{"from":"alice","msg":"hello"}}
 
 LEARN MORE
@@ -788,7 +788,7 @@ enum ColorMode {
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
-enum PeekFormat {
+enum FollowFormat {
     Pretty,
     Jsonl,
 }
@@ -848,40 +848,40 @@ NOTES
 Accepts local pool refs (name/path), remote shorthand refs (http(s)://host:port/<pool>),
 inline JSON, file input (-f/--file), or streams via stdin (auto-detected)."#,
         after_help = r#"EXAMPLES
-  $ plasmite poke foo '{"hello": "world"}'                      # inline JSON
-  $ plasmite poke foo --tag sev1 '{"msg": "alert"}'             # with tags
-  $ jq -c '.[]' data.json | plasmite poke foo                   # stream from pipe"#,
+  $ plasmite feed foo '{"hello": "world"}'                      # inline JSON
+  $ plasmite feed foo --tag sev1 '{"msg": "alert"}'             # with tags
+  $ jq -c '.[]' data.json | plasmite feed foo                   # stream from pipe"#,
         after_long_help = r#"EXAMPLES
   # Inline JSON
-  $ plasmite poke foo '{"hello": "world"}'
+  $ plasmite feed foo '{"hello": "world"}'
 
   # Tag messages with --tag
-  $ plasmite poke foo --tag ping --tag from-alice '{"msg": "hello bob"}'
+  $ plasmite feed foo --tag ping --tag from-alice '{"msg": "hello bob"}'
 
   # Pipe JSON Lines
-  $ jq -c '.items[]' data.json | plasmite poke foo
+  $ jq -c '.items[]' data.json | plasmite feed foo
 
   # Replay a JSONL file
-  $ plasmite poke foo -f events.jsonl
+  $ plasmite feed foo -f events.jsonl
 
   # Stream from curl (event streams auto-detected)
-  $ curl -N https://api.example.com/events | plasmite poke events
+  $ curl -N https://api.example.com/events | plasmite feed events
 
   # Remote shorthand ref (serve must already expose the pool)
-  $ plasmite poke http://127.0.0.1:9700/demo --tag remote '{"msg":"hello"}'
+  $ plasmite feed http://127.0.0.1:9700/demo --tag remote '{"msg":"hello"}'
 
-  # Auto-create pool on first poke
-  $ plasmite poke bar --create '{"first": "message"}'
+  # Auto-create pool on first feed
+  $ plasmite feed bar --create '{"first": "message"}'
 
 NOTES
   - Remote refs must be shorthand: http(s)://host:port/<pool> (no trailing slash)
   - API-shaped URLs (e.g. /v0/pools/<pool>/append) are rejected as POOL refs
-  - `--create` is local-only; remote poke never creates remote pools
+  - `--create` is local-only; remote feed never creates remote pools
   - `--in auto` detects JSONL, JSON-seq (0x1e), event streams (data: prefix)
   - `--errors skip` continues past bad records; `--durability flush` syncs to disk
   - `--retry N` retries on transient failures (lock contention, etc.)"#
     )]
-    Poke {
+    Feed {
         #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
         pool: String,
         #[arg(help = "Inline JSON value")]
@@ -973,74 +973,74 @@ NOTES
         about = "Fetch one message by sequence number",
         long_about = r#"Fetch a specific message by its seq number and print as JSON."#,
         after_help = r#"EXAMPLES
-  $ plasmite get foo 1
-  $ plasmite get foo 42 | jq '.data'"#
+  $ plasmite fetch foo 1
+  $ plasmite fetch foo 42 | jq '.data'"#
     )]
-    Get {
+    Fetch {
         #[arg(help = "Pool name or path")]
         pool: String,
         #[arg(help = "Sequence number")]
         seq: u64,
     },
     #[command(
-        about = "Watch messages from a pool",
-        long_about = r#"Watch a pool and stream messages as they arrive.
+        about = "Follow messages from a pool",
+        long_about = r#"Follow a pool and stream messages as they arrive.
 
-By default, `peek` waits for new messages forever (Ctrl-C to stop).
-Use `--tail N` to see recent history first, then keep watching.
+By default, `follow` waits for new messages forever (Ctrl-C to stop).
+Use `--tail N` to see recent history first, then keep following.
 Use `--replay N` with `--tail` or `--since` to replay with timing."#,
         after_help = r#"EXAMPLES
-  $ plasmite peek foo                                           # watch live
-  $ plasmite peek foo --tail 10                                 # last 10 + live
-  $ plasmite peek foo --where '.data.ok == true' --one          # match & exit
-  $ plasmite peek foo --format jsonl | jq '.data'               # pipe to jq"#,
+  $ plasmite follow foo                                           # follow live
+  $ plasmite follow foo --tail 10                                 # last 10 + live
+  $ plasmite follow foo --where '.data.ok == true' --one          # match & exit
+  $ plasmite follow foo --format jsonl | jq '.data'               # pipe to jq"#,
         after_long_help = r#"EXAMPLES
-  # Watch for new messages
-  $ plasmite peek foo
+  # Follow for new messages
+  $ plasmite follow foo
 
-  # Last 10 messages, then keep watching
-  $ plasmite peek foo --tail 10
+  # Last 10 messages, then keep following
+  $ plasmite follow foo --tail 10
 
   # Emit one matching message, then exit
-  $ plasmite peek foo --where '.data.status == "error"' --one
+  $ plasmite follow foo --where '.data.status == "error"' --one
 
   # Messages from the last 5 minutes
-  $ plasmite peek foo --since 5m
+  $ plasmite follow foo --since 5m
 
   # Replay at original timing (or 2x, 0.5x, 0 = instant)
-  $ plasmite peek foo --tail 100 --replay 1
+  $ plasmite follow foo --tail 100 --replay 1
 
   # Filter by exact tag (repeat for AND)
-  $ plasmite peek foo --tag ping --one
+  $ plasmite follow foo --tag ping --one
 
   # Pipe to jq
-  $ plasmite peek foo --format jsonl | jq -r '.data.msg'
+  $ plasmite follow foo --format jsonl | jq -r '.data.msg'
 
   # Wait up to 5 seconds for a message
-  $ plasmite peek foo --timeout 5s
+  $ plasmite follow foo --timeout 5s
 
   # Remote shorthand ref (serve must already expose the pool)
-  $ plasmite peek http://127.0.0.1:9700/demo --tail 20 --format jsonl
+  $ plasmite follow http://127.0.0.1:9700/demo --tail 20 --format jsonl
 
 NOTES
   - Use `--format jsonl` for scripts (one JSON object per line)
   - `--tag` matches exact tags; `--where` uses jq-style expressions; repeat either for AND
   - `--since 5m` and `--since 2026-01-15T10:00:00Z` both work
   - Remote refs must be shorthand: http(s)://host:port/<pool> (no trailing slash)
-  - Remote `peek` supports `--tail`, `--tag`, `--where`, `--one`, `--timeout`, `--data-only`, and `--format`
-  - `--create` is local-only; remote peek never creates remote pools
+  - Remote `follow` supports `--tail`, `--tag`, `--where`, `--one`, `--timeout`, `--data-only`, and `--format`
+  - `--create` is local-only; remote follow never creates remote pools
   - `--replay N` exits when all selected messages are emitted (no live follow); `--replay 0` emits instantly"#
     )]
-    Peek {
+    Follow {
         #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
         pool: String,
-        #[arg(long, help = "Create local pool if missing before watching")]
+        #[arg(long, help = "Create local pool if missing before following")]
         create: bool,
         #[arg(
             long = "tail",
             short = 'n',
             default_value_t = 0,
-            help = "Print the last N messages first, then keep watching"
+            help = "Print the last N messages first, then keep following"
         )]
         tail: u64,
         #[arg(long, help = "Exit after emitting one matching message")]
@@ -1059,7 +1059,7 @@ NOTES
             value_enum,
             help = "Output format: pretty|jsonl (use --jsonl as alias for jsonl)"
         )]
-        format: Option<PeekFormat>,
+        format: Option<FollowFormat>,
         #[arg(
             long,
             help = "Only emit messages at or after this time (RFC 3339 or relative like 5m)",
@@ -1492,7 +1492,7 @@ const DEFAULT_MAX_TAIL_CONCURRENCY: usize = 64;
 //   4. Stdin/pipe usage            → fallback wording (no exact command)
 //
 // See also: `render_shell_agnostic_token`, `render_shell_agnostic_command`,
-//           `poke_exact_create_command_hint`, `peek_exact_create_command_hint`.
+//           `feed_exact_create_command_hint`, `follow_exact_create_command_hint`.
 // ──────────────────────────────────────────────────────────────────────────
 
 fn add_missing_pool_hint(err: Error, pool_ref: &str, input: &str) -> Error {
@@ -1557,7 +1557,7 @@ fn render_shell_agnostic_command(tokens: &[String]) -> String {
         .join(" ")
 }
 
-struct PokeExactCreateHint<'a> {
+struct FeedExactCreateHint<'a> {
     tags: &'a [String],
     data: &'a Option<String>,
     file: &'a Option<String>,
@@ -1569,13 +1569,13 @@ struct PokeExactCreateHint<'a> {
     single_input: bool,
 }
 
-fn poke_exact_create_command_hint(pool: &str, options: PokeExactCreateHint<'_>) -> Option<String> {
+fn feed_exact_create_command_hint(pool: &str, options: FeedExactCreateHint<'_>) -> Option<String> {
     if !options.single_input {
         return None;
     }
     let mut tokens = vec![
         "plasmite".to_string(),
-        "poke".to_string(),
+        "feed".to_string(),
         pool.to_string(),
         "--create".to_string(),
     ];
@@ -1629,14 +1629,14 @@ fn poke_exact_create_command_hint(pool: &str, options: PokeExactCreateHint<'_>) 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn peek_exact_create_command_hint(
+fn follow_exact_create_command_hint(
     pool: &str,
     tail: u64,
     one: bool,
     jsonl: bool,
     timeout: Option<&str>,
     data_only: bool,
-    format: Option<PeekFormat>,
+    format: Option<FollowFormat>,
     since: Option<&str>,
     where_expr: &[String],
     tags: &[String],
@@ -1646,7 +1646,7 @@ fn peek_exact_create_command_hint(
 ) -> String {
     let mut tokens = vec![
         "plasmite".to_string(),
-        "peek".to_string(),
+        "follow".to_string(),
         pool.to_string(),
         "--create".to_string(),
     ];
@@ -1671,8 +1671,8 @@ fn peek_exact_create_command_hint(
         tokens.push("--format".to_string());
         tokens.push(
             match format {
-                PeekFormat::Pretty => "pretty",
-                PeekFormat::Jsonl => "jsonl",
+                FollowFormat::Pretty => "pretty",
+                FollowFormat::Jsonl => "jsonl",
             }
             .to_string(),
         );
@@ -1707,7 +1707,7 @@ fn add_missing_seq_hint(err: Error, pool_ref: &str) -> Error {
         return err;
     }
     err.with_hint(format!(
-        "Check available messages: plasmite pool info {pool_ref} (or plasmite peek {pool_ref} --tail 10)."
+        "Check available messages: plasmite pool info {pool_ref} (or plasmite follow {pool_ref} --tail 10)."
     ))
 }
 
@@ -3000,12 +3000,12 @@ fn clap_error_hint(err: &clap::Error) -> String {
         .filter(|token| token.starts_with('<') && token.ends_with('>'))
         .collect();
     if missing_required
-        && parts.as_slice() == ["peek"]
+        && parts.as_slice() == ["follow"]
         && required_tokens
             .iter()
             .any(|token| token.contains("POOL") || token.contains("pool"))
     {
-        return "Provide a pool ref, for example: `plasmite peek chat -n 1`.".to_string();
+        return "Provide a pool ref, for example: `plasmite follow chat -n 1`.".to_string();
     }
 
     format!("Try `plasmite {} --help`.", parts.join(" "))
@@ -3020,13 +3020,13 @@ fn parse_inline_json(data: &str) -> Result<Value, Error> {
     })
 }
 
-fn missing_poke_data_error() -> Error {
+fn missing_feed_data_error() -> Error {
     Error::new(ErrorKind::Usage)
         .with_message("missing data input")
         .with_hint("Provide JSON via DATA, --file, or pipe JSON to stdin.")
 }
 
-fn open_poke_reader(path: &str) -> Result<Box<dyn Read>, Error> {
+fn open_feed_reader(path: &str) -> Result<Box<dyn Read>, Error> {
     if path == "-" {
         return Ok(Box::new(io::stdin()));
     }
@@ -3076,7 +3076,7 @@ fn ingest_failure_notice(
     let notice = Notice {
         kind: "ingest_skip".to_string(),
         time: notice_time_now().unwrap_or_else(|| "unknown".to_string()),
-        cmd: "poke".to_string(),
+        cmd: "feed".to_string(),
         pool: pool_ref.to_string(),
         message: failure.message.clone(),
         details,
@@ -3098,7 +3098,7 @@ fn ingest_summary_notice(
     let notice = Notice {
         kind: "ingest_summary".to_string(),
         time: notice_time_now().unwrap_or_else(|| "unknown".to_string()),
-        cmd: "poke".to_string(),
+        cmd: "feed".to_string(),
         pool: pool_ref.to_string(),
         message: "ingestion completed with skipped records".to_string(),
         details,
@@ -3117,7 +3117,7 @@ fn mode_label(mode: IngestMode) -> &'static str {
     }
 }
 
-struct PokeIngestContext<'a> {
+struct FeedIngestContext<'a> {
     pool_ref: &'a str,
     pool_path_label: &'a str,
     tags: &'a [String],
@@ -3129,7 +3129,7 @@ struct PokeIngestContext<'a> {
     errors: ErrorPolicyCli,
 }
 
-struct RemotePokeIngestContext<'a> {
+struct RemoteFeedIngestContext<'a> {
     pool_ref: &'a str,
     pool_path_label: &'a str,
     tags: &'a [String],
@@ -3143,7 +3143,7 @@ struct RemotePokeIngestContext<'a> {
 
 fn ingest_from_stdin<R: Read>(
     reader: R,
-    ctx: PokeIngestContext<'_>,
+    ctx: FeedIngestContext<'_>,
 ) -> Result<IngestOutcome, Error> {
     let ingest_config = IngestConfig {
         mode: input_mode_to_ingest(ctx.input),
@@ -3168,7 +3168,7 @@ fn ingest_from_stdin<R: Read>(
                 Ok((seq, timestamp_ns))
             })?;
             emit_message(
-                poke_receipt_json(seq, timestamp_ns, ctx.tags)?,
+                feed_receipt_json(seq, timestamp_ns, ctx.tags)?,
                 false,
                 ctx.color_mode,
             );
@@ -3188,7 +3188,7 @@ fn ingest_from_stdin<R: Read>(
 
 fn ingest_from_stdin_remote<R: Read>(
     reader: R,
-    ctx: RemotePokeIngestContext<'_>,
+    ctx: RemoteFeedIngestContext<'_>,
 ) -> Result<IngestOutcome, Error> {
     let ingest_config = IngestConfig {
         mode: input_mode_to_ingest(ctx.input),
@@ -3207,7 +3207,7 @@ fn ingest_from_stdin_remote<R: Read>(
                 ctx.remote_pool
                     .append_json_now(&data, ctx.tags, ctx.durability)
             })?;
-            emit_message(poke_receipt_from_message(&message), false, ctx.color_mode);
+            emit_message(feed_receipt_from_message(&message), false, ctx.color_mode);
             Ok(())
         },
         |failure| {
@@ -3248,7 +3248,7 @@ fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
     })
 }
 
-fn poke_receipt_json(seq: u64, timestamp_ns: u64, tags: &[String]) -> Result<Value, Error> {
+fn feed_receipt_json(seq: u64, timestamp_ns: u64, tags: &[String]) -> Result<Value, Error> {
     Ok(json!({
         "seq": seq,
         "time": format_ts(timestamp_ns)?,
@@ -3258,7 +3258,7 @@ fn poke_receipt_json(seq: u64, timestamp_ns: u64, tags: &[String]) -> Result<Val
     }))
 }
 
-fn poke_receipt_from_message(message: &plasmite::api::Message) -> Value {
+fn feed_receipt_from_message(message: &plasmite::api::Message) -> Value {
     json!({
         "seq": message.seq,
         "time": message.time,
@@ -3354,7 +3354,7 @@ impl DropNotice {
 }
 
 #[derive(Clone, Debug)]
-struct PeekConfig {
+struct FollowConfig {
     tail: u64,
     pretty: bool,
     one: bool,
@@ -3386,25 +3386,25 @@ fn matches_required_tags(required_tags: &[String], message: &Value) -> bool {
     })
 }
 
-fn peek_remote(base_url: &str, pool: &str, cfg: &PeekConfig) -> Result<RunOutcome, Error> {
+fn follow_remote(base_url: &str, pool: &str, cfg: &FollowConfig) -> Result<RunOutcome, Error> {
     if cfg.replay_speed.is_some() {
         return Err(Error::new(ErrorKind::Usage)
-            .with_message("remote peek does not support --replay")
-            .with_hint("Use local peek with --replay, or omit --replay for remote streams."));
+            .with_message("remote follow does not support --replay")
+            .with_hint("Use local follow with --replay, or omit --replay for remote streams."));
     }
     if cfg.since_ns.is_some() {
         return Err(Error::new(ErrorKind::Usage)
-            .with_message("remote peek does not support --since")
+            .with_message("remote follow does not support --since")
             .with_hint("Use --tail N for remote refs, or run --since against a local pool path."));
     }
     if !cfg.notify {
         return Err(Error::new(ErrorKind::Usage)
-            .with_message("remote peek does not support --no-notify")
+            .with_message("remote follow does not support --no-notify")
             .with_hint("--no-notify only applies to local pool semaphores."));
     }
     if cfg.quiet_drops {
         return Err(Error::new(ErrorKind::Usage)
-            .with_message("remote peek does not support --quiet-drops")
+            .with_message("remote follow does not support --quiet-drops")
             .with_hint("--quiet-drops only applies to local drop notices."));
     }
 
@@ -3478,14 +3478,14 @@ fn peek_remote(base_url: &str, pool: &str, cfg: &PeekConfig) -> Result<RunOutcom
     }
 }
 
-fn peek(
+fn follow_pool(
     pool: &Pool,
     pool_ref: &str,
     pool_path: &Path,
-    cfg: PeekConfig,
+    cfg: FollowConfig,
 ) -> Result<RunOutcome, Error> {
     if cfg.replay_speed.is_some() {
-        return peek_replay(pool, &cfg);
+        return follow_replay(pool, &cfg);
     }
 
     let mut cursor = Cursor::new();
@@ -3628,7 +3628,7 @@ fn peek(
         let notice = Notice {
             kind: "drop".to_string(),
             time,
-            cmd: "peek".to_string(),
+            cmd: "follow".to_string(),
             pool: pool_ref.clone(),
             message: format!("dropped {dropped_count} messages"),
             details,
@@ -3744,7 +3744,7 @@ fn peek(
     }
 }
 
-fn peek_replay(pool: &Pool, cfg: &PeekConfig) -> Result<RunOutcome, Error> {
+fn follow_replay(pool: &Pool, cfg: &FollowConfig) -> Result<RunOutcome, Error> {
     let speed = cfg.replay_speed.unwrap_or(0.0);
     let mut cursor = Cursor::new();
     let mut header = pool.header_from_mmap()?;

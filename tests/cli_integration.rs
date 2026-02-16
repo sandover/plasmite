@@ -135,6 +135,19 @@ fn parse_notice_json(line: &str) -> Value {
     parse_json(line.trim())
 }
 
+fn assert_error_kind(output: &std::process::Output, expected_status: i32, expected_kind: &str) {
+    assert_eq!(output.status.code(), Some(expected_status));
+    let err = parse_error_json(&output.stderr);
+    let inner = err
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
+    assert_eq!(
+        inner.get("kind").and_then(|v| v.as_str()),
+        Some(expected_kind)
+    );
+}
+
 fn assert_actionable_usage_feedback(
     output: &std::process::Output,
     expected_message_fragment: &str,
@@ -256,7 +269,7 @@ fn help_pool_lists_pool_subcommands() {
 }
 
 #[test]
-fn create_poke_get_peek_flow() {
+fn create_feed_fetch_follow_flow() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -290,45 +303,45 @@ fn create_poke_get_peek_flow() {
     );
     assert!(created.get("bounds").unwrap().get("oldest").is_none());
 
-    let poke = cmd()
+    let feed_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "testpool",
             "{\"x\":1}",
             "--tag",
             "ping",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
-    let poke_json = parse_json(std::str::from_utf8(&poke.stdout).expect("utf8"));
-    let seq = poke_json.get("seq").unwrap().as_u64().unwrap();
-    assert!(poke_json.get("time").is_some());
-    assert_eq!(poke_json.get("meta").unwrap()["tags"][0], "ping");
-    assert!(poke_json.get("data").is_none());
+        .expect("feed");
+    assert!(feed_out.status.success());
+    let feed_json = parse_json(std::str::from_utf8(&feed_out.stdout).expect("utf8"));
+    let seq = feed_json.get("seq").unwrap().as_u64().unwrap();
+    assert!(feed_json.get("time").is_some());
+    assert_eq!(feed_json.get("meta").unwrap()["tags"][0], "ping");
+    assert!(feed_json.get("data").is_none());
 
     let get = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "get",
+            "fetch",
             "testpool",
             &seq.to_string(),
         ])
         .output()
-        .expect("get");
+        .expect("fetch");
     assert!(get.status.success());
     let get_json = parse_json(std::str::from_utf8(&get.stdout).expect("utf8"));
     assert_eq!(get_json.get("seq").unwrap().as_u64().unwrap(), seq);
     assert_eq!(get_json.get("data").unwrap()["x"], 1);
 
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "testpool",
             "--tail",
             "1",
@@ -336,14 +349,14 @@ fn create_poke_get_peek_flow() {
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek");
-    let stdout = peek.stdout.take().expect("stdout");
+        .expect("follow");
+    let stdout = follower.stdout.take().expect("stdout");
     let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from peek output");
-    let peek_json = parse_json(line.trim());
-    assert_eq!(peek_json.get("seq").unwrap().as_u64().unwrap(), seq);
-    let _ = peek.kill();
-    let _ = peek.wait();
+    assert!(!line.is_empty(), "expected a line from follow output");
+    let follower_json = parse_json(line.trim());
+    assert_eq!(follower_json.get("seq").unwrap().as_u64().unwrap(), seq);
+    let _ = follower.kill();
+    let _ = follower.wait();
 }
 
 #[test]
@@ -388,29 +401,29 @@ fn pool_info_json_includes_metrics() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke_one = cmd()
+    let feed_one = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "metrics",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke_one.status.success());
+        .expect("feed");
+    assert!(feed_one.status.success());
 
-    let poke_two = cmd()
+    let feed_two = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "metrics",
             "{\"x\":2}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke_two.status.success());
+        .expect("feed");
+    assert!(feed_two.status.success());
 
     let info = cmd()
         .args([
@@ -563,17 +576,17 @@ fn pool_info_default_is_human_readable() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "pretty",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
     let info = cmd()
         .args([
@@ -614,41 +627,41 @@ fn readme_quickstart_flow() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let feed_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":1}",
             "--tag",
             "ping",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
-    let poke_json = parse_json(std::str::from_utf8(&poke.stdout).expect("utf8"));
-    let seq = poke_json.get("seq").unwrap().as_u64().unwrap();
+        .expect("feed");
+    assert!(feed_out.status.success());
+    let feed_json = parse_json(std::str::from_utf8(&feed_out.stdout).expect("utf8"));
+    let seq = feed_json.get("seq").unwrap().as_u64().unwrap();
 
     let get = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "get",
+            "fetch",
             "demo",
             &seq.to_string(),
         ])
         .output()
-        .expect("get");
+        .expect("fetch");
     assert!(get.status.success());
     let get_json = parse_json(std::str::from_utf8(&get.stdout).expect("utf8"));
     assert_eq!(get_json.get("seq").unwrap().as_u64().unwrap(), seq);
 
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "1",
@@ -656,18 +669,18 @@ fn readme_quickstart_flow() {
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek");
-    let stdout = peek.stdout.take().expect("stdout");
+        .expect("follow");
+    let stdout = follower.stdout.take().expect("stdout");
     let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from peek output");
-    let peek_json = parse_json(line.trim());
-    assert_eq!(peek_json.get("seq").unwrap().as_u64().unwrap(), seq);
-    let _ = peek.kill();
-    let _ = peek.wait();
+    assert!(!line.is_empty(), "expected a line from follow output");
+    let follower_json = parse_json(line.trim());
+    assert_eq!(follower_json.get("seq").unwrap().as_u64().unwrap(), seq);
+    let _ = follower.kill();
+    let _ = follower.wait();
 }
 
 #[test]
-fn peek_emits_new_messages() {
+fn follow_emits_new_messages() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -683,11 +696,11 @@ fn peek_emits_new_messages() {
         .expect("create");
     assert!(create.status.success());
 
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "1",
@@ -696,9 +709,9 @@ fn peek_emits_new_messages() {
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek");
+        .expect("follow");
 
-    let stdout = peek.stdout.take().expect("stdout");
+    let stdout = follower.stdout.take().expect("stdout");
     let (line_tx, line_rx) = mpsc::channel();
     thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
@@ -707,30 +720,30 @@ fn peek_emits_new_messages() {
         let _ = line_tx.send(line);
     });
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":42}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
     let line = line_rx
         .recv_timeout(Duration::from_secs(2))
-        .expect("peek output");
-    assert!(!line.is_empty(), "expected a line from peek output");
+        .expect("follow output");
+    assert!(!line.is_empty(), "expected a line from follow output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 42);
-    let status = peek.wait().expect("peek wait");
-    assert!(status.success(), "peek status={status:?}");
+    let status = follower.wait().expect("follow wait");
+    assert!(status.success(), "follow status={status:?}");
 }
 
 #[test]
-fn peek_one_exits_after_first_match() {
+fn follow_one_exits_after_first_match() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -746,34 +759,36 @@ fn peek_one_exits_after_first_match() {
         .expect("create");
     assert!(create.status.success());
 
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--jsonl",
+            "--tail",
+            "1",
             "--one",
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek");
+        .expect("follow");
 
     thread::sleep(Duration::from_millis(50));
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let stdout = peek.stdout.take().expect("stdout");
+    let stdout = follower.stdout.take().expect("stdout");
     let (line_tx, line_rx) = mpsc::channel();
     thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
@@ -784,37 +799,37 @@ fn peek_one_exits_after_first_match() {
 
     let line = line_rx
         .recv_timeout(Duration::from_secs(2))
-        .expect("peek output");
+        .expect("follow output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 1);
 
     // Send a second message after the first is observed so `--one` ordering
     // is deterministic without relying on fixed startup sleeps.
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":2}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
     let (exit_tx, exit_rx) = mpsc::channel();
     thread::spawn(move || {
-        let status = peek.wait().expect("wait");
+        let status = follower.wait().expect("wait");
         let _ = exit_tx.send(status);
     });
     let status = exit_rx
         .recv_timeout(Duration::from_secs(2))
-        .expect("peek exit");
+        .expect("follow exit");
     assert!(status.success());
 }
 
 #[test]
-fn peek_tail_one_emits_nth_match() {
+fn follow_tail_one_emits_nth_match() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -830,11 +845,11 @@ fn peek_tail_one_emits_nth_match() {
         .expect("create");
     assert!(create.status.success());
 
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "2",
@@ -843,35 +858,35 @@ fn peek_tail_one_emits_nth_match() {
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek");
+        .expect("follow");
 
     thread::sleep(Duration::from_millis(50));
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":2}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let stdout = peek.stdout.take().expect("stdout");
+    let stdout = follower.stdout.take().expect("stdout");
     let (line_tx, line_rx) = mpsc::channel();
     thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
@@ -882,23 +897,23 @@ fn peek_tail_one_emits_nth_match() {
 
     let line = line_rx
         .recv_timeout(Duration::from_secs(2))
-        .expect("peek output");
+        .expect("follow output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 2);
 
     let (exit_tx, exit_rx) = mpsc::channel();
     thread::spawn(move || {
-        let status = peek.wait().expect("wait");
+        let status = follower.wait().expect("wait");
         let _ = exit_tx.send(status);
     });
     let status = exit_rx
         .recv_timeout(Duration::from_secs(2))
-        .expect("peek exit");
+        .expect("follow exit");
     assert!(status.success());
 }
 
 #[test]
-fn peek_timeout_exits_when_no_output() {
+fn follow_timeout_exits_when_no_output() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -918,20 +933,20 @@ fn peek_timeout_exits_when_no_output() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--jsonl",
             "--timeout",
             "500ms",
         ])
         .output()
-        .expect("peek");
+        .expect("follow");
     assert_eq!(output.status.code().unwrap(), 124);
     assert!(output.stdout.is_empty());
 }
 
 #[test]
-fn peek_timeout_with_one_exits_on_message() {
+fn follow_timeout_with_one_exits_on_message() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -951,7 +966,7 @@ fn peek_timeout_with_one_exits_on_message() {
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(50));
         let _ = cmd()
-            .args(["--dir", &pool_dir_str, "poke", "demo", "{\"x\":1}"])
+            .args(["--dir", &pool_dir_str, "feed", "demo", "{\"x\":1}"])
             .output();
     });
 
@@ -959,7 +974,7 @@ fn peek_timeout_with_one_exits_on_message() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--jsonl",
             "--one",
@@ -967,7 +982,7 @@ fn peek_timeout_with_one_exits_on_message() {
             "5s",
         ])
         .output()
-        .expect("peek");
+        .expect("follow");
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 1);
@@ -975,7 +990,7 @@ fn peek_timeout_with_one_exits_on_message() {
 }
 
 #[test]
-fn peek_data_only_jsonl_emits_payload() {
+fn follow_data_only_jsonl_emits_payload() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -991,23 +1006,23 @@ fn peek_data_only_jsonl_emits_payload() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
     let output = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "1",
@@ -1016,7 +1031,7 @@ fn peek_data_only_jsonl_emits_payload() {
             "--one",
         ])
         .output()
-        .expect("peek");
+        .expect("follow");
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 1);
@@ -1025,7 +1040,7 @@ fn peek_data_only_jsonl_emits_payload() {
 }
 
 #[test]
-fn peek_data_only_where_filters_envelope() {
+fn follow_data_only_where_filters_envelope() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1041,39 +1056,39 @@ fn peek_data_only_where_filters_envelope() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":1}",
             "--tag",
             "drop",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":2}",
             "--tag",
             "keep",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
     let output = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "1",
@@ -1084,7 +1099,7 @@ fn peek_data_only_where_filters_envelope() {
             r#".meta.tags[]? == "keep""#,
         ])
         .output()
-        .expect("peek");
+        .expect("follow");
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 1);
@@ -1093,7 +1108,7 @@ fn peek_data_only_where_filters_envelope() {
 }
 
 #[test]
-fn peek_data_only_pretty_emits_payload() {
+fn follow_data_only_pretty_emits_payload() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1109,23 +1124,23 @@ fn peek_data_only_pretty_emits_payload() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":3}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
     let output = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "1",
@@ -1135,7 +1150,7 @@ fn peek_data_only_pretty_emits_payload() {
             "--one",
         ])
         .output()
-        .expect("peek");
+        .expect("follow");
     assert!(output.status.success());
     let value = parse_json(std::str::from_utf8(&output.stdout).expect("utf8"));
     assert_eq!(value.get("x").unwrap().as_i64().unwrap(), 3);
@@ -1143,7 +1158,7 @@ fn peek_data_only_pretty_emits_payload() {
 }
 
 #[test]
-fn peek_where_filters_messages() {
+fn follow_where_filters_messages() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1159,39 +1174,39 @@ fn peek_where_filters_messages() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":1}",
             "--tag",
             "drop",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":2}",
             "--tag",
             "keep",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "10",
@@ -1201,18 +1216,18 @@ fn peek_where_filters_messages() {
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek");
-    let stdout = peek.stdout.take().expect("stdout");
+        .expect("follow");
+    let stdout = follower.stdout.take().expect("stdout");
     let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from peek output");
+    assert!(!line.is_empty(), "expected a line from follow output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 2);
-    let _ = peek.kill();
-    let _ = peek.wait();
+    let _ = follower.kill();
+    let _ = follower.wait();
 }
 
 #[test]
-fn peek_tag_filters_messages() {
+fn follow_tag_filters_messages() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1228,39 +1243,39 @@ fn peek_tag_filters_messages() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":1}",
             "--tag",
             "drop",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":2}",
             "--tag",
             "keep",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "10",
@@ -1270,18 +1285,18 @@ fn peek_tag_filters_messages() {
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek");
-    let stdout = peek.stdout.take().expect("stdout");
+        .expect("follow");
+    let stdout = follower.stdout.take().expect("stdout");
     let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from peek output");
+    assert!(!line.is_empty(), "expected a line from follow output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 2);
-    let _ = peek.kill();
-    let _ = peek.wait();
+    let _ = follower.kill();
+    let _ = follower.wait();
 }
 
 #[test]
-fn peek_tag_and_where_compose_with_and() {
+fn follow_tag_and_where_compose_with_and() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1303,26 +1318,26 @@ fn peek_tag_and_where_compose_with_and() {
         (r#"{"service":"payments","level":"error"}"#, "keep"),
     ];
     for (payload, tag) in events {
-        let poke = cmd()
+        let emit_out = cmd()
             .args([
                 "--dir",
                 pool_dir.to_str().unwrap(),
-                "poke",
+                "feed",
                 "demo",
                 payload,
                 "--tag",
                 tag,
             ])
             .output()
-            .expect("poke");
-        assert!(poke.status.success());
+            .expect("feed");
+        assert!(emit_out.status.success());
     }
 
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "10",
@@ -1336,19 +1351,19 @@ fn peek_tag_and_where_compose_with_and() {
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek");
-    let stdout = peek.stdout.take().expect("stdout");
+        .expect("follow");
+    let stdout = follower.stdout.take().expect("stdout");
     let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from peek output");
+    assert!(!line.is_empty(), "expected a line from follow output");
     let value = parse_json(line.trim());
     assert_eq!(value["data"]["service"], "billing");
     assert_eq!(value["data"]["level"], "error");
-    let _ = peek.kill();
-    let _ = peek.wait();
+    let _ = follower.kill();
+    let _ = follower.wait();
 }
 
 #[test]
-fn peek_where_multiple_predicates_and() {
+fn follow_where_multiple_predicates_and() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1364,39 +1379,39 @@ fn peek_where_multiple_predicates_and() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"level\":1}",
             "--tag",
             "alpha",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"level\":2}",
             "--tag",
             "alpha",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "10",
@@ -1408,18 +1423,18 @@ fn peek_where_multiple_predicates_and() {
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek");
-    let stdout = peek.stdout.take().expect("stdout");
+        .expect("follow");
+    let stdout = follower.stdout.take().expect("stdout");
     let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from peek output");
+    assert!(!line.is_empty(), "expected a line from follow output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["level"], 2);
-    let _ = peek.kill();
-    let _ = peek.wait();
+    let _ = follower.kill();
+    let _ = follower.wait();
 }
 
 #[test]
-fn peek_where_invalid_expression_is_usage_error() {
+fn follow_where_invalid_expression_is_usage_error() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1435,23 +1450,23 @@ fn peek_where_invalid_expression_is_usage_error() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let peek = cmd()
+    let follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "1",
@@ -1460,9 +1475,9 @@ fn peek_where_invalid_expression_is_usage_error() {
             "not valid jq",
         ])
         .output()
-        .expect("peek");
-    assert_eq!(peek.status.code().unwrap(), 2);
-    let err = parse_error_json(&peek.stderr);
+        .expect("follow");
+    assert_eq!(follower.status.code().unwrap(), 2);
+    let err = parse_error_json(&follower.stderr);
     let inner = err
         .get("error")
         .and_then(|v| v.as_object())
@@ -1471,7 +1486,7 @@ fn peek_where_invalid_expression_is_usage_error() {
 }
 
 #[test]
-fn peek_where_non_boolean_expression_is_usage_error() {
+fn follow_where_non_boolean_expression_is_usage_error() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1487,23 +1502,23 @@ fn peek_where_non_boolean_expression_is_usage_error() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let peek = cmd()
+    let follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "1",
@@ -1512,9 +1527,9 @@ fn peek_where_non_boolean_expression_is_usage_error() {
             ".data",
         ])
         .output()
-        .expect("peek");
-    assert_eq!(peek.status.code().unwrap(), 2);
-    let err = parse_error_json(&peek.stderr);
+        .expect("follow");
+    assert_eq!(follower.status.code().unwrap(), 2);
+    let err = parse_error_json(&follower.stderr);
     let inner = err
         .get("error")
         .and_then(|v| v.as_object())
@@ -1523,7 +1538,7 @@ fn peek_where_non_boolean_expression_is_usage_error() {
 }
 
 #[test]
-fn peek_where_with_since_emits_matches() {
+fn follow_where_with_since_emits_matches() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1539,35 +1554,35 @@ fn peek_where_with_since_emits_matches() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":5}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--since",
             "1h",
@@ -1577,18 +1592,18 @@ fn peek_where_with_since_emits_matches() {
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek");
-    let stdout = peek.stdout.take().expect("stdout");
+        .expect("follow");
+    let stdout = follower.stdout.take().expect("stdout");
     let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from peek output");
+    assert!(!line.is_empty(), "expected a line from follow output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 5);
-    let _ = peek.kill();
-    let _ = peek.wait();
+    let _ = follower.kill();
+    let _ = follower.wait();
 }
 
 #[test]
-fn peek_where_with_format_pretty_emits_matches() {
+fn follow_where_with_format_pretty_emits_matches() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1604,23 +1619,23 @@ fn peek_where_with_format_pretty_emits_matches() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "1",
@@ -1631,17 +1646,17 @@ fn peek_where_with_format_pretty_emits_matches() {
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek");
-    let stdout = peek.stdout.take().expect("stdout");
+        .expect("follow");
+    let stdout = follower.stdout.take().expect("stdout");
     let reader = BufReader::new(stdout);
     let value = read_json_value(reader);
     assert_eq!(value.get("data").unwrap()["x"], 1);
-    let _ = peek.kill();
-    let _ = peek.wait();
+    let _ = follower.kill();
+    let _ = follower.wait();
 }
 
 #[test]
-fn peek_where_with_quiet_drops_suppresses_notice() {
+fn follow_where_with_quiet_drops_suppresses_notice() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1657,23 +1672,23 @@ fn peek_where_with_quiet_drops_suppresses_notice() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "1",
@@ -1685,14 +1700,14 @@ fn peek_where_with_quiet_drops_suppresses_notice() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("peek");
-    let stdout = peek.stdout.take().expect("stdout");
+        .expect("follow");
+    let stdout = follower.stdout.take().expect("stdout");
     let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from peek output");
+    assert!(!line.is_empty(), "expected a line from follow output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 1);
-    let _ = peek.kill();
-    let output = peek.wait_with_output().expect("wait");
+    let _ = follower.kill();
+    let output = follower.wait_with_output().expect("wait");
     assert!(
         output.stderr.is_empty(),
         "expected no drop notices on stderr"
@@ -1700,7 +1715,7 @@ fn peek_where_with_quiet_drops_suppresses_notice() {
 }
 
 #[test]
-fn peek_where_multiple_predicates_with_since() {
+fn follow_where_multiple_predicates_with_since() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1716,39 +1731,39 @@ fn peek_where_multiple_predicates_with_since() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":1}",
             "--tag",
             "alpha",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":2}",
             "--tag",
             "alpha",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--since",
             "1h",
@@ -1760,14 +1775,14 @@ fn peek_where_multiple_predicates_with_since() {
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek");
-    let stdout = peek.stdout.take().expect("stdout");
+        .expect("follow");
+    let stdout = follower.stdout.take().expect("stdout");
     let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from peek output");
+    assert!(!line.is_empty(), "expected a line from follow output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 2);
-    let _ = peek.kill();
-    let _ = peek.wait();
+    let _ = follower.kill();
+    let _ = follower.wait();
 }
 
 #[test]
@@ -1791,12 +1806,12 @@ fn not_found_exit_code() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "get",
+            "fetch",
             "testpool",
             "999",
         ])
         .output()
-        .expect("get");
+        .expect("fetch");
     assert_eq!(get.status.code().unwrap(), 3);
     let err = parse_error_json(&get.stderr);
     let inner = err
@@ -1809,7 +1824,7 @@ fn not_found_exit_code() {
     );
     assert_eq!(inner.get("seq").and_then(|v| v.as_u64()).unwrap(), 999);
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(hint.contains("pool info") || hint.contains("peek"));
+    assert!(hint.contains("pool info") || hint.contains("follow"));
 }
 
 #[test]
@@ -1829,12 +1844,12 @@ fn usage_exit_code() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "poke", "testpool"])
+    let emit_out = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "feed", "testpool"])
         .output()
-        .expect("poke");
-    assert_eq!(poke.status.code().unwrap(), 2);
-    let err = parse_error_json(&poke.stderr);
+        .expect("feed");
+    assert_eq!(emit_out.status.code().unwrap(), 2);
+    let err = parse_error_json(&emit_out.stderr);
     let inner = err
         .get("error")
         .and_then(|v| v.as_object())
@@ -1845,7 +1860,7 @@ fn usage_exit_code() {
 }
 
 #[test]
-fn poke_emits_json_by_default() {
+fn emit_emits_json_by_default() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1861,24 +1876,24 @@ fn poke_emits_json_by_default() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "testpool",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
-    let value = parse_json(std::str::from_utf8(&poke.stdout).expect("utf8"));
+        .expect("feed");
+    assert!(emit_out.status.success());
+    let value = parse_json(std::str::from_utf8(&emit_out.stdout).expect("utf8"));
     assert!(value.get("seq").is_some());
     assert!(value.get("time").is_some());
 }
 
 #[test]
-fn poke_short_file_flag_reads_single_json_file() {
+fn emit_short_file_flag_reads_single_json_file() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1897,36 +1912,36 @@ fn poke_short_file_flag_reads_single_json_file() {
     let input_file = temp.path().join("one.json");
     std::fs::write(&input_file, b"{\"x\":1}\n").expect("write input");
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "-f",
             input_file.to_str().unwrap(),
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
     assert!(
-        poke.status.success(),
+        emit_out.status.success(),
         "{}",
-        String::from_utf8_lossy(&poke.stderr)
+        String::from_utf8_lossy(&emit_out.stderr)
     );
-    let receipts = parse_json_lines(&poke.stdout);
+    let receipts = parse_json_lines(&emit_out.stdout);
     assert_eq!(receipts.len(), 1);
 
     let get = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "get", "demo", "1"])
+        .args(["--dir", pool_dir.to_str().unwrap(), "fetch", "demo", "1"])
         .output()
-        .expect("get");
+        .expect("fetch");
     assert!(get.status.success());
     let value = parse_json(std::str::from_utf8(&get.stdout).expect("utf8"));
     assert_eq!(value["data"]["x"], 1);
 }
 
 #[test]
-fn poke_file_jsonl_ingests_multiple_records() {
+fn emit_file_jsonl_ingests_multiple_records() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1945,46 +1960,46 @@ fn poke_file_jsonl_ingests_multiple_records() {
     let input_file = temp.path().join("events.jsonl");
     std::fs::write(&input_file, b"{\"x\":1}\n{\"x\":2}\n").expect("write input");
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "--file",
             input_file.to_str().unwrap(),
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
     assert!(
-        poke.status.success(),
+        emit_out.status.success(),
         "{}",
-        String::from_utf8_lossy(&poke.stderr)
+        String::from_utf8_lossy(&emit_out.stderr)
     );
-    let receipts = parse_json_lines(&poke.stdout);
+    let receipts = parse_json_lines(&emit_out.stdout);
     assert_eq!(receipts.len(), 2);
     assert_eq!(receipts[0]["seq"], 1);
     assert_eq!(receipts[1]["seq"], 2);
 
     let get_one = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "get", "demo", "1"])
+        .args(["--dir", pool_dir.to_str().unwrap(), "fetch", "demo", "1"])
         .output()
-        .expect("get one");
+        .expect("fetch one");
     assert!(get_one.status.success());
     let first = parse_json(std::str::from_utf8(&get_one.stdout).expect("utf8"));
     assert_eq!(first["data"]["x"], 1);
 
     let get_two = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "get", "demo", "2"])
+        .args(["--dir", pool_dir.to_str().unwrap(), "fetch", "demo", "2"])
         .output()
-        .expect("get two");
+        .expect("fetch two");
     assert!(get_two.status.success());
     let second = parse_json(std::str::from_utf8(&get_two.stdout).expect("utf8"));
     assert_eq!(second["data"]["x"], 2);
 }
 
 #[test]
-fn poke_file_auto_handles_multiline_json() {
+fn emit_file_auto_handles_multiline_json() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2003,30 +2018,30 @@ fn poke_file_auto_handles_multiline_json() {
     let input_file = temp.path().join("pretty.json");
     std::fs::write(&input_file, b"{\n  \"x\": 1,\n  \"y\": 2\n}\n").expect("write input");
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "--file",
             input_file.to_str().unwrap(),
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
     assert!(
-        poke.status.success(),
+        emit_out.status.success(),
         "{}",
-        String::from_utf8_lossy(&poke.stderr)
+        String::from_utf8_lossy(&emit_out.stderr)
     );
-    let receipts = parse_json_lines(&poke.stdout);
+    let receipts = parse_json_lines(&emit_out.stdout);
     assert_eq!(receipts.len(), 1);
     assert_eq!(receipts[0]["seq"], 1);
 
     let get = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "get", "demo", "1"])
+        .args(["--dir", pool_dir.to_str().unwrap(), "fetch", "demo", "1"])
         .output()
-        .expect("get");
+        .expect("fetch");
     assert!(get.status.success());
     let value = parse_json(std::str::from_utf8(&get.stdout).expect("utf8"));
     assert_eq!(value["data"]["x"], 1);
@@ -2034,7 +2049,7 @@ fn poke_file_auto_handles_multiline_json() {
 }
 
 #[test]
-fn poke_retries_when_pool_is_busy() {
+fn emit_retries_when_pool_is_busy() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2061,7 +2076,7 @@ fn poke_retries_when_pool_is_busy() {
             .args([
                 "--dir",
                 &pool_dir_str,
-                "poke",
+                "feed",
                 "busy",
                 "{\"x\":1}",
                 "--retry",
@@ -2070,7 +2085,7 @@ fn poke_retries_when_pool_is_busy() {
                 "50ms",
             ])
             .output()
-            .expect("poke");
+            .expect("feed");
         let _ = tx.send(output);
     });
 
@@ -2080,11 +2095,57 @@ fn poke_retries_when_pool_is_busy() {
     let output = rx.recv_timeout(Duration::from_secs(2)).expect("output");
     assert!(
         output.status.success(),
-        "poke failed: {}",
+        "feed failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let value = parse_json(std::str::from_utf8(&output.stdout).expect("utf8"));
     assert!(value.get("seq").is_some());
+}
+
+#[test]
+fn emit_retries_exhaust_when_pool_stays_busy() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "retry",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let pool_path = pool_dir.join("retry.plasmite");
+    let file = File::open(&pool_path).expect("open pool");
+    file.lock_exclusive().expect("lock");
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "feed",
+            "retry",
+            "{\"x\":1}",
+            "--retry",
+            "1",
+            "--retry-delay",
+            "30ms",
+        ])
+        .output()
+        .expect("feed");
+
+    assert_error_kind(&output, 5, "Busy");
+    let error_json = parse_error_json(&output.stderr);
+    let inner = error_json
+        .get("error")
+        .and_then(|v| v.as_object())
+        .expect("error object");
+    let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(hint.contains("Retry attempts"));
 }
 
 #[test]
@@ -2174,25 +2235,25 @@ fn color_always_does_not_color_jsonl() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
             "--color",
             "always",
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "1",
@@ -2201,19 +2262,19 @@ fn color_always_does_not_color_jsonl() {
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek jsonl");
-    let stdout = peek.stdout.take().expect("stdout");
+        .expect("follow jsonl");
+    let stdout = follower.stdout.take().expect("stdout");
     let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from peek output");
+    assert!(!line.is_empty(), "expected a line from follow output");
     let line = line.trim_end();
     assert!(!line.contains("\u{1b}["));
     let _ = parse_json(line);
-    let _ = peek.kill();
-    let _ = peek.wait();
+    let _ = follower.kill();
+    let _ = follower.wait();
 }
 
 #[test]
-fn poke_auto_handles_pretty_json() {
+fn emit_auto_handles_pretty_json() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2229,19 +2290,19 @@ fn poke_auto_handles_pretty_json() {
         .expect("create");
     assert!(create.status.success());
 
-    let mut poke = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "poke", "demo"])
+    let mut emit_out = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "feed", "demo"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .expect("poke");
+        .expect("feed");
     {
-        let stdin = poke.stdin.as_mut().expect("stdin");
+        let stdin = emit_out.stdin.as_mut().expect("stdin");
         stdin
             .write_all(b"{\n  \"x\": 1,\n  \"y\": 2\n}\n")
             .expect("write stdin");
     }
-    let output = poke.wait_with_output().expect("poke output");
+    let output = emit_out.wait_with_output().expect("feed output");
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 1);
@@ -2250,7 +2311,7 @@ fn poke_auto_handles_pretty_json() {
 }
 
 #[test]
-fn poke_auto_handles_event_stream() {
+fn emit_auto_handles_event_stream() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2266,19 +2327,19 @@ fn poke_auto_handles_event_stream() {
         .expect("create");
     assert!(create.status.success());
 
-    let mut poke = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "poke", "demo"])
+    let mut emit_out = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "feed", "demo"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .expect("poke");
+        .expect("feed");
     {
-        let stdin = poke.stdin.as_mut().expect("stdin");
+        let stdin = emit_out.stdin.as_mut().expect("stdin");
         stdin
             .write_all(b"data: {\"x\":1}\n\ndata: {\"x\":2}\n\n")
             .expect("write stdin");
     }
-    let output = poke.wait_with_output().expect("poke output");
+    let output = emit_out.wait_with_output().expect("feed output");
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 2);
@@ -2287,7 +2348,7 @@ fn poke_auto_handles_event_stream() {
 }
 
 #[test]
-fn poke_auto_detects_json_seq() {
+fn emit_auto_detects_json_seq() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2303,19 +2364,19 @@ fn poke_auto_detects_json_seq() {
         .expect("create");
     assert!(create.status.success());
 
-    let mut poke = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "poke", "demo"])
+    let mut emit_out = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "feed", "demo"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .expect("poke");
+        .expect("feed");
     {
-        let stdin = poke.stdin.as_mut().expect("stdin");
+        let stdin = emit_out.stdin.as_mut().expect("stdin");
         stdin
             .write_all(b"\x1e{\"x\":1}\x1e{\"x\":2}")
             .expect("write stdin");
     }
-    let output = poke.wait_with_output().expect("poke output");
+    let output = emit_out.wait_with_output().expect("feed output");
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 2);
@@ -2324,7 +2385,7 @@ fn poke_auto_detects_json_seq() {
 }
 
 #[test]
-fn poke_auto_skip_reports_oversize() {
+fn emit_auto_skip_reports_oversize() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2340,11 +2401,11 @@ fn poke_auto_skip_reports_oversize() {
         .expect("create");
     assert!(create.status.success());
 
-    let mut poke = cmd()
+    let mut emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "-e",
             "skip",
@@ -2353,15 +2414,15 @@ fn poke_auto_skip_reports_oversize() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("poke");
+        .expect("feed");
     {
-        let stdin = poke.stdin.as_mut().expect("stdin");
+        let stdin = emit_out.stdin.as_mut().expect("stdin");
         let big = "x".repeat(1024 * 1024 + 1);
         let line = format!("{{\"big\":\"{big}\"}}\n");
         stdin.write_all(line.as_bytes()).expect("write stdin");
         stdin.write_all(b"{\"ok\":1}\n").expect("write ok");
     }
-    let output = poke.wait_with_output().expect("poke output");
+    let output = emit_out.wait_with_output().expect("feed output");
     assert_eq!(output.status.code().unwrap(), 1);
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 1);
@@ -2378,7 +2439,7 @@ fn poke_auto_skip_reports_oversize() {
 }
 
 #[test]
-fn poke_seq_mode_parses_rs_records() {
+fn emit_seq_mode_parses_rs_records() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2394,11 +2455,11 @@ fn poke_seq_mode_parses_rs_records() {
         .expect("create");
     assert!(create.status.success());
 
-    let mut poke = cmd()
+    let mut emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "-i",
             "seq",
@@ -2406,14 +2467,14 @@ fn poke_seq_mode_parses_rs_records() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .expect("poke");
+        .expect("feed");
     {
-        let stdin = poke.stdin.as_mut().expect("stdin");
+        let stdin = emit_out.stdin.as_mut().expect("stdin");
         stdin
             .write_all(b"\x1e{\"x\":1}\x1e{\"x\":2}")
             .expect("write stdin");
     }
-    let output = poke.wait_with_output().expect("poke output");
+    let output = emit_out.wait_with_output().expect("feed output");
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 2);
@@ -2422,7 +2483,7 @@ fn poke_seq_mode_parses_rs_records() {
 }
 
 #[test]
-fn poke_errors_skip_emits_notices_and_nonzero() {
+fn emit_errors_skip_emits_notices_and_nonzero() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2438,11 +2499,11 @@ fn poke_errors_skip_emits_notices_and_nonzero() {
         .expect("create");
     assert!(create.status.success());
 
-    let mut poke = cmd()
+    let mut emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "-i",
             "jsonl",
@@ -2453,14 +2514,14 @@ fn poke_errors_skip_emits_notices_and_nonzero() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("poke");
+        .expect("feed");
     {
-        let stdin = poke.stdin.as_mut().expect("stdin");
+        let stdin = emit_out.stdin.as_mut().expect("stdin");
         stdin
             .write_all(b"{\"x\":1}\nnot-json\n{\"x\":2}\n")
             .expect("write stdin");
     }
-    let output = poke.wait_with_output().expect("poke output");
+    let output = emit_out.wait_with_output().expect("feed output");
     assert_eq!(output.status.code().unwrap(), 1);
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 2);
@@ -2489,7 +2550,7 @@ fn poke_errors_skip_emits_notices_and_nonzero() {
 }
 
 #[test]
-fn poke_errors_skip_reports_oversize() {
+fn emit_errors_skip_reports_oversize() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2505,11 +2566,11 @@ fn poke_errors_skip_reports_oversize() {
         .expect("create");
     assert!(create.status.success());
 
-    let mut poke = cmd()
+    let mut emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "-i",
             "jsonl",
@@ -2520,15 +2581,15 @@ fn poke_errors_skip_reports_oversize() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("poke");
+        .expect("feed");
     {
-        let stdin = poke.stdin.as_mut().expect("stdin");
+        let stdin = emit_out.stdin.as_mut().expect("stdin");
         let big = "x".repeat(1024 * 1024 + 1);
         let line = format!("{{\"big\":\"{big}\"}}\n");
         stdin.write_all(line.as_bytes()).expect("write stdin");
         stdin.write_all(b"{\"ok\":1}\n").expect("write ok");
     }
-    let output = poke.wait_with_output().expect("poke output");
+    let output = emit_out.wait_with_output().expect("feed output");
     assert_eq!(output.status.code().unwrap(), 1);
     let notices = parse_json_lines(&output.stderr);
     let oversize = notices.iter().find(|value| {
@@ -2543,7 +2604,7 @@ fn poke_errors_skip_reports_oversize() {
 }
 
 #[test]
-fn poke_in_json_accepts_pretty_json() {
+fn emit_in_json_accepts_pretty_json() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2559,11 +2620,11 @@ fn poke_in_json_accepts_pretty_json() {
         .expect("create");
     assert!(create.status.success());
 
-    let mut poke = cmd()
+    let mut emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "-i",
             "json",
@@ -2571,14 +2632,14 @@ fn poke_in_json_accepts_pretty_json() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .expect("poke");
+        .expect("feed");
     {
-        let stdin = poke.stdin.as_mut().expect("stdin");
+        let stdin = emit_out.stdin.as_mut().expect("stdin");
         stdin
             .write_all(b"{\n  \"x\": 1,\n  \"y\": 2\n}\n")
             .expect("write stdin");
     }
-    let output = poke.wait_with_output().expect("poke output");
+    let output = emit_out.wait_with_output().expect("feed output");
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 1);
@@ -2587,7 +2648,7 @@ fn poke_in_json_accepts_pretty_json() {
 }
 
 #[test]
-fn poke_in_json_errors_skip_returns_nonzero() {
+fn emit_in_json_errors_skip_returns_nonzero() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2603,11 +2664,11 @@ fn poke_in_json_errors_skip_returns_nonzero() {
         .expect("create");
     assert!(create.status.success());
 
-    let mut poke = cmd()
+    let mut emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "-i",
             "json",
@@ -2617,12 +2678,12 @@ fn poke_in_json_errors_skip_returns_nonzero() {
         .stdin(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("poke");
+        .expect("feed");
     {
-        let stdin = poke.stdin.as_mut().expect("stdin");
+        let stdin = emit_out.stdin.as_mut().expect("stdin");
         stdin.write_all(b"{\"x\":1").expect("write stdin");
     }
-    let output = poke.wait_with_output().expect("poke output");
+    let output = emit_out.wait_with_output().expect("feed output");
     assert_eq!(output.status.code().unwrap(), 1);
     let notices = parse_json_lines(&output.stderr);
     assert!(notices.iter().any(|value| {
@@ -2635,7 +2696,7 @@ fn poke_in_json_errors_skip_returns_nonzero() {
 }
 
 #[test]
-fn poke_event_stream_flushes_trailing_event() {
+fn emit_event_stream_flushes_trailing_event() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2651,11 +2712,11 @@ fn poke_event_stream_flushes_trailing_event() {
         .expect("create");
     assert!(create.status.success());
 
-    let mut poke = cmd()
+    let mut emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "-i",
             "auto",
@@ -2663,12 +2724,12 @@ fn poke_event_stream_flushes_trailing_event() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .expect("poke");
+        .expect("feed");
     {
-        let stdin = poke.stdin.as_mut().expect("stdin");
+        let stdin = emit_out.stdin.as_mut().expect("stdin");
         stdin.write_all(b"data: {\"x\":1}\n").expect("write stdin");
     }
-    let output = poke.wait_with_output().expect("poke output");
+    let output = emit_out.wait_with_output().expect("feed output");
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 1);
@@ -2677,7 +2738,7 @@ fn poke_event_stream_flushes_trailing_event() {
 }
 
 #[test]
-fn poke_jq_mode_rejects_skip() {
+fn emit_jq_mode_rejects_skip() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2693,11 +2754,11 @@ fn poke_jq_mode_rejects_skip() {
         .expect("create");
     assert!(create.status.success());
 
-    let mut poke = cmd()
+    let mut emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "-i",
             "jq",
@@ -2707,12 +2768,12 @@ fn poke_jq_mode_rejects_skip() {
         .stdin(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("poke");
+        .expect("feed");
     {
-        let stdin = poke.stdin.as_mut().expect("stdin");
+        let stdin = emit_out.stdin.as_mut().expect("stdin");
         stdin.write_all(b"{\"x\":1}\n{\"x\":2}\n").expect("write");
     }
-    let output = poke.wait_with_output().expect("poke output");
+    let output = emit_out.wait_with_output().expect("feed output");
     assert_eq!(output.status.code().unwrap(), 2);
     let err = parse_error_json(&output.stderr);
     let inner = err
@@ -2800,7 +2861,7 @@ fn pool_list_defaults_to_table_output() {
 }
 
 #[test]
-fn peek_since_future_exits_empty() {
+fn follow_since_future_exits_empty() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2816,23 +2877,23 @@ fn peek_since_future_exits_empty() {
         .expect("create");
     assert!(create.status.success());
 
-    let peek = cmd()
+    let follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--since",
             "2999-01-01T00:00:00Z",
         ])
         .output()
-        .expect("peek");
-    assert!(peek.status.success());
-    assert!(peek.stdout.is_empty());
+        .expect("follow");
+    assert!(follower.status.success());
+    assert!(follower.stdout.is_empty());
 }
 
 #[test]
-fn peek_format_jsonl_matches_jsonl_alias() {
+fn follow_format_jsonl_matches_jsonl_alias() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2848,23 +2909,23 @@ fn peek_format_jsonl_matches_jsonl_alias() {
         .expect("create");
     assert!(create.status.success());
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
+        .expect("feed");
+    assert!(emit_out.status.success());
 
     let mut fmt = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "1",
@@ -2873,10 +2934,10 @@ fn peek_format_jsonl_matches_jsonl_alias() {
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek format");
+        .expect("follow format");
     let fmt_stdout = fmt.stdout.take().expect("stdout");
     let fmt_line = read_line_with_timeout(fmt_stdout, Duration::from_secs(2));
-    assert!(!fmt_line.is_empty(), "expected a line from peek output");
+    assert!(!fmt_line.is_empty(), "expected a line from follow output");
     let fmt_line = fmt_line.trim_end();
     assert!(!fmt_line.contains('\n'));
     let _ = parse_json(fmt_line);
@@ -2887,7 +2948,7 @@ fn peek_format_jsonl_matches_jsonl_alias() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "1",
@@ -2895,10 +2956,10 @@ fn peek_format_jsonl_matches_jsonl_alias() {
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek jsonl");
+        .expect("follow jsonl");
     let alias_stdout = alias.stdout.take().expect("stdout");
     let alias_line = read_line_with_timeout(alias_stdout, Duration::from_secs(2));
-    assert!(!alias_line.is_empty(), "expected a line from peek output");
+    assert!(!alias_line.is_empty(), "expected a line from follow output");
     let alias_line = alias_line.trim_end();
     assert!(!alias_line.contains('\n'));
     let _ = parse_json(alias_line);
@@ -2907,7 +2968,7 @@ fn peek_format_jsonl_matches_jsonl_alias() {
 }
 
 #[test]
-fn peek_emits_drop_notice_on_stderr() {
+fn follow_emits_drop_notice_on_stderr() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2925,21 +2986,21 @@ fn peek_emits_drop_notice_on_stderr() {
         .expect("create");
     assert!(create.status.success());
 
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--jsonl",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("peek");
+        .expect("follow");
 
-    let stdout = peek.stdout.take().expect("stdout");
-    let stderr = peek.stderr.take().expect("stderr");
+    let stdout = follower.stdout.take().expect("stdout");
+    let stderr = follower.stderr.take().expect("stderr");
 
     thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
@@ -2972,19 +3033,19 @@ fn peek_emits_drop_notice_on_stderr() {
 
     for i in 0..200u64 {
         let payload = "a".repeat(8192);
-        let poke = cmd()
+        let emit_out = cmd()
             .args([
                 "--dir",
                 pool_dir.to_str().unwrap(),
-                "poke",
+                "feed",
                 "demo",
                 &format!("{{\"x\":{i},\"pad\":\"{payload}\"}}"),
             ])
             .output()
-            .expect("poke");
-        if !poke.status.success() {
-            let stderr = String::from_utf8_lossy(&poke.stderr);
-            panic!("poke failed at {i}: {stderr}");
+            .expect("feed");
+        if !emit_out.status.success() {
+            let stderr = String::from_utf8_lossy(&emit_out.stderr);
+            panic!("feed failed at {i}: {stderr}");
         }
     }
 
@@ -2997,7 +3058,7 @@ fn peek_emits_drop_notice_on_stderr() {
         .and_then(|v| v.as_object())
         .expect("notice object");
     assert_eq!(notice.get("kind").and_then(|v| v.as_str()), Some("drop"));
-    assert_eq!(notice.get("cmd").and_then(|v| v.as_str()), Some("peek"));
+    assert_eq!(notice.get("cmd").and_then(|v| v.as_str()), Some("follow"));
     assert_eq!(notice.get("pool").and_then(|v| v.as_str()), Some("demo"));
     let details = notice
         .get("details")
@@ -3011,12 +3072,12 @@ fn peek_emits_drop_notice_on_stderr() {
     assert!(details.get("last_seen_seq").is_some());
     assert!(details.get("next_seen_seq").is_some());
 
-    let _ = peek.kill();
-    let _ = peek.wait();
+    let _ = follower.kill();
+    let _ = follower.wait();
 }
 
 #[test]
-fn peek_rejects_conflicting_output_flags() {
+fn follow_rejects_conflicting_output_flags() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -3032,11 +3093,11 @@ fn peek_rejects_conflicting_output_flags() {
         .expect("create");
     assert!(create.status.success());
 
-    let peek = cmd()
+    let follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--tail",
             "1",
@@ -3045,9 +3106,9 @@ fn peek_rejects_conflicting_output_flags() {
             "jsonl",
         ])
         .output()
-        .expect("peek");
-    assert_eq!(peek.status.code().unwrap(), 2);
-    let err = parse_error_json(&peek.stderr);
+        .expect("follow");
+    assert_eq!(follower.status.code().unwrap(), 2);
+    let err = parse_error_json(&follower.stderr);
     let inner = err
         .get("error")
         .and_then(|v| v.as_object())
@@ -3058,23 +3119,23 @@ fn peek_rejects_conflicting_output_flags() {
 }
 
 #[test]
-fn poke_create_flag_creates_missing_pool() {
+fn emit_create_flag_creates_missing_pool() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "autopool",
             "{\"x\":1}",
             "--create",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
-    let value = parse_json(std::str::from_utf8(&poke.stdout).expect("utf8"));
+        .expect("feed");
+    assert!(emit_out.status.success());
+    let value = parse_json(std::str::from_utf8(&emit_out.stdout).expect("utf8"));
     assert!(value.get("seq").is_some());
 
     let pool_path = pool_dir.join("autopool.plasmite");
@@ -3082,23 +3143,23 @@ fn poke_create_flag_creates_missing_pool() {
 }
 
 #[test]
-fn peek_create_flag_creates_missing_pool() {
+fn follow_create_flag_creates_missing_pool() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
-    let peek = cmd()
+    let follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "autopool",
             "--create",
             "--timeout",
             "20ms",
         ])
         .output()
-        .expect("peek");
-    assert_eq!(peek.status.code(), Some(124));
+        .expect("follow");
+    assert_eq!(follower.status.code(), Some(124));
     assert!(pool_dir.join("autopool.plasmite").exists());
 }
 
@@ -3305,20 +3366,20 @@ fn errors_are_json_on_non_tty_stderr() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
-    let peek = cmd()
+    let follower = cmd()
         .args([
             "--color",
             "always",
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "missing",
         ])
         .output()
-        .expect("peek");
-    assert_eq!(peek.status.code().unwrap(), 3);
+        .expect("follow");
+    assert_eq!(follower.status.code().unwrap(), 3);
 
-    let err = parse_error_json(&peek.stderr);
+    let err = parse_error_json(&follower.stderr);
     let inner = err
         .get("error")
         .and_then(|v| v.as_object())
@@ -3354,12 +3415,12 @@ fn clap_errors_are_concise_in_json() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "demo",
             "--definitely-not-a-flag",
         ])
         .output()
-        .expect("peek");
+        .expect("follow");
     assert_eq!(bad.status.code().unwrap(), 2);
 
     let err = parse_error_json(&bad.stderr);
@@ -3380,15 +3441,19 @@ fn misuse_feedback_matrix_is_actionable_across_command_families() {
     let cases: [(&[&str], &str, &str); 8] = [
         (&["pool", "info"], "required arguments", "pool info --help"),
         (
-            &["poke", "demo", "{\"x\":1}", "--retry-delay", "1s"],
+            &["feed", "demo", "{\"x\":1}", "--retry-delay", "1s"],
             "--retry-delay requires --retry",
             "Add --retry",
         ),
-        (&["peek"], "required arguments", "plasmite peek chat -n 1"),
         (
-            &["get", "demo"],
+            &["follow"],
             "required arguments",
-            "plasmite get --help",
+            "plasmite follow chat -n 1",
+        ),
+        (
+            &["fetch", "demo"],
+            "required arguments",
+            "plasmite fetch --help",
         ),
         (
             &["doctor", "demo", "--all"],
@@ -3419,9 +3484,9 @@ fn misuse_feedback_matrix_is_actionable_across_command_families() {
 }
 
 #[test]
-fn peek_missing_pool_has_actionable_hint() {
+fn follow_missing_pool_has_actionable_hint() {
     // This assertion currently checks the fallback exact command hint text for missing pools.
-    let output = cmd().args(["peek", "-n", "1"]).output().expect("peek");
+    let output = cmd().args(["follow", "-n", "1"]).output().expect("follow");
     assert_eq!(output.status.code().unwrap(), 2);
     let err = parse_error_json(&output.stderr);
     let hint = err
@@ -3430,11 +3495,11 @@ fn peek_missing_pool_has_actionable_hint() {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     assert!(hint.contains("pool ref"));
-    assert!(hint.contains("plasmite peek chat -n 1"));
+    assert!(hint.contains("plasmite follow chat -n 1"));
 }
 
 #[test]
-fn poke_missing_pool_hint_suggests_create() {
+fn emit_missing_pool_hint_suggests_create() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -3442,12 +3507,12 @@ fn poke_missing_pool_hint_suggests_create() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "missing",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
     assert_eq!(output.status.code(), Some(3));
 
     let err = parse_error_json(&output.stderr);
@@ -3456,18 +3521,18 @@ fn poke_missing_pool_hint_suggests_create() {
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
     assert!(hint.contains("--create"));
     assert!(hint.contains("exact command"));
-    assert!(hint.contains("plasmite poke missing --create"));
+    assert!(hint.contains("plasmite feed missing --create"));
 }
 
 #[test]
-fn peek_missing_pool_hint_suggests_create() {
+fn follow_missing_pool_hint_suggests_create() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
     let output = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "peek", "missing"])
+        .args(["--dir", pool_dir.to_str().unwrap(), "follow", "missing"])
         .output()
-        .expect("peek");
+        .expect("follow");
     assert_eq!(output.status.code(), Some(3));
 
     let err = parse_error_json(&output.stderr);
@@ -3476,7 +3541,7 @@ fn peek_missing_pool_hint_suggests_create() {
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
     assert!(hint.contains("--create"));
     assert!(hint.contains("exact command"));
-    assert!(hint.contains("plasmite peek missing --create"));
+    assert!(hint.contains("plasmite follow missing --create"));
 }
 
 #[test]
@@ -3580,6 +3645,122 @@ fn permission_error_has_hint_and_causes() {
         .permissions();
     perms.set_mode(original_mode);
     std::fs::set_permissions(&pool_dir, perms).expect("unset perms");
+}
+
+#[test]
+fn permission_denied_matrix_for_write_paths() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("readonly-pools");
+    std::fs::create_dir_all(&pool_dir).expect("mkdir");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "base",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let mut perms = std::fs::metadata(&pool_dir)
+        .expect("metadata")
+        .permissions();
+    let original_mode = perms.mode();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&pool_dir, perms).expect("set perms");
+
+    let output_create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "other",
+        ])
+        .output()
+        .expect("create denied");
+    assert_error_kind(&output_create, 6, "Permission");
+
+    let output_feed = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "feed",
+            "base",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("feed denied");
+    assert_error_kind(&output_feed, 6, "Permission");
+
+    let output_remove = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "remove",
+            "base",
+        ])
+        .output()
+        .expect("remove denied");
+    assert_error_kind(&output_remove, 6, "Permission");
+
+    let restore = std::fs::Permissions::from_mode(original_mode);
+    std::fs::set_permissions(&pool_dir, restore).expect("unset perms");
+}
+
+#[test]
+fn truncated_pool_file_variants_are_rejected() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    std::fs::create_dir_all(&pool_dir).expect("mkdir");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "probe",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let pool_path = pool_dir.join("probe.plasmite");
+    let valid = std::fs::read(&pool_path).expect("read valid pool");
+
+    let mut cases = Vec::new();
+    cases.push(Vec::new());
+    cases.push(valid[..1].to_vec());
+    cases.push(valid[..valid.len() / 2].to_vec());
+    let mut truncated = valid.clone();
+    truncated.truncate(valid.len().saturating_sub(128.min(valid.len())));
+    cases.push(truncated);
+    let mut flipped = valid.clone();
+    if !flipped.is_empty() {
+        let idx = std::mem::size_of::<u64>() + 3;
+        flipped[idx] = flipped[idx].wrapping_add(0x01);
+    }
+    cases.push(flipped);
+
+    for bytes in cases {
+        std::fs::write(&pool_path, &bytes).expect("write mutated pool");
+        let output = cmd()
+            .args(["--dir", pool_dir.to_str().unwrap(), "pool", "info", "probe"])
+            .output()
+            .expect("info");
+        let error_json = parse_error_json(&output.stderr);
+        let inner = error_json
+            .get("error")
+            .and_then(|v| v.as_object())
+            .expect("error object");
+        assert_ne!(output.status.code(), Some(0));
+        assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Corrupt"));
+    }
 }
 
 #[test]
@@ -3817,7 +3998,7 @@ fn doctor_missing_pool_reports_not_found() {
 }
 
 #[test]
-fn poke_remote_url_happy_path_appends_message() {
+fn emit_remote_url_happy_path_appends_message() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -3835,20 +4016,20 @@ fn poke_remote_url_happy_path_appends_message() {
 
     let server = ServeProcess::start(&pool_dir);
     let pool_url = format!("{}/demo", server.base_url);
-    let poke = cmd()
+    let emit_out = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             &pool_url,
             "{\"x\":1}",
             "--tag",
             "ping",
         ])
         .output()
-        .expect("poke");
-    assert!(poke.status.success());
-    let value = parse_json(std::str::from_utf8(&poke.stdout).expect("utf8"));
+        .expect("feed");
+    assert!(emit_out.status.success());
+    let value = parse_json(std::str::from_utf8(&emit_out.stdout).expect("utf8"));
     assert_eq!(value.get("seq").and_then(|v| v.as_u64()), Some(1));
     assert!(value.get("data").is_none());
     assert_eq!(
@@ -3858,15 +4039,15 @@ fn poke_remote_url_happy_path_appends_message() {
 }
 
 #[test]
-fn poke_remote_url_rejects_api_shaped_path() {
+fn emit_remote_url_rejects_api_shaped_path() {
     let output = cmd()
         .args([
-            "poke",
+            "feed",
             "http://localhost:9170/v0/pools/demo/append",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
     assert!(!output.status.success());
     let err = parse_error_json(&output.stderr);
     assert_eq!(
@@ -3878,11 +4059,11 @@ fn poke_remote_url_rejects_api_shaped_path() {
 }
 
 #[test]
-fn poke_remote_url_rejects_trailing_slash() {
+fn emit_remote_url_rejects_trailing_slash() {
     let output = cmd()
-        .args(["poke", "http://localhost:9170/demo/", "{\"x\":1}"])
+        .args(["feed", "http://localhost:9170/demo/", "{\"x\":1}"])
         .output()
-        .expect("poke");
+        .expect("feed");
     assert!(!output.status.success());
     let err = parse_error_json(&output.stderr);
     assert_eq!(
@@ -3894,16 +4075,16 @@ fn poke_remote_url_rejects_trailing_slash() {
 }
 
 #[test]
-fn poke_remote_url_rejects_create_flag() {
+fn emit_remote_url_rejects_create_flag() {
     let output = cmd()
         .args([
-            "poke",
+            "feed",
             "http://localhost:9170/demo",
             "--create",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
     assert!(!output.status.success());
     let err = parse_error_json(&output.stderr);
     assert_eq!(
@@ -3927,16 +4108,16 @@ fn poke_remote_url_rejects_create_flag() {
 }
 
 #[test]
-fn poke_remote_create_rejected() {
+fn emit_remote_create_rejected() {
     let output = cmd()
         .args([
-            "poke",
+            "feed",
             "http://localhost:9170/demo",
             "--create",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
     assert_eq!(output.status.code(), Some(2));
 
     let err = parse_error_json(&output.stderr);
@@ -3949,7 +4130,7 @@ fn poke_remote_create_rejected() {
 }
 
 #[test]
-fn peek_remote_url_rejects_create_flag() {
+fn follow_remote_url_rejects_create_flag() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -3957,12 +4138,12 @@ fn peek_remote_url_rejects_create_flag() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "http://127.0.0.1:65535/demo",
             "--create",
         ])
         .output()
-        .expect("peek");
+        .expect("follow");
     assert_eq!(output.status.code(), Some(2));
 
     let err = parse_error_json(&output.stderr);
@@ -3973,7 +4154,7 @@ fn peek_remote_url_rejects_create_flag() {
 }
 
 #[test]
-fn poke_remote_url_auth_errors_propagate() {
+fn emit_remote_url_auth_errors_propagate() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -3992,9 +4173,9 @@ fn poke_remote_url_auth_errors_propagate() {
     let server = ServeProcess::start_with_args(&pool_dir, &["--token", "secret-token"]);
     let pool_url = format!("{}/demo", server.base_url);
     let output = cmd()
-        .args(["poke", &pool_url, "{\"x\":1}"])
+        .args(["feed", &pool_url, "{\"x\":1}"])
         .output()
-        .expect("poke");
+        .expect("feed");
     assert!(!output.status.success());
     let err = parse_error_json(&output.stderr);
     assert_eq!(
@@ -4006,7 +4187,7 @@ fn poke_remote_url_auth_errors_propagate() {
 }
 
 #[test]
-fn peek_remote_url_happy_path_reads_recent_messages() {
+fn follow_remote_url_happy_path_reads_recent_messages() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -4026,30 +4207,30 @@ fn peek_remote_url_happy_path_reads_recent_messages() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":1}",
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
     assert!(first.status.success());
     let second = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "demo",
             "{\"x\":2}",
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
     assert!(second.status.success());
 
     let server = ServeProcess::start(&pool_dir);
     let pool_url = format!("{}/demo", server.base_url);
-    let peek = cmd()
+    let follower = cmd()
         .args([
-            "peek",
+            "follow",
             &pool_url,
             "--tail",
             "1",
@@ -4059,19 +4240,19 @@ fn peek_remote_url_happy_path_reads_recent_messages() {
             "2s",
         ])
         .output()
-        .expect("peek");
+        .expect("follow");
     assert!(
-        peek.status.success(),
+        follower.status.success(),
         "stderr={}",
-        String::from_utf8_lossy(&peek.stderr)
+        String::from_utf8_lossy(&follower.stderr)
     );
-    let value = parse_json(std::str::from_utf8(&peek.stdout).expect("utf8").trim());
+    let value = parse_json(std::str::from_utf8(&follower.stdout).expect("utf8").trim());
     assert_eq!(value.get("seq").and_then(|v| v.as_u64()), Some(2));
     assert_eq!(value.get("data").and_then(|v| v.get("x")), Some(&json!(2)));
 }
 
 #[test]
-fn peek_remote_url_supports_tag_filter() {
+fn follow_remote_url_supports_tag_filter() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -4088,49 +4269,49 @@ fn peek_remote_url_supports_tag_filter() {
     assert!(create.status.success());
 
     for (payload, tag) in [("{\"x\":1}", "drop"), ("{\"x\":2}", "keep")] {
-        let poke = cmd()
+        let emit_out = cmd()
             .args([
                 "--dir",
                 pool_dir.to_str().unwrap(),
-                "poke",
+                "feed",
                 "demo",
                 payload,
                 "--tag",
                 tag,
             ])
             .output()
-            .expect("poke");
-        assert!(poke.status.success());
+            .expect("feed");
+        assert!(emit_out.status.success());
     }
 
     let server = ServeProcess::start(&pool_dir);
     let pool_url = format!("{}/demo", server.base_url);
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
-            "peek", &pool_url, "--tail", "10", "--jsonl", "--tag", "keep",
+            "follow", &pool_url, "--tail", "10", "--jsonl", "--tag", "keep",
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek");
-    let stdout = peek.stdout.take().expect("stdout");
+        .expect("follow");
+    let stdout = follower.stdout.take().expect("stdout");
     let line = read_line_with_timeout(stdout, Duration::from_secs(2));
-    assert!(!line.is_empty(), "expected a line from peek output");
+    assert!(!line.is_empty(), "expected a line from follow output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").and_then(|v| v.get("x")), Some(&json!(2)));
-    let _ = peek.kill();
-    let _ = peek.wait();
+    let _ = follower.kill();
+    let _ = follower.wait();
 }
 
 #[test]
-fn peek_remote_url_rejects_api_shaped_path() {
+fn follow_remote_url_rejects_api_shaped_path() {
     let output = cmd()
         .args([
-            "peek",
+            "follow",
             "http://localhost:9170/v0/pools/demo/tail",
             "--jsonl",
         ])
         .output()
-        .expect("peek");
+        .expect("follow");
     assert!(!output.status.success());
     let err = parse_error_json(&output.stderr);
     assert_eq!(
@@ -4142,13 +4323,13 @@ fn peek_remote_url_rejects_api_shaped_path() {
 }
 
 #[test]
-fn peek_remote_url_rejects_since_and_replay() {
+fn follow_remote_url_rejects_since_and_replay() {
     let pool_url = "http://localhost:9170/demo";
 
     let since = cmd()
-        .args(["peek", pool_url, "--since", "5m"])
+        .args(["follow", pool_url, "--since", "5m"])
         .output()
-        .expect("peek");
+        .expect("follow");
     assert!(!since.status.success());
     let since_err = parse_error_json(&since.stderr);
     let since_message = since_err
@@ -4159,9 +4340,9 @@ fn peek_remote_url_rejects_since_and_replay() {
     assert!(since_message.contains("does not support --since"));
 
     let replay = cmd()
-        .args(["peek", pool_url, "--tail", "5", "--replay", "1"])
+        .args(["follow", pool_url, "--tail", "5", "--replay", "1"])
         .output()
-        .expect("peek");
+        .expect("follow");
     assert!(!replay.status.success());
     let replay_err = parse_error_json(&replay.stderr);
     let replay_message = replay_err
@@ -4173,7 +4354,7 @@ fn peek_remote_url_rejects_since_and_replay() {
 }
 
 #[test]
-fn peek_remote_url_timeout_returns_124() {
+fn follow_remote_url_timeout_returns_124() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -4191,15 +4372,15 @@ fn peek_remote_url_timeout_returns_124() {
 
     let server = ServeProcess::start(&pool_dir);
     let pool_url = format!("{}/demo", server.base_url);
-    let peek = cmd()
-        .args(["peek", &pool_url, "--jsonl", "--timeout", "150ms"])
+    let follower = cmd()
+        .args(["follow", &pool_url, "--jsonl", "--timeout", "150ms"])
         .output()
-        .expect("peek");
-    assert_eq!(peek.status.code(), Some(124));
+        .expect("follow");
+    assert_eq!(follower.status.code(), Some(124));
 }
 
 #[test]
-fn poke_streams_json_values_from_stdin() {
+fn emit_streams_json_values_from_stdin() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -4215,19 +4396,19 @@ fn poke_streams_json_values_from_stdin() {
         .expect("create");
     assert!(create.status.success());
 
-    let mut poke = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "poke", "testpool"])
+    let mut emit_out = cmd()
+        .args(["--dir", pool_dir.to_str().unwrap(), "feed", "testpool"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .expect("poke");
+        .expect("feed");
     {
-        let stdin = poke.stdin.as_mut().expect("stdin");
+        let stdin = emit_out.stdin.as_mut().expect("stdin");
         stdin
             .write_all(b"{\"x\":1}\n{\"x\":2}")
             .expect("write stdin");
     }
-    let output = poke.wait_with_output().expect("poke output");
+    let output = emit_out.wait_with_output().expect("feed output");
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 2);
@@ -4236,11 +4417,11 @@ fn poke_streams_json_values_from_stdin() {
     assert!(lines[0].get("data").is_none());
     assert!(lines[1].get("data").is_none());
 
-    let mut peek = cmd()
+    let mut follower = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "testpool",
             "--tail",
             "2",
@@ -4248,21 +4429,21 @@ fn poke_streams_json_values_from_stdin() {
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("peek");
-    let stdout = peek.stdout.take().expect("stdout");
+        .expect("follow");
+    let stdout = follower.stdout.take().expect("stdout");
     let mut reader = BufReader::new(stdout);
-    let mut peek_lines = Vec::new();
+    let mut follower_lines = Vec::new();
     for _ in 0..2 {
         let mut line = String::new();
         let read = reader.read_line(&mut line).expect("read line");
-        assert!(read > 0, "expected a line from peek output");
-        peek_lines.push(parse_json(line.trim()));
+        assert!(read > 0, "expected a line from follow output");
+        follower_lines.push(parse_json(line.trim()));
     }
-    let _ = peek.kill();
-    let _ = peek.wait();
-    assert_eq!(peek_lines.len(), 2);
-    assert_eq!(peek_lines[0].get("data").unwrap()["x"], 1);
-    assert_eq!(peek_lines[1].get("data").unwrap()["x"], 2);
+    let _ = follower.kill();
+    let _ = follower.wait();
+    assert_eq!(follower_lines.len(), 2);
+    assert_eq!(follower_lines[0].get("data").unwrap()["x"], 1);
+    assert_eq!(follower_lines[1].get("data").unwrap()["x"], 2);
 }
 
 #[test]
@@ -4788,12 +4969,12 @@ fn completion_bash_generates_valid_output() {
         "bash should include pool subcommand"
     );
     assert!(
-        stdout.contains("poke"),
-        "bash should include poke subcommand"
+        stdout.contains("feed"),
+        "bash should include feed subcommand"
     );
     assert!(
-        stdout.contains("peek"),
-        "bash should include peek subcommand"
+        stdout.contains("follow"),
+        "bash should include follow subcommand"
     );
 }
 
@@ -4848,7 +5029,7 @@ fn completion_invalid_shell_fails() {
 }
 
 #[test]
-fn peek_replay_emits_messages_in_order() {
+fn follow_replay_emits_messages_in_order() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -4861,12 +5042,12 @@ fn peek_replay_emits_messages_in_order() {
             .args([
                 "--dir",
                 pool_dir.to_str().unwrap(),
-                "poke",
+                "feed",
                 "rp",
                 &format!("{{\"i\":{i}}}"),
             ])
             .output()
-            .expect("poke");
+            .expect("feed");
         sleep(Duration::from_millis(20));
     }
 
@@ -4874,7 +5055,7 @@ fn peek_replay_emits_messages_in_order() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "rp",
             "--tail",
             "100",
@@ -4883,7 +5064,7 @@ fn peek_replay_emits_messages_in_order() {
             "--jsonl",
         ])
         .output()
-        .expect("peek --replay");
+        .expect("follow --replay");
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
     assert_eq!(messages.len(), 3);
@@ -4893,7 +5074,7 @@ fn peek_replay_emits_messages_in_order() {
 }
 
 #[test]
-fn peek_replay_tail_limits_messages() {
+fn follow_replay_tail_limits_messages() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -4906,19 +5087,19 @@ fn peek_replay_tail_limits_messages() {
             .args([
                 "--dir",
                 pool_dir.to_str().unwrap(),
-                "poke",
+                "feed",
                 "rpt",
                 &format!("{{\"i\":{i}}}"),
             ])
             .output()
-            .expect("poke");
+            .expect("feed");
     }
 
     let output = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "rpt",
             "--tail",
             "2",
@@ -4927,7 +5108,7 @@ fn peek_replay_tail_limits_messages() {
             "--jsonl",
         ])
         .output()
-        .expect("peek --replay");
+        .expect("follow --replay");
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
     assert_eq!(messages.len(), 2);
@@ -4936,7 +5117,7 @@ fn peek_replay_tail_limits_messages() {
 }
 
 #[test]
-fn peek_replay_respects_speed_timing() {
+fn follow_replay_respects_speed_timing() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -4948,30 +5129,30 @@ fn peek_replay_respects_speed_timing() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "rps",
             "{\"i\":1}",
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
     sleep(Duration::from_millis(200));
     cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "rps",
             "{\"i\":2}",
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
 
     let start = Instant::now();
     let output = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "rps",
             "--tail",
             "100",
@@ -4980,7 +5161,7 @@ fn peek_replay_respects_speed_timing() {
             "--jsonl",
         ])
         .output()
-        .expect("peek --replay");
+        .expect("follow --replay");
     let elapsed = start.elapsed();
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
@@ -4992,7 +5173,7 @@ fn peek_replay_respects_speed_timing() {
 }
 
 #[test]
-fn peek_replay_speed_2x_halves_delay() {
+fn follow_replay_speed_2x_halves_delay() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -5010,30 +5191,30 @@ fn peek_replay_speed_2x_halves_delay() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "rps2",
             "{\"i\":1}",
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
     sleep(Duration::from_millis(400));
     cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "rps2",
             "{\"i\":2}",
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
 
     let start = Instant::now();
     let output = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "rps2",
             "--tail",
             "100",
@@ -5042,7 +5223,7 @@ fn peek_replay_speed_2x_halves_delay() {
             "--jsonl",
         ])
         .output()
-        .expect("peek --replay");
+        .expect("follow --replay");
     let elapsed = start.elapsed();
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
@@ -5058,7 +5239,7 @@ fn peek_replay_speed_2x_halves_delay() {
 }
 
 #[test]
-fn peek_replay_rejects_without_tail_or_since() {
+fn follow_replay_rejects_without_tail_or_since() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -5071,18 +5252,18 @@ fn peek_replay_rejects_without_tail_or_since() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "rpz",
             "--replay",
             "1",
         ])
         .output()
-        .expect("peek --replay");
+        .expect("follow --replay");
     assert!(!output.status.success());
 }
 
 #[test]
-fn peek_replay_rejects_negative_speed() {
+fn follow_replay_rejects_negative_speed() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -5095,7 +5276,7 @@ fn peek_replay_rejects_negative_speed() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "rpn",
             "--tail",
             "5",
@@ -5103,12 +5284,12 @@ fn peek_replay_rejects_negative_speed() {
             "-1",
         ])
         .output()
-        .expect("peek --replay");
+        .expect("follow --replay");
     assert!(!output.status.success());
 }
 
 #[test]
-fn peek_replay_where_filters_messages() {
+fn follow_replay_where_filters_messages() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -5120,38 +5301,38 @@ fn peek_replay_where_filters_messages() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "rpw",
             r#"{"level":"info"}"#,
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
     cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "rpw",
             r#"{"level":"error"}"#,
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
     cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "rpw",
             r#"{"level":"info"}"#,
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
 
     let output = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "rpw",
             "--tail",
             "100",
@@ -5162,7 +5343,7 @@ fn peek_replay_where_filters_messages() {
             r#".data.level == "error""#,
         ])
         .output()
-        .expect("peek --replay");
+        .expect("follow --replay");
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
     assert_eq!(messages.len(), 1);
@@ -5170,7 +5351,7 @@ fn peek_replay_where_filters_messages() {
 }
 
 #[test]
-fn peek_replay_one_exits_after_first_message() {
+fn follow_replay_one_exits_after_first_message() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -5183,19 +5364,19 @@ fn peek_replay_one_exits_after_first_message() {
             .args([
                 "--dir",
                 pool_dir.to_str().unwrap(),
-                "poke",
+                "feed",
                 "rpo",
                 &format!("{{\"i\":{i}}}"),
             ])
             .output()
-            .expect("poke");
+            .expect("feed");
     }
 
     let output = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "rpo",
             "--tail",
             "100",
@@ -5205,7 +5386,7 @@ fn peek_replay_one_exits_after_first_message() {
             "--one",
         ])
         .output()
-        .expect("peek --replay");
+        .expect("follow --replay");
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
     assert_eq!(messages.len(), 1);
@@ -5213,7 +5394,7 @@ fn peek_replay_one_exits_after_first_message() {
 }
 
 #[test]
-fn peek_replay_empty_pool_exits_ok() {
+fn follow_replay_empty_pool_exits_ok() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -5226,7 +5407,7 @@ fn peek_replay_empty_pool_exits_ok() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "rpe",
             "--tail",
             "100",
@@ -5235,13 +5416,13 @@ fn peek_replay_empty_pool_exits_ok() {
             "--jsonl",
         ])
         .output()
-        .expect("peek --replay");
+        .expect("follow --replay");
     assert!(output.status.success());
     assert!(output.stdout.is_empty());
 }
 
 #[test]
-fn peek_replay_data_only_emits_payload() {
+fn follow_replay_data_only_emits_payload() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -5253,18 +5434,18 @@ fn peek_replay_data_only_emits_payload() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "rpd",
             r#"{"x":42}"#,
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
 
     let output = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "rpd",
             "--tail",
             "100",
@@ -5274,7 +5455,7 @@ fn peek_replay_data_only_emits_payload() {
             "--data-only",
         ])
         .output()
-        .expect("peek --replay");
+        .expect("follow --replay");
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
     assert_eq!(messages.len(), 1);
@@ -5283,7 +5464,7 @@ fn peek_replay_data_only_emits_payload() {
 }
 
 #[test]
-fn peek_replay_zero_speed_emits_without_delay() {
+fn follow_replay_zero_speed_emits_without_delay() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -5295,30 +5476,30 @@ fn peek_replay_zero_speed_emits_without_delay() {
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "rp0",
             "{\"i\":1}",
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
     sleep(Duration::from_millis(200));
     cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "poke",
+            "feed",
             "rp0",
             "{\"i\":2}",
         ])
         .output()
-        .expect("poke");
+        .expect("feed");
 
     let start = Instant::now();
     let output = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
-            "peek",
+            "follow",
             "rp0",
             "--tail",
             "100",
@@ -5327,7 +5508,7 @@ fn peek_replay_zero_speed_emits_without_delay() {
             "--jsonl",
         ])
         .output()
-        .expect("peek --replay 0");
+        .expect("follow --replay 0");
     let elapsed = start.elapsed();
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);

@@ -33,7 +33,7 @@ Set `CC_x86_64_pc_windows_msvc=clang-cl` for C compilation while keeping the MSV
 Source of truth: `.github/workflows/ci.yml` (`WINDOWS_SMOKE_PROMOTE_AFTER_GREEN_MAIN_RUNS=10`).
 
 ### Gate 2: minimum runtime smoke coverage
-- CLI: `--version` + local pool roundtrip (`pool create` + `poke` + `peek`) with payload assertion.
+- CLI: `--version` + local pool roundtrip (`pool create` + `feed` + `follow`) with payload assertion.
 - Non-CLI: at least one binding/remote path smoke active (`scripts/node_remote_only_smoke.sh`).
 
 ### Gate 3: release/provenance workflow

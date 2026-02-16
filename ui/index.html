@@ -59,11 +59,11 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         flex-direction: column;
       }
 
-      .app--watch {
+      .app--follow {
         height: calc(100vh - 2rem);
       }
 
-      .app--watch .card {
+      .app--follow .card {
         min-height: 0;
         flex: 1;
       }
@@ -494,7 +494,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           margin-top: 0.6rem;
         }
 
-        .app--watch {
+        .app--follow {
           height: calc(100vh - 1.2rem);
         }
 
@@ -646,7 +646,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         /* ---- Pool list ---- */
 
         function renderPoolList(pools, error) {
-          app.classList.remove("app--watch");
+          app.classList.remove("app--follow");
           var listRows = pools
             .slice()
             .sort(function (a, b) { return a.name.localeCompare(b.name); })
@@ -683,7 +683,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
                 toolbarHtml +
               '</header>' +
               '<div class="body">' +
-                '<p class="muted">Pool browser. Click a pool to open its watch view.</p>' +
+                '<p class="muted">Pool browser. Click a pool to open its follow view.</p>' +
                 (error ? '<p class="error">' + escapeHtml(error) + '</p>' : "") +
                 '<div class="rows">' +
                   (listRows || '<div class="muted">No pools found.</div>') +
@@ -706,10 +706,10 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           }
         }
 
-        /* ---- Pool watch view ---- */
+        /* ---- Pool follow view ---- */
 
         function renderPoolView(error) {
-          app.classList.add("app--watch");
+          app.classList.add("app--follow");
 
           var toolbarHtml = state.authRequired
             ? '<div class="toolbar">' +

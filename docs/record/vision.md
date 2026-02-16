@@ -37,7 +37,7 @@ Out of scope:
 
 ## Success criteria
 
-- New users can complete create/poke/peek/get flows quickly from CLI docs.
+- New users can complete create/feed/follow/fetch flows quickly from CLI docs.
 - Integrators can rely on stable contracts and clear upgrade guidance.
 - Feature additions improve power without increasing conceptual overhead.
 

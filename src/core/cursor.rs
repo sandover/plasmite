@@ -1,6 +1,6 @@
 //! Purpose: Iterate committed frames in the ring with overwrite safety and minimal scanning.
 //! Exports: `Cursor`, `CursorResult`, `FrameRef`.
-//! Role: Read-side API used by CLI commands (get/peek/follow) without exposing raw offsets.
+//! Role: Read-side API used by CLI commands (fetch/follow) without exposing raw offsets.
 //! Invariants: Never returns `Writing` or invalid frames; treats them as non-visible.
 //! Invariants: Detects overwrite (fell-behind) and resynchronizes to the current tail.
 use crate::core::error::{Error, ErrorKind};

@@ -53,7 +53,7 @@ def main() -> None:
             run_create_pool(client, step, index, step_id)
         elif op == "append":
             run_append(client, step, index, step_id)
-        elif op == "get":
+        elif op == "fetch":
             run_get(client, step, index, step_id)
         elif op == "tail":
             run_tail(client, step, index, step_id)
@@ -275,7 +275,7 @@ def run_spawn_poke(repo_root: Path, workdir_path: Path, step: dict[str, Any], in
         tags = message.get("tags", [])
         if not isinstance(tags, list):
             raise step_err(index, step_id, "message.tags must be array")
-        args = [plasmite_bin, "--dir", str(workdir_path), "poke", pool, payload]
+        args = [plasmite_bin, "--dir", str(workdir_path), "feed", pool, payload]
         for tag in tags:
             args.extend(["--tag", tag])
         processes.append(subprocess.Popen(args))
@@ -283,7 +283,7 @@ def run_spawn_poke(repo_root: Path, workdir_path: Path, step: dict[str, Any], in
     for proc in processes:
         code = proc.wait()
         if code != 0:
-            raise step_err(index, step_id, "poke process failed")
+            raise step_err(index, step_id, "feed process failed")
 
 
 def run_corrupt_pool_header(workdir_path: Path, step: dict[str, Any], index: int, step_id: str | None) -> None:

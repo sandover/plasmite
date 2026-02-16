@@ -119,7 +119,7 @@ gh workflow run release-publish.yml -f build_run_id=<successful-release-build-ru
 
 - **Source build fails with `cl.exe` errors (`__builtin_expect`, `__attribute__`, parsing errors in `lite3.h`)**
   - Prefer official install channels (`uv tool install plasmite`, `npm i -g plasmite`) over local source builds.
-- **`poke` fails with `failed to encode json as lite3`**
+- **`feed` fails with `failed to encode json as lite3`**
   - Use remote refs (`http://host:port/<pool>`) so encoding occurs on the remote server.
 - **Emergency fallback artifact integrity**
   - PowerShell: `Get-FileHash .\\plasmite_<version>_windows_amd64_preview.zip -Algorithm SHA256`

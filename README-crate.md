@@ -248,8 +248,8 @@ The crate also installs the `plasmite` and `pls` CLI binaries:
 ```bash
 cargo install plasmite
 
-pls poke events --create '{"kind": "signup", "user": "alice"}'
-pls peek events
+pls feed events --create '{"kind": "signup", "user": "alice"}'
+pls follow events
 pls serve
 ```
 

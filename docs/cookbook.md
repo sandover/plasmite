@@ -19,17 +19,17 @@
 
 Block a deploy script until your test runner signals "green".
 
-**The scenario:** Two scripts coordinate through a pool. The deploy script waits; the test runner pokes when it's done.
+**The scenario:** Two scripts coordinate through a pool. The deploy script waits; the test runner feeds when it's done.
 
 ```bash
 # deploy.sh — block until tests pass
-pls peek ci --where '.data.status == "green"' --one > /dev/null
+pls follow ci --where '.data.status == "green"' --one > /dev/null
 echo "Tests passed — deploying..."
 ./deploy-to-staging.sh
 
 # test-runner.sh — signal when done (--create makes the pool if needed)
 ./run-tests.sh
-pls poke ci --create '{"status": "green", "commit": "a1b2c3d", "suite": "unit"}'
+pls feed ci --create '{"status": "green", "commit": "a1b2c3d", "suite": "unit"}'
 ```
 
 No polling loops, no lock files, no shared database. `--one` exits as soon as a match arrives.
@@ -38,30 +38,30 @@ No polling loops, no lock files, no shared database. `--one` exits as soon as a 
 
 ## Live Build Progress
 
-Write structured progress from a build script; watch it in real time from another terminal.
+Write structured progress from a build script; follow it in real time from another terminal.
 
 **Terminal 1** — the build:
 
 ```bash
-pls poke build --create '{"step": "compile", "pct": 0}'
+pls feed build --create '{"step": "compile", "pct": 0}'
 sleep 1
-pls poke build '{"step": "compile", "pct": 100}'
-pls poke build '{"step": "test", "pct": 0}'
+pls feed build '{"step": "compile", "pct": 100}'
+pls feed build '{"step": "test", "pct": 0}'
 sleep 2
-pls poke build '{"step": "test", "pct": 100}'
-pls poke build --tag done '{"step": "finished", "ok": true}'
+pls feed build '{"step": "test", "pct": 100}'
+pls feed build --tag done '{"step": "finished", "ok": true}'
 ```
 
-**Terminal 2** — watching:
+**Terminal 2** — following:
 
 ```bash
-pls peek build
+pls follow build
 ```
 
 You'll see each message stream in as it's written. To wait for completion:
 
 ```bash
-pls peek build --tag done --one
+pls follow build --tag done --one
 ```
 
 ---
@@ -72,23 +72,23 @@ Pipe structured system logs into a bounded pool. Replay them later for debugging
 
 ```bash
 # Linux — journald
-journalctl -o json-seq -f | pls poke syslog --create
+journalctl -o json-seq -f | pls feed syslog --create
 
 # macOS — unified log
-/usr/bin/log stream --style ndjson | pls poke syslog --create
+/usr/bin/log stream --style ndjson | pls feed syslog --create
 ```
 
 The pool is a ring buffer (default 1 MB), so it won't fill your disk. To create a bigger buffer:
 
 ```bash
 pls pool create syslog --size 8M
-journalctl -o json-seq -f | pls poke syslog
+journalctl -o json-seq -f | pls feed syslog
 ```
 
 Replay the last 30 minutes:
 
 ```bash
-pls peek syslog --since 30m --replay 1
+pls follow syslog --since 30m --replay 1
 ```
 
 ---
@@ -102,11 +102,11 @@ A Python producer feeds work items into a pool. A Go consumer processes them.
 ```bash
 # producer.py
 for i in $(seq 1 5); do
-  pls poke jobs --create "{\"task\": \"resize-image\", \"id\": $i}"
+  pls feed jobs --create "{\"task\": \"resize-image\", \"id\": $i}"
 done
 
 # consumer (any language, any terminal)
-pls peek jobs
+pls follow jobs
 ```
 
 **With native bindings:**
@@ -154,21 +154,21 @@ Several scripts publish tagged events to one pool. A reader filters by tag.
 **Writers** (run from different scripts or cron jobs):
 
 ```bash
-pls poke events --create --tag deploy '{"service": "api", "sha": "f4e5d6c"}'
-pls poke events --tag alert '{"service": "api", "msg": "latency spike"}'
-pls poke events --tag metric '{"service": "web", "rps": 1420}'
+pls feed events --create --tag deploy '{"service": "api", "sha": "f4e5d6c"}'
+pls feed events --tag alert '{"service": "api", "msg": "latency spike"}'
+pls feed events --tag metric '{"service": "web", "rps": 1420}'
 ```
 
 **Reader** — show only alerts:
 
 ```bash
-pls peek events --tag alert
+pls follow events --tag alert
 ```
 
 Combine tags with `--where` for finer filtering:
 
 ```bash
-pls peek events --tag alert --where '.data.service == "api"'
+pls follow events --tag alert --where '.data.service == "api"'
 ```
 
 ---
@@ -179,22 +179,22 @@ Replay recent messages at speed, filter by time range, and export to a file.
 
 ```bash
 # Replay the last hour at 10× real-time speed
-pls peek incidents --since 1h --replay 10
+pls follow incidents --since 1h --replay 10
 
 # Replay at original speed (1×)
-pls peek incidents --since 1h --replay 1
+pls follow incidents --since 1h --replay 1
 
 # Show only the last 20 messages
-pls peek incidents --tail 20
+pls follow incidents --tail 20
 
 # Export recent errors to a file for sharing
-pls peek incidents --tag error --tail 100 --jsonl > /tmp/errors.jsonl
+pls follow incidents --tag error --tail 100 --jsonl > /tmp/errors.jsonl
 ```
 
 Combine `--since`, `--tag`, and `--where` to narrow down exactly what you need:
 
 ```bash
-pls peek incidents --since 2h --tag sev1 --where '.data.code == 503'
+pls follow incidents --since 2h --tag sev1 --where '.data.code == 503'
 ```
 
 ---
@@ -216,8 +216,8 @@ pls serve init
 **On the client** — same CLI, just pass a URL:
 
 ```bash
-pls poke http://server:9700/events '{"sensor": "temp", "value": 23.5}'
-pls peek http://server:9700/events --tail 20
+pls feed http://server:9700/events '{"sensor": "temp", "value": 23.5}'
+pls follow http://server:9700/events --tail 20
 ```
 
 A built-in web UI is available at `http://server:9700/ui`.
@@ -251,19 +251,19 @@ Operational notes:
 Pipe a streaming HTTP response directly into a pool.
 
 ```bash
-curl -N https://api.example.com/events | pls poke api-events --create
+curl -N https://api.example.com/events | pls feed api-events --create
 ```
 
 Then tail it from another terminal:
 
 ```bash
-pls peek api-events
+pls follow api-events
 ```
 
 Or filter for specific events as they arrive:
 
 ```bash
-pls peek api-events --where '.data.type == "payment.completed"'
+pls follow api-events --where '.data.type == "payment.completed"'
 ```
 
 ---
@@ -288,5 +288,5 @@ Plasmite is great for local and small-team IPC, but it's not the answer to every
 - **Go bindings**: [bindings/go/README.md](../bindings/go/README.md)
 - **Node bindings**: [../bindings/node/README.md](../bindings/node/README.md)
 - **CLI spec**: [../spec/v0/SPEC.md](../spec/v0/SPEC.md)
-- **Pattern matching & filtering**: [spec/v0/SPEC.md § peek](../spec/v0/SPEC.md)
+- **Pattern matching & filtering**: [spec/v0/SPEC.md § follow](../spec/v0/SPEC.md)
 - **README**: [../README.md](../README.md)

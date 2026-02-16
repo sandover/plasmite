@@ -26,12 +26,12 @@ pls pool create my-channel</pre></td>
 </tr>
 <tr>
 <td></td>
-<td><pre lang="bash"># Bob starts watching
-pls peek my-channel</pre></td>
+<td><pre lang="bash"># Bob starts following
+pls follow my-channel</pre></td>
 </tr>
 <tr>
-<td><pre lang="bash"># Alice sends (aka "pokes") a message
-pls poke my-channel \
+<td><pre lang="bash"># Alice feeds the channel
+pls feed my-channel \
   '{"from": "alice",
     "msg": "hello world"}'</pre></td>
 <td></td>
@@ -66,14 +66,14 @@ For IPC across machines, `pls serve` exposes your local pools securely, and serv
 
 ### Build event bus
 
-Your build script writes progress to a pool. In another terminal, you watch it arrive in real time.
+Your build script writes progress to a pool. In another terminal, you follow it in real time.
 
 ```bash
-pls poke build --create '{"step": "compile", "status": "done"}'
-pls poke build '{"step": "test", "status": "running"}'
+pls feed build --create '{"step": "compile", "status": "done"}'
+pls feed build '{"step": "test", "status": "running"}'
 
 # elsewhere:
-pls peek build
+pls follow build
 ```
 
 ### CI gate
@@ -82,10 +82,10 @@ Your deploy script waits for the test runner to say "green" — no polling loops
 
 ```bash
 # deploy.sh
-pls peek ci --where '.data.status == "green"' --one > /dev/null && ./deploy.sh
+pls follow ci --where '.data.status == "green"' --one > /dev/null && ./deploy.sh
 
 # test-runner.sh
-pls poke ci --create '{"status": "green", "commit": "abc123"}'
+pls feed ci --create '{"status": "green", "commit": "abc123"}'
 ```
 
 ### System log intake
@@ -93,8 +93,8 @@ pls poke ci --create '{"status": "green", "commit": "abc123"}'
 Pipe your system logs into a bounded pool. It won't fill your disk, and you can replay anything later.
 
 ```bash
-journalctl -o json-seq -f | pls poke syslog --create       # Linux
-pls peek syslog --since 30m --replay 1                       # replay last 30 min
+journalctl -o json-seq -f | pls feed syslog --create       # Linux
+pls follow syslog --since 30m --replay 1                       # replay last 30 min
 ```
 
 ### Tagged incident stream
@@ -102,9 +102,9 @@ pls peek syslog --since 30m --replay 1                       # replay last 30 mi
 Tag events when you write them, then filter and replay on the read side.
 
 ```bash
-pls poke incidents --create --tag sev1 '{"msg": "payment gateway timeout"}'
-pls peek incidents --tag sev1 --where '.data.msg | test("timeout")'
-pls peek incidents --since 1h --replay 10
+pls feed incidents --create --tag sev1 '{"msg": "payment gateway timeout"}'
+pls follow incidents --tag sev1 --where '.data.msg | test("timeout")'
+pls follow incidents --since 1h --replay 10
 ```
 
 ### Remote pools
@@ -115,13 +115,13 @@ Start a server and your pools are available over HTTP. Clients use the same CLI 
 pls serve                          # loopback-only by default
 pls serve init                     # bootstrap TLS + token for LAN access
 
-pls poke http://server:9700/events '{"sensor": "temp", "value": 23.5}'
-pls peek http://server:9700/events --tail 20
+pls feed http://server:9700/events '{"sensor": "temp", "value": 23.5}'
+pls follow http://server:9700/events --tail 20
 ```
 
 A built-in web UI lives at `/ui`:
 
-![Plasmite UI pool watch](docs/images/ui/ui-pool-watch.png)
+![Plasmite UI pool follow](docs/images/ui/ui-pool-follow.png)
 
 For CORS, auth, and deployment details, see [Serving & remote access](docs/record/serving.md) and the [remote protocol spec](spec/remote/v0/SPEC.md).
 
@@ -131,27 +131,59 @@ Plasmite is designed for single-host and host-adjacent messaging. If you need mu
 
 ## Install
 
-| Channel | Command | CLI | Library/Bindings | Notes |
-|---|---|---|---|---|
-| Homebrew | `brew install sandover/tap/plasmite` | Yes | Yes (`libplasmite`, header, pkg-config) | Recommended for macOS and Go users. |
-| Rust crate (CLI) | `cargo install plasmite` | Yes | No | Installs `plasmite` + `pls`. |
-| Rust crate (lib) | `cargo add plasmite` | No | Rust API | Use in Rust apps. |
-| Python | `uv tool install plasmite` | Yes | Python bindings | Wheel bundles native assets on supported targets. |
-| Python (project dep) | `uv add plasmite` | Optional | Python bindings | Use from existing uv-managed project. |
-| Node | `npm i -g plasmite` | Optional | Node bindings | Bundles addon + native assets. |
-| Go | `go get github.com/sandover/plasmite/bindings/go/plasmite` | No | Go bindings | Requires system SDK (`brew install ...` first). |
-| Release tarball | Download from [releases](https://github.com/sandover/plasmite/releases) | Yes | Yes (SDK layout) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |
-| Windows | Download from [releases](https://github.com/sandover/plasmite/releases) | Yes | Partial SDK | Best-effort preview (`x86_64-pc-windows-msvc`). See [distribution docs](docs/record/distribution.md). |
+### macOS (recommended)
 
-For Windows troubleshooting, registry setup, and release mechanics, see [Distribution](docs/record/distribution.md) and [Releasing](docs/record/releasing.md).
+```bash
+brew install sandover/tap/plasmite
+```
+
+Installs the CLI (`plasmite` + `pls`) and the full SDK (`libplasmite`, C header, pkg-config). Also required for Go bindings.
+
+### Rust
+
+```bash
+cargo install plasmite     # CLI only (plasmite + pls)
+cargo add plasmite         # use as a library in your Rust project
+```
+
+### Python
+
+```bash
+uv tool install plasmite   # standalone CLI + Python bindings
+uv add plasmite            # add to an existing uv-managed project
+```
+
+Everything you need is included in the package — no separate compile step.
+
+### Node
+
+```bash
+npm i -g plasmite
+```
+
+Everything you need is included in the package — no separate compile step.
+
+### Go
+
+```bash
+go get github.com/sandover/plasmite/bindings/go/plasmite
+```
+
+Go bindings only (no CLI). Requires the system SDK — install via Homebrew first.
+
+### Pre-built binaries
+
+Download tarballs from [GitHub Releases](https://github.com/sandover/plasmite/releases). Each archive contains a full SDK layout: `bin/`, `lib/`, `include/`, and `lib/pkgconfig/`.
+
+Windows builds (`x86_64-pc-windows-msvc`) are available as a best-effort preview. See the [distribution docs](docs/record/distribution.md) for details, troubleshooting, and registry setup.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `poke POOL DATA` | Send a message (`--create` to auto-create the pool) |
-| `peek POOL` | Watch messages (`--create` auto-creates missing local pools) |
-| `get POOL SEQ` | Fetch one message by sequence number |
+| `feed POOL DATA` | Send a message (`--create` to auto-create the pool) |
+| `follow POOL` | Follow messages (`--create` auto-creates missing local pools) |
+| `fetch POOL SEQ` | Fetch one message by sequence number |
 | `pool create NAME` | Create a pool (`--size 8M` for larger) |
 | `pool list` | List pools |
 | `pool info NAME` | Show pool metadata and metrics |
@@ -168,7 +200,7 @@ For scripting, use `--json` with `pool create`, `pool list`, `pool delete`, `doc
 A pool is a single `.plasmite` file containing a persistent ring buffer:
 
 - **Multiple writers** append concurrently (serialized via OS file locks)
-- **Multiple readers** watch concurrently (lock-free, zero-copy)
+- **Multiple readers** follow concurrently (lock-free, zero-copy)
 - **Bounded retention** — old messages overwritten when full (default 1 MB, configurable)
 - **Crash-safe** — processes crash and restart; torn writes never propagate
 
@@ -190,15 +222,15 @@ Default pool directory: `~/.plasmite/pools/`.
 
 **How writes work**: Writers acquire an OS file lock, plan frame placement (including ring wrap), write the frame as `Writing`, then flip it to `Committed` and update the header. The lock is held only for the memcpy + header update — no allocation or encoding happens under the lock.
 
-**How lookups work**: Each pool includes an inline index — a fixed-size hash table mapping sequence numbers to byte offsets. `get POOL 42` usually jumps directly to the right frame. If the slot is stale or collided, the reader scans forward from the tail. You can tune this with `--index-capacity` at pool creation time.
+**How lookups work**: Each pool includes an inline index — a fixed-size hash table mapping sequence numbers to byte offsets. `fetch POOL 42` usually jumps directly to the right frame. If the slot is stale or collided, the reader scans forward from the tail. You can tune this with `--index-capacity` at pool creation time.
 
 Algorithmic complexity below uses **N** = visible messages in the pool (depends on message sizes and pool capacity), **M** = index slot count.
 
 | Operation | Complexity | Notes |
 |---|---|---|
 | Append | O(1) + O(payload bytes) | Writes one frame, updates one index slot, publishes the header. `durability=flush` adds OS flush cost. |
-| Get by seq (`get POOL SEQ`) | Usually O(1); O(N) worst case | If the index slot matches, it's a direct jump. If the slot is overwritten/stale/invalid (or M=0), it scans forward from the tail until it finds (or passes) the target seq. |
-| Tail / peek (`peek`, `export --tail`) | O(k) to emit k; then O(1)/message | Steady-state work is per message. Tag filters are cheap; `--where` runs a jq predicate per message. |
+| Get by seq (`fetch POOL SEQ`) | Usually O(1); O(N) worst case | If the index slot matches, it's a direct jump. If the slot is overwritten/stale/invalid (or M=0), it scans forward from the tail until it finds (or passes) the target seq. |
+| Tail / follow (`follow`, `export --tail`) | O(k) to emit k; then O(1)/message | Steady-state work is per message. Tag filters are cheap; `--where` runs a jq predicate per message. |
 | Export range (`export --from/--to`) | O(R) | Linear in the number of exported messages. |
 | Validate (`doctor`, `pool info` warnings) | O(N) | Full ring scan. Index checks are sampled/best-effort diagnostics. |
 

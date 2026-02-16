@@ -18,6 +18,16 @@ clippy:
 test:
 	cargo test
 
+# Lane A: deterministic fast hardening checks for local iteration + PR CI.
+# Keep runtime bounded and avoid flaky timing-sensitive scenarios.
+hardening-fast: test
+	@echo "hardening-fast complete"
+
+# Lane B: broader deterministic hardening checks for full/main CI.
+# This lane is intentionally broader than Lane A but still release-agnostic.
+hardening-broad: conformance-all cross-artifact-smoke
+	@echo "hardening-broad complete"
+
 # Verify version alignment across release surfaces.
 check-version-alignment:
 	./scripts/check-version-alignment.sh
@@ -48,10 +58,10 @@ bindings-node-typecheck:
 bindings-test: bindings-go-test bindings-python-test bindings-node-test bindings-node-typecheck
 
 # Fast local CI parity gate used during iteration.
-ci-fast: fmt clippy test check-version-alignment bindings-node-typecheck
+ci-fast: fmt clippy hardening-fast check-version-alignment bindings-node-typecheck
 
 # Full CI parity gate including ABI/conformance/cross-artifact checks.
-ci-full: fmt clippy test check-version-alignment abi-smoke conformance-all cross-artifact-smoke bindings-node-typecheck
+ci-full: fmt clippy hardening-fast check-version-alignment abi-smoke hardening-broad bindings-node-typecheck
 
 # Alias for full CI gate.
 ci: ci-full
@@ -131,8 +141,8 @@ serve-dev: _serve-kill
 	@# Seed a demo pool if it doesn't already exist
 	if [ ! -f {{_dev_dir}}/pools/demo.plasmite ]; then \
 	  ./target/debug/plasmite --dir {{_dev_dir}}/pools pool create demo --size 1M > /dev/null; \
-	  ./target/debug/plasmite --dir {{_dev_dir}}/pools poke demo --tag deploy '{"service":"api","version":"1.0"}' > /dev/null; \
-	  ./target/debug/plasmite --dir {{_dev_dir}}/pools poke demo --tag metric '{"cpu":12.3,"rps":4200}' > /dev/null; \
+	  ./target/debug/plasmite --dir {{_dev_dir}}/pools feed demo --tag deploy '{"service":"api","version":"1.0"}' > /dev/null; \
+	  ./target/debug/plasmite --dir {{_dev_dir}}/pools feed demo --tag metric '{"cpu":12.3,"rps":4200}' > /dev/null; \
 	  echo "serve-dev: seeded demo pool with 2 messages"; \
 	fi
 	@nohup ./target/debug/plasmite --dir {{_dev_dir}}/pools serve --bind {{_dev_bind}} \
@@ -158,8 +168,8 @@ serve-with cmd: _serve-kill
 	mkdir -p {{_dev_dir}}/pools
 	@if [ ! -f {{_dev_dir}}/pools/demo.plasmite ]; then \
 	  ./target/debug/plasmite --dir {{_dev_dir}}/pools pool create demo --size 1M > /dev/null; \
-	  ./target/debug/plasmite --dir {{_dev_dir}}/pools poke demo --tag deploy '{"service":"api","version":"1.0"}' > /dev/null; \
-	  ./target/debug/plasmite --dir {{_dev_dir}}/pools poke demo --tag metric '{"cpu":12.3,"rps":4200}' > /dev/null; \
+	  ./target/debug/plasmite --dir {{_dev_dir}}/pools feed demo --tag deploy '{"service":"api","version":"1.0"}' > /dev/null; \
+	  ./target/debug/plasmite --dir {{_dev_dir}}/pools feed demo --tag metric '{"cpu":12.3,"rps":4200}' > /dev/null; \
 	  echo "serve-with: seeded demo pool with 2 messages"; \
 	fi
 	@set -euo pipefail; \
@@ -180,7 +190,7 @@ serve-dev-auth token="devtoken": _serve-kill
 	mkdir -p {{_dev_dir}}/pools
 	@if [ ! -f {{_dev_dir}}/pools/demo.plasmite ]; then \
 	  ./target/debug/plasmite --dir {{_dev_dir}}/pools pool create demo --size 1M > /dev/null; \
-	  ./target/debug/plasmite --dir {{_dev_dir}}/pools poke demo --tag deploy '{"service":"api","version":"1.0"}' > /dev/null; \
+	  ./target/debug/plasmite --dir {{_dev_dir}}/pools feed demo --tag deploy '{"service":"api","version":"1.0"}' > /dev/null; \
 	  echo "serve-dev-auth: seeded demo pool with 1 message"; \
 	fi
 	@nohup ./target/debug/plasmite --dir {{_dev_dir}}/pools serve --bind {{_dev_bind}} --token {{token}} \

@@ -1,5 +1,5 @@
 //! Purpose: Smoke-test multi-process append locking serializes concurrent writers.
-//! Role: Integration test spawning multiple `plasmite poke` processes.
+//! Role: Integration test spawning multiple `plasmite feed` processes.
 //! Invariants: Each child must succeed; resulting pool bounds reflect all writes.
 //! Invariants: Uses temporary directories; avoids reliance on global state.
 //! Invariants: Fast regression coverage, not an exhaustive concurrency proof.
@@ -13,7 +13,7 @@ fn cmd() -> Command {
 }
 
 #[test]
-fn concurrent_poke_is_serialized() {
+fn concurrent_feed_is_serialized() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -36,7 +36,7 @@ fn concurrent_poke_is_serialized() {
             .args([
                 "--dir",
                 pool_dir.to_str().unwrap(),
-                "poke",
+                "feed",
                 "lockpool",
                 &format!("{{\"i\":{i}}}"),
                 "--tag",

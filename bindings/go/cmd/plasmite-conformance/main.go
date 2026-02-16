@@ -110,7 +110,7 @@ func run() error {
 			if err := runAppend(client, step, index, stepID); err != nil {
 				return err
 			}
-		case "get":
+		case "fetch":
 			if err := runGet(client, step, index, stepID); err != nil {
 				return err
 			}
@@ -514,7 +514,7 @@ func runSpawnPoke(repoRoot string, workdirPath string, step map[string]any, inde
 		wg.Add(1)
 		go func(payload string, tags []string) {
 			defer wg.Done()
-			args := []string{"--dir", workdirPath, "poke", pool, payload}
+			args := []string{"--dir", workdirPath, "feed", pool, payload}
 			for _, tag := range tags {
 				args = append(args, "--tag", tag)
 			}
@@ -530,7 +530,7 @@ func runSpawnPoke(repoRoot string, workdirPath string, step map[string]any, inde
 	wg.Wait()
 	close(errs)
 	if err := <-errs; err != nil {
-		return stepErr(index, stepID, fmt.Sprintf("poke process failed: %v", err))
+		return stepErr(index, stepID, fmt.Sprintf("feed process failed: %v", err))
 	}
 	return nil
 }
