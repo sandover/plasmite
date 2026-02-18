@@ -84,6 +84,24 @@ class BindingTests(unittest.TestCase):
             first.close()
             second.close()
 
+    def test_default_client_creates_pool_dir_in_fresh_home(self) -> None:
+        import tempfile
+
+        home = Path(tempfile.mkdtemp(prefix="plasmite-py-home-"))
+        expected_pool_dir = home / ".plasmite" / "pools"
+        expected_pool_path = expected_pool_dir / "work.plasmite"
+        self.assertFalse(expected_pool_dir.exists())
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}, clear=False):
+            client = Client()
+            pool = client.pool("work", 1024 * 1024)
+            msg = pool.append({"kind": "one"}, ["alpha"])
+            self.assertEqual(msg.data["kind"], "one")
+            pool.close()
+            client.close()
+
+        self.assertTrue(expected_pool_path.exists())
+
     def test_tail_timeout_and_close(self) -> None:
         client = Client(str(self.pool_dir))
         pool = client.create_pool("tail", 1024 * 1024)

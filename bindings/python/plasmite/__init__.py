@@ -190,13 +190,17 @@ def _load_lib() -> CDLL:
 
 _LIB = _load_lib()
 
-DEFAULT_POOL_DIR = os.path.join(os.environ.get("HOME", ""), ".plasmite", "pools")
 DEFAULT_POOL_SIZE_BYTES = 4 * 1024 * 1024
 DEFAULT_POOL_SIZE = DEFAULT_POOL_SIZE_BYTES
 
 
 def default_pool_dir() -> str:
-    return DEFAULT_POOL_DIR
+    # Compute lazily so tests/tools can override HOME in-process without re-importing.
+    # `expanduser("~")` consults HOME at call time on Unix.
+    return os.path.join(os.path.expanduser("~"), ".plasmite", "pools")
+
+
+DEFAULT_POOL_DIR = default_pool_dir()
 
 _LIB.plsm_client_new.argtypes = [c_char_p, POINTER(POINTER(plsm_client_t)), POINTER(POINTER(plsm_error_t))]
 _LIB.plsm_client_new.restype = c_int
