@@ -3,6 +3,7 @@
 ## Contents
 
 - [Produce & Consume](#produce--consume)
+- [Duplex Chat](#duplex-chat)
 - [CI Gate](#ci-gate)
 - [Live Build Progress](#live-build-progress)
 - [System Log Intake](#system-log-intake)
@@ -126,6 +127,31 @@ c.Close()
 ```
 
 </details>
+
+## Duplex Chat
+
+For two-party live chat, run one command in each terminal:
+
+**Terminal 1** — Alice:
+
+```bash
+pls duplex chat --create --me alice
+```
+
+**Terminal 2** — Bob:
+
+```bash
+pls duplex chat --create --me bob
+```
+
+In each terminal, type plain text lines to send and see the shared stream.
+Use `--echo-self` if you want to see your own lines echoed back by the stream.
+
+You can also pipe JSON:
+
+```bash
+printf '{"from":"alice","msg":"boot complete"}\n{"from":"alice","msg":"ready"}' | pls duplex chat --me alice
+```
 
 ---
 
