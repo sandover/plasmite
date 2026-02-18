@@ -65,23 +65,29 @@ PLASMITE_SDK_DIR=/path/to/sdk python -m build
 ## Usage
 
 ```python
-from plasmite import Client, Durability
+from plasmite import Client, Durability, parse_message
 
 with Client("./data") as client:
     with client.create_pool("docs", 64 * 1024 * 1024) as pool:
-        message = pool.append_json(
-            b'{"kind":"note","text":"hi"}',
-            ["note"],
-            Durability.FAST,
-        )
-        print(message.decode("utf-8"))
+        message = pool.append({"kind": "note", "text": "hi"}, ["note"], Durability.FAST)
+        parsed = parse_message(message)
+        print(parsed)
 
-        frame = pool.get_lite3(1)
-        print(len(frame.payload))
+        fetched = parse_message(pool.get(parsed["seq"]))
+        print(fetched["data"]["text"])
+
+        stream = pool.open_stream(since_seq=parsed["seq"], max_messages=1, timeout_ms=100)
+        for item in stream:
+            print(parse_message(item))
+        stream.close()
 
         for item in pool.tail(tags=["note"], max_messages=1, timeout_ms=100):
-            print(item.decode("utf-8"))
+            print(parse_message(item))
 ```
+
+`Pool.get(seq)` is an alias for `Pool.get_json(seq)`.
+
+`Stream` and `Lite3Stream` implement Python iterator protocol, so `for item in stream:` works directly.
 
 `Pool.tail(..., tags=[...])` uses exact tag matching and composes with other filters using AND semantics.
 

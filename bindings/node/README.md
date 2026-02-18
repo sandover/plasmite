@@ -21,7 +21,7 @@ toolchain or compile step needed.
 ### Local pools (native, in-process)
 
 ```js
-const { Client, Durability } = require("plasmite");
+const { Client, Durability, parseMessage } = require("plasmite");
 
 // Open a client pointed at a directory (created if it doesn't exist)
 const client = new Client("./data");
@@ -30,22 +30,17 @@ const client = new Client("./data");
 const pool = client.createPool("events", 64 * 1024 * 1024);
 
 // Append a JSON message with tags
-pool.appendJson(
-  Buffer.from(JSON.stringify({ kind: "signup", user: "alice" })),
-  ["user-event"],
-  Durability.Flush,
-);
+pool.append({ kind: "signup", user: "alice" }, ["user-event"], Durability.Flush);
 
 // Read it back by sequence number
-const msg = pool.getJson(1n);
-console.log(JSON.parse(msg.toString()));
+const msg = pool.get(1n);
+console.log(parseMessage(msg).data);
 // => { kind: "signup", user: "alice" }
 
 // Stream messages as they arrive
 const stream = pool.openStream();
-let frame;
-while ((frame = stream.nextJson()) !== null) {
-  console.log(JSON.parse(frame.toString()));
+for (const frame of stream) {
+  console.log(parseMessage(frame));
 }
 stream.close();
 
@@ -94,14 +89,24 @@ tail.cancel();
 | | `.createPool(name, sizeBytes)` | Create a new pool (returns `Pool`) |
 | | `.openPool(name)` | Open an existing pool (returns `Pool`) |
 | | `.close()` | Release resources |
-| `Pool` | `.appendJson(buf, tags, durability)` | Append a JSON message; returns the stored envelope as `Buffer` |
-| | `.appendLite3(buf, durability)` | Append raw bytes (lite3 framing); returns sequence `bigint` |
+| `Module` | `.parseMessage(buf)` | Decode a message `Buffer` to a parsed JS object |
+| | `.replay(pool, opts?)` | Backward-compatible replay wrapper (delegates to `pool.replay`) |
+| `Pool` | `.appendJson(payload, tags, durability)` | Append JSON payload (Buffer or JSON-serializable value); returns message envelope as `Buffer` |
+| | `.append(data, tags?, durability?)` | Append any JSON-serializable value; returns message `Buffer` |
+| | `.appendLite3(buf, durability?)` | Append raw bytes (lite3 framing); returns sequence `bigint` |
+| | `.get(seq)` | Alias for `.getJson(seq)` |
 | | `.getJson(seq)` | Get message by sequence number; returns `Buffer` |
 | | `.getLite3(seq)` | Get lite3 frame by sequence number |
+| | `.tail(opts?)` | Async generator for local tailing with optional tag filter |
+| | `.replay(opts?)` | Async generator replay with speed/timing controls |
 | | `.openStream(sinceSeq?, max?, timeoutMs?)` | Open a message stream |
 | | `.openLite3Stream(sinceSeq?, max?, timeoutMs?)` | Open a lite3 frame stream |
 | | `.close()` | Close the pool |
 | `Stream` | `.nextJson()` | Next message as `Buffer`, or `null` at end |
+| | `[Symbol.iterator]()` | Iterate synchronously via `for...of` |
+| | `.close()` | Close the stream |
+| `Lite3Stream` | `.next()` | Next lite3 frame, or `null` at end |
+| | `[Symbol.iterator]()` | Iterate synchronously via `for...of` |
 | | `.close()` | Close the stream |
 
 **Durability** controls fsync behavior:
@@ -144,7 +149,7 @@ Local operations throw `PlasmiteNativeError` with structured fields:
 
 ```js
 try {
-  pool.getJson(999n);
+  pool.get(999n);
 } catch (err) {
   if (err instanceof PlasmiteNativeError) {
     console.log(err.kind);   // "NotFound"

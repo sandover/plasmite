@@ -2,6 +2,7 @@
 
 ## Contents
 
+- [Produce & Consume](#produce--consume)
 - [CI Gate](#ci-gate)
 - [Live Build Progress](#live-build-progress)
 - [System Log Intake](#system-log-intake)
@@ -12,6 +13,92 @@
 - [Ingest an API Event Stream](#ingest-an-api-event-stream)
 - [When Plasmite Isn't the Right Fit](#when-plasmite-isnt-the-right-fit)
 - [Next Steps](#next-steps)
+
+---
+
+## Produce & Consume
+
+The core pattern — everything else in this cookbook is a variation.
+
+**Terminal 1** — write a message:
+
+```bash
+pls feed work --create '{"task": "resize", "id": 1}'
+```
+
+**Terminal 2** — read it (and keep listening):
+
+```bash
+pls follow work
+```
+
+<details>
+<summary><strong>Python · Node · Go</strong></summary>
+
+**Python — produce**
+
+```python
+import json
+from plasmite import Client, Durability
+
+with Client() as c:
+    pool = c.create_pool("work")
+    pool.append({"task": "resize", "id": 1})
+    pool.close()
+```
+
+**Python — consume**
+
+```python
+from plasmite import Client, parse_message
+
+with Client() as c, c.open_pool("work") as pool:
+    for raw in pool.tail(timeout_ms=5000):
+        print(parse_message(raw))
+```
+
+**Node — produce**
+
+```js
+const { Client, Durability } = require("plasmite");
+const c = new Client();
+const pool = c.createPool("work");
+pool.append({ task: "resize", id: 1 });
+pool.close(); c.close();
+```
+
+**Node — consume**
+
+```js
+const { Client, parseMessage } = require("plasmite");
+const c = new Client();
+const pool = c.openPool("work");
+const stream = pool.openStream(null, null, 5000);
+for (const msg of stream) console.log(parseMessage(msg));
+stream.close(); pool.close(); c.close();
+```
+
+**Go — produce**
+
+```go
+c, _ := plasmite.NewDefaultClient()
+p, _ := c.CreatePool(plasmite.PoolRefName("work"), plasmite.DefaultPoolSize)
+p.Append(map[string]any{"task": "resize", "id": 1}, nil, plasmite.DurabilityFast)
+p.Close(); c.Close()
+```
+
+**Go — consume**
+
+```go
+c, _ := plasmite.NewDefaultClient()
+p, _ := c.OpenPool(plasmite.PoolRefName("work"))
+out, errs := p.Tail(ctx, plasmite.TailOptions{Timeout: 5 * time.Second})
+for msg := range out { fmt.Println(string(msg)) }
+if err := <-errs; err != nil { log.Fatal(err) }
+p.Close(); c.Close()
+```
+
+</details>
 
 ---
 
@@ -64,6 +151,60 @@ You'll see each message stream in as it's written. To wait for completion:
 pls follow build --tag done --one
 ```
 
+<details>
+<summary><strong>Python · Node · Go</strong></summary>
+
+**Python — writer**
+
+```python
+import json
+from plasmite import Client, Durability
+
+with Client() as c:
+    pool = c.create_pool("build")
+    for step, pct in [("compile", 0), ("compile", 100), ("test", 0), ("test", 100)]:
+        pool.append({"step": step, "pct": pct})
+    pool.append({"step": "finished", "ok": True}, ["done"], Durability.FAST)
+    pool.close()
+```
+
+**Python — follower**
+
+```python
+from plasmite import Client, parse_message
+
+with Client() as c, c.open_pool("build") as pool:
+    for raw in pool.tail(timeout_ms=5000, tags=["done"]):
+        print(parse_message(raw))
+        break  # --one equivalent
+```
+
+**Node — writer**
+
+```js
+const { Client, Durability } = require("plasmite");
+const c = new Client();
+const pool = c.createPool("build");
+for (const [step, pct] of [["compile",0],["compile",100],["test",0],["test",100]])
+  pool.append({ step, pct });
+pool.append({ step: "finished", ok: true }, ["done"]);
+pool.close(); c.close();
+```
+
+**Go — writer**
+
+```go
+c, _ := plasmite.NewDefaultClient()
+p, _ := c.CreatePool(plasmite.PoolRefName("build"), plasmite.DefaultPoolSize)
+for _, s := range [][2]any{{"compile",0},{"compile",100},{"test",0},{"test",100}} {
+    p.Append(map[string]any{"step": s[0], "pct": s[1]}, nil, plasmite.DurabilityFast)
+}
+p.Append(map[string]any{"step": "finished", "ok": true}, []string{"done"}, plasmite.DurabilityFast)
+p.Close(); c.Close()
+```
+
+</details>
+
 ---
 
 ## System Log Intake
@@ -78,7 +219,7 @@ journalctl -o json-seq -f | pls feed syslog --create
 /usr/bin/log stream --style ndjson | pls feed syslog --create
 ```
 
-The pool is a ring buffer (default 1 MB), so it won't fill your disk. To create a bigger buffer:
+The pool is a ring buffer (default 4 MB), so it won't fill your disk. To create a bigger buffer:
 
 ```bash
 pls pool create syslog --size 8M
@@ -116,21 +257,28 @@ Python producer:
 ```python
 from plasmite import Client, Durability
 
-client = Client("./data")
-pool = client.create_pool("jobs", 4 * 1024 * 1024)
+client = Client()
+pool = client.create_pool("jobs")
 
 for i in range(5):
-    pool.append_json(
-        f'{{"task": "resize-image", "id": {i}}}'.encode(),
-        ["img"],
-        Durability.FAST,
-    )
+    pool.append({"task": "resize-image", "id": i}, ["img"])
+```
+
+Node producer:
+
+```js
+const { Client, Durability } = require("plasmite");
+const c = new Client();
+const pool = c.openPool("jobs");
+for (let i = 0; i < 5; i++)
+  pool.append({ task: "resize-image", id: i }, ["img"]);
+pool.close(); c.close();
 ```
 
 Go consumer:
 
 ```go
-client, _ := plasmite.NewClient("./data")
+client, _ := plasmite.NewDefaultClient()
 defer client.Close()
 
 pool, _ := client.OpenPool(plasmite.PoolRefName("jobs"))
@@ -143,7 +291,7 @@ for msg := range out {
 if err := <-errs; err != nil { log.Fatal(err) }
 ```
 
-Both processes hit the same on-disk pool — no serialization adapter, no broker.
+All processes hit the same on-disk pool — no serialization adapter, no broker.
 
 ---
 
@@ -170,6 +318,66 @@ Combine tags with `--where` for finer filtering:
 ```bash
 pls follow events --tag alert --where '.data.service == "api"'
 ```
+
+<details>
+<summary><strong>Python · Node · Go</strong></summary>
+
+**Python — write tagged events**
+
+```python
+import json
+from plasmite import Client, Durability
+
+with Client() as c:
+    pool = c.create_pool("events")
+    pool.append({"service": "api", "sha": "f4e5d6c"}, ["deploy"], Durability.FAST)
+    pool.append({"service": "api", "msg": "latency spike"}, ["alert"], Durability.FAST)
+    pool.close()
+```
+
+**Python — filter by tag**
+
+```python
+from plasmite import Client, parse_message
+
+with Client() as c, c.open_pool("events") as pool:
+    for raw in pool.tail(timeout_ms=5000, tags=["alert"]):
+        print(parse_message(raw))
+```
+
+**Node — write tagged events**
+
+```js
+const { Client, Durability } = require("plasmite");
+const c = new Client();
+const pool = c.createPool("events");
+pool.append({ service: "api", sha: "f4e5d6c" }, ["deploy"]);
+pool.append({ service: "api", msg: "latency spike" }, ["alert"]);
+pool.close(); c.close();
+```
+
+**Go — write tagged events**
+
+```go
+c, _ := plasmite.NewDefaultClient()
+p, _ := c.CreatePool(plasmite.PoolRefName("events"), plasmite.DefaultPoolSize)
+p.Append(map[string]any{"service": "api", "sha": "f4e5d6c"}, []string{"deploy"}, plasmite.DurabilityFast)
+p.Append(map[string]any{"service": "api", "msg": "latency spike"}, []string{"alert"}, plasmite.DurabilityFast)
+p.Close(); c.Close()
+```
+
+**Go — filter by tag**
+
+```go
+c, _ := plasmite.NewDefaultClient()
+p, _ := c.OpenPool(plasmite.PoolRefName("events"))
+out, errs := p.Tail(ctx, plasmite.TailOptions{Tags: []string{"alert"}, Timeout: 5 * time.Second})
+for msg := range out { fmt.Println(string(msg)) }
+if err := <-errs; err != nil { log.Fatal(err) }
+p.Close(); c.Close()
+```
+
+</details>
 
 ---
 
@@ -243,6 +451,7 @@ Then your page can:
 The following sections are covered by `scripts/cookbook_smoke.sh` and enforced in
 `just ci-fast`:
 
+- Produce & Consume
 - CI Gate
 - Live Build Progress
 - Multi-Writer Event Bus

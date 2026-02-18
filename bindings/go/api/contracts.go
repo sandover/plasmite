@@ -66,6 +66,9 @@ const (
 	DurabilityFlush Durability = 1
 )
 
+const DefaultPoolSizeBytes uint64 = 4 * 1024 * 1024
+const DefaultPoolSize = DefaultPoolSizeBytes
+
 type PoolRef string
 
 func PoolRefName(name string) PoolRef { return PoolRef(name) }

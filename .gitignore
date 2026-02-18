@@ -15,6 +15,10 @@ bindings/node/native/Cargo.lock
 bindings/python/**/__pycache__/
 bindings/python/dist/
 bindings/python/*.egg-info/
+bindings/python/build/
+bindings/python/.venv/
+bindings/python/plasmite/_native/
+bindings/python/uv.lock
 conformance/work*/
 conformance/work-*/
 **/*.rs.bk

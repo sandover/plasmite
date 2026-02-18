@@ -9,6 +9,7 @@ Notes: Used by `npx tsc --noEmit -p tsconfig.json`.
 import {
   Client,
   Durability,
+  parseMessage,
   RemoteClient,
   RemoteError,
   replay,
@@ -17,9 +18,14 @@ import {
 const client = new Client("./data");
 const pool = client.createPool("docs", 1024 * 1024);
 const appended = pool.appendJson(Buffer.from("{}"), [], Durability.Fast);
+const appendedAlias = pool.append({ kind: "note" }, ["tag"], Durability.Fast);
 const frame = pool.getLite3(1n);
+const got = pool.get(1n);
+const parsed = parseMessage(got);
 void appended;
+void appendedAlias;
 void frame;
+void parsed;
 
 async function smokeRemote() {
   const remote = new RemoteClient("http://127.0.0.1:9700");
@@ -35,6 +41,14 @@ async function smokeRemote() {
 }
 
 async function smokeReplay() {
+  for await (const message of pool.tail({ maxMessages: 1, timeoutMs: 10, tags: ["tag"] })) {
+    void message;
+    break;
+  }
+  for await (const message of pool.replay({ speed: 1, tags: ["tag"] })) {
+    void message;
+    break;
+  }
   for await (const message of replay(pool, { speed: 1 })) {
     void message;
     break;

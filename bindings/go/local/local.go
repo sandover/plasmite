@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 	"unsafe"
@@ -108,6 +110,18 @@ func NewClient(poolDir string) (*Client, error) {
 	return &Client{ptr: cClient}, nil
 }
 
+func NewDefaultClient() (*Client, error) {
+	return NewClient(DefaultPoolDir())
+}
+
+func DefaultPoolDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Join(os.TempDir(), "plasmite", "pools")
+	}
+	return filepath.Join(home, ".plasmite", "pools")
+}
+
 func (c *Client) Close() {
 	if c == nil || c.ptr == nil {
 		return
@@ -122,6 +136,9 @@ func (c *Client) CreatePool(ref PoolRef, sizeBytes uint64) (api.Pool, error) {
 	}
 	if ref == "" {
 		return nil, invalidArgumentError("pool ref is required")
+	}
+	if sizeBytes == 0 {
+		sizeBytes = api.DefaultPoolSizeBytes
 	}
 	cRef := C.CString(string(ref))
 	defer C.free(unsafe.Pointer(cRef))

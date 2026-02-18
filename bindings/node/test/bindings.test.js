@@ -15,6 +15,7 @@ const os = require("node:os");
 const {
   Client,
   Durability,
+  parseMessage,
   PlasmiteNativeError,
   RemoteClient,
   RemotePool,
@@ -50,6 +51,27 @@ test("append/get supports large payload and tags", () => {
   client.close();
 });
 
+test("append/get aliases and parseMessage helper round-trip JSON", () => {
+  const temp = makeTempDir();
+  const poolDir = path.join(temp, "pools");
+  fs.mkdirSync(poolDir, { recursive: true });
+  const client = new Client(poolDir);
+  const pool = client.createPool("aliases", 1024 * 1024);
+
+  const appended = pool.append({ kind: "alias", ok: true }, ["alpha"]);
+  const parsed = parseMessage(appended);
+  assert.equal(parsed.data.kind, "alias");
+  assert.equal(parsed.data.ok, true);
+  assert.deepEqual(parsed.meta.tags, ["alpha"]);
+
+  const fetched = parseMessage(pool.get(BigInt(parsed.seq)));
+  assert.equal(fetched.data.kind, "alias");
+  assert.equal(fetched.data.ok, true);
+
+  pool.close();
+  client.close();
+});
+
 test("tail timeout returns no message and close is safe", () => {
   const temp = makeTempDir();
   const poolDir = path.join(temp, "pools");
@@ -62,6 +84,93 @@ test("tail timeout returns no message and close is safe", () => {
   assert.equal(next, null);
   stream.close();
   stream.close();
+
+  pool.close();
+  client.close();
+});
+
+test("stream and lite3 stream support for-of iteration", () => {
+  const temp = makeTempDir();
+  const poolDir = path.join(temp, "pools");
+  fs.mkdirSync(poolDir, { recursive: true });
+  const client = new Client(poolDir);
+  const pool = client.createPool("iter", 1024 * 1024);
+
+  const first = parseMessage(pool.append({ kind: "one" }, ["iter"]));
+  pool.append({ kind: "two" }, ["iter"]);
+  pool.append({ kind: "three" }, ["iter"]);
+
+  const stream = pool.openStream(BigInt(first.seq), BigInt(3), BigInt(50));
+  const seenKinds = [];
+  for (const message of stream) {
+    seenKinds.push(parseMessage(message).data.kind);
+  }
+  assert.deepEqual(seenKinds, ["one", "two", "three"]);
+  assert.equal(stream.nextJson(), null);
+  stream.close();
+
+  const frameSeed = pool.getLite3(BigInt(first.seq));
+  const liteSeq = pool.appendLite3(frameSeed.payload);
+  pool.appendLite3(frameSeed.payload);
+  const lite3Stream = pool.openLite3Stream(liteSeq, BigInt(2), BigInt(50));
+  const frameSeqs = [];
+  for (const frame of lite3Stream) {
+    frameSeqs.push(frame.seq);
+  }
+  assert.deepEqual(frameSeqs, [liteSeq, liteSeq + 1n]);
+  assert.equal(lite3Stream.next(), null);
+  lite3Stream.close();
+
+  pool.close();
+  client.close();
+});
+
+test("tail filters by tags and replay works as a pool method", async () => {
+  const temp = makeTempDir();
+  const poolDir = path.join(temp, "pools");
+  fs.mkdirSync(poolDir, { recursive: true });
+  const client = new Client(poolDir);
+  const pool = client.createPool("tail-replay", 1024 * 1024);
+
+  pool.append({ kind: "drop", i: 1 }, ["drop"]);
+  const keep1 = parseMessage(pool.append({ kind: "keep", i: 2 }, ["keep"]));
+  pool.append({ kind: "drop", i: 3 }, ["drop"]);
+  const keep2 = parseMessage(pool.append({ kind: "keep", i: 4 }, ["keep"]));
+
+  const tailed = [];
+  for await (const message of pool.tail({ tags: ["keep"], maxMessages: 2, timeoutMs: 10 })) {
+    tailed.push(parseMessage(message).data.i);
+  }
+  assert.deepEqual(tailed, [2, 4]);
+
+  const replayed = [];
+  for await (const message of pool.replay({
+    sinceSeq: keep1.seq,
+    maxMessages: 2,
+    speed: 2.0,
+    tags: ["keep"],
+  })) {
+    replayed.push(parseMessage(message).seq);
+  }
+  assert.deepEqual(replayed, [keep1.seq, keep2.seq]);
+
+  pool.close();
+  client.close();
+});
+
+test("tail timeout with no messages returns done", async () => {
+  const temp = makeTempDir();
+  const poolDir = path.join(temp, "pools");
+  fs.mkdirSync(poolDir, { recursive: true });
+  const client = new Client(poolDir);
+  const pool = client.createPool("tail-empty", 1024 * 1024);
+
+  const iterator = pool
+    .tail({ sinceSeq: 9999, maxMessages: 1, timeoutMs: 10, tags: ["nope"] })
+    [Symbol.asyncIterator]();
+  const next = await iterator.next();
+  assert.equal(next.done, true);
+  assert.equal(next.value, undefined);
 
   pool.close();
   client.close();
@@ -117,7 +226,7 @@ test("lite3 append/get/tail round-trips bytes", () => {
   const lite3Frame = pool.getLite3(BigInt(message.seq));
   assert.ok(lite3Frame.payload.length > 0);
 
-  const seq2 = pool.appendLite3(lite3Frame.payload, Durability.Fast);
+  const seq2 = pool.appendLite3(lite3Frame.payload);
   const lite3Frame2 = pool.getLite3(seq2);
   assert.deepEqual(lite3Frame2.payload, lite3Frame.payload);
 

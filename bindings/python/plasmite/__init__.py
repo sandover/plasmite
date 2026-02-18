@@ -138,6 +138,14 @@ def _load_lib() -> CDLL:
 
 _LIB = _load_lib()
 
+DEFAULT_POOL_DIR = os.path.join(os.environ.get("HOME", ""), ".plasmite", "pools")
+DEFAULT_POOL_SIZE_BYTES = 4 * 1024 * 1024
+DEFAULT_POOL_SIZE = DEFAULT_POOL_SIZE_BYTES
+
+
+def default_pool_dir() -> str:
+    return DEFAULT_POOL_DIR
+
 _LIB.plsm_client_new.argtypes = [c_char_p, POINTER(POINTER(plsm_client_t)), POINTER(POINTER(plsm_error_t))]
 _LIB.plsm_client_new.restype = c_int
 _LIB.plsm_client_free.argtypes = [POINTER(plsm_client_t)]
@@ -310,7 +318,7 @@ def _frame_to_py(frame: plsm_lite3_frame_t) -> Lite3Frame:
     return Lite3Frame(seq=seq, timestamp_ns=timestamp_ns, flags=flags, payload=payload)
 
 
-def _descrip_array(values: Iterable[str]) -> tuple[POINTER(c_char_p), list[bytes]]:
+def _tag_array(values: Iterable[str]) -> tuple[POINTER(c_char_p), list[bytes]]:
     encoded = [value.encode("utf-8") for value in values]
     if not encoded:
         return POINTER(c_char_p)(), encoded
@@ -352,7 +360,9 @@ def _optional_non_negative_int(value: Optional[int], name: str) -> Optional[int]
 
 
 class Client:
-    def __init__(self, pool_dir: str) -> None:
+    def __init__(self, pool_dir: str | None = None) -> None:
+        if pool_dir is None:
+            pool_dir = default_pool_dir()
         if not pool_dir:
             raise ValueError("pool_dir is required")
         out_client = POINTER(plsm_client_t)()
@@ -362,7 +372,11 @@ class Client:
             raise _take_error(out_err)
         self._ptr = out_client
 
-    def create_pool(self, pool_ref: str, size_bytes: int) -> Pool:
+    def create_pool(
+        self,
+        pool_ref: str,
+        size_bytes: int = DEFAULT_POOL_SIZE_BYTES,
+    ) -> Pool:
         _require_open(self._ptr, "client")
         if not pool_ref:
             raise ValueError("pool_ref is required")
@@ -431,7 +445,7 @@ class Pool:
             raise ValueError("payload is required")
         buf = plsm_buf_t()
         out_err = POINTER(plsm_error_t)()
-        arr, _keep = _descrip_array(tags)
+        arr, _keep = _tag_array(tags)
         payload_buf = (c_uint8 * len(payload)).from_buffer_copy(payload)
         rc = _LIB.plsm_pool_append_json(
             self._ptr,
@@ -446,6 +460,18 @@ class Pool:
         if rc != 0:
             raise _take_error(out_err)
         return _buf_to_bytes(buf)
+
+    def append(
+        self,
+        value,
+        tags: Optional[Iterable[str]] = None,
+        durability: Durability = Durability.FAST,
+    ) -> bytes:
+        return self.append_json(
+            json.dumps(value).encode("utf-8"),
+            [] if tags is None else tags,
+            durability,
+        )
 
     def append_lite3(self, payload: bytes, durability: Durability) -> int:
         _require_open(self._ptr, "pool")
@@ -476,6 +502,9 @@ class Pool:
         if rc != 0:
             raise _take_error(out_err)
         return _buf_to_bytes(buf)
+
+    def get(self, seq: int) -> bytes:
+        return self.get_json(seq)
 
     def get_lite3(self, seq: int) -> Lite3Frame:
         _require_open(self._ptr, "pool")
@@ -572,12 +601,13 @@ class Pool:
         try:
             prev_dt: Optional[datetime] = None
             delivered = 0
+            filter_by_tags = bool(required_tags)
             while True:
                 msg = stream.next_json()
                 if msg is None:
                     break
                 parsed = json.loads(msg)
-                if not _message_has_tags(parsed, required_tags):
+                if filter_by_tags and not _message_has_tags(parsed, required_tags):
                     continue
                 raw_time = parsed.get("time")
                 cur_dt: Optional[datetime] = None
@@ -617,13 +647,15 @@ class Pool:
         )
         try:
             delivered = 0
+            filter_by_tags = bool(required_tags)
             while True:
                 msg = stream.next_json()
                 if msg is None:
                     break
-                parsed = json.loads(msg)
-                if not _message_has_tags(parsed, required_tags):
-                    continue
+                if filter_by_tags:
+                    parsed = json.loads(msg)
+                    if not _message_has_tags(parsed, required_tags):
+                        continue
                 delivered += 1
                 yield msg
                 if max_messages is not None and delivered >= max_messages:
@@ -662,6 +694,15 @@ class Stream:
             return None
         raise _take_error(out_err)
 
+    def __iter__(self) -> Stream:
+        return self
+
+    def __next__(self) -> bytes:
+        message = self.next_json()
+        if message is None:
+            raise StopIteration
+        return message
+
     def close(self) -> None:
         if getattr(self, "_ptr", None):
             _LIB.plsm_stream_free(self._ptr)
@@ -692,6 +733,15 @@ class Lite3Stream:
         if rc == 0:
             return None
         raise _take_error(out_err)
+
+    def __iter__(self) -> Lite3Stream:
+        return self
+
+    def __next__(self) -> Lite3Frame:
+        frame = self.next()
+        if frame is None:
+            raise StopIteration
+        return frame
 
     def close(self) -> None:
         if getattr(self, "_ptr", None):
@@ -731,5 +781,9 @@ __all__ = [
     "Durability",
     "ErrorKind",
     "PlasmiteError",
+    "DEFAULT_POOL_DIR",
+    "DEFAULT_POOL_SIZE",
+    "DEFAULT_POOL_SIZE_BYTES",
+    "default_pool_dir",
     "parse_message",
 ]

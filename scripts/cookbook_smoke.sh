@@ -76,6 +76,12 @@ fi
 rm -rf "${WORK_DIR}"
 mkdir -p "${POOL_DIR}"
 
+# Produce & Consume
+produce_out="${WORK_DIR}/produce_consume.jsonl"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed work --create '{"task":"resize","id":1}' >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow work --tail 1 --one --jsonl >"${produce_out}"
+assert_contains "${produce_out}" '"task":"resize"' "Produce & Consume"
+
 # CI Gate
 ci_out="${WORK_DIR}/ci_gate_follow.jsonl"
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" pool create ci >/dev/null

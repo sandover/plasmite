@@ -1,6 +1,6 @@
 /*
 Purpose: Stable TypeScript declarations for the public Node bindings API.
-Key Exports: Client, Pool, Stream, Lite3Stream, replay, and remote client types.
+Key Exports: Client, Pool, Stream, Lite3Stream, parseMessage, replay, and remote client types.
 Role: Preserve complete JS + native type surface independently of generated files.
 Invariants: Public runtime exports from index.js are represented here.
 Invariants: Numeric sequence fields accept number or bigint input.
@@ -22,6 +22,9 @@ export const enum ErrorKind {
   Corrupt = 7,
   Io = 8,
 }
+export const DEFAULT_POOL_DIR: string
+export const DEFAULT_POOL_SIZE_BYTES: number
+export const DEFAULT_POOL_SIZE: number
 
 export interface Lite3Frame {
   seq: bigint
@@ -39,17 +42,21 @@ export class PlasmiteNativeError extends Error {
 }
 
 export class Client {
-  constructor(poolDir: string)
-  createPool(poolRef: string, sizeBytes: number | bigint): Pool
+  constructor(poolDir?: string)
+  createPool(poolRef: string, sizeBytes?: number | bigint): Pool
   openPool(poolRef: string): Pool
   close(): void
 }
 
 export class Pool {
-  appendJson(payload: Buffer, tags: string[], durability: Durability): Buffer
-  appendLite3(payload: Buffer, durability: Durability): bigint
+  append(payload: unknown, tags?: string[], durability?: Durability): Buffer
+  appendJson(payload: unknown, tags?: string[], durability?: Durability): Buffer
+  appendLite3(payload: Buffer, durability?: Durability): bigint
+  get(seq: number | bigint): Buffer
   getJson(seq: number | bigint): Buffer
   getLite3(seq: number | bigint): Lite3Frame
+  tail(options?: LocalTailOptions): AsyncGenerator<Buffer, void, unknown>
+  replay(options?: ReplayOptions): AsyncGenerator<Buffer, void, unknown>
   openStream(
     sinceSeq?: number | bigint | null,
     maxMessages?: number | bigint | null,
@@ -64,11 +71,13 @@ export class Pool {
 }
 
 export class Stream {
+  [Symbol.iterator](): Iterator<Buffer>
   nextJson(): Buffer | null
   close(): void
 }
 
 export class Lite3Stream {
+  [Symbol.iterator](): Iterator<Lite3Frame>
   next(): Lite3Frame | null
   close(): void
 }
@@ -78,7 +87,17 @@ export interface ReplayOptions {
   sinceSeq?: number | bigint
   maxMessages?: number | bigint
   timeoutMs?: number | bigint
+  tags?: string[]
 }
+
+export interface LocalTailOptions {
+  sinceSeq?: number | bigint
+  maxMessages?: number | bigint
+  timeoutMs?: number | bigint
+  tags?: string[]
+}
+
+export function parseMessage(payload: Buffer): Record<string, unknown>
 
 export function replay(
   pool: Pool,

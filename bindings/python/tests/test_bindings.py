@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -49,6 +50,9 @@ class BindingTests(unittest.TestCase):
         get_bytes = pool.get_json(message["seq"])
         fetched = parse_message(get_bytes)
         self.assertEqual(len(fetched["data"]["blob"]), len(payload["blob"]))
+        get_alias_bytes = pool.get(message["seq"])
+        get_alias = parse_message(get_alias_bytes)
+        self.assertEqual(get_alias["seq"], fetched["seq"])
 
         pool.close()
         client.close()
@@ -61,6 +65,33 @@ class BindingTests(unittest.TestCase):
         self.assertIsNone(stream.next_json())
         stream.close()
         stream.close()
+
+        pool.close()
+        client.close()
+
+    def test_stream_and_lite3_stream_iterators(self) -> None:
+        client = Client(str(self.pool_dir))
+        pool = client.create_pool("iter", 1024 * 1024)
+
+        first = parse_message(pool.append({"kind": "one"}, ["iter"]))
+        pool.append({"kind": "two"}, ["iter"])
+        pool.append({"kind": "three"}, ["iter"])
+
+        stream = pool.open_stream(since_seq=first["seq"], max_messages=3, timeout_ms=50)
+        seen = [parse_message(raw)["data"]["kind"] for raw in stream]
+        self.assertEqual(seen, ["one", "two", "three"])
+        self.assertIsNone(stream.next_json())
+        stream.close()
+
+        frame_seed = pool.get_lite3(first["seq"])
+        seq2 = pool.append_lite3(frame_seed.payload, Durability.FAST)
+        pool.append_lite3(frame_seed.payload, Durability.FAST)
+
+        lite3_stream = pool.open_lite3_stream(since_seq=seq2, max_messages=2, timeout_ms=50)
+        frame_seqs = [frame.seq for frame in lite3_stream]
+        self.assertEqual(frame_seqs, [seq2, seq2 + 1])
+        self.assertIsNone(lite3_stream.next())
+        lite3_stream.close()
 
         pool.close()
         client.close()
@@ -91,6 +122,38 @@ class BindingTests(unittest.TestCase):
         self.assertEqual(len(results), 1)
         message = parse_message(results[0])
         self.assertEqual(message["data"]["kind"], "keep")
+
+        pool.close()
+        client.close()
+
+    def test_tail_no_tags_skips_tag_filter_helper(self) -> None:
+        client = Client(str(self.pool_dir))
+        pool = client.create_pool("tail-no-tags-fast-path", 1024 * 1024)
+        pool.append_json(b'{"kind":"keep"}', ["keep"], Durability.FAST)
+
+        with mock.patch(
+            "plasmite._message_has_tags",
+            side_effect=AssertionError("tail should bypass tag helper without tags"),
+        ):
+            results = list(pool.tail(max_messages=1, timeout_ms=50))
+        self.assertEqual(len(results), 1)
+        self.assertEqual(parse_message(results[0])["data"]["kind"], "keep")
+
+        pool.close()
+        client.close()
+
+    def test_replay_no_tags_skips_tag_filter_helper(self) -> None:
+        client = Client(str(self.pool_dir))
+        pool = client.create_pool("replay-no-tags-fast-path", 1024 * 1024)
+        pool.append_json(b'{"kind":"keep"}', ["keep"], Durability.FAST)
+
+        with mock.patch(
+            "plasmite._message_has_tags",
+            side_effect=AssertionError("replay should bypass tag helper without tags"),
+        ):
+            results = list(pool.replay(speed=1.0, max_messages=1, timeout_ms=50))
+        self.assertEqual(len(results), 1)
+        self.assertEqual(parse_message(results[0])["data"]["kind"], "keep")
 
         pool.close()
         client.close()

@@ -10,7 +10,7 @@ docs/
 ├── building.md                                — Build system + vendoring; read when touching build/release tooling
 ├── cookbook.md                                — Task-oriented examples; read when you want copy/paste CLI workflows
 │
-│   Docs of record (canonical, current truth)
+│   Docs of record
 ├── record/README.md                           — Docs of record index; start here for stable policies and runbooks
 ├── record/vision.md                           — Product scope + principles; read when breaking scope ties
 ├── record/architecture.md                      — Implementation architecture; read when changing internals or layering
@@ -20,12 +20,8 @@ docs/
 ├── ../include/plasmite.h                       — C ABI header; read for stability contract, ownership rules, linking
 ├── record/serving.md                           — Serving + remote access (TLS, auth, CORS, deployment)
 │
-│   Planning (in-flight; promote to record/decisions when accepted)
-├── planning/README.md                          — Planning index; start here for active proposals/roadmap notes
+├── decisions/README.md                         — Catalog of architecture decisions in decisions/
 │
-├── decisions/README.md                         — Catalog of Architecture Decisions in decisions/
-│
-│   Assets
 └── images/ui/                                  — UI screenshots; read when updating docs/UI references
 
 spec/
