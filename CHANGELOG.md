@@ -7,6 +7,8 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - Documentation indexes and binding READMEs were audited for API/default/command accuracy.
 - Corrected Go module path to `github.com/sandover/plasmite/bindings/go` so downstream `go get github.com/sandover/plasmite/bindings/go/local` resolves from this repo layout.
+- Simplified shared internals: CLI dispatch split into `src/command_dispatch.rs`, pool path/info helpers centralized, and serve tail setup deduplicated.
+- Simplified binding maintenance: Node error/type-surface mapping is centralized with a declaration drift gate, binding tests use reusable setup helpers, and conformance runners now share per-language step-dispatch/pool-open helpers.
 
 ## [0.3.0] - 2026-02-16
 

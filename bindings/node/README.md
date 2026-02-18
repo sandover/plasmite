@@ -191,6 +191,21 @@ needed.
 import { Client, Durability, Pool, RemoteClient } from "plasmite";
 ```
 
+For repo development, `npm test` runs:
+- native rebuild
+- `npm run check:type-surface` (runtime export ↔ `types.d.ts` drift check)
+- `node --test test/*.test.js` (includes conformance tests)
+
+Run the conformance runner directly:
+
+```bash
+cd bindings/node
+npm run build
+PLASMITE_LIB_DIR="$(pwd)/../../target/debug" \
+PLASMITE_BIN="$(pwd)/../../target/debug/plasmite" \
+node cmd/plasmite-conformance.js ../../conformance/sample-v0.json
+```
+
 ## Platform support
 
 Pre-built binaries are included for:

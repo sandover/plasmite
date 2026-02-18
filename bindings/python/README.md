@@ -62,6 +62,16 @@ Build a wheel with bundled native assets from a specific SDK directory:
 PLASMITE_SDK_DIR=/path/to/sdk python -m build
 ```
 
+Conformance runner (manifest parity with Rust/Go/Node):
+
+```bash
+cargo build -p plasmite
+cd bindings/python
+PLASMITE_LIB_DIR="$(pwd)/../../target/debug" \
+PLASMITE_BIN="$(pwd)/../../target/debug/plasmite" \
+python3 cmd/plasmite_conformance.py ../../conformance/sample-v0.json
+```
+
 ## Usage
 
 ```python

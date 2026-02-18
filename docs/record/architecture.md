@@ -17,8 +17,11 @@ Normative behavior lives in:
 ## Layer model
 
 1. Interface layer
-- CLI (`src/main.rs`), API (`src/api/*`), and HTTP server (`src/serve.rs`).
+- CLI (`src/main.rs`, `src/command_dispatch.rs`), API (`src/api/*`), and HTTP server (`src/serve.rs`).
 - Responsibilities: parse/validate inputs, invoke core operations, map results to user-facing formats.
+- Shared interface helpers:
+  - Pool path and pool-info JSON helpers (`src/pool_paths.rs`, `src/pool_info_json.rs`) are reused across CLI/API/server.
+  - Serve tail handlers share runtime/stream setup helpers in `src/serve.rs` to keep endpoint behavior consistent.
 
 2. Core domain layer
 - Pool format and operations (`src/core/*`).

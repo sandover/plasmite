@@ -121,17 +121,54 @@ cargo audit --db .scratch/advisory-db --no-fetch
 The conformance suite validates that all language bindings behave consistently.
 See `conformance/README.md` for the full manifest format.
 
-Run the Rust conformance runner:
+Run all conformance runners (recommended):
+
+```bash
+./scripts/conformance_all.sh
+```
+
+Run the Rust conformance runner directly:
 
 ```bash
 cargo run --bin plasmite-conformance -- conformance/sample-v0.json
 ```
 
-Run Go conformance:
+Run Go conformance directly:
 
 ```bash
 cd bindings/go
-CGO_LDFLAGS="-L$(pwd)/../../target/debug" go run ./cmd/plasmite-conformance ../../conformance/sample-v0.json
+cargo build -p plasmite
+DYLD_LIBRARY_PATH="$(pwd)/../../target/debug${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}" \
+LD_LIBRARY_PATH="$(pwd)/../../target/debug${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+PKG_CONFIG="/usr/bin/true" \
+CGO_CFLAGS="-I$(pwd)/../../include" \
+CGO_LDFLAGS="-L$(pwd)/../../target/debug" \
+go run ./cmd/plasmite-conformance ../../conformance/sample-v0.json
+```
+
+Run Node conformance directly:
+
+```bash
+cd bindings/node
+npm run build
+PLASMITE_LIB_DIR="$(pwd)/../../target/debug" \
+PLASMITE_BIN="$(pwd)/../../target/debug/plasmite" \
+node cmd/plasmite-conformance.js ../../conformance/sample-v0.json
+```
+
+Run Python conformance directly:
+
+```bash
+cd bindings/python
+PLASMITE_LIB_DIR="$(pwd)/../../target/debug" \
+PLASMITE_BIN="$(pwd)/../../target/debug/plasmite" \
+python3 cmd/plasmite_conformance.py ../../conformance/sample-v0.json
+```
+
+Cross-artifact compatibility smoke:
+
+```bash
+./scripts/cross_artifact_smoke.sh
 ```
 
 ## Binding tests
@@ -194,6 +231,9 @@ cd bindings/node
 cargo build -p plasmite
 PLASMITE_LIB_DIR="$(pwd)/../../target/debug" npm test
 ```
+
+The Node suite includes `npm run check:type-surface`, which verifies runtime
+exports stay aligned with `bindings/node/types.d.ts`.
 
 ## Notes
 

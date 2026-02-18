@@ -52,6 +52,19 @@ go test ./...
 
 `just bindings-go-test` runs this override automatically for CI and local development.
 
+Conformance runner (manifest parity with Rust/Node/Python):
+
+```bash
+cargo build -p plasmite
+cd bindings/go
+DYLD_LIBRARY_PATH="$(pwd)/../../target/debug${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}" \
+LD_LIBRARY_PATH="$(pwd)/../../target/debug${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+PKG_CONFIG=/usr/bin/true \
+CGO_CFLAGS="-I$(pwd)/../../include" \
+CGO_LDFLAGS="-L$(pwd)/../../target/debug" \
+go run ./cmd/plasmite-conformance ../../conformance/sample-v0.json
+```
+
 ## Usage
 
 ```go
