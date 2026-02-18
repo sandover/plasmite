@@ -282,7 +282,7 @@ jobs:
           mkdir -p "$HOME/.cargo/bin"
           curl -fsSL "$url" -o "$archive"
           tar -xzf "$archive" -C "$HOME/.cargo/bin" cargo-binstall
-          "$HOME/.cargo/bin/cargo-binstall" --version
+          "$HOME/.cargo/bin/cargo-binstall" -V
       - name: cargo-binstall smoke (linux preview scope)
         shell: bash
         env:
