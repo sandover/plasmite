@@ -17,13 +17,16 @@ Before running any release step:
 2. Derive `base_tag` automatically as the highest semver tag lower than `release_target`:
    - `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`
    - Read `Base tag:` from the generated evidence report and reuse that value for any base-tag-driven commands.
-2. Verify runtime access:
+3. Verify runtime access:
    - `gh auth status`
    - network access for GitHub + registries
-3. Verify version alignment:
+4. Verify version alignment:
    - `bash scripts/check-version-alignment.sh`
-4. Open or initialize evidence report (idempotent):
+5. Open or initialize evidence report (idempotent):
    - `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`
+6. Verify required repository secrets are configured:
+   - always: `NPM_TOKEN`, `PYPI_API_TOKEN`, `CARGO_REGISTRY_TOKEN`
+   - live publish only: `HOMEBREW_TAP_TOKEN`
 
 Release invariants (non-negotiable):
 1. Publish only from a successful `release` build run with verified metadata.
@@ -31,6 +34,9 @@ Release invariants (non-negotiable):
 3. Release remains fail-closed: all channels publish or none do.
 4. Registry versions must align with `release_target`.
 5. `HOMEBREW_TAP_TOKEN` must be configured for live publish runs.
+6. Release workflows use pinned helper tooling:
+   - `RELEASE_RUST_TOOLCHAIN=1.88.0`
+   - `CARGO_BINSTALL_VERSION=1.17.5`
 
 ## Procedure
 
@@ -86,13 +92,16 @@ The `release-publish` workflow is manual-dispatch-only (`workflow_dispatch`). Th
 2. Run release build workflow (`release`):
    - push tag `vX.Y.Z` or dispatch `release.yml` with `tag`
    - require successful build run
-3. Rehearsal publish run (always before live publish):
+3. Optionally prove build provenance explicitly before publish:
+   - `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <build_run_id> --expect-tag <release_target>`
+4. Rehearsal publish run (always before live publish):
    - `gh workflow run release-publish.yml -f release_tag=<release_target> -f rehearsal=true`
-4. Live publish run:
+5. Live publish run:
    - `gh workflow run release-publish.yml -f release_tag=<release_target> -f rehearsal=false`
-5. `release-publish.yml` resolves a successful build run for that tag, verifies release metadata, syncs Homebrew tap, then publishes.
-6. For credential/transient failures, do publish-only rerun using the same `release_target`.
-7. If needed for incident recovery, dispatch with explicit build run:
+6. `release-publish.yml` resolves a successful build run for the tag, verifies release metadata, syncs Homebrew tap, then publishes.
+7. Prefer `release_tag` dispatches for normal operation; use explicit `build_run_id` only for incident recovery.
+8. For credential/transient failures, do publish-only rerun using the same `release_target`.
+9. If needed for incident recovery, dispatch with explicit build run:
    - `gh workflow run release-publish.yml -f build_run_id=<build_run_id> -f rehearsal=false`
 
 ### Release Tooling Stability
@@ -113,11 +122,11 @@ If any release workflow fails:
    - extract fast triage signals:
      - `gh api repos/sandover/plasmite/actions/jobs/<job-id>/logs | rg -n "error:|Process completed with exit code|cannot find -lplasmite|linking with|unsupported platform"`
    - this is triage-only; release gating decisions remain unchanged.
-2. Capture machine-readable failure evidence:
+3. Capture machine-readable failure evidence:
    - `gh run view <run-id> --json url,jobs --jq '{url,jobs:[.jobs[]|select(.conclusion=="failure")|{name,url:.url}]}'`
    - `gh run view <run-id> --log-failed`
    - If `sync-homebrew-tap` fails, check `HOMEBREW_TAP_TOKEN` and rerun `release-publish` for the same `release_target`.
-3. If incident-class failure, file blocker:
+4. If incident-class failure, file blocker:
    - `bash skills/plasmite-release-manager/scripts/file_release_blocker_with_evidence.sh --release-target <release_target> --check "<gate>" --title "<title>" --summary "<summary>" --run-id <run-id> --agent <model@host>`
 
 ## Post-Release Verification
