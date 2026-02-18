@@ -8,6 +8,7 @@ Notes: Uses temporary directories for isolated pools.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
@@ -90,6 +91,29 @@ test("client.pool creates missing pool and reopens existing pool", () => {
   first.close();
   second.close();
   client.close();
+});
+
+test("default client creates pool dir in fresh HOME", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "plasmite-node-home-"));
+  const expectedPoolDir = path.join(home, ".plasmite", "pools");
+  const expectedPoolPath = path.join(expectedPoolDir, "work.plasmite");
+  assert.equal(fs.existsSync(expectedPoolDir), false);
+
+  const script = `
+    const { Client } = require("./index.js");
+    const client = new Client();
+    const pool = client.pool("work", 1024 * 1024);
+    pool.append({ kind: "one" }, ["alpha"]);
+    pool.close();
+    client.close();
+  `;
+  const output = childProcess.spawnSync(process.execPath, ["-e", script], {
+    cwd: path.join(__dirname, ".."),
+    env: { ...process.env, HOME: home },
+    encoding: "utf8",
+  });
+  assert.equal(output.status, 0, output.stderr || output.stdout);
+  assert.equal(fs.existsSync(expectedPoolPath), true);
 });
 
 test("tail timeout returns no message and close is safe", () => {
