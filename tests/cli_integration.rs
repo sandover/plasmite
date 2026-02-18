@@ -3556,7 +3556,7 @@ fn permission_error_has_hint_and_causes() {
         ])
         .output()
         .expect("create");
-    assert_eq!(create.status.code().unwrap(), 8);
+    assert_eq!(create.status.code().unwrap(), 6);
     let err = parse_error_json(&create.stderr);
     let inner = err
         .get("error")

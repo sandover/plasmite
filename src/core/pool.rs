@@ -416,24 +416,65 @@ pub struct Pool {
 impl Pool {
     pub fn create(path: impl AsRef<Path>, options: PoolOptions) -> Result<Self, Error> {
         let path = path.as_ref().to_path_buf();
+
+        // Creating a pool is a mutating operation; ensure the parent directory exists so
+        // API/binding users don't need to `mkdir -p` for common first-run flows.
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|err| {
+                let kind = map_io_error_kind(&err);
+                let message = match kind {
+                    ErrorKind::Permission => "failed to create pool directory (permission denied)",
+                    _ => "failed to create pool directory",
+                };
+                Error::new(kind)
+                    .with_message(message)
+                    .with_path(parent)
+                    .with_source(err)
+            })?;
+        }
+
         let mut file = OpenOptions::new()
             .create(true)
             .truncate(true)
             .read(true)
             .write(true)
             .open(&path)
-            .map_err(|err| Error::new(ErrorKind::Io).with_path(&path).with_source(err))?;
+            .map_err(|err| {
+                let kind = map_io_error_kind(&err);
+                let message = match kind {
+                    ErrorKind::NotFound => "parent directory not found",
+                    ErrorKind::Permission => "failed to create pool file (permission denied)",
+                    _ => "failed to create pool file",
+                };
+                Error::new(kind)
+                    .with_message(message)
+                    .with_path(&path)
+                    .with_source(err)
+            })?;
 
-        file.set_len(options.file_size)
-            .map_err(|err| Error::new(ErrorKind::Io).with_path(&path).with_source(err))?;
+        file.set_len(options.file_size).map_err(|err| {
+            let kind = map_io_error_kind(&err);
+            Error::new(kind)
+                .with_message("failed to size pool file")
+                .with_path(&path)
+                .with_source(err)
+        })?;
 
         let index_capacity = options.resolved_index_capacity();
         let header = PoolHeader::new(options.file_size, index_capacity)?;
         write_header(&mut file, &header, &path)?;
 
         let mmap = unsafe {
-            MmapMut::map_mut(&file)
-                .map_err(|err| Error::new(ErrorKind::Io).with_path(&path).with_source(err))?
+            MmapMut::map_mut(&file).map_err(|err| {
+                let kind = map_io_error_kind(&err);
+                Error::new(kind)
+                    .with_message("failed to mmap pool file")
+                    .with_path(&path)
+                    .with_source(err)
+            })?
         };
 
         let mut pool = Self {
@@ -1144,6 +1185,42 @@ mod tests {
 
         let reopened = Pool::open(&path).expect("open pool");
         assert_eq!(reopened.header().file_size, 1024 * 1024);
+    }
+
+    #[test]
+    fn create_auto_creates_parent_dirs() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let nested = dir.path().join("missing").join("nested");
+        let path = nested.join("pool.plasmite");
+        assert!(!nested.exists());
+
+        let _pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create pool");
+        assert!(nested.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_reports_permission_when_parent_dir_is_not_writable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let readonly = dir.path().join("readonly");
+        fs::create_dir_all(&readonly).expect("mkdir");
+        fs::set_permissions(&readonly, fs::Permissions::from_mode(0o555)).expect("chmod");
+
+        let path = readonly.join("child").join("pool.plasmite");
+        let err = match Pool::create(&path, PoolOptions::new(1024 * 1024)) {
+            Ok(_) => panic!("expected error"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), ErrorKind::Permission);
+        assert!(
+            err.message()
+                .unwrap_or_default()
+                .contains("failed to create pool directory"),
+            "unexpected message: {:?}",
+            err.message()
+        );
     }
 
     #[test]
