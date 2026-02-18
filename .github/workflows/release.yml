@@ -13,6 +13,9 @@ on:
 permissions:
   contents: read
 
+env:
+  RELEASE_RUST_TOOLCHAIN: "1.88.0"
+
 jobs:
   release-context:
     runs-on: ubuntu-latest
@@ -89,6 +92,7 @@ jobs:
           ref: ${{ needs.release-context.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: ${{ env.RELEASE_RUST_TOOLCHAIN }}
           targets: ${{ matrix.target }}
       - name: Install smoke-test tooling
         shell: bash
@@ -161,6 +165,7 @@ jobs:
           ref: ${{ needs.release-context.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: ${{ env.RELEASE_RUST_TOOLCHAIN }}
           targets: ${{ matrix.target }}
       - uses: actions/setup-python@v5
         with:
@@ -223,6 +228,7 @@ jobs:
           ref: ${{ needs.release-context.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: ${{ env.RELEASE_RUST_TOOLCHAIN }}
           targets: ${{ matrix.target }}
       - uses: actions/setup-node@v4
         with:

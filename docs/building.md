@@ -77,21 +77,23 @@ lib/pkgconfig/plasmite.pc
 
 `release.yml` uploads build artifacts only (SDK tarballs, Python dist artifacts, npm tarball, and release metadata).
 
-`.github/workflows/release-publish.yml` (publish stage) consumes a successful build run's artifacts, runs registry preflight checks, publishes crates/npm/PyPI, and then creates/updates the GitHub release with SDK tarballs + `sha256sums.txt`.
+`.github/workflows/release-publish.yml` (publish stage) consumes a successful build run's artifacts, runs registry preflight checks, syncs/verifies the Homebrew tap formula, publishes crates/npm/PyPI, and then creates/updates the GitHub release with SDK tarballs + `sha256sums.txt`.
 
-Before any registry publish steps run, `release-publish.yml` now also verifies Homebrew tap alignment (version + URLs + checksums). If tap alignment is stale, publish fails closed before crates/npm/PyPI.
+Before any registry publish steps run, `release-publish.yml` updates `sandover/homebrew-tap` from build artifacts and verifies alignment (version + URLs + checksums). Live publish requires `HOMEBREW_TAP_TOKEN` so the workflow can commit/push tap updates.
 
 For low-risk workflow validation after release workflow changes, run a no-publish rehearsal:
 
 ```bash
-gh workflow run release-publish.yml -f build_run_id=<successful-release-build-run-id> -f rehearsal=true
+gh workflow run release-publish.yml -f release_tag=<vX.Y.Z> -f rehearsal=true
 ```
 
 If publish fails due to registry credentials, rerun only publish without rebuilding matrix artifacts:
 
 ```bash
-gh workflow run release-publish.yml -f build_run_id=<successful-release-build-run-id> -f rehearsal=false -f allow_partial_release=false
+gh workflow run release-publish.yml -f release_tag=<vX.Y.Z> -f rehearsal=false
 ```
+
+If you need to force a specific build run (for example, during incident recovery), you can still pass `build_run_id` instead of `release_tag`.
 
 ## Performance monitoring policy
 

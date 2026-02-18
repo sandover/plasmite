@@ -30,7 +30,7 @@ Think of a Plasmite release as answering two questions:
 We split the work into two big stages so that “building” and “publishing” are decoupled:
 
 - **Build stage (GitHub)**: compile + package everything, and upload the results as artifacts.
-- **Publish stage (GitHub)**: manually dispatch `release-publish.yml` with a successful build run ID, verify provenance and Homebrew alignment, then publish to registries and create the GitHub Release. There is no automatic trigger from the build workflow.
+- **Publish stage (GitHub)**: manually dispatch `release-publish.yml` with `release_tag=vX.Y.Z` (or an explicit `build_run_id`), verify provenance, sync/verify Homebrew alignment, then publish to registries and create the GitHub Release.
 
 This split is intentional: if a registry token is expired (or a policy check fails), we can re-run the publish stage without rebuilding the entire multi-platform build.
 
@@ -40,10 +40,9 @@ This split is intentional: if a registry token is expired (or a policy check fai
   - Pick the release version and prepare the release notes / changelog.
   - Run a *local* performance comparison against the prior tag (release-blocking).
   - Push a version tag (which is the “official pointer” to the commit being released).
-  - Update the Homebrew tap formula repo to point at the release tarballs and checksums.
 - **On GitHub Actions**
   - Build and package release artifacts for supported platforms.
-  - Re-download those artifacts by build run ID, verify they match the tag/version, and then publish to registries + GitHub Releases.
+  - Re-download those artifacts, verify they match the tag/version, sync Homebrew formula updates, and then publish to registries + GitHub Releases.
 
 ### Stages and gates (what they’re for, and what they cost)
 
@@ -68,10 +67,10 @@ Costs below are intentionally qualitative; exact runtimes vary by machine and Gi
      - Python distributions (sdist + wheels for supported platforms)
      - Node publish artifact (an npm tarball)
 
-4. **Homebrew parity (maintainer + GitHub, release-blocking)**
+4. **Homebrew parity (GitHub, release-blocking)**
    - Purpose: prevent a release where Homebrew points at stale or mismatched tarballs.
-   - Gate (GitHub, `release-publish.yml`): formula version/URLs/checksums must match the build artifacts exactly.
-   - Cost: cheap (verification is fast; the human part is updating the tap repo).
+   - Gate (GitHub, `release-publish.yml`): formula is updated from build artifacts, pushed to tap, and verified for exact version/URL/checksum alignment.
+   - Cost: cheap (automated formula sync + verification).
 
 5. **Publish to registries (GitHub, `release-publish.yml`)**
    - Purpose: make the same version available via crates.io, npm, and PyPI.
@@ -112,7 +111,8 @@ CI still runs a scheduled benchmark (`perf-monitor.yml`) to catch trend regressi
 - Use a runtime that can reach GitHub and registries and can use maintainer `gh` auth.
 - Release automation is split: `release.yml` builds artifacts, `release-publish.yml` performs preflight + registry publish + GitHub release.
 - Homebrew parity is mandatory: `release-publish.yml` must block registry publish until Homebrew formula version/URLs/checksums are aligned.
-- Publish-only retry after credential fixes must re-use a successful build run ID (no matrix rebuild required).
+- Live publish requires `HOMEBREW_TAP_TOKEN` so workflow can commit/push tap updates.
+- Publish-only retry after credential fixes must target the same release tag (or explicit successful `build_run_id`) without rebuilding matrix artifacts.
 
 ## Support-tier enforcement
 
@@ -135,18 +135,17 @@ flowchart TD
     B --> C["release.yml build run"]
     C --> D{"Build succeeded?"}
     D -- "No" --> X
-    D -- "Yes" --> E["Update + push homebrew-tap formula from build artifacts"]
-    E -.-> F["release-publish rehearsal (optional, recommended on workflow changes)"]
-    F -.-> G{"Rehearsal succeeded?"}
-    G -- "No" --> X
-    E --> H["release-publish live (manual dispatch)"]
-    G -- "Yes" --> H
-    H --> I{"Preflight + tap verification pass?"}
-    I -- "No" --> X
-    I -- "Yes" --> J["Publish crates.io + npm + PyPI"]
-    J --> K["Create GitHub release assets"]
-    K --> L["Delivery verification (registries + Homebrew)"]
-    M["CI perf-monitor (scheduled/manual, advisory only)"] -. "non-blocking signal" .-> A1
+    D -- "Yes" --> E["release-publish rehearsal (optional, recommended on workflow changes)"]
+    E -.-> F{"Rehearsal succeeded?"}
+    F -- "No" --> X
+    F -- "Yes" --> G["release-publish live (manual dispatch)"]
+    D -- "Yes" --> G
+    G --> H{"Preflight + tap sync/verification pass?"}
+    H -- "No" --> X
+    H -- "Yes" --> I["Publish crates.io + npm + PyPI"]
+    I --> J["Create GitHub release assets"]
+    J --> K["Delivery verification (registries + Homebrew)"]
+    L["CI perf-monitor (scheduled/manual, advisory only)"] -. "non-blocking signal" .-> A1
 ```
 
 ## Human Decisions to Make Per Release
@@ -167,10 +166,10 @@ The skill handles mechanics, but maintainers still decide:
 5. Run local benchmark comparison against the prior tag:
    - `bash skills/plasmite-release-manager/scripts/compare_local_benchmarks.sh --base-tag <base_tag> --runs 3`
 6. Ask Codex to run the skill in `live` mode.
-7. Update and push `../homebrew-tap` formula for this target using build artifacts.
+7. Ensure `HOMEBREW_TAP_TOKEN` is set in repository secrets before live publish.
 8. Confirm post-release delivery verification is complete on all channels.
-9. If publish fails due to credentials/policy, run publish-only rerun with the successful build run ID:
-   - `gh workflow run release-publish.yml -f build_run_id=<build-run-id> -f rehearsal=false`
+9. If publish fails due to credentials/policy, run publish-only rerun with the same target:
+   - `gh workflow run release-publish.yml -f release_tag=<vX.Y.Z> -f rehearsal=false`
 
 ## Versioning Policy
 
