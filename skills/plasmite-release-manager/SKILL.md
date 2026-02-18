@@ -30,6 +30,7 @@ Release invariants (non-negotiable):
 2. Homebrew formula alignment must pass before registry publish.
 3. Release remains fail-closed: all channels publish or none do.
 4. Registry versions must align with `release_target`.
+5. `../homebrew-tap` must be updated and pushed before `release-publish` dispatch.
 
 ## Procedure
 
@@ -88,13 +89,23 @@ The `release-publish` workflow is manual-dispatch-only (`workflow_dispatch`). Th
    - require successful build run
 3. Verify build provenance for candidate `build_run_id`:
    - `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <build_run_id> --expect-tag <release_target>`
-4. Align Homebrew formula using release artifacts:
+4. Align and publish Homebrew tap using release artifacts (required every release):
    - `bash scripts/update_homebrew_formula.sh <release_target> ../homebrew-tap --build-run-id <build_run_id>`
-5. Rehearsal publish run (recommended on workflow changes):
+   - `git -C ../homebrew-tap add Formula/plasmite.rb`
+   - `git -C ../homebrew-tap commit -m "plasmite: update to <release_target#v>"`
+   - `git -C ../homebrew-tap push`
+   - `gh api repos/sandover/homebrew-tap/contents/Formula/plasmite.rb -H "Accept: application/vnd.github.raw" | rg -n "version \"<release_target#v>\""`
+5. Rehearsal publish run (always before live publish):
    - `gh workflow run release-publish.yml -f build_run_id=<build_run_id> -f rehearsal=true`
 6. Live publish run:
    - `gh workflow run release-publish.yml -f build_run_id=<build_run_id> -f rehearsal=false`
 7. For credential/transient failures, do publish-only rerun using same verified `build_run_id`.
+
+### Release Tooling Stability
+
+- Prefer pinned binary installs for external helper tools in release workflows (for example `cargo-binstall`) instead of `cargo install` from source.
+- Keep helper-tool versions explicit in workflow constants and bump intentionally.
+- If source compilation is unavoidable, pin an explicit Rust toolchain for that step and validate the tool's minimum supported Rust version before bumping.
 
 ### 4) Failure Handling
 
@@ -111,6 +122,7 @@ If any release workflow fails:
 2. Capture machine-readable failure evidence:
    - `gh run view <run-id> --json url,jobs --jq '{url,jobs:[.jobs[]|select(.conclusion=="failure")|{name,url:.url}]}'`
    - `gh run view <run-id> --log-failed`
+   - If `verify-homebrew-tap` fails with version mismatch, treat it as a missed tap-sync step: update/push `../homebrew-tap`, then rerun `release-publish` with the same `build_run_id`.
 3. If incident-class failure, file blocker:
    - `bash skills/plasmite-release-manager/scripts/file_release_blocker_with_evidence.sh --release-target <release_target> --check "<gate>" --title "<title>" --summary "<summary>" --run-id <run-id> --agent <model@host>`
 

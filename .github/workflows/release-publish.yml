@@ -16,6 +16,10 @@ permissions:
   contents: write
   actions: read
 
+env:
+  CARGO_BINSTALL_VERSION: "1.17.5"
+  CARGO_BINSTALL_TARGET: "x86_64-unknown-linux-musl"
+
 jobs:
   resolve-build-run:
     runs-on: ubuntu-latest
@@ -231,7 +235,6 @@ jobs:
         with:
           name: release-inputs
           path: release-inputs
-      - uses: dtolnay/rust-toolchain@stable
       - name: Verify cargo-binstall metadata contract (preview)
         shell: bash
         run: |
@@ -270,9 +273,16 @@ jobs:
               sys.exit(1)
           print("cargo-binstall metadata contract ok")
           PY
-      - name: Install cargo-binstall
+      - name: Install cargo-binstall (pinned binary)
         shell: bash
-        run: cargo install cargo-binstall --locked --version 1.17.5
+        run: |
+          set -euo pipefail
+          archive="cargo-binstall-${CARGO_BINSTALL_TARGET}.tgz"
+          url="https://github.com/cargo-bins/cargo-binstall/releases/download/v${CARGO_BINSTALL_VERSION}/${archive}"
+          mkdir -p "$HOME/.cargo/bin"
+          curl -fsSL "$url" -o "$archive"
+          tar -xzf "$archive" -C "$HOME/.cargo/bin" cargo-binstall
+          "$HOME/.cargo/bin/cargo-binstall" --version
       - name: cargo-binstall smoke (linux preview scope)
         shell: bash
         env:
@@ -287,7 +297,7 @@ jobs:
             exit 1
           fi
 
-          cargo binstall --no-confirm --force \
+          "$HOME/.cargo/bin/cargo-binstall" --no-confirm --force \
             --version "$VERSION" \
             --pkg-url "file://${GITHUB_WORKSPACE}/${archive}" \
             --pkg-fmt tgz \
@@ -418,7 +428,7 @@ jobs:
             ### cargo-binstall (preview)
             Supported preview targets: `x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`.
             ```bash
-            cargo install cargo-binstall --locked --version 1.17.5
+            cargo install cargo-binstall --locked --version ${{ env.CARGO_BINSTALL_VERSION }}
             cargo binstall plasmite --version ${{ needs.resolve-build-run.outputs.version }} --no-confirm
             ```
 
