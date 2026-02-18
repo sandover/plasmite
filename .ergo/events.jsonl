@@ -3317,3 +3317,19 @@
 {"type":"claim","ts":"2026-02-18T18:52:37.838833Z","data":{"id":"XJ4MQD","agent_id":"gpt-5.2@codex","ts":"2026-02-18T18:52:37.838833Z"}}
 {"type":"state","ts":"2026-02-18T18:52:37.838833Z","data":{"id":"XJ4MQD","state":"doing","ts":"2026-02-18T18:52:37.838833Z"}}
 {"type":"state","ts":"2026-02-18T18:55:33.605274Z","data":{"id":"XJ4MQD","state":"done","ts":"2026-02-18T18:55:33.605274Z"}}
+{"type":"claim","ts":"2026-02-18T18:56:00.389313Z","data":{"id":"BJJID3","agent_id":"gpt-5.2@codex","ts":"2026-02-18T18:56:00.389313Z"}}
+{"type":"state","ts":"2026-02-18T18:56:00.389313Z","data":{"id":"BJJID3","state":"doing","ts":"2026-02-18T18:56:00.389313Z"}}
+{"type":"result","ts":"2026-02-18T18:57:47.774112Z","data":{"task_id":"BJJID3","summary":"Preview mappings confirmed; no repackaging needed, add cargo-binstall metadata overrides.","path":".scratch/spikes/bjjid3-cargo-binstall-contract.md","sha256_at_attach":"215882188ae96893e22262bd31717ada423faaddc10c52109fe8ad12e5dbd2f9","mtime_at_attach":"2026-02-18T18:57:38.181434665Z","git_commit_at_attach":"e5e97a9b4c9ba7477bb4b126615e28a2d4a4ccbc","ts":"2026-02-18T18:57:47.774112Z"}}
+{"type":"state","ts":"2026-02-18T18:57:47.802583Z","data":{"id":"BJJID3","state":"done","ts":"2026-02-18T18:57:47.802583Z"}}
+{"type":"claim","ts":"2026-02-18T18:58:00.32581Z","data":{"id":"W7ZHNF","agent_id":"gpt-5.2@codex","ts":"2026-02-18T18:58:00.32581Z"}}
+{"type":"state","ts":"2026-02-18T18:58:00.32581Z","data":{"id":"W7ZHNF","state":"doing","ts":"2026-02-18T18:58:00.32581Z"}}
+{"type":"result","ts":"2026-02-18T18:59:28.822946Z","data":{"task_id":"W7ZHNF","summary":"Added cargo-binstall metadata + target pkg-url overrides per BJJID3; no asset rename/repack needed.","path":".scratch/spikes/w7zhnf-cargo-binstall-implementation.md","sha256_at_attach":"183423095ef7286bcffd2dacddc9ec48c5a2d0c20e2a959a355603c2ef1e5e4f","mtime_at_attach":"2026-02-18T18:59:25.908411538Z","git_commit_at_attach":"e5e97a9b4c9ba7477bb4b126615e28a2d4a4ccbc","ts":"2026-02-18T18:59:28.822946Z"}}
+{"type":"state","ts":"2026-02-18T18:59:28.851441Z","data":{"id":"W7ZHNF","state":"done","ts":"2026-02-18T18:59:28.851441Z"}}
+{"type":"claim","ts":"2026-02-18T18:59:41.126117Z","data":{"id":"3IC3AK","agent_id":"gpt-5.2@codex","ts":"2026-02-18T18:59:41.126117Z"}}
+{"type":"state","ts":"2026-02-18T18:59:41.126117Z","data":{"id":"3IC3AK","state":"doing","ts":"2026-02-18T18:59:41.126117Z"}}
+{"type":"result","ts":"2026-02-18T19:01:09.693743Z","data":{"task_id":"3IC3AK","summary":"Added fail-closed cargo-binstall smoke gate in release-publish; rehearsal and publish use the same verification logic.","path":".scratch/spikes/3ic3ak-cargo-binstall-gate.md","sha256_at_attach":"6cdb63130c1ba317283fced1e77a559767973ff7f998caff6222e6b4882f2222","mtime_at_attach":"2026-02-18T19:01:06.566638334Z","git_commit_at_attach":"e5e97a9b4c9ba7477bb4b126615e28a2d4a4ccbc","ts":"2026-02-18T19:01:09.693743Z"}}
+{"type":"state","ts":"2026-02-18T19:01:09.741359Z","data":{"id":"3IC3AK","state":"done","ts":"2026-02-18T19:01:09.741359Z"}}
+{"type":"claim","ts":"2026-02-18T19:01:24.929783Z","data":{"id":"KCFJTR","agent_id":"gpt-5.2@codex","ts":"2026-02-18T19:01:24.929783Z"}}
+{"type":"state","ts":"2026-02-18T19:01:24.929783Z","data":{"id":"KCFJTR","state":"doing","ts":"2026-02-18T19:01:24.929783Z"}}
+{"type":"result","ts":"2026-02-18T19:03:00.987524Z","data":{"task_id":"KCFJTR","summary":"Updated distribution/release docs and release notes guidance for cargo-binstall preview + promotion criteria.","path":".scratch/spikes/kcfjtr-cargo-binstall-doc-policy.md","sha256_at_attach":"b83a7b607d8d37c9711830621daca1f1067b2dc2cdf98609223aeda979ef7c63","mtime_at_attach":"2026-02-18T19:02:54.823553704Z","git_commit_at_attach":"e5e97a9b4c9ba7477bb4b126615e28a2d4a4ccbc","ts":"2026-02-18T19:03:00.987524Z"}}
+{"type":"state","ts":"2026-02-18T19:03:01.016635Z","data":{"id":"KCFJTR","state":"done","ts":"2026-02-18T19:03:01.016635Z"}}

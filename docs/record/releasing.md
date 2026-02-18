@@ -25,7 +25,7 @@ If this file and the skill ever disagree, follow the skill and then update this 
 Think of a Plasmite release as answering two questions:
 
 1. **What exact code are we shipping?** (a specific git commit, pinned by a version tag like `v0.2.3`)
-2. **Can users install that exact build reliably from every channel we support?** (GitHub tarballs, Homebrew, crates.io, npm, PyPI)
+2. **Can users install that exact build reliably from every channel we support?** (GitHub tarballs, Homebrew, crates.io, npm, PyPI, and preview channels such as cargo-binstall)
 
 We split the work into two big stages so that “building” and “publishing” are decoupled:
 
@@ -79,6 +79,7 @@ Costs below are intentionally qualitative; exact runtimes vary by machine and Gi
      - token “can we log in?” checks (fail fast if CI can’t authenticate)
      - “publish what we built” checks (publish is only allowed from a successful build run that matches the tag/version)
      - Homebrew parity check (above) must pass *before* any registry publishes
+     - cargo-binstall preview gate (`verify-cargo-binstall`) installs from release artifacts and runs `plasmite --version` in both rehearsal and live modes (Linux preview scope today)
    - Cost: moderate (mostly network + registry processing).
 
 6. **Create/update the GitHub Release (GitHub, `release-publish.yml`)**
@@ -117,6 +118,7 @@ CI still runs a scheduled benchmark (`perf-monitor.yml`) to catch trend regressi
 
 - A platform/channel combination is `official` only if its idiomatic install command has a passing automated install/runtime smoke gate in release automation.
 - Preview artifacts (including manual zip/tar workflows) do not upgrade support tier by themselves.
+- cargo-binstall is currently `preview`: URL mapping and release assets exist for Linux/macOS targets, but release-publish smoke is Linux-only until expanded.
 - Promotion from `preview` to `official` must include:
   - an update to `docs/record/distribution.md`,
   - release workflow coverage for that combination,
