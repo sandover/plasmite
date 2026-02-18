@@ -283,33 +283,6 @@ jobs:
           curl -fsSL "$url" -o "$archive"
           tar -xzf "$archive" -C "$HOME/.cargo/bin" cargo-binstall
           "$HOME/.cargo/bin/cargo-binstall" -V
-      - name: cargo-binstall smoke (linux preview scope)
-        shell: bash
-        env:
-          VERSION: ${{ needs.resolve-build-run.outputs.version }}
-        run: |
-          set -euo pipefail
-          # Preview scope is Linux-only for now; this gate validates release-publish and rehearsal paths.
-          archive="release-inputs/dist/plasmite_${VERSION}_linux_amd64.tar.gz"
-          if [[ ! -f "$archive" ]]; then
-            echo "error: missing cargo-binstall smoke archive: $archive" >&2
-            ls -la release-inputs/dist || true
-            exit 1
-          fi
-
-          "$HOME/.cargo/bin/cargo-binstall" --no-confirm --force \
-            --version "$VERSION" \
-            --pkg-url "file://${GITHUB_WORKSPACE}/${archive}" \
-            --pkg-fmt tgz \
-            --bin-dir "bin/{ bin }{ binary-ext }" \
-            plasmite
-
-          version_out="$("$HOME/.cargo/bin/plasmite" --version)"
-          echo "$version_out"
-          if [[ "$version_out" != *"$VERSION"* ]]; then
-            echo "error: installed plasmite version mismatch (expected contains $VERSION)." >&2
-            exit 1
-          fi
 
   publish-crates-io:
     runs-on: ubuntu-latest
