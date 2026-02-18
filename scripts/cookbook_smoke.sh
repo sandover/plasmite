@@ -63,16 +63,46 @@ assert_jq_true() {
 run_binding_fixtures() {
   local fixtures_dir="${WORK_DIR}/fixtures"
   local python_out="${WORK_DIR}/python_fixture.json"
+  local python_home_out="${WORK_DIR}/python_home_fixture.json"
   local node_out="${WORK_DIR}/node_fixture.json"
+  local node_home_out="${WORK_DIR}/node_home_fixture.json"
   local go_out="${WORK_DIR}/go_fixture.json"
+  local fresh_home="${fixtures_dir}/fresh-home"
 
   mkdir -p "${fixtures_dir}"
+  rm -rf "${fresh_home}"
+  mkdir -p "${fresh_home}"
 
   PYTHONPATH="${ROOT_DIR}/bindings/python" \
     PLASMITE_LIB_DIR="${ROOT_DIR}/target/debug" \
     python3 "${ROOT_DIR}/bindings/python/cmd/cookbook_smoke_fixture.py" "${fixtures_dir}/python-pools" >"${python_out}"
   assert_jq_true "${python_out}" '.data.task == "resize"' "Python cookbook fixture"
   assert_jq_true "${python_out}" '.tags == ["cookbook"]' "Python cookbook fixture"
+
+  HOME="${fresh_home}" \
+    PYTHONPATH="${ROOT_DIR}/bindings/python" \
+    PLASMITE_LIB_DIR="${ROOT_DIR}/target/debug" \
+    python3 - >"${python_home_out}" <<'PY'
+import json
+from pathlib import Path
+
+from plasmite import Client, Durability
+
+home = Path.home()
+pool_dir = home / ".plasmite" / "pools"
+pool_path = pool_dir / "cookbook-home.plasmite"
+
+with Client() as client:
+    with client.pool("cookbook-home", 1024 * 1024) as pool:
+        msg = pool.append({"task": "resize", "id": 1}, ["cookbook"], Durability.FAST)
+        pool.get(msg.seq)
+        print(json.dumps({"seq": msg.seq, "tags": msg.tags, "data": msg.data}))
+
+if not pool_path.exists():
+    raise RuntimeError(f"expected pool to exist: {pool_path}")
+PY
+  assert_jq_true "${python_home_out}" '.data.task == "resize"' "Python fresh HOME fixture"
+  assert_jq_true "${python_home_out}" '.tags == ["cookbook"]' "Python fresh HOME fixture"
 
   if [[ ! -d "${ROOT_DIR}/bindings/node/node_modules" ]]; then
     (cd "${ROOT_DIR}/bindings/node" && npm install)
@@ -82,6 +112,42 @@ run_binding_fixtures() {
     node "${ROOT_DIR}/bindings/node/cookbook_smoke_fixture.js" "${fixtures_dir}/node-pools" >"${node_out}"
   assert_jq_true "${node_out}" '.data.task == "resize"' "Node cookbook fixture"
   assert_jq_true "${node_out}" '.tags == ["cookbook"]' "Node cookbook fixture"
+
+  (
+    cd "${ROOT_DIR}/bindings/node"
+    HOME="${fresh_home}" \
+      PLASMITE_LIB_DIR="${ROOT_DIR}/target/debug" \
+      node - >"${node_home_out}" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const os = require("node:os");
+
+const { Client } = require("./index.js");
+
+const home = os.homedir();
+const poolPath = path.join(home, ".plasmite", "pools", "cookbook-home.plasmite");
+
+const client = new Client();
+let pool = null;
+try {
+  pool = client.pool("cookbook-home", 1024 * 1024);
+  const msg = pool.append({ task: "resize", id: 1 }, ["cookbook"]);
+  pool.get(msg.seq);
+  process.stdout.write(`${JSON.stringify({ seq: Number(msg.seq), tags: msg.tags, data: msg.data })}\n`);
+} finally {
+  if (pool) {
+    pool.close();
+  }
+  client.close();
+}
+
+if (!fs.existsSync(poolPath)) {
+  throw new Error(`expected pool to exist: ${poolPath}`);
+}
+NODE
+  )
+  assert_jq_true "${node_home_out}" '.data.task == "resize"' "Node fresh HOME fixture"
+  assert_jq_true "${node_home_out}" '.tags == ["cookbook"]' "Node fresh HOME fixture"
 
   mkdir -p "${WORK_DIR}/go-cache" "${WORK_DIR}/go-tmp"
   (
