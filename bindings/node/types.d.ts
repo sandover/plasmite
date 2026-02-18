@@ -48,6 +48,15 @@ export class Message {
   get tags(): string[]
 }
 
+export interface MessageEnvelope {
+  seq: number | bigint | string
+  time: string
+  data: unknown
+  meta?: {
+    tags?: unknown[]
+  }
+}
+
 export class PlasmiteNativeError extends Error {
   kind?: ErrorKind
   path?: string
@@ -117,7 +126,7 @@ export interface LocalTailOptions {
   tags?: string[]
 }
 
-export function parseMessage(payload: Buffer | Message): Message
+export function parseMessage(payload: Buffer | Message | MessageEnvelope): Message
 
 export function replay(
   pool: Pool,

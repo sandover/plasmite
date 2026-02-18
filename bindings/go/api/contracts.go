@@ -90,7 +90,7 @@ func ApplyAppendOptions(opts ...AppendOption) AppendConfig {
 	return cfg
 }
 
-const DefaultPoolSizeBytes uint64 = 4 * 1024 * 1024
+const DefaultPoolSizeBytes uint64 = 1024 * 1024
 const DefaultPoolSize = DefaultPoolSizeBytes
 
 type PoolRef string

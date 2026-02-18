@@ -63,7 +63,7 @@ Use clean envs where practical:
   - `npm i -g plasmite@X.Y.Z`
   - `plasmite --version`
 - Go:
-  - `go get github.com/sandover/plasmite/bindings/go/plasmite@vX.Y.Z`
+  - `go get github.com/sandover/plasmite/bindings/go/local@vX.Y.Z`
 
 ## Blocker Policy
 

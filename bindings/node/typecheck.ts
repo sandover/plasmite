@@ -25,12 +25,19 @@ const appendedAlias = pool.append({ kind: "note" }, ["tag"], Durability.Fast);
 const frame = pool.getLite3(1n);
 const got = pool.get(1n);
 const parsed = parseMessage(got);
+const parsedFromEnvelope = parseMessage({
+  seq: 1,
+  time: "2026-02-18T00:00:00Z",
+  data: { ok: true },
+  meta: { tags: ["tag"] },
+});
 const typedMessage: Message = got;
 void appended;
 void pooled;
 void appendedAlias;
 void frame;
 void parsed;
+void parsedFromEnvelope;
 void typedMessage;
 
 async function smokeRemote() {

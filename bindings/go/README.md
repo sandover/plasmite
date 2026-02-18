@@ -4,6 +4,17 @@ These bindings wrap the `libplasmite` C ABI via cgo and expose typed Go contract
 `Append`, `Get`, `Tail`, and `Replay` return `*Message` values, while Lite3 APIs
 remain the raw-byte fast path.
 
+## Package Layout
+
+- `github.com/sandover/plasmite/bindings/go/local` — cgo-backed local client and pool operations.
+- `github.com/sandover/plasmite/bindings/go/api` — pure Go contracts and shared model types.
+
+Install the local binding package in a downstream module:
+
+```bash
+go get github.com/sandover/plasmite/bindings/go/local
+```
+
 ## Build Requirements
 - Go 1.22+
 - `pkg-config` (`pkgconf`) available on PATH
@@ -44,6 +55,17 @@ go test ./...
 ## Usage
 
 ```go
+package main
+
+import (
+    "context"
+    "errors"
+    "fmt"
+    "time"
+
+    plasmite "github.com/sandover/plasmite/bindings/go/local"
+)
+
 client, err := plasmite.NewClient("./data")
 if err != nil {
     // handle err

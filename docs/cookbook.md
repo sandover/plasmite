@@ -63,21 +63,35 @@ with Client() as c:
 
 ```js
 const { Client } = require("plasmite");
-using c = new Client();
-using pool = c.pool("work");
-const msg = pool.append({ task: "resize", id: 1 });
-console.log(msg.seq, msg.tags, msg.data);
+const c = new Client();
+let pool;
+try {
+  pool = c.pool("work");
+  const msg = pool.append({ task: "resize", id: 1 });
+  console.log(msg.seq, msg.tags, msg.data);
+} finally {
+  if (pool) pool.close();
+  c.close();
+}
 ```
 
 **Node — consume**
 
 ```js
 const { Client } = require("plasmite");
-using c = new Client();
-using pool = c.openPool("work");
-for await (const msg of pool.tail({ timeoutMs: 5000, maxMessages: 1 })) {
-  console.log(msg.seq, msg.tags, msg.data);
-}
+(async () => {
+  const c = new Client();
+  let pool;
+  try {
+    pool = c.openPool("work");
+    for await (const msg of pool.tail({ timeoutMs: 5000, maxMessages: 1 })) {
+      console.log(msg.seq, msg.tags, msg.data);
+    }
+  } finally {
+    if (pool) pool.close();
+    c.close();
+  }
+})();
 ```
 
 **Go — produce**
@@ -193,11 +207,17 @@ with Client() as c, c.open_pool("build") as pool:
 
 ```js
 const { Client } = require("plasmite");
-using c = new Client();
-using pool = c.pool("build");
-for (const [step, pct] of [["compile",0],["compile",100],["test",0],["test",100]])
-  pool.append({ step, pct });
-pool.append({ step: "finished", ok: true }, ["done"]);
+const c = new Client();
+let pool;
+try {
+  pool = c.pool("build");
+  for (const [step, pct] of [["compile",0],["compile",100],["test",0],["test",100]])
+    pool.append({ step, pct });
+  pool.append({ step: "finished", ok: true }, ["done"]);
+} finally {
+  if (pool) pool.close();
+  c.close();
+}
 ```
 
 **Go — writer**
@@ -228,7 +248,7 @@ journalctl -o json-seq -f | pls feed syslog --create
 /usr/bin/log stream --style ndjson | pls feed syslog --create
 ```
 
-The pool is a ring buffer (default 4 MB), so it won't fill your disk. To create a bigger buffer:
+The pool is a ring buffer (default 1 MB), so it won't fill your disk. To create a bigger buffer:
 
 ```bash
 pls pool create syslog --size 8M
@@ -276,10 +296,16 @@ Node producer:
 
 ```js
 const { Client } = require("plasmite");
-using c = new Client();
-using pool = c.pool("jobs");
-for (let i = 0; i < 5; i++)
-  console.log(pool.append({ task: "resize-image", id: i }, ["img"]).seq);
+const c = new Client();
+let pool;
+try {
+  pool = c.pool("jobs");
+  for (let i = 0; i < 5; i++)
+    console.log(pool.append({ task: "resize-image", id: i }, ["img"]).seq);
+} finally {
+  if (pool) pool.close();
+  c.close();
+}
 ```
 
 Go consumer:
@@ -353,10 +379,16 @@ with Client() as c, c.open_pool("events") as pool:
 
 ```js
 const { Client } = require("plasmite");
-using c = new Client();
-using pool = c.pool("events");
-pool.append({ service: "api", sha: "f4e5d6c" }, ["deploy"]);
-pool.append({ service: "api", msg: "latency spike" }, ["alert"]);
+const c = new Client();
+let pool;
+try {
+  pool = c.pool("events");
+  pool.append({ service: "api", sha: "f4e5d6c" }, ["deploy"]);
+  pool.append({ service: "api", msg: "latency spike" }, ["alert"]);
+} finally {
+  if (pool) pool.close();
+  c.close();
+}
 ```
 
 **Go — write tagged events**
@@ -399,7 +431,8 @@ pls follow incidents --since 1h --replay 1
 pls follow incidents --tail 20
 
 # Export recent errors to a file for sharing
-pls follow incidents --tag error --tail 100 --jsonl > /tmp/errors.jsonl
+mkdir -p tmp
+pls follow incidents --tag error --tail 100 --jsonl > tmp/errors.jsonl
 ```
 
 Combine `--since`, `--tag`, and `--where` to narrow down exactly what you need:
@@ -439,7 +472,7 @@ If your browser app is hosted on another origin (for example `https://demo.wrati
 
 ```bash
 pls serve \
-  --bind 0.0.0.0:9100 \
+  --bind 0.0.0.0:9700 \
   --allow-non-loopback \
   --access read-only \
   --cors-origin https://demo.wratify.ai

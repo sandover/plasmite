@@ -5,7 +5,30 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
-- Go binding package layout now uses `bindings/go/api` for pure contracts and `bindings/go/local` for cgo implementation details; this is an intentionally breaking import-path change with no compatibility shim.
+- Documentation indexes and binding READMEs were audited for API/default/command accuracy.
+- Corrected Go module path to `github.com/sandover/plasmite/bindings/go` so downstream `go get github.com/sandover/plasmite/bindings/go/local` resolves from this repo layout.
+
+## [0.3.0] - 2026-02-16
+
+### Added
+- Deterministic cookbook smoke coverage in CI hardening lanes.
+- Expanded remote and CLI hardening/security negative-test coverage.
+
+### Changed
+- Completed CLI naming migration to `feed` / `follow` / `fetch`.
+- Go bindings package layout now uses `bindings/go/api` (pure contracts) and `bindings/go/local` (cgo implementation); import paths changed without a compatibility shim.
+- README content was rewritten around real-world use cases and performance framing.
+
+## [0.2.0] - 2026-02-15
+
+### Added
+- Windows (`x86_64-pc-windows-msvc`) npm and PyPI install support.
+- CI coverage and release plumbing for Windows artifact smoke paths.
+- Browser CORS allowlist ergonomics and serving guidance improvements.
+
+### Changed
+- Release artifacts now include Windows import-library support needed by bindings.
+- Documentation was consolidated into canonical docs-of-record and decision docs.
 
 ## [0.1.0] - 2026-02-06
 

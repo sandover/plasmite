@@ -28,7 +28,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/sandover/plasmite/bindings/go/plasmite/api"
+	"github.com/sandover/plasmite/bindings/go/api"
 )
 
 type ErrorKind = api.ErrorKind

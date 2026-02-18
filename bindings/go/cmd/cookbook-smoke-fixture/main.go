@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"os"
 
-	plasmite "github.com/sandover/plasmite/bindings/go/plasmite/local"
+	plasmite "github.com/sandover/plasmite/bindings/go/local"
 )
 
 func main() {

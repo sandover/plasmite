@@ -12,12 +12,12 @@ pls serve                                # loopback, no auth, no TLS
 
 ## Bind and network access
 
-By default, `pls serve` binds to `127.0.0.1:9100` (loopback only).
+By default, `pls serve` binds to `127.0.0.1:9700` (loopback only).
 
 To listen on all interfaces, use `--bind` with `--allow-non-loopback`:
 
 ```bash
-pls serve --bind 0.0.0.0:9100 --allow-non-loopback
+pls serve --bind 0.0.0.0:9700 --allow-non-loopback
 ```
 
 Non-loopback + write access requires both a `--token-file` and TLS (see below).
@@ -43,7 +43,7 @@ pls serve --tls-cert /etc/letsencrypt/live/pool.example.com/fullchain.pem \
 
 ## Authentication
 
-Auth is via bearer tokens.  Generate a token file with `pls serve init`:
+Auth is via bearer tokens. Generate a token file with `pls serve init`:
 
 ```bash
 pls serve --token-file .plasmite-token
@@ -108,7 +108,7 @@ Configurable via flags:
 
 When fronting `pls serve` with nginx, Caddy, or similar:
 
-- Proxy both HTTP and WebSocket/SSE traffic.
+- Proxy HTTP and SSE traffic.
 - Forward `Authorization` headers.
 - Set appropriate timeouts for long-lived tail streams.
 - Let the proxy handle TLS termination and use `--insecure-no-tls` on the backend if on the same host.

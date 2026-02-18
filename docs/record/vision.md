@@ -25,7 +25,7 @@ A developer should be able to create, inspect, stream, and automate message work
 
 In scope:
 
-- Durable-ish bounded pools with concurrent readers/writers.
+- Durable bounded pools with concurrent readers/writers.
 - CLI + bindings + HTTP interfaces over one shared correctness core.
 - Versioned specs and ADRs for decisions that affect compatibility.
 

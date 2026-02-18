@@ -36,7 +36,7 @@ function resolveNativeAddonPath() {
 }
 
 const DEFAULT_POOL_DIR = path.join(os.homedir(), ".plasmite", "pools");
-const DEFAULT_POOL_SIZE = 4 * 1024 * 1024;
+const DEFAULT_POOL_SIZE = 1024 * 1024;
 const DEFAULT_POOL_SIZE_BYTES = DEFAULT_POOL_SIZE;
 const ERROR_KIND_VALUES = Object.freeze({
   Internal: 1,

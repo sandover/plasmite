@@ -74,6 +74,9 @@ class BindingTests(unittest.TestCase):
         pool.close()
         client.close()
 
+    def test_default_pool_size_constant_matches_core_default(self) -> None:
+        self.assertEqual(plasmite.DEFAULT_POOL_SIZE_BYTES, 1024 * 1024)
+
     def test_client_pool_creates_then_reopens(self) -> None:
         with Client(str(self.pool_dir)) as client:
             first = client.pool("work", 1024 * 1024)

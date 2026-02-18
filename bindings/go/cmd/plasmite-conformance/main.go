@@ -24,8 +24,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sandover/plasmite/bindings/go/plasmite/api"
-	plasmite "github.com/sandover/plasmite/bindings/go/plasmite/local"
+	"github.com/sandover/plasmite/bindings/go/api"
+	plasmite "github.com/sandover/plasmite/bindings/go/local"
 )
 
 type message struct {

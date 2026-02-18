@@ -2,7 +2,7 @@
 
 Canonical, current truth documentation for Plasmite.
 
-For the full docs index (including specs, planning, and decisions), see `docs/README.md`.
+For the full docs index (including specs and decisions), see `docs/README.md`.
 
 ## Contents
 
@@ -15,4 +15,4 @@ For the full docs index (including specs, planning, and decisions), see `docs/RE
 - C ABI header + stability contract: `../../include/plasmite.h`
 
 Do not place proposals, exploratory design drafts, or roadmap notes here.
-Those belong in `docs/planning/` until accepted and promoted.
+Track those in ergo tasks/epics until accepted and promoted.

@@ -16,7 +16,7 @@ cargo test
 Plasmite uses three test lanes so we can add risk coverage without introducing
 release complexity or fragile gating.
 
-- **Lane A (fast, deterministic):** local MacBook + pull-request CI path.
+- **Lane A (fast, deterministic):** local developer machine + pull-request CI path.
   - Command: `just hardening-fast`
   - Included by: `just ci-fast` (and therefore PR CI)
   - Intended for deterministic checks with bounded runtime overhead.

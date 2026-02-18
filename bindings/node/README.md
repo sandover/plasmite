@@ -23,25 +23,31 @@ toolchain or compile step needed.
 ```js
 const { Client, Durability, ErrorKind, PlasmiteNativeError } = require("plasmite");
 
-using client = new Client("./data");
-using pool = client.pool("events", 64 * 1024 * 1024);
-
-const msg = pool.append({ kind: "signup", user: "alice" }, ["user-event"], Durability.Flush);
-console.log(msg.seq, msg.tags, msg.data);
-// => 1n [ 'user-event' ] { kind: 'signup', user: 'alice' }
-
-const fetched = pool.get(msg.seq);
-console.log(fetched.data.user);
-// => "alice"
-
+const client = new Client("./data");
+let pool;
 try {
-  client.openPool("missing");
-} catch (err) {
-  if (err instanceof PlasmiteNativeError && err.kind === ErrorKind.NotFound) {
-    console.log("pool not found");
-  } else {
-    throw err;
+  pool = client.pool("events", 64 * 1024 * 1024);
+
+  const msg = pool.append({ kind: "signup", user: "alice" }, ["user-event"], Durability.Flush);
+  console.log(msg.seq, msg.tags, msg.data);
+  // => 1n [ 'user-event' ] { kind: 'signup', user: 'alice' }
+
+  const fetched = pool.get(msg.seq);
+  console.log(fetched.data.user);
+  // => "alice"
+
+  try {
+    client.openPool("missing");
+  } catch (err) {
+    if (err instanceof PlasmiteNativeError && err.kind === ErrorKind.NotFound) {
+      console.log("pool not found");
+    } else {
+      throw err;
+    }
   }
+} finally {
+  if (pool) pool.close();
+  client.close();
 }
 ```
 
@@ -52,7 +58,7 @@ try {
 
 ### Remote pools (HTTP/JSON)
 
-Connect to a plasmite server (`npx plasmite serve` or `pls serve`) to read
+Connect to a Plasmite server (`npx plasmite serve` or `pls serve`) to read
 and write pools over the network.
 
 ```js
@@ -88,12 +94,12 @@ const { RemoteClient } = require("plasmite");
 
 | Class | Method | Description |
 |---|---|---|
-| `Client(dir)` | | Open a pool directory |
+| `Client(dir?)` | | Open a pool directory (`~/.plasmite/pools` by default) |
 | | `.createPool(name, sizeBytes)` | Create a new pool (returns `Pool`) |
 | | `.openPool(name)` | Open an existing pool (returns `Pool`) |
 | | `.pool(name, sizeBytes?)` | Open if present, else create |
 | | `.close()` | Release resources |
-| | `[Symbol.dispose]()` | Alias for `.close()` to support `using` |
+| | `[Symbol.dispose]()` | Alias for `.close()` (used by explicit resource-management syntax when enabled) |
 | `Module` | `.parseMessage(value)` | Normalize a raw envelope or `Message` into a typed `Message` |
 | | `.replay(pool, opts?)` | Backward-compatible replay wrapper (delegates to `pool.replay`) |
 | `Pool` | `.appendJson(payload, tags, durability)` | Append JSON payload (Buffer or JSON-serializable value); returns message envelope as `Buffer` |
@@ -107,7 +113,7 @@ const { RemoteClient } = require("plasmite");
 | | `.openStream(sinceSeq?, max?, timeoutMs?)` | Open a message stream |
 | | `.openLite3Stream(sinceSeq?, max?, timeoutMs?)` | Open a lite3 frame stream |
 | | `.close()` | Close the pool |
-| | `[Symbol.dispose]()` | Alias for `.close()` to support `using` |
+| | `[Symbol.dispose]()` | Alias for `.close()` (used by explicit resource-management syntax when enabled) |
 | `Stream` | `.nextJson()` | Next message as `Buffer`, or `null` at end |
 | | `[Symbol.iterator]()` | Iterate synchronously via `for...of` |
 | | `.close()` | Close the stream |
@@ -173,7 +179,7 @@ The package includes the `plasmite` CLI:
 
 ```bash
 npx plasmite --version
-npx plasmite serve ./data --port 9700
+npx plasmite --dir ./data serve --bind 127.0.0.1:9700
 ```
 
 ## TypeScript
@@ -187,9 +193,12 @@ import { Client, Durability, Pool, RemoteClient } from "plasmite";
 
 ## Platform support
 
-Pre-built binaries are included for Linux x86_64. macOS and Windows users
-should install via Homebrew (`brew install sandover/tap/plasmite`) or build
-from source.
+Pre-built binaries are included for:
+- Linux: `x64`, `arm64`
+- macOS: `x64`, `arm64`
+- Windows: `x64`
+
+If your platform/architecture is not listed, install the SDK (`libplasmite`) and build from source.
 
 ## License
 

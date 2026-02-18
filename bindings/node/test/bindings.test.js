@@ -15,6 +15,7 @@ const os = require("node:os");
 
 const {
   Client,
+  DEFAULT_POOL_SIZE_BYTES,
   Durability,
   ErrorKind,
   parseMessage,
@@ -51,6 +52,22 @@ test("append/get supports large payload and tags", () => {
 
   pool.close();
   client.close();
+});
+
+test("default pool size constant remains 1 MiB", () => {
+  assert.equal(DEFAULT_POOL_SIZE_BYTES, 1024 * 1024);
+});
+
+test("parseMessage accepts plain envelope objects", () => {
+  const message = parseMessage({
+    seq: "7",
+    time: "2026-02-18T00:00:00Z",
+    data: { ok: true },
+    meta: { tags: ["alpha"] },
+  });
+  assert.equal(message.seq, 7n);
+  assert.equal(message.timeRfc3339, "2026-02-18T00:00:00Z");
+  assert.deepEqual(message.tags, ["alpha"]);
 });
 
 test("append/get aliases and parseMessage helper round-trip JSON", () => {

@@ -1,6 +1,6 @@
-# Distribution (v0.1.x)
+# Distribution (v0)
 
-What users get from each install channel, supported platforms, and the stable on-disk SDK layout.
+This document defines what users get from each install channel, supported platforms, and the stable on-disk SDK layout.
 
 ## Support Tiers
 
@@ -28,7 +28,7 @@ Not currently targeted:
 | crates.io (Rust) | `cargo add plasmite` | No | Yes (Rust crate) | `official` | Standard Rust dependency. |
 | PyPI (Python) | `uv tool install plasmite` | Yes | Yes (Python bindings) | `official` (macOS/Linux/Windows x86_64) | Wheel bundles native assets and CLI. |
 | npm (Node) | `npm i -g plasmite` | Yes | Yes (Node bindings) | `official` (macOS/Linux/Windows x86_64) | Bundles addon, native assets, and CLI. |
-| Go module | `go get github.com/sandover/plasmite/bindings/go/plasmite` | No | Yes (Go bindings) | `official` (macOS/Linux) | Requires system SDK (brew/manual) for cgo. |
+| Go module | `go get github.com/sandover/plasmite/bindings/go/local` | No | Yes (Go bindings) | `official` (macOS/Linux) | Requires system SDK (brew/manual) for cgo; import pure contracts from `/api` when needed. |
 | GitHub release tarball | Download from releases | Yes | Yes (SDK layout) | `official` (manual path) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |
 
 ## SDK Layout (Release Artifacts)

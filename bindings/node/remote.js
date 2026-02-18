@@ -260,7 +260,8 @@ class RemotePool {
         if (!line || !line.trim()) {
           continue;
         }
-        yield messageFromEnvelope(JSON.parse(line));
+        const raw = Buffer.from(line, "utf8");
+        yield messageFromEnvelope(JSON.parse(line), raw);
       }
     } finally {
       controller.abort();

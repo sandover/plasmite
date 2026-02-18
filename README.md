@@ -82,7 +82,7 @@ Your deploy script waits for the test runner to say "green" — no polling loops
 
 ```bash
 # deploy.sh
-pls follow ci --where '.data.status == "green"' --one > /dev/null && ./deploy.sh
+pls follow ci --where '.data.status == "green"' --one > /dev/null && ./deploy-to-staging.sh
 
 # test-runner.sh
 pls feed ci --create '{"status": "green", "commit": "abc123"}'
@@ -166,7 +166,7 @@ The package includes pre-built native bindings.
 ### Go
 
 ```bash
-go get github.com/sandover/plasmite/bindings/go/plasmite
+go get github.com/sandover/plasmite/bindings/go/local
 ```
 
 Bindings only (no CLI). Links against `libplasmite` via cgo, so you'll need the SDK on your system first — via Homebrew on macOS, or from a [GitHub Releases](https://github.com/sandover/plasmite/releases) tarball on Linux.

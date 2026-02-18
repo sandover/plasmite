@@ -37,3 +37,10 @@ func TestMessageTagsAccessorUsesMeta(t *testing.T) {
 		t.Fatalf("unexpected tags: %#v", tags)
 	}
 }
+
+func TestDefaultPoolSizeBytesMatchesCoreDefault(t *testing.T) {
+	const want = 1024 * 1024
+	if DefaultPoolSizeBytes != want {
+		t.Fatalf("expected default pool size %d, got %d", want, DefaultPoolSizeBytes)
+	}
+}

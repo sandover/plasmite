@@ -52,18 +52,23 @@ class Message {
     this.timeRfc3339 = timeRfc3339;
     this.data = envelope.data;
     this.meta = Object.freeze({ tags });
-    this.raw = Buffer.isBuffer(raw)
-      ? raw
-      : Buffer.from(JSON.stringify({
-        seq: serializeSeq(seq),
-        time: timeRfc3339,
-        data: this.data,
-        meta: { tags: [...tags] },
-      }));
+    this._raw = Buffer.isBuffer(raw) ? raw : null;
   }
 
   get tags() {
     return this.meta.tags;
+  }
+
+  get raw() {
+    if (!this._raw) {
+      this._raw = Buffer.from(JSON.stringify({
+        seq: serializeSeq(this.seq),
+        time: this.timeRfc3339,
+        data: this.data,
+        meta: { tags: [...this.meta.tags] },
+      }));
+    }
+    return this._raw;
   }
 }
 
