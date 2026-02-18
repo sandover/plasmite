@@ -7,6 +7,7 @@ bindings/node/libplasmite.dylib
 bindings/node/libplasmite.so
 bindings/node/libplasmite.dll
 bindings/node/plasmite
+bindings/node/index.d.ts
 bindings/node/native/target/
 bindings/node/native/linux-x64/
 bindings/node/native/darwin-x64/

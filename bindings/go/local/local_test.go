@@ -18,11 +18,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sandover/plasmite/bindings/go/api"
 )
 
-func TestAppendGetLargePayload(t *testing.T) {
-	temp := t.TempDir()
-	poolDir := filepath.Join(temp, "pools")
+const testPoolSizeBytes uint64 = 1024 * 1024
+
+func newTestClient(t *testing.T) *Client {
+	t.Helper()
+	poolDir := filepath.Join(t.TempDir(), "pools")
 	if err := os.MkdirAll(poolDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -30,13 +34,27 @@ func TestAppendGetLargePayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}
-	defer client.Close()
+	t.Cleanup(func() {
+		client.Close()
+	})
+	return client
+}
 
-	pool, err := client.CreatePool(PoolRefName("big"), 1024*1024)
+func newTestPool(t *testing.T, client *Client, name string) api.Pool {
+	t.Helper()
+	pool, err := client.CreatePool(PoolRefName(name), testPoolSizeBytes)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	defer pool.Close()
+	t.Cleanup(func() {
+		pool.Close()
+	})
+	return pool
+}
+
+func TestAppendGetLargePayload(t *testing.T) {
+	client := newTestClient(t)
+	pool := newTestPool(t, client, "big")
 
 	payload := strings.Repeat("x", 64*1024)
 	data := map[string]any{"blob": payload}
@@ -70,24 +88,15 @@ func TestAppendGetLargePayload(t *testing.T) {
 }
 
 func TestClientPoolCreateThenReopen(t *testing.T) {
-	temp := t.TempDir()
-	poolDir := filepath.Join(temp, "pools")
-	if err := os.MkdirAll(poolDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	client, err := NewClient(poolDir)
-	if err != nil {
-		t.Fatalf("client: %v", err)
-	}
-	defer client.Close()
+	client := newTestClient(t)
 
-	first, err := client.Pool(PoolRefName("work"), 1024*1024)
+	first, err := client.Pool(PoolRefName("work"), testPoolSizeBytes)
 	if err != nil {
 		t.Fatalf("pool create/open first: %v", err)
 	}
 	defer first.Close()
 
-	second, err := client.Pool(PoolRefName("work"), 2*1024*1024)
+	second, err := client.Pool(PoolRefName("work"), 2*testPoolSizeBytes)
 	if err != nil {
 		t.Fatalf("pool create/open second: %v", err)
 	}
@@ -112,24 +121,10 @@ func TestClientPoolCreateThenReopen(t *testing.T) {
 }
 
 func TestTailCancelAndResume(t *testing.T) {
-	temp := t.TempDir()
-	poolDir := filepath.Join(temp, "pools")
-	if err := os.MkdirAll(poolDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	client, err := NewClient(poolDir)
-	if err != nil {
-		t.Fatalf("client: %v", err)
-	}
-	defer client.Close()
+	client := newTestClient(t)
+	pool := newTestPool(t, client, "tail")
 
-	pool, err := client.CreatePool(PoolRefName("tail"), 1024*1024)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	defer pool.Close()
-
-	_, err = pool.Append(map[string]any{"n": 1}, nil, WithDurability(DurabilityFast))
+	_, err := pool.Append(map[string]any{"n": 1}, nil, WithDurability(DurabilityFast))
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
@@ -172,22 +167,8 @@ func TestTailCancelAndResume(t *testing.T) {
 }
 
 func TestTailFiltersByTags(t *testing.T) {
-	temp := t.TempDir()
-	poolDir := filepath.Join(temp, "pools")
-	if err := os.MkdirAll(poolDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	client, err := NewClient(poolDir)
-	if err != nil {
-		t.Fatalf("client: %v", err)
-	}
-	defer client.Close()
-
-	pool, err := client.CreatePool(PoolRefName("tagged"), 1024*1024)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	defer pool.Close()
+	client := newTestClient(t)
+	pool := newTestPool(t, client, "tagged")
 
 	if _, err := pool.Append(map[string]any{"kind": "drop"}, []string{"drop"}, WithDurability(DurabilityFast)); err != nil {
 		t.Fatalf("append drop: %v", err)
@@ -222,23 +203,12 @@ func TestTailFiltersByTags(t *testing.T) {
 }
 
 func TestCloseIdempotent(t *testing.T) {
-	temp := t.TempDir()
-	poolDir := filepath.Join(temp, "pools")
-	if err := os.MkdirAll(poolDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	client, err := NewClient(poolDir)
-	if err != nil {
-		t.Fatalf("client: %v", err)
-	}
-	pool, err := client.CreatePool(PoolRefName("close"), 1024*1024)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
+	client := newTestClient(t)
+	pool := newTestPool(t, client, "close")
 	pool.Close()
 	pool.Close()
 
-	_, err = pool.Append(map[string]any{"n": 1}, nil, WithDurability(DurabilityFast))
+	_, err := pool.Append(map[string]any{"n": 1}, nil, WithDurability(DurabilityFast))
 	if err == nil {
 		t.Fatalf("expected error on closed pool")
 	}
@@ -248,7 +218,7 @@ func TestCloseIdempotent(t *testing.T) {
 
 	client.Close()
 	client.Close()
-	_, err = client.CreatePool(PoolRefName("oops"), 1024*1024)
+	_, err = client.CreatePool(PoolRefName("oops"), testPoolSizeBytes)
 	if err == nil {
 		t.Fatalf("expected error on closed client")
 	}
@@ -262,26 +232,13 @@ func TestArgumentErrorsUseSentinel(t *testing.T) {
 		t.Fatalf("expected ErrInvalidArgument for empty poolDir, got %v", err)
 	}
 
-	temp := t.TempDir()
-	poolDir := filepath.Join(temp, "pools")
-	if err := os.MkdirAll(poolDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	client, err := NewClient(poolDir)
-	if err != nil {
-		t.Fatalf("client: %v", err)
-	}
-	defer client.Close()
+	client := newTestClient(t)
 
-	if _, err := client.CreatePool(PoolRefName(""), 1024*1024); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := client.CreatePool(PoolRefName(""), testPoolSizeBytes); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument for empty pool ref, got %v", err)
 	}
 
-	pool, err := client.CreatePool(PoolRefName("args"), 1024*1024)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	defer pool.Close()
+	pool := newTestPool(t, client, "args")
 
 	if _, err := pool.AppendJSON(nil, nil, DurabilityFast); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument for empty payload, got %v", err)
@@ -289,22 +246,8 @@ func TestArgumentErrorsUseSentinel(t *testing.T) {
 }
 
 func TestLite3AppendGetTail(t *testing.T) {
-	temp := t.TempDir()
-	poolDir := filepath.Join(temp, "pools")
-	if err := os.MkdirAll(poolDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	client, err := NewClient(poolDir)
-	if err != nil {
-		t.Fatalf("client: %v", err)
-	}
-	defer client.Close()
-
-	pool, err := client.CreatePool(PoolRefName("lite3"), 1024*1024)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	defer pool.Close()
+	client := newTestClient(t)
+	pool := newTestPool(t, client, "lite3")
 
 	msg, err := pool.Append(map[string]any{"x": 1}, []string{"alpha"}, WithDurability(DurabilityFast))
 	if err != nil {
@@ -378,24 +321,10 @@ func TestLite3AppendGetTail(t *testing.T) {
 }
 
 func TestLite3AppendRejectsInvalidPayload(t *testing.T) {
-	temp := t.TempDir()
-	poolDir := filepath.Join(temp, "pools")
-	if err := os.MkdirAll(poolDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	client, err := NewClient(poolDir)
-	if err != nil {
-		t.Fatalf("client: %v", err)
-	}
-	defer client.Close()
+	client := newTestClient(t)
+	pool := newTestPool(t, client, "lite3-bad")
 
-	pool, err := client.CreatePool(PoolRefName("lite3-bad"), 1024*1024)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	defer pool.Close()
-
-	_, err = pool.AppendLite3([]byte{0x01, 0x02, 0x03}, DurabilityFast)
+	_, err := pool.AppendLite3([]byte{0x01, 0x02, 0x03}, DurabilityFast)
 	if err == nil {
 		t.Fatalf("expected error")
 	}

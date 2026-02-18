@@ -10,24 +10,7 @@ Invariants: Tail streams are JSONL and exposed as async iterables.
 const { Readable } = require("node:stream");
 const readline = require("node:readline");
 const { messageFromEnvelope } = require("./message");
-
-const ERROR_KIND_VALUES = Object.freeze({
-  Internal: 1,
-  Usage: 2,
-  NotFound: 3,
-  AlreadyExists: 4,
-  Busy: 5,
-  Permission: 6,
-  Corrupt: 7,
-  Io: 8,
-});
-
-const DURABILITY_VALUES = Object.freeze({
-  fast: "fast",
-  flush: "flush",
-  0: "fast",
-  1: "flush",
-});
+const { ERROR_KIND_VALUES, mapDurability, mapErrorKind } = require("./mappings");
 
 class RemoteError extends Error {
   /**
@@ -42,7 +25,7 @@ class RemoteError extends Error {
     super(message);
     this.name = "RemoteError";
     this.status = status;
-    this.kind = mapErrorKind(error && error.kind);
+    this.kind = mapErrorKind(error && error.kind, ERROR_KIND_VALUES.Io);
     this.hint = error && error.hint ? error.hint : undefined;
     this.path = error && error.path ? error.path : undefined;
     this.seq = error && error.seq ? error.seq : undefined;
@@ -298,27 +281,6 @@ async function parseRemoteError(response) {
     payload = null;
   }
   return new RemoteError(payload, response.status);
-}
-
-function mapErrorKind(value) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string" && ERROR_KIND_VALUES[value] !== undefined) {
-    return ERROR_KIND_VALUES[value];
-  }
-  return ERROR_KIND_VALUES.Io;
-}
-
-function mapDurability(value) {
-  if (value === undefined || value === null) {
-    return "fast";
-  }
-  const mapped = DURABILITY_VALUES[String(value).toLowerCase()];
-  if (mapped) {
-    return mapped;
-  }
-  throw new TypeError("durability must be Durability.Fast or Durability.Flush");
 }
 
 module.exports = {

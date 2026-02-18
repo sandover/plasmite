@@ -26,7 +26,7 @@ use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{Semaphore, mpsc};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 use tokio::task::JoinSet;
 use tokio::time::Duration;
 use tokio_rustls::TlsAcceptor;
@@ -38,9 +38,9 @@ use tower_service::Service;
 use tracing_subscriber::EnvFilter;
 use url::Url;
 
+use crate::pool_info_json::pool_info_json;
 use plasmite::api::{
-    Bounds, Durability, Error, ErrorKind, LocalClient, PoolApiExt, PoolInfo, PoolOptions, PoolRef,
-    TailOptions, lite3,
+    Durability, Error, ErrorKind, LocalClient, PoolApiExt, PoolOptions, PoolRef, TailOptions, lite3,
 };
 
 const UI_INDEX_HTML: &str = include_str!("../ui/index.html");
@@ -604,6 +604,18 @@ struct TailQuery {
     timeout_ms: Option<u64>,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum TailStreamEncoding {
+    Jsonl,
+    Lite3,
+    Sse,
+}
+
+struct TailRuntime {
+    permit: OwnedSemaphorePermit,
+    options: TailOptions,
+}
+
 #[derive(Debug, Deserialize)]
 struct AppendLite3Query {
     durability: Option<String>,
@@ -900,86 +912,15 @@ async fn tail_messages(
     Query(query): Query<TailQuery>,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-    if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
-    if let Err(err) = ensure_read_access(&state) {
-        return error_response(err);
-    }
-    let pool_ref = match pool_ref_from_request(&pool) {
+    let pool_ref = match tail_pool_ref_from_request(&state, &headers, &pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
     };
-    let client = state.client.clone();
-    let permit = match state.tail_semaphore.clone().try_acquire_owned() {
-        Ok(permit) => permit,
-        Err(_) => {
-            return error_response(
-                Error::new(ErrorKind::Busy)
-                    .with_message("too many concurrent tail requests")
-                    .with_hint("Try again later or reduce tail concurrency."),
-            );
-        }
+    let runtime = match prepare_tail_runtime(&state, &query, raw_query.as_deref()) {
+        Ok(runtime) => runtime,
+        Err(err) => return error_response(err),
     };
-    if let Some(timeout_ms) = query.timeout_ms {
-        if timeout_ms > state.max_tail_timeout_ms {
-            return error_response(
-                Error::new(ErrorKind::Usage)
-                    .with_message("tail timeout exceeds server limit")
-                    .with_hint(format!("Use timeout_ms <= {}.", state.max_tail_timeout_ms)),
-            );
-        }
-    }
-    let timeout_ms = query.timeout_ms.unwrap_or(state.max_tail_timeout_ms);
-    let tags = parse_tags_from_query(raw_query.as_deref());
-
-    let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
-    tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        let result = client.open_pool(&pool_ref).and_then(|pool| {
-            let options = TailOptions {
-                since_seq: query.since_seq,
-                max_messages: query.max.map(|value| value as usize),
-                tags,
-                timeout: Some(std::time::Duration::from_millis(timeout_ms)),
-                ..TailOptions::default()
-            };
-            let mut tail = pool.tail(options);
-            while let Some(message) = tail.next_message()? {
-                let line = match serde_json::to_vec(&message_json(&message)) {
-                    Ok(mut bytes) => {
-                        bytes.push(b'\n');
-                        bytes
-                    }
-                    Err(err) => {
-                        return Err(Error::new(ErrorKind::Internal)
-                            .with_message("failed to encode message")
-                            .with_source(err));
-                    }
-                };
-                if tx.blocking_send(Ok(Bytes::from(line))).is_err() {
-                    break;
-                }
-            }
-            Ok(())
-        });
-        if let Err(err) = result {
-            let _ = tx.blocking_send(Err(err));
-        }
-    });
-
-    let stream = ReceiverStream::new(rx)
-        .map(|result| result.map_err(|err| std::io::Error::other(err.to_string())));
-
-    let mut response = Response::new(Body::from_stream(stream));
-    response.headers_mut().insert(
-        "content-type",
-        HeaderValue::from_static("application/jsonl"),
-    );
-    response
-        .headers_mut()
-        .insert("plasmite-version", HeaderValue::from_static("0"));
-    response
+    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Jsonl)
 }
 
 async fn tail_lite3(
@@ -989,89 +930,18 @@ async fn tail_lite3(
     Query(query): Query<TailQuery>,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-    if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
-    if let Err(err) = ensure_read_access(&state) {
-        return error_response(err);
-    }
-    let pool_ref = match pool_ref_from_request(&pool) {
+    let pool_ref = match tail_pool_ref_from_request(&state, &headers, &pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
     };
-    if let Some(since_seq) = query.since_seq {
-        let precheck = state.client.open_pool(&pool_ref).and_then(|pool| {
-            let frame = pool.get_lite3(since_seq)?;
-            lite3::validate_bytes(frame.payload)?;
-            Ok(())
-        });
-        match precheck {
-            Ok(()) => {}
-            Err(err) if err.kind() == ErrorKind::NotFound => {}
-            Err(err) => return error_response(err),
-        }
+    if let Err(err) = precheck_lite3_since_seq(&state.client, &pool_ref, query.since_seq) {
+        return error_response(err);
     }
-    let client = state.client.clone();
-    let permit = match state.tail_semaphore.clone().try_acquire_owned() {
-        Ok(permit) => permit,
-        Err(_) => {
-            return error_response(
-                Error::new(ErrorKind::Busy)
-                    .with_message("too many concurrent tail requests")
-                    .with_hint("Try again later or reduce tail concurrency."),
-            );
-        }
+    let runtime = match prepare_tail_runtime(&state, &query, raw_query.as_deref()) {
+        Ok(runtime) => runtime,
+        Err(err) => return error_response(err),
     };
-    if let Some(timeout_ms) = query.timeout_ms {
-        if timeout_ms > state.max_tail_timeout_ms {
-            return error_response(
-                Error::new(ErrorKind::Usage)
-                    .with_message("tail timeout exceeds server limit")
-                    .with_hint(format!("Use timeout_ms <= {}.", state.max_tail_timeout_ms)),
-            );
-        }
-    }
-    let timeout_ms = query.timeout_ms.unwrap_or(state.max_tail_timeout_ms);
-    let tags = parse_tags_from_query(raw_query.as_deref());
-
-    let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
-    tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        let result = client.open_pool(&pool_ref).and_then(|pool| {
-            let options = TailOptions {
-                since_seq: query.since_seq,
-                max_messages: query.max.map(|value| value as usize),
-                tags,
-                timeout: Some(std::time::Duration::from_millis(timeout_ms)),
-                ..TailOptions::default()
-            };
-            let mut tail = pool.tail_lite3(options);
-            while let Some(frame) = tail.next_frame()? {
-                lite3::validate_bytes(frame.payload)?;
-                let encoded = encode_lite3_stream_frame(&frame)?;
-                if tx.blocking_send(Ok(encoded)).is_err() {
-                    break;
-                }
-            }
-            Ok(())
-        });
-        if let Err(err) = result {
-            let _ = tx.blocking_send(Err(err));
-        }
-    });
-
-    let stream = ReceiverStream::new(rx)
-        .map(|result| result.map_err(|err| std::io::Error::other(err.to_string())));
-
-    let mut response = Response::new(Body::from_stream(stream));
-    response.headers_mut().insert(
-        "content-type",
-        HeaderValue::from_static("application/x-plasmite-lite3-stream"),
-    );
-    response
-        .headers_mut()
-        .insert("plasmite-version", HeaderValue::from_static("0"));
-    response
+    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Lite3)
 }
 
 async fn ui_events(
@@ -1081,67 +951,99 @@ async fn ui_events(
     Query(query): Query<TailQuery>,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-    if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
-    if let Err(err) = ensure_read_access(&state) {
-        return error_response(err);
-    }
-    let pool_ref = match pool_ref_from_request(&pool) {
+    let pool_ref = match tail_pool_ref_from_request(&state, &headers, &pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
     };
-    let permit = match state.tail_semaphore.clone().try_acquire_owned() {
-        Ok(permit) => permit,
-        Err(_) => {
-            return error_response(
-                Error::new(ErrorKind::Busy)
-                    .with_message("too many concurrent tail requests")
-                    .with_hint("Try again later or reduce tail concurrency."),
-            );
-        }
+    let runtime = match prepare_tail_runtime(&state, &query, raw_query.as_deref()) {
+        Ok(runtime) => runtime,
+        Err(err) => return error_response(err),
     };
-    if let Some(timeout_ms) = query.timeout_ms {
-        if timeout_ms > state.max_tail_timeout_ms {
-            return error_response(
-                Error::new(ErrorKind::Usage)
-                    .with_message("tail timeout exceeds server limit")
-                    .with_hint(format!("Use timeout_ms <= {}.", state.max_tail_timeout_ms)),
-            );
-        }
+    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Sse)
+}
+
+fn tail_pool_ref_from_request(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    pool: &str,
+) -> Result<PoolRef, Error> {
+    authorize(headers, state)?;
+    ensure_read_access(state)?;
+    pool_ref_from_request(pool)
+}
+
+fn precheck_lite3_since_seq(
+    client: &LocalClient,
+    pool_ref: &PoolRef,
+    since_seq: Option<u64>,
+) -> Result<(), Error> {
+    let Some(since_seq) = since_seq else {
+        return Ok(());
+    };
+    let precheck = client.open_pool(pool_ref).and_then(|pool| {
+        let frame = pool.get_lite3(since_seq)?;
+        lite3::validate_bytes(frame.payload)?;
+        Ok(())
+    });
+    match precheck {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
+    }
+}
+
+fn prepare_tail_runtime(
+    state: &Arc<AppState>,
+    query: &TailQuery,
+    raw_query: Option<&str>,
+) -> Result<TailRuntime, Error> {
+    let permit = acquire_tail_permit(state)?;
+    if let Some(timeout_ms) = query.timeout_ms
+        && timeout_ms > state.max_tail_timeout_ms
+    {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("tail timeout exceeds server limit")
+            .with_hint(format!("Use timeout_ms <= {}.", state.max_tail_timeout_ms)));
     }
     let timeout_ms = query.timeout_ms.unwrap_or(state.max_tail_timeout_ms);
-    let tags = parse_tags_from_query(raw_query.as_deref());
-    let client = state.client.clone();
-    let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
+    let options = TailOptions {
+        since_seq: query.since_seq,
+        max_messages: query.max.map(|value| value as usize),
+        tags: parse_tags_from_query(raw_query),
+        timeout: Some(Duration::from_millis(timeout_ms)),
+        ..TailOptions::default()
+    };
+    Ok(TailRuntime { permit, options })
+}
 
+fn acquire_tail_permit(state: &Arc<AppState>) -> Result<OwnedSemaphorePermit, Error> {
+    state
+        .tail_semaphore
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| tail_busy_error())
+}
+
+fn tail_busy_error() -> Error {
+    Error::new(ErrorKind::Busy)
+        .with_message("too many concurrent tail requests")
+        .with_hint("Try again later or reduce tail concurrency.")
+}
+
+fn spawn_tail_stream_response(
+    state: &Arc<AppState>,
+    pool_ref: PoolRef,
+    runtime: TailRuntime,
+    encoding: TailStreamEncoding,
+) -> Response {
+    let client = state.client.clone();
+    let TailRuntime { permit, options } = runtime;
+    let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        let result = client.open_pool(&pool_ref).and_then(|pool| {
-            let options = TailOptions {
-                since_seq: query.since_seq,
-                max_messages: query.max.map(|value| value as usize),
-                tags,
-                timeout: Some(std::time::Duration::from_millis(timeout_ms)),
-                ..TailOptions::default()
-            };
-            let mut tail = pool.tail(options);
-            while let Some(message) = tail.next_message()? {
-                let mut payload = serde_json::to_vec(&message_json(&message)).map_err(|err| {
-                    Error::new(ErrorKind::Internal)
-                        .with_message("failed to encode message")
-                        .with_source(err)
-                })?;
-                // SSE event frame: clients parse one JSON message per event.
-                let mut frame = b"event: message\ndata: ".to_vec();
-                frame.append(&mut payload);
-                frame.extend_from_slice(b"\n\n");
-                if tx.blocking_send(Ok(Bytes::from(frame))).is_err() {
-                    break;
-                }
-            }
-            Ok(())
-        });
+        let result = client
+            .open_pool(&pool_ref)
+            .and_then(|pool| stream_tail_bytes(&pool, options, encoding, tx.clone()));
         if let Err(err) = result {
             let _ = tx.blocking_send(Err(err));
         }
@@ -1149,23 +1051,99 @@ async fn ui_events(
 
     let stream = ReceiverStream::new(rx)
         .map(|result| result.map_err(|err| std::io::Error::other(err.to_string())));
-
     let mut response = Response::new(Body::from_stream(stream));
-    response.headers_mut().insert(
-        "content-type",
-        HeaderValue::from_static("text/event-stream"),
-    );
-    response.headers_mut().insert(
-        "cache-control",
-        HeaderValue::from_static("no-cache, no-transform"),
-    );
-    response
-        .headers_mut()
-        .insert("connection", HeaderValue::from_static("keep-alive"));
+    apply_tail_response_headers(&mut response, encoding);
     response
         .headers_mut()
         .insert("plasmite-version", HeaderValue::from_static("0"));
     response
+}
+
+fn stream_tail_bytes(
+    pool: &plasmite::api::Pool,
+    options: TailOptions,
+    encoding: TailStreamEncoding,
+    tx: mpsc::Sender<Result<Bytes, Error>>,
+) -> Result<(), Error> {
+    match encoding {
+        TailStreamEncoding::Jsonl | TailStreamEncoding::Sse => {
+            let mut tail = pool.tail(options);
+            while let Some(message) = tail.next_message()? {
+                let encoded = match encoding {
+                    TailStreamEncoding::Jsonl => encode_jsonl_message(&message)?,
+                    TailStreamEncoding::Sse => encode_sse_message(&message)?,
+                    TailStreamEncoding::Lite3 => unreachable!("handled in separate branch"),
+                };
+                if tx.blocking_send(Ok(encoded)).is_err() {
+                    break;
+                }
+            }
+        }
+        TailStreamEncoding::Lite3 => {
+            let mut tail = pool.tail_lite3(options);
+            while let Some(frame) = tail.next_frame()? {
+                lite3::validate_bytes(frame.payload)?;
+                let encoded = encode_lite3_stream_frame(&frame)?;
+                if tx.blocking_send(Ok(encoded)).is_err() {
+                    break;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn encode_message_payload(message: &plasmite::api::Message) -> Result<Vec<u8>, Error> {
+    serde_json::to_vec(&message_json(message)).map_err(|err| {
+        Error::new(ErrorKind::Internal)
+            .with_message("failed to encode message")
+            .with_source(err)
+    })
+}
+
+fn encode_jsonl_message(message: &plasmite::api::Message) -> Result<Bytes, Error> {
+    let mut payload = encode_message_payload(message)?;
+    payload.push(b'\n');
+    Ok(Bytes::from(payload))
+}
+
+fn encode_sse_message(message: &plasmite::api::Message) -> Result<Bytes, Error> {
+    let mut payload = encode_message_payload(message)?;
+    // SSE event frame: clients parse one JSON message per event.
+    let mut frame = b"event: message\ndata: ".to_vec();
+    frame.append(&mut payload);
+    frame.extend_from_slice(b"\n\n");
+    Ok(Bytes::from(frame))
+}
+
+fn apply_tail_response_headers(response: &mut Response, encoding: TailStreamEncoding) {
+    match encoding {
+        TailStreamEncoding::Jsonl => {
+            response.headers_mut().insert(
+                "content-type",
+                HeaderValue::from_static("application/jsonl"),
+            );
+        }
+        TailStreamEncoding::Lite3 => {
+            response.headers_mut().insert(
+                "content-type",
+                HeaderValue::from_static("application/x-plasmite-lite3-stream"),
+            );
+        }
+        TailStreamEncoding::Sse => {
+            response.headers_mut().insert(
+                "content-type",
+                HeaderValue::from_static("text/event-stream"),
+            );
+            response.headers_mut().insert(
+                "cache-control",
+                HeaderValue::from_static("no-cache, no-transform"),
+            );
+            response
+                .headers_mut()
+                .insert("connection", HeaderValue::from_static("keep-alive"));
+        }
+    }
 }
 
 fn pool_ref_from_request(pool: &str) -> Result<PoolRef, Error> {
@@ -1201,52 +1179,6 @@ fn parse_tags_from_query(raw_query: Option<&str>) -> Vec<String> {
         .filter_map(|(key, value)| (key == "tag").then(|| value.into_owned()))
         .collect::<Vec<_>>();
     normalize_tags(tags)
-}
-
-fn pool_info_json(pool_ref: &str, info: &PoolInfo) -> serde_json::Value {
-    let mut map = serde_json::Map::new();
-    map.insert("name".to_string(), json!(pool_ref));
-    map.insert("path".to_string(), json!(info.path.display().to_string()));
-    map.insert("file_size".to_string(), json!(info.file_size));
-    map.insert("index_offset".to_string(), json!(info.index_offset));
-    map.insert("index_capacity".to_string(), json!(info.index_capacity));
-    map.insert("index_size_bytes".to_string(), json!(info.index_size_bytes));
-    map.insert("ring_offset".to_string(), json!(info.ring_offset));
-    map.insert("ring_size".to_string(), json!(info.ring_size));
-    map.insert("bounds".to_string(), bounds_json(info.bounds));
-    if let Some(metrics) = &info.metrics {
-        map.insert("metrics".to_string(), pool_metrics_json(metrics));
-    }
-    serde_json::Value::Object(map)
-}
-
-fn pool_metrics_json(metrics: &plasmite::api::PoolMetrics) -> serde_json::Value {
-    json!({
-        "message_count": metrics.message_count,
-        "seq_span": metrics.seq_span,
-        "utilization": {
-            "used_bytes": metrics.utilization.used_bytes,
-            "free_bytes": metrics.utilization.free_bytes,
-            "used_percent": (metrics.utilization.used_percent_hundredths as f64) / 100.0,
-        },
-        "age": {
-            "oldest_time": metrics.age.oldest_time,
-            "newest_time": metrics.age.newest_time,
-            "oldest_age_ms": metrics.age.oldest_age_ms,
-            "newest_age_ms": metrics.age.newest_age_ms,
-        },
-    })
-}
-
-fn bounds_json(bounds: Bounds) -> serde_json::Value {
-    let mut map = serde_json::Map::new();
-    if let Some(oldest) = bounds.oldest_seq {
-        map.insert("oldest".to_string(), json!(oldest));
-    }
-    if let Some(newest) = bounds.newest_seq {
-        map.insert("newest".to_string(), json!(newest));
-    }
-    serde_json::Value::Object(map)
 }
 
 fn json_response(payload: serde_json::Value) -> Response {

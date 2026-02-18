@@ -8,6 +8,7 @@ Notes: Requires libplasmite to be discoverable at runtime.
 
 const { RemoteClient, RemoteError, RemotePool } = require("./remote");
 const { Message, parseMessage } = require("./message");
+const { ERROR_KIND_VALUES, mapErrorKind } = require("./mappings");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const path = require("node:path");
@@ -38,17 +39,6 @@ function resolveNativeAddonPath() {
 const DEFAULT_POOL_DIR = path.join(os.homedir(), ".plasmite", "pools");
 const DEFAULT_POOL_SIZE = 1024 * 1024;
 const DEFAULT_POOL_SIZE_BYTES = DEFAULT_POOL_SIZE;
-const ERROR_KIND_VALUES = Object.freeze({
-  Internal: 1,
-  Usage: 2,
-  NotFound: 3,
-  AlreadyExists: 4,
-  Busy: 5,
-  Permission: 6,
-  Corrupt: 7,
-  Io: 8,
-});
-
 let native = null;
 let nativeLoadError = null;
 let nativeAddonPath = null;
@@ -484,17 +474,6 @@ function nextSinceSeq(message, fallback) {
     return message.seq + 1;
   }
   return fallback;
-}
-
-function mapErrorKind(value) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const mapped = ERROR_KIND_VALUES[value];
-  return mapped === undefined ? undefined : mapped;
 }
 
 function decorateLite3Frame(frame) {

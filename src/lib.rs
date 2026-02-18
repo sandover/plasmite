@@ -7,3 +7,4 @@ mod abi;
 pub mod api;
 mod core;
 pub mod notice;
+mod pool_paths;

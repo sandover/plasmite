@@ -12,7 +12,7 @@
   "files": [
     "index.js",
     "message.js",
-    "index.d.ts",
+    "mappings.js",
     "types.d.ts",
     "remote.js",
     "bin/plasmite.js",
@@ -39,7 +39,8 @@
   "scripts": {
     "prepare-native": "node scripts/prepare_native_assets.js",
     "build": "napi build --cargo-cwd native",
-    "test": "npm run build && node --test test/*.test.js",
+    "check:type-surface": "node scripts/check_type_surface.js",
+    "test": "npm run build && npm run check:type-surface && node --test test/*.test.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "prepack": "npm run build && npm run prepare-native",
     "prepublishOnly": "npm run typecheck"

@@ -4,7 +4,7 @@ Key Exports: Client, Pool, Stream, Lite3Stream, parseMessage, replay, and remote
 Role: Preserve complete JS + native type surface independently of generated files.
 Invariants: Public runtime exports from index.js are represented here.
 Invariants: Numeric sequence fields accept number or bigint input.
-Notes: Kept separate from NAPI-generated index.d.ts to avoid regeneration loss.
+Notes: Canonical declaration source for package typing (`package.json#types`).
 */
 
 export const enum Durability {

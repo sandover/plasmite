@@ -1,0 +1,607 @@
+//! Purpose: Hold top-level CLI command dispatch for `plasmite`.
+//! Exports: `dispatch_command`.
+//! Role: Keep `main.rs` focused on parse/bootstrap and delegate command execution.
+//! Invariants: Command behavior, output envelopes, and exit code semantics stay unchanged.
+//! Invariants: Helpers in `main.rs` remain the source of command business logic.
+
+use super::*;
+
+pub(super) fn dispatch_command(
+    command: Command,
+    pool_dir: PathBuf,
+    color_mode: ColorMode,
+) -> Result<RunOutcome, Error> {
+    match command {
+        Command::Completion { shell } => {
+            let mut cmd = Cli::command();
+            clap_complete::aot::generate(shell, &mut cmd, "plasmite", &mut io::stdout());
+            Ok(RunOutcome::ok())
+        }
+        Command::Version => {
+            let output = json!({
+                "name": "plasmite",
+                "version": env!("CARGO_PKG_VERSION"),
+            });
+            emit_json(output, color_mode);
+            Ok(RunOutcome::ok())
+        }
+        Command::Doctor { pool, all, json } => {
+            if all && pool.is_some() {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("--all cannot be combined with a pool name")
+                    .with_hint("Use --all by itself, or provide a single pool."));
+            }
+            if !all && pool.is_none() {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("doctor requires a pool name or --all")
+                    .with_hint("Use `plasmite doctor <pool>` or `plasmite doctor --all`."));
+            }
+            let client = LocalClient::new().with_pool_dir(&pool_dir);
+            let reports = if let Some(pool) = pool {
+                let path = resolve_poolref(&pool, &pool_dir)?;
+                let pool_ref = PoolRef::path(path.clone());
+                vec![doctor_report(&client, pool_ref, pool, path)?]
+            } else {
+                let mut reports = Vec::new();
+                for path in list_pool_paths(&pool_dir)? {
+                    let label = path.to_string_lossy().to_string();
+                    let pool_ref = PoolRef::path(path.clone());
+                    reports.push(doctor_report(&client, pool_ref, label, path)?);
+                }
+                reports
+            };
+
+            if json {
+                let values = reports.iter().map(report_json).collect::<Vec<_>>();
+                emit_json(json!({ "reports": values }), color_mode);
+            } else {
+                for report in &reports {
+                    emit_doctor_human(report);
+                }
+            }
+
+            let has_corrupt = reports
+                .iter()
+                .any(|report| report.status == ValidationStatus::Corrupt);
+            let exit_code = if has_corrupt {
+                to_exit_code(ErrorKind::Corrupt)
+            } else {
+                0
+            };
+            Ok(RunOutcome::with_code(exit_code))
+        }
+        Command::Serve { subcommand, run } => match subcommand {
+            Some(ServeSubcommand::Init(args)) => {
+                let bind: SocketAddr = args.bind.parse().map_err(|_| {
+                    Error::new(ErrorKind::Usage)
+                        .with_message("invalid bind address")
+                        .with_hint("Use a host:port value like 0.0.0.0:9700.")
+                })?;
+                let config = serve_init::ServeInitConfig {
+                    output_dir: args.output_dir,
+                    token_file: args.token_file,
+                    tls_cert: args.tls_cert,
+                    tls_key: args.tls_key,
+                    bind,
+                    force: args.force,
+                };
+                let result = serve_init::init(config)?;
+                if io::stdout().is_terminal() {
+                    emit_serve_init_human(&result);
+                } else {
+                    emit_json(
+                        json!({
+                            "init": {
+                                "artifact_paths": {
+                                    "token_file": result.token_file,
+                                    "tls_cert": result.tls_cert,
+                                    "tls_key": result.tls_key,
+                                },
+                                "next_commands": result.next_commands,
+                            }
+                        }),
+                        color_mode,
+                    );
+                }
+                Ok(RunOutcome::ok())
+            }
+            Some(ServeSubcommand::Check { json }) => {
+                let mut config = serve_config_from_run_args(run, &pool_dir)?;
+                config.cors_allowed_origins = serve::preflight_config(&config)?;
+                emit_serve_check_report(&config, color_mode, json);
+                Ok(RunOutcome::ok())
+            }
+            None => {
+                let config = serve_config_from_run_args(run, &pool_dir)?;
+                emit_serve_startup_guidance(&config);
+                let runtime = tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|err| {
+                        Error::new(ErrorKind::Internal)
+                            .with_message("failed to start runtime")
+                            .with_source(err)
+                    })?;
+                runtime.block_on(serve::serve(config))?;
+                Ok(RunOutcome::ok())
+            }
+        },
+        Command::Pool { command } => match command {
+            PoolCommand::Create {
+                names,
+                size,
+                index_capacity,
+                json,
+            } => {
+                let size = size
+                    .as_deref()
+                    .map(parse_size)
+                    .transpose()?
+                    .unwrap_or(DEFAULT_POOL_SIZE);
+                ensure_pool_dir(&pool_dir)?;
+                let mut results = Vec::new();
+                for name in names {
+                    let path = resolve_poolref(&name, &pool_dir)?;
+                    if path.exists() {
+                        return Err(Error::new(ErrorKind::AlreadyExists)
+                            .with_message("pool already exists")
+                            .with_path(&path)
+                            .with_hint(
+                                "Choose a different name or remove the existing pool file.",
+                            ));
+                    }
+                    let mut options = PoolOptions::new(size);
+                    if let Some(index_capacity) = index_capacity {
+                        let index_size_bytes = index_capacity as u64 * 16;
+                        if index_size_bytes > size / 2 {
+                            return Err(Error::new(ErrorKind::Usage)
+                                .with_message("index capacity is too large for pool size")
+                                .with_hint(
+                                    "Reduce --index-capacity or increase --size (index region must be <= 50% of the pool file).",
+                                ));
+                        }
+                        options = options.with_index_capacity(index_capacity);
+                    }
+                    let pool = Pool::create(&path, options)?;
+                    let info = pool.info()?;
+                    results.push(pool_info_json(&name, &info));
+                }
+                if json {
+                    emit_json(json!({ "created": results }), color_mode);
+                } else {
+                    emit_pool_create_table(&results, &pool_dir);
+                }
+                Ok(RunOutcome::ok())
+            }
+            PoolCommand::Info { name, json } => {
+                let path = resolve_poolref(&name, &pool_dir)?;
+                let pool =
+                    Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &name, &name))?;
+                let info = pool.info()?;
+                if json {
+                    emit_json(pool_info_json(&name, &info), color_mode);
+                } else {
+                    emit_pool_info_pretty(&name, &info);
+                }
+                Ok(RunOutcome::ok())
+            }
+            PoolCommand::Delete { names, json } => {
+                let mut deleted = Vec::new();
+                let mut failed = Vec::new();
+                let mut table_rows = Vec::new();
+                let mut first_error_kind = None;
+
+                for name in names {
+                    let result = if name.contains("://") {
+                        Err(Error::new(ErrorKind::Usage)
+                            .with_message("pool delete accepts local pool names or paths only")
+                            .with_hint("Use pool names/paths for local delete, or call remote APIs directly."))
+                    } else {
+                        resolve_poolref(&name, &pool_dir).and_then(|path| {
+                            std::fs::remove_file(&path).map_err(|err| {
+                                if err.kind() == std::io::ErrorKind::NotFound {
+                                    Error::new(ErrorKind::NotFound)
+                                        .with_message("pool not found")
+                                        .with_path(&path)
+                                        .with_hint("Create the pool first or check --dir.")
+                                } else {
+                                    Error::new(ErrorKind::Io)
+                                        .with_message("failed to delete pool")
+                                        .with_path(&path)
+                                        .with_source(err)
+                                }
+                            })?;
+                            Ok(path)
+                        })
+                    };
+
+                    match result {
+                        Ok(path) => {
+                            let display_path = short_display_path(path.as_path(), Some(&pool_dir));
+                            deleted.push(json!({
+                                "pool": name,
+                                "path": path.display().to_string(),
+                            }));
+                            table_rows.push(vec![
+                                name,
+                                "OK".to_string(),
+                                display_path,
+                                String::new(),
+                            ]);
+                        }
+                        Err(err) => {
+                            if first_error_kind.is_none() {
+                                first_error_kind = Some(err.kind());
+                            }
+                            let display_path = err
+                                .path()
+                                .map(|path| short_display_path(path, Some(&pool_dir)))
+                                .unwrap_or_else(|| "-".to_string());
+                            let detail = err.message().unwrap_or("error").to_string();
+                            failed.push(json!({
+                                "pool": name,
+                                "error": error_json(&err)["error"].clone(),
+                            }));
+                            table_rows.push(vec![name, "ERR".to_string(), display_path, detail]);
+                        }
+                    }
+                }
+
+                if json {
+                    emit_json(
+                        json!({
+                            "deleted": deleted,
+                            "failed": failed,
+                        }),
+                        color_mode,
+                    );
+                } else {
+                    emit_table(&["NAME", "STATUS", "PATH", "DETAIL"], &table_rows);
+                }
+                if let Some(kind) = first_error_kind {
+                    Ok(RunOutcome::with_code(to_exit_code(kind)))
+                } else {
+                    Ok(RunOutcome::ok())
+                }
+            }
+            PoolCommand::List { json } => {
+                let pools = list_pools(&pool_dir);
+                if json {
+                    emit_json(json!({ "pools": pools }), color_mode);
+                } else {
+                    emit_pool_list_table(&pools, &pool_dir);
+                }
+                Ok(RunOutcome::ok())
+            }
+        },
+        Command::Feed {
+            pool,
+            tag,
+            data,
+            file,
+            durability,
+            create,
+            create_size,
+            retry,
+            retry_delay,
+            input,
+            errors,
+        } => {
+            let target = resolve_pool_target(&pool, &pool_dir)?;
+            let data_arg = data;
+            let file_arg = file;
+            if create_size.is_some() && !create {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("--create-size requires --create")
+                    .with_hint("Add --create or remove --create-size."));
+            }
+            if retry_delay.is_some() && retry == 0 {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("--retry-delay requires --retry")
+                    .with_hint("Add --retry or remove --retry-delay."));
+            }
+            let durability = parse_durability(&durability)?;
+            let retry_config = parse_retry_config(retry, retry_delay.as_deref())?;
+            if data_arg.is_some() && file_arg.is_some() {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("multiple data inputs provided")
+                    .with_hint("Use only one of DATA, --file, or stdin."));
+            }
+            let file = file_arg.as_deref();
+            let stdin_is_terminal = io::stdin().is_terminal();
+            let stdin_stream = data_arg.is_none() && file.is_none() && !stdin_is_terminal;
+            let single_input = data_arg.is_some() || file.is_some() || stdin_is_terminal;
+            let exact_create_hint = feed_exact_create_command_hint(
+                &pool,
+                FeedExactCreateHint {
+                    tags: &tag,
+                    data: &data_arg,
+                    file: &file_arg,
+                    durability,
+                    retry,
+                    retry_delay: retry_delay.as_deref(),
+                    input,
+                    errors,
+                    single_input,
+                },
+            );
+            match target {
+                PoolTarget::LocalPath(path) => {
+                    let mut pool_handle = match Pool::open(&path) {
+                        Ok(pool) => pool,
+                        Err(err) if create && err.kind() == ErrorKind::NotFound => {
+                            ensure_pool_dir(&pool_dir)?;
+                            let size = create_size
+                                .as_deref()
+                                .map(parse_size)
+                                .transpose()?
+                                .unwrap_or(DEFAULT_POOL_SIZE);
+                            Pool::create(&path, PoolOptions::new(size))?
+                        }
+                        Err(err) => {
+                            return Err(add_missing_pool_create_hint(
+                                err,
+                                "feed",
+                                &pool,
+                                &pool,
+                                exact_create_hint,
+                            ));
+                        }
+                    };
+                    if let Some(data) = data_arg.as_deref() {
+                        let data = parse_inline_json(data)?;
+                        let payload = lite3::encode_message(&tag, &data)?;
+                        let (seq, timestamp_ns) = retry_with_config(retry_config, || {
+                            let timestamp_ns = now_ns()?;
+                            let options = AppendOptions::new(timestamp_ns, durability);
+                            let seq =
+                                pool_handle.append_with_options(payload.as_slice(), options)?;
+                            Ok((seq, timestamp_ns))
+                        })?;
+                        emit_json(feed_receipt_json(seq, timestamp_ns, &tag)?, color_mode);
+                    } else {
+                        let pool_path_label = path.display().to_string();
+                        let outcome = if let Some(file) = file {
+                            let reader = open_feed_reader(file)?;
+                            ingest_from_stdin(
+                                reader,
+                                FeedIngestContext {
+                                    pool_ref: &pool,
+                                    pool_path_label: &pool_path_label,
+                                    tags: &tag,
+                                    durability,
+                                    retry_config,
+                                    pool_handle: &mut pool_handle,
+                                    color_mode,
+                                    input,
+                                    errors,
+                                },
+                            )?
+                        } else if stdin_stream {
+                            ingest_from_stdin(
+                                io::stdin().lock(),
+                                FeedIngestContext {
+                                    pool_ref: &pool,
+                                    pool_path_label: &pool_path_label,
+                                    tags: &tag,
+                                    durability,
+                                    retry_config,
+                                    pool_handle: &mut pool_handle,
+                                    color_mode,
+                                    input,
+                                    errors,
+                                },
+                            )?
+                        } else {
+                            return Err(missing_feed_data_error());
+                        };
+                        if outcome.records_total == 0 {
+                            return Err(missing_feed_data_error());
+                        }
+                        if outcome.failed > 0 {
+                            return Ok(RunOutcome::with_code(1));
+                        }
+                    }
+                }
+                PoolTarget::Remote {
+                    base_url,
+                    pool: name,
+                } => {
+                    if create {
+                        return Err(Error::new(ErrorKind::Usage)
+                            .with_message("remote feed does not support --create")
+                            .with_hint("Create remote pools with server-side tooling, not feed."));
+                    }
+                    let client = RemoteClient::new(base_url)?;
+                    let remote_pool = client
+                        .open_pool(&PoolRef::name(name.clone()))
+                        .map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
+                    if let Some(data) = data_arg.as_deref() {
+                        let data = parse_inline_json(data)?;
+                        let message = retry_with_config(retry_config, || {
+                            remote_pool.append_json_now(&data, &tag, durability)
+                        })?;
+                        emit_json(feed_receipt_from_message(&message), color_mode);
+                    } else {
+                        let pool_path_label = format!("{}/{}", client.base_url(), name);
+                        let outcome = if let Some(file) = file {
+                            let reader = open_feed_reader(file)?;
+                            ingest_from_stdin_remote(
+                                reader,
+                                RemoteFeedIngestContext {
+                                    pool_ref: &pool,
+                                    pool_path_label: &pool_path_label,
+                                    tags: &tag,
+                                    durability,
+                                    retry_config,
+                                    remote_pool: &remote_pool,
+                                    color_mode,
+                                    input,
+                                    errors,
+                                },
+                            )?
+                        } else if stdin_stream {
+                            ingest_from_stdin_remote(
+                                io::stdin().lock(),
+                                RemoteFeedIngestContext {
+                                    pool_ref: &pool,
+                                    pool_path_label: &pool_path_label,
+                                    tags: &tag,
+                                    durability,
+                                    retry_config,
+                                    remote_pool: &remote_pool,
+                                    color_mode,
+                                    input,
+                                    errors,
+                                },
+                            )?
+                        } else {
+                            return Err(missing_feed_data_error());
+                        };
+                        if outcome.records_total == 0 {
+                            return Err(missing_feed_data_error());
+                        }
+                        if outcome.failed > 0 {
+                            return Ok(RunOutcome::with_code(1));
+                        }
+                    }
+                }
+            };
+            Ok(RunOutcome::ok())
+        }
+        Command::Fetch { pool, seq } => {
+            let path = resolve_poolref(&pool, &pool_dir)?;
+            let pool_handle =
+                Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
+            let frame = pool_handle
+                .get(seq)
+                .map_err(|err| add_missing_seq_hint(err, &pool))?;
+            emit_json(message_from_frame(&frame)?, color_mode);
+            Ok(RunOutcome::ok())
+        }
+        Command::Follow {
+            pool,
+            create,
+            jsonl,
+            tail,
+            one,
+            timeout,
+            data_only,
+            quiet_drops,
+            no_notify,
+            format,
+            since,
+            where_expr,
+            tags,
+            replay,
+        } => {
+            if jsonl && format.is_some() {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("conflicting output options")
+                    .with_hint("Use --format jsonl (or --jsonl), but not both."));
+            }
+            let format_flag = format;
+            let format = format.unwrap_or(if jsonl {
+                FollowFormat::Jsonl
+            } else {
+                FollowFormat::Pretty
+            });
+            let pretty = matches!(format, FollowFormat::Pretty);
+            let now = now_ns()?;
+            let since_ns = since
+                .as_deref()
+                .map(|value| parse_since(value, now))
+                .transpose()?;
+            let timeout_input = timeout.as_deref();
+            let timeout = timeout_input.map(parse_duration).transpose()?;
+            let exact_follow_create_hint = follow_exact_create_command_hint(
+                &pool,
+                tail,
+                one,
+                jsonl,
+                timeout_input,
+                data_only,
+                format_flag,
+                since.as_deref(),
+                &where_expr,
+                &tags,
+                quiet_drops,
+                no_notify,
+                replay,
+            );
+            let cfg = FollowConfig {
+                tail,
+                pretty,
+                one,
+                timeout,
+                data_only,
+                since_ns,
+                required_tags: tags,
+                where_predicates: compile_filters(&where_expr)?,
+                quiet_drops,
+                notify: !no_notify,
+                color_mode,
+                replay_speed: replay,
+            };
+            let target = resolve_pool_target(&pool, &pool_dir)?;
+            match target {
+                PoolTarget::LocalPath(path) => {
+                    let exact_create_hint = Some(exact_follow_create_hint.clone());
+                    if let Some(speed) = replay {
+                        if speed < 0.0 {
+                            return Err(Error::new(ErrorKind::Usage)
+                                .with_message("--replay speed must be non-negative")
+                                .with_hint("Use --replay 1 for realtime, --replay 2 for 2x, --replay 0 for no delay."));
+                        }
+                        if !speed.is_finite() {
+                            return Err(Error::new(ErrorKind::Usage)
+                                .with_message("--replay speed must be a finite number")
+                                .with_hint("Use --replay 1 for realtime, --replay 2 for 2x, --replay 0 for no delay."));
+                        }
+                        if tail == 0 && since.is_none() {
+                            return Err(Error::new(ErrorKind::Usage)
+                                .with_message("--replay requires --tail or --since")
+                                .with_hint(
+                                    "Replay needs historical messages. Use --tail N or --since DURATION.",
+                                ));
+                        }
+                    }
+                    if let Some(since_ns) = since_ns {
+                        if since_ns > now {
+                            return Ok(RunOutcome::ok());
+                        }
+                    }
+                    let pool_handle = match Pool::open(&path) {
+                        Ok(pool_handle) => pool_handle,
+                        Err(err) if create && err.kind() == ErrorKind::NotFound => {
+                            ensure_pool_dir(&pool_dir)?;
+                            Pool::create(&path, PoolOptions::new(DEFAULT_POOL_SIZE))?
+                        }
+                        Err(err) => {
+                            return Err(add_missing_pool_create_hint(
+                                err,
+                                "follow",
+                                &pool,
+                                &pool,
+                                exact_create_hint,
+                            ));
+                        }
+                    };
+                    let outcome = follow_pool(&pool_handle, &pool, &path, cfg)?;
+                    Ok(outcome)
+                }
+                PoolTarget::Remote { base_url, pool } => {
+                    if create {
+                        return Err(Error::new(ErrorKind::Usage)
+                            .with_message("remote follow does not support --create")
+                            .with_hint(
+                                "Create remote pools with server-side tooling, then rerun follow.",
+                            ));
+                    }
+                    let outcome = follow_remote(&base_url, &pool, &cfg)?;
+                    Ok(outcome)
+                }
+            }
+        }
+    }
+}

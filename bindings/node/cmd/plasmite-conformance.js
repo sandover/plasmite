@@ -33,6 +33,20 @@ async function main() {
   resetWorkdir(workdirPath);
 
   const client = new Client(workdirPath);
+  const stepRunners = {
+    create_pool: (step, index, stepId) => runCreatePool(client, step, index, stepId),
+    append: (step, index, stepId) => runAppend(client, step, index, stepId),
+    fetch: (step, index, stepId) => runGet(client, step, index, stepId),
+    get: (step, index, stepId) => runGet(client, step, index, stepId),
+    tail: (step, index, stepId) => runTail(client, step, index, stepId),
+    list_pools: (step, index, stepId) => runListPools(step, index, stepId, workdirPath),
+    pool_info: (step, index, stepId) => runPoolInfo(repoRoot, workdirPath, step, index, stepId),
+    delete_pool: (step, index, stepId) => runDeletePool(step, index, stepId, workdirPath),
+    spawn_poke: (step, index, stepId) => runSpawnPoke(repoRoot, workdirPath, step, index, stepId),
+    corrupt_pool_header: (step, index, stepId) =>
+      runCorruptPoolHeader(workdirPath, step, index, stepId),
+    chmod_path: (step, index, stepId) => runChmodPath(step, index, stepId),
+  };
 
   for (let index = 0; index < manifest.steps.length; index += 1) {
     const step = manifest.steps[index];
@@ -41,41 +55,11 @@ async function main() {
     if (!op) {
       throw stepError(index, stepId, "missing op");
     }
-    switch (op) {
-      case "create_pool":
-        runCreatePool(client, step, index, stepId);
-        break;
-      case "append":
-        runAppend(client, step, index, stepId);
-        break;
-      case "fetch":
-      case "get":
-        runGet(client, step, index, stepId);
-        break;
-      case "tail":
-        runTail(client, step, index, stepId);
-        break;
-      case "list_pools":
-        runListPools(step, index, stepId, workdirPath);
-        break;
-      case "pool_info":
-        runPoolInfo(repoRoot, workdirPath, step, index, stepId);
-        break;
-      case "delete_pool":
-        runDeletePool(step, index, stepId, workdirPath);
-        break;
-      case "spawn_poke":
-        await runSpawnPoke(repoRoot, workdirPath, step, index, stepId);
-        break;
-      case "corrupt_pool_header":
-        runCorruptPoolHeader(workdirPath, step, index, stepId);
-        break;
-      case "chmod_path":
-        runChmodPath(step, index, stepId);
-        break;
-      default:
-        throw stepError(index, stepId, `unknown op: ${op}`);
+    const runner = stepRunners[op];
+    if (!runner) {
+      throw stepError(index, stepId, `unknown op: ${op}`);
     }
+    await runner(step, index, stepId);
   }
 }
 
@@ -94,8 +78,21 @@ function runCreatePool(client, step, index, stepId) {
   validateExpectError(step.expect, result.error, index, stepId);
 }
 
-function runAppend(client, step, index, stepId) {
+function withOpenPool(client, step, index, stepId, runForPool) {
   const pool = requirePool(step, index, stepId);
+  const poolHandle = tryCall(() => client.openPool(pool));
+  if (poolHandle.error) {
+    validateExpectError(step.expect, poolHandle.error, index, stepId);
+    return;
+  }
+  try {
+    runForPool(poolHandle.value);
+  } finally {
+    poolHandle.value.close();
+  }
+}
+
+function runAppend(client, step, index, stepId) {
   const input = requireInput(step, index, stepId);
   const payload = input.data;
   if (payload === undefined) {
@@ -103,139 +100,121 @@ function runAppend(client, step, index, stepId) {
   }
   const tags = input.tags ?? [];
 
-  const poolHandle = tryCall(() => client.openPool(pool));
-  if (poolHandle.error) {
-    validateExpectError(step.expect, poolHandle.error, index, stepId);
-    return;
-  }
-
-  const result = tryCall(() =>
-    poolHandle.value.appendJson(
-      Buffer.from(JSON.stringify(payload)),
-      tags,
-      Durability.Fast
-    )
-  );
-  poolHandle.value.close();
-  if (result.error) {
-    validateExpectError(step.expect, result.error, index, stepId);
-    return;
-  }
-  validateExpectError(step.expect, null, index, stepId);
-
-  if (step.expect && typeof step.expect.seq === "number") {
-    const message = JSON.parse(result.value.toString("utf8"));
-    if (message.seq !== step.expect.seq) {
-      throw stepError(index, stepId, `expected seq ${step.expect.seq}, got ${message.seq}`);
+  withOpenPool(client, step, index, stepId, (poolHandle) => {
+    const result = tryCall(() =>
+      poolHandle.appendJson(
+        Buffer.from(JSON.stringify(payload)),
+        tags,
+        Durability.Fast
+      )
+    );
+    if (result.error) {
+      validateExpectError(step.expect, result.error, index, stepId);
+      return;
     }
-  }
+    validateExpectError(step.expect, null, index, stepId);
+
+    if (step.expect && typeof step.expect.seq === "number") {
+      const message = JSON.parse(result.value.toString("utf8"));
+      if (message.seq !== step.expect.seq) {
+        throw stepError(index, stepId, `expected seq ${step.expect.seq}, got ${message.seq}`);
+      }
+    }
+  });
 }
 
 function runGet(client, step, index, stepId) {
-  const pool = requirePool(step, index, stepId);
   const input = requireInput(step, index, stepId);
   if (typeof input.seq !== "number") {
     throw stepError(index, stepId, "missing input.seq");
   }
 
-  const poolHandle = tryCall(() => client.openPool(pool));
-  if (poolHandle.error) {
-    validateExpectError(step.expect, poolHandle.error, index, stepId);
-    return;
-  }
+  withOpenPool(client, step, index, stepId, (poolHandle) => {
+    const result = tryCall(() => poolHandle.getJson(BigInt(input.seq)));
+    if (result.error) {
+      validateExpectError(step.expect, result.error, index, stepId);
+      return;
+    }
+    validateExpectError(step.expect, null, index, stepId);
 
-  const result = tryCall(() => poolHandle.value.getJson(BigInt(input.seq)));
-  poolHandle.value.close();
-  if (result.error) {
-    validateExpectError(step.expect, result.error, index, stepId);
-    return;
-  }
-  validateExpectError(step.expect, null, index, stepId);
-
-  const message = JSON.parse(result.value.toString("utf8"));
-  if (step.expect?.data !== undefined && !deepEqual(step.expect.data, message.data)) {
-    throw stepError(index, stepId, "data mismatch");
-  }
-  if (step.expect?.tags !== undefined && !deepEqual(step.expect.tags, message.meta.tags)) {
-    throw stepError(index, stepId, "tags mismatch");
-  }
+    const message = JSON.parse(result.value.toString("utf8"));
+    if (step.expect?.data !== undefined && !deepEqual(step.expect.data, message.data)) {
+      throw stepError(index, stepId, "data mismatch");
+    }
+    if (step.expect?.tags !== undefined && !deepEqual(step.expect.tags, message.meta.tags)) {
+      throw stepError(index, stepId, "tags mismatch");
+    }
+  });
 }
 
 function runTail(client, step, index, stepId) {
-  const pool = requirePool(step, index, stepId);
   const input = step.input ?? {};
   const sinceSeq = typeof input.since_seq === "number" ? BigInt(input.since_seq) : undefined;
   const maxMessages = typeof input.max === "number" ? BigInt(input.max) : undefined;
   const expect = step.expect ?? null;
 
-  const poolHandle = tryCall(() => client.openPool(pool));
-  if (poolHandle.error) {
-    validateExpectError(step.expect, poolHandle.error, index, stepId);
-    return;
-  }
-
-  const streamResult = tryCall(() =>
-    poolHandle.value.openStream(sinceSeq, maxMessages, BigInt(500))
-  );
-  if (streamResult.error) {
-    poolHandle.value.close();
-    validateExpectError(step.expect, streamResult.error, index, stepId);
-    return;
-  }
-
-  const messages = [];
-  while (true) {
-    const next = streamResult.value.nextJson();
-    if (!next) {
-      break;
+  withOpenPool(client, step, index, stepId, (poolHandle) => {
+    const streamResult = tryCall(() =>
+      poolHandle.openStream(sinceSeq, maxMessages, BigInt(500))
+    );
+    if (streamResult.error) {
+      validateExpectError(step.expect, streamResult.error, index, stepId);
+      return;
     }
-    messages.push(JSON.parse(next.toString("utf8")));
-    if (maxMessages && BigInt(messages.length) >= maxMessages) {
-      break;
-    }
-  }
-  streamResult.value.close();
-  poolHandle.value.close();
 
-  validateExpectError(step.expect, null, index, stepId);
-
-  const expected = expectedMessages(expect, index, stepId);
-  if (messages.length !== expected.messages.length) {
-    throw stepError(index, stepId, `expected ${expected.messages.length} messages, got ${messages.length}`);
-  }
-
-  for (let i = 1; i < messages.length; i += 1) {
-    if (messages[i - 1].seq >= messages[i].seq) {
-      throw stepError(index, stepId, "tail messages out of order");
-    }
-  }
-
-  if (expected.ordered) {
-    expected.messages.forEach((entry, idx) => {
-      if (!deepEqual(entry.data, messages[idx].data)) {
-        throw stepError(index, stepId, "data mismatch");
-      }
-      if (entry.tags && !deepEqual(entry.tags, messages[idx].meta.tags)) {
-        throw stepError(index, stepId, "tags mismatch");
-      }
-    });
-  } else {
-    const used = new Array(messages.length).fill(false);
-    expected.messages.forEach((entry) => {
-      let found = false;
-      for (let idx = 0; idx < messages.length; idx += 1) {
-        if (used[idx]) continue;
-        if (!deepEqual(entry.data, messages[idx].data)) continue;
-        if (entry.tags && !deepEqual(entry.tags, messages[idx].meta.tags)) continue;
-        used[idx] = true;
-        found = true;
+    const messages = [];
+    while (true) {
+      const next = streamResult.value.nextJson();
+      if (!next) {
         break;
       }
-      if (!found) {
-        throw stepError(index, stepId, "message mismatch");
+      messages.push(JSON.parse(next.toString("utf8")));
+      if (maxMessages && BigInt(messages.length) >= maxMessages) {
+        break;
       }
-    });
-  }
+    }
+    streamResult.value.close();
+
+    validateExpectError(step.expect, null, index, stepId);
+
+    const expected = expectedMessages(expect, index, stepId);
+    if (messages.length !== expected.messages.length) {
+      throw stepError(index, stepId, `expected ${expected.messages.length} messages, got ${messages.length}`);
+    }
+
+    for (let i = 1; i < messages.length; i += 1) {
+      if (messages[i - 1].seq >= messages[i].seq) {
+        throw stepError(index, stepId, "tail messages out of order");
+      }
+    }
+
+    if (expected.ordered) {
+      expected.messages.forEach((entry, idx) => {
+        if (!deepEqual(entry.data, messages[idx].data)) {
+          throw stepError(index, stepId, "data mismatch");
+        }
+        if (entry.tags && !deepEqual(entry.tags, messages[idx].meta.tags)) {
+          throw stepError(index, stepId, "tags mismatch");
+        }
+      });
+    } else {
+      const used = new Array(messages.length).fill(false);
+      expected.messages.forEach((entry) => {
+        let found = false;
+        for (let idx = 0; idx < messages.length; idx += 1) {
+          if (used[idx]) continue;
+          if (!deepEqual(entry.data, messages[idx].data)) continue;
+          if (entry.tags && !deepEqual(entry.tags, messages[idx].meta.tags)) continue;
+          used[idx] = true;
+          found = true;
+          break;
+        }
+        if (!found) {
+          throw stepError(index, stepId, "message mismatch");
+        }
+      });
+    }
+  });
 }
 
 function runListPools(step, index, stepId, workdirPath) {

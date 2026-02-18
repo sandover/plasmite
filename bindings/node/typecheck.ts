@@ -15,7 +15,7 @@ import {
   RemoteClient,
   RemoteError,
   replay,
-} from "./types";
+} from ".";
 
 const client = new Client("./data");
 const pool = client.createPool("docs", 1024 * 1024);

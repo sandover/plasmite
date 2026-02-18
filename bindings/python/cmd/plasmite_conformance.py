@@ -15,7 +15,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 if str(PACKAGE_ROOT) not in sys.path:
@@ -43,34 +43,29 @@ def main() -> None:
     reset_workdir(workdir_path)
 
     client = Client(str(workdir_path))
+    step_runners = {
+        "create_pool": lambda step, index, step_id: run_create_pool(client, step, index, step_id),
+        "append": lambda step, index, step_id: run_append(client, step, index, step_id),
+        "fetch": lambda step, index, step_id: run_get(client, step, index, step_id),
+        "get": lambda step, index, step_id: run_get(client, step, index, step_id),
+        "tail": lambda step, index, step_id: run_tail(client, step, index, step_id),
+        "list_pools": lambda step, index, step_id: run_list_pools(workdir_path, step, index, step_id),
+        "pool_info": lambda step, index, step_id: run_pool_info(repo_root, workdir_path, step, index, step_id),
+        "delete_pool": lambda step, index, step_id: run_delete_pool(workdir_path, step, index, step_id),
+        "spawn_poke": lambda step, index, step_id: run_spawn_poke(repo_root, workdir_path, step, index, step_id),
+        "corrupt_pool_header": lambda step, index, step_id: run_corrupt_pool_header(workdir_path, step, index, step_id),
+        "chmod_path": lambda step, index, step_id: run_chmod_path(step, index, step_id),
+    }
 
     for index, step in enumerate(manifest.get("steps", [])):
         step_id = step.get("id")
         op = step.get("op")
         if not op:
             raise step_err(index, step_id, "missing op")
-        if op == "create_pool":
-            run_create_pool(client, step, index, step_id)
-        elif op == "append":
-            run_append(client, step, index, step_id)
-        elif op in ("fetch", "get"):
-            run_get(client, step, index, step_id)
-        elif op == "tail":
-            run_tail(client, step, index, step_id)
-        elif op == "list_pools":
-            run_list_pools(workdir_path, step, index, step_id)
-        elif op == "pool_info":
-            run_pool_info(repo_root, workdir_path, step, index, step_id)
-        elif op == "delete_pool":
-            run_delete_pool(workdir_path, step, index, step_id)
-        elif op == "spawn_poke":
-            run_spawn_poke(repo_root, workdir_path, step, index, step_id)
-        elif op == "corrupt_pool_header":
-            run_corrupt_pool_header(workdir_path, step, index, step_id)
-        elif op == "chmod_path":
-            run_chmod_path(step, index, step_id)
-        else:
+        runner = step_runners.get(op)
+        if runner is None:
             raise step_err(index, step_id, f"unknown op: {op}")
+        runner(step, index, step_id)
 
 
 def reset_workdir(path: Path) -> None:
@@ -86,121 +81,126 @@ def run_create_pool(client: Client, step: dict[str, Any], index: int, step_id: s
     validate_expect_error(step.get("expect"), err, index, step_id)
 
 
-def run_append(client: Client, step: dict[str, Any], index: int, step_id: str | None) -> None:
+def with_open_pool(
+    client: Client,
+    step: dict[str, Any],
+    index: int,
+    step_id: str | None,
+    run_for_pool: Callable[[Any], None],
+) -> None:
     pool = require_pool(step, index, step_id)
+    pool_handle = try_call(lambda: client.open_pool(pool))
+    if pool_handle.error:
+        validate_expect_error(step.get("expect"), pool_handle.error, index, step_id)
+        return
+    try:
+        run_for_pool(pool_handle.value)
+    finally:
+        pool_handle.value.close()
+
+
+def run_append(client: Client, step: dict[str, Any], index: int, step_id: str | None) -> None:
     input_data = require_input(step, index, step_id)
     if "data" not in input_data:
         raise step_err(index, step_id, "missing input.data")
     tags = input_data.get("tags", [])
-
-    pool_handle = try_call(lambda: client.open_pool(pool))
-    if pool_handle.error:
-        validate_expect_error(step.get("expect"), pool_handle.error, index, step_id)
-        return
-
     payload = json.dumps(input_data["data"]).encode("utf-8")
-    result = try_call(lambda: pool_handle.value.append_json(payload, tags, Durability.FAST))
-    pool_handle.value.close()
-    if result.error:
-        validate_expect_error(step.get("expect"), result.error, index, step_id)
-        return
-    validate_expect_error(step.get("expect"), None, index, step_id)
 
-    if step.get("expect", {}).get("seq") is not None:
-        message = parse_message(result.value)
-        if message.seq != step["expect"]["seq"]:
-            raise step_err(index, step_id, f"expected seq {step['expect']['seq']}, got {message.seq}")
+    def run_for_pool(pool: Any) -> None:
+        result = try_call(lambda: pool.append_json(payload, tags, Durability.FAST))
+        if result.error:
+            validate_expect_error(step.get("expect"), result.error, index, step_id)
+            return
+        validate_expect_error(step.get("expect"), None, index, step_id)
+
+        if step.get("expect", {}).get("seq") is not None:
+            message = parse_message(result.value)
+            if message.seq != step["expect"]["seq"]:
+                raise step_err(index, step_id, f"expected seq {step['expect']['seq']}, got {message.seq}")
+
+    with_open_pool(client, step, index, step_id, run_for_pool)
 
 
 def run_get(client: Client, step: dict[str, Any], index: int, step_id: str | None) -> None:
-    pool = require_pool(step, index, step_id)
     input_data = require_input(step, index, step_id)
     if "seq" not in input_data:
         raise step_err(index, step_id, "missing input.seq")
 
-    pool_handle = try_call(lambda: client.open_pool(pool))
-    if pool_handle.error:
-        validate_expect_error(step.get("expect"), pool_handle.error, index, step_id)
-        return
+    def run_for_pool(pool: Any) -> None:
+        result = try_call(lambda: pool.get_json(int(input_data["seq"])))
+        if result.error:
+            validate_expect_error(step.get("expect"), result.error, index, step_id)
+            return
+        validate_expect_error(step.get("expect"), None, index, step_id)
 
-    result = try_call(lambda: pool_handle.value.get_json(int(input_data["seq"])))
-    pool_handle.value.close()
-    if result.error:
-        validate_expect_error(step.get("expect"), result.error, index, step_id)
-        return
-    validate_expect_error(step.get("expect"), None, index, step_id)
+        message = parse_message(result.value)
+        if step.get("expect", {}).get("data") is not None and step["expect"]["data"] != message.data:
+            raise step_err(index, step_id, "data mismatch")
+        if step.get("expect", {}).get("tags") is not None and step["expect"]["tags"] != message.tags:
+            raise step_err(index, step_id, "tags mismatch")
 
-    message = parse_message(result.value)
-    if step.get("expect", {}).get("data") is not None and step["expect"]["data"] != message.data:
-        raise step_err(index, step_id, "data mismatch")
-    if step.get("expect", {}).get("tags") is not None and step["expect"]["tags"] != message.tags:
-        raise step_err(index, step_id, "tags mismatch")
+    with_open_pool(client, step, index, step_id, run_for_pool)
 
 
 def run_tail(client: Client, step: dict[str, Any], index: int, step_id: str | None) -> None:
-    pool = require_pool(step, index, step_id)
     input_data = step.get("input", {})
     since_seq = input_data.get("since_seq")
     max_messages = input_data.get("max")
 
-    pool_handle = try_call(lambda: client.open_pool(pool))
-    if pool_handle.error:
-        validate_expect_error(step.get("expect"), pool_handle.error, index, step_id)
-        return
-
-    stream = try_call(
-        lambda: pool_handle.value.open_stream(
-            int(since_seq) if since_seq is not None else None,
-            int(max_messages) if max_messages is not None else None,
-            500,
+    def run_for_pool(pool: Any) -> None:
+        stream = try_call(
+            lambda: pool.open_stream(
+                int(since_seq) if since_seq is not None else None,
+                int(max_messages) if max_messages is not None else None,
+                500,
+            )
         )
-    )
-    if stream.error:
-        pool_handle.value.close()
-        validate_expect_error(step.get("expect"), stream.error, index, step_id)
-        return
+        if stream.error:
+            validate_expect_error(step.get("expect"), stream.error, index, step_id)
+            return
 
-    messages = []
-    while True:
-        payload = stream.value.next_json()
-        if payload is None:
-            break
-        messages.append(parse_message(payload))
-        if max_messages is not None and len(messages) >= int(max_messages):
-            break
-    stream.value.close()
-    pool_handle.value.close()
-
-    validate_expect_error(step.get("expect"), None, index, step_id)
-
-    expected = expected_messages(step.get("expect"), index, step_id)
-    if len(messages) != len(expected["messages"]):
-        raise step_err(index, step_id, f"expected {len(expected['messages'])} messages, got {len(messages)}")
-
-    for idx in range(1, len(messages)):
-        if messages[idx - 1].seq >= messages[idx].seq:
-            raise step_err(index, step_id, "tail messages out of order")
-
-    if expected["ordered"]:
-        for idx, entry in enumerate(expected["messages"]):
-            if entry["data"] != messages[idx].data:
-                raise step_err(index, step_id, "data mismatch")
-            if "tags" in entry and entry["tags"] != messages[idx].tags:
-                raise step_err(index, step_id, "tags mismatch")
-    else:
-        remaining = messages[:]
-        for entry in expected["messages"]:
-            matched = False
-            for idx, actual in enumerate(remaining):
-                if entry["data"] != actual.data:
-                    continue
-                if "tags" in entry and entry["tags"] != actual.tags:
-                    continue
-                remaining.pop(idx)
-                matched = True
+        messages = []
+        while True:
+            payload = stream.value.next_json()
+            if payload is None:
                 break
-            if not matched:
-                raise step_err(index, step_id, "message mismatch")
+            messages.append(parse_message(payload))
+            if max_messages is not None and len(messages) >= int(max_messages):
+                break
+        stream.value.close()
+
+        validate_expect_error(step.get("expect"), None, index, step_id)
+
+        expected = expected_messages(step.get("expect"), index, step_id)
+        if len(messages) != len(expected["messages"]):
+            raise step_err(index, step_id, f"expected {len(expected['messages'])} messages, got {len(messages)}")
+
+        for idx in range(1, len(messages)):
+            if messages[idx - 1].seq >= messages[idx].seq:
+                raise step_err(index, step_id, "tail messages out of order")
+
+        if expected["ordered"]:
+            for idx, entry in enumerate(expected["messages"]):
+                if entry["data"] != messages[idx].data:
+                    raise step_err(index, step_id, "data mismatch")
+                if "tags" in entry and entry["tags"] != messages[idx].tags:
+                    raise step_err(index, step_id, "tags mismatch")
+        else:
+            remaining = messages[:]
+            for entry in expected["messages"]:
+                matched = False
+                for idx, actual in enumerate(remaining):
+                    if entry["data"] != actual.data:
+                        continue
+                    if "tags" in entry and entry["tags"] != actual.tags:
+                        continue
+                    remaining.pop(idx)
+                    matched = True
+                    break
+                if not matched:
+                    raise step_err(index, step_id, "message mismatch")
+
+    with_open_pool(client, step, index, step_id, run_for_pool)
 
 
 def run_list_pools(workdir_path: Path, step: dict[str, Any], index: int, step_id: str | None) -> None:

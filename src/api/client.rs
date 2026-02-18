@@ -9,6 +9,7 @@ use super::validation::validate_pool_state_report;
 use super::{ValidationIssue, ValidationReport};
 use crate::core::error::{Error, ErrorKind};
 use crate::core::pool::{Pool, PoolInfo, PoolOptions};
+use crate::pool_paths::{PoolNameResolveError, default_pool_dir, resolve_named_pool_path};
 use std::path::{Path, PathBuf};
 
 pub type ApiResult<T> = Result<T, Error>;
@@ -165,21 +166,8 @@ impl Default for LocalClient {
     }
 }
 
-fn default_pool_dir() -> PathBuf {
-    let home = std::env::var_os("HOME").unwrap_or_default();
-    PathBuf::from(home).join(".plasmite").join("pools")
-}
-
 fn resolve_name(name: &str, pool_dir: &Path) -> ApiResult<PathBuf> {
-    if name.contains('/') {
-        return Err(
-            Error::new(ErrorKind::Usage).with_message("pool name must not contain path separators")
-        );
-    }
-    if name.ends_with(".plasmite") {
-        return Ok(pool_dir.join(name));
-    }
-    Ok(pool_dir.join(format!("{name}.plasmite")))
+    resolve_named_pool_path(name, pool_dir).map_err(map_pool_name_resolve_error)
 }
 
 fn map_io_error_kind(err: &std::io::Error) -> ErrorKind {
@@ -187,6 +175,14 @@ fn map_io_error_kind(err: &std::io::Error) -> ErrorKind {
         std::io::ErrorKind::NotFound => ErrorKind::NotFound,
         std::io::ErrorKind::PermissionDenied => ErrorKind::Permission,
         _ => ErrorKind::Io,
+    }
+}
+
+fn map_pool_name_resolve_error(err: PoolNameResolveError) -> Error {
+    match err {
+        PoolNameResolveError::ContainsPathSeparator => {
+            Error::new(ErrorKind::Usage).with_message("pool name must not contain path separators")
+        }
     }
 }
 

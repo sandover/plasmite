@@ -141,87 +141,46 @@ clean:
 _dev_dir := "/tmp/plasmite-dev"
 _dev_port := "9009"
 _dev_bind := "127.0.0.1:" + _dev_port
+_dev_bin := "./target/debug/plasmite"
+_dev_pool_dir := _dev_dir + "/pools"
+_dev_log := _dev_dir + "/serve.log"
+_dev_pid := _dev_dir + "/serve.pid"
 
 # Build, seed test data, and start a dev server on :9009 (returns immediately).
 serve-dev: _serve-kill
 	cargo build --bin plasmite
-	mkdir -p {{_dev_dir}}/pools
-	@# Seed a demo pool if it doesn't already exist
-	if [ ! -f {{_dev_dir}}/pools/demo.plasmite ]; then \
-	  ./target/debug/plasmite --dir {{_dev_dir}}/pools pool create demo --size 1M > /dev/null; \
-	  ./target/debug/plasmite --dir {{_dev_dir}}/pools feed demo --tag deploy '{"service":"api","version":"1.0"}' > /dev/null; \
-	  ./target/debug/plasmite --dir {{_dev_dir}}/pools feed demo --tag metric '{"cpu":12.3,"rps":4200}' > /dev/null; \
-	  echo "serve-dev: seeded demo pool with 2 messages"; \
-	fi
-	@nohup ./target/debug/plasmite --dir {{_dev_dir}}/pools serve --bind {{_dev_bind}} \
-	  > {{_dev_dir}}/serve.log 2>&1 & echo $! > {{_dev_dir}}/serve.pid
-	@sleep 0.5
-	@# Verify it actually started
-	@if kill -0 $(cat {{_dev_dir}}/serve.pid) 2>/dev/null; then \
-	  echo "serve-dev: server running (pid $(cat {{_dev_dir}}/serve.pid))"; \
-	  echo "serve-dev: http://{{_dev_bind}}/ui"; \
-	  echo "serve-dev: log at {{_dev_dir}}/serve.log"; \
-	  echo "serve-dev: sandbox-safe one-shot: just serve-with '<command>'"; \
-	  echo "serve-dev: stop with 'just serve-stop'"; \
-	else \
-	  echo "serve-dev: ERROR — server exited immediately. Check {{_dev_dir}}/serve.log"; \
-	  cat {{_dev_dir}}/serve.log; \
-	  exit 1; \
-	fi
+	bash scripts/serve_dev.sh seed-demo {{_dev_bin}} {{_dev_pool_dir}} full serve-dev
+	bash scripts/serve_dev.sh start-detached {{_dev_bin}} {{_dev_pool_dir}} {{_dev_bind}} {{_dev_log}} {{_dev_pid}} "" serve-dev
+	@echo "serve-dev: server running (pid $(cat {{_dev_pid}}))"
+	@echo "serve-dev: http://{{_dev_bind}}/ui"
+	@echo "serve-dev: log at {{_dev_log}}"
+	@echo "serve-dev: sandbox-safe one-shot: just serve-with '<command>'"
+	@echo "serve-dev: stop with 'just serve-stop'"
 
 # Run a command while hosting a temporary dev server (sandbox-safe).
 # Example: just serve-with "agent-browser open http://127.0.0.1:9009/ui/pools/demo"
 serve-with cmd: _serve-kill
 	cargo build --bin plasmite
-	mkdir -p {{_dev_dir}}/pools
-	@if [ ! -f {{_dev_dir}}/pools/demo.plasmite ]; then \
-	  ./target/debug/plasmite --dir {{_dev_dir}}/pools pool create demo --size 1M > /dev/null; \
-	  ./target/debug/plasmite --dir {{_dev_dir}}/pools feed demo --tag deploy '{"service":"api","version":"1.0"}' > /dev/null; \
-	  ./target/debug/plasmite --dir {{_dev_dir}}/pools feed demo --tag metric '{"cpu":12.3,"rps":4200}' > /dev/null; \
-	  echo "serve-with: seeded demo pool with 2 messages"; \
-	fi
-	@set -euo pipefail; \
-	  ./target/debug/plasmite --dir {{_dev_dir}}/pools serve --bind {{_dev_bind}} > {{_dev_dir}}/serve.log 2>&1 & \
-	  pid=$$!; \
-	  trap 'kill $$pid 2>/dev/null || true' EXIT; \
-	  sleep 0.5; \
-	  if ! kill -0 $$pid 2>/dev/null; then \
-	    echo "serve-with: ERROR — server exited immediately. Check {{_dev_dir}}/serve.log"; \
-	    cat {{_dev_dir}}/serve.log; \
-	    exit 1; \
-	  fi; \
-	  {{cmd}}
+	bash scripts/serve_dev.sh seed-demo {{_dev_bin}} {{_dev_pool_dir}} full serve-with
+	bash scripts/serve_dev.sh run-with {{_dev_bin}} {{_dev_pool_dir}} {{_dev_bind}} {{_dev_log}} serve-with "{{cmd}}"
 
 # Start dev server with bearer auth enabled.
 serve-dev-auth token="devtoken": _serve-kill
 	cargo build --bin plasmite
-	mkdir -p {{_dev_dir}}/pools
-	@if [ ! -f {{_dev_dir}}/pools/demo.plasmite ]; then \
-	  ./target/debug/plasmite --dir {{_dev_dir}}/pools pool create demo --size 1M > /dev/null; \
-	  ./target/debug/plasmite --dir {{_dev_dir}}/pools feed demo --tag deploy '{"service":"api","version":"1.0"}' > /dev/null; \
-	  echo "serve-dev-auth: seeded demo pool with 1 message"; \
-	fi
-	@nohup ./target/debug/plasmite --dir {{_dev_dir}}/pools serve --bind {{_dev_bind}} --token {{token}} \
-	  > {{_dev_dir}}/serve.log 2>&1 & echo $! > {{_dev_dir}}/serve.pid
-	@sleep 0.5
-	@if kill -0 $(cat {{_dev_dir}}/serve.pid) 2>/dev/null; then \
-	  echo "serve-dev-auth: server running (pid $(cat {{_dev_dir}}/serve.pid))"; \
-	  echo "serve-dev-auth: http://{{_dev_bind}}/ui?token={{token}}"; \
-	  echo "serve-dev-auth: auth required — token: {{token}}"; \
-	  echo "serve-dev-auth: log at {{_dev_dir}}/serve.log"; \
-	  echo "serve-dev-auth: stop with 'just serve-stop'"; \
-	else \
-	  echo "serve-dev-auth: ERROR — server exited immediately. Check {{_dev_dir}}/serve.log"; \
-	  cat {{_dev_dir}}/serve.log; \
-	  exit 1; \
-	fi
+	bash scripts/serve_dev.sh seed-demo {{_dev_bin}} {{_dev_pool_dir}} auth serve-dev-auth
+	bash scripts/serve_dev.sh start-detached {{_dev_bin}} {{_dev_pool_dir}} {{_dev_bind}} {{_dev_log}} {{_dev_pid}} {{token}} serve-dev-auth
+	@echo "serve-dev-auth: server running (pid $(cat {{_dev_pid}}))"
+	@echo "serve-dev-auth: http://{{_dev_bind}}/ui?token={{token}}"
+	@echo "serve-dev-auth: auth required — token: {{token}}"
+	@echo "serve-dev-auth: log at {{_dev_log}}"
+	@echo "serve-dev-auth: stop with 'just serve-stop'"
 
 # Show status of the dev server.
 serve-status:
-	@if [ -f {{_dev_dir}}/serve.pid ] && kill -0 $(cat {{_dev_dir}}/serve.pid) 2>/dev/null; then \
-	  echo "serve-status: running (pid $(cat {{_dev_dir}}/serve.pid))"; \
+	@if [ -f {{_dev_pid}} ] && kill -0 $(cat {{_dev_pid}}) 2>/dev/null; then \
+	  echo "serve-status: running (pid $(cat {{_dev_pid}}))"; \
 	  echo "serve-status: http://{{_dev_bind}}/ui"; \
-	  echo "serve-status: log at {{_dev_dir}}/serve.log"; \
+	  echo "serve-status: log at {{_dev_log}}"; \
 	else \
 	  echo "serve-status: not running"; \
 	fi
@@ -232,18 +191,18 @@ serve-stop: _serve-kill
 
 # Tail the dev server log.
 serve-log:
-	@if [ -f {{_dev_dir}}/serve.log ]; then tail -40 {{_dev_dir}}/serve.log; else echo "serve-log: no log file"; fi
+	@if [ -f {{_dev_log}} ]; then tail -40 {{_dev_log}}; else echo "serve-log: no log file"; fi
 
 # Internal: kill any existing dev server.
 _serve-kill:
-	@if [ -f {{_dev_dir}}/serve.pid ]; then \
-	  pid=$(cat {{_dev_dir}}/serve.pid); \
+	@if [ -f {{_dev_pid}} ]; then \
+	  pid=$(cat {{_dev_pid}}); \
 	  if kill -0 $pid 2>/dev/null; then \
 	    kill $pid 2>/dev/null || true; \
 	    echo "serve: killed previous server (pid $pid)"; \
 	    sleep 0.3; \
 	  fi; \
-	  rm -f {{_dev_dir}}/serve.pid; \
+	  rm -f {{_dev_pid}}; \
 	fi
 	@# Also clean up orphan listeners on the dev port in case pidfile state was lost/stale.
 	@for pid in $(lsof -nP -tiTCP:{{_dev_port}} -sTCP:LISTEN 2>/dev/null || true); do \

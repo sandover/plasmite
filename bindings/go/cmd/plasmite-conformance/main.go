@@ -89,6 +89,42 @@ func run() error {
 	}
 	defer client.Close()
 
+	runners := map[string]func(map[string]any, int, *string) error{
+		"create_pool": func(step map[string]any, index int, stepID *string) error {
+			return runCreatePool(client, step, index, stepID)
+		},
+		"append": func(step map[string]any, index int, stepID *string) error {
+			return runAppend(client, step, index, stepID)
+		},
+		"fetch": func(step map[string]any, index int, stepID *string) error {
+			return runGet(client, step, index, stepID)
+		},
+		"get": func(step map[string]any, index int, stepID *string) error {
+			return runGet(client, step, index, stepID)
+		},
+		"tail": func(step map[string]any, index int, stepID *string) error {
+			return runTail(client, step, index, stepID)
+		},
+		"list_pools": func(step map[string]any, index int, stepID *string) error {
+			return runListPools(step, index, stepID, workdirPath)
+		},
+		"pool_info": func(step map[string]any, index int, stepID *string) error {
+			return runPoolInfo(repoRoot, workdirPath, step, index, stepID)
+		},
+		"delete_pool": func(step map[string]any, index int, stepID *string) error {
+			return runDeletePool(step, index, stepID, workdirPath)
+		},
+		"spawn_poke": func(step map[string]any, index int, stepID *string) error {
+			return runSpawnPoke(repoRoot, workdirPath, step, index, stepID)
+		},
+		"corrupt_pool_header": func(step map[string]any, index int, stepID *string) error {
+			return runCorruptPoolHeader(step, index, stepID, workdirPath)
+		},
+		"chmod_path": func(step map[string]any, index int, stepID *string) error {
+			return runChmodPath(step, index, stepID)
+		},
+	}
+
 	for index, stepValue := range steps {
 		step, ok := stepValue.(map[string]any)
 		if !ok {
@@ -102,49 +138,12 @@ func run() error {
 		if !ok {
 			return stepErr(index, stepID, "missing op")
 		}
-		switch op {
-		case "create_pool":
-			if err := runCreatePool(client, step, index, stepID); err != nil {
-				return err
-			}
-		case "append":
-			if err := runAppend(client, step, index, stepID); err != nil {
-				return err
-			}
-		case "fetch":
-			if err := runGet(client, step, index, stepID); err != nil {
-				return err
-			}
-		case "tail":
-			if err := runTail(client, step, index, stepID); err != nil {
-				return err
-			}
-		case "list_pools":
-			if err := runListPools(step, index, stepID, workdirPath); err != nil {
-				return err
-			}
-		case "pool_info":
-			if err := runPoolInfo(repoRoot, workdirPath, step, index, stepID); err != nil {
-				return err
-			}
-		case "delete_pool":
-			if err := runDeletePool(step, index, stepID, workdirPath); err != nil {
-				return err
-			}
-		case "spawn_poke":
-			if err := runSpawnPoke(repoRoot, workdirPath, step, index, stepID); err != nil {
-				return err
-			}
-		case "corrupt_pool_header":
-			if err := runCorruptPoolHeader(step, index, stepID, workdirPath); err != nil {
-				return err
-			}
-		case "chmod_path":
-			if err := runChmodPath(step, index, stepID); err != nil {
-				return err
-			}
-		default:
+		runner, ok := runners[op]
+		if !ok {
 			return stepErr(index, stepID, fmt.Sprintf("unknown op: %s", op))
+		}
+		if err := runner(step, index, stepID); err != nil {
+			return err
 		}
 	}
 
@@ -179,192 +178,169 @@ func runCreatePool(client *plasmite.Client, step map[string]any, index int, step
 }
 
 func runAppend(client *plasmite.Client, step map[string]any, index int, stepID *string) error {
-	poolRef, err := poolRefFromStep(step, index, stepID)
-	if err != nil {
-		return err
-	}
-	pool, err := client.OpenPool(poolRef)
-	if err != nil {
-		return validateExpectError(step["expect"], err, index, stepID)
-	}
-	defer pool.Close()
-
-	input, ok := step["input"].(map[string]any)
-	if !ok {
-		return stepErr(index, stepID, "missing input")
-	}
-	data, ok := input["data"]
-	if !ok {
-		return stepErr(index, stepID, "missing input.data")
-	}
-	var tags []string
-	if raw, ok := input["tags"].([]any); ok {
-		tags, err = parseStringArray(raw)
-		if err != nil {
-			return stepErr(index, stepID, err.Error())
+	return withOpenPool(client, step, index, stepID, func(pool api.Pool) error {
+		input, ok := step["input"].(map[string]any)
+		if !ok {
+			return stepErr(index, stepID, "missing input")
 		}
-	}
+		data, ok := input["data"]
+		if !ok {
+			return stepErr(index, stepID, "missing input.data")
+		}
+		var tags []string
+		if raw, ok := input["tags"].([]any); ok {
+			parsedTags, err := parseStringArray(raw)
+			if err != nil {
+				return stepErr(index, stepID, err.Error())
+			}
+			tags = parsedTags
+		}
 
-	msg, err := pool.Append(data, tags, plasmite.WithDurability(plasmite.DurabilityFast))
-	if err != nil {
-		return validateExpectError(step["expect"], err, index, stepID)
-	}
-	if err := validateExpectError(step["expect"], nil, index, stepID); err != nil {
-		return err
-	}
+		msg, err := pool.Append(data, tags, plasmite.WithDurability(plasmite.DurabilityFast))
+		if err != nil {
+			return validateExpectError(step["expect"], err, index, stepID)
+		}
+		if err := validateExpectError(step["expect"], nil, index, stepID); err != nil {
+			return err
+		}
 
-	if expect, ok := step["expect"].(map[string]any); ok {
-		if rawSeq, ok := expect["seq"].(float64); ok {
-			if msg.Seq != uint64(rawSeq) {
-				return stepErr(index, stepID, fmt.Sprintf("expected seq %.0f, got %d", rawSeq, msg.Seq))
+		if expect, ok := step["expect"].(map[string]any); ok {
+			if rawSeq, ok := expect["seq"].(float64); ok {
+				if msg.Seq != uint64(rawSeq) {
+					return stepErr(index, stepID, fmt.Sprintf("expected seq %.0f, got %d", rawSeq, msg.Seq))
+				}
 			}
 		}
-	}
 
-	return nil
+		return nil
+	})
 }
 
 func runGet(client *plasmite.Client, step map[string]any, index int, stepID *string) error {
-	poolRef, err := poolRefFromStep(step, index, stepID)
-	if err != nil {
-		return err
-	}
-	pool, err := client.OpenPool(poolRef)
-	if err != nil {
-		return validateExpectError(step["expect"], err, index, stepID)
-	}
-	defer pool.Close()
+	return withOpenPool(client, step, index, stepID, func(pool api.Pool) error {
+		input, ok := step["input"].(map[string]any)
+		if !ok {
+			return stepErr(index, stepID, "missing input")
+		}
+		seqRaw, ok := input["seq"].(float64)
+		if !ok {
+			return stepErr(index, stepID, "missing input.seq")
+		}
 
-	input, ok := step["input"].(map[string]any)
-	if !ok {
-		return stepErr(index, stepID, "missing input")
-	}
-	seqRaw, ok := input["seq"].(float64)
-	if !ok {
-		return stepErr(index, stepID, "missing input.seq")
-	}
+		msg, err := pool.Get(uint64(seqRaw))
+		if err != nil {
+			return validateExpectError(step["expect"], err, index, stepID)
+		}
+		if err := validateExpectError(step["expect"], nil, index, stepID); err != nil {
+			return err
+		}
 
-	msg, err := pool.Get(uint64(seqRaw))
-	if err != nil {
-		return validateExpectError(step["expect"], err, index, stepID)
-	}
-	if err := validateExpectError(step["expect"], nil, index, stepID); err != nil {
-		return err
-	}
+		parsed := fromBindingMessage(msg)
+		if err := expectData(step, parsed.Data, index, stepID); err != nil {
+			return err
+		}
+		if err := expectTags(step, parsed.Meta.Tags, index, stepID); err != nil {
+			return err
+		}
 
-	parsed := fromBindingMessage(msg)
-	if err := expectData(step, parsed.Data, index, stepID); err != nil {
-		return err
-	}
-	if err := expectTags(step, parsed.Meta.Tags, index, stepID); err != nil {
-		return err
-	}
-
-	return nil
+		return nil
+	})
 }
 
 func runTail(client *plasmite.Client, step map[string]any, index int, stepID *string) error {
-	poolRef, err := poolRefFromStep(step, index, stepID)
-	if err != nil {
-		return err
-	}
-	pool, err := client.OpenPool(poolRef)
-	if err != nil {
-		return validateExpectError(step["expect"], err, index, stepID)
-	}
-	defer pool.Close()
-
-	input, _ := step["input"].(map[string]any)
-	var since *uint64
-	var max *uint64
-	if input != nil {
-		if raw, ok := input["since_seq"].(float64); ok {
-			val := uint64(raw)
-			since = &val
+	return withOpenPool(client, step, index, stepID, func(pool api.Pool) error {
+		input, _ := step["input"].(map[string]any)
+		var since *uint64
+		var max *uint64
+		if input != nil {
+			if raw, ok := input["since_seq"].(float64); ok {
+				val := uint64(raw)
+				since = &val
+			}
+			if raw, ok := input["max"].(float64); ok {
+				val := uint64(raw)
+				max = &val
+			}
 		}
-		if raw, ok := input["max"].(float64); ok {
-			val := uint64(raw)
+
+		expectMessages, ordered, err := expectedMessages(step, index, stepID)
+		if err != nil {
+			return err
+		}
+		if max == nil {
+			val := uint64(len(expectMessages))
 			max = &val
 		}
-	}
 
-	expectMessages, ordered, err := expectedMessages(step, index, stepID)
-	if err != nil {
-		return err
-	}
-	if max == nil {
-		val := uint64(len(expectMessages))
-		max = &val
-	}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+		out, errs := pool.Tail(ctx, plasmite.TailOptions{
+			SinceSeq:    since,
+			MaxMessages: max,
+			Timeout:     500 * time.Millisecond,
+			Buffer:      8,
+		})
 
-	out, errs := pool.Tail(ctx, plasmite.TailOptions{
-		SinceSeq:    since,
-		MaxMessages: max,
-		Timeout:     500 * time.Millisecond,
-		Buffer:      8,
-	})
-
-	var messages []message
-	for msg := range out {
-		messages = append(messages, fromBindingMessage(msg))
-		if uint64(len(messages)) >= *max {
-			break
-		}
-	}
-	select {
-	case err := <-errs:
-		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
-			return validateExpectError(step["expect"], err, index, stepID)
-		}
-	default:
-	}
-
-	if len(messages) != len(expectMessages) {
-		return stepErr(index, stepID, fmt.Sprintf("expected %d messages, got %d", len(expectMessages), len(messages)))
-	}
-	for i := 1; i < len(messages); i++ {
-		if messages[i-1].Seq >= messages[i].Seq {
-			return stepErr(index, stepID, "tail messages out of order")
-		}
-	}
-	if ordered {
-		for idx, expected := range expectMessages {
-			actual := messages[idx]
-			if !reflect.DeepEqual(expected.Data, actual.Data) {
-				return stepErr(index, stepID, "data mismatch")
-			}
-			if expected.Tags != nil && !reflect.DeepEqual(expected.Tags, actual.Meta.Tags) {
-				return stepErr(index, stepID, "tags mismatch")
-			}
-		}
-	} else {
-		used := make([]bool, len(messages))
-		for _, expected := range expectMessages {
-			found := false
-			for idx, actual := range messages {
-				if used[idx] {
-					continue
-				}
-				if !reflect.DeepEqual(expected.Data, actual.Data) {
-					continue
-				}
-				if expected.Tags != nil && !reflect.DeepEqual(expected.Tags, actual.Meta.Tags) {
-					continue
-				}
-				used[idx] = true
-				found = true
+		var messages []message
+		for msg := range out {
+			messages = append(messages, fromBindingMessage(msg))
+			if uint64(len(messages)) >= *max {
 				break
 			}
-			if !found {
-				return stepErr(index, stepID, "message mismatch")
+		}
+		select {
+		case err := <-errs:
+			if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+				return validateExpectError(step["expect"], err, index, stepID)
+			}
+		default:
+		}
+
+		if len(messages) != len(expectMessages) {
+			return stepErr(index, stepID, fmt.Sprintf("expected %d messages, got %d", len(expectMessages), len(messages)))
+		}
+		for i := 1; i < len(messages); i++ {
+			if messages[i-1].Seq >= messages[i].Seq {
+				return stepErr(index, stepID, "tail messages out of order")
 			}
 		}
-	}
+		if ordered {
+			for idx, expected := range expectMessages {
+				actual := messages[idx]
+				if !reflect.DeepEqual(expected.Data, actual.Data) {
+					return stepErr(index, stepID, "data mismatch")
+				}
+				if expected.Tags != nil && !reflect.DeepEqual(expected.Tags, actual.Meta.Tags) {
+					return stepErr(index, stepID, "tags mismatch")
+				}
+			}
+		} else {
+			used := make([]bool, len(messages))
+			for _, expected := range expectMessages {
+				found := false
+				for idx, actual := range messages {
+					if used[idx] {
+						continue
+					}
+					if !reflect.DeepEqual(expected.Data, actual.Data) {
+						continue
+					}
+					if expected.Tags != nil && !reflect.DeepEqual(expected.Tags, actual.Meta.Tags) {
+						continue
+					}
+					used[idx] = true
+					found = true
+					break
+				}
+				if !found {
+					return stepErr(index, stepID, "message mismatch")
+				}
+			}
+		}
 
-	return validateExpectError(step["expect"], nil, index, stepID)
+		return validateExpectError(step["expect"], nil, index, stepID)
+	})
 }
 
 func runListPools(step map[string]any, index int, stepID *string, workdirPath string) error {
@@ -812,6 +788,25 @@ func errorKindLabel(kind plasmite.ErrorKind) string {
 	default:
 		return "Internal"
 	}
+}
+
+func withOpenPool(
+	client *plasmite.Client,
+	step map[string]any,
+	index int,
+	stepID *string,
+	run func(api.Pool) error,
+) error {
+	poolRef, err := poolRefFromStep(step, index, stepID)
+	if err != nil {
+		return err
+	}
+	pool, err := client.OpenPool(poolRef)
+	if err != nil {
+		return validateExpectError(step["expect"], err, index, stepID)
+	}
+	defer pool.Close()
+	return run(pool)
 }
 
 func poolRefFromStep(step map[string]any, index int, stepID *string) (plasmite.PoolRef, error) {
