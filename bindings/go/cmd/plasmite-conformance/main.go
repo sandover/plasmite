@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sandover/plasmite/bindings/go/plasmite/api"
 	plasmite "github.com/sandover/plasmite/bindings/go/plasmite/local"
 )
 
@@ -204,7 +205,7 @@ func runAppend(client *plasmite.Client, step map[string]any, index int, stepID *
 		}
 	}
 
-	messageBytes, err := pool.Append(data, tags, plasmite.DurabilityFast)
+	msg, err := pool.Append(data, tags, plasmite.WithDurability(plasmite.DurabilityFast))
 	if err != nil {
 		return validateExpectError(step["expect"], err, index, stepID)
 	}
@@ -214,10 +215,6 @@ func runAppend(client *plasmite.Client, step map[string]any, index int, stepID *
 
 	if expect, ok := step["expect"].(map[string]any); ok {
 		if rawSeq, ok := expect["seq"].(float64); ok {
-			msg, err := parseMessage(messageBytes)
-			if err != nil {
-				return stepErr(index, stepID, fmt.Sprintf("failed to parse message: %v", err))
-			}
 			if msg.Seq != uint64(rawSeq) {
 				return stepErr(index, stepID, fmt.Sprintf("expected seq %.0f, got %d", rawSeq, msg.Seq))
 			}
@@ -247,7 +244,7 @@ func runGet(client *plasmite.Client, step map[string]any, index int, stepID *str
 		return stepErr(index, stepID, "missing input.seq")
 	}
 
-	messageBytes, err := pool.Get(uint64(seqRaw))
+	msg, err := pool.Get(uint64(seqRaw))
 	if err != nil {
 		return validateExpectError(step["expect"], err, index, stepID)
 	}
@@ -255,14 +252,11 @@ func runGet(client *plasmite.Client, step map[string]any, index int, stepID *str
 		return err
 	}
 
-	msg, err := parseMessage(messageBytes)
-	if err != nil {
-		return stepErr(index, stepID, fmt.Sprintf("failed to parse message: %v", err))
-	}
-	if err := expectData(step, msg.Data, index, stepID); err != nil {
+	parsed := fromBindingMessage(msg)
+	if err := expectData(step, parsed.Data, index, stepID); err != nil {
 		return err
 	}
-	if err := expectTags(step, msg.Meta.Tags, index, stepID); err != nil {
+	if err := expectTags(step, parsed.Meta.Tags, index, stepID); err != nil {
 		return err
 	}
 
@@ -315,11 +309,7 @@ func runTail(client *plasmite.Client, step map[string]any, index int, stepID *st
 
 	var messages []message
 	for msg := range out {
-		parsed, err := parseMessage(msg)
-		if err != nil {
-			return stepErr(index, stepID, fmt.Sprintf("failed to parse message: %v", err))
-		}
-		messages = append(messages, parsed)
+		messages = append(messages, fromBindingMessage(msg))
 		if uint64(len(messages)) >= *max {
 			break
 		}
@@ -849,12 +839,21 @@ func resolvePoolPath(pool string, workdirPath string) string {
 	return filepath.Join(workdirPath, pool+".plasmite")
 }
 
-func parseMessage(payload []byte) (message, error) {
-	var msg message
-	if err := json.Unmarshal(payload, &msg); err != nil {
-		return message{}, err
+func fromBindingMessage(msg *api.Message) message {
+	if msg == nil {
+		return message{}
 	}
-	return msg, nil
+	var data any
+	_ = json.Unmarshal(msg.Data, &data)
+	return message{
+		Seq: msg.Seq,
+		Meta: struct {
+			Tags []string `json:"tags"`
+		}{
+			Tags: append([]string(nil), msg.Meta.Tags...),
+		},
+		Data: data,
+	}
 }
 
 func parseStringArray(values []any) ([]string, error) {

@@ -20,14 +20,6 @@ import (
 	"time"
 )
 
-type message struct {
-	Seq  uint64 `json:"seq"`
-	Meta struct {
-		Tags []string `json:"tags"`
-	} `json:"meta"`
-	Data map[string]any `json:"data"`
-}
-
 func TestAppendGetLargePayload(t *testing.T) {
 	temp := t.TempDir()
 	poolDir := filepath.Join(temp, "pools")
@@ -49,30 +41,73 @@ func TestAppendGetLargePayload(t *testing.T) {
 	payload := strings.Repeat("x", 64*1024)
 	data := map[string]any{"blob": payload}
 	tags := []string{"alpha", "beta", "gamma"}
-	msgBytes, err := pool.Append(data, tags, DurabilityFast)
+	msg, err := pool.Append(data, tags, WithDurability(DurabilityFast))
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
-	var msg message
-	if err := json.Unmarshal(msgBytes, &msg); err != nil {
-		t.Fatalf("parse append: %v", err)
+	decoded, err := decodeObject(msg.Data)
+	if err != nil {
+		t.Fatalf("decode append: %v", err)
 	}
-	if msg.Data["blob"] != payload {
+	if decoded["blob"] != payload {
 		t.Fatalf("append payload mismatch")
 	}
 	if len(msg.Meta.Tags) != len(tags) {
 		t.Fatalf("tags mismatch")
 	}
 
-	getBytes, err := pool.Get(msg.Seq)
+	getMsg, err := pool.Get(msg.Seq)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if err := json.Unmarshal(getBytes, &msg); err != nil {
-		t.Fatalf("parse get: %v", err)
+	decodedGet, err := decodeObject(getMsg.Data)
+	if err != nil {
+		t.Fatalf("decode get: %v", err)
 	}
-	if msg.Data["blob"] != payload {
+	if decodedGet["blob"] != payload {
 		t.Fatalf("get payload mismatch")
+	}
+}
+
+func TestClientPoolCreateThenReopen(t *testing.T) {
+	temp := t.TempDir()
+	poolDir := filepath.Join(temp, "pools")
+	if err := os.MkdirAll(poolDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	client, err := NewClient(poolDir)
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	defer client.Close()
+
+	first, err := client.Pool(PoolRefName("work"), 1024*1024)
+	if err != nil {
+		t.Fatalf("pool create/open first: %v", err)
+	}
+	defer first.Close()
+
+	second, err := client.Pool(PoolRefName("work"), 2*1024*1024)
+	if err != nil {
+		t.Fatalf("pool create/open second: %v", err)
+	}
+	defer second.Close()
+
+	msg, err := first.Append(map[string]any{"kind": "created"}, []string{"alpha"}, WithDurability(DurabilityFast))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	getMsg, err := second.Get(msg.Seq)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	decoded, err := decodeObject(getMsg.Data)
+	if err != nil {
+		t.Fatalf("decode get: %v", err)
+	}
+	if decoded["kind"] != "created" {
+		t.Fatalf("expected created kind")
 	}
 }
 
@@ -94,7 +129,7 @@ func TestTailCancelAndResume(t *testing.T) {
 	}
 	defer pool.Close()
 
-	_, err = pool.Append(map[string]any{"n": 1}, nil, DurabilityFast)
+	_, err = pool.Append(map[string]any{"n": 1}, nil, WithDurability(DurabilityFast))
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
@@ -120,7 +155,7 @@ func TestTailCancelAndResume(t *testing.T) {
 		t.Fatalf("expected cancellation error")
 	}
 
-	_, err = pool.Append(map[string]any{"n": 2}, nil, DurabilityFast)
+	_, err = pool.Append(map[string]any{"n": 2}, nil, WithDurability(DurabilityFast))
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
@@ -154,10 +189,10 @@ func TestTailFiltersByTags(t *testing.T) {
 	}
 	defer pool.Close()
 
-	if _, err := pool.Append(map[string]any{"kind": "drop"}, []string{"drop"}, DurabilityFast); err != nil {
+	if _, err := pool.Append(map[string]any{"kind": "drop"}, []string{"drop"}, WithDurability(DurabilityFast)); err != nil {
 		t.Fatalf("append drop: %v", err)
 	}
-	if _, err := pool.Append(map[string]any{"kind": "keep"}, []string{"keep"}, DurabilityFast); err != nil {
+	if _, err := pool.Append(map[string]any{"kind": "keep"}, []string{"keep"}, WithDurability(DurabilityFast)); err != nil {
 		t.Fatalf("append keep: %v", err)
 	}
 
@@ -172,12 +207,12 @@ func TestTailFiltersByTags(t *testing.T) {
 
 	select {
 	case msg := <-out:
-		var parsed message
-		if err := json.Unmarshal(msg, &parsed); err != nil {
-			t.Fatalf("unmarshal: %v", err)
+		decoded, err := decodeObject(msg.Data)
+		if err != nil {
+			t.Fatalf("decode: %v", err)
 		}
-		if parsed.Data["kind"] != "keep" {
-			t.Fatalf("expected keep message, got %v", parsed.Data["kind"])
+		if decoded["kind"] != "keep" {
+			t.Fatalf("expected keep message, got %v", decoded["kind"])
 		}
 	case err := <-errs:
 		t.Fatalf("unexpected error: %v", err)
@@ -203,7 +238,7 @@ func TestCloseIdempotent(t *testing.T) {
 	pool.Close()
 	pool.Close()
 
-	_, err = pool.Append(map[string]any{"n": 1}, nil, DurabilityFast)
+	_, err = pool.Append(map[string]any{"n": 1}, nil, WithDurability(DurabilityFast))
 	if err == nil {
 		t.Fatalf("expected error on closed pool")
 	}
@@ -271,13 +306,9 @@ func TestLite3AppendGetTail(t *testing.T) {
 	}
 	defer pool.Close()
 
-	msgBytes, err := pool.Append(map[string]any{"x": 1}, []string{"alpha"}, DurabilityFast)
+	msg, err := pool.Append(map[string]any{"x": 1}, []string{"alpha"}, WithDurability(DurabilityFast))
 	if err != nil {
 		t.Fatalf("append json: %v", err)
-	}
-	var msg message
-	if err := json.Unmarshal(msgBytes, &msg); err != nil {
-		t.Fatalf("parse append: %v", err)
 	}
 
 	seedFrame, err := pool.GetLite3(msg.Seq)
@@ -379,4 +410,12 @@ func TestLite3AppendRejectsInvalidPayload(t *testing.T) {
 
 func uint64Ptr(val uint64) *uint64 {
 	return &val
+}
+
+func decodeObject(raw json.RawMessage) (map[string]any, error) {
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

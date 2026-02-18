@@ -21,31 +21,28 @@ toolchain or compile step needed.
 ### Local pools (native, in-process)
 
 ```js
-const { Client, Durability, parseMessage } = require("plasmite");
+const { Client, Durability, ErrorKind, PlasmiteNativeError } = require("plasmite");
 
-// Open a client pointed at a directory (created if it doesn't exist)
-const client = new Client("./data");
+using client = new Client("./data");
+using pool = client.pool("events", 64 * 1024 * 1024);
 
-// Create a 64 MB pool called "events"
-const pool = client.createPool("events", 64 * 1024 * 1024);
+const msg = pool.append({ kind: "signup", user: "alice" }, ["user-event"], Durability.Flush);
+console.log(msg.seq, msg.tags, msg.data);
+// => 1n [ 'user-event' ] { kind: 'signup', user: 'alice' }
 
-// Append a JSON message with tags
-pool.append({ kind: "signup", user: "alice" }, ["user-event"], Durability.Flush);
+const fetched = pool.get(msg.seq);
+console.log(fetched.data.user);
+// => "alice"
 
-// Read it back by sequence number
-const msg = pool.get(1n);
-console.log(parseMessage(msg).data);
-// => { kind: "signup", user: "alice" }
-
-// Stream messages as they arrive
-const stream = pool.openStream();
-for (const frame of stream) {
-  console.log(parseMessage(frame));
+try {
+  client.openPool("missing");
+} catch (err) {
+  if (err instanceof PlasmiteNativeError && err.kind === ErrorKind.NotFound) {
+    console.log("pool not found");
+  } else {
+    throw err;
+  }
 }
-stream.close();
-
-pool.close();
-client.close();
 ```
 
 ### Remote pools (HTTP/JSON)
@@ -56,27 +53,28 @@ and write pools over the network.
 ```js
 const { RemoteClient } = require("plasmite");
 
-const client = new RemoteClient("http://127.0.0.1:9700");
-// With auth: new RemoteClient("http://...", { token: "secret" })
+(async () => {
+  const client = new RemoteClient("http://127.0.0.1:9700");
+  // With auth: new RemoteClient("http://...", { token: "secret" })
 
-const pool = await client.openPool("events");
+  const pool = await client.openPool("events");
 
-// Append — accepts plain objects, serialized as JSON for you
-const message = await pool.append(
-  { kind: "deploy", sha: "abc123" },
-  ["ops"],
-);
-console.log(message.seq); // => 1
+  // Append — accepts plain objects, serialized as JSON for you
+  const message = await pool.append(
+    { kind: "deploy", sha: "abc123" },
+    ["ops"],
+  );
+  console.log(message.seq); // => 1n
 
-// Read by sequence number
-const got = await pool.get(1);
-console.log(got.data); // => { kind: "deploy", sha: "abc123" }
+  // Read by sequence number
+  const got = await pool.get(1);
+  console.log(got.data); // => { kind: "deploy", sha: "abc123" }
 
-// Tail — live-stream new messages (JSONL under the hood)
-const tail = await pool.tail({ sinceSeq: 0, tags: ["ops"] });
-const next = await tail.next(); // resolves on next matching message
-console.log(next);
-tail.cancel();
+  // Tail — live-stream new messages (JSONL under the hood)
+  for await (const msg of pool.tail({ sinceSeq: 0, tags: ["ops"], maxMessages: 1 })) {
+    console.log(msg.seq, msg.tags, msg.data);
+  }
+})();
 ```
 
 ## API
@@ -88,26 +86,31 @@ tail.cancel();
 | `Client(dir)` | | Open a pool directory |
 | | `.createPool(name, sizeBytes)` | Create a new pool (returns `Pool`) |
 | | `.openPool(name)` | Open an existing pool (returns `Pool`) |
+| | `.pool(name, sizeBytes?)` | Open if present, else create |
 | | `.close()` | Release resources |
-| `Module` | `.parseMessage(buf)` | Decode a message `Buffer` to a parsed JS object |
+| | `[Symbol.dispose]()` | Alias for `.close()` to support `using` |
+| `Module` | `.parseMessage(value)` | Normalize a raw envelope or `Message` into a typed `Message` |
 | | `.replay(pool, opts?)` | Backward-compatible replay wrapper (delegates to `pool.replay`) |
 | `Pool` | `.appendJson(payload, tags, durability)` | Append JSON payload (Buffer or JSON-serializable value); returns message envelope as `Buffer` |
-| | `.append(data, tags?, durability?)` | Append any JSON-serializable value; returns message `Buffer` |
+| | `.append(data, tags?, durability?)` | Append any JSON-serializable value; returns typed `Message` |
 | | `.appendLite3(buf, durability?)` | Append raw bytes (lite3 framing); returns sequence `bigint` |
-| | `.get(seq)` | Alias for `.getJson(seq)` |
+| | `.get(seq)` | Get message by sequence number; returns typed `Message` |
 | | `.getJson(seq)` | Get message by sequence number; returns `Buffer` |
 | | `.getLite3(seq)` | Get lite3 frame by sequence number |
-| | `.tail(opts?)` | Async generator for local tailing with optional tag filter |
-| | `.replay(opts?)` | Async generator replay with speed/timing controls |
+| | `.tail(opts?)` | Async generator of typed `Message` values with optional tag filter |
+| | `.replay(opts?)` | Async generator of typed `Message` values with speed/timing controls |
 | | `.openStream(sinceSeq?, max?, timeoutMs?)` | Open a message stream |
 | | `.openLite3Stream(sinceSeq?, max?, timeoutMs?)` | Open a lite3 frame stream |
 | | `.close()` | Close the pool |
+| | `[Symbol.dispose]()` | Alias for `.close()` to support `using` |
 | `Stream` | `.nextJson()` | Next message as `Buffer`, or `null` at end |
 | | `[Symbol.iterator]()` | Iterate synchronously via `for...of` |
 | | `.close()` | Close the stream |
+| | `[Symbol.dispose]()` | Alias for `.close()` |
 | `Lite3Stream` | `.next()` | Next lite3 frame, or `null` at end |
 | | `[Symbol.iterator]()` | Iterate synchronously via `for...of` |
 | | `.close()` | Close the stream |
+| | `[Symbol.dispose]()` | Alias for `.close()` |
 
 **Durability** controls fsync behavior:
 - `Durability.Fast` — buffered writes (higher throughput)
@@ -128,19 +131,17 @@ Sequence numbers accept `number` or `bigint`.
 | | `.deletePool(name)` | Delete a pool |
 | `RemotePool` | `.append(data, tags?, durability?)` | Append a message (data is any JSON-serializable value) |
 | | `.get(seq)` | Get a message by sequence number |
-| | `.tail(opts?)` | Live-tail messages (returns `RemoteTail`) |
-| `RemoteTail` | `.next()` | Await next message (resolves to message or `null`) |
-| | `.cancel()` | Stop the tail stream |
+| | `.tail(opts?)` | Live-tail typed messages (`AsyncGenerator<Message>`) |
 
 ### Tail options
 
 ```js
-await pool.tail({
+const options = {
   sinceSeq: 0,         // start after this sequence number
   maxMessages: 100,    // stop after N messages
   timeoutMs: 5000,     // stop after N ms of inactivity
   tags: ["signup"],    // filter by exact tag match (AND across tags)
-});
+};
 ```
 
 ### Error handling
@@ -152,7 +153,7 @@ try {
   pool.get(999n);
 } catch (err) {
   if (err instanceof PlasmiteNativeError) {
-    console.log(err.kind);   // "NotFound"
+    console.log(err.kind === ErrorKind.NotFound); // true
     console.log(err.seq);    // 999
   }
 }

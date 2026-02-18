@@ -108,8 +108,8 @@ def run_append(client: Client, step: dict[str, Any], index: int, step_id: str | 
 
     if step.get("expect", {}).get("seq") is not None:
         message = parse_message(result.value)
-        if message.get("seq") != step["expect"]["seq"]:
-            raise step_err(index, step_id, f"expected seq {step['expect']['seq']}, got {message.get('seq')}")
+        if message.seq != step["expect"]["seq"]:
+            raise step_err(index, step_id, f"expected seq {step['expect']['seq']}, got {message.seq}")
 
 
 def run_get(client: Client, step: dict[str, Any], index: int, step_id: str | None) -> None:
@@ -131,9 +131,9 @@ def run_get(client: Client, step: dict[str, Any], index: int, step_id: str | Non
     validate_expect_error(step.get("expect"), None, index, step_id)
 
     message = parse_message(result.value)
-    if step.get("expect", {}).get("data") is not None and step["expect"]["data"] != message.get("data"):
+    if step.get("expect", {}).get("data") is not None and step["expect"]["data"] != message.data:
         raise step_err(index, step_id, "data mismatch")
-    if step.get("expect", {}).get("tags") is not None and step["expect"]["tags"] != message.get("meta", {}).get("tags"):
+    if step.get("expect", {}).get("tags") is not None and step["expect"]["tags"] != message.tags:
         raise step_err(index, step_id, "tags mismatch")
 
 
@@ -178,23 +178,23 @@ def run_tail(client: Client, step: dict[str, Any], index: int, step_id: str | No
         raise step_err(index, step_id, f"expected {len(expected['messages'])} messages, got {len(messages)}")
 
     for idx in range(1, len(messages)):
-        if messages[idx - 1]["seq"] >= messages[idx]["seq"]:
+        if messages[idx - 1].seq >= messages[idx].seq:
             raise step_err(index, step_id, "tail messages out of order")
 
     if expected["ordered"]:
         for idx, entry in enumerate(expected["messages"]):
-            if entry["data"] != messages[idx]["data"]:
+            if entry["data"] != messages[idx].data:
                 raise step_err(index, step_id, "data mismatch")
-            if "tags" in entry and entry["tags"] != messages[idx]["meta"]["tags"]:
+            if "tags" in entry and entry["tags"] != messages[idx].tags:
                 raise step_err(index, step_id, "tags mismatch")
     else:
         remaining = messages[:]
         for entry in expected["messages"]:
             matched = False
             for idx, actual in enumerate(remaining):
-                if entry["data"] != actual["data"]:
+                if entry["data"] != actual.data:
                     continue
-                if "tags" in entry and entry["tags"] != actual["meta"]["tags"]:
+                if "tags" in entry and entry["tags"] != actual.tags:
                     continue
                 remaining.pop(idx)
                 matched = True

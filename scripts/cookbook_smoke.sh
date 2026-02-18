@@ -51,6 +51,53 @@ assert_file_non_empty() {
   fi
 }
 
+assert_jq_true() {
+  local file="$1"
+  local filter="$2"
+  local label="$3"
+  if ! jq -e "${filter}" "${file}" >/dev/null; then
+    fail "${label}: expected jq filter '${filter}' to be true for ${file}"
+  fi
+}
+
+run_binding_fixtures() {
+  local fixtures_dir="${WORK_DIR}/fixtures"
+  local python_out="${WORK_DIR}/python_fixture.json"
+  local node_out="${WORK_DIR}/node_fixture.json"
+  local go_out="${WORK_DIR}/go_fixture.json"
+
+  mkdir -p "${fixtures_dir}"
+
+  PYTHONPATH="${ROOT_DIR}/bindings/python" \
+    PLASMITE_LIB_DIR="${ROOT_DIR}/target/debug" \
+    python3 "${ROOT_DIR}/bindings/python/cmd/cookbook_smoke_fixture.py" "${fixtures_dir}/python-pools" >"${python_out}"
+  assert_jq_true "${python_out}" '.data.task == "resize"' "Python cookbook fixture"
+  assert_jq_true "${python_out}" '.tags == ["cookbook"]' "Python cookbook fixture"
+
+  if [[ ! -d "${ROOT_DIR}/bindings/node/node_modules" ]]; then
+    (cd "${ROOT_DIR}/bindings/node" && npm install)
+  fi
+  (cd "${ROOT_DIR}/bindings/node" && npm run build >/dev/null)
+  PLASMITE_LIB_DIR="${ROOT_DIR}/target/debug" \
+    node "${ROOT_DIR}/bindings/node/cookbook_smoke_fixture.js" "${fixtures_dir}/node-pools" >"${node_out}"
+  assert_jq_true "${node_out}" '.data.task == "resize"' "Node cookbook fixture"
+  assert_jq_true "${node_out}" '.tags == ["cookbook"]' "Node cookbook fixture"
+
+  mkdir -p "${WORK_DIR}/go-cache" "${WORK_DIR}/go-tmp"
+  (
+    cd "${ROOT_DIR}/bindings/go" && \
+      GOCACHE="${ROOT_DIR}/tmp/go-cache" \
+      GOTMPDIR="${ROOT_DIR}/tmp/go-tmp" \
+      PLASMITE_LIB_DIR="${ROOT_DIR}/target/debug" \
+      PKG_CONFIG="/usr/bin/true" \
+      CGO_CFLAGS="-I${ROOT_DIR}/include" \
+      CGO_LDFLAGS="-L${ROOT_DIR}/target/debug" \
+      go run ./cmd/cookbook-smoke-fixture "${fixtures_dir}/go-pools"
+  ) >"${go_out}"
+  assert_jq_true "${go_out}" '.data.task == "resize"' "Go cookbook fixture"
+  assert_jq_true "${go_out}" '.tags == ["cookbook"]' "Go cookbook fixture"
+}
+
 pick_port() {
   python3 - <<'PY'
 import socket
@@ -154,5 +201,7 @@ fi
 assert_contains "${remote_follow_out}" '"sensor":"temp"' "Remote Pool Access"
 
 SERVE_PID=""
+
+run_binding_fixtures
 
 echo "cookbook smoke checks passed"

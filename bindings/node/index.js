@@ -1,12 +1,13 @@
 /*
 Purpose: JavaScript entry point for the Plasmite Node binding.
-Key Exports: Client, Pool, Stream, Durability, ErrorKind, replay.
+Key Exports: Client, Pool, Message, Stream, Durability, ErrorKind, replay.
 Role: Thin wrapper around the native N-API addon.
 Invariants: Exports align with native symbols and v0 API semantics.
 Notes: Requires libplasmite to be discoverable at runtime.
 */
 
-const { RemoteClient, RemoteError, RemotePool, RemoteTail } = require("./remote");
+const { RemoteClient, RemoteError, RemotePool } = require("./remote");
+const { Message, parseMessage } = require("./message");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const path = require("node:path");
@@ -37,6 +38,16 @@ function resolveNativeAddonPath() {
 const DEFAULT_POOL_DIR = path.join(os.homedir(), ".plasmite", "pools");
 const DEFAULT_POOL_SIZE = 4 * 1024 * 1024;
 const DEFAULT_POOL_SIZE_BYTES = DEFAULT_POOL_SIZE;
+const ERROR_KIND_VALUES = Object.freeze({
+  Internal: 1,
+  Usage: 2,
+  NotFound: 3,
+  AlreadyExists: 4,
+  Busy: 5,
+  Permission: 6,
+  Corrupt: 7,
+  Io: 8,
+});
 
 let native = null;
 let nativeLoadError = null;
@@ -53,8 +64,8 @@ try {
   nativeLoadError = err;
 }
 
-const Durability = native ? native.Durability : Object.freeze({});
-const ErrorKind = native ? native.ErrorKind : Object.freeze({});
+const Durability = native ? native.Durability : Object.freeze({ Fast: 0, Flush: 1 });
+const ErrorKind = native ? native.ErrorKind : ERROR_KIND_VALUES;
 
 function makeNativeUnavailableError() {
   const reason = nativeLoadError instanceof Error ? nativeLoadError.message : "unknown load error";
@@ -105,7 +116,14 @@ function parseNativeError(err) {
       details[key] = Number.isFinite(parsed) ? parsed : undefined;
       continue;
     }
+    if (key === "kind") {
+      details.kind = mapErrorKind(value);
+      continue;
+    }
     details[key] = value;
+  }
+  if (details.kind === undefined) {
+    details.kind = ErrorKind.Io;
   }
   return new PlasmiteNativeError(err.message, details, err);
 }
@@ -114,7 +132,19 @@ function wrapNativeError(err) {
   return parseNativeError(err) ?? err;
 }
 
+function isNativeNotFoundError(err) {
+  if (!(err instanceof PlasmiteNativeError)) {
+    return false;
+  }
+  return err.kind === ErrorKind.NotFound;
+}
+
 class Client {
+  /**
+   * Create a local client bound to a pool directory.
+   * @param {string} [poolDir]
+   * @returns {Client}
+   */
   constructor(poolDir = DEFAULT_POOL_DIR) {
     if (!native) {
       throw makeNativeUnavailableError();
@@ -122,6 +152,12 @@ class Client {
     this._inner = new native.Client(poolDir);
   }
 
+  /**
+   * Create a new pool.
+   * @param {string} poolRef
+   * @param {number|bigint} [sizeBytes]
+   * @returns {Pool}
+   */
   createPool(poolRef, sizeBytes = DEFAULT_POOL_SIZE_BYTES) {
     try {
       return new Pool(this._inner.createPool(poolRef, sizeBytes));
@@ -130,6 +166,11 @@ class Client {
     }
   }
 
+  /**
+   * Open an existing pool.
+   * @param {string} poolRef
+   * @returns {Pool}
+   */
   openPool(poolRef) {
     try {
       return new Pool(this._inner.openPool(poolRef));
@@ -138,12 +179,41 @@ class Client {
     }
   }
 
+  /**
+   * Open a pool if it exists, otherwise create it.
+   * @param {string} poolRef
+   * @param {number|bigint} [sizeBytes]
+   * @returns {Pool}
+   */
+  pool(poolRef, sizeBytes = DEFAULT_POOL_SIZE_BYTES) {
+    try {
+      return this.openPool(poolRef);
+    } catch (err) {
+      if (isNativeNotFoundError(err)) {
+        return this.createPool(poolRef, sizeBytes);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Close the client handle.
+   * @returns {void}
+   */
   close() {
     this._inner.close();
+  }
+
+  [Symbol.dispose]() {
+    this.close();
   }
 }
 
 class Pool {
+  /**
+   * @param {object} inner
+   * @returns {Pool}
+   */
   constructor(inner) {
     if (!native) {
       throw makeNativeUnavailableError();
@@ -151,6 +221,13 @@ class Pool {
     this._inner = inner;
   }
 
+  /**
+   * Append JSON bytes and return raw message bytes.
+   * @param {unknown} payload
+   * @param {string[]} [tags]
+   * @param {number} [durability]
+   * @returns {Buffer}
+   */
   appendJson(payload, tags, durability) {
     const input = Buffer.isBuffer(payload)
       ? payload
@@ -162,10 +239,23 @@ class Pool {
     }
   }
 
+  /**
+   * Append payload and return parsed Message.
+   * @param {unknown} payload
+   * @param {string[]} [tags]
+   * @param {number} [durability]
+   * @returns {Message}
+   */
   append(payload, tags, durability) {
-    return this.appendJson(payload, tags, durability);
+    return parseMessage(this.appendJson(payload, tags, durability));
   }
 
+  /**
+   * Append a Lite3 frame payload.
+   * @param {Buffer} payload
+   * @param {number} [durability]
+   * @returns {bigint}
+   */
   appendLite3(payload, durability) {
     try {
       return this._inner.appendLite3(payload, durability ?? Durability.Fast);
@@ -174,6 +264,11 @@ class Pool {
     }
   }
 
+  /**
+   * Get raw message bytes by sequence.
+   * @param {number|bigint} seq
+   * @returns {Buffer}
+   */
   getJson(seq) {
     try {
       return this._inner.getJson(seq);
@@ -182,18 +277,35 @@ class Pool {
     }
   }
 
+  /**
+   * Get parsed Message by sequence.
+   * @param {number|bigint} seq
+   * @returns {Message}
+   */
   get(seq) {
-    return this.getJson(seq);
+    return parseMessage(this.getJson(seq));
   }
 
+  /**
+   * Get Lite3 frame by sequence.
+   * @param {number|bigint} seq
+   * @returns {import("./types").Lite3Frame}
+   */
   getLite3(seq) {
     try {
-      return this._inner.getLite3(seq);
+      return decorateLite3Frame(this._inner.getLite3(seq));
     } catch (err) {
       throw wrapNativeError(err);
     }
   }
 
+  /**
+   * Open a raw JSON stream.
+   * @param {number|bigint|null} sinceSeq
+   * @param {number|bigint|null} maxMessages
+   * @param {number|bigint|null} timeoutMs
+   * @returns {Stream}
+   */
   openStream(sinceSeq, maxMessages, timeoutMs) {
     try {
       return new Stream(this._inner.openStream(sinceSeq, maxMessages, timeoutMs));
@@ -202,6 +314,13 @@ class Pool {
     }
   }
 
+  /**
+   * Open a raw Lite3 stream.
+   * @param {number|bigint|null} sinceSeq
+   * @param {number|bigint|null} maxMessages
+   * @param {number|bigint|null} timeoutMs
+   * @returns {Lite3Stream}
+   */
   openLite3Stream(sinceSeq, maxMessages, timeoutMs) {
     try {
       return new Lite3Stream(
@@ -212,6 +331,11 @@ class Pool {
     }
   }
 
+  /**
+   * Tail parsed messages with optional filtering.
+   * @param {{sinceSeq?: number|bigint, maxMessages?: number|bigint, timeoutMs?: number|bigint, tags?: string[]}} [options]
+   * @returns {AsyncGenerator<Message, void, unknown>}
+   */
   async *tail(options = {}) {
     const { sinceSeq, maxMessages, timeoutMs, tags } = options;
     const requiredTags = normalizeTagFilter(tags);
@@ -238,7 +362,7 @@ class Pool {
             continue;
           }
           delivered += 1;
-          yield message;
+          yield parsed;
           if (limit !== null && delivered >= limit) {
             return;
           }
@@ -253,6 +377,11 @@ class Pool {
     }
   }
 
+  /**
+   * Replay parsed messages with original timing.
+   * @param {{speed?: number, sinceSeq?: number|bigint, maxMessages?: number|bigint, timeoutMs?: number|bigint, tags?: string[]}} [options]
+   * @returns {AsyncGenerator<Message, void, unknown>}
+   */
   async *replay(options = {}) {
     const { speed = 1.0, sinceSeq, maxMessages, timeoutMs, tags } = options;
     if (speed <= 0) {
@@ -277,7 +406,7 @@ class Pool {
           continue;
         }
         messages.push({
-          message,
+          message: parsed,
           timeMs: messageTimeMs(parsed),
         });
         if (limit !== null && messages.length >= limit) {
@@ -303,13 +432,17 @@ class Pool {
     }
   }
 
+  /**
+   * Close the pool handle.
+   * @returns {void}
+   */
   close() {
     this._inner.close();
   }
-}
 
-function parseMessage(buf) {
-  return JSON.parse(buf.toString("utf8"));
+  [Symbol.dispose]() {
+    this.close();
+  }
 }
 
 function normalizeTagFilter(tags) {
@@ -333,10 +466,10 @@ function messageHasTags(message, requiredTags) {
 }
 
 function messageTimeMs(message) {
-  if (!message || typeof message.time !== "string") {
+  if (!message || !(message.time instanceof Date)) {
     return null;
   }
-  const value = new Date(message.time).getTime();
+  const value = message.time.getTime();
   return Number.isFinite(value) ? value : null;
 }
 
@@ -351,6 +484,33 @@ function nextSinceSeq(message, fallback) {
     return message.seq + 1;
   }
   return fallback;
+}
+
+function mapErrorKind(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const mapped = ERROR_KIND_VALUES[value];
+  return mapped === undefined ? undefined : mapped;
+}
+
+function decorateLite3Frame(frame) {
+  if (!frame || typeof frame !== "object") {
+    return frame;
+  }
+  if (!Object.prototype.hasOwnProperty.call(frame, "time")) {
+    Object.defineProperty(frame, "time", {
+      configurable: false,
+      enumerable: true,
+      get() {
+        return new Date(Number(this.timestampNs) / 1_000_000);
+      },
+    });
+  }
+  return frame;
 }
 
 function normalizeOptionalCount(value, fieldName) {
@@ -389,6 +549,10 @@ function normalizePollingTimeout(timeoutMs) {
 }
 
 class Stream {
+  /**
+   * @param {object} inner
+   * @returns {Stream}
+   */
   constructor(inner) {
     if (!native) {
       throw makeNativeUnavailableError();
@@ -396,6 +560,10 @@ class Stream {
     this._inner = inner;
   }
 
+  /**
+   * Read the next raw JSON message.
+   * @returns {Buffer|null}
+   */
   nextJson() {
     try {
       return this._inner.nextJson();
@@ -404,6 +572,10 @@ class Stream {
     }
   }
 
+  /**
+   * Iterate raw JSON messages.
+   * @returns {Iterator<Buffer>}
+   */
   *[Symbol.iterator]() {
     let message;
     while ((message = this.nextJson()) !== null) {
@@ -411,12 +583,24 @@ class Stream {
     }
   }
 
+  /**
+   * Close the stream handle.
+   * @returns {void}
+   */
   close() {
     this._inner.close();
+  }
+
+  [Symbol.dispose]() {
+    this.close();
   }
 }
 
 class Lite3Stream {
+  /**
+   * @param {object} inner
+   * @returns {Lite3Stream}
+   */
   constructor(inner) {
     if (!native) {
       throw makeNativeUnavailableError();
@@ -424,14 +608,22 @@ class Lite3Stream {
     this._inner = inner;
   }
 
+  /**
+   * Read the next Lite3 frame.
+   * @returns {import("./types").Lite3Frame|null}
+   */
   next() {
     try {
-      return this._inner.next();
+      return decorateLite3Frame(this._inner.next());
     } catch (err) {
       throw wrapNativeError(err);
     }
   }
 
+  /**
+   * Iterate Lite3 frames.
+   * @returns {Iterator<import("./types").Lite3Frame>}
+   */
   *[Symbol.iterator]() {
     let frame;
     while ((frame = this.next()) !== null) {
@@ -439,11 +631,25 @@ class Lite3Stream {
     }
   }
 
+  /**
+   * Close the Lite3 stream handle.
+   * @returns {void}
+   */
   close() {
     this._inner.close();
   }
+
+  [Symbol.dispose]() {
+    this.close();
+  }
 }
 
+/**
+ * Backward-compatible replay helper.
+ * @param {Pool} pool
+ * @param {object} [options]
+ * @returns {AsyncGenerator<Message, void, unknown>}
+ */
 async function* replay(pool, options = {}) {
   yield* pool.replay(options);
 }
@@ -453,6 +659,7 @@ module.exports = {
   Pool,
   Stream,
   Lite3Stream,
+  Message,
   DEFAULT_POOL_DIR,
   DEFAULT_POOL_SIZE,
   DEFAULT_POOL_SIZE_BYTES,
@@ -462,7 +669,6 @@ module.exports = {
   RemoteClient,
   RemoteError,
   RemotePool,
-  RemoteTail,
   parseMessage,
   replay,
 };

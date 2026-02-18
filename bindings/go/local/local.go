@@ -19,6 +19,7 @@ import "C"
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -86,6 +87,10 @@ type Lite3Frame = api.Lite3Frame
 type TailOptions = api.TailOptions
 
 type ReplayOptions = api.ReplayOptions
+
+type AppendOption = api.AppendOption
+
+func WithDurability(d Durability) AppendOption { return api.WithDurability(d) }
 
 var (
 	_ api.Client      = (*Client)(nil)
@@ -171,6 +176,18 @@ func (c *Client) OpenPool(ref PoolRef) (api.Pool, error) {
 	return &Pool{ptr: cPool}, nil
 }
 
+func (c *Client) Pool(ref PoolRef, sizeBytes uint64) (api.Pool, error) {
+	pool, err := c.OpenPool(ref)
+	if err == nil {
+		return pool, nil
+	}
+	var perr *Error
+	if errors.As(err, &perr) && perr.Kind == ErrorNotFound {
+		return c.CreatePool(ref, sizeBytes)
+	}
+	return nil, err
+}
+
 func (p *Pool) Close() {
 	if p == nil || p.ptr == nil {
 		return
@@ -211,12 +228,17 @@ func (p *Pool) AppendJSON(payload []byte, tags []string, durability Durability) 
 	return copyAndFreeBuf(&cBuf), nil
 }
 
-func (p *Pool) Append(value any, tags []string, durability Durability) ([]byte, error) {
+func (p *Pool) Append(value any, tags []string, opts ...AppendOption) (*api.Message, error) {
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return nil, fmt.Errorf("plasmite: marshal payload: %w", err)
 	}
-	return p.AppendJSON(payload, tags, durability)
+	cfg := api.ApplyAppendOptions(opts...)
+	raw, err := p.AppendJSON(payload, tags, cfg.Durability)
+	if err != nil {
+		return nil, err
+	}
+	return api.DecodeMessage(raw)
 }
 
 // AppendLite3 appends a pre-encoded Lite3 payload without JSON encoding.
@@ -260,8 +282,12 @@ func (p *Pool) GetJSON(seq uint64) ([]byte, error) {
 	return copyAndFreeBuf(&cBuf), nil
 }
 
-func (p *Pool) Get(seq uint64) ([]byte, error) {
-	return p.GetJSON(seq)
+func (p *Pool) Get(seq uint64) (*api.Message, error) {
+	raw, err := p.GetJSON(seq)
+	if err != nil {
+		return nil, err
+	}
+	return api.DecodeMessage(raw)
 }
 
 // GetLite3 returns the raw Lite3 payload and metadata for the given sequence.
@@ -415,8 +441,8 @@ func (s *Lite3Stream) Close() {
 // Tail streams JSON messages on a buffered channel.
 // Backpressure: when the buffer is full, tailing blocks until the caller drains it.
 // Cancellation: the stream is reopened after Timeout to check ctx; set Timeout for responsiveness.
-func (p *Pool) Tail(ctx context.Context, opts TailOptions) (<-chan []byte, <-chan error) {
-	out := make(chan []byte, bufferSize(opts.Buffer))
+func (p *Pool) Tail(ctx context.Context, opts TailOptions) (<-chan *api.Message, <-chan error) {
+	out := make(chan *api.Message, bufferSize(opts.Buffer))
 	errs := make(chan error, 1)
 
 	go func() {
@@ -458,7 +484,7 @@ func (p *Pool) Tail(ctx context.Context, opts TailOptions) (<-chan []byte, <-cha
 			}
 
 			for {
-				msg, err := stream.NextJSON()
+				raw, err := stream.NextJSON()
 				if err == io.EOF {
 					stream.Close()
 					break
@@ -468,10 +494,14 @@ func (p *Pool) Tail(ctx context.Context, opts TailOptions) (<-chan []byte, <-cha
 					errs <- err
 					return
 				}
-				if seq, err := extractSeq(msg); err == nil {
-					next := seq + 1
-					since = &next
+				msg, err := api.DecodeMessage(raw)
+				if err != nil {
+					stream.Close()
+					errs <- err
+					return
 				}
+				next := msg.Seq + 1
+				since = &next
 				if !messageHasTags(msg, opts.Tags) {
 					continue
 				}
@@ -578,8 +608,8 @@ func (p *Pool) TailLite3(ctx context.Context, opts TailOptions) (<-chan *Lite3Fr
 
 // Replay collects all messages from the pool, then yields them with inter-message delays
 // scaled by the speed multiplier. Unlike Tail, Replay is bounded — it does not follow live writes.
-func (p *Pool) Replay(ctx context.Context, opts ReplayOptions) (<-chan []byte, <-chan error) {
-	out := make(chan []byte, 64)
+func (p *Pool) Replay(ctx context.Context, opts ReplayOptions) (<-chan *api.Message, <-chan error) {
+	out := make(chan *api.Message, 64)
 	errs := make(chan error, 1)
 
 	go func() {
@@ -598,12 +628,18 @@ func (p *Pool) Replay(ctx context.Context, opts ReplayOptions) (<-chan []byte, <
 			return
 		}
 
-		var messages [][]byte
+		var messages []*api.Message
 		for {
-			msg, err := stream.NextJSON()
+			raw, err := stream.NextJSON()
 			if err == io.EOF {
 				break
 			}
+			if err != nil {
+				stream.Close()
+				errs <- err
+				return
+			}
+			msg, err := api.DecodeMessage(raw)
 			if err != nil {
 				stream.Close()
 				errs <- err
@@ -624,7 +660,7 @@ func (p *Pool) Replay(ctx context.Context, opts ReplayOptions) (<-chan []byte, <
 
 		timestamps := make([]time.Time, len(messages))
 		for i, msg := range messages {
-			timestamps[i] = extractTime(msg)
+			timestamps[i] = msg.Time
 		}
 
 		for i, msg := range messages {
@@ -651,20 +687,6 @@ func (p *Pool) Replay(ctx context.Context, opts ReplayOptions) (<-chan []byte, <
 	}()
 
 	return out, errs
-}
-
-func extractTime(message []byte) time.Time {
-	var payload struct {
-		Time string `json:"time"`
-	}
-	if err := json.Unmarshal(message, &payload); err != nil || payload.Time == "" {
-		return time.Time{}
-	}
-	t, err := time.Parse(time.RFC3339Nano, payload.Time)
-	if err != nil {
-		return time.Time{}
-	}
-	return t
 }
 
 func copyAndFreeBuf(buf *C.plsm_buf_t) []byte {
@@ -744,30 +766,15 @@ func bufferSize(input int) int {
 	return input
 }
 
-func extractSeq(message []byte) (uint64, error) {
-	var payload struct {
-		Seq uint64 `json:"seq"`
-	}
-	if err := json.Unmarshal(message, &payload); err != nil {
-		return 0, err
-	}
-	return payload.Seq, nil
-}
-
-func messageHasTags(message []byte, required []string) bool {
+func messageHasTags(message *api.Message, required []string) bool {
 	if len(required) == 0 {
 		return true
 	}
-	var payload struct {
-		Meta struct {
-			Tags []string `json:"tags"`
-		} `json:"meta"`
-	}
-	if err := json.Unmarshal(message, &payload); err != nil {
+	if message == nil {
 		return false
 	}
-	have := make(map[string]struct{}, len(payload.Meta.Tags))
-	for _, tag := range payload.Meta.Tags {
+	have := make(map[string]struct{}, len(message.Meta.Tags))
+	for _, tag := range message.Meta.Tags {
 		have[tag] = struct{}{}
 	}
 	for _, requiredTag := range required {

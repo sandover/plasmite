@@ -9,6 +9,7 @@ Notes: Uses ctypes and links to libplasmite resolved at runtime.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from ctypes import (
     CDLL,
     POINTER,
@@ -22,14 +23,14 @@ from ctypes import (
     c_uint8,
     c_void_p,
 )
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import IntEnum
 import json
 import os
 from pathlib import Path
 import sys
 import time as _time
-from typing import Generator, Iterable, Optional
+from typing import Any, Generator, Iterable, Optional
 
 
 class ErrorKind(IntEnum):
@@ -62,6 +63,57 @@ class PlasmiteError(RuntimeError):
         self.path = path
         self.seq = seq
         self.offset = offset
+
+
+class NotFoundError(PlasmiteError):
+    pass
+
+
+class AlreadyExistsError(PlasmiteError):
+    pass
+
+
+class BusyError(PlasmiteError):
+    pass
+
+
+class PermissionDeniedError(PlasmiteError):
+    pass
+
+
+class CorruptError(PlasmiteError):
+    pass
+
+
+class IoError(PlasmiteError):
+    pass
+
+
+class UsageError(PlasmiteError):
+    pass
+
+
+class InternalError(PlasmiteError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class MessageMeta:
+    tags: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class Message:
+    seq: int
+    time: datetime
+    time_rfc3339: str
+    data: Any
+    meta: MessageMeta
+    raw: bytes
+
+    @property
+    def tags(self) -> list[str]:
+        return self.meta.tags
 
 
 class plsm_client_t(Structure):
@@ -262,6 +314,17 @@ _LIB.plsm_lite3_frame_free.restype = None
 _LIB.plsm_error_free.argtypes = [POINTER(plsm_error_t)]
 _LIB.plsm_error_free.restype = None
 
+_ERROR_KIND_TO_CLASS: dict[ErrorKind, type[PlasmiteError]] = {
+    ErrorKind.INTERNAL: InternalError,
+    ErrorKind.USAGE: UsageError,
+    ErrorKind.NOT_FOUND: NotFoundError,
+    ErrorKind.ALREADY_EXISTS: AlreadyExistsError,
+    ErrorKind.BUSY: BusyError,
+    ErrorKind.PERMISSION: PermissionDeniedError,
+    ErrorKind.CORRUPT: CorruptError,
+    ErrorKind.IO: IoError,
+}
+
 
 def _take_error(err_ptr: POINTER(plsm_error_t) | None) -> PlasmiteError:
     if not err_ptr:
@@ -279,7 +342,8 @@ def _take_error(err_ptr: POINTER(plsm_error_t) | None) -> PlasmiteError:
         kind = ErrorKind.INTERNAL
     if not message:
         message = _default_error_message(kind)
-    return PlasmiteError(kind, message, path, seq, offset)
+    error_cls = _ERROR_KIND_TO_CLASS.get(kind, PlasmiteError)
+    return error_cls(kind, message, path, seq, offset)
 
 
 def _default_error_message(kind: ErrorKind) -> str:
@@ -410,6 +474,16 @@ class Client:
             raise _take_error(out_err)
         return Pool(out_pool)
 
+    def pool(
+        self,
+        pool_ref: str,
+        size_bytes: int = DEFAULT_POOL_SIZE_BYTES,
+    ) -> Pool:
+        try:
+            return self.open_pool(pool_ref)
+        except NotFoundError:
+            return self.create_pool(pool_ref, size_bytes)
+
     def close(self) -> None:
         if getattr(self, "_ptr", None):
             _LIB.plsm_client_free(self._ptr)
@@ -426,12 +500,16 @@ class Client:
         self.close()
 
 
+@dataclass(frozen=True, slots=True)
 class Lite3Frame:
-    def __init__(self, seq: int, timestamp_ns: int, flags: int, payload: bytes) -> None:
-        self.seq = seq
-        self.timestamp_ns = timestamp_ns
-        self.flags = flags
-        self.payload = payload
+    seq: int
+    timestamp_ns: int
+    flags: int
+    payload: bytes
+
+    @property
+    def time(self) -> datetime:
+        return datetime.fromtimestamp(self.timestamp_ns / 1_000_000_000, tz=timezone.utc)
 
 
 class Pool:
@@ -466,12 +544,13 @@ class Pool:
         value,
         tags: Optional[Iterable[str]] = None,
         durability: Durability = Durability.FAST,
-    ) -> bytes:
-        return self.append_json(
+    ) -> Message:
+        payload = self.append_json(
             json.dumps(value).encode("utf-8"),
             [] if tags is None else tags,
             durability,
         )
+        return parse_message(payload)
 
     def append_lite3(self, payload: bytes, durability: Durability) -> int:
         _require_open(self._ptr, "pool")
@@ -503,8 +582,8 @@ class Pool:
             raise _take_error(out_err)
         return _buf_to_bytes(buf)
 
-    def get(self, seq: int) -> bytes:
-        return self.get_json(seq)
+    def get(self, seq: int) -> Message:
+        return parse_message(self.get_json(seq))
 
     def get_lite3(self, seq: int) -> Lite3Frame:
         _require_open(self._ptr, "pool")
@@ -577,11 +656,11 @@ class Pool:
         max_messages: Optional[int] = None,
         timeout_ms: Optional[int] = None,
         tags: Optional[Iterable[str]] = None,
-    ) -> Generator[bytes, None, None]:
+    ) -> Generator[Message, None, None]:
         """Replay messages with original timing scaled by speed.
 
-        Yields bytes (JSON messages) with inter-message delays derived from
-        each message's ``time`` field. The first message is yielded
+        Yields Message objects with inter-message delays derived from
+        each message's ``time``. The first message is yielded
         immediately; subsequent messages are delayed by
         ``(current_time - prev_time) / speed``.
         """
@@ -606,15 +685,10 @@ class Pool:
                 msg = stream.next_json()
                 if msg is None:
                     break
-                parsed = json.loads(msg)
-                if filter_by_tags and not _message_has_tags(parsed, required_tags):
+                message = parse_message(msg)
+                if filter_by_tags and not _message_has_tags(message, required_tags):
                     continue
-                raw_time = parsed.get("time")
-                cur_dt: Optional[datetime] = None
-                if raw_time is not None:
-                    cur_dt = datetime.fromisoformat(
-                        raw_time.replace("Z", "+00:00")
-                    )
+                cur_dt = message.time
                 if prev_dt is not None and cur_dt is not None:
                     delta = (cur_dt - prev_dt).total_seconds() / speed
                     if delta > 0:
@@ -622,7 +696,7 @@ class Pool:
                 if cur_dt is not None:
                     prev_dt = cur_dt
                 delivered += 1
-                yield msg
+                yield message
                 if max_messages is not None and delivered >= max_messages:
                     break
         finally:
@@ -634,7 +708,7 @@ class Pool:
         max_messages: Optional[int] = None,
         timeout_ms: Optional[int] = None,
         tags: Optional[Iterable[str]] = None,
-    ) -> Generator[bytes, None, None]:
+    ) -> Generator[Message, None, None]:
         """Tail JSON messages and optionally filter by exact tags."""
         required_tags = list(tags or [])
         stream_max_messages = (
@@ -652,12 +726,12 @@ class Pool:
                 msg = stream.next_json()
                 if msg is None:
                     break
+                message = parse_message(msg)
                 if filter_by_tags:
-                    parsed = json.loads(msg)
-                    if not _message_has_tags(parsed, required_tags):
+                    if not _message_has_tags(message, required_tags):
                         continue
                 delivered += 1
-                yield msg
+                yield message
                 if max_messages is not None and delivered >= max_messages:
                     break
         finally:
@@ -759,28 +833,64 @@ class Lite3Stream:
         self.close()
 
 
-def parse_message(payload: bytes) -> dict:
-    return json.loads(payload.decode("utf-8"))
+def _parse_rfc3339_utc(raw_time: str) -> datetime:
+    parsed = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("message time must include timezone")
+    return parsed.astimezone(timezone.utc)
 
 
-def _message_has_tags(message: dict, required_tags: list[str]) -> bool:
+def parse_message(payload: bytes) -> Message:
+    raw = _ensure_bytes(payload, "payload")
+    parsed = json.loads(raw.decode("utf-8"))
+    if not isinstance(parsed, dict):
+        raise ValueError("message payload must decode to an object")
+    raw_time = parsed.get("time")
+    if not isinstance(raw_time, str):
+        raise ValueError("message time must be an RFC3339 string")
+    meta = parsed.get("meta", {})
+    tags = meta.get("tags") if isinstance(meta, dict) else None
+    if not isinstance(tags, list):
+        tags = []
+    tag_list = [str(tag) for tag in tags]
+    seq = parsed.get("seq")
+    if not isinstance(seq, int):
+        raise ValueError("message seq must be an int")
+    return Message(
+        seq=seq,
+        time=_parse_rfc3339_utc(raw_time),
+        time_rfc3339=raw_time,
+        data=parsed.get("data"),
+        meta=MessageMeta(tags=tag_list),
+        raw=raw,
+    )
+
+
+def _message_has_tags(message: Message, required_tags: list[str]) -> bool:
     if not required_tags:
         return True
-    message_tags = message.get("meta", {}).get("tags")
-    if not isinstance(message_tags, list):
-        return False
-    return all(tag in message_tags for tag in required_tags)
+    return all(tag in message.tags for tag in required_tags)
 
 
 __all__ = [
     "Client",
     "Pool",
+    "Message",
+    "MessageMeta",
     "Stream",
     "Lite3Frame",
     "Lite3Stream",
     "Durability",
     "ErrorKind",
     "PlasmiteError",
+    "NotFoundError",
+    "AlreadyExistsError",
+    "BusyError",
+    "PermissionDeniedError",
+    "CorruptError",
+    "IoError",
+    "UsageError",
+    "InternalError",
     "DEFAULT_POOL_DIR",
     "DEFAULT_POOL_SIZE",
     "DEFAULT_POOL_SIZE_BYTES",

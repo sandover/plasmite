@@ -20,7 +20,19 @@ LIB_DIR = os.environ.get("PLASMITE_LIB_DIR") or str(REPO_ROOT / "target" / "debu
 if "PLASMITE_LIB_DIR" not in os.environ:
     os.environ["PLASMITE_LIB_DIR"] = LIB_DIR
 
-from plasmite import Client, Durability, Lite3Frame, PlasmiteError, parse_message
+import plasmite
+from plasmite import (
+    AlreadyExistsError,
+    Client,
+    Durability,
+    ErrorKind,
+    Lite3Frame,
+    Message,
+    MessageMeta,
+    NotFoundError,
+    PlasmiteError,
+    parse_message,
+)
 
 
 class BindingTests(unittest.TestCase):
@@ -44,18 +56,33 @@ class BindingTests(unittest.TestCase):
             json.dumps(payload).encode("utf-8"), tags, Durability.FAST
         )
         message = parse_message(msg_bytes)
-        self.assertEqual(len(message["data"]["blob"]), len(payload["blob"]))
-        self.assertEqual(message["meta"]["tags"], tags)
+        self.assertIsInstance(message, Message)
+        self.assertIsInstance(message.meta, MessageMeta)
+        self.assertEqual(len(message.data["blob"]), len(payload["blob"]))
+        self.assertEqual(message.meta.tags, tags)
+        self.assertEqual(message.tags, tags)
+        self.assertEqual(message.raw, msg_bytes)
+        self.assertIsNotNone(message.time.tzinfo)
 
-        get_bytes = pool.get_json(message["seq"])
+        get_bytes = pool.get_json(message.seq)
         fetched = parse_message(get_bytes)
-        self.assertEqual(len(fetched["data"]["blob"]), len(payload["blob"]))
-        get_alias_bytes = pool.get(message["seq"])
-        get_alias = parse_message(get_alias_bytes)
-        self.assertEqual(get_alias["seq"], fetched["seq"])
+        self.assertEqual(len(fetched.data["blob"]), len(payload["blob"]))
+        get_alias = pool.get(message.seq)
+        self.assertIsInstance(get_alias, Message)
+        self.assertEqual(get_alias.seq, fetched.seq)
 
         pool.close()
         client.close()
+
+    def test_client_pool_creates_then_reopens(self) -> None:
+        with Client(str(self.pool_dir)) as client:
+            first = client.pool("work", 1024 * 1024)
+            second = client.pool("work", 2 * 1024 * 1024)
+            first_msg = first.append({"kind": "one"}, ["alpha"])
+            second_msg = second.get(first_msg.seq)
+            self.assertEqual(second_msg.data["kind"], "one")
+            first.close()
+            second.close()
 
     def test_tail_timeout_and_close(self) -> None:
         client = Client(str(self.pool_dir))
@@ -73,17 +100,17 @@ class BindingTests(unittest.TestCase):
         client = Client(str(self.pool_dir))
         pool = client.create_pool("iter", 1024 * 1024)
 
-        first = parse_message(pool.append({"kind": "one"}, ["iter"]))
+        first = pool.append({"kind": "one"}, ["iter"])
         pool.append({"kind": "two"}, ["iter"])
         pool.append({"kind": "three"}, ["iter"])
 
-        stream = pool.open_stream(since_seq=first["seq"], max_messages=3, timeout_ms=50)
-        seen = [parse_message(raw)["data"]["kind"] for raw in stream]
+        stream = pool.open_stream(since_seq=first.seq, max_messages=3, timeout_ms=50)
+        seen = [parse_message(raw).data["kind"] for raw in stream]
         self.assertEqual(seen, ["one", "two", "three"])
         self.assertIsNone(stream.next_json())
         stream.close()
 
-        frame_seed = pool.get_lite3(first["seq"])
+        frame_seed = pool.get_lite3(first.seq)
         seq2 = pool.append_lite3(frame_seed.payload, Durability.FAST)
         pool.append_lite3(frame_seed.payload, Durability.FAST)
 
@@ -105,8 +132,9 @@ class BindingTests(unittest.TestCase):
 
         results = list(pool.tail(max_messages=1, timeout_ms=50, tags=["keep"]))
         self.assertEqual(len(results), 1)
-        message = parse_message(results[0])
-        self.assertEqual(message["data"]["kind"], "keep")
+        message = results[0]
+        self.assertIsInstance(message, Message)
+        self.assertEqual(message.data["kind"], "keep")
 
         pool.close()
         client.close()
@@ -120,8 +148,9 @@ class BindingTests(unittest.TestCase):
 
         results = list(pool.replay(speed=1.0, max_messages=1, timeout_ms=50, tags=["keep"]))
         self.assertEqual(len(results), 1)
-        message = parse_message(results[0])
-        self.assertEqual(message["data"]["kind"], "keep")
+        message = results[0]
+        self.assertIsInstance(message, Message)
+        self.assertEqual(message.data["kind"], "keep")
 
         pool.close()
         client.close()
@@ -137,7 +166,7 @@ class BindingTests(unittest.TestCase):
         ):
             results = list(pool.tail(max_messages=1, timeout_ms=50))
         self.assertEqual(len(results), 1)
-        self.assertEqual(parse_message(results[0])["data"]["kind"], "keep")
+        self.assertEqual(results[0].data["kind"], "keep")
 
         pool.close()
         client.close()
@@ -153,7 +182,7 @@ class BindingTests(unittest.TestCase):
         ):
             results = list(pool.replay(speed=1.0, max_messages=1, timeout_ms=50))
         self.assertEqual(len(results), 1)
-        self.assertEqual(parse_message(results[0])["data"]["kind"], "keep")
+        self.assertEqual(results[0].data["kind"], "keep")
 
         pool.close()
         client.close()
@@ -178,8 +207,9 @@ class BindingTests(unittest.TestCase):
             json.dumps({"x": 1}).encode("utf-8"), ["alpha"], Durability.FAST
         )
         message = parse_message(msg_bytes)
-        frame = pool.get_lite3(message["seq"])
+        frame = pool.get_lite3(message.seq)
         self.assertIsInstance(frame, Lite3Frame)
+        self.assertIsNotNone(frame.time.tzinfo)
         self.assertGreater(len(frame.payload), 0)
 
         seq2 = pool.append_lite3(frame.payload, Durability.FAST)
@@ -214,7 +244,7 @@ class BindingTests(unittest.TestCase):
                 msg = pool.append_json(b'{"x":1}', [], Durability.FAST)
                 parsed = parse_message(msg)
                 with pool.open_stream(
-                    since_seq=parsed["seq"], max_messages=1, timeout_ms=50
+                    since_seq=parsed.seq, max_messages=1, timeout_ms=50
                 ) as stream:
                     self.assertIsNotNone(stream.next_json())
 
@@ -234,6 +264,12 @@ class BindingTests(unittest.TestCase):
             pool.close()
             with self.assertRaises(PlasmiteError):
                 pool.get_json(1)
+
+    def test_error_subclasses_are_raised(self) -> None:
+        with Client(str(self.pool_dir)) as client:
+            self.assertIs(plasmite._ERROR_KIND_TO_CLASS[ErrorKind.ALREADY_EXISTS], AlreadyExistsError)
+            with self.assertRaises(NotFoundError):
+                client.open_pool("missing")
 
 
 if __name__ == "__main__":

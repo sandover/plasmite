@@ -31,10 +31,25 @@ export interface Lite3Frame {
   timestampNs: bigint
   flags: number
   payload: Buffer
+  time: Date
+}
+
+export interface MessageMeta {
+  tags: string[]
+}
+
+export class Message {
+  readonly seq: bigint
+  readonly time: Date
+  readonly timeRfc3339: string
+  readonly data: unknown
+  readonly meta: MessageMeta
+  readonly raw: Buffer
+  get tags(): string[]
 }
 
 export class PlasmiteNativeError extends Error {
-  kind?: string
+  kind?: ErrorKind
   path?: string
   seq?: number
   offset?: number
@@ -45,18 +60,20 @@ export class Client {
   constructor(poolDir?: string)
   createPool(poolRef: string, sizeBytes?: number | bigint): Pool
   openPool(poolRef: string): Pool
+  pool(poolRef: string, sizeBytes?: number | bigint): Pool
   close(): void
+  [Symbol.dispose](): void
 }
 
 export class Pool {
-  append(payload: unknown, tags?: string[], durability?: Durability): Buffer
+  append(payload: unknown, tags?: string[], durability?: Durability): Message
   appendJson(payload: unknown, tags?: string[], durability?: Durability): Buffer
   appendLite3(payload: Buffer, durability?: Durability): bigint
-  get(seq: number | bigint): Buffer
+  get(seq: number | bigint): Message
   getJson(seq: number | bigint): Buffer
   getLite3(seq: number | bigint): Lite3Frame
-  tail(options?: LocalTailOptions): AsyncGenerator<Buffer, void, unknown>
-  replay(options?: ReplayOptions): AsyncGenerator<Buffer, void, unknown>
+  tail(options?: LocalTailOptions): AsyncGenerator<Message, void, unknown>
+  replay(options?: ReplayOptions): AsyncGenerator<Message, void, unknown>
   openStream(
     sinceSeq?: number | bigint | null,
     maxMessages?: number | bigint | null,
@@ -68,18 +85,21 @@ export class Pool {
     timeoutMs?: number | bigint | null,
   ): Lite3Stream
   close(): void
+  [Symbol.dispose](): void
 }
 
 export class Stream {
   [Symbol.iterator](): Iterator<Buffer>
   nextJson(): Buffer | null
   close(): void
+  [Symbol.dispose](): void
 }
 
 export class Lite3Stream {
   [Symbol.iterator](): Iterator<Lite3Frame>
   next(): Lite3Frame | null
   close(): void
+  [Symbol.dispose](): void
 }
 
 export interface ReplayOptions {
@@ -97,12 +117,12 @@ export interface LocalTailOptions {
   tags?: string[]
 }
 
-export function parseMessage(payload: Buffer): Record<string, unknown>
+export function parseMessage(payload: Buffer | Message): Message
 
 export function replay(
   pool: Pool,
   options?: ReplayOptions,
-): AsyncGenerator<Buffer, void, unknown>
+): AsyncGenerator<Message, void, unknown>
 
 export interface RemoteClientOptions {
   token?: string
@@ -121,15 +141,6 @@ export interface RemotePoolInfo {
   index_inline: boolean
 }
 
-export interface RemoteMessage {
-  seq: number
-  time: string
-  data: unknown
-  meta?: {
-    tags?: string[]
-  }
-}
-
 export interface RemoteTailOptions {
   sinceSeq?: number | bigint
   maxMessages?: number | bigint
@@ -138,7 +149,7 @@ export interface RemoteTailOptions {
 
 export class RemoteError extends Error {
   status: number
-  kind: string
+  kind: ErrorKind
   hint?: string
   path?: string
   seq?: number
@@ -165,13 +176,8 @@ export class RemotePool {
   append(
     data: unknown,
     tags?: string[],
-    durability?: "fast" | "flush",
-  ): Promise<RemoteMessage>
-  get(seq: number | bigint): Promise<RemoteMessage>
-  tail(options?: RemoteTailOptions): Promise<RemoteTail>
-}
-
-export class RemoteTail {
-  next(): Promise<RemoteMessage | null>
-  cancel(): void
+    durability?: Durability,
+  ): Promise<Message>
+  get(seq: number | bigint): Promise<Message>
+  tail(options?: RemoteTailOptions): AsyncGenerator<Message, void, unknown>
 }

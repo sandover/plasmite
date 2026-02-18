@@ -15,6 +15,7 @@ const os = require("node:os");
 const {
   Client,
   Durability,
+  ErrorKind,
   parseMessage,
   PlasmiteNativeError,
   RemoteClient,
@@ -58,17 +59,36 @@ test("append/get aliases and parseMessage helper round-trip JSON", () => {
   const client = new Client(poolDir);
   const pool = client.createPool("aliases", 1024 * 1024);
 
-  const appended = pool.append({ kind: "alias", ok: true }, ["alpha"]);
-  const parsed = parseMessage(appended);
+  const parsed = pool.append({ kind: "alias", ok: true }, ["alpha"]);
   assert.equal(parsed.data.kind, "alias");
   assert.equal(parsed.data.ok, true);
   assert.deepEqual(parsed.meta.tags, ["alpha"]);
+  assert.ok(Buffer.isBuffer(parsed.raw));
+  assert.ok(parsed.time instanceof Date);
+  assert.equal(typeof parsed.timeRfc3339, "string");
 
-  const fetched = parseMessage(pool.get(BigInt(parsed.seq)));
+  const fetched = pool.get(parsed.seq);
   assert.equal(fetched.data.kind, "alias");
   assert.equal(fetched.data.ok, true);
 
   pool.close();
+  client.close();
+});
+
+test("client.pool creates missing pool and reopens existing pool", () => {
+  const temp = makeTempDir();
+  const poolDir = path.join(temp, "pools");
+  fs.mkdirSync(poolDir, { recursive: true });
+  const client = new Client(poolDir);
+
+  const first = client.pool("work", 1024 * 1024);
+  const second = client.pool("work", 2 * 1024 * 1024);
+  const appended = first.append({ kind: "created" }, ["alpha"]);
+  const fetched = second.get(appended.seq);
+  assert.equal(fetched.data.kind, "created");
+
+  first.close();
+  second.close();
   client.close();
 });
 
@@ -96,11 +116,11 @@ test("stream and lite3 stream support for-of iteration", () => {
   const client = new Client(poolDir);
   const pool = client.createPool("iter", 1024 * 1024);
 
-  const first = parseMessage(pool.append({ kind: "one" }, ["iter"]));
+  const first = pool.append({ kind: "one" }, ["iter"]);
   pool.append({ kind: "two" }, ["iter"]);
   pool.append({ kind: "three" }, ["iter"]);
 
-  const stream = pool.openStream(BigInt(first.seq), BigInt(3), BigInt(50));
+  const stream = pool.openStream(first.seq, BigInt(3), BigInt(50));
   const seenKinds = [];
   for (const message of stream) {
     seenKinds.push(parseMessage(message).data.kind);
@@ -109,7 +129,8 @@ test("stream and lite3 stream support for-of iteration", () => {
   assert.equal(stream.nextJson(), null);
   stream.close();
 
-  const frameSeed = pool.getLite3(BigInt(first.seq));
+  const frameSeed = pool.getLite3(first.seq);
+  assert.ok(frameSeed.time instanceof Date);
   const liteSeq = pool.appendLite3(frameSeed.payload);
   pool.appendLite3(frameSeed.payload);
   const lite3Stream = pool.openLite3Stream(liteSeq, BigInt(2), BigInt(50));
@@ -133,13 +154,13 @@ test("tail filters by tags and replay works as a pool method", async () => {
   const pool = client.createPool("tail-replay", 1024 * 1024);
 
   pool.append({ kind: "drop", i: 1 }, ["drop"]);
-  const keep1 = parseMessage(pool.append({ kind: "keep", i: 2 }, ["keep"]));
+  const keep1 = pool.append({ kind: "keep", i: 2 }, ["keep"]);
   pool.append({ kind: "drop", i: 3 }, ["drop"]);
-  const keep2 = parseMessage(pool.append({ kind: "keep", i: 4 }, ["keep"]));
+  const keep2 = pool.append({ kind: "keep", i: 4 }, ["keep"]);
 
   const tailed = [];
   for await (const message of pool.tail({ tags: ["keep"], maxMessages: 2, timeoutMs: 10 })) {
-    tailed.push(parseMessage(message).data.i);
+    tailed.push(message.data.i);
   }
   assert.deepEqual(tailed, [2, 4]);
 
@@ -150,7 +171,7 @@ test("tail filters by tags and replay works as a pool method", async () => {
     speed: 2.0,
     tags: ["keep"],
   })) {
-    replayed.push(parseMessage(message).seq);
+    replayed.push(message.seq);
   }
   assert.deepEqual(replayed, [keep1.seq, keep2.seq]);
 
@@ -205,7 +226,7 @@ test("native errors expose structured metadata", () => {
   }
 
   assert.ok(captured instanceof PlasmiteNativeError);
-  assert.equal(captured.kind, "Usage");
+  assert.equal(captured.kind, ErrorKind.Usage);
   assert.match(captured.message, /kind=Usage/);
 });
 
@@ -224,6 +245,7 @@ test("lite3 append/get/tail round-trips bytes", () => {
   );
   const message = JSON.parse(messageBuf.toString("utf8"));
   const lite3Frame = pool.getLite3(BigInt(message.seq));
+  assert.ok(lite3Frame.time instanceof Date);
   assert.ok(lite3Frame.payload.length > 0);
 
   const seq2 = pool.appendLite3(lite3Frame.payload);
@@ -280,12 +302,16 @@ test("remote tail encodes tags as repeated tag query params", async () => {
   try {
     const client = new RemoteClient("http://127.0.0.1:9700");
     const pool = new RemotePool(client, "demo");
-    const tail = await pool.tail({
+    for await (const message of pool.tail({
       tags: ["keep", "prod"],
       maxMessages: 1,
       timeoutMs: 10,
-    });
-    tail.cancel();
+    })) {
+      assert.equal(message.seq, 1n);
+      assert.ok(message.time instanceof Date);
+      assert.deepEqual(message.tags, ["keep", "prod"]);
+      break;
+    }
 
     assert.ok(capturedUrl, "expected fetch URL to be captured");
     assert.equal(capturedUrl.pathname, "/v0/pools/demo/tail");

@@ -65,33 +65,33 @@ PLASMITE_SDK_DIR=/path/to/sdk python -m build
 ## Usage
 
 ```python
-from plasmite import Client, Durability, parse_message
+from plasmite import Client, Durability, NotFoundError
 
 with Client("./data") as client:
-    with client.create_pool("docs", 64 * 1024 * 1024) as pool:
-        message = pool.append({"kind": "note", "text": "hi"}, ["note"], Durability.FAST)
-        parsed = parse_message(message)
-        print(parsed)
+    with client.pool("docs", 64 * 1024 * 1024) as pool:
+        msg = pool.append({"kind": "note", "text": "hi"}, ["note"], Durability.FAST)
+        print(msg.seq, msg.tags, msg.data["text"])
 
-        fetched = parse_message(pool.get(parsed["seq"]))
-        print(fetched["data"]["text"])
-
-        stream = pool.open_stream(since_seq=parsed["seq"], max_messages=1, timeout_ms=100)
-        for item in stream:
-            print(parse_message(item))
-        stream.close()
+        fetched = pool.get(msg.seq)
+        print(fetched.data["text"])
 
         for item in pool.tail(tags=["note"], max_messages=1, timeout_ms=100):
-            print(parse_message(item))
+            print(item.seq, item.tags, item.data)
+
+    try:
+        client.open_pool("missing")
+    except NotFoundError:
+        print("pool not found")
 ```
 
-`Pool.get(seq)` is an alias for `Pool.get_json(seq)`.
+`Pool.append(...)`, `Pool.get(...)`, `Pool.tail(...)`, and `Pool.replay(...)` return typed `Message` values by default.
 
-`Stream` and `Lite3Stream` implement Python iterator protocol, so `for item in stream:` works directly.
+Use `append_json(...)` / `get_json(...)` only when you explicitly need raw wire bytes.
 
 `Pool.tail(..., tags=[...])` uses exact tag matching and composes with other filters using AND semantics.
 
 ## Error behavior
 
 - Invalid local arguments raise `ValueError` / `TypeError`.
-- ABI/runtime failures raise `PlasmiteError` with `kind`, `path`, `seq`, and `offset` when present.
+- ABI/runtime failures raise typed subclasses of `PlasmiteError` (`NotFoundError`, `AlreadyExistsError`, `BusyError`, `PermissionDeniedError`, `CorruptError`, `IoError`, `UsageError`, `InternalError`).
+- All `PlasmiteError` values expose `kind`, `path`, `seq`, and `offset` when present.

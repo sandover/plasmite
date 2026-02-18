@@ -1,8 +1,8 @@
 # Plasmite Go Bindings (v0)
 
-These bindings wrap the `libplasmite` C ABI via cgo and return JSON message bytes
-that match the v0 API spec. Lite3 fast-path APIs accept and return raw Lite3
-payload bytes.
+These bindings wrap the `libplasmite` C ABI via cgo and expose typed Go contracts.
+`Append`, `Get`, `Tail`, and `Replay` return `*Message` values, while Lite3 APIs
+remain the raw-byte fast path.
 
 ## Build Requirements
 - Go 1.22+
@@ -56,25 +56,46 @@ if err != nil {
 }
 defer pool.Close()
 
-msg, err := pool.Append(map[string]any{"kind": "note", "text": "hi"}, []string{"note"}, plasmite.DurabilityFast)
+msg, err := pool.Append(
+    map[string]any{"kind": "note", "text": "hi"},
+    []string{"note"},
+    plasmite.WithDurability(plasmite.DurabilityFast),
+)
 if err != nil {
     // handle err
 }
-_ = msg
+fmt.Println(msg.Seq, msg.Tags())
+fmt.Println(string(msg.Data))
+
+fetched, err := pool.Get(msg.Seq)
+if err != nil {
+    // handle err
+}
+fmt.Println(string(fetched.Data))
+
+same, err := client.Pool(plasmite.PoolRefName("docs"), 0) // open or create
+if err != nil {
+    // handle err
+}
+defer same.Close()
 
 frame, err := pool.GetLite3(1)
 if err != nil {
     // handle err
 }
-_ = frame
+fmt.Println(frame.Seq, frame.Time())
 
 ctx := context.Background()
 tail, errs := pool.Tail(ctx, plasmite.TailOptions{
     Tags:        []string{"note"},
     Timeout:     100 * time.Millisecond,
 })
-_ = tail
-_ = errs
+for item := range tail {
+    fmt.Println(item.Seq, item.Tags(), string(item.Data))
+}
+if err := <-errs; err != nil && !errors.Is(err, context.Canceled) {
+    // handle err
+}
 ```
 
 `TailOptions.Tags` applies exact tag matching and composes with other filters via AND semantics.

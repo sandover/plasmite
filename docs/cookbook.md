@@ -38,53 +38,61 @@ pls follow work
 **Python — produce**
 
 ```python
-import json
-from plasmite import Client, Durability
+from plasmite import Client
 
-with Client() as c:
-    pool = c.create_pool("work")
-    pool.append({"task": "resize", "id": 1})
-    pool.close()
+with Client() as c, c.pool("work") as pool:
+    msg = pool.append({"task": "resize", "id": 1})
+    print(msg.seq, msg.tags, msg.data)
 ```
 
 **Python — consume**
 
 ```python
-from plasmite import Client, parse_message
+from plasmite import Client, NotFoundError
 
-with Client() as c, c.open_pool("work") as pool:
-    for raw in pool.tail(timeout_ms=5000):
-        print(parse_message(raw))
+with Client() as c:
+    try:
+        with c.open_pool("work") as pool:
+            for msg in pool.tail(timeout_ms=5000):
+                print(msg.seq, msg.tags, msg.data)
+    except NotFoundError:
+        print("create or feed the pool first")
 ```
 
 **Node — produce**
 
 ```js
-const { Client, Durability } = require("plasmite");
-const c = new Client();
-const pool = c.createPool("work");
-pool.append({ task: "resize", id: 1 });
-pool.close(); c.close();
+const { Client } = require("plasmite");
+using c = new Client();
+using pool = c.pool("work");
+const msg = pool.append({ task: "resize", id: 1 });
+console.log(msg.seq, msg.tags, msg.data);
 ```
 
 **Node — consume**
 
 ```js
-const { Client, parseMessage } = require("plasmite");
-const c = new Client();
-const pool = c.openPool("work");
-const stream = pool.openStream(null, null, 5000);
-for (const msg of stream) console.log(parseMessage(msg));
-stream.close(); pool.close(); c.close();
+const { Client } = require("plasmite");
+using c = new Client();
+using pool = c.openPool("work");
+for await (const msg of pool.tail({ timeoutMs: 5000, maxMessages: 1 })) {
+  console.log(msg.seq, msg.tags, msg.data);
+}
 ```
 
 **Go — produce**
 
 ```go
 c, _ := plasmite.NewDefaultClient()
-p, _ := c.CreatePool(plasmite.PoolRefName("work"), plasmite.DefaultPoolSize)
-p.Append(map[string]any{"task": "resize", "id": 1}, nil, plasmite.DurabilityFast)
-p.Close(); c.Close()
+p, _ := c.Pool(plasmite.PoolRefName("work"), 0)
+msg, _ := p.Append(
+    map[string]any{"task": "resize", "id": 1},
+    nil,
+    plasmite.WithDurability(plasmite.DurabilityFast),
+)
+fmt.Println(msg.Seq, msg.Tags(), string(msg.Data))
+p.Close()
+c.Close()
 ```
 
 **Go — consume**
@@ -93,9 +101,14 @@ p.Close(); c.Close()
 c, _ := plasmite.NewDefaultClient()
 p, _ := c.OpenPool(plasmite.PoolRefName("work"))
 out, errs := p.Tail(ctx, plasmite.TailOptions{Timeout: 5 * time.Second})
-for msg := range out { fmt.Println(string(msg)) }
-if err := <-errs; err != nil { log.Fatal(err) }
-p.Close(); c.Close()
+for msg := range out {
+    fmt.Println(msg.Seq, msg.Tags(), string(msg.Data))
+}
+if err := <-errs; err != nil {
+    log.Fatal(err)
+}
+p.Close()
+c.Close()
 ```
 
 </details>
@@ -157,49 +170,45 @@ pls follow build --tag done --one
 **Python — writer**
 
 ```python
-import json
 from plasmite import Client, Durability
 
-with Client() as c:
-    pool = c.create_pool("build")
+with Client() as c, c.pool("build") as pool:
     for step, pct in [("compile", 0), ("compile", 100), ("test", 0), ("test", 100)]:
         pool.append({"step": step, "pct": pct})
     pool.append({"step": "finished", "ok": True}, ["done"], Durability.FAST)
-    pool.close()
 ```
 
 **Python — follower**
 
 ```python
-from plasmite import Client, parse_message
+from plasmite import Client
 
 with Client() as c, c.open_pool("build") as pool:
-    for raw in pool.tail(timeout_ms=5000, tags=["done"]):
-        print(parse_message(raw))
+    for msg in pool.tail(timeout_ms=5000, tags=["done"]):
+        print(msg.seq, msg.tags, msg.data)
         break  # --one equivalent
 ```
 
 **Node — writer**
 
 ```js
-const { Client, Durability } = require("plasmite");
-const c = new Client();
-const pool = c.createPool("build");
+const { Client } = require("plasmite");
+using c = new Client();
+using pool = c.pool("build");
 for (const [step, pct] of [["compile",0],["compile",100],["test",0],["test",100]])
   pool.append({ step, pct });
 pool.append({ step: "finished", ok: true }, ["done"]);
-pool.close(); c.close();
 ```
 
 **Go — writer**
 
 ```go
 c, _ := plasmite.NewDefaultClient()
-p, _ := c.CreatePool(plasmite.PoolRefName("build"), plasmite.DefaultPoolSize)
+p, _ := c.Pool(plasmite.PoolRefName("build"), 0)
 for _, s := range [][2]any{{"compile",0},{"compile",100},{"test",0},{"test",100}} {
-    p.Append(map[string]any{"step": s[0], "pct": s[1]}, nil, plasmite.DurabilityFast)
+    p.Append(map[string]any{"step": s[0], "pct": s[1]}, nil, plasmite.WithDurability(plasmite.DurabilityFast))
 }
-p.Append(map[string]any{"step": "finished", "ok": true}, []string{"done"}, plasmite.DurabilityFast)
+p.Append(map[string]any{"step": "finished", "ok": true}, []string{"done"}, plasmite.WithDurability(plasmite.DurabilityFast))
 p.Close(); c.Close()
 ```
 
@@ -255,24 +264,22 @@ pls follow jobs
 Python producer:
 
 ```python
-from plasmite import Client, Durability
+from plasmite import Client
 
-client = Client()
-pool = client.create_pool("jobs")
-
-for i in range(5):
-    pool.append({"task": "resize-image", "id": i}, ["img"])
+with Client() as client, client.pool("jobs") as pool:
+    for i in range(5):
+        msg = pool.append({"task": "resize-image", "id": i}, ["img"])
+        print(msg.seq, msg.data)
 ```
 
 Node producer:
 
 ```js
-const { Client, Durability } = require("plasmite");
-const c = new Client();
-const pool = c.openPool("jobs");
+const { Client } = require("plasmite");
+using c = new Client();
+using pool = c.pool("jobs");
 for (let i = 0; i < 5; i++)
-  pool.append({ task: "resize-image", id: i }, ["img"]);
-pool.close(); c.close();
+  console.log(pool.append({ task: "resize-image", id: i }, ["img"]).seq);
 ```
 
 Go consumer:
@@ -286,7 +293,7 @@ defer pool.Close()
 
 out, errs := pool.Tail(ctx, plasmite.TailOptions{Timeout: 5 * time.Second})
 for msg := range out {
-    fmt.Println(string(msg))
+    fmt.Println(msg.Seq, msg.Tags(), string(msg.Data))
 }
 if err := <-errs; err != nil { log.Fatal(err) }
 ```
@@ -325,44 +332,40 @@ pls follow events --tag alert --where '.data.service == "api"'
 **Python — write tagged events**
 
 ```python
-import json
 from plasmite import Client, Durability
 
-with Client() as c:
-    pool = c.create_pool("events")
+with Client() as c, c.pool("events") as pool:
     pool.append({"service": "api", "sha": "f4e5d6c"}, ["deploy"], Durability.FAST)
     pool.append({"service": "api", "msg": "latency spike"}, ["alert"], Durability.FAST)
-    pool.close()
 ```
 
 **Python — filter by tag**
 
 ```python
-from plasmite import Client, parse_message
+from plasmite import Client
 
 with Client() as c, c.open_pool("events") as pool:
-    for raw in pool.tail(timeout_ms=5000, tags=["alert"]):
-        print(parse_message(raw))
+    for msg in pool.tail(timeout_ms=5000, tags=["alert"]):
+        print(msg.seq, msg.tags, msg.data)
 ```
 
 **Node — write tagged events**
 
 ```js
-const { Client, Durability } = require("plasmite");
-const c = new Client();
-const pool = c.createPool("events");
+const { Client } = require("plasmite");
+using c = new Client();
+using pool = c.pool("events");
 pool.append({ service: "api", sha: "f4e5d6c" }, ["deploy"]);
 pool.append({ service: "api", msg: "latency spike" }, ["alert"]);
-pool.close(); c.close();
 ```
 
 **Go — write tagged events**
 
 ```go
 c, _ := plasmite.NewDefaultClient()
-p, _ := c.CreatePool(plasmite.PoolRefName("events"), plasmite.DefaultPoolSize)
-p.Append(map[string]any{"service": "api", "sha": "f4e5d6c"}, []string{"deploy"}, plasmite.DurabilityFast)
-p.Append(map[string]any{"service": "api", "msg": "latency spike"}, []string{"alert"}, plasmite.DurabilityFast)
+p, _ := c.Pool(plasmite.PoolRefName("events"), 0)
+p.Append(map[string]any{"service": "api", "sha": "f4e5d6c"}, []string{"deploy"}, plasmite.WithDurability(plasmite.DurabilityFast))
+p.Append(map[string]any{"service": "api", "msg": "latency spike"}, []string{"alert"}, plasmite.WithDurability(plasmite.DurabilityFast))
 p.Close(); c.Close()
 ```
 
@@ -372,7 +375,7 @@ p.Close(); c.Close()
 c, _ := plasmite.NewDefaultClient()
 p, _ := c.OpenPool(plasmite.PoolRefName("events"))
 out, errs := p.Tail(ctx, plasmite.TailOptions{Tags: []string{"alert"}, Timeout: 5 * time.Second})
-for msg := range out { fmt.Println(string(msg)) }
+for msg := range out { fmt.Println(msg.Seq, msg.Tags(), string(msg.Data)) }
 if err := <-errs; err != nil { log.Fatal(err) }
 p.Close(); c.Close()
 ```
