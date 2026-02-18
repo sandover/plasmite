@@ -224,14 +224,55 @@ jobs:
     runs-on: ubuntu-latest
     needs: [resolve-build-run, collect-build-artifacts]
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-build-run.outputs.tag }}
       - uses: actions/download-artifact@v4
         with:
           name: release-inputs
           path: release-inputs
       - uses: dtolnay/rust-toolchain@stable
+      - name: Verify cargo-binstall metadata contract (preview)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib
+          import sys
+          import tomllib
+
+          cargo_toml = pathlib.Path("Cargo.toml").read_text(encoding="utf-8")
+          doc = tomllib.loads(cargo_toml)
+          binstall = doc.get("package", {}).get("metadata", {}).get("binstall", {})
+          overrides = binstall.get("overrides", {})
+
+          expected_urls = {
+              "x86_64-unknown-linux-gnu": "{ repo }/releases/download/v{ version }/{ name }_{ version }_linux_amd64.tar.gz",
+              "x86_64-apple-darwin": "{ repo }/releases/download/v{ version }/{ name }_{ version }_darwin_amd64.tar.gz",
+              "aarch64-apple-darwin": "{ repo }/releases/download/v{ version }/{ name }_{ version }_darwin_arm64.tar.gz",
+          }
+
+          errors = []
+          if binstall.get("pkg-fmt") != "tgz":
+              errors.append("package.metadata.binstall.pkg-fmt must be 'tgz'")
+          if binstall.get("bin-dir") != "bin/{ bin }{ binary-ext }":
+              errors.append("package.metadata.binstall.bin-dir must be 'bin/{ bin }{ binary-ext }'")
+
+          for target, expected in expected_urls.items():
+              actual = (overrides.get(target) or {}).get("pkg-url")
+              if actual != expected:
+                  errors.append(f"{target} pkg-url mismatch: expected '{expected}', got '{actual}'")
+
+          if errors:
+              print("error: cargo-binstall metadata contract mismatch", file=sys.stderr)
+              for item in errors:
+                  print(f"- {item}", file=sys.stderr)
+              sys.exit(1)
+          print("cargo-binstall metadata contract ok")
+          PY
       - name: Install cargo-binstall
         shell: bash
-        run: cargo install cargo-binstall --locked
+        run: cargo install cargo-binstall --locked --version 1.17.5
       - name: cargo-binstall smoke (linux preview scope)
         shell: bash
         env:
