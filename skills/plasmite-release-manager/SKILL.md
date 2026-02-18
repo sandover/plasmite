@@ -30,7 +30,7 @@ Release invariants (non-negotiable):
 2. Homebrew formula alignment must pass before registry publish.
 3. Release remains fail-closed: all channels publish or none do.
 4. Registry versions must align with `release_target`.
-5. `../homebrew-tap` must be updated and pushed before `release-publish` dispatch.
+5. `HOMEBREW_TAP_TOKEN` must be configured for live publish runs.
 
 ## Procedure
 
@@ -68,12 +68,11 @@ Gate policy:
 
 ### 2) Short Resume Checkpoint
 
-If interrupted, run these four commands before resuming:
+If interrupted, run these three commands before resuming:
 ```bash
 git status --short --branch
 gh run list --workflow release --limit 1 --json databaseId,conclusion
 gh run list --workflow release-publish --limit 1 --json databaseId,conclusion
-git -C ../homebrew-tap log --oneline -1
 ```
 
 Escalate to incident workflow only when short checkpoint reveals anomalies
@@ -87,19 +86,14 @@ The `release-publish` workflow is manual-dispatch-only (`workflow_dispatch`). Th
 2. Run release build workflow (`release`):
    - push tag `vX.Y.Z` or dispatch `release.yml` with `tag`
    - require successful build run
-3. Verify build provenance for candidate `build_run_id`:
-   - `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <build_run_id> --expect-tag <release_target>`
-4. Align and publish Homebrew tap using release artifacts (required every release):
-   - `bash scripts/update_homebrew_formula.sh <release_target> ../homebrew-tap --build-run-id <build_run_id>`
-   - `git -C ../homebrew-tap add Formula/plasmite.rb`
-   - `git -C ../homebrew-tap commit -m "plasmite: update to <release_target#v>"`
-   - `git -C ../homebrew-tap push`
-   - `gh api repos/sandover/homebrew-tap/contents/Formula/plasmite.rb -H "Accept: application/vnd.github.raw" | rg -n "version \"<release_target#v>\""`
-5. Rehearsal publish run (always before live publish):
-   - `gh workflow run release-publish.yml -f build_run_id=<build_run_id> -f rehearsal=true`
-6. Live publish run:
+3. Rehearsal publish run (always before live publish):
+   - `gh workflow run release-publish.yml -f release_tag=<release_target> -f rehearsal=true`
+4. Live publish run:
+   - `gh workflow run release-publish.yml -f release_tag=<release_target> -f rehearsal=false`
+5. `release-publish.yml` resolves a successful build run for that tag, verifies release metadata, syncs Homebrew tap, then publishes.
+6. For credential/transient failures, do publish-only rerun using the same `release_target`.
+7. If needed for incident recovery, dispatch with explicit build run:
    - `gh workflow run release-publish.yml -f build_run_id=<build_run_id> -f rehearsal=false`
-7. For credential/transient failures, do publish-only rerun using same verified `build_run_id`.
 
 ### Release Tooling Stability
 
@@ -122,7 +116,7 @@ If any release workflow fails:
 2. Capture machine-readable failure evidence:
    - `gh run view <run-id> --json url,jobs --jq '{url,jobs:[.jobs[]|select(.conclusion=="failure")|{name,url:.url}]}'`
    - `gh run view <run-id> --log-failed`
-   - If `verify-homebrew-tap` fails with version mismatch, treat it as a missed tap-sync step: update/push `../homebrew-tap`, then rerun `release-publish` with the same `build_run_id`.
+   - If `sync-homebrew-tap` fails, check `HOMEBREW_TAP_TOKEN` and rerun `release-publish` for the same `release_target`.
 3. If incident-class failure, file blocker:
    - `bash skills/plasmite-release-manager/scripts/file_release_blocker_with_evidence.sh --release-target <release_target> --check "<gate>" --title "<title>" --summary "<summary>" --run-id <run-id> --agent <model@host>`
 
