@@ -67,6 +67,7 @@ Message envelope shared with the CLI schema.
 ### create_pool
 
 - Creates a new pool; fails with `AlreadyExists` if the pool exists.
+- Local creates MUST create parent directories as needed (equivalent to `mkdir -p` on the pool file’s parent).
 - Options may include size, retention, or durability defaults (additive).
 
 ### open_pool

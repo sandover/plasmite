@@ -45,6 +45,11 @@ try {
 }
 ```
 
+## Troubleshooting
+
+- **Missing pool directory**: pool creation creates parent directories automatically. If you call `openPool(...)` on a missing pool, catch `ErrorKind.NotFound` or use `client.pool(...)` to create-or-open.
+- **Permission denied**: choose a writable pool directory (`new Client("/path/to/pools")`) and verify directory permissions/ownership. Errors include `err.path` when available.
+
 ### Remote pools (HTTP/JSON)
 
 Connect to a plasmite server (`npx plasmite serve` or `pls serve`) to read

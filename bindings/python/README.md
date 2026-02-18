@@ -95,3 +95,8 @@ Use `append_json(...)` / `get_json(...)` only when you explicitly need raw wire 
 - Invalid local arguments raise `ValueError` / `TypeError`.
 - ABI/runtime failures raise typed subclasses of `PlasmiteError` (`NotFoundError`, `AlreadyExistsError`, `BusyError`, `PermissionDeniedError`, `CorruptError`, `IoError`, `UsageError`, `InternalError`).
 - All `PlasmiteError` values expose `kind`, `path`, `seq`, and `offset` when present.
+
+## Troubleshooting
+
+- **Missing pool directory**: pool creation creates parent directories automatically. If you call `open_pool(...)` on a missing pool, catch `NotFoundError` or use `client.pool(...)` to create-or-open.
+- **Permission denied**: choose a writable pool directory (`Client("/path/to/pools")`) and verify directory permissions/ownership. Errors include `err.path` when available.
