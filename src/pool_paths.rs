@@ -20,7 +20,7 @@ pub(crate) fn resolve_named_pool_path(
     name: &str,
     pool_dir: &Path,
 ) -> Result<PathBuf, PoolNameResolveError> {
-    if name.contains('/') {
+    if name.chars().any(std::path::is_separator) {
         return Err(PoolNameResolveError::ContainsPathSeparator);
     }
     if name.ends_with(".plasmite") {

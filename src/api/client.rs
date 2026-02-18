@@ -212,6 +212,14 @@ mod tests {
         assert_eq!(err.kind(), super::ErrorKind::Usage);
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn poolref_name_rejects_backslash_on_windows() {
+        let pool_dir = PathBuf::from(".scratch/pools");
+        let err = resolve_name(r"foo\bar", &pool_dir).expect_err("err");
+        assert_eq!(err.kind(), super::ErrorKind::Usage);
+    }
+
     #[test]
     fn local_client_defaults_pool_dir() {
         let client = LocalClient::new();

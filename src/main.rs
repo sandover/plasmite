@@ -806,7 +806,7 @@ struct ServeRunArgs {
 }
 
 fn resolve_poolref(input: &str, pool_dir: &Path) -> Result<PathBuf, Error> {
-    if input.contains('/') {
+    if input.chars().any(std::path::is_separator) {
         return Ok(PathBuf::from(input));
     }
     resolve_named_pool_path(input, pool_dir).map_err(map_pool_name_resolve_error)
@@ -912,7 +912,7 @@ fn add_missing_pool_hint(err: Error, pool_ref: &str, input: &str) -> Error {
     if err.kind() != ErrorKind::NotFound || err.hint().is_some() {
         return err;
     }
-    if input.contains('/') {
+    if input.chars().any(std::path::is_separator) {
         return err.with_hint(
             "Pool path not found. Check the path or pass --dir for a different pool directory.",
         );
@@ -935,7 +935,7 @@ fn add_missing_pool_create_hint(
     if input.contains("://") {
         return err.with_hint("Remote pool not found. Create it with server-side tooling first.");
     }
-    if input.contains('/') {
+    if input.chars().any(std::path::is_separator) {
         return err.with_hint(
             "Pool path not found. Check the path or pass --dir for a different pool directory.",
         );
@@ -3370,6 +3370,17 @@ mod tests {
         let err = resolve_pool_target("http://localhost:9170/demo#frag", Path::new("/tmp/pools"))
             .expect_err("err");
         assert_eq!(err.kind(), ErrorKind::Usage);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolve_pool_target_treats_windows_backslash_path_as_local_path() {
+        let input = r"C:\pools\demo.plasmite";
+        let target = resolve_pool_target(input, Path::new("C:\\ignored")).expect("target");
+        match target {
+            PoolTarget::LocalPath(path) => assert_eq!(path, PathBuf::from(input)),
+            _ => panic!("expected local path"),
+        }
     }
 
     #[test]
