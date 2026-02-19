@@ -256,6 +256,50 @@ fn help_pool_lists_pool_subcommands() {
 }
 
 #[test]
+fn duplex_with_no_args_prints_help() {
+    let output = cmd().args(["duplex"]).output().expect("duplex");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = std::str::from_utf8(&output.stderr).expect("utf8");
+    assert!(stderr.contains("Usage: plasmite duplex"));
+    assert!(stderr.contains("Send and follow from one command"));
+}
+
+#[test]
+fn feed_with_no_args_prints_help() {
+    let output = cmd().args(["feed"]).output().expect("feed");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = std::str::from_utf8(&output.stderr).expect("utf8");
+    assert!(stderr.contains("Usage: plasmite feed"));
+}
+
+#[test]
+fn fetch_with_no_args_prints_help() {
+    let output = cmd().args(["fetch"]).output().expect("fetch");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = std::str::from_utf8(&output.stderr).expect("utf8");
+    assert!(stderr.contains("Usage: plasmite fetch"));
+}
+
+#[test]
+fn follow_with_no_args_prints_help() {
+    let output = cmd().args(["follow"]).output().expect("follow");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = std::str::from_utf8(&output.stderr).expect("utf8");
+    assert!(stderr.contains("Usage: plasmite follow"));
+}
+
+#[test]
+fn pool_create_with_no_args_prints_help() {
+    let output = cmd()
+        .args(["pool", "create"])
+        .output()
+        .expect("pool create");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = std::str::from_utf8(&output.stderr).expect("utf8");
+    assert!(stderr.contains("Usage: plasmite pool create"));
+}
+
+#[test]
 fn create_feed_fetch_follow_flow() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
@@ -3379,22 +3423,11 @@ fn clap_errors_are_concise_in_json() {
 
 #[test]
 fn misuse_feedback_matrix_is_actionable_across_command_families() {
-    let cases: [(&[&str], &str, &str); 8] = [
-        (&["pool", "info"], "required arguments", "pool info --help"),
+    let cases: [(&[&str], &str, &str); 5] = [
         (
             &["feed", "demo", "{\"x\":1}", "--retry-delay", "1s"],
             "--retry-delay requires --retry",
             "Add --retry",
-        ),
-        (
-            &["follow"],
-            "required arguments",
-            "plasmite follow chat -n 1",
-        ),
-        (
-            &["fetch", "demo"],
-            "required arguments",
-            "plasmite fetch --help",
         ),
         (
             &["doctor", "demo", "--all"],
@@ -3862,17 +3895,10 @@ fn doctor_requires_pool_or_all() {
         .args(["--dir", pool_dir.to_str().unwrap(), "doctor"])
         .output()
         .expect("doctor");
-    assert!(!doctor.status.success());
-    let err = parse_error_json(&doctor.stderr);
-    let inner = err
-        .get("error")
-        .and_then(|v| v.as_object())
-        .expect("error object");
-    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Usage"));
-    let message = inner.get("message").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(message.contains("requires a pool name or --all"));
-    let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(hint.contains("doctor <pool>") || hint.contains("doctor --all"));
+    assert_eq!(doctor.status.code(), Some(2));
+    let stderr = std::str::from_utf8(&doctor.stderr).expect("utf8");
+    assert!(stderr.contains("Usage: plasmite doctor"));
+    assert!(stderr.contains("Diagnose pool health"));
 }
 
 #[test]

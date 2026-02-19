@@ -83,7 +83,9 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
     let cli = match Cli::try_parse_from(normalize_args(std::env::args_os())) {
         Ok(cli) => cli,
         Err(err) => match err.kind() {
-            ClapErrorKind::DisplayHelp | ClapErrorKind::DisplayVersion => {
+            ClapErrorKind::DisplayHelp
+            | ClapErrorKind::DisplayVersion
+            | ClapErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
                 err.print().map_err(|io_err| {
                     (
                         Error::new(ErrorKind::Io)
@@ -92,7 +94,15 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                         ColorMode::Auto,
                     )
                 })?;
-                return Ok(RunOutcome::ok());
+                let exit_code = if matches!(
+                    err.kind(),
+                    ClapErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+                ) {
+                    2
+                } else {
+                    0
+                };
+                return Ok(RunOutcome::with_code(exit_code));
             }
             _ => {
                 let message = clap_error_summary(&err);
@@ -258,6 +268,7 @@ NOTES
         command: PoolCommand,
     },
     #[command(
+        arg_required_else_help = true,
         about = "Send a message to a pool",
         long_about = r#"Send JSON messages to a pool.
 
@@ -386,6 +397,7 @@ NOTES
         run: ServeRunArgs,
     },
     #[command(
+        arg_required_else_help = true,
         about = "Fetch one message by sequence number",
         long_about = r#"Fetch a specific message by its seq number and print as JSON."#,
         after_help = r#"EXAMPLES
@@ -399,6 +411,7 @@ NOTES
         seq: u64,
     },
     #[command(
+        arg_required_else_help = true,
         about = "Follow messages from a pool",
         long_about = r#"Follow a pool and stream messages as they arrive.
 
@@ -506,6 +519,7 @@ NOTES
         replay: Option<f64>,
     },
     #[command(
+        arg_required_else_help = true,
         about = "Send and follow from one command",
         long_about = r#"Read and write a pool from one process.
 
@@ -554,6 +568,7 @@ NOTES
         echo_self: bool,
     },
     #[command(
+        arg_required_else_help = true,
         about = "Diagnose pool health",
         long_about = r#"Validate one pool (or all pools) and emit a diagnostic report."#,
         after_help = r#"EXAMPLES
@@ -582,6 +597,7 @@ NOTES
     )]
     Version,
     #[command(
+        arg_required_else_help = true,
         about = "Generate shell completions",
         long_about = r#"Generate shell completion scripts.
 
@@ -621,6 +637,7 @@ impl From<AccessModeCli> for serve::AccessMode {
 #[derive(Subcommand)]
 enum PoolCommand {
     #[command(
+        arg_required_else_help = true,
         about = "Create one or more pools",
         long_about = r#"Create pool files. Default size is 1MB (use --size for larger).
 
@@ -648,6 +665,7 @@ NOTES
         json: bool,
     },
     #[command(
+        arg_required_else_help = true,
         about = "Show pool metadata and bounds",
         long_about = r#"Show pool size, bounds, and metrics in human-readable format by default."#,
         after_help = r#"EXAMPLES
@@ -661,6 +679,7 @@ NOTES
         json: bool,
     },
     #[command(
+        arg_required_else_help = true,
         about = "Delete one or more pool files",
         long_about = r#"Delete one or more pool files (destructive, cannot be undone)."#,
         after_help = r#"EXAMPLES
