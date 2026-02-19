@@ -523,10 +523,15 @@ NOTES
         about = "Send and follow from one command",
         long_about = r#"Read and write a pool from one process.
 
-`duplex` behaves like `feed` on stdin and `follow` on stdout:
+`duplex` follows a pool on stdout (like `follow`) while also sending input from stdin:
 
-- TTY stdin: requires `--me`; each non-empty line becomes `{\"from\": NAME, \"msg\": LINE}`.
-- Non-TTY stdin: reads stdin as JSON stream values (feed defaults: --in auto --errors stop)."#
+- TTY stdin: requires `--me`; each non-empty line appends a message with `.data = {"from": ME, "msg": LINE}`.
+  Your own messages are hidden from output unless `--echo-self` is set.
+- Non-TTY stdin: ingests stdin as a JSON stream (like `feed`, defaults: `--in auto --errors stop`).
+  Duplex exits when stdin ends (EOF) or when the receive side ends (e.g. timeout/error).
+
+Notes:
+- Remote refs do not support `--create` or `--since` (use `--tail` for remote)."#
     )]
     Duplex {
         #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
@@ -542,7 +547,7 @@ NOTES
             long = "tail",
             short = 'n',
             default_value_t = 0,
-            help = "Print the last N messages first, then keep following"
+            help = "Print the last N messages first"
         )]
         tail: u64,
         #[arg(long, help = "Emit JSON Lines (one object per line)")]
