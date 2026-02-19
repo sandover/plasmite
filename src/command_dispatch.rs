@@ -708,6 +708,11 @@ pub(super) fn dispatch_command(
                                 "Create remote pools with server-side tooling, then rerun duplex.",
                             ));
                     }
+                    if since.is_some() {
+                        return Err(Error::new(ErrorKind::Usage)
+                            .with_message("remote duplex does not support --since")
+                            .with_hint("Use --tail N for remote refs, or run --since against a local pool path."));
+                    }
                     let client = RemoteClient::new(base_url.clone())?;
                     let remote_pool = client.open_pool(&PoolRef::name(name.clone()))?;
                     let follow_tx = event_tx.clone();
