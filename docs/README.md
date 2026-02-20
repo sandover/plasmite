@@ -3,13 +3,11 @@
 Plasmite documentation is intentionally split into:
 
 - `docs/record/`: canonical docs of record
-- `docs/decisions/`: ADRs (also docs of record)
 - `.ergo/`: feature planning and task tracking via the ergo graph and events log
 
 ## Start here
 
 - Docs of record: `docs/record/README.md`
-- Decisions (ADRs): `docs/decisions/README.md`
 - Specs index: `spec/README.md`
 
 ## Normative specs

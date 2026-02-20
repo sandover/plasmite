@@ -2,7 +2,7 @@
 
 Canonical, current truth documentation for Plasmite.
 
-For the full docs index (including specs and decisions), see `docs/README.md`.
+For the full docs index (including specs), see `docs/README.md`.
 
 ## Contents
 
