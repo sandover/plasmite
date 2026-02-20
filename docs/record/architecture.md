@@ -9,29 +9,37 @@ Normative behavior lives in:
 
 ## Design principles
 
-- Local-first: pool storage correctness does not depend on external services.
-- Contract-first: CLI/API/protocol stability is preserved while internals evolve.
-- Shared core: CLI, bindings, and server reuse the same pool/message logic.
-- Explicit failure modes: errors map to stable kinds and scriptable exit codes.
+These are operational constraints, not labels. Each states a violation condition.
+
+**Local-first.** The core layer must compile and pass all tests with no network dependencies. Pool operations must never make network calls. Any dependency introduced into `src/core` that requires network access is a violation.
+
+**Contract-first.** Public API types, CLI flag shapes, and HTTP endpoint paths are frozen within a major version. Internal refactors that preserve observable behavior are always allowed. Changes that alter observable behavior require a spec update before the code change. Merging a behavior change without a corresponding spec update is a violation.
+
+**Shared core.** CLI, API, and HTTP server must all invoke pool and message operations through `src/core` or `src/api`. Duplicating correctness logic across interface adapters is a violation. Shared interface helpers (`pool_paths.rs`, `pool_info_json.rs`) exist precisely to prevent parallel implementations; adding a parallel implementation is a violation.
+
+**Explicit failure modes.** Every error returned by a public interface must map to a stable `ErrorKind`. Adding a new failure case requires adding or reusing an existing `ErrorKind`. Returning a generic internal error for a condition that has a more specific kind is a violation.
 
 ## Layer model
 
-1. Interface layer
-- CLI (`src/main.rs`, `src/command_dispatch.rs`), API (`src/api/*`), and HTTP server (`src/serve.rs`).
-- Responsibilities: parse/validate inputs, invoke core operations, map results to user-facing formats.
-- Shared interface helpers:
-  - Pool path and pool-info JSON helpers (`src/pool_paths.rs`, `src/pool_info_json.rs`) are reused across CLI/API/server.
-  - Serve tail handlers share runtime/stream setup helpers in `src/serve.rs` to keep endpoint behavior consistent.
+```
+Interface layer  →  Core domain layer  →  Platform layer
+```
 
-2. Core domain layer
-- Pool format and operations (`src/core/*`).
-- Responsibilities: append/get/tail semantics, validation, sequencing, corruption detection.
+**Interface layer** (`src/main.rs`, `src/command_dispatch.rs`, `src/api/*`, `src/serve.rs`, `src/abi.rs`):
+- Must: parse and validate inputs, invoke core operations, map results to user-facing formats.
+- Must not: implement storage correctness logic — no frame parsing, ring arithmetic, or sequence validation.
+- Must not: hold pool state across requests beyond what `Pool` and `Cursor` already encapsulate.
 
-3. Platform layer
-- File mapping, file locking, and notify primitives.
-- Responsibilities: concurrency and durability primitives across supported OSes.
+**Core domain layer** (`src/core/*`):
+- Must: own all append/get/tail semantics, validation, sequencing, and corruption detection.
+- Must not: call into interface-layer modules.
+- Must not: make network calls or depend on a runtime async context.
 
-Rule: interface layers do not implement storage correctness logic themselves.
+**Platform layer** (`memmap2`, `fs2`, `libc`):
+- Must: provide concurrency and durability primitives.
+- Must not: contain message-semantic logic.
+
+**Cross-layer rule:** Interface layers do not implement storage correctness logic themselves. This is the most important rule in this document. A change that moves ring arithmetic, frame validation, or sequence logic into a CLI handler, HTTP endpoint, or ABI wrapper is a violation regardless of how localized or convenient it appears.
 
 ## Data model and on-disk layout
 
@@ -40,15 +48,17 @@ A pool file is:
 `header | index_region | ring`
 
 - Header: metadata, bounds, and offsets.
-- Index region: optional fixed-size seq->offset slots (`(u64 seq, u64 offset)`).
+- Index region: optional fixed-size seq→offset slots (`(u64 seq, u64 offset)`).
 - Ring: append log frames containing encoded `{meta, data}` payloads.
 
 Key invariants:
 
 - Sequence numbers are monotonically increasing for committed messages.
 - Frame commit state is validated before exposure to readers.
-- Corrupt/torn/stale reads do not silently return invalid payloads.
+- Corrupt, torn, or stale reads do not silently return invalid payloads.
 - Index mismatches always fall back to scan for correctness.
+- A binary must refuse to open a pool with a format version it does not understand; an unknown version produces an actionable error, not a panic or silent data access.
+- Format version increments are additive within a major version where possible; breaking changes to the on-disk layout require a new format version.
 
 ## Write/read paths
 
@@ -60,6 +70,12 @@ Append (high level):
 4. Commit frame bytes.
 5. Update index slot (when enabled).
 6. Publish header updates and notify waiters.
+
+Invariants:
+
+- The writer lock must be held for the full duration of steps 3–6. Releasing it between planning and committing is a violation.
+- A frame in `Writing` state that is never committed must not be returned to readers.
+- `plan.rs` must remain pure and side-effect-free. It must not write to the pool file. Its output must be fully determined by its inputs.
 
 Get-by-seq path:
 
@@ -74,19 +90,36 @@ Tail path:
 2. Stream committed messages in order.
 3. Use notify + bounded polling fallback for low-latency follow mode.
 
+Invariant: Correctness of the tail path must not depend on notify delivery. Notify is a latency optimization; a tail that never receives a notification must still eventually return all committed messages. Removing notify must not cause failures in non-timing tests.
+
 ## Transport architecture
 
 Plasmite is transport-agnostic at the core.
 
 - Local mode: CLI/API calls directly into core operations.
 - Remote mode: `plasmite serve` adapts HTTP request/response into the same core calls.
-- Future transports (for example QUIC) should be adapters, not alternate correctness engines.
+- Future transports must be adapters over the existing core, not alternate correctness engines.
+
+Invariant: Adding a new transport must not require changes to `src/core`. If a proposed transport requires core changes to function correctly, the design is wrong.
 
 ## Extension seams
 
-- New interfaces should reuse `PoolRef` and core message operations.
-- New payload conventions should preserve existing envelope semantics (`seq`, `time`, `meta`, `data`).
-- Performance work must preserve crash-safety and fallback correctness paths.
+- New interfaces must reuse `PoolRef` and core message operations. Parallel pool-resolution logic is a violation.
+- New payload conventions must preserve existing envelope semantics (`seq`, `time`, `meta`, `data`). Removing or renaming envelope fields is a breaking change.
+- Performance work must preserve crash-safety and fallback correctness paths. Optimizations that bypass the index fallback-to-scan path are violations.
+- New commands or flags must not change the observable behavior of existing commands as a side effect.
+
+## Quality criteria
+
+These are auditable claims about the implementation. Each is checkable by inspection or test.
+
+- `src/core` contains no `async` code and no network dependencies.
+- All public error conditions map to a named `ErrorKind` variant; no public path returns a generic internal error for a condition with a more specific kind.
+- All three interface surfaces (CLI, API, HTTP) exercise the same underlying pool operations for equivalent actions.
+- `plan.rs` has no side effects; its output is fully determined by its inputs.
+- The notify path is never on the correctness critical path; removing notify must not cause failures in non-timing tests.
+- Pool files opened with an unknown format version produce an actionable error, not a panic or silent data access.
+- The C ABI (`abi.rs`) contains no correctness logic; it is a thin translation layer over `src/api`.
 
 ## Operational guarantees vs non-goals
 
