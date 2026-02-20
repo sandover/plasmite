@@ -20,8 +20,6 @@ docs/
 ├── ../include/plasmite.h                       — C ABI header; read for stability contract, ownership rules, linking
 ├── record/serving.md                           — Serving + remote access (TLS, auth, CORS, deployment)
 │
-├── decisions/README.md                         — Catalog of architecture decisions in decisions/
-│
 └── images/ui/                                  — UI screenshots; read when updating docs/UI references
 
 spec/

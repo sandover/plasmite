@@ -33,7 +33,7 @@ In scope:
 
 - Durable bounded pools with concurrent readers/writers.
 - CLI + bindings + HTTP interfaces over one shared correctness core.
-- Versioned specs and ADRs for decisions that affect compatibility.
+- Versioned specs and canonical docs of record for decisions that affect compatibility.
 
 Out of scope — these are hard stops, not positioning decisions:
 
