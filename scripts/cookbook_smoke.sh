@@ -107,7 +107,7 @@ PY
   if [[ ! -d "${ROOT_DIR}/bindings/node/node_modules" ]]; then
     (cd "${ROOT_DIR}/bindings/node" && npm install)
   fi
-  (cd "${ROOT_DIR}/bindings/node" && npm run build >/dev/null)
+  (cd "${ROOT_DIR}/bindings/node" && npm run build >/dev/null && npm run prepare-native >/dev/null)
   PLASMITE_LIB_DIR="${ROOT_DIR}/target/debug" \
     node "${ROOT_DIR}/bindings/node/cookbook_smoke_fixture.js" "${fixtures_dir}/node-pools" >"${node_out}"
   assert_jq_true "${node_out}" '.data.task == "resize"' "Node cookbook fixture"
