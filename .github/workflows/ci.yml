@@ -120,8 +120,9 @@ jobs:
   windows-smoke:
     needs: [pr-paths]
     if: >-
-      (github.event_name == 'pull_request' && needs.pr-paths.outputs.windows == 'true')
-      || github.event_name != 'pull_request'
+      always()
+      && (github.event_name != 'pull_request'
+          || needs.pr-paths.outputs.windows == 'true')
     continue-on-error: true
     runs-on: windows-latest
     steps:
