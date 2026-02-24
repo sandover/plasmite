@@ -348,7 +348,14 @@ jobs:
             echo "CARGO_REGISTRY_TOKEN not set; cannot publish crates.io package."
             exit 1
           fi
-          cargo publish --locked --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"
+          if cargo publish --locked --token "${{ secrets.CARGO_REGISTRY_TOKEN }}" 2>&1 | tee /tmp/cargo-publish.log; then
+            echo "publish-crates-io: published successfully."
+          elif grep -q "already exists on crates.io" /tmp/cargo-publish.log; then
+            echo "publish-crates-io: version already published (idempotent success)."
+          else
+            cat /tmp/cargo-publish.log
+            exit 1
+          fi
 
   publish-npm:
     runs-on: ubuntu-latest
@@ -379,7 +386,14 @@ jobs:
             ls -la release-inputs/node-dist || true
             exit 1
           fi
-          npm publish "${files[0]}" --access public
+          if npm publish "${files[0]}" --access public 2>&1 | tee /tmp/npm-publish.log; then
+            echo "publish-npm: published successfully."
+          elif grep -q "cannot publish over the previously published" /tmp/npm-publish.log; then
+            echo "publish-npm: version already published (idempotent success)."
+          else
+            cat /tmp/npm-publish.log
+            exit 1
+          fi
 
   publish-pypi:
     runs-on: ubuntu-latest
@@ -412,6 +426,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [resolve-build-run, collect-build-artifacts, sync-homebrew-tap, publish-pypi, publish-crates-io, publish-npm]
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-build-run.outputs.tag }}
+          sparse-checkout: CHANGELOG.md
       - uses: actions/download-artifact@v4
         with:
           name: release-inputs
@@ -423,40 +441,67 @@ jobs:
           cd release-inputs/dist
           shasum -a 256 *.tar.gz > sha256sums.txt
           cat sha256sums.txt
+      - name: Extract changelog section
+        id: changelog
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve-build-run.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Extract the section for this version from CHANGELOG.md.
+          # Matches from "## [VERSION]" up to the next "## [" heading.
+          section=$(awk -v ver="$VERSION" '
+            /^## \[/ { if (found) exit; if (index($0, "[" ver "]")) found=1; next }
+            found { print }
+          ' CHANGELOG.md)
+          if [[ -z "$section" ]]; then
+            section="See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ needs.resolve-build-run.outputs.tag }}/CHANGELOG.md) for details."
+          fi
+          # Write to file to avoid delimiter issues in GITHUB_OUTPUT.
+          echo "$section" > /tmp/changelog-section.md
       - name: Rehearsal mode
         if: needs.resolve-build-run.outputs.rehearsal == 'true'
         run: 'echo "release rehearsal: skipping GitHub release publish."'
-      - uses: softprops/action-gh-release@v2
+      - name: Create GitHub Release
         if: needs.resolve-build-run.outputs.rehearsal != 'true'
-        with:
-          tag_name: ${{ needs.resolve-build-run.outputs.tag }}
-          files: |
-            release-inputs/dist/*
-          body: |
-            Release ${{ needs.resolve-build-run.outputs.tag }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve-build-run.outputs.tag }}
+        run: |
+          set -euo pipefail
+          changelog=$(cat /tmp/changelog-section.md)
+          cat > /tmp/release-body.md <<BODY
+          ${changelog}
 
-            ## Install
+          ## Install
 
-            ### Homebrew (macOS and Linux)
-            ```bash
-            brew install sandover/tap/plasmite
-            ```
+          ### Homebrew (macOS and Linux)
+          \`\`\`bash
+          brew install sandover/tap/plasmite
+          \`\`\`
 
-            ### Manual install
-            Download the appropriate tarball for your platform, extract it, and install the SDK layout:
-            ```bash
-            tar xzf plasmite_*_<your-platform>.tar.gz
-            sudo install -d /usr/local/bin /usr/local/lib /usr/local/include /usr/local/lib/pkgconfig
-            sudo cp -f bin/plasmite bin/pls /usr/local/bin/
-            sudo cp -f include/plasmite.h /usr/local/include/
-            sudo cp -f lib/pkgconfig/plasmite.pc /usr/local/lib/pkgconfig/
-            # macOS
-            sudo cp -f lib/libplasmite.dylib /usr/local/lib/ 2>/dev/null || true
-            # Linux
-            sudo cp -f lib/libplasmite.so /usr/local/lib/ 2>/dev/null || true
-            ```
+          ### Manual install
+          Download the appropriate tarball for your platform, extract it, and install the SDK layout:
+          \`\`\`bash
+          tar xzf plasmite_*_<your-platform>.tar.gz
+          sudo install -d /usr/local/bin /usr/local/lib /usr/local/include /usr/local/lib/pkgconfig
+          sudo cp -f bin/plasmite bin/pls /usr/local/bin/
+          sudo cp -f include/plasmite.h /usr/local/include/
+          sudo cp -f lib/pkgconfig/plasmite.pc /usr/local/lib/pkgconfig/
+          # macOS
+          sudo cp -f lib/libplasmite.dylib /usr/local/lib/ 2>/dev/null || true
+          # Linux
+          sudo cp -f lib/libplasmite.so /usr/local/lib/ 2>/dev/null || true
+          \`\`\`
 
-            ### From source
-            ```bash
-            cargo install --git https://github.com/sandover/plasmite --tag ${{ needs.resolve-build-run.outputs.tag }} plasmite
-            ```
+          ### From source
+          \`\`\`bash
+          cargo install --git https://github.com/${{ github.repository }} --tag ${TAG} plasmite
+          \`\`\`
+          BODY
+          # Trim leading whitespace from heredoc indentation.
+          sed -i 's/^          //' /tmp/release-body.md
+          gh release create "$TAG" release-inputs/dist/* \
+            --title "$TAG" \
+            --notes-file /tmp/release-body.md

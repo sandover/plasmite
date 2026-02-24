@@ -107,7 +107,7 @@ GitHub runners are shared machines, so benchmark numbers can swing due to factor
 - Use a runtime that can reach GitHub and registries and can use maintainer `gh` auth.
 - Release automation is split: `release.yml` builds artifacts, `release-publish.yml` performs preflight + registry publish + GitHub release.
 - Homebrew parity is mandatory: `release-publish.yml` syncs/verifies the formula in parallel with registry publishes; the final GitHub release is gated on both.
-- Live publish requires `HOMEBREW_TAP_TOKEN` so workflow can commit/push tap updates.
+- Homebrew tap is updated locally from `../homebrew-tap` using `scripts/update_homebrew_formula.sh` and pushed before live publish dispatch. The `sync-homebrew-tap` CI job verifies alignment.
 - Publish-only retry after credential fixes must target the same release tag (or explicit successful `build_run_id`) without rebuilding matrix artifacts.
 
 ## Support-tier enforcement
@@ -161,7 +161,7 @@ The skill handles mechanics, but maintainers still decide:
 5. Run local benchmark comparison against the prior tag:
    - `bash skills/plasmite-release-manager/scripts/compare_local_benchmarks.sh --base-tag <base_tag> --runs 3`
 6. Ask Codex to run the skill in `live` mode.
-7. Ensure `HOMEBREW_TAP_TOKEN` is set in repository secrets before live publish.
+7. Update and push the Homebrew formula from `../homebrew-tap` before live publish dispatch.
 8. Confirm post-release delivery verification is complete on all channels.
 9. If publish fails due to credentials/policy, run publish-only rerun with the same target:
    - `gh workflow run release-publish.yml -f release_tag=<vX.Y.Z> -f rehearsal=false`

@@ -19,10 +19,9 @@ Authoritative runbook for Plasmite releases. Keep execution fail-closed and alig
 2. `release-publish` must gate registry publish on Homebrew tap sync/alignment.
 3. Release remains fail-closed across channels (no partial success treated as done).
 4. Registry/package versions must equal `release_target`.
-5. Secrets must exist:
-   - always: `NPM_TOKEN`, `PYPI_API_TOKEN`, `CARGO_REGISTRY_TOKEN`
-   - live publish: `HOMEBREW_TAP_TOKEN`
-6. Tooling pins in workflows are policy:
+5. Secrets must exist: `NPM_TOKEN`, `PYPI_API_TOKEN`, `CARGO_REGISTRY_TOKEN`.
+6. Homebrew tap is updated locally (not via CI secret). The maintainer pushes the formula from their `../homebrew-tap` checkout; the `sync-homebrew-tap` CI job verifies alignment.
+7. Tooling pins in workflows are policy:
    - `RELEASE_RUST_TOOLCHAIN=1.88.0`
    - `CARGO_BINSTALL_VERSION=1.17.5`
 
@@ -32,13 +31,21 @@ Authoritative runbook for Plasmite releases. Keep execution fail-closed and alig
    - `gh auth status`
 2. Confirm version alignment:
    - `bash scripts/check-version-alignment.sh`
-3. Initialize/reopen release evidence (derives `base_tag`):
+3. Finalize the changelog:
+   - Rename `## [Unreleased]` to `## [<version>] - <YYYY-MM-DD>` in `CHANGELOG.md`.
+   - Review that the section accurately covers all notable changes since the previous release (check `git log <base_tag>..HEAD --oneline`).
+   - Add a fresh empty `## [Unreleased]` heading above the new section.
+   - The changelog must be committed and pushed before tagging. The `release` job extracts it for GitHub Release notes.
+4. Bump version:
+   - `bash scripts/bump_version.sh <version>`
+5. Initialize/reopen release evidence (derives `base_tag`):
    - `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`
 
 ## Required QA Gates
 
 Run before any publish dispatch:
 
+- Changelog: verify `CHANGELOG.md` has a `## [<version>] - <date>` section (not `[Unreleased]`) and the version matches the release target.
 - `cargo fmt --all`
 - `cargo clippy --all-targets -- -D warnings`
 - `cargo test`
@@ -57,10 +64,13 @@ Any failed required gate blocks release progression.
 ## Build And Publish Procedure
 
 1. Ensure release source is pushed and tag exists/planned.
-2. Run `release.yml` (tag push or manual dispatch with `tag`).
-3. Rehearse publish (required before live):
+2. Run `release.yml` (tag push or manual dispatch with `tag`). Wait for all matrix jobs to succeed.
+3. Update the Homebrew formula locally and push:
+   - `bash scripts/update_homebrew_formula.sh <release_target> ../homebrew-tap --build-run-id <build_run_id>`
+   - `cd ../homebrew-tap && git add Formula/plasmite.rb && git commit -m "plasmite: update to <version>" && git push`
+4. Rehearse publish (recommended before first live dispatch):
    - `gh workflow run release-publish.yml -f release_tag=<release_target> -f rehearsal=true`
-4. Run live publish:
+5. Run live publish:
    - `gh workflow run release-publish.yml -f release_tag=<release_target> -f rehearsal=false`
 
 Dispatch policy:
@@ -78,8 +88,9 @@ On any release workflow failure:
 2. Collect evidence:
    - `gh run view <run-id> --json url,jobs --jq '{url,jobs:[.jobs[]|select(.conclusion=="failure")|{name,url:.url}]}'`
    - `gh run view <run-id> --log-failed`
-3. If `sync-homebrew-tap` fails, verify `HOMEBREW_TAP_TOKEN`, then rerun for the same target.
-4. If incident-class failure, file a blocker:
+3. If `sync-homebrew-tap` fails: update and push the formula from the local `../homebrew-tap` checkout (see Build And Publish Procedure step 3), then rerun.
+4. If registries fail with "already published" (npm 403, crates.io "already exists"): the packages are live. Create the GitHub Release manually with `gh release create` using artifacts downloaded from the build run (`gh run download <build_run_id>`).
+5. If incident-class failure, file a blocker:
    - `bash skills/plasmite-release-manager/scripts/file_release_blocker_with_evidence.sh --release-target <release_target> --check "<gate>" --title "<title>" --summary "<summary>" --run-id <run-id> --agent <model@host>`
 
 ## Resume Checkpoint

@@ -4,14 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-02-24
+
 ### Added
 - `plasmite duplex` — read and write a pool from one command. TTY mode wraps each line as `{"from": ME, "msg": LINE}` for live chat; non-TTY mode ingests a JSON stream. Supports `--tail`, `--since`, `--timeout`, `--echo-self`, and remote pools.
+- Subcommands now show their help text when required arguments are missing.
 
 ### Changed
-- Documentation indexes and binding READMEs were audited for API/default/command accuracy.
+- CI and release pipeline simplified (-636 lines); consolidated workflow topology.
+- Vision and architecture docs deepened into governing documents of record.
+
+## [0.4.0] - 2026-02-18
+
+### Added
+- SDK-grade typed APIs across Go, Python, and Node bindings (ergonomic round 2).
+- Pool directories are auto-created on `create_pool` across all bindings.
+- cargo-binstall preview channel for Linux/macOS.
+
+### Changed
+- Documentation indexes and binding READMEs audited for API/default/command accuracy.
 - Corrected Go module path to `github.com/sandover/plasmite/bindings/go` so downstream `go get github.com/sandover/plasmite/bindings/go/local` resolves from this repo layout.
 - Simplified shared internals: CLI dispatch split into `src/command_dispatch.rs`, pool path/info helpers centralized, and serve tail setup deduplicated.
-- Simplified binding maintenance: Node error/type-surface mapping is centralized with a declaration drift gate, binding tests use reusable setup helpers, and conformance runners now share per-language step-dispatch/pool-open helpers.
+- Simplified binding maintenance: Node error/type-surface mapping centralized with a declaration drift gate, binding tests use reusable setup helpers, and conformance runners share per-language step-dispatch/pool-open helpers.
 
 ## [0.3.0] - 2026-02-16
 
