@@ -30,6 +30,9 @@ Only these commands are in-scope for v0.0.1:
 * `plasmite follow`
 * `plasmite version`
 
+Experimental command (not part of the frozen v0.0.1 contract):
+* `plasmite duplex`
+
 ### Flags in scope
 
 Minimal, explicit flag set for v0.0.1:
@@ -42,6 +45,9 @@ Minimal, explicit flag set for v0.0.1:
 * `serve check`: `--json`
 * `feed`: `DATA`, `--file FILE`, `--in`, `--errors`, `--tag`, `--durability fast|flush`, `--create`, `--create-size`, `--retry`, `--retry-delay`
 * `follow`: `--tail`, `--since`, `--tag`, `--where`, `--format pretty|jsonl`, `--jsonl`, `--quiet-drops`
+* `duplex`: `--me`, `--create`, `--tail`, `--since`, `--format`, `--jsonl`, `--timeout`, `--echo-self`
+
+`duplex` is implemented but remains experimental and may change without contract guarantees.
 
 `pool create`, `pool list`, `pool delete`, `doctor`, and `serve check` print human-readable output by default and support `--json` for machine-readable output. `feed` emits append receipts (`seq`, `time`, `meta`) and does not echo `data`.
 
@@ -642,6 +648,53 @@ plasmite follow demo --where '.meta.tags[]? == "error"'
 * Empty `--tag ""` is accepted and matches only messages with an empty-string tag.
 * A malformed `--where` expression is a `Usage` error.
 * `--tag` is additive and backward-compatible; existing `--where` scripts continue to work unchanged.
+
+## `plasmite duplex`
+
+Read and write from one command.
+
+**Synopsis**
+
+```bash
+plasmite duplex POOLREF [OPTIONS]
+```
+
+POOLREF for `duplex` supports:
+- local name/path refs, and
+- remote shorthand refs: `http(s)://host:port/<pool>` (exactly one pool path segment, no trailing slash).
+
+Remote refs read and write against the same remote pool; remote `--create` is rejected.
+
+**Options**
+
+* `--me NAME` (required when stdin is a TTY): identity used for line-mode messages.
+* `--create` (local refs only): create missing pool before follow/send.
+* `--tail N` (or `-n N`) and `--since TIME`: follow options inherited from `follow`.
+* `--format pretty|jsonl` and `--jsonl`: output format for followed messages.
+* `--timeout DURATION`: follow timeout.
+* `--echo-self`: include messages sent by `--me` in the follow stream.
+
+Unsupported (by design in this implementation):
+* `--tag`, `--where`, `--quiet-drops`, `--replay`, and all send-only flags beyond implicit defaults (`auto` ingest, `Stop` errors, `Durability::Fast`).
+
+**Behavior**
+
+* TTY stdin:
+  * each non-empty line is transformed into `{"from": NAME, "msg": LINE}`.
+  * `--me` is required.
+  * newline and CRLF are stripped.
+* Non-TTY stdin:
+  * reads a JSON stream like `feed` with stream ingest mode (`Auto`, `Stop`, and `Durability::Fast`), with no receipts.
+* Followed messages are printed in the selected format.
+* By default, messages from `--me` are suppressed for readability.
+* Use `--echo-self` to include your own messages in output.
+* `duplex` exits when either side finishes (first completion wins):
+  * send side completion includes stdin EOF, and
+  * follow side completion includes timeout/error exits.
+
+Errors:
+* TTY input with no `--me` is a usage error.
+* Remote refs reject `--create` with usage guidance.
 
 ---
 

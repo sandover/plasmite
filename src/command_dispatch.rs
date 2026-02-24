@@ -376,6 +376,7 @@ pub(super) fn dispatch_command(
                                     input,
                                     errors,
                                 },
+                                true,
                             )?
                         } else if stdin_stream {
                             ingest_from_stdin(
@@ -391,6 +392,7 @@ pub(super) fn dispatch_command(
                                     input,
                                     errors,
                                 },
+                                true,
                             )?
                         } else {
                             return Err(missing_feed_data_error());
@@ -439,6 +441,7 @@ pub(super) fn dispatch_command(
                                     input,
                                     errors,
                                 },
+                                true,
                             )?
                         } else if stdin_stream {
                             ingest_from_stdin_remote(
@@ -454,6 +457,7 @@ pub(super) fn dispatch_command(
                                     input,
                                     errors,
                                 },
+                                true,
                             )?
                         } else {
                             return Err(missing_feed_data_error());
@@ -478,6 +482,342 @@ pub(super) fn dispatch_command(
                 .map_err(|err| add_missing_seq_hint(err, &pool))?;
             emit_json(message_from_frame(&frame)?, color_mode);
             Ok(RunOutcome::ok())
+        }
+        Command::Duplex {
+            pool,
+            me,
+            create,
+            tail,
+            jsonl,
+            timeout,
+            format,
+            since,
+            echo_self,
+        } => {
+            if jsonl && format.is_some() {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("conflicting output options")
+                    .with_hint("Use --format jsonl (or --jsonl), but not both."));
+            }
+            let stdin_is_terminal = io::stdin().is_terminal();
+            if duplex_requires_me_when_tty(stdin_is_terminal, me.as_deref()) {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("TTY input requires --me for duplex")
+                    .with_hint("Provide --me NAME to send TTY line-mode messages."));
+            }
+            let format_flag = format;
+            let format = format.unwrap_or(if jsonl {
+                FollowFormat::Jsonl
+            } else {
+                FollowFormat::Pretty
+            });
+            let pretty = matches!(format, FollowFormat::Pretty);
+            let now = now_ns()?;
+            let since_ns = since
+                .as_deref()
+                .map(|value| parse_since(value, now))
+                .transpose()?;
+            if let Some(since_ns) = since_ns {
+                if since_ns > now {
+                    return Ok(RunOutcome::ok());
+                }
+            }
+            let timeout_input = timeout.as_deref();
+            let timeout = timeout_input.map(parse_duration).transpose()?;
+            let exact_follow_create_hint = follow_exact_create_command_hint(
+                &pool,
+                tail,
+                false,
+                jsonl,
+                timeout_input,
+                false,
+                format_flag,
+                since.as_deref(),
+                &[],
+                &[],
+                false,
+                false,
+                None,
+            );
+            let stop = Arc::new(AtomicBool::new(false));
+            let cfg = FollowConfig {
+                tail,
+                pretty,
+                one: false,
+                timeout,
+                data_only: false,
+                since_ns,
+                required_tags: Vec::new(),
+                where_predicates: compile_filters(&[])?,
+                quiet_drops: false,
+                notify: true,
+                color_mode,
+                replay_speed: None,
+                suppress_sender: if echo_self { None } else { me.clone() },
+                stop: Some(stop.clone()),
+            };
+
+            #[derive(Clone, Copy)]
+            enum DuplexSide {
+                Follow,
+                Send,
+            }
+
+            let (event_tx, event_rx) = mpsc::channel::<(DuplexSide, Result<RunOutcome, Error>)>();
+            let target = resolve_pool_target(&pool, &pool_dir)?;
+            match target {
+                PoolTarget::LocalPath(path) => {
+                    let exact_create_hint = Some(exact_follow_create_hint.clone());
+                    let follow_pool_handle = match Pool::open(&path) {
+                        Ok(pool_handle) => pool_handle,
+                        Err(err) if create && err.kind() == ErrorKind::NotFound => {
+                            ensure_pool_dir(&pool_dir)?;
+                            Pool::create(&path, PoolOptions::new(DEFAULT_POOL_SIZE))?
+                        }
+                        Err(err) => {
+                            return Err(add_missing_pool_create_hint(
+                                err,
+                                "duplex",
+                                &pool,
+                                &pool,
+                                exact_create_hint,
+                            ));
+                        }
+                    };
+                    let mut send_pool = Pool::open(&path)?;
+                    let follow_tx = event_tx.clone();
+                    let follow_cfg = cfg.clone();
+                    let stop_for_follow = stop.clone();
+                    let pool_name = pool.clone();
+                    let follow_path = path.clone();
+                    let _ = std::thread::spawn(move || {
+                        let outcome = super::follow_pool(
+                            &follow_pool_handle,
+                            &pool_name,
+                            &follow_path,
+                            follow_cfg,
+                        );
+                        if outcome.is_err() {
+                            stop_for_follow.store(true, Ordering::Release);
+                        }
+                        let _ = follow_tx.send((DuplexSide::Follow, outcome));
+                    });
+
+                    let send_tx = event_tx;
+                    let stop_for_send = stop.clone();
+                    let me_for_send = me.clone();
+                    let stdin_mode_terminal = stdin_is_terminal;
+                    let _ = std::thread::spawn(move || {
+                        if stdin_mode_terminal {
+                            let mut reader = std::io::BufReader::new(io::stdin());
+                            let mut outcome = RunOutcome::ok();
+                            let mut have_input = false;
+                            loop {
+                                if follow_should_stop(Some(&stop_for_send)) {
+                                    break;
+                                }
+                                let mut line = String::new();
+                                let n = match std::io::BufRead::read_line(&mut reader, &mut line) {
+                                    Ok(n) => n,
+                                    Err(err) => {
+                                        let err = Error::new(ErrorKind::Io)
+                                            .with_message("failed to read line from stdin")
+                                            .with_source(err);
+                                        let _ = send_tx.send((DuplexSide::Send, Err(err)));
+                                        return;
+                                    }
+                                };
+                                if n == 0 {
+                                    break;
+                                }
+                                if follow_should_stop(Some(&stop_for_send)) {
+                                    break;
+                                }
+                                let Some(value) = parse_duplex_tty_line(
+                                    me_for_send.as_ref().expect("me required"),
+                                    &line,
+                                ) else {
+                                    continue;
+                                };
+                                have_input = true;
+                                let payload = lite3::encode_message(&Vec::<String>::new(), &value);
+                                if let Err(err) = payload {
+                                    let _ = send_tx.send((DuplexSide::Send, Err(err)));
+                                    return;
+                                }
+                                let payload = payload.expect("payload");
+                                if let Err(err) = retry_with_config(None, || {
+                                    let timestamp_ns = now_ns()?;
+                                    let options =
+                                        AppendOptions::new(timestamp_ns, Durability::Fast);
+                                    send_pool
+                                        .append_with_options(payload.as_slice(), options)
+                                        .map(|_| ())
+                                }) {
+                                    let _ = send_tx.send((DuplexSide::Send, Err(err)));
+                                    return;
+                                }
+                            }
+                            if have_input {
+                                outcome = RunOutcome::ok();
+                            }
+                            let _ = send_tx.send((DuplexSide::Send, Ok(outcome)));
+                        } else {
+                            let pool_ref = pool.to_string();
+                            let pool_path_label = path.display().to_string();
+                            let mut send_pool = send_pool;
+                            let outcome = ingest_from_stdin(
+                                io::stdin().lock(),
+                                FeedIngestContext {
+                                    pool_ref: &pool_ref,
+                                    pool_path_label: &pool_path_label,
+                                    tags: &[],
+                                    durability: Durability::Fast,
+                                    retry_config: None,
+                                    pool_handle: &mut send_pool,
+                                    color_mode,
+                                    input: InputMode::Auto,
+                                    errors: ErrorPolicyCli::Stop,
+                                },
+                                false,
+                            );
+                            let outcome = match outcome {
+                                Ok(outcome) => {
+                                    if outcome.records_total == 0 {
+                                        Err(missing_feed_data_error())
+                                    } else if outcome.failed > 0 {
+                                        Ok(RunOutcome::with_code(1))
+                                    } else {
+                                        Ok(RunOutcome::ok())
+                                    }
+                                }
+                                Err(err) => Err(err),
+                            };
+                            let _ = send_tx.send((DuplexSide::Send, outcome));
+                        };
+                    });
+                }
+                PoolTarget::Remote {
+                    base_url,
+                    pool: name,
+                } => {
+                    if create {
+                        return Err(Error::new(ErrorKind::Usage)
+                            .with_message("remote duplex does not support --create")
+                            .with_hint(
+                                "Create remote pools with server-side tooling, then rerun duplex.",
+                            ));
+                    }
+                    if since.is_some() {
+                        return Err(Error::new(ErrorKind::Usage)
+                            .with_message("remote duplex does not support --since")
+                            .with_hint("Use --tail N for remote refs, or run --since against a local pool path."));
+                    }
+                    let client = RemoteClient::new(base_url.clone())?;
+                    let remote_pool = client.open_pool(&PoolRef::name(name.clone()))?;
+                    let follow_tx = event_tx.clone();
+                    let follow_cfg = cfg.clone();
+                    let stop_for_follow = stop.clone();
+                    let pool_name = name.clone();
+                    let follow_base_url = base_url.clone();
+                    let _ = std::thread::spawn(move || {
+                        let outcome = follow_remote(&follow_base_url, &pool_name, &follow_cfg);
+                        if outcome.is_err() {
+                            stop_for_follow.store(true, Ordering::Release);
+                        }
+                        let _ = follow_tx.send((DuplexSide::Follow, outcome));
+                    });
+
+                    let send_tx = event_tx;
+                    let stop_for_send = stop.clone();
+                    let me_for_send = me.clone();
+                    let stdin_mode_terminal = stdin_is_terminal;
+                    let _ = std::thread::spawn(move || {
+                        if stdin_mode_terminal {
+                            let mut reader = std::io::BufReader::new(io::stdin());
+                            let mut outcome = RunOutcome::ok();
+                            let mut have_input = false;
+                            loop {
+                                if follow_should_stop(Some(&stop_for_send)) {
+                                    break;
+                                }
+                                let mut line = String::new();
+                                let n = match std::io::BufRead::read_line(&mut reader, &mut line) {
+                                    Ok(n) => n,
+                                    Err(err) => {
+                                        let err = Error::new(ErrorKind::Io)
+                                            .with_message("failed to read line from stdin")
+                                            .with_source(err);
+                                        let _ = send_tx.send((DuplexSide::Send, Err(err)));
+                                        return;
+                                    }
+                                };
+                                if n == 0 {
+                                    break;
+                                }
+                                if follow_should_stop(Some(&stop_for_send)) {
+                                    break;
+                                }
+                                let Some(value) = parse_duplex_tty_line(
+                                    me_for_send.as_ref().expect("me required"),
+                                    &line,
+                                ) else {
+                                    continue;
+                                };
+                                have_input = true;
+                                if let Err(err) =
+                                    remote_pool.append_json_now(&value, &[], Durability::Fast)
+                                {
+                                    let _ = send_tx.send((DuplexSide::Send, Err(err)));
+                                    return;
+                                }
+                            }
+                            if have_input {
+                                outcome = RunOutcome::ok();
+                            }
+                            let _ = send_tx.send((DuplexSide::Send, Ok(outcome)));
+                        } else {
+                            let pool_path_label = format!("{}/{}", client.base_url(), name);
+                            let outcome = ingest_from_stdin_remote(
+                                io::stdin().lock(),
+                                RemoteFeedIngestContext {
+                                    pool_ref: &name,
+                                    pool_path_label: &pool_path_label,
+                                    tags: &[],
+                                    durability: Durability::Fast,
+                                    retry_config: None,
+                                    remote_pool: &remote_pool,
+                                    color_mode,
+                                    input: InputMode::Auto,
+                                    errors: ErrorPolicyCli::Stop,
+                                },
+                                false,
+                            );
+                            let outcome = match outcome {
+                                Ok(outcome) => {
+                                    if outcome.records_total == 0 {
+                                        Err(missing_feed_data_error())
+                                    } else if outcome.failed > 0 {
+                                        Ok(RunOutcome::with_code(1))
+                                    } else {
+                                        Ok(RunOutcome::ok())
+                                    }
+                                }
+                                Err(err) => Err(err),
+                            };
+                            let _ = send_tx.send((DuplexSide::Send, outcome));
+                        }
+                    });
+                }
+            }
+
+            match event_rx.recv() {
+                Ok((_side, outcome)) => {
+                    stop.store(true, Ordering::Release);
+                    outcome
+                }
+                Err(_) => Ok(RunOutcome::ok()),
+            }
         }
         Command::Follow {
             pool,
@@ -542,6 +882,8 @@ pub(super) fn dispatch_command(
                 notify: !no_notify,
                 color_mode,
                 replay_speed: replay,
+                suppress_sender: None,
+                stop: None,
             };
             let target = resolve_pool_target(&pool, &pool_dir)?;
             match target {

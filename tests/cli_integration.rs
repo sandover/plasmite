@@ -256,6 +256,50 @@ fn help_pool_lists_pool_subcommands() {
 }
 
 #[test]
+fn duplex_with_no_args_prints_help() {
+    let output = cmd().args(["duplex"]).output().expect("duplex");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = std::str::from_utf8(&output.stderr).expect("utf8");
+    assert!(stderr.contains("Usage: plasmite duplex"));
+    assert!(stderr.contains("Send and follow from one command"));
+}
+
+#[test]
+fn feed_with_no_args_prints_help() {
+    let output = cmd().args(["feed"]).output().expect("feed");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = std::str::from_utf8(&output.stderr).expect("utf8");
+    assert!(stderr.contains("Usage: plasmite feed"));
+}
+
+#[test]
+fn fetch_with_no_args_prints_help() {
+    let output = cmd().args(["fetch"]).output().expect("fetch");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = std::str::from_utf8(&output.stderr).expect("utf8");
+    assert!(stderr.contains("Usage: plasmite fetch"));
+}
+
+#[test]
+fn follow_with_no_args_prints_help() {
+    let output = cmd().args(["follow"]).output().expect("follow");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = std::str::from_utf8(&output.stderr).expect("utf8");
+    assert!(stderr.contains("Usage: plasmite follow"));
+}
+
+#[test]
+fn pool_create_with_no_args_prints_help() {
+    let output = cmd()
+        .args(["pool", "create"])
+        .output()
+        .expect("pool create");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = std::str::from_utf8(&output.stderr).expect("utf8");
+    assert!(stderr.contains("Usage: plasmite pool create"));
+}
+
+#[test]
 fn create_feed_fetch_follow_flow() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
@@ -3379,22 +3423,11 @@ fn clap_errors_are_concise_in_json() {
 
 #[test]
 fn misuse_feedback_matrix_is_actionable_across_command_families() {
-    let cases: [(&[&str], &str, &str); 8] = [
-        (&["pool", "info"], "required arguments", "pool info --help"),
+    let cases: [(&[&str], &str, &str); 5] = [
         (
             &["feed", "demo", "{\"x\":1}", "--retry-delay", "1s"],
             "--retry-delay requires --retry",
             "Add --retry",
-        ),
-        (
-            &["follow"],
-            "required arguments",
-            "plasmite follow chat -n 1",
-        ),
-        (
-            &["fetch", "demo"],
-            "required arguments",
-            "plasmite fetch --help",
         ),
         (
             &["doctor", "demo", "--all"],
@@ -3862,17 +3895,10 @@ fn doctor_requires_pool_or_all() {
         .args(["--dir", pool_dir.to_str().unwrap(), "doctor"])
         .output()
         .expect("doctor");
-    assert!(!doctor.status.success());
-    let err = parse_error_json(&doctor.stderr);
-    let inner = err
-        .get("error")
-        .and_then(|v| v.as_object())
-        .expect("error object");
-    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Usage"));
-    let message = inner.get("message").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(message.contains("requires a pool name or --all"));
-    let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(hint.contains("doctor <pool>") || hint.contains("doctor --all"));
+    assert_eq!(doctor.status.code(), Some(2));
+    let stderr = std::str::from_utf8(&doctor.stderr).expect("utf8");
+    assert!(stderr.contains("Usage: plasmite doctor"));
+    assert!(stderr.contains("Diagnose pool health"));
 }
 
 #[test]
@@ -4393,6 +4419,208 @@ fn emit_streams_json_values_from_stdin() {
     assert_eq!(follower_lines.len(), 2);
     assert_eq!(follower_lines[0].get("data").unwrap()["x"], 1);
     assert_eq!(follower_lines[1].get("data").unwrap()["x"], 2);
+}
+
+#[test]
+fn duplex_non_tty_echoes_followed_messages_without_self_echo() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "chat",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let seed_out = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "feed",
+            "chat",
+            "{\"from\":\"bob\",\"msg\":\"seed\"}",
+        ])
+        .output()
+        .expect("seed feed");
+    assert!(seed_out.status.success());
+
+    let mut duplex = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "duplex",
+            "chat",
+            "--create",
+            "--me",
+            "alice",
+            "--tail",
+            "1",
+            "--jsonl",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("duplex");
+    let stdout = duplex.stdout.take().expect("duplex stdout");
+    let (line_tx, line_rx) = mpsc::channel::<String>();
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        loop {
+            let mut line = String::new();
+            let read = reader.read_line(&mut line).unwrap_or(0);
+            if read == 0 {
+                break;
+            }
+            if line_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let first_line = line_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("expected seed line");
+    let first_value = parse_json(first_line.trim());
+    assert_eq!(first_value.get("data").unwrap()["from"], "bob");
+    {
+        let stdin = duplex.stdin.as_mut().expect("duplex stdin");
+        stdin
+            .write_all(b"{\"from\":\"alice\",\"msg\":\"reply\"}\n")
+            .expect("write stdin");
+    }
+    assert!(
+        line_rx.recv_timeout(Duration::from_millis(500)).is_err(),
+        "expected self-suppression to avoid echoing alice message"
+    );
+    let _ = duplex.stdin.take();
+    let status = duplex.wait().expect("duplex wait");
+    assert_eq!(status.code(), Some(0), "unexpected duplex exit code");
+
+    let follow_out = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "follow",
+            "chat",
+            "--tail",
+            "2",
+            "--jsonl",
+            "--timeout",
+            "150ms",
+        ])
+        .output()
+        .expect("follow");
+    assert!(
+        follow_out.status.code() == Some(0) || follow_out.status.code() == Some(124),
+        "unexpected follow exit code: {:?}",
+        follow_out.status.code()
+    );
+    let follow_lines = parse_json_lines(&follow_out.stdout);
+    assert_eq!(follow_lines.len(), 2);
+    assert_eq!(follow_lines[0].get("data").unwrap()["from"], "bob");
+    assert_eq!(follow_lines[1].get("data").unwrap()["from"], "alice");
+}
+
+#[test]
+fn duplex_remote_url_rejects_create_flag() {
+    let output = cmd()
+        .args([
+            "duplex",
+            "http://127.0.0.1:65535/chat",
+            "--create",
+            "--me",
+            "alice",
+        ])
+        .output()
+        .expect("duplex");
+    assert_eq!(output.status.code(), Some(2));
+    let err = parse_error_json(&output.stderr);
+    let inner = err.get("error").and_then(|v| v.as_object()).expect("error");
+    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Usage"));
+    let message = inner.get("message").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(message.contains("does not support --create"));
+}
+
+#[test]
+fn duplex_remote_happy_path_sends_and_reads() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "chat",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let seed_out = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "feed",
+            "chat",
+            "{\"from\":\"bob\",\"msg\":\"seed\"}",
+        ])
+        .output()
+        .expect("seed feed");
+    assert!(seed_out.status.success());
+
+    let server = ServeProcess::start(&pool_dir);
+    let pool_url = format!("{}/chat", server.base_url);
+    let mut duplex = cmd()
+        .args([
+            "duplex", &pool_url, "--me", "alice", "--tail", "1", "--jsonl",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("duplex");
+    let stdout = duplex.stdout.take().expect("duplex stdout");
+    let first_line = read_line_with_timeout(stdout, Duration::from_secs(2));
+    let first_value = parse_json(first_line.trim());
+    assert_eq!(first_value.get("data").unwrap()["from"], "bob");
+
+    {
+        let stdin = duplex.stdin.as_mut().expect("duplex stdin");
+        stdin
+            .write_all(b"{\"from\":\"alice\",\"msg\":\"remote-reply\"}\n")
+            .expect("write stdin");
+    }
+    let _ = duplex.stdin.take();
+    let status = duplex.wait().expect("duplex wait");
+    assert_eq!(status.code(), Some(0), "unexpected duplex exit code");
+
+    let follow_out = cmd()
+        .args([
+            "follow",
+            &pool_url,
+            "--tail",
+            "2",
+            "--jsonl",
+            "--timeout",
+            "200ms",
+        ])
+        .output()
+        .expect("follow");
+    assert!(
+        follow_out.status.code() == Some(0) || follow_out.status.code() == Some(124),
+        "unexpected follow exit code: {:?}",
+        follow_out.status.code()
+    );
+    let follow_lines = parse_json_lines(&follow_out.stdout);
+    assert_eq!(follow_lines.len(), 2);
+    assert_eq!(follow_lines[0].get("data").unwrap()["from"], "bob");
+    assert_eq!(follow_lines[1].get("data").unwrap()["from"], "alice");
 }
 
 #[test]

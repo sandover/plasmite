@@ -9,6 +9,9 @@ use std::ffi::OsString;
 use std::io::{self, IsTerminal, Read};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 
 use clap::{
     Args, CommandFactory, Parser, Subcommand, ValueEnum, ValueHint,
@@ -80,7 +83,9 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
     let cli = match Cli::try_parse_from(normalize_args(std::env::args_os())) {
         Ok(cli) => cli,
         Err(err) => match err.kind() {
-            ClapErrorKind::DisplayHelp | ClapErrorKind::DisplayVersion => {
+            ClapErrorKind::DisplayHelp
+            | ClapErrorKind::DisplayVersion
+            | ClapErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
                 err.print().map_err(|io_err| {
                     (
                         Error::new(ErrorKind::Io)
@@ -89,7 +94,15 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                         ColorMode::Auto,
                     )
                 })?;
-                return Ok(RunOutcome::ok());
+                let exit_code = if matches!(
+                    err.kind(),
+                    ClapErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+                ) {
+                    2
+                } else {
+                    0
+                };
+                return Ok(RunOutcome::with_code(exit_code));
             }
             _ => {
                 let message = clap_error_summary(&err);
@@ -255,6 +268,7 @@ NOTES
         command: PoolCommand,
     },
     #[command(
+        arg_required_else_help = true,
         about = "Send a message to a pool",
         long_about = r#"Send JSON messages to a pool.
 
@@ -383,6 +397,7 @@ NOTES
         run: ServeRunArgs,
     },
     #[command(
+        arg_required_else_help = true,
         about = "Fetch one message by sequence number",
         long_about = r#"Fetch a specific message by its seq number and print as JSON."#,
         after_help = r#"EXAMPLES
@@ -396,6 +411,7 @@ NOTES
         seq: u64,
     },
     #[command(
+        arg_required_else_help = true,
         about = "Follow messages from a pool",
         long_about = r#"Follow a pool and stream messages as they arrive.
 
@@ -503,6 +519,61 @@ NOTES
         replay: Option<f64>,
     },
     #[command(
+        arg_required_else_help = true,
+        about = "Send and follow from one command",
+        long_about = r#"Read and write a pool from one process.
+
+`duplex` follows a pool on stdout (like `follow`) while also sending input from stdin:
+
+- TTY stdin: requires `--me`; each non-empty line appends a message with `.data = {"from": ME, "msg": LINE}`.
+  Your own messages are hidden from output unless `--echo-self` is set.
+- Non-TTY stdin: ingests stdin as a JSON stream (like `feed`, defaults: `--in auto --errors stop`).
+  Duplex exits when stdin ends (EOF) or when the receive side ends (e.g. timeout/error).
+
+Notes:
+- Remote refs do not support `--create` or `--since` (use `--tail` for remote)."#
+    )]
+    Duplex {
+        #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
+        pool: String,
+        #[arg(
+            long,
+            help = "Sender identity for TTY mode and default self-suppression"
+        )]
+        me: Option<String>,
+        #[arg(long, help = "Create local pool if missing before following")]
+        create: bool,
+        #[arg(
+            long = "tail",
+            short = 'n',
+            default_value_t = 0,
+            help = "Print the last N messages first"
+        )]
+        tail: u64,
+        #[arg(long, help = "Emit JSON Lines (one object per line)")]
+        jsonl: bool,
+        #[arg(
+            long,
+            help = "Exit 124 if no output within duration (e.g. 500ms, 5s, 1m)"
+        )]
+        timeout: Option<String>,
+        #[arg(
+            long = "format",
+            value_enum,
+            help = "Output format: pretty|jsonl (use --jsonl as alias for jsonl)"
+        )]
+        format: Option<FollowFormat>,
+        #[arg(
+            long,
+            help = "Start at or after this time (RFC 3339 or relative like 5m)",
+            conflicts_with = "tail"
+        )]
+        since: Option<String>,
+        #[arg(long, help = "Also emit your own messages in the receive stream")]
+        echo_self: bool,
+    },
+    #[command(
+        arg_required_else_help = true,
         about = "Diagnose pool health",
         long_about = r#"Validate one pool (or all pools) and emit a diagnostic report."#,
         after_help = r#"EXAMPLES
@@ -531,6 +602,7 @@ NOTES
     )]
     Version,
     #[command(
+        arg_required_else_help = true,
         about = "Generate shell completions",
         long_about = r#"Generate shell completion scripts.
 
@@ -570,6 +642,7 @@ impl From<AccessModeCli> for serve::AccessMode {
 #[derive(Subcommand)]
 enum PoolCommand {
     #[command(
+        arg_required_else_help = true,
         about = "Create one or more pools",
         long_about = r#"Create pool files. Default size is 1MB (use --size for larger).
 
@@ -597,6 +670,7 @@ NOTES
         json: bool,
     },
     #[command(
+        arg_required_else_help = true,
         about = "Show pool metadata and bounds",
         long_about = r#"Show pool size, bounds, and metrics in human-readable format by default."#,
         after_help = r#"EXAMPLES
@@ -610,6 +684,7 @@ NOTES
         json: bool,
     },
     #[command(
+        arg_required_else_help = true,
         about = "Delete one or more pool files",
         long_about = r#"Delete one or more pool files (destructive, cannot be undone)."#,
         after_help = r#"EXAMPLES
@@ -2511,6 +2586,7 @@ struct RemoteFeedIngestContext<'a> {
 fn ingest_from_stdin<R: Read>(
     reader: R,
     ctx: FeedIngestContext<'_>,
+    emit_receipt: bool,
 ) -> Result<IngestOutcome, Error> {
     let ingest_config = IngestConfig {
         mode: input_mode_to_ingest(ctx.input),
@@ -2534,11 +2610,13 @@ fn ingest_from_stdin<R: Read>(
                     .append_with_options(payload.as_slice(), options)?;
                 Ok((seq, timestamp_ns))
             })?;
-            emit_message(
-                feed_receipt_json(seq, timestamp_ns, ctx.tags)?,
-                false,
-                ctx.color_mode,
-            );
+            if emit_receipt {
+                emit_message(
+                    feed_receipt_json(seq, timestamp_ns, ctx.tags)?,
+                    false,
+                    ctx.color_mode,
+                );
+            }
             Ok(())
         },
         |failure| {
@@ -2556,6 +2634,7 @@ fn ingest_from_stdin<R: Read>(
 fn ingest_from_stdin_remote<R: Read>(
     reader: R,
     ctx: RemoteFeedIngestContext<'_>,
+    emit_receipt: bool,
 ) -> Result<IngestOutcome, Error> {
     let ingest_config = IngestConfig {
         mode: input_mode_to_ingest(ctx.input),
@@ -2574,7 +2653,9 @@ fn ingest_from_stdin_remote<R: Read>(
                 ctx.remote_pool
                     .append_json_now(&data, ctx.tags, ctx.durability)
             })?;
-            emit_message(feed_receipt_from_message(&message), false, ctx.color_mode);
+            if emit_receipt {
+                emit_message(feed_receipt_from_message(&message), false, ctx.color_mode);
+            }
             Ok(())
         },
         |failure| {
@@ -2734,6 +2815,8 @@ struct FollowConfig {
     notify: bool,
     color_mode: ColorMode,
     replay_speed: Option<f64>,
+    suppress_sender: Option<String>,
+    stop: Option<Arc<AtomicBool>>,
 }
 
 fn matches_required_tags(required_tags: &[String], message: &Value) -> bool {
@@ -2751,6 +2834,39 @@ fn matches_required_tags(required_tags: &[String], message: &Value) -> bool {
         tags.iter()
             .any(|tag| tag.as_str().is_some_and(|value| value == required))
     })
+}
+
+fn should_suppress_sender(message: &Value, sender: &str) -> bool {
+    message
+        .get("data")
+        .and_then(|data| data.get("from"))
+        .and_then(Value::as_str)
+        .is_some_and(|value| value == sender)
+}
+
+fn duplex_requires_me_when_tty(stdin_is_terminal: bool, me: Option<&str>) -> bool {
+    stdin_is_terminal && me.is_none()
+}
+
+fn parse_duplex_tty_line(me: &str, line: &str) -> Option<Value> {
+    let trimmed = line.trim_end_matches(&['\r', '\n'][..]);
+    if trimmed.trim().is_empty() {
+        return None;
+    }
+    Some(json!({
+        "from": me,
+        "msg": trimmed,
+    }))
+}
+
+fn should_suppress_message(cfg: &FollowConfig, message: &Value) -> bool {
+    cfg.suppress_sender
+        .as_deref()
+        .is_some_and(|sender| should_suppress_sender(message, sender))
+}
+
+fn follow_should_stop(stop: Option<&Arc<AtomicBool>>) -> bool {
+    stop.is_some_and(|flag| flag.load(Ordering::Acquire))
 }
 
 fn follow_remote(base_url: &str, pool: &str, cfg: &FollowConfig) -> Result<RunOutcome, Error> {
@@ -2794,6 +2910,10 @@ fn follow_remote(base_url: &str, pool: &str, cfg: &FollowConfig) -> Result<RunOu
 
     let mut tail_wait_matches = VecDeque::new();
     loop {
+        if follow_should_stop(cfg.stop.as_ref()) {
+            return Ok(RunOutcome::ok());
+        }
+
         let mut options = TailOptions::new();
         options.since_seq = next_since_seq;
         options.timeout = cfg.timeout;
@@ -2801,9 +2921,13 @@ fn follow_remote(base_url: &str, pool: &str, cfg: &FollowConfig) -> Result<RunOu
 
         let mut emitted_in_cycle = false;
         while let Some(message) = tail.next_message()? {
+            if follow_should_stop(cfg.stop.as_ref()) {
+                return Ok(RunOutcome::ok());
+            }
             next_since_seq = Some(message.seq.saturating_add(1));
             let value = message_to_json(&message);
-            if !matches_required_tags(cfg.required_tags.as_slice(), &value)
+            if should_suppress_message(cfg, &value)
+                || !matches_required_tags(cfg.required_tags.as_slice(), &value)
                 || !matches_all(cfg.where_predicates.as_slice(), &value)?
             {
                 continue;
@@ -2875,11 +2999,18 @@ fn follow_pool(
     if let Some(since_ns) = cfg.since_ns {
         cursor.seek_to(header.tail_off as usize);
         loop {
+            if follow_should_stop(cfg.stop.as_ref()) {
+                return Ok(RunOutcome::ok());
+            }
             match cursor.next(pool)? {
                 CursorResult::Message(frame) => {
+                    if follow_should_stop(cfg.stop.as_ref()) {
+                        return Ok(RunOutcome::ok());
+                    }
                     if frame.timestamp_ns >= since_ns {
                         let message = message_from_frame(&frame)?;
-                        if matches_required_tags(cfg.required_tags.as_slice(), &message)
+                        if !should_suppress_message(&cfg, &message)
+                            && matches_required_tags(cfg.required_tags.as_slice(), &message)
                             && matches_all(cfg.where_predicates.as_slice(), &message)?
                         {
                             emit_message(
@@ -2905,10 +3036,17 @@ fn follow_pool(
     } else if cfg.tail > 0 {
         cursor.seek_to(header.tail_off as usize);
         loop {
+            if follow_should_stop(cfg.stop.as_ref()) {
+                return Ok(RunOutcome::ok());
+            }
             match cursor.next(pool)? {
                 CursorResult::Message(frame) => {
+                    if follow_should_stop(cfg.stop.as_ref()) {
+                        return Ok(RunOutcome::ok());
+                    }
                     let message = message_from_frame(&frame)?;
-                    if matches_required_tags(cfg.required_tags.as_slice(), &message)
+                    if !should_suppress_message(&cfg, &message)
+                        && matches_required_tags(cfg.required_tags.as_slice(), &message)
                         && matches_all(cfg.where_predicates.as_slice(), &message)?
                     {
                         emit.push_back(message);
@@ -3023,8 +3161,14 @@ fn follow_pool(
     };
 
     loop {
+        if follow_should_stop(cfg.stop.as_ref()) {
+            return Ok(RunOutcome::ok());
+        }
         match cursor.next(pool)? {
             CursorResult::Message(frame) => {
+                if follow_should_stop(cfg.stop.as_ref()) {
+                    return Ok(RunOutcome::ok());
+                }
                 if let Some(last_seen_seq) = last_seen_seq {
                     if frame.seq > last_seen_seq + 1 {
                         queue_drop(last_seen_seq, frame.seq, &mut pending_drop);
@@ -3032,7 +3176,8 @@ fn follow_pool(
                     }
                 }
                 let message = message_from_frame(&frame)?;
-                if matches_required_tags(cfg.required_tags.as_slice(), &message)
+                if !should_suppress_message(&cfg, &message)
+                    && matches_required_tags(cfg.required_tags.as_slice(), &message)
                     && matches_all(cfg.where_predicates.as_slice(), &message)?
                 {
                     if tail_wait {
@@ -3067,6 +3212,9 @@ fn follow_pool(
                 backoff = Duration::from_millis(1);
             }
             CursorResult::WouldBlock => {
+                if follow_should_stop(cfg.stop.as_ref()) {
+                    return Ok(RunOutcome::ok());
+                }
                 maybe_emit_pending(&mut pending_drop, &mut last_notice_at);
                 if let Some(deadline) = timeout_deadline {
                     let now = Instant::now();
@@ -3100,6 +3248,9 @@ fn follow_pool(
                 backoff = std::cmp::min(backoff * 2, max_backoff);
             }
             CursorResult::FellBehind => {
+                if follow_should_stop(cfg.stop.as_ref()) {
+                    return Ok(RunOutcome::ok());
+                }
                 header = pool.header_from_mmap()?;
                 if cfg.tail > 0 {
                     cursor.seek_to(header.tail_off as usize);
@@ -3200,9 +3351,9 @@ fn follow_replay(pool: &Pool, cfg: &FollowConfig) -> Result<RunOutcome, Error> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Error, ErrorKind, PoolTarget, RetryConfig, error_text, matches_required_tags,
-        parse_duration, parse_size, read_token_file, render_table, resolve_pool_target,
-        retry_with_config, short_display_path,
+        Error, ErrorKind, PoolTarget, RetryConfig, duplex_requires_me_when_tty, error_text,
+        matches_required_tags, parse_duplex_tty_line, parse_duration, parse_size, read_token_file,
+        render_table, resolve_pool_target, retry_with_config, short_display_path,
     };
     use serde_json::json;
     use std::io::Cursor;
@@ -3251,6 +3402,27 @@ mod tests {
         assert_eq!(parse_duration("500ms").unwrap(), Duration::from_millis(500));
         assert_eq!(parse_duration("5s").unwrap(), Duration::from_secs(5));
         assert_eq!(parse_duration("1m").unwrap(), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn duplex_requires_me_when_tty_inputs() {
+        assert!(duplex_requires_me_when_tty(true, None));
+        assert!(!duplex_requires_me_when_tty(false, None));
+        assert!(!duplex_requires_me_when_tty(true, Some("alice")));
+        assert!(!duplex_requires_me_when_tty(false, Some("alice")));
+    }
+
+    #[test]
+    fn parse_duplex_tty_line_supports_text_and_crlf() {
+        let value = parse_duplex_tty_line("alice", "hello world\r\n").expect("value");
+        assert_eq!(value.get("from").and_then(|v| v.as_str()), Some("alice"));
+        assert_eq!(
+            value.get("msg").and_then(|v| v.as_str()),
+            Some("hello world")
+        );
+
+        assert!(parse_duplex_tty_line("alice", "\n").is_none());
+        assert!(parse_duplex_tty_line("alice", "   \r\n").is_none());
     }
 
     #[test]
