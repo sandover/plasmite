@@ -152,8 +152,8 @@ NODE
   mkdir -p "${WORK_DIR}/go-cache" "${WORK_DIR}/go-tmp"
   (
     cd "${ROOT_DIR}/bindings/go" && \
-      GOCACHE="${ROOT_DIR}/tmp/go-cache" \
-      GOTMPDIR="${ROOT_DIR}/tmp/go-tmp" \
+      GOCACHE="${WORK_DIR}/go-cache" \
+      GOTMPDIR="${WORK_DIR}/go-tmp" \
       PLASMITE_LIB_DIR="${ROOT_DIR}/target/debug" \
       PKG_CONFIG="/usr/bin/true" \
       CGO_CFLAGS="-I${ROOT_DIR}/include" \
