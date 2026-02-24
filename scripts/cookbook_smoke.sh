@@ -155,6 +155,8 @@ NODE
       GOCACHE="${WORK_DIR}/go-cache" \
       GOTMPDIR="${WORK_DIR}/go-tmp" \
       PLASMITE_LIB_DIR="${ROOT_DIR}/target/debug" \
+      LD_LIBRARY_PATH="${ROOT_DIR}/target/debug:${LD_LIBRARY_PATH:-}" \
+      DYLD_FALLBACK_LIBRARY_PATH="${ROOT_DIR}/target/debug:${DYLD_FALLBACK_LIBRARY_PATH:-}" \
       PKG_CONFIG="/usr/bin/true" \
       CGO_CFLAGS="-I${ROOT_DIR}/include" \
       CGO_LDFLAGS="-L${ROOT_DIR}/target/debug" \
