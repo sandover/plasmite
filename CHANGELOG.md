@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `plasmite duplex` — read and write a pool from one command. TTY mode wraps each line as `{"from": ME, "msg": LINE}` for live chat; non-TTY mode ingests a JSON stream. Supports `--tail`, `--since`, `--timeout`, `--echo-self`, and remote pools.
+
 ### Changed
 - Documentation indexes and binding READMEs were audited for API/default/command accuracy.
 - Corrected Go module path to `github.com/sandover/plasmite/bindings/go` so downstream `go get github.com/sandover/plasmite/bindings/go/local` resolves from this repo layout.

@@ -130,27 +130,51 @@ c.Close()
 
 ## Duplex Chat
 
-For two-party live chat, run one command in each terminal:
+`duplex` runs send and follow concurrently in one process — type a line and it's appended to the pool; messages from the other side stream to your terminal as they arrive. Both sides share a single pool.
 
-**Terminal 1** — Alice:
+### Basic two-party chat
+
+**Terminal 1** — Alice creates the pool and starts chatting:
 
 ```bash
 pls duplex chat --create --me alice
 ```
 
-**Terminal 2** — Bob:
+**Terminal 2** — Bob joins and catches up on the last 20 messages:
 
 ```bash
-pls duplex chat --create --me bob
+pls duplex chat --me bob --tail 20
 ```
 
-In each terminal, type plain text lines to send and see the shared stream.
-Use `--echo-self` if you want to see your own lines echoed back by the stream.
-
-You can also pipe JSON:
+Each non-empty line you type becomes `{"from": "alice", "msg": "your line"}`. By default, your own messages are hidden from the follow stream so you only see the other side. Add `--echo-self` to see everything:
 
 ```bash
-printf '{"from":"alice","msg":"boot complete"}\n{"from":"alice","msg":"ready"}' | pls duplex chat --me alice
+pls duplex chat --me alice --echo-self
+```
+
+### Remote duplex
+
+If a server is running (`pls serve`), duplex works over the network too — same syntax, just pass a URL:
+
+```bash
+pls duplex http://server:9700/chat --me alice --tail 10
+```
+
+Note: `--create` and `--since` are not supported for remote pools. Use `--tail` to catch up on history.
+
+### Scripted duplex (non-TTY)
+
+When stdin is not a TTY, duplex ingests a JSON stream (like `feed`). The session ends when stdin reaches EOF.
+
+```bash
+printf '{"from":"alice","msg":"boot complete"}\n{"from":"alice","msg":"ready"}' \
+  | pls duplex chat --me alice
+```
+
+Use `--timeout` to bound how long the follow side waits for new messages:
+
+```bash
+printf '{"ping": true}' | pls duplex chat --me healthcheck --timeout 5s
 ```
 
 ---
@@ -522,6 +546,7 @@ The following sections are covered by `scripts/cookbook_smoke.sh` and enforced i
 
 Non-gated sections in this pass:
 
+- Duplex Chat
 - System Log Intake
 - Ingest an API Event Stream
 - Polyglot Service Stitching

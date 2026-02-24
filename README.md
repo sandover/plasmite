@@ -107,6 +107,20 @@ pls follow incidents --tag sev1 --where '.data.msg | test("timeout")'
 pls follow incidents --since 1h --replay 10
 ```
 
+### Live chat between processes
+
+Two processes share a pool and talk to each other in real time — no broker, no sockets, no protocol to design.
+
+```bash
+# Terminal 1 — Alice
+pls duplex chat --create --me alice
+
+# Terminal 2 — Bob joins and catches up on the last 20 messages
+pls duplex chat --me bob --tail 20
+```
+
+Each line you type becomes a message. Bob sees Alice's messages as they arrive (and vice versa). Pipe JSON instead of typing for scripted use.
+
 ### Remote pools
 
 Start a server and your pools are available over HTTP. Clients use the same CLI — just pass a URL.
@@ -188,6 +202,7 @@ Windows builds (`x86_64-pc-windows-msvc`) are available via npm and PyPI. See th
 | `pool list` | List pools |
 | `pool info NAME` | Show pool metadata and metrics |
 | `pool delete NAME...` | Delete one or more pools |
+| `duplex POOL` | Read and write from one command (`--me` for chat mode) |
 | `doctor POOL \| --all` | Validate pool integrity |
 | `serve` | HTTP server (loopback default; non-loopback opt-in) |
 
