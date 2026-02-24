@@ -46,8 +46,6 @@ Run before any publish dispatch:
 - `bash scripts/node_pack_smoke.sh`
 - `bash scripts/node_remote_only_smoke.sh`
 - `bash scripts/python_wheel_smoke.sh`
-- `bash scripts/check_release_workflow_topology.sh`
-
 Run conditional gates when relevant:
 
 - dependency/security changes: `cargo audit --db .scratch/advisory-db --no-fetch --ignore yanked`

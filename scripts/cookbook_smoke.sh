@@ -186,6 +186,11 @@ if [[ ! -x "${PLASMITE_BIN}" ]]; then
   (cd "${ROOT_DIR}" && cargo build -q --bin plasmite)
 fi
 
+if ! compgen -G "${ROOT_DIR}/target/debug/libplasmite.{dylib,so}" >/dev/null; then
+  echo "building libplasmite (cdylib)..."
+  (cd "${ROOT_DIR}" && cargo build -q --lib)
+fi
+
 rm -rf "${WORK_DIR}"
 mkdir -p "${POOL_DIR}"
 

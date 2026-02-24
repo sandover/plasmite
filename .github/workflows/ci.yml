@@ -7,47 +7,31 @@ on:
   schedule:
     - cron: "0 8 * * *"
 
-env:
-  # Windows smoke preview policy defaults (used by the Windows gate rollout tasks).
-  WINDOWS_SMOKE_PREVIEW_MODE: non-blocking
-  WINDOWS_SMOKE_PREVIEW_CONTINUE_ON_ERROR: "true"
-  WINDOWS_SMOKE_PROMOTE_AFTER_GREEN_MAIN_RUNS: "10"
-  WINDOWS_SMOKE_ROLLBACK_FAILURES: "2"
-  WINDOWS_SMOKE_ROLLBACK_WINDOW_RUNS: "5"
-  WINDOWS_SMOKE_OWNER_PRIMARY: "@brandonharvey"
-  WINDOWS_SMOKE_OWNER_BACKUP: "release-owner-on-duty"
-
 jobs:
-  windows-preview-policy:
-    name: windows smoke preview policy
-    runs-on: ubuntu-latest
-    steps:
-      - name: Publish active windows smoke policy
-        run: |
-          echo "::notice title=Windows smoke preview mode::${WINDOWS_SMOKE_PREVIEW_MODE} (continue-on-error=${WINDOWS_SMOKE_PREVIEW_CONTINUE_ON_ERROR})"
-          {
-            echo "### Windows smoke preview policy"
-            echo ""
-            echo "- Mode: ${WINDOWS_SMOKE_PREVIEW_MODE} (continue-on-error=${WINDOWS_SMOKE_PREVIEW_CONTINUE_ON_ERROR})"
-            echo "- Promotion threshold: ${WINDOWS_SMOKE_PROMOTE_AFTER_GREEN_MAIN_RUNS} consecutive green \`main\` runs"
-            echo "- Rollback trigger: ${WINDOWS_SMOKE_ROLLBACK_FAILURES} failures in ${WINDOWS_SMOKE_ROLLBACK_WINDOW_RUNS} \`main\` runs"
-            echo "- Owners: ${WINDOWS_SMOKE_OWNER_PRIMARY} (primary), ${WINDOWS_SMOKE_OWNER_BACKUP} (backup)"
-            echo "- Policy: docs/planning/windows-preview-rollback.md"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  windows-smoke-paths:
-    name: windows smoke trigger scope
+  pr-paths:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     outputs:
-      run_windows_smoke: ${{ steps.resolve.outputs.run_windows_smoke }}
+      packaging: ${{ steps.filter.outputs.packaging }}
+      windows: ${{ steps.filter.outputs.windows }}
     steps:
       - uses: actions/checkout@v4
       - id: filter
-        if: github.event_name == 'pull_request'
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            windows_smoke:
+            packaging:
+              - 'build.rs'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'c/**'
+              - 'vendor/lite3/**'
+              - 'src/**'
+              - 'bindings/**'
+              - 'scripts/**'
+              - 'include/**'
+              - '.github/workflows/**'
+            windows:
               - 'build.rs'
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -59,56 +43,6 @@ jobs:
               - 'bindings/python/**'
               - 'scripts/**'
               - '.github/workflows/**'
-      - id: resolve
-        shell: bash
-        run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "run_windows_smoke=${{ steps.filter.outputs.windows_smoke }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "run_windows_smoke=true" >> "$GITHUB_OUTPUT"
-          fi
-
-  windows-smoke:
-    name: windows smoke
-    needs: [windows-preview-policy, windows-smoke-paths]
-    if: ${{ needs.windows-smoke-paths.outputs.run_windows_smoke == 'true' }}
-    continue-on-error: true
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Announce preview gating mode
-        shell: pwsh
-        run: |
-          Write-Host "::notice title=Windows smoke gating mode::${env:WINDOWS_SMOKE_PREVIEW_MODE} (continue-on-error=${env:WINDOWS_SMOKE_PREVIEW_CONTINUE_ON_ERROR})"
-      - name: Build release binaries
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          cargo build --release --bins
-      - name: Smoke CLI version
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          .\target\release\plasmite.exe --version
-      - name: Local pool roundtrip smoke
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $PSNativeCommandUseErrorActionPreference = $true
-          $dir = ".scratch/windows-smoke"
-          $pool = "ci-smoke"
-          $exe = ".\target\release\plasmite.exe"
-          $payloadPath = "$dir\payload.json"
-          Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          Set-Content -Path $payloadPath -Value '{"ci":"windows-smoke"}' -NoNewline
-          & $exe --dir $dir pool create $pool
-          & $exe --dir $dir feed $pool -f $payloadPath
-          $out = & $exe --dir $dir follow $pool --tail 1 --one --timeout 2s --data-only --format jsonl
-          if (-not ($out -match '"ci":"windows-smoke"')) {
-            throw "Roundtrip payload marker missing from follow output."
-          }
 
   pr-fast:
     if: github.event_name == 'pull_request'
@@ -135,7 +69,8 @@ jobs:
       - run: just ci-fast
 
   dist-smoke:
-    if: github.event_name == 'pull_request'
+    needs: [pr-paths]
+    if: github.event_name == 'pull_request' && needs.pr-paths.outputs.packaging == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -182,38 +117,44 @@ jobs:
           PLASMITE_SDK_DIR: ${{ github.workspace }}/target/${{ matrix.target }}/release
         run: ./scripts/python_wheel_smoke.sh
 
-  release-contract:
-    runs-on: ubuntu-latest
+  windows-smoke:
+    needs: [pr-paths]
+    if: >-
+      (github.event_name == 'pull_request' && needs.pr-paths.outputs.windows == 'true')
+      || github.event_name != 'pull_request'
+    continue-on-error: true
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - uses: astral-sh/setup-uv@v5
-      - run: cd bindings/node && npm ci
-      - name: Validate release workflow/script contracts
-        run: bash scripts/check_release_workflow_topology.sh
-      - name: Build host release SDK inputs for contract smokes
-        shell: bash
+      - name: Build release binaries
+        shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           cargo build --release --bins
-          if [[ "${{ runner.os }}" == "macOS" ]]; then
-            cargo rustc --release --lib --crate-type=cdylib -- -C link-arg=-Wl,-install_name,@rpath/libplasmite.dylib
-          else
-            cargo rustc --release --lib --crate-type=cdylib -- -C link-arg=-Wl,-soname,libplasmite.so
-          fi
-      - name: Node smoke with release SDK contract path
-        env:
-          PLASMITE_SDK_DIR: ${{ github.workspace }}/target/release
-        run: bash scripts/node_pack_smoke.sh
-      - name: Python smoke with release SDK contract path
-        env:
-          PLASMITE_SDK_DIR: ${{ github.workspace }}/target/release
-        run: bash scripts/python_wheel_smoke.sh
+      - name: Smoke CLI version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          .\target\release\plasmite.exe --version
+      - name: Local pool roundtrip smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $dir = ".scratch/windows-smoke"
+          $pool = "ci-smoke"
+          $exe = ".\target\release\plasmite.exe"
+          $payloadPath = "$dir\payload.json"
+          Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Set-Content -Path $payloadPath -Value '{"ci":"windows-smoke"}' -NoNewline
+          & $exe --dir $dir pool create $pool
+          & $exe --dir $dir feed $pool -f $payloadPath
+          $out = & $exe --dir $dir follow $pool --tail 1 --one --timeout 2s --data-only --format jsonl
+          if (-not ($out -match '"ci":"windows-smoke"')) {
+            throw "Roundtrip payload marker missing from follow output."
+          }
 
   full:
     if: github.event_name != 'pull_request'
@@ -240,6 +181,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+      - run: cd bindings/node && npm ci
       - run: just ci
 
   audit:

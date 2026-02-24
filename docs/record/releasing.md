@@ -77,8 +77,6 @@ Costs below are intentionally qualitative; exact runtimes vary by machine and Gi
    - Gates:
      - token “can we log in?” checks (fail fast if CI can’t authenticate)
      - “publish what we built” checks (publish is only allowed from a successful build run that matches the tag/version)
-     - Homebrew parity check (above) must pass *before* any registry publishes
-     - cargo-binstall preview gate (`verify-cargo-binstall`) installs from release artifacts and runs `plasmite --version` in both rehearsal and live modes (Linux preview scope today)
    - Cost: moderate (mostly network + registry processing).
 
 6. **Create/update the GitHub Release (GitHub, `release-publish.yml`)**
@@ -91,11 +89,9 @@ Costs below are intentionally qualitative; exact runtimes vary by machine and Gi
    - Gate: not a publish gate (publishing already happened), but it’s a release-quality requirement.
    - Cost: moderate (some waiting for registry propagation).
 
-### Why the performance gate is local (and CI perf is advisory)
+### Why the performance gate is local
 
 GitHub runners are shared machines, so benchmark numbers can swing due to factors unrelated to our code. For release decisions we prefer “same host, same conditions” comparisons on a maintainer machine.
-
-CI still runs a scheduled benchmark (`perf-monitor.yml`) to catch trend regressions and provide a paper trail, but it is intentionally non-blocking.
 
 ### “Rehearsal” mode (publish without publishing)
 
@@ -110,7 +106,7 @@ CI still runs a scheduled benchmark (`perf-monitor.yml`) to catch trend regressi
 - Do not release from a branch with unpushed commits (`git status --short --branch` must not show `ahead`).
 - Use a runtime that can reach GitHub and registries and can use maintainer `gh` auth.
 - Release automation is split: `release.yml` builds artifacts, `release-publish.yml` performs preflight + registry publish + GitHub release.
-- Homebrew parity is mandatory: `release-publish.yml` must block registry publish until Homebrew formula version/URLs/checksums are aligned.
+- Homebrew parity is mandatory: `release-publish.yml` syncs/verifies the formula in parallel with registry publishes; the final GitHub release is gated on both.
 - Live publish requires `HOMEBREW_TAP_TOKEN` so workflow can commit/push tap updates.
 - Publish-only retry after credential fixes must target the same release tag (or explicit successful `build_run_id`) without rebuilding matrix artifacts.
 
@@ -145,7 +141,6 @@ flowchart TD
     H -- "Yes" --> I["Publish crates.io + npm + PyPI"]
     I --> J["Create GitHub release assets"]
     J --> K["Delivery verification (registries + Homebrew)"]
-    L["CI perf-monitor (scheduled/manual, advisory only)"] -. "non-blocking signal" .-> A1
 ```
 
 ## Human Decisions to Make Per Release

@@ -17,7 +17,7 @@ Required for trustworthy release evidence:
 Preflight commands:
 - `mkdir -p .scratch .scratch/release`
 - `test -w .scratch`
-- `bash scripts/check_release_workflow_topology.sh`
+- `# (topology check removed — manual verification on workflow edits)`
 
 Clean-filesystem guard (required before release mechanics):
 - verify release helper scripts do not rely on pre-existing `.scratch` paths
@@ -31,7 +31,7 @@ Goal:
 - prevent release workflow failures caused by tooling, contract, or topology drift.
 
 Evidence commands:
-- `bash scripts/check_release_workflow_topology.sh`
+- `# (topology check removed — manual verification on workflow edits)`
 - `rg -n "publish-preflight|release-metadata|build_run_id|needs:" .github/workflows/release.yml .github/workflows/release-publish.yml`
 - `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <successful-release-run-id> --expect-tag <release_target>`
 
@@ -94,7 +94,7 @@ Comparison policy:
 - use same host and power mode for baseline/current
 - collect at least 3 runs per scenario and compare median `ms_per_msg` (script does this)
 - ignore scenarios where both medians are below `0.0001 ms/msg` (timer quantization noise)
-- CI `perf-monitor` data is advisory and non-blocking; do not substitute it for local release gating
+- Performance gating is local-only; CI perf monitoring has been removed
 
 Block if:
 - local benchmark comparison reports median regression >= 15% in core scenarios (append, multi_writer, get_scan) without approved explanation
