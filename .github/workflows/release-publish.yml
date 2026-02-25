@@ -422,6 +422,83 @@ jobs:
           packages-dir: release-inputs/py-dist
           skip-existing: true
 
+  # Record publish outcomes as GitHub Deployments (Environments UI) so the repo's
+  # Deployments page becomes a release ledger for external distribution channels.
+  #
+  # Important: do not create deployments during rehearsal runs, since they would
+  # misleadingly suggest artifacts were published.
+  record-pypi:
+    if: needs.resolve-build-run.outputs.rehearsal != 'true' && always()
+    runs-on: ubuntu-latest
+    needs: [resolve-build-run, publish-pypi]
+    environment:
+      name: pypi
+      url: "https://pypi.org/project/plasmite/${{ needs.resolve-build-run.outputs.version }}/"
+    steps:
+      - name: Assert PyPI publish succeeded
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ needs.publish-pypi.result }}" != "success" ]]; then
+            echo "PyPI publish failed (job result=${{ needs.publish-pypi.result }})." >&2
+            exit 1
+          fi
+          echo "PyPI publish succeeded."
+
+  record-npm:
+    if: needs.resolve-build-run.outputs.rehearsal != 'true' && always()
+    runs-on: ubuntu-latest
+    needs: [resolve-build-run, publish-npm]
+    environment:
+      name: npm
+      url: "https://www.npmjs.com/package/plasmite/v/${{ needs.resolve-build-run.outputs.version }}"
+    steps:
+      - name: Assert npm publish succeeded
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ needs.publish-npm.result }}" != "success" ]]; then
+            echo "npm publish failed (job result=${{ needs.publish-npm.result }})." >&2
+            exit 1
+          fi
+          echo "npm publish succeeded."
+
+  record-crates-io:
+    if: needs.resolve-build-run.outputs.rehearsal != 'true' && always()
+    runs-on: ubuntu-latest
+    needs: [resolve-build-run, publish-crates-io]
+    environment:
+      name: crates-io
+      url: "https://crates.io/crates/plasmite/${{ needs.resolve-build-run.outputs.version }}"
+    steps:
+      - name: Assert crates.io publish succeeded
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ needs.publish-crates-io.result }}" != "success" ]]; then
+            echo "crates.io publish failed (job result=${{ needs.publish-crates-io.result }})." >&2
+            exit 1
+          fi
+          echo "crates.io publish succeeded."
+
+  record-homebrew:
+    if: needs.resolve-build-run.outputs.rehearsal != 'true' && always()
+    runs-on: ubuntu-latest
+    needs: [resolve-build-run, sync-homebrew-tap]
+    environment:
+      name: homebrew
+      url: "https://github.com/${{ env.HOMEBREW_TAP_REPO }}/blob/HEAD/Formula/plasmite.rb"
+    steps:
+      - name: Assert Homebrew tap sync succeeded
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ needs.sync-homebrew-tap.result }}" != "success" ]]; then
+            echo "Homebrew tap sync failed (job result=${{ needs.sync-homebrew-tap.result }})." >&2
+            exit 1
+          fi
+          echo "Homebrew tap sync succeeded."
+
   release:
     runs-on: ubuntu-latest
     needs: [resolve-build-run, collect-build-artifacts, sync-homebrew-tap, publish-pypi, publish-crates-io, publish-npm]
@@ -505,3 +582,21 @@ jobs:
           gh release create "$TAG" release-inputs/dist/* \
             --title "$TAG" \
             --notes-file /tmp/release-body.md
+
+  record-github-release:
+    if: needs.resolve-build-run.outputs.rehearsal != 'true' && always()
+    runs-on: ubuntu-latest
+    needs: [resolve-build-run, release]
+    environment:
+      name: github-release
+      url: "https://github.com/${{ github.repository }}/releases/tag/${{ needs.resolve-build-run.outputs.tag }}"
+    steps:
+      - name: Assert GitHub Release succeeded
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ needs.release.result }}" != "success" ]]; then
+            echo "GitHub Release failed (job result=${{ needs.release.result }})." >&2
+            exit 1
+          fi
+          echo "GitHub Release succeeded."
