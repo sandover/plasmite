@@ -1,114 +1,51 @@
 # Plasmite Public API Spec v0
 
-This document is the **normative** contract for the Plasmite public API v0.
-The CLI contract remains normative for scripting behavior in `spec/v0/SPEC.md`.
+This document defines the normative public API contract for v0 across bindings.
+It is intentionally signature-free: language-level method/function signatures live in code-level API docs.
+
+## Scope
+
+- This spec freezes cross-language semantics and invariants.
+- This spec does not freeze binding-specific naming, argument ordering, or doc examples.
 
 ## Versioning + Compatibility
 
-- The API is versioned as `v0`.
-- **Additive-only within v0**:
-  - new fields must be optional with defaults that preserve old behavior,
-  - new operations may be added without changing existing semantics,
-  - existing fields/operations **must not** change meaning or remove behaviors.
+- The API surface is versioned as `v0`.
+- Compatibility within v0 is additive-only.
+- Existing field/operation meanings must not be removed or redefined.
+- New fields must be optional with defaults that preserve old behavior.
+- New operations are allowed if existing semantics remain stable.
 - Any breaking change requires a new major API version.
 
-## Core Types
+## Stable Surface
 
 ### PoolRef
 
-Identifies a pool without fixing transport.
+- `name("chat")`: resolves within the configured pool directory.
+- `path("/abs/path/to/pool.plasmite")`: direct local path.
+- `uri("tcp://host:port/pool/chat")`: accepted for forward compatibility.
+- Local v0 clients reject URI refs with `Usage` (remote pool refs are not yet supported through local clients).
 
-- `name("chat")`: resolved within the configured pool directory.
-- `path("/abs/path/to/pool.plasmite")`: direct path to a pool.
-- `uri("tcp://host:port/pool/chat")`: reserved for future remote pools.
+### Client + Pool Capabilities
 
-### Client
+- Clients expose pool lifecycle operations: create, open, info, list, delete.
+- Pool handles expose message operations: append, get, tail.
+- `list_pools` is scoped to the configured local pool directory.
 
-A transport-aware resolver that produces pools and pool metadata.
+## Data + Error Contract
 
-- `create_pool(ref, options) -> PoolInfo`
-- `open_pool(ref, options) -> Pool`
-- `pool_info(ref) -> PoolInfo`
-- `list_pools(dir) -> [PoolInfo]` (local-only)
-- `delete_pool(ref) -> ()`
+### Core Data Types
 
-### Pool
+- `Message` envelope semantics match `spec/v0/SPEC.md` (`seq`, `time`, `meta`, `data`).
+- `PoolInfo` includes canonical local `path` and capacity/bounds diagnostics.
+- `PoolInfo` fields are additive-only within v0.
 
-A handle to a specific pool.
+### Error Kind Contract
 
-- `append(pool, AppendRequest) -> Message`
-- `get(pool, seq) -> Message`
-- `tail(pool, TailRequest) -> Stream<Message>`
+Errors must carry a stable `kind` plus structured context when available (for example `path`, `seq`, `offset`).
+Bindings must preserve kinds and expose context idiomatically.
 
-### Message
-
-Message envelope shared with the CLI schema.
-
-- `seq: u64` (monotonic per pool)
-- `time: RFC3339 UTC string`
-- `meta: Meta`
-- `data: JSON value`
-
-### Meta
-
-- `tags: []string`
-- Future fields must be additive and namespace-aware.
-
-### PoolInfo
-
-- `uuid: string`
-- `path: string`
-- `size_bytes: u64`
-- `created_at: RFC3339 UTC string`
-- `updated_at: RFC3339 UTC string`
-
-## Operation Semantics
-
-### create_pool
-
-- Creates a new pool; fails with `AlreadyExists` if the pool exists.
-- Local creates MUST create parent directories as needed (equivalent to `mkdir -p` on the pool file’s parent).
-- Options may include size, retention, or durability defaults (additive).
-
-### open_pool
-
-- Opens an existing pool; fails with `NotFound` if missing.
-- Options may include read-only or validation flags (additive).
-
-### pool_info
-
-- Returns metadata for the pool at `ref`.
-
-### list_pools
-
-- Returns all pools within a directory; errors if the directory is invalid.
-
-### delete_pool
-
-- Removes the pool; a busy pool may return `Busy`.
-
-### append
-
-- Appends a message and returns the committed envelope.
-- Must be atomic with respect to the pool ordering.
-- `meta.tags` are stored verbatim; ordering is preserved.
-
-### get
-
-- Returns a message by `seq`.
-- `NotFound` if the `seq` is out of range or absent.
-
-### tail
-
-- Returns a stream of messages starting at a requested cursor or time window.
-- The stream must preserve the pool ordering.
-
-## Error Kinds
-
-Errors must carry a stable **kind** plus structured context (path, pool ref, seq, offset when applicable).
-Bindings must preserve the kind and expose the context idiomatically.
-
-Stable kinds (v0):
+Stable v0 kinds:
 
 - `Usage`
 - `NotFound`
@@ -119,49 +56,37 @@ Stable kinds (v0):
 - `Io`
 - `Internal`
 
-## Streaming Semantics
+## Behavioral Semantics
+
+### Required Operation Semantics
+
+- `create_pool` creates a new pool and returns `AlreadyExists` if one already exists.
+- Local create paths must create parent directories as needed (equivalent to `mkdir -p`).
+- `open_pool` returns `NotFound` when target is missing.
+- `delete_pool` may return `Busy` when the pool cannot be removed safely.
+- `append` is atomic with respect to pool ordering and returns the committed envelope.
+- `get` returns `NotFound` when `seq` is absent/out of range.
+- `tail` preserves pool ordering by `seq`.
+
+### Streaming Semantics
 
 - Ordering is strictly by `seq` within a pool.
-- Streams must support explicit cancellation by the caller.
-- Backpressure must be respected; implementations must not unboundedly buffer messages.
-- If a stream is canceled, no further messages may be delivered after cancellation is observed.
-- For remote transports, reconnection semantics must not reorder messages and must be explicit.
+- Streams support explicit caller cancellation.
+- Implementations must respect backpressure and avoid unbounded buffering.
+- Once cancellation is observed, no further messages may be delivered.
+- Reconnect behavior (for remote transports) must be explicit and must not reorder messages.
 
-## Conformance Expectations
+### Conformance
 
-- A binding is conformant if it implements all core types and operations and preserves error kinds.
-- Conformance tests may use the CLI spec for message formatting details and validation rules.
+A binding is conformant when it implements the operation families above and preserves error kinds/semantics.
+Conformance suites may rely on CLI spec formatting rules for shared message validation behavior.
 
----
+## Non-Contract Surface
 
-## Quickstart (Rust)
+- Binding-specific naming, argument ordering, and exact method/function signatures.
+- Binding-specific prose examples and convenience helpers.
 
-```rust
-use plasmite::api::{LocalClient, PoolRef, PoolOptions, PoolApiExt, Durability, TailOptions, ErrorKind};
-use serde_json::json;
+## References
 
-// Create a client and pool
-let client = LocalClient::new();
-let pool_ref = PoolRef::name("events");
-let _info = client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
-let mut pool = client.open_pool(&pool_ref)?;
-
-// Append
-let msg = pool.append_json_now(&json!({"msg": "hello"}), &["greeting".into()], Durability::Fast)?;
-println!("seq={}", msg.seq);
-
-// Get
-let fetched = pool.get_message(1)?;
-
-// Tail
-let mut tail = pool.tail(TailOptions::default());
-while let Some(message) = tail.next_message()? {
-    println!("{}", message.seq);
-}
-
-// Error handling by kind
-match pool.get_message(9999) {
-    Err(err) if err.kind() == ErrorKind::NotFound => { /* expected */ }
-    other => other.map(|_| ()),
-}?;
-```
+- CLI contract: `spec/v0/SPEC.md`
+- Remote protocol contract: `spec/remote/v0/SPEC.md`

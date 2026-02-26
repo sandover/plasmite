@@ -1049,8 +1049,13 @@ fn spawn_tail_stream_response(
         }
     });
 
-    let stream = ReceiverStream::new(rx)
-        .map(|result| result.map_err(|err| std::io::Error::other(err.to_string())));
+    let stream = ReceiverStream::new(rx).map(move |result| match result {
+        Ok(bytes) => Ok(bytes),
+        Err(err) => match encode_tail_terminal_error(&err, encoding) {
+            Some(bytes) => Ok(bytes),
+            None => Err(std::io::Error::other(error_json_string(&err))),
+        },
+    });
     let mut response = Response::new(Body::from_stream(stream));
     apply_tail_response_headers(&mut response, encoding);
     response
@@ -1114,6 +1119,24 @@ fn encode_sse_message(message: &plasmite::api::Message) -> Result<Bytes, Error> 
     frame.append(&mut payload);
     frame.extend_from_slice(b"\n\n");
     Ok(Bytes::from(frame))
+}
+
+fn encode_tail_terminal_error(err: &Error, encoding: TailStreamEncoding) -> Option<Bytes> {
+    match encoding {
+        TailStreamEncoding::Jsonl => {
+            let mut payload = error_json_string(err).into_bytes();
+            payload.push(b'\n');
+            Some(Bytes::from(payload))
+        }
+        TailStreamEncoding::Sse => {
+            // SSE terminal error frame keeps machine-readable error semantics after streaming starts.
+            let mut frame = b"event: error\ndata: ".to_vec();
+            frame.extend_from_slice(error_json_string(err).as_bytes());
+            frame.extend_from_slice(b"\n\n");
+            Some(Bytes::from(frame))
+        }
+        TailStreamEncoding::Lite3 => None,
+    }
 }
 
 fn apply_tail_response_headers(response: &mut Response, encoding: TailStreamEncoding) {
@@ -1213,6 +1236,11 @@ fn encode_lite3_stream_frame(frame: &plasmite::api::FrameRef<'_>) -> Result<Byte
     Ok(Bytes::from(buf))
 }
 
+fn error_json_string(err: &Error) -> String {
+    serde_json::to_string(&json!({ "error": error_body(err) }))
+        .unwrap_or_else(|_| "{\"error\":{\"kind\":\"Internal\",\"message\":\"error\"}}".to_string())
+}
+
 fn durability_from_str(value: Option<&str>) -> Durability {
     match value {
         Some("flush") => Durability::Flush,
@@ -1242,19 +1270,23 @@ fn error_response(err: Error) -> Response {
 
 fn error_response_with_status(err: Error, status: StatusCode) -> Response {
     let body = ErrorEnvelope {
-        error: ErrorBody {
-            kind: format!("{:?}", err.kind()),
-            message: err.message().unwrap_or("error").to_string(),
-            path: err.path().map(|path| path.to_string_lossy().to_string()),
-            seq: err.seq(),
-            offset: err.offset(),
-        },
+        error: error_body(&err),
     };
     let mut response = (status, Json(body)).into_response();
     response
         .headers_mut()
         .insert("plasmite-version", HeaderValue::from_static("0"));
     response
+}
+
+fn error_body(err: &Error) -> ErrorBody {
+    ErrorBody {
+        kind: format!("{:?}", err.kind()),
+        message: err.message().unwrap_or("error").to_string(),
+        path: err.path().map(|path| path.to_string_lossy().to_string()),
+        seq: err.seq(),
+        offset: err.offset(),
+    }
 }
 
 fn is_access_forbidden(err: &Error) -> bool {

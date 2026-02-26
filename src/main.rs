@@ -125,6 +125,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
     result
         .map_err(add_corrupt_hint)
         .map_err(add_io_hint)
+        .map_err(add_internal_hint)
         .map_err(|err| (err, color_mode))
 }
 
@@ -1222,6 +1223,15 @@ fn add_corrupt_hint(err: Error) -> Error {
     err.with_hint("Pool appears corrupt. Recreate it or investigate with validation tooling.")
 }
 
+fn add_internal_hint(err: Error) -> Error {
+    if err.kind() != ErrorKind::Internal || err.hint().is_some() {
+        return err;
+    }
+    err.with_hint(
+        "Unexpected internal failure. Retry with RUST_BACKTRACE=1 and share command/context if it persists.",
+    )
+}
+
 fn emit_doctor_human(report: &ValidationReport) {
     let label = report
         .pool_ref
@@ -1327,7 +1337,7 @@ fn list_pool_paths(pool_dir: &Path) -> Result<Vec<PathBuf>, Error> {
     Ok(pools)
 }
 
-fn list_pools(pool_dir: &Path) -> Vec<Value> {
+fn list_pools(pool_dir: &Path, client: &LocalClient) -> Vec<Value> {
     let mut pools = Vec::new();
     let entries = match std::fs::read_dir(pool_dir) {
         Ok(entries) => entries,
@@ -1375,19 +1385,9 @@ fn list_pools(pool_dir: &Path) -> Vec<Value> {
             .and_then(format_system_time)
             .map(Value::String)
             .unwrap_or(Value::Null);
-        match Pool::open(&path) {
-            Ok(pool) => {
-                let info = match pool.info() {
-                    Ok(info) => info,
-                    Err(err) => {
-                        pools.push(pool_list_error(
-                            &name,
-                            &path,
-                            add_corrupt_hint(add_io_hint(err)),
-                        ));
-                        continue;
-                    }
-                };
+        let pool_ref = PoolRef::path(path.clone());
+        match client.pool_info(&pool_ref) {
+            Ok(info) => {
                 let mut map = Map::new();
                 map.insert("name".to_string(), json!(name));
                 map.insert("path".to_string(), json!(path.display().to_string()));

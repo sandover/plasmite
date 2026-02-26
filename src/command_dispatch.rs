@@ -133,6 +133,7 @@ pub(super) fn dispatch_command(
                 index_capacity,
                 json,
             } => {
+                let client = LocalClient::new().with_pool_dir(&pool_dir);
                 let size = size
                     .as_deref()
                     .map(parse_size)
@@ -162,8 +163,8 @@ pub(super) fn dispatch_command(
                         }
                         options = options.with_index_capacity(index_capacity);
                     }
-                    let pool = Pool::create(&path, options)?;
-                    let info = pool.info()?;
+                    let pool_ref = PoolRef::path(path.clone());
+                    let info = client.create_pool(&pool_ref, options)?;
                     results.push(pool_info_json(&name, &info));
                 }
                 if json {
@@ -174,10 +175,12 @@ pub(super) fn dispatch_command(
                 Ok(RunOutcome::ok())
             }
             PoolCommand::Info { name, json } => {
+                let client = LocalClient::new().with_pool_dir(&pool_dir);
                 let path = resolve_poolref(&name, &pool_dir)?;
-                let pool =
-                    Pool::open(&path).map_err(|err| add_missing_pool_hint(err, &name, &name))?;
-                let info = pool.info()?;
+                let pool_ref = PoolRef::path(path);
+                let info = client
+                    .pool_info(&pool_ref)
+                    .map_err(|err| add_missing_pool_hint(err, &name, &name))?;
                 if json {
                     emit_json(pool_info_json(&name, &info), color_mode);
                 } else {
@@ -186,6 +189,7 @@ pub(super) fn dispatch_command(
                 Ok(RunOutcome::ok())
             }
             PoolCommand::Delete { names, json } => {
+                let client = LocalClient::new().with_pool_dir(&pool_dir);
                 let mut deleted = Vec::new();
                 let mut failed = Vec::new();
                 let mut table_rows = Vec::new();
@@ -198,17 +202,21 @@ pub(super) fn dispatch_command(
                             .with_hint("Use pool names/paths for local delete, or call remote APIs directly."))
                     } else {
                         resolve_poolref(&name, &pool_dir).and_then(|path| {
-                            std::fs::remove_file(&path).map_err(|err| {
-                                if err.kind() == std::io::ErrorKind::NotFound {
+                            let pool_ref = PoolRef::path(path.clone());
+                            client.delete_pool(&pool_ref).map_err(|err| {
+                                if err.kind() == ErrorKind::NotFound {
                                     Error::new(ErrorKind::NotFound)
                                         .with_message("pool not found")
                                         .with_path(&path)
                                         .with_hint("Create the pool first or check --dir.")
-                                } else {
+                                } else if err.kind() == ErrorKind::Permission {
+                                    // Keep historical CLI delete semantics: permission failures
+                                    // are surfaced as I/O for stable exit-code behavior.
                                     Error::new(ErrorKind::Io)
                                         .with_message("failed to delete pool")
                                         .with_path(&path)
-                                        .with_source(err)
+                                } else {
+                                    err
                                 }
                             })?;
                             Ok(path)
@@ -265,7 +273,8 @@ pub(super) fn dispatch_command(
                 }
             }
             PoolCommand::List { json } => {
-                let pools = list_pools(&pool_dir);
+                let client = LocalClient::new().with_pool_dir(&pool_dir);
+                let pools = list_pools(&pool_dir, &client);
                 if json {
                     emit_json(json!({ "pools": pools }), color_mode);
                 } else {

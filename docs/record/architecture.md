@@ -27,7 +27,8 @@ Interface layer  →  Core domain layer  →  Platform layer
 
 **Interface layer** (`src/main.rs`, `src/command_dispatch.rs`, `src/api/*`, `src/serve.rs`, `src/abi.rs`):
 - Must: parse and validate inputs, invoke core operations, map results to user-facing formats.
-- Must not: implement storage correctness logic — no frame parsing, ring arithmetic, or sequence validation.
+- Must not: duplicate storage correctness logic across multiple interface surfaces.
+- Allowed exception: one shared validation-report implementation may perform read-only ring/frame checks when exposed through API/CLI diagnostics.
 - Must not: hold pool state across requests beyond what `Pool` and `Cursor` already encapsulate.
 
 **Core domain layer** (`src/core/*`):
@@ -39,7 +40,7 @@ Interface layer  →  Core domain layer  →  Platform layer
 - Must: provide concurrency and durability primitives.
 - Must not: contain message-semantic logic.
 
-**Cross-layer rule:** Interface layers do not implement storage correctness logic themselves. This is the most important rule in this document. A change that moves ring arithmetic, frame validation, or sequence logic into a CLI handler, HTTP endpoint, or ABI wrapper is a violation regardless of how localized or convenient it appears.
+**Cross-layer rule:** Interface layers must not fork storage correctness logic into per-surface implementations. A single shared validator used by diagnostics is acceptable; embedding bespoke ring/frame/seq rules inside CLI handlers, HTTP handlers, and ABI wrappers independently is a violation.
 
 ## Data model and on-disk layout
 
@@ -119,7 +120,7 @@ These are auditable claims about the implementation. Each is checkable by inspec
 - `plan.rs` has no side effects; its output is fully determined by its inputs.
 - The notify path is never on the correctness critical path; removing notify must not cause failures in non-timing tests.
 - Pool files opened with an unknown format version produce an actionable error, not a panic or silent data access.
-- The C ABI (`abi.rs`) contains no correctness logic; it is a thin translation layer over `src/api`.
+- The C ABI (`abi.rs`) remains adapter-focused: parameter translation, error mapping, and session/poll orchestration only; it must not introduce separate storage correctness semantics from `src/core`/`src/api`.
 
 ## Operational guarantees vs non-goals
 
