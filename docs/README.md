@@ -3,7 +3,7 @@
 Plasmite documentation is intentionally split into:
 
 - `docs/record/`: canonical docs of record
-- `.ergo/`: feature planning and task tracking via the ergo graph and events log
+- `.ergo/`: feature planning and task tracking via the ergo graph and plans log (`plans.jsonl`)
 
 ## Start here
 

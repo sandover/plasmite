@@ -242,8 +242,8 @@ Algorithmic complexity below uses **N** = visible messages in the pool (depends 
 |---|---|---|
 | Append | O(1) + O(payload bytes) | Writes one frame, updates one index slot, publishes the header. `durability=flush` adds OS flush cost. |
 | Get by seq (`fetch POOL SEQ`) | Usually O(1); O(N) worst case | If the index slot matches, it's a direct jump. If the slot is overwritten/stale/invalid (or M=0), it scans forward from the tail until it finds (or passes) the target seq. |
-| Tail / follow (`follow`, `export --tail`) | O(k) to emit k; then O(1)/message | Steady-state work is per message. Tag filters are cheap; `--where` runs a jq predicate per message. |
-| Export range (`export --from/--to`) | O(R) | Linear in the number of exported messages. |
+| Tail / follow (`follow --tail`) | O(k) to emit k; then O(1)/message | Steady-state work is per message. Tag filters are cheap; `--where` runs a jq predicate per message. |
+| Replay window (`follow --since ... --replay`) | O(R) | Linear in the number of replayed messages. |
 | Validate (`doctor`, `pool info` warnings) | O(N) | Full ring scan. Index checks are sampled/best-effort diagnostics. |
 
 ## Bindings
