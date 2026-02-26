@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-02-26
+
+### Fixed
+- Release publish flow is now idempotent and release-note extraction is wired to the finalized changelog section.
+- Homebrew tap handling in `release-publish` is verification-only and fail-closed for formula/version/checksum alignment.
+- Remote tail streams now preserve structured terminal error envelopes after stream start for JSONL and Server-Sent Events (SSE) encodings.
+- CLI internal failures that previously surfaced without guidance now include an actionable retry/backtrace hint.
+
+### Changed
+- `pool create`, `pool info`, `pool delete`, and `pool list` now route through `LocalClient`/`PoolRef` paths for more consistent local lifecycle behavior.
+- CLI/API/remote v0 specs were distilled to contract-focused docs, with docs-of-record and spec indexes aligned to the frozen compatibility surface.
+- Planning log history was renamed from `.ergo/events.jsonl` to `.ergo/plans.jsonl`.
+
 ## [0.5.0] - 2026-02-24
 
 ### Added

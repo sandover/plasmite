@@ -1,6 +1,6 @@
 [package]
 name = "plasmite"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 license = "MIT"
 description = "Persistent JSON message queues backed by plain files for local and remote IPC"
