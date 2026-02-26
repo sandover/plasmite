@@ -51,16 +51,13 @@ For IPC across machines, `pls serve` exposes your local pools securely, and serv
 
 | | Drawbacks | Plasmite |
 |---|---|---|
-| **Log files / `tail -f`** | Unstructured, grow forever, no sequence numbers, fragile parsing | Structured JSON with sequence numbers. Filter with tags or jq. Disk usage stays bounded. |
-| **Temp files + locks** | No streaming, easy to corrupt, readers block writers | Writers append concurrently, readers stream in real time. No corruption, no contention. |
-| **Redis / NATS** | Another server to run and monitor; overkill for single-host messaging | Just files on disk — no daemon, no ports, no config. If you only need local or host-adjacent messaging, don't introduce a broker. |
-| **SQLite as a queue** | Polling-based, write contention, schema and vacuuming are on you | Built for message streams: follow/replay, concurrent writers, no schema, no cleanup, no polling. |
-| **Named pipes** | One reader at a time, writers block, nothing persists | Readers and writers come and go freely. Messages survive restarts. |
-| **Unix domain sockets** | Stream-oriented, no message framing, no persistence, one-to-one | Message boundaries and sequence numbers built in. Fan-out to any number of readers. |
-| **Poll a directory** | Busy loops, no ordering, files accumulate forever | Messages stream in order. The ring buffer won't fill your disk. |
-| **Shared memory** | No persistence, painful to coordinate, binary formats | Human-readable JSON on disk, zero-copy reads, no coordination pain. |
-| **ZeroMQ** | No persistence, complex pattern zoo, binary protocol, library in every process | Durable and human-readable by default. One CLI command or library call to get started. |
-| **Language-specific queue libs** | Tied to one runtime; no CLI, no cross-language story | Consistent CLI + multi-language bindings (Rust, Python, Go, Node, C) + versioned on-disk format. An ecosystem, not a single-language helper. |
+| **Kafka** or **RabbitMQ** | Lots of machinery: partitions, groups, exchanges, bindings, oh my. | `pls feed` / `pls follow` for local IPC. Add `pls serve` for remote access. No cluster required. |
+| **Redis / NATS** | Still a server you run, monitor, and connect to — even for same-machine messaging. Messages live in server memory; if the server dies, messaging stops. | No server process for local IPC. Pools persist on disk independent of any process. Add `pls serve` when you need remote access. |
+| **Log files / `tail -f`** | You parse with regex and it breaks when the format changes. Logs grow until you rotate, and rotation breaks `tail -f`. No way to replay from a specific point. No remote access without setting up syslog. | Structured JSON with sequence numbers. Bounded disk usage. Replay from any point with `--since` or `--from`. `pls serve` for remote access. |
+| **Ad-hoc files (temp files, locks, polled dirs)** | Readers poll for new files. Locking is manual — a crash leaves a stale lock. Files accumulate and you write your own cleanup. No ordering unless you bake it into filenames. | Readers stream in real time. Writers append concurrently without explicit locks. Ring buffer keeps disk bounded, messages stay ordered. `pls serve` for remote access. |
+| **SQLite as a queue** | No `LISTEN`/`NOTIFY` — readers poll. Writers contend on the write-ahead log. You design a schema, write migrations, vacuum. SQLite explicitly discourages network access to the DB file. | Follow/replay without polling. No `SQLITE_BUSY`. No schema, no migrations, no cleanup. `pls serve` for remote access. |
+| **OS primitives (pipes, sockets, shm)** | Named pipes: if the reader dies, the writer blocks or gets SIGPIPE. One reader only, nothing survives a reboot. Unix sockets: you implement your own framing and reconnection. Shared memory: you coordinate with semaphores, and a crash while holding a lock is a mess. None work across machines. | Multiple readers and writers, crash-safe, persistent across reboots. `pls serve` to go cross-machine. |
+| **ZeroMQ** | Messages vanish when processes restart. The pattern matrix (PUB/SUB, PUSH/PULL, ROUTER/DEALER) is powerful but complex to get right. Binary protocol — can't inspect messages with standard tools. | Messages persist across restarts. Human-readable JSON you can inspect with `jq`. `pls serve` for remote. |
 
 ## Real world use cases
 
