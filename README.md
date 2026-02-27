@@ -68,12 +68,8 @@ For IPC across machines, `pls serve` exposes local pools securely, and serves a 
 </tr>
 <tr>
 <td></td>
-<td><b>Bob sees it</b><br/><code>{ "data": 
-  {"from": "alice", 
-   "msg": "hi all"}, ... }</code></td>
-<td><b>Carol sees it</b><br/><code>{ "data": 
-  {"from": "alice", 
-  "msg": "hi all"}, ... }</code></td>
+<td><b>Bob sees it</b><br/><code>{ "data": {"from": "alice", "msg": "hi all"}, ... }</code></td>
+<td><b>Carol sees it</b><br/><code>{ "data": {"from": "alice", "msg": "hi all"}, ... }</code></td>
 </tr>
 </table>
 
