@@ -57,8 +57,8 @@ For IPC across machines, `pls serve` exposes local pools securely, and serves a 
 <tr>
 <td></td>
 <td></td>
-<td><b>Carol follows remotely</b><br/><code>pls follow 
-  http://alice:9700/channel</code></td>
+<td><b>Carol follows remotely</b><br/>
+<code>pls follow http://alice:9700/channel</code></td>
 </tr>
 <tr>
 <td><b>Alice writes</b><br/><code>pls feed channel 
