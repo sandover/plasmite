@@ -69,8 +69,9 @@ Costs below are intentionally qualitative; exact runtimes vary by machine and Gi
 
 4. **Homebrew parity (GitHub, release-blocking)**
    - Purpose: prevent a release where Homebrew points at stale or mismatched tarballs.
-   - Gate (GitHub, `release-publish.yml`): formula is updated from build artifacts, pushed to tap, and verified for exact version/URL/checksum alignment.
-   - Cost: cheap (automated formula sync + verification).
+   - Gate (GitHub, `release-publish.yml`): CI computes the expected formula delta and verifies exact version/URL/checksum alignment against the tap state.
+   - Policy split: maintainers update + push `../homebrew-tap` locally; CI only verifies alignment and never mutates tap history.
+   - Cost: cheap (automated diff + verification).
 
 5. **Publish to registries (GitHub, `release-publish.yml`)**
    - Purpose: make the same version available via crates.io, npm, and PyPI.
@@ -86,7 +87,7 @@ Costs below are intentionally qualitative; exact runtimes vary by machine and Gi
 
 7. **Delivery verification (human/automation, post-release)**
    - Purpose: confirm the “happy path” works for real users (install + run) across channels.
-   - Gate: not a publish gate (publishing already happened), but it’s a release-quality requirement.
+   - Gate: not a publish gate (publishing already happened), but it’s a release-quality requirement tracked by the post-release smoke contract.
    - Cost: moderate (some waiting for registry propagation).
 
 ### Why the performance gate is local
@@ -96,6 +97,32 @@ GitHub runners are shared machines, so benchmark numbers can swing due to factor
 ### “Rehearsal” mode (publish without publishing)
 
 `release-publish.yml` supports a rehearsal mode that runs the same preflight/provenance/tap checks, but skips actually publishing to registries or GitHub Releases. Use it when you change release automation or when you want a safe “end-to-end confidence check” before going live.
+
+## Post-release delivery smoke contract
+
+Purpose: verify that fresh installs resolve + run across public channels after publish completes.
+
+- Required channels: `npm`, `pypi`, `crates`.
+- Advisory channel: `homebrew` (tracked and triaged, but does not block release-complete status by itself).
+- Runner: `scripts/post_release_delivery_smoke.sh` (manual/local) or `.github/workflows/post-release-smoke.yml` (`workflow_dispatch`).
+
+Per-channel checks:
+
+- `npm`: install `plasmite@<version>` in isolated npm + pnpm workdirs and run `plasmite --version`.
+- `pypi`: use `uv tool run --from plasmite==<version> plasmite --version`.
+- `crates`: `cargo install plasmite --version <version>` into isolated `CARGO_HOME`/`--root`, then run the installed binary.
+- `homebrew` (advisory): verify tap formula stable version resolves to `<version>`.
+
+Retry/backoff/propagation policy:
+
+- Retries are bounded by `--max-wait-minutes`.
+- Backoff is exponential and capped per attempt.
+- This explicitly handles registry propagation delays (for example npm/PyPI index lag) before declaring failure.
+
+Failure policy:
+
+- Any required-channel failure => release is **not** complete; open/track follow-up and rerun smoke.
+- Advisory-only failure (currently Homebrew) => release may be marked complete with a documented follow-up owner.
 
 ## Release Policy
 
@@ -107,6 +134,7 @@ GitHub runners are shared machines, so benchmark numbers can swing due to factor
 - Use a runtime that can reach GitHub and registries and can use maintainer `gh` auth.
 - Release automation is split: `release.yml` builds artifacts, `release-publish.yml` performs preflight + registry publish + GitHub release.
 - Homebrew parity is mandatory: `release-publish.yml` syncs/verifies the formula in parallel with registry publishes; the final GitHub release is gated on both.
+- Post-release delivery smoke is mandatory for release completion: run `post-release-smoke.yml` (or the script locally) and archive results.
 - Homebrew tap is updated locally from `../homebrew-tap` using `scripts/update_homebrew_formula.sh` and pushed before live publish dispatch. The `sync-homebrew-tap` CI job verifies alignment.
 - Publish-only retry after credential fixes must target the same release tag (or explicit successful `build_run_id`) without rebuilding matrix artifacts.
 
@@ -163,6 +191,7 @@ The skill handles mechanics, but maintainers still decide:
 6. Ask Codex to run the skill in `live` mode.
 7. Update and push the Homebrew formula from `../homebrew-tap` before live publish dispatch.
 8. Confirm post-release delivery verification is complete on all channels.
+   - Recommended: dispatch `.github/workflows/post-release-smoke.yml` with the released version and default channels.
 9. If publish fails due to credentials/policy, run publish-only rerun with the same target:
    - `gh workflow run release-publish.yml -f release_tag=<vX.Y.Z> -f rehearsal=false`
 

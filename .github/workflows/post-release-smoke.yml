@@ -1,0 +1,59 @@
+name: post-release-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Release version to verify (format: X.Y.Z)"
+        required: true
+        type: string
+      channels:
+        description: "Comma-separated channels (npm,pypi,crates,homebrew)"
+        required: false
+        default: "npm,pypi,crates,homebrew"
+        type: string
+      max_wait_minutes:
+        description: "Retry budget in minutes"
+        required: false
+        default: "30"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  delivery-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Run post-release delivery smoke
+        shell: bash
+        env:
+          PLASMITE_KEEP_SCRATCH: "1"
+        run: |
+          set -euo pipefail
+          bash scripts/post_release_delivery_smoke.sh \
+            --version "${{ inputs.release_version }}" \
+            --channels "${{ inputs.channels }}" \
+            --max-wait-minutes "${{ inputs.max_wait_minutes }}"
+
+      - name: Upload smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-release-smoke-${{ github.run_id }}
+          path: .scratch/post-release-smoke-*
+          if-no-files-found: ignore

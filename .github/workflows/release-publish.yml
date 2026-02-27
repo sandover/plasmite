@@ -265,7 +265,7 @@ jobs:
         with:
           repository: ${{ env.HOMEBREW_TAP_REPO }}
           path: homebrew-tap
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && secrets.HOMEBREW_TAP_TOKEN || github.token }}
+          token: ${{ github.token }}
       - id: sync
         name: Compute expected Homebrew tap formula delta
         shell: bash
@@ -312,7 +312,7 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ needs.resolve-build-run.outputs.version }}
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && secrets.HOMEBREW_TAP_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           ./scripts/verify_homebrew_formula_alignment.sh \
