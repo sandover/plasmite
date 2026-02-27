@@ -21,8 +21,9 @@ Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and 
 
 For IPC across machines, `pls serve` exposes local pools securely, and serves a minimal web UI too.
 
+#### Local IPC
+
 <table width="100%">
-<tr><th colspan="2">Local IPC</th></tr>
 <tr><th>Alice's terminal</th><th>Bob's terminal</th></tr>
 <tr>
 <td><b>Alice creates a channel</b><br/><code>pls pool create channel</code></td>
@@ -33,23 +34,21 @@ For IPC across machines, `pls serve` exposes local pools securely, and serves a 
 <td><b>Bob starts reading</b><br/><code>pls follow channel</code></td>
 </tr>
 <tr>
-<td><b>Alice writes a message</b><br/><pre lang="bash"><code>pls feed channel 
-  '{"from": "alice",
-    "msg": "hello world"}'</code></pre></td>
+<td><b>Alice writes a message</b><br/><code>pls feed channel 
+  '{"from": "alice", "msg": "hello world"}'</code></td>
 <td></td>
 </tr>
 <tr>
 <td></td>
-<td><b>Bob sees it on stdout</b><br/><pre><code>{ "data": 
-  {"from": "alice", 
-   "msg": "hello world"}, 
- ... }</code></pre></td>
+<td><b>Bob sees it on stdout</b><br/><code>{ "data": 
+  {"from": "alice", "msg": "hello world"}, ... }</code></td>
 </tr>
 </table>
 
+#### Remote IPC
+
 <table width="100%">
-<tr><th colspan="3">Remote IPC</th></tr>
-<tr><th>Alice</th><th>Bob</th><th>Carol (remote)</th></tr>
+<tr><th>Alice</th><th>Bob (already following)</th><th>Carol</th></tr>
 <tr>
 <td><b>Alice runs pool server</b><br/><code>pls serve init</code><br/><code>pls serve</code></td>
 <td></td>
@@ -58,26 +57,26 @@ For IPC across machines, `pls serve` exposes local pools securely, and serves a 
 <tr>
 <td></td>
 <td></td>
-<td><b>Carol follows remotely</b><br/><pre lang="bash"><code>pls follow 
-  http://alice:9700/channel</code></pre></td>
+<td><b>Carol follows remotely</b><br/><code>pls follow 
+  http://alice:9700/channel</code></td>
 </tr>
 <tr>
-<td><b>Alice writes</b><br/><pre lang="bash"><code>pls feed channel 
+<td><b>Alice writes</b><br/><code>pls feed channel 
   '{"from": "alice",
-    "msg": "hi all"}'</code></pre></td>
+    "msg": "hi all"}'</code></td>
 <td></td>
 <td></td>
 </tr>
 <tr>
 <td></td>
-<td><b>Bob sees it</b><br/><pre><code>{ "data": 
+<td><b>Bob sees it</b><br/><code>{ "data": 
   {"from": "alice", 
   "msg": "hi all"}, 
-  ... }</code></pre></td>
-<td><b>Carol sees it</b><br/><pre><code>{ "data": 
+  ... }</code></td>
+<td><b>Carol sees it</b><br/><code>{ "data": 
   {"from": "alice", 
   "msg": "hi all"}, 
-  ... }</code></pre></td>
+  ... }</code></td>
 </tr>
 </table>
 
