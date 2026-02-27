@@ -56,7 +56,7 @@ For IPC across machines, `pls serve` exposes local pools securely, and serves a 
 </tr>
 <tr>
 <td></td>
-<td></td>
+<td><i>(Bob never quit his follow process, so he's still watching.)</i></td>
 <td><b>Carol follows remotely</b><br/>
 <code>pls follow http://alice:9700/channel</code></td>
 </tr>
@@ -79,98 +79,15 @@ Plasmite APIs have the same usage style as the CLI.
 
 | | Drawbacks | Plasmite |
 |---|---|---|
-| **Kafka** or **RabbitMQ** | Lots of machinery: partitions, groups, exchanges, bindings, oh my. | `pls feed` / `pls follow` for local IPC. Add `pls serve` for remote access. No cluster required. |
-| **Redis / NATS** | Still a server you run, monitor, and connect to — even for same-machine messaging. Messages live in server memory; if the server dies, messaging stops. | No server process for local IPC. Pools persist on disk independent of any process. Add `pls serve` when you need remote access. |
-| **Log files / `tail -f`** | You parse with regex and it breaks when the format changes. Logs grow until you rotate, and rotation breaks `tail -f`. No way to replay from a specific point. No remote access without setting up syslog. | Structured JSON with sequence numbers. Bounded disk usage. Replay from any point with `--since` or `--tail`. `pls serve` for remote access. |
-| **Ad-hoc files (temp files, locks, polled dirs)** | Readers poll for new files. Locking is manual — a crash leaves a stale lock. Files accumulate and you write your own cleanup. No ordering unless you bake it into filenames. | Readers stream in real time. Writers append concurrently without explicit locks. Ring buffer keeps disk bounded, messages stay ordered. `pls serve` for remote access. |
-| **SQLite as a queue** | No `LISTEN`/`NOTIFY` — readers poll. Writers contend on the write-ahead log. You design a schema, write migrations, vacuum. SQLite explicitly discourages network access to the DB file. | Follow/replay without polling. No `SQLITE_BUSY`. No schema, no migrations, no cleanup. `pls serve` for remote access. |
-| **OS primitives (pipes, sockets, shm)** | Named pipes: if the reader dies, the writer blocks or gets SIGPIPE. One reader only, nothing survives a reboot. Unix sockets: you implement your own framing and reconnection. Shared memory: you coordinate with semaphores, and a crash while holding a lock is a mess. None work across machines. | Multiple readers and writers, crash-safe, persistent across reboots. `pls serve` to go cross-machine. |
-| **ZeroMQ** | Messages vanish when processes restart. The pattern matrix (PUB/SUB, PUSH/PULL, ROUTER/DEALER) is powerful but complex to get right. Binary protocol — can't inspect messages with standard tools. | Messages persist across restarts. Human-readable JSON you can inspect with `jq`. `pls serve` for remote. |
+| **Kafka**, **RabbitMQ**,  | Lots of machinery: partitions, groups, exchanges, bindings, oh my. | Minimal machinery, no config, and only run a server if you need one. |
+| **Redis / NATS** | Server required even for local messaging. Messages live in server memory; if the server dies, messaging stops. | Pools persist on disk independent of any process. |
+| **Log files / `tail -f`** | Messages are unstructured. Logs grow and have to be rotated (and rotating logs breaks `tail -f`). No way to replay from a specific point. No remote access without setting up syslog. | Messages are JSON with sequence numbers. Bounded disk usage. Replay from any point. Remote access is easy. |
+| **Ad-hoc files (temp files, locks, polled dirs)** | Readers have to poll for new files. Locking is manual; crashes leave a stale lock. Files accumulate. No ordering unless you bake it into filenames. | Readers stream in real time. Writers append concurrently without explicit locks. Ring buffer keeps disk bounded, messages stay ordered. |
+| **SQLite as a queue** | Readers have to poll. Writers contend. Have to design a schema, write migrations. SQLite explicitly discourages network access to the DB file. | Follow & replay without polling. No `SQLITE_BUSY`. No schema, no migrations, no cleanup, easy remote access. |
+| **OS primitives (pipes, sockets, shm)** | Named pipes mean if the reader dies, the writer blocks or gets SIGPIPE. With sockets you have to implement your own framing and reconnection. Shared memory has to be coordinated with semaphores, and a crash while holding a lock is bad news. Machine-local only. | Multiple readers and writers, crash-safe, persistent across reboots. |
+| **ZeroMQ** | Messages vanish when processes restart. The pattern matrix is expressive but hard to get right. Binary protocol means you can't inspect messages with standard tools. | Messages persist across restarts. Human-readable JSON is easy to massage with `jq`. |
 
-## Real world use cases
-
-### Build event bus
-
-Your build script writes progress to a pool. In another terminal, you follow it in real time.
-
-```bash
-pls feed build --create '{"step": "compile", "status": "done"}'
-pls feed build '{"step": "test", "status": "running"}'
-
-# elsewhere:
-pls follow build
-```
-
-### CI gate
-
-Your deploy script waits for the test runner to say "green" — no polling loops, no lock files, no shared database.
-
-```bash
-# deploy.sh
-pls follow ci --where '.data.status == "green"' --one > /dev/null && ./deploy-to-staging.sh
-
-# test-runner.sh
-pls feed ci --create '{"status": "green", "commit": "abc123"}'
-```
-
-### System log intake
-
-Pipe your system logs into a bounded pool. It won't fill your disk, and you can replay anything later.
-
-```bash
-journalctl -o json-seq -f | pls feed syslog --create       # Linux
-pls follow syslog --since 30m --replay 1                       # replay last 30 min
-```
-
-### Tagged incident stream
-
-Tag events when you write them, then filter and replay on the read side.
-
-```bash
-pls feed incidents --create --tag sev1 '{"msg": "payment gateway timeout"}'
-pls follow incidents --tag sev1 --where '.data.msg | test("timeout")'
-pls follow incidents --since 1h --replay 10
-```
-
-### Live chat between processes
-
-Two processes share a pool and talk to each other in real time — no broker, no sockets, no protocol to design.
-
-```bash
-# Terminal 1 — Alice
-pls duplex chat --create --me alice
-
-# Terminal 2 — Bob joins and catches up on the last 20 messages
-pls duplex chat --me bob --tail 20
-```
-
-Each line you type becomes a message. Bob sees Alice's messages as they arrive (and vice versa). Pipe JSON instead of typing for scripted use.
-
-### Remote pools
-
-Start a server and your pools are available over HTTP. Clients use the same CLI — just pass a URL.
-
-```bash
-# on the server
-pls serve init                     # one-time: bootstrap TLS cert + bearer token
-pls serve                          # start serving (LAN-accessible after init)
-```
-
-```bash
-# on a client
-pls feed http://server:9700/events '{"sensor": "temp", "value": 23.5}'
-pls follow http://server:9700/events --tail 20
-```
-
-A built-in web UI lives at `/ui`:
-
-![Plasmite UI pool follow](docs/images/ui/ui-pool-follow.png)
-
-For CORS, auth, and deployment details, see [Serving & remote access](docs/record/serving.md) and the [remote protocol spec](spec/remote/v0/SPEC.md).
-
-More examples — polyglot producer/consumer, multi-writer event bus, API stream ingest, CORS setup — in the **[Cookbook](docs/cookbook.md)**.
-
-Plasmite is designed for single-host and host-adjacent messaging. If you need multi-host cluster replication, schema registries, or workflow orchestration, see [When Plasmite Isn't the Right Fit](docs/cookbook.md#when-plasmite-isnt-the-right-fit).
+**Use cases** — CI gates, live event streams, duplex chat, system log ring buffers, replay & debug — all in the **[Cookbook](docs/cookbook.md)**. Plasmite is designed for single-host and host-adjacent messaging. If you need multi-host cluster replication, schema registries, or workflow orchestration, see [When Plasmite Isn't the Right Fit](docs/cookbook.md#when-plasmite-isnt-the-right-fit).
 
 ## Install
 
