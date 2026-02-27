@@ -48,7 +48,7 @@ For IPC across machines, `pls serve` exposes local pools securely, and serves a 
 #### Remote IPC
 
 <table width="100%">
-<tr><th>Alice</th><th>Bob (already following)</th><th>Carol</th></tr>
+<tr><th>Alice</th><th>Bob</th><th>Carol</th></tr>
 <tr>
 <td><b>Alice runs pool server</b><br/><code>pls serve init</code><br/><code>pls serve</code></td>
 <td></td>
@@ -62,8 +62,7 @@ For IPC across machines, `pls serve` exposes local pools securely, and serves a 
 </tr>
 <tr>
 <td><b>Alice writes</b><br/><code>pls feed channel 
-  '{"from": "alice",
-    "msg": "hi all"}'</code></td>
+  '{"from": "alice", "msg": "hi all"}'</code></td>
 <td></td>
 <td></td>
 </tr>
@@ -71,12 +70,10 @@ For IPC across machines, `pls serve` exposes local pools securely, and serves a 
 <td></td>
 <td><b>Bob sees it</b><br/><code>{ "data": 
   {"from": "alice", 
-  "msg": "hi all"}, 
-  ... }</code></td>
+   "msg": "hi all"}, ... }</code></td>
 <td><b>Carol sees it</b><br/><code>{ "data": 
   {"from": "alice", 
-  "msg": "hi all"}, 
-  ... }</code></td>
+  "msg": "hi all"}, ... }</code></td>
 </tr>
 </table>
 
