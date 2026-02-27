@@ -15,9 +15,14 @@ use crate::core::pool::{
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::io::{BufRead, BufReader, Read};
-use std::path::PathBuf;
+use std::io::{BufRead, BufReader, Cursor, Read};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use ureq::rustls::client::danger::{
+    HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
+};
+use ureq::rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use ureq::rustls::{DigitallySignedStruct, Error as TlsError, SignatureScheme};
 use url::Url;
 
 type ApiResult<T> = Result<T, Error>;
@@ -31,6 +36,46 @@ struct RemoteClientInner {
     base_url: Url,
     token: Option<String>,
     agent: ureq::Agent,
+}
+
+#[derive(Debug)]
+struct AcceptAllServerCertVerifier;
+
+impl ServerCertVerifier for AcceptAllServerCertVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, TlsError> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, TlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, TlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        ureq::rustls::crypto::aws_lc_rs::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
 }
 
 #[derive(Clone)]
@@ -207,6 +252,57 @@ impl RemoteClient {
         self
     }
 
+    pub fn with_tls_ca_file(mut self, path: impl AsRef<Path>) -> ApiResult<Self> {
+        let path = path.as_ref();
+        let cert_bytes = std::fs::read(path).map_err(|err| {
+            Error::new(ErrorKind::Usage)
+                .with_message("failed to read TLS CA/certificate file")
+                .with_path(path)
+                .with_source(err)
+        })?;
+        let mut cert_reader = Cursor::new(cert_bytes);
+        let certs = rustls_pemfile::certs(&mut cert_reader)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| {
+                Error::new(ErrorKind::Usage)
+                    .with_message("failed to parse TLS CA/certificate file")
+                    .with_path(path)
+                    .with_source(err)
+            })?;
+        if certs.is_empty() {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("TLS CA/certificate file contains no certificates")
+                .with_path(path));
+        }
+
+        let _ = ureq::rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let mut root_store = ureq::rustls::RootCertStore::empty();
+        let (added, _) = root_store.add_parsable_certificates(certs);
+        if added == 0 {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("TLS CA/certificate file contains no parsable certificates")
+                .with_path(path));
+        }
+
+        let tls_config = ureq::rustls::ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+        let agent = ureq::builder().tls_config(Arc::new(tls_config)).build();
+        self = self.with_agent(agent);
+        Ok(self)
+    }
+
+    pub fn with_tls_skip_verify(mut self) -> Self {
+        let _ = ureq::rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let tls_config = ureq::rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AcceptAllServerCertVerifier))
+            .with_no_client_auth();
+        let agent = ureq::builder().tls_config(Arc::new(tls_config)).build();
+        self = self.with_agent(agent);
+        self
+    }
+
     pub fn base_url(&self) -> &Url {
         &self.inner.base_url
     }
@@ -353,6 +449,19 @@ impl RemoteClient {
                 .with_message("request failed")
                 .with_source(err)),
         }
+    }
+
+    fn with_agent(mut self, agent: ureq::Agent) -> Self {
+        if let Some(inner) = Arc::get_mut(&mut self.inner) {
+            inner.agent = agent;
+        } else {
+            self.inner = Arc::new(RemoteClientInner {
+                base_url: self.inner.base_url.clone(),
+                token: self.inner.token.clone(),
+                agent,
+            });
+        }
+        self
     }
 }
 

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use getrandom::fill as fill_random;
 use rcgen::{Certificate, CertificateParams, SanType};
+use sha2::{Digest, Sha256};
 
 use plasmite::api::{Error, ErrorKind};
 
@@ -28,7 +29,10 @@ pub struct ServeInitResult {
     pub token_file: String,
     pub tls_cert: String,
     pub tls_key: String,
-    pub next_commands: Vec<String>,
+    pub tls_fingerprint: String,
+    pub server_commands: Vec<String>,
+    pub client_commands: Vec<String>,
+    pub curl_client_commands: Vec<String>,
 }
 
 pub fn init(config: ServeInitConfig) -> Result<ServeInitResult, Error> {
@@ -68,7 +72,7 @@ pub fn init(config: ServeInitConfig) -> Result<ServeInitResult, Error> {
             .with_source(err)
     })?;
 
-    let (cert_pem, key_pem) = generate_self_signed_pem(config.bind.ip())?;
+    let (cert_pem, key_pem, cert_der) = generate_self_signed_pem(config.bind.ip())?;
     std::fs::write(&tls_cert, cert_pem).map_err(|err| {
         Error::new(ErrorKind::Io)
             .with_message("failed to write TLS certificate")
@@ -85,6 +89,7 @@ pub fn init(config: ServeInitConfig) -> Result<ServeInitResult, Error> {
     let token_display = token_file.display().to_string();
     let cert_display = tls_cert.display().to_string();
     let key_display = tls_key.display().to_string();
+    let tls_fingerprint = format_cert_fingerprint(&cert_der);
     let bind = config.bind.to_string();
     let serve_cmd = format!(
         "plasmite serve --bind {bind} --allow-non-loopback --token-file {} --tls-cert {} --tls-key {}",
@@ -97,8 +102,21 @@ pub fn init(config: ServeInitConfig) -> Result<ServeInitResult, Error> {
         display_host(config.bind.ip()),
         config.bind.port()
     );
+    let pool_url = format!("{base_url}/demo");
     let append_url = format!("{base_url}/v0/pools/demo/append");
     let tail_url = format!("{base_url}/v0/pools/demo/tail?timeout_ms=5000");
+    let feed_cmd = format!(
+        "plasmite feed {} --token-file {} --tls-ca {} '{{\"hello\":\"world\"}}'",
+        quote_for_shell(&pool_url),
+        quote_for_shell(&token_display),
+        quote_for_shell(&cert_display),
+    );
+    let follow_cmd = format!(
+        "plasmite follow {} --token-file {} --tls-ca {} --tail 10",
+        quote_for_shell(&pool_url),
+        quote_for_shell(&token_display),
+        quote_for_shell(&cert_display),
+    );
     let append_cmd = format!(
         "curl -k -sS -X POST -H 'Authorization: Bearer <token>' -H 'content-type: application/json' --data '{{\"hello\":\"world\"}}' {}",
         quote_for_shell(&append_url),
@@ -112,7 +130,10 @@ pub fn init(config: ServeInitConfig) -> Result<ServeInitResult, Error> {
         token_file: token_display,
         tls_cert: cert_display,
         tls_key: key_display,
-        next_commands: vec![serve_cmd, append_cmd, tail_cmd],
+        tls_fingerprint,
+        server_commands: vec![serve_cmd],
+        client_commands: vec![feed_cmd, follow_cmd],
+        curl_client_commands: vec![append_cmd, tail_cmd],
     })
 }
 
@@ -173,7 +194,7 @@ fn nibble_hex(nibble: u8) -> char {
     }
 }
 
-fn generate_self_signed_pem(bind_ip: IpAddr) -> Result<(String, String), Error> {
+fn generate_self_signed_pem(bind_ip: IpAddr) -> Result<(String, String, Vec<u8>), Error> {
     let mut params = CertificateParams::new(vec!["localhost".to_string()]);
     params
         .subject_alt_names
@@ -189,13 +210,30 @@ fn generate_self_signed_pem(bind_ip: IpAddr) -> Result<(String, String), Error> 
             .with_message("failed to generate self-signed certificate")
             .with_source(err)
     })?;
+    let cert_der = cert.serialize_der().map_err(|err| {
+        Error::new(ErrorKind::Internal)
+            .with_message("failed to encode self-signed certificate")
+            .with_source(err)
+    })?;
     let cert_pem = cert.serialize_pem().map_err(|err| {
         Error::new(ErrorKind::Internal)
             .with_message("failed to encode self-signed certificate")
             .with_source(err)
     })?;
     let key_pem = cert.serialize_private_key_pem();
-    Ok((cert_pem, key_pem))
+    Ok((cert_pem, key_pem, cert_der))
+}
+
+fn format_cert_fingerprint(cert_der: &[u8]) -> String {
+    let digest = Sha256::digest(cert_der);
+    let mut output = String::from("SHA256:");
+    for (idx, byte) in digest.iter().enumerate() {
+        if idx > 0 {
+            output.push(':');
+        }
+        output.push_str(&format!("{byte:02X}"));
+    }
+    output
 }
 
 fn quote_for_shell(value: &str) -> String {

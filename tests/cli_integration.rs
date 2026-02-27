@@ -4184,6 +4184,212 @@ fn emit_remote_url_auth_errors_propagate() {
 }
 
 #[test]
+fn emit_remote_url_accepts_token_and_token_file_flags() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let server = ServeProcess::start_with_args(&pool_dir, &["--token", "secret-token"]);
+    let pool_url = format!("{}/demo", server.base_url);
+
+    let with_token = cmd()
+        .args(["feed", &pool_url, "{\"x\":1}", "--token", "secret-token"])
+        .output()
+        .expect("feed");
+    assert!(with_token.status.success());
+
+    let token_file = temp.path().join("token.txt");
+    std::fs::write(&token_file, "secret-token\n").expect("write token file");
+    let with_token_file = cmd()
+        .args([
+            "feed",
+            &pool_url,
+            "{\"x\":2}",
+            "--token-file",
+            token_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("feed");
+    assert!(with_token_file.status.success());
+}
+
+#[test]
+fn emit_and_follow_local_reject_remote_auth_tls_flags() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let cert_path = temp.path().join("dev-cert.pem");
+    std::fs::write(&cert_path, "not-a-real-cert\n").expect("write cert");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let feed = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "feed",
+            "demo",
+            "{\"x\":1}",
+            "--token",
+            "devtoken",
+        ])
+        .output()
+        .expect("feed");
+    assert_eq!(feed.status.code(), Some(2));
+    let feed_err = parse_error_json(&feed.stderr);
+    assert_eq!(
+        feed_err
+            .get("error")
+            .and_then(|v| v.get("kind"))
+            .and_then(|v| v.as_str()),
+        Some("Usage")
+    );
+
+    let follow = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "follow",
+            "demo",
+            "--tail",
+            "0",
+            "--timeout",
+            "100ms",
+            "--tls-ca",
+            cert_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("follow");
+    assert_eq!(follow.status.code(), Some(2));
+    let follow_err = parse_error_json(&follow.stderr);
+    assert_eq!(
+        follow_err
+            .get("error")
+            .and_then(|v| v.get("kind"))
+            .and_then(|v| v.as_str()),
+        Some("Usage")
+    );
+}
+
+#[test]
+fn follow_remote_tls_ca_and_skip_verify_work() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let feed = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "feed",
+            "demo",
+            "{\"x\":1}",
+        ])
+        .output()
+        .expect("feed");
+    assert!(feed.status.success());
+
+    let mut params = CertificateParams::new(vec!["localhost".to_string()]);
+    params
+        .subject_alt_names
+        .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+    params
+        .subject_alt_names
+        .push(SanType::IpAddress(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+    let cert = Certificate::from_params(params).expect("cert");
+    let cert_pem = cert.serialize_pem().expect("cert pem");
+    let key_pem = cert.serialize_private_key_pem();
+    let cert_path = temp.path().join("cert.pem");
+    let key_path = temp.path().join("key.pem");
+    std::fs::write(&cert_path, cert_pem).expect("write cert");
+    std::fs::write(&key_path, key_pem).expect("write key");
+
+    let server = ServeProcess::start_with_args_and_scheme(
+        &pool_dir,
+        &[
+            "--tls-cert",
+            cert_path.to_str().unwrap(),
+            "--tls-key",
+            key_path.to_str().unwrap(),
+        ],
+        "https",
+    );
+    let pool_url = format!("{}/demo", server.base_url);
+
+    let trusted = cmd()
+        .args([
+            "follow",
+            &pool_url,
+            "--tail",
+            "1",
+            "--one",
+            "--jsonl",
+            "--timeout",
+            "2s",
+            "--tls-ca",
+            cert_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("follow");
+    assert!(
+        trusted.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&trusted.stderr)
+    );
+
+    let skipped = cmd()
+        .args([
+            "follow",
+            &pool_url,
+            "--tail",
+            "1",
+            "--one",
+            "--jsonl",
+            "--timeout",
+            "2s",
+            "--tls-skip-verify",
+        ])
+        .output()
+        .expect("follow");
+    assert!(
+        skipped.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&skipped.stderr)
+    );
+}
+
+#[test]
 fn follow_remote_url_happy_path_reads_recent_messages() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
@@ -4348,6 +4554,30 @@ fn follow_remote_url_rejects_since_and_replay() {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     assert!(replay_message.contains("does not support --replay"));
+}
+
+#[test]
+fn follow_remote_url_rejects_future_since() {
+    let pool_url = "http://localhost:9170/demo";
+
+    let since = cmd()
+        .args(["follow", pool_url, "--since", "2999-01-01T00:00:00Z"])
+        .output()
+        .expect("follow");
+    assert_eq!(since.status.code(), Some(2));
+    let since_err = parse_error_json(&since.stderr);
+    let since_kind = since_err
+        .get("error")
+        .and_then(|v| v.get("kind"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert_eq!(since_kind, "Usage");
+    let since_message = since_err
+        .get("error")
+        .and_then(|v| v.get("message"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(since_message.contains("does not support --since"));
 }
 
 #[test]
@@ -4739,6 +4969,81 @@ fn serve_check_outputs_resolved_config() {
 }
 
 #[test]
+fn serve_check_human_uses_readable_limits_and_fingerprint() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut params = CertificateParams::new(vec!["localhost".to_string()]);
+    params
+        .subject_alt_names
+        .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+    params
+        .subject_alt_names
+        .push(SanType::IpAddress(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+    let cert = Certificate::from_params(params).expect("cert");
+    let cert_pem = cert.serialize_pem().expect("cert pem");
+    let key_pem = cert.serialize_private_key_pem();
+    let cert_path = temp.path().join("cert.pem");
+    let key_path = temp.path().join("key.pem");
+    std::fs::write(&cert_path, cert_pem).expect("write cert");
+    std::fs::write(&key_path, key_pem).expect("write key");
+
+    let output = cmd()
+        .args([
+            "serve",
+            "--tls-cert",
+            cert_path.to_str().unwrap(),
+            "--tls-key",
+            key_path.to_str().unwrap(),
+            "check",
+        ])
+        .output()
+        .expect("serve check");
+    assert!(output.status.success());
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+    assert!(stdout.contains("limits: body=1M timeout=30s concurrency=64"));
+    assert!(stdout.contains("tls_fingerprint: SHA256:"));
+}
+
+#[test]
+fn serve_check_json_includes_tls_fingerprint() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut params = CertificateParams::new(vec!["localhost".to_string()]);
+    params
+        .subject_alt_names
+        .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+    params
+        .subject_alt_names
+        .push(SanType::IpAddress(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+    let cert = Certificate::from_params(params).expect("cert");
+    let cert_pem = cert.serialize_pem().expect("cert pem");
+    let key_pem = cert.serialize_private_key_pem();
+    let cert_path = temp.path().join("cert.pem");
+    let key_path = temp.path().join("key.pem");
+    std::fs::write(&cert_path, cert_pem).expect("write cert");
+    std::fs::write(&key_path, key_pem).expect("write key");
+
+    let output = cmd()
+        .args([
+            "serve",
+            "--tls-cert",
+            cert_path.to_str().unwrap(),
+            "--tls-key",
+            key_path.to_str().unwrap(),
+            "check",
+            "--json",
+        ])
+        .output()
+        .expect("serve check");
+    assert!(output.status.success());
+    let payload = parse_json(std::str::from_utf8(&output.stdout).expect("utf8"));
+    let fingerprint = payload
+        .get("check")
+        .and_then(|v| v.get("tls_fingerprint"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(fingerprint.starts_with("SHA256:"));
+}
+
+#[test]
 fn serve_check_defaults_to_human_output() {
     let output = cmd()
         .args(["serve", "check"])
@@ -4811,16 +5116,33 @@ fn serve_init_writes_artifacts_and_next_commands() {
         "token value should not be echoed to stdout"
     );
 
-    let next_commands = payload
+    let server_commands = payload
         .get("init")
-        .and_then(|v| v.get("next_commands"))
+        .and_then(|v| v.get("server_commands"))
         .and_then(|v| v.as_array())
-        .expect("next_commands");
-    assert!(next_commands.iter().any(|v| {
+        .expect("server_commands");
+    assert!(server_commands.iter().any(|v| {
         v.as_str()
             .unwrap_or("")
             .contains("plasmite serve --bind 0.0.0.0:9700 --allow-non-loopback")
     }));
+    let client_commands = payload
+        .get("init")
+        .and_then(|v| v.get("client_commands"))
+        .and_then(|v| v.as_array())
+        .expect("client_commands");
+    assert!(
+        client_commands
+            .iter()
+            .any(|v| v.as_str().unwrap_or("").contains("plasmite feed")),
+        "expected plasmite feed client command"
+    );
+    let tls_fingerprint = payload
+        .get("init")
+        .and_then(|v| v.get("tls_fingerprint"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(tls_fingerprint.starts_with("SHA256:"));
 }
 
 #[test]

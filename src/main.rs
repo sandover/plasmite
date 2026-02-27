@@ -360,6 +360,34 @@ NOTES
             help = "Stream error policy: stop|skip"
         )]
         errors: ErrorPolicyCli,
+        #[arg(
+            long,
+            help = "Bearer token for remote refs (dev-only; prefer --token-file)",
+            help_heading = "Remote auth/TLS"
+        )]
+        token: Option<String>,
+        #[arg(
+            long,
+            value_name = "PATH",
+            help = "Read bearer token from file for remote refs",
+            value_hint = ValueHint::FilePath,
+            help_heading = "Remote auth/TLS"
+        )]
+        token_file: Option<PathBuf>,
+        #[arg(
+            long = "tls-ca",
+            value_name = "PATH",
+            help = "Trust this PEM CA/certificate for remote TLS",
+            value_hint = ValueHint::FilePath,
+            help_heading = "Remote auth/TLS"
+        )]
+        tls_ca: Option<PathBuf>,
+        #[arg(
+            long = "tls-skip-verify",
+            help = "Disable remote TLS certificate verification (unsafe; dev-only)",
+            help_heading = "Remote auth/TLS"
+        )]
+        tls_skip_verify: bool,
     },
     #[command(
         about = "Serve pools over HTTP (loopback default in v0)",
@@ -518,6 +546,34 @@ NOTES
             help = "Replay with timing (1 = realtime, 2 = 2x, 0.5 = half; 0 = no delay). Requires --tail or --since"
         )]
         replay: Option<f64>,
+        #[arg(
+            long,
+            help = "Bearer token for remote refs (dev-only; prefer --token-file)",
+            help_heading = "Remote auth/TLS"
+        )]
+        token: Option<String>,
+        #[arg(
+            long,
+            value_name = "PATH",
+            help = "Read bearer token from file for remote refs",
+            value_hint = ValueHint::FilePath,
+            help_heading = "Remote auth/TLS"
+        )]
+        token_file: Option<PathBuf>,
+        #[arg(
+            long = "tls-ca",
+            value_name = "PATH",
+            help = "Trust this PEM CA/certificate for remote TLS",
+            value_hint = ValueHint::FilePath,
+            help_heading = "Remote auth/TLS"
+        )]
+        tls_ca: Option<PathBuf>,
+        #[arg(
+            long = "tls-skip-verify",
+            help = "Disable remote TLS certificate verification (unsafe; dev-only)",
+            help_heading = "Remote auth/TLS"
+        )]
+        tls_skip_verify: bool,
     },
     #[command(
         arg_required_else_help = true,
@@ -1233,27 +1289,110 @@ fn add_internal_hint(err: Error) -> Error {
 }
 
 fn emit_doctor_human(report: &ValidationReport) {
+    if !io::stdout().is_terminal() {
+        let label = report
+            .pool_ref
+            .clone()
+            .unwrap_or_else(|| report.path.to_string_lossy().to_string());
+        match report.status {
+            ValidationStatus::Ok => {
+                println!("OK: {label}");
+            }
+            ValidationStatus::Corrupt => {
+                let last_good = report
+                    .last_good_seq
+                    .map(|seq| format!(" last_good_seq={seq}"))
+                    .unwrap_or_default();
+                let issue = report
+                    .issues
+                    .first()
+                    .map(|issue| format!(" issue={}", issue.message))
+                    .unwrap_or_default();
+                println!("CORRUPT: {label}{last_good}{issue}");
+            }
+        }
+        return;
+    }
+
     let label = report
         .pool_ref
         .clone()
         .unwrap_or_else(|| report.path.to_string_lossy().to_string());
     match report.status {
         ValidationStatus::Ok => {
-            println!("OK: {label}");
+            println!("{label}: healthy");
+            println!(
+                "  messages:  {} ({})",
+                report.issue_count,
+                format_seq_range(report.last_good_seq, report.last_good_seq)
+            );
+            println!("  checked:   {} frames, 0 issues", report.issue_count);
         }
         ValidationStatus::Corrupt => {
-            let last_good = report
-                .last_good_seq
-                .map(|seq| format!(" last_good_seq={seq}"))
-                .unwrap_or_default();
             let issue = report
                 .issues
                 .first()
-                .map(|issue| format!(" issue={}", issue.message))
-                .unwrap_or_default();
-            println!("CORRUPT: {label}{last_good}{issue}");
+                .map(|value| value.message.clone())
+                .unwrap_or_else(|| "corruption detected".to_string());
+            println!("{label}: corrupt");
+            println!(
+                "  messages:  {} ({})",
+                report.issue_count,
+                format_seq_range(report.last_good_seq, report.last_good_seq)
+            );
+            println!(
+                "  checked:   {} frames, {} issues",
+                report.issue_count,
+                report.issues.len()
+            );
+            println!("  detail:    {issue}");
         }
     }
+}
+
+fn emit_doctor_human_summary(reports: &[ValidationReport]) {
+    if reports.is_empty() {
+        println!("No pools found.");
+        return;
+    }
+    if !io::stdout().is_terminal() {
+        for report in reports {
+            emit_doctor_human(report);
+        }
+        return;
+    }
+
+    let corrupt = reports
+        .iter()
+        .filter(|report| report.status == ValidationStatus::Corrupt)
+        .count();
+    if corrupt == 0 {
+        println!("All {} pools healthy", reports.len());
+    } else {
+        println!("{corrupt} of {} pools has issues", reports.len());
+    }
+    let rows = reports
+        .iter()
+        .map(|report| {
+            let label = report
+                .pool_ref
+                .clone()
+                .unwrap_or_else(|| report.path.to_string_lossy().to_string());
+            let status = if report.status == ValidationStatus::Corrupt {
+                "CORRUPT".to_string()
+            } else {
+                "OK".to_string()
+            };
+            let issue_count = report.issues.len().to_string();
+            let detail = report
+                .issues
+                .first()
+                .map(|issue| issue.message.clone())
+                .unwrap_or_default();
+            vec![label, status, issue_count, detail]
+        })
+        .collect::<Vec<_>>();
+    emit_table(&["POOL", "STATUS", "ISSUES", "DETAIL"], &rows);
 }
 
 fn report_json(report: &ValidationReport) -> Value {
@@ -1411,9 +1550,26 @@ fn list_pools(pool_dir: &Path, client: &LocalClient) -> Vec<Value> {
 }
 
 fn emit_pool_list_table(pools: &[Value], pool_dir: &Path) {
-    let headers = [
-        "NAME", "STATUS", "SIZE", "OLDEST", "NEWEST", "MTIME", "PATH", "DETAIL",
-    ];
+    let interactive = io::stdout().is_terminal();
+    if interactive && pools.is_empty() {
+        println!("No pools found in {}", pool_dir.display());
+        println!();
+        println!("  Create one: plasmite pool create <name>");
+        return;
+    }
+
+    let has_errors = pools.iter().any(|pool| {
+        pool.get("error")
+            .and_then(|value| value.get("error"))
+            .is_some()
+    });
+    let headers = if interactive && !has_errors {
+        vec!["NAME", "SIZE", "MSGS", "MODIFIED", "PATH"]
+    } else {
+        vec![
+            "NAME", "STATUS", "SIZE", "OLDEST", "NEWEST", "MTIME", "PATH", "DETAIL",
+        ]
+    };
     let rows = pools
         .iter()
         .map(|pool| {
@@ -1450,38 +1606,60 @@ fn emit_pool_list_table(pools: &[Value], pool_dir: &Path) {
                     detail,
                 ]
             } else {
-                let size = pool
-                    .get("file_size")
-                    .and_then(|value| value.as_u64())
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| "-".to_string());
                 let oldest = pool
                     .get("bounds")
                     .and_then(|value| value.get("oldest"))
-                    .and_then(|value| value.as_u64())
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| "-".to_string());
+                    .and_then(|value| value.as_u64());
                 let newest = pool
                     .get("bounds")
                     .and_then(|value| value.get("newest"))
+                    .and_then(|value| value.as_u64());
+                let msg_count = match (oldest, newest) {
+                    (Some(a), Some(b)) => b.saturating_sub(a).saturating_add(1),
+                    _ => 0,
+                };
+                let size = pool
+                    .get("file_size")
                     .and_then(|value| value.as_u64())
+                    .map(|value| {
+                        if interactive {
+                            format_bytes(value)
+                        } else {
+                            value.to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| "-".to_string());
+                let oldest_str = oldest
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                let newest_str = newest
                     .map(|value| value.to_string())
                     .unwrap_or_else(|| "-".to_string());
                 let mtime = pool
                     .get("mtime")
                     .and_then(|value| value.as_str())
-                    .unwrap_or("-")
-                    .to_string();
-                vec![
-                    name,
-                    "OK".to_string(),
-                    size,
-                    oldest,
-                    newest,
-                    mtime,
-                    display_path,
-                    String::new(),
-                ]
+                    .map(|value| {
+                        if interactive {
+                            format_relative_from_timestamp(value)
+                        } else {
+                            value.to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| "-".to_string());
+                if interactive && !has_errors {
+                    vec![name, size, msg_count.to_string(), mtime, display_path]
+                } else {
+                    vec![
+                        name,
+                        "OK".to_string(),
+                        size,
+                        oldest_str,
+                        newest_str,
+                        mtime,
+                        display_path,
+                        String::new(),
+                    ]
+                }
             }
         })
         .collect::<Vec<_>>();
@@ -1490,6 +1668,56 @@ fn emit_pool_list_table(pools: &[Value], pool_dir: &Path) {
 }
 
 fn emit_pool_create_table(created: &[Value], pool_dir: &Path) {
+    if io::stdout().is_terminal() {
+        if created.len() == 1 {
+            if let Some(pool) = created.first() {
+                let name = pool
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("pool");
+                let size = pool
+                    .get("file_size")
+                    .and_then(|value| value.as_u64())
+                    .map(format_bytes)
+                    .unwrap_or_else(|| "-".to_string());
+                let index = pool
+                    .get("index_capacity")
+                    .and_then(|value| value.as_u64())
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                let path = pool
+                    .get("path")
+                    .and_then(|value| value.as_str())
+                    .map(|value| short_display_path(Path::new(value), Some(pool_dir)))
+                    .unwrap_or_else(|| "-".to_string());
+                println!("Created {name} ({size}, {index} index slots)");
+                println!("  path: {path}");
+            }
+            return;
+        }
+
+        let size = created
+            .first()
+            .and_then(|pool| pool.get("file_size"))
+            .and_then(|value| value.as_u64())
+            .map(format_bytes)
+            .unwrap_or_else(|| "-".to_string());
+        println!("Created {} pools ({} each)", created.len(), size);
+        for pool in created {
+            let name = pool
+                .get("name")
+                .and_then(|value| value.as_str())
+                .unwrap_or("pool");
+            let path = pool
+                .get("path")
+                .and_then(|value| value.as_str())
+                .map(|value| short_display_path(Path::new(value), Some(pool_dir)))
+                .unwrap_or_else(|| "-".to_string());
+            println!("  - {name} ({path})");
+        }
+        return;
+    }
+
     let headers = ["NAME", "SIZE", "INDEX", "PATH"];
     let rows = created
         .iter()
@@ -1543,6 +1771,97 @@ fn format_system_time(time: std::time::SystemTime) -> Option<String> {
     ts.format(&Rfc3339).ok()
 }
 
+fn format_bytes(value: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = 1024 * 1024;
+    const GIB: u64 = 1024 * 1024 * 1024;
+    if value < KIB {
+        return value.to_string();
+    }
+    let (unit, suffix) = if value >= GIB {
+        (GIB, "G")
+    } else if value >= MIB {
+        (MIB, "M")
+    } else {
+        (KIB, "K")
+    };
+    if value.is_multiple_of(unit) {
+        return format!("{}{}", value / unit, suffix);
+    }
+    format!("{:.1}{}", (value as f64) / (unit as f64), suffix)
+}
+
+fn format_timestamp_human(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return "-".to_string();
+    }
+    let parsed =
+        time::OffsetDateTime::parse(trimmed, &time::format_description::well_known::Rfc3339);
+    let Ok(parsed) = parsed else {
+        return trimmed.to_string();
+    };
+    let parsed = parsed.to_offset(time::UtcOffset::UTC);
+    let format = time::format_description::parse("[year]-[month]-[day]T[hour]:[minute]:[second]Z");
+    let Ok(format) = format else {
+        return trimmed.to_string();
+    };
+    parsed
+        .format(&format)
+        .unwrap_or_else(|_| trimmed.to_string())
+}
+
+fn format_relative_time(age_ms: Option<u64>) -> String {
+    let Some(age_ms) = age_ms else {
+        return "-".to_string();
+    };
+    let seconds = (age_ms / 1000).max(1);
+    if seconds < 60 {
+        return format!("{seconds}s ago");
+    }
+    let minutes = seconds / 60;
+    if minutes < 60 {
+        return format!("{minutes}m ago");
+    }
+    let hours = minutes / 60;
+    if hours < 24 {
+        return format!("{hours}h ago");
+    }
+    let days = hours / 24;
+    if days < 7 {
+        return format!("{days}d ago");
+    }
+    format!("{}w ago", days / 7)
+}
+
+fn format_seq_range(oldest: Option<u64>, newest: Option<u64>) -> String {
+    match (oldest, newest) {
+        (Some(oldest), Some(newest)) => format!("seq {oldest}..{newest}"),
+        _ => "-".to_string(),
+    }
+}
+
+fn format_relative_from_timestamp(value: &str) -> String {
+    let Ok(parsed) =
+        time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
+    else {
+        return "-".to_string();
+    };
+    let now_ns = match now_ns() {
+        Ok(value) => value,
+        Err(_) => return "-".to_string(),
+    };
+    let now = match time::OffsetDateTime::from_unix_timestamp_nanos(now_ns as i128) {
+        Ok(value) => value,
+        Err(_) => return "-".to_string(),
+    };
+    let delta = now
+        .unix_timestamp_nanos()
+        .saturating_sub(parsed.unix_timestamp_nanos());
+    let age_ms = (delta / 1_000_000) as u64;
+    format_relative_time(Some(age_ms))
+}
+
 fn ensure_pool_dir(dir: &Path) -> Result<(), Error> {
     std::fs::create_dir_all(dir)
         .map_err(|err| Error::new(ErrorKind::Io).with_path(dir).with_source(err))
@@ -1564,20 +1883,62 @@ fn read_token_file(path: &Path) -> Result<String, Error> {
     Ok(token)
 }
 
+fn resolve_token_value(
+    token: Option<String>,
+    token_file: Option<PathBuf>,
+) -> Result<Option<String>, Error> {
+    if token.is_some() && token_file.is_some() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("--token cannot be combined with --token-file")
+            .with_hint("Use --token-file for safer handling, or pass --token for local/dev use."));
+    }
+    if let Some(path) = token_file {
+        return read_token_file(&path).map(Some);
+    }
+    Ok(token)
+}
+
+fn reject_remote_only_flags_for_local_target(
+    command: &str,
+    token: Option<&str>,
+    token_file: Option<&Path>,
+    tls_ca: Option<&Path>,
+    tls_skip_verify: bool,
+) -> Result<(), Error> {
+    if token.is_none() && token_file.is_none() && tls_ca.is_none() && !tls_skip_verify {
+        return Ok(());
+    }
+    Err(Error::new(ErrorKind::Usage)
+        .with_message(format!(
+            "{command} remote auth/TLS flags require a remote http(s) pool ref"
+        ))
+        .with_hint("Use --token/--token-file/--tls-ca/--tls-skip-verify only with http(s)://host:port/<pool> refs."))
+}
+
 fn emit_serve_init_human(result: &serve_init::ServeInitResult) {
-    println!("serve init: generated artifacts");
+    println!("Generated TLS + token artifacts");
+    println!();
+    println!("server:");
     println!("  token_file: {}", result.token_file);
     println!("  tls_cert:   {}", result.tls_cert);
     println!("  tls_key:    {}", result.tls_key);
-    println!();
-    println!("next commands:");
-    for (idx, cmd) in result.next_commands.iter().enumerate() {
+    println!("  tls_fingerprint: {}", result.tls_fingerprint);
+    for (idx, cmd) in result.server_commands.iter().enumerate() {
         println!("  {}. {}", idx + 1, cmd);
+    }
+    println!();
+    println!("clients:");
+    for cmd in &result.client_commands {
+        println!("  {cmd}");
+    }
+    println!("  curl:");
+    for cmd in &result.curl_client_commands {
+        println!("    {cmd}");
     }
     println!();
     println!("notes:");
     println!("  - token value is not printed; read it from token_file when needed");
-    println!("  - TLS is self-signed; curl examples use -k for local testing");
+    println!("  - share token and fingerprint with collaborators out-of-band");
 }
 
 fn emit_serve_startup_guidance(config: &serve::ServeConfig) {
@@ -1642,23 +2003,54 @@ fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<String> {
         format!("  {access_line}"),
         format!("  {cors_line}"),
         "  stop: press Ctrl-C".to_string(),
-        "try:".to_string(),
-        format!(
-            "  curl{curl_tls_flag} -sS -X POST{auth_header} -H 'content-type: application/json' --data '{{\"hello\":\"world\"}}' '{append_url}'"
-        ),
-        format!("  curl{curl_tls_flag} -N -sS{auth_header} '{tail_url}'"),
     ];
+
+    if let Some(fingerprint) = config.tls_fingerprint.as_deref() {
+        lines.push(format!("  tls_fingerprint: {fingerprint}"));
+    }
+
+    if config.token.is_some() {
+        let client_tls_flag = if tls_enabled {
+            " --tls-ca <tls-cert>"
+        } else {
+            ""
+        };
+        let feed_cmd = format!(
+            "  plasmite feed {base_url}/demo --token-file <token-file>{client_tls_flag} '{{\"hello\":\"world\"}}'"
+        );
+        let follow_cmd = format!(
+            "  plasmite follow {base_url}/demo --token-file <token-file>{client_tls_flag} --tail 10"
+        );
+        lines.push("clients connect with:".to_string());
+        lines.push(feed_cmd);
+        lines.push(follow_cmd);
+        lines.push(format!(
+            "  curl{curl_tls_flag} -sS -X POST{auth_header} -H 'content-type: application/json' --data '{{\"hello\":\"world\"}}' '{append_url}'"
+        ));
+        lines.push(format!(
+            "  curl{curl_tls_flag} -N -sS{auth_header} '{tail_url}'"
+        ));
+    } else {
+        lines.push("try:".to_string());
+        lines.push(format!(
+            "  curl{curl_tls_flag} -sS -X POST{auth_header} -H 'content-type: application/json' --data '{{\"hello\":\"world\"}}' '{append_url}'"
+        ));
+        lines.push(format!(
+            "  curl{curl_tls_flag} -N -sS{auth_header} '{tail_url}'"
+        ));
+    }
 
     if config.token.is_some() && config.token_file_used {
         lines
             .push("note: the token value is not printed; read it from your token file".to_string());
     }
     if config.tls_self_signed {
-        lines.push("note: self-signed TLS; curl examples use -k for local testing".to_string());
+        lines.push("note: self-signed TLS; use --tls-ca with plasmite clients or -k for temporary curl testing".to_string());
     }
     if config.bind.ip().is_unspecified() {
         lines.push(
-            "note: listening on all interfaces; remote clients must use your host IP or DNS name (not 127.0.0.1).".to_string(),
+            "note: replace 127.0.0.1 in examples with your host IP or DNS name for remote clients."
+                .to_string(),
         );
     }
 
@@ -1715,6 +2107,7 @@ fn emit_serve_check_report(config: &serve::ServeConfig, color_mode: ColorMode, j
                 "web_ui_pool": format!("{base_url}/ui/pools/demo"),
                 "auth": auth_mode,
                 "tls": tls_mode,
+                "tls_fingerprint": config.tls_fingerprint,
                 "access": access_mode,
                 "cors_allowed_origins": cors_origins,
                 "limits": {
@@ -1771,10 +2164,15 @@ fn build_serve_check_lines(config: &serve::ServeConfig) -> Vec<String> {
         format!("  {access_line}"),
         format!("  {cors_line}"),
         format!(
-            "  limits: body={}B tail_timeout={}ms tail_concurrency={}",
-            config.max_body_bytes, config.max_tail_timeout_ms, config.max_concurrent_tails
+            "  limits: body={} timeout={} concurrency={}",
+            format_bytes(config.max_body_bytes),
+            format_timeout_ms(config.max_tail_timeout_ms),
+            config.max_concurrent_tails
         ),
     ];
+    if let Some(fingerprint) = config.tls_fingerprint.as_deref() {
+        lines.push(format!("  tls_fingerprint: {fingerprint}"));
+    }
 
     if config.bind.ip().is_unspecified() {
         lines.push(
@@ -1827,6 +2225,18 @@ fn serve_config_from_run_args(
     } else {
         (run.token, false)
     };
+    let tls_self_signed_material = if run.tls_self_signed {
+        Some(serve::prepare_self_signed_tls(bind.ip())?)
+    } else {
+        None
+    };
+    let tls_fingerprint = if let Some(material) = &tls_self_signed_material {
+        Some(material.fingerprint.clone())
+    } else if let Some(cert_path) = run.tls_cert.as_ref() {
+        Some(serve::tls_fingerprint_from_cert_path(cert_path)?)
+    } else {
+        None
+    };
     Ok(serve::ServeConfig {
         bind,
         pool_dir: pool_dir.to_path_buf(),
@@ -1839,10 +2249,19 @@ fn serve_config_from_run_args(
         tls_cert: run.tls_cert,
         tls_key: run.tls_key,
         tls_self_signed: run.tls_self_signed,
+        tls_self_signed_material,
+        tls_fingerprint,
         max_body_bytes: run.max_body_bytes,
         max_tail_timeout_ms: run.max_tail_timeout_ms,
         max_concurrent_tails: run.max_tail_concurrency,
     })
+}
+
+fn format_timeout_ms(timeout_ms: u64) -> String {
+    if timeout_ms.is_multiple_of(1000) {
+        return format!("{}s", timeout_ms / 1000);
+    }
+    format!("{timeout_ms}ms")
 }
 
 fn display_host(ip: std::net::IpAddr) -> String {
@@ -2061,28 +2480,60 @@ fn parse_durability(input: &str) -> Result<Durability, Error> {
 }
 
 fn emit_pool_info_pretty(pool_ref: &str, info: &plasmite::api::PoolInfo) {
-    println!("Pool: {pool_ref}");
-    println!("Path: {}", info.path.display());
-    println!(
-        "Size: {} bytes (index: offset={} slots={} bytes={}, ring: offset={} size={})",
-        info.file_size,
-        info.index_offset,
-        info.index_capacity,
-        info.index_size_bytes,
-        info.ring_offset,
-        info.ring_size
-    );
+    if !io::stdout().is_terminal() {
+        println!("Pool: {pool_ref}");
+        println!("Path: {}", info.path.display());
+        println!(
+            "Size: {} bytes (index: offset={} slots={} bytes={}, ring: offset={} size={})",
+            info.file_size,
+            info.index_offset,
+            info.index_capacity,
+            info.index_size_bytes,
+            info.ring_offset,
+            info.ring_size
+        );
 
-    let oldest = info
-        .bounds
-        .oldest_seq
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "-".to_string());
-    let newest = info
-        .bounds
-        .newest_seq
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "-".to_string());
+        let oldest = info
+            .bounds
+            .oldest_seq
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let newest = info
+            .bounds
+            .newest_seq
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let count = info
+            .metrics
+            .as_ref()
+            .map(|metrics| metrics.message_count)
+            .unwrap_or_else(|| match (info.bounds.oldest_seq, info.bounds.newest_seq) {
+                (Some(oldest), Some(newest)) => newest.saturating_sub(oldest).saturating_add(1),
+                _ => 0,
+            });
+        println!("Bounds: oldest={oldest} newest={newest} count={count}");
+
+        if let Some(metrics) = &info.metrics {
+            let whole = metrics.utilization.used_percent_hundredths / 100;
+            let frac = metrics.utilization.used_percent_hundredths % 100;
+            println!(
+                "Utilization: used={}B free={}B ({}.{:02}%)",
+                metrics.utilization.used_bytes, metrics.utilization.free_bytes, whole, frac
+            );
+            println!(
+                "Oldest: {} ({})",
+                metrics.age.oldest_time.as_deref().unwrap_or("-"),
+                human_age(metrics.age.oldest_age_ms),
+            );
+            println!(
+                "Newest: {} ({})",
+                metrics.age.newest_time.as_deref().unwrap_or("-"),
+                human_age(metrics.age.newest_age_ms),
+            );
+        }
+        return;
+    }
+
     let count = info
         .metrics
         .as_ref()
@@ -2091,24 +2542,110 @@ fn emit_pool_info_pretty(pool_ref: &str, info: &plasmite::api::PoolInfo) {
             (Some(oldest), Some(newest)) => newest.saturating_sub(oldest).saturating_add(1),
             _ => 0,
         });
-    println!("Bounds: oldest={oldest} newest={newest} count={count}");
-
+    println!("{pool_ref}");
+    println!("  path: {}", info.path.display());
     if let Some(metrics) = &info.metrics {
         let whole = metrics.utilization.used_percent_hundredths / 100;
         let frac = metrics.utilization.used_percent_hundredths % 100;
         println!(
-            "Utilization: used={}B free={}B ({}.{:02}%)",
-            metrics.utilization.used_bytes, metrics.utilization.free_bytes, whole, frac
+            "  size: {} ({} used, {}.{:02}%)",
+            format_bytes(info.file_size),
+            format_bytes(metrics.utilization.used_bytes),
+            whole,
+            frac
         );
         println!(
-            "Oldest: {} ({})",
-            metrics.age.oldest_time.as_deref().unwrap_or("-"),
-            human_age(metrics.age.oldest_age_ms),
+            "  messages: {} ({})",
+            count,
+            format_seq_range(info.bounds.oldest_seq, info.bounds.newest_seq)
         );
         println!(
-            "Newest: {} ({})",
-            metrics.age.newest_time.as_deref().unwrap_or("-"),
-            human_age(metrics.age.newest_age_ms),
+            "  oldest: {} ({})",
+            format_relative_time(metrics.age.oldest_age_ms),
+            metrics
+                .age
+                .oldest_time
+                .as_deref()
+                .map(format_timestamp_human)
+                .unwrap_or_else(|| "-".to_string()),
+        );
+        println!(
+            "  newest: {} ({})",
+            format_relative_time(metrics.age.newest_age_ms),
+            metrics
+                .age
+                .newest_time
+                .as_deref()
+                .map(format_timestamp_human)
+                .unwrap_or_else(|| "-".to_string()),
+        );
+    } else {
+        println!("  size: {}", format_bytes(info.file_size));
+        println!(
+            "  messages: {} ({})",
+            count,
+            format_seq_range(info.bounds.oldest_seq, info.bounds.newest_seq)
+        );
+    }
+    println!(
+        "  index: {} slots ({})",
+        info.index_capacity,
+        format_bytes(info.index_size_bytes)
+    );
+    println!(
+        "  ring: {} (offset {})",
+        format_bytes(info.ring_size),
+        info.ring_offset
+    );
+}
+
+fn emit_feed_receipt_human(receipt: &Value) {
+    let seq = receipt
+        .get("seq")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let time = receipt
+        .get("time")
+        .and_then(|value| value.as_str())
+        .map(format_timestamp_human)
+        .unwrap_or_else(|| "-".to_string());
+    let tags = receipt
+        .get("meta")
+        .and_then(|value| value.get("tags"))
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+    if tags.is_empty() {
+        println!("fed seq={seq} at {time}");
+    } else {
+        println!("fed seq={seq} at {time}  tags: {tags}");
+    }
+}
+
+fn emit_feed_receipt(value: Value, color_mode: ColorMode) {
+    if io::stdout().is_terminal() {
+        emit_feed_receipt_human(&value);
+    } else {
+        emit_json(value, color_mode);
+    }
+}
+
+fn emit_version_output(color_mode: ColorMode) {
+    if io::stdout().is_terminal() {
+        println!("plasmite {}", env!("CARGO_PKG_VERSION"));
+    } else {
+        emit_json(
+            json!({
+                "name": "plasmite",
+                "version": env!("CARGO_PKG_VERSION"),
+            }),
+            color_mode,
         );
     }
 }
@@ -2188,18 +2725,7 @@ fn format_table_line(cells: &[String], widths: &[usize]) -> String {
 }
 
 fn human_age(age_ms: Option<u64>) -> String {
-    let Some(age_ms) = age_ms else {
-        return "-".to_string();
-    };
-    if age_ms < 1_000 {
-        return format!("{age_ms}ms ago");
-    }
-    if age_ms < 60_000 {
-        let tenths = (age_ms as f64) / 1_000.0;
-        return format!("{tenths:.1}s ago");
-    }
-    let seconds = age_ms / 1_000;
-    format!("{seconds}s ago")
+    format_relative_time(age_ms)
 }
 
 fn emit_json(value: serde_json::Value, color_mode: ColorMode) {
@@ -2869,7 +3395,11 @@ fn follow_should_stop(stop: Option<&Arc<AtomicBool>>) -> bool {
     stop.is_some_and(|flag| flag.load(Ordering::Acquire))
 }
 
-fn follow_remote(base_url: &str, pool: &str, cfg: &FollowConfig) -> Result<RunOutcome, Error> {
+fn follow_remote(
+    client: &RemoteClient,
+    pool: &str,
+    cfg: &FollowConfig,
+) -> Result<RunOutcome, Error> {
     if cfg.replay_speed.is_some() {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("remote follow does not support --replay")
@@ -2891,7 +3421,6 @@ fn follow_remote(base_url: &str, pool: &str, cfg: &FollowConfig) -> Result<RunOu
             .with_hint("--quiet-drops only applies to local drop notices."));
     }
 
-    let client = RemoteClient::new(base_url.to_string())?;
     let remote_pool = client.open_pool(&PoolRef::name(pool))?;
 
     let mut next_since_seq = if cfg.tail > 0 {
@@ -3351,9 +3880,11 @@ fn follow_replay(pool: &Pool, cfg: &FollowConfig) -> Result<RunOutcome, Error> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Error, ErrorKind, PoolTarget, RetryConfig, duplex_requires_me_when_tty, error_text,
-        matches_required_tags, parse_duplex_tty_line, parse_duration, parse_size, read_token_file,
-        render_table, resolve_pool_target, retry_with_config, short_display_path,
+        Error, ErrorKind, PoolTarget, RetryConfig, build_serve_startup_lines,
+        duplex_requires_me_when_tty, error_text, format_bytes, format_relative_time,
+        format_seq_range, format_timestamp_human, matches_required_tags, parse_duplex_tty_line,
+        parse_duration, parse_size, read_token_file, render_table, resolve_pool_target,
+        retry_with_config, short_display_path,
     };
     use serde_json::json;
     use std::io::Cursor;
@@ -3388,6 +3919,83 @@ mod tests {
         assert_eq!(parse_size("2k").unwrap(), 2048);
         assert_eq!(parse_size("3M").unwrap(), 3 * 1024 * 1024);
         assert_eq!(parse_size("4g").unwrap(), 4 * 1024 * 1024 * 1024);
+    }
+
+    fn test_serve_config() -> super::serve::ServeConfig {
+        super::serve::ServeConfig {
+            bind: "127.0.0.1:9700".parse().expect("bind"),
+            pool_dir: PathBuf::from("/tmp/pools"),
+            token: None,
+            cors_allowed_origins: Vec::new(),
+            access_mode: super::serve::AccessMode::ReadWrite,
+            allow_non_loopback: false,
+            insecure_no_tls: false,
+            token_file_used: false,
+            tls_cert: None,
+            tls_key: None,
+            tls_self_signed: false,
+            tls_self_signed_material: None,
+            tls_fingerprint: None,
+            max_body_bytes: 1024 * 1024,
+            max_tail_timeout_ms: 30_000,
+            max_concurrent_tails: 64,
+        }
+    }
+
+    #[test]
+    fn serve_startup_banner_secure_mode_includes_clients_section() {
+        let mut config = test_serve_config();
+        config.token = Some("secret".to_string());
+        config.token_file_used = true;
+        config.tls_self_signed = true;
+        config.tls_fingerprint = Some("SHA256:AA:BB".to_string());
+        let text = build_serve_startup_lines(&config).join("\n");
+        assert!(text.contains("clients connect with:"));
+        assert!(text.contains("--token-file <token-file> --tls-ca <tls-cert>"));
+        assert!(text.contains("tls_fingerprint: SHA256:AA:BB"));
+    }
+
+    #[test]
+    fn serve_startup_banner_local_mode_stays_compact() {
+        let config = test_serve_config();
+        let text = build_serve_startup_lines(&config).join("\n");
+        assert!(!text.contains("clients connect with:"));
+        assert!(text.contains("try:"));
+    }
+
+    #[test]
+    fn format_bytes_boundaries() {
+        assert_eq!(format_bytes(0), "0");
+        assert_eq!(format_bytes(1023), "1023");
+        assert_eq!(format_bytes(1024), "1K");
+        assert_eq!(format_bytes(1536), "1.5K");
+        assert_eq!(format_bytes(1024 * 1024), "1M");
+    }
+
+    #[test]
+    fn format_timestamp_human_truncates_to_seconds() {
+        assert_eq!(
+            format_timestamp_human("2026-02-27T12:34:56.789Z"),
+            "2026-02-27T12:34:56Z"
+        );
+        assert_eq!(format_timestamp_human(""), "-");
+    }
+
+    #[test]
+    fn format_relative_time_boundaries() {
+        assert_eq!(format_relative_time(Some(0)), "1s ago");
+        assert_eq!(format_relative_time(Some(59_000)), "59s ago");
+        assert_eq!(format_relative_time(Some(60_000)), "1m ago");
+        assert_eq!(format_relative_time(Some(3_600_000)), "1h ago");
+        assert_eq!(format_relative_time(Some(86_400_000)), "1d ago");
+        assert_eq!(format_relative_time(Some(7 * 86_400_000)), "1w ago");
+        assert_eq!(format_relative_time(None), "-");
+    }
+
+    #[test]
+    fn format_seq_range_handles_empty_and_present_bounds() {
+        assert_eq!(format_seq_range(None, None), "-");
+        assert_eq!(format_seq_range(Some(3), Some(5)), "seq 3..5");
     }
 
     #[test]

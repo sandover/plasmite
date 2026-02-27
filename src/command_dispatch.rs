@@ -18,11 +18,7 @@ pub(super) fn dispatch_command(
             Ok(RunOutcome::ok())
         }
         Command::Version => {
-            let output = json!({
-                "name": "plasmite",
-                "version": env!("CARGO_PKG_VERSION"),
-            });
-            emit_json(output, color_mode);
+            emit_version_output(color_mode);
             Ok(RunOutcome::ok())
         }
         Command::Doctor { pool, all, json } => {
@@ -54,6 +50,8 @@ pub(super) fn dispatch_command(
             if json {
                 let values = reports.iter().map(report_json).collect::<Vec<_>>();
                 emit_json(json!({ "reports": values }), color_mode);
+            } else if all {
+                emit_doctor_human_summary(&reports);
             } else {
                 for report in &reports {
                     emit_doctor_human(report);
@@ -97,7 +95,10 @@ pub(super) fn dispatch_command(
                                     "tls_cert": result.tls_cert,
                                     "tls_key": result.tls_key,
                                 },
-                                "next_commands": result.next_commands,
+                                "tls_fingerprint": result.tls_fingerprint,
+                                "server_commands": result.server_commands,
+                                "client_commands": result.client_commands,
+                                "curl_client_commands": result.curl_client_commands,
                             }
                         }),
                         color_mode,
@@ -263,6 +264,30 @@ pub(super) fn dispatch_command(
                         }),
                         color_mode,
                     );
+                } else if io::stdout().is_terminal() {
+                    let total = table_rows.len();
+                    let deleted_count = deleted.len();
+                    if total == 1 && deleted_count == 1 {
+                        if let Some(row) = table_rows.first() {
+                            println!("Deleted {}", row.first().cloned().unwrap_or_default());
+                            println!("  path: {}", row.get(2).cloned().unwrap_or_default());
+                        }
+                    } else if failed.is_empty() {
+                        println!("Deleted {deleted_count} pools");
+                        for row in table_rows
+                            .iter()
+                            .filter(|row| row.get(1).is_some_and(|value| value == "OK"))
+                        {
+                            println!(
+                                "  - {} ({})",
+                                row.first().cloned().unwrap_or_default(),
+                                row.get(2).cloned().unwrap_or_default()
+                            );
+                        }
+                    } else {
+                        println!("Deleted {deleted_count} of {total} pools");
+                        emit_table(&["NAME", "STATUS", "PATH", "DETAIL"], &table_rows);
+                    }
                 } else {
                     emit_table(&["NAME", "STATUS", "PATH", "DETAIL"], &table_rows);
                 }
@@ -295,6 +320,10 @@ pub(super) fn dispatch_command(
             retry_delay,
             input,
             errors,
+            token,
+            token_file,
+            tls_ca,
+            tls_skip_verify,
         } => {
             let target = resolve_pool_target(&pool, &pool_dir)?;
             let data_arg = data;
@@ -336,6 +365,13 @@ pub(super) fn dispatch_command(
             );
             match target {
                 PoolTarget::LocalPath(path) => {
+                    reject_remote_only_flags_for_local_target(
+                        "feed",
+                        token.as_deref(),
+                        token_file.as_deref(),
+                        tls_ca.as_deref(),
+                        tls_skip_verify,
+                    )?;
                     let mut pool_handle = match Pool::open(&path) {
                         Ok(pool) => pool,
                         Err(err) if create && err.kind() == ErrorKind::NotFound => {
@@ -367,7 +403,7 @@ pub(super) fn dispatch_command(
                                 pool_handle.append_with_options(payload.as_slice(), options)?;
                             Ok((seq, timestamp_ns))
                         })?;
-                        emit_json(feed_receipt_json(seq, timestamp_ns, &tag)?, color_mode);
+                        emit_feed_receipt(feed_receipt_json(seq, timestamp_ns, &tag)?, color_mode);
                     } else {
                         let pool_path_label = path.display().to_string();
                         let outcome = if let Some(file) = file {
@@ -423,7 +459,20 @@ pub(super) fn dispatch_command(
                             .with_message("remote feed does not support --create")
                             .with_hint("Create remote pools with server-side tooling, not feed."));
                     }
-                    let client = RemoteClient::new(base_url)?;
+                    let token_value = resolve_token_value(token, token_file)?;
+                    let mut client = RemoteClient::new(base_url)?;
+                    if let Some(token_value) = token_value {
+                        client = client.with_token(token_value);
+                    }
+                    if let Some(path) = tls_ca {
+                        client = client.with_tls_ca_file(path)?;
+                    }
+                    if tls_skip_verify {
+                        eprintln!(
+                            "warning: --tls-skip-verify disables TLS certificate verification (unsafe)"
+                        );
+                        client = client.with_tls_skip_verify();
+                    }
                     let remote_pool = client
                         .open_pool(&PoolRef::name(name.clone()))
                         .map_err(|err| add_missing_pool_hint(err, &pool, &pool))?;
@@ -432,7 +481,7 @@ pub(super) fn dispatch_command(
                         let message = retry_with_config(retry_config, || {
                             remote_pool.append_json_now(&data, &tag, durability)
                         })?;
-                        emit_json(feed_receipt_from_message(&message), color_mode);
+                        emit_feed_receipt(feed_receipt_from_message(&message), color_mode);
                     } else {
                         let pool_path_label = format!("{}/{}", client.base_url(), name);
                         let outcome = if let Some(file) = file {
@@ -727,10 +776,10 @@ pub(super) fn dispatch_command(
                     let follow_tx = event_tx.clone();
                     let follow_cfg = cfg.clone();
                     let stop_for_follow = stop.clone();
+                    let follow_client = client.clone();
                     let pool_name = name.clone();
-                    let follow_base_url = base_url.clone();
                     let _ = std::thread::spawn(move || {
-                        let outcome = follow_remote(&follow_base_url, &pool_name, &follow_cfg);
+                        let outcome = follow_remote(&follow_client, &pool_name, &follow_cfg);
                         if outcome.is_err() {
                             stop_for_follow.store(true, Ordering::Release);
                         }
@@ -843,6 +892,10 @@ pub(super) fn dispatch_command(
             where_expr,
             tags,
             replay,
+            token,
+            token_file,
+            tls_ca,
+            tls_skip_verify,
         } => {
             if jsonl && format.is_some() {
                 return Err(Error::new(ErrorKind::Usage)
@@ -897,6 +950,13 @@ pub(super) fn dispatch_command(
             let target = resolve_pool_target(&pool, &pool_dir)?;
             match target {
                 PoolTarget::LocalPath(path) => {
+                    reject_remote_only_flags_for_local_target(
+                        "follow",
+                        token.as_deref(),
+                        token_file.as_deref(),
+                        tls_ca.as_deref(),
+                        tls_skip_verify,
+                    )?;
                     let exact_create_hint = Some(exact_follow_create_hint.clone());
                     if let Some(speed) = replay {
                         if speed < 0.0 {
@@ -949,7 +1009,21 @@ pub(super) fn dispatch_command(
                                 "Create remote pools with server-side tooling, then rerun follow.",
                             ));
                     }
-                    let outcome = follow_remote(&base_url, &pool, &cfg)?;
+                    let token_value = resolve_token_value(token, token_file)?;
+                    let mut client = RemoteClient::new(base_url)?;
+                    if let Some(token_value) = token_value {
+                        client = client.with_token(token_value);
+                    }
+                    if let Some(path) = tls_ca {
+                        client = client.with_tls_ca_file(path)?;
+                    }
+                    if tls_skip_verify {
+                        eprintln!(
+                            "warning: --tls-skip-verify disables TLS certificate verification (unsafe)"
+                        );
+                        client = client.with_tls_skip_verify();
+                    }
+                    let outcome = follow_remote(&client, &pool, &cfg)?;
                     Ok(outcome)
                 }
             }

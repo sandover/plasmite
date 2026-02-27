@@ -20,11 +20,12 @@ use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::future::IntoFuture;
 use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 use tokio::task::JoinSet;
@@ -58,9 +59,58 @@ pub struct ServeConfig {
     pub tls_cert: Option<PathBuf>,
     pub tls_key: Option<PathBuf>,
     pub tls_self_signed: bool,
+    pub tls_self_signed_material: Option<SelfSignedTlsMaterial>,
+    pub tls_fingerprint: Option<String>,
     pub max_body_bytes: u64,
     pub max_tail_timeout_ms: u64,
     pub max_concurrent_tails: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct SelfSignedTlsMaterial {
+    cert_der: Vec<u8>,
+    key_der: Vec<u8>,
+    pub fingerprint: String,
+}
+
+pub fn prepare_self_signed_tls(bind_ip: IpAddr) -> Result<SelfSignedTlsMaterial, Error> {
+    let mut params = CertificateParams::new(vec!["localhost".to_string()]);
+    params
+        .subject_alt_names
+        .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+    params
+        .subject_alt_names
+        .push(SanType::IpAddress(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+    if !bind_ip.is_unspecified() {
+        params.subject_alt_names.push(SanType::IpAddress(bind_ip));
+    }
+    let cert = Certificate::from_params(params).map_err(|err| {
+        Error::new(ErrorKind::Internal)
+            .with_message("failed to generate self-signed certificate")
+            .with_source(err)
+    })?;
+    let cert_der = cert.serialize_der().map_err(|err| {
+        Error::new(ErrorKind::Internal)
+            .with_message("failed to serialize self-signed certificate")
+            .with_source(err)
+    })?;
+    let key_der = cert.serialize_private_key_der();
+    let fingerprint = format_cert_fingerprint(&cert_der);
+    Ok(SelfSignedTlsMaterial {
+        cert_der,
+        key_der,
+        fingerprint,
+    })
+}
+
+pub fn tls_fingerprint_from_cert_path(cert_path: &Path) -> Result<String, Error> {
+    let certs = load_certificates_from_pem(cert_path)?;
+    let first = certs.first().ok_or_else(|| {
+        Error::new(ErrorKind::Usage)
+            .with_message("TLS certificate file contains no certificates")
+            .with_path(cert_path)
+    })?;
+    Ok(format_cert_fingerprint(first.as_ref()))
 }
 
 #[derive(Clone)]
@@ -308,31 +358,12 @@ fn tls_is_configured(config: &ServeConfig) -> bool {
 
 async fn build_tls_config(config: &ServeConfig) -> Result<Option<Arc<ServerConfig>>, Error> {
     if config.tls_self_signed {
-        let mut params = CertificateParams::new(vec!["localhost".to_string()]);
-        params
-            .subject_alt_names
-            .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
-        params
-            .subject_alt_names
-            .push(SanType::IpAddress(IpAddr::V6(Ipv6Addr::LOCALHOST)));
-        if !config.bind.ip().is_unspecified() {
-            params
-                .subject_alt_names
-                .push(SanType::IpAddress(config.bind.ip()));
-        }
-        let cert = Certificate::from_params(params).map_err(|err| {
-            Error::new(ErrorKind::Internal)
-                .with_message("failed to generate self-signed certificate")
-                .with_source(err)
-        })?;
-        let cert_der = cert.serialize_der().map_err(|err| {
-            Error::new(ErrorKind::Internal)
-                .with_message("failed to serialize self-signed certificate")
-                .with_source(err)
-        })?;
-        let key_der = cert.serialize_private_key_der();
-        let certs = vec![CertificateDer::from(cert_der)];
-        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_der));
+        let material = match &config.tls_self_signed_material {
+            Some(value) => value.clone(),
+            None => prepare_self_signed_tls(config.bind.ip())?,
+        };
+        let certs = vec![CertificateDer::from(material.cert_der)];
+        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(material.key_der));
         let tls = build_server_config(certs, key)?;
         return Ok(Some(Arc::new(tls)));
     }
@@ -345,20 +376,37 @@ async fn build_tls_config(config: &ServeConfig) -> Result<Option<Arc<ServerConfi
     Ok(None)
 }
 
-fn load_tls_config_from_pem(
-    cert_path: &PathBuf,
-    key_path: &PathBuf,
-) -> Result<ServerConfig, Error> {
-    let cert_bytes = std::fs::read(cert_path).map_err(|err| {
-        Error::new(ErrorKind::Io)
-            .with_message("failed to read TLS certificate")
-            .with_path(cert_path)
-            .with_source(err)
-    })?;
+fn load_tls_config_from_pem(cert_path: &Path, key_path: &Path) -> Result<ServerConfig, Error> {
+    let certs = load_certificates_from_pem(cert_path)?;
     let key_bytes = std::fs::read(key_path).map_err(|err| {
         Error::new(ErrorKind::Io)
             .with_message("failed to read TLS key")
             .with_path(key_path)
+            .with_source(err)
+    })?;
+
+    let mut key_reader = Cursor::new(key_bytes);
+    let key = rustls_pemfile::private_key(&mut key_reader)
+        .map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_message("failed to parse TLS key")
+                .with_path(key_path)
+                .with_source(err)
+        })?
+        .ok_or_else(|| {
+            Error::new(ErrorKind::Usage)
+                .with_message("TLS key file contains no private key")
+                .with_path(key_path)
+        })?;
+
+    build_server_config(certs, key)
+}
+
+fn load_certificates_from_pem(cert_path: &Path) -> Result<Vec<CertificateDer<'static>>, Error> {
+    let cert_bytes = std::fs::read(cert_path).map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message("failed to read TLS certificate")
+            .with_path(cert_path)
             .with_source(err)
     })?;
 
@@ -376,22 +424,19 @@ fn load_tls_config_from_pem(
             .with_message("TLS certificate file contains no certificates")
             .with_path(cert_path));
     }
+    Ok(certs)
+}
 
-    let mut key_reader = Cursor::new(key_bytes);
-    let key = rustls_pemfile::private_key(&mut key_reader)
-        .map_err(|err| {
-            Error::new(ErrorKind::Io)
-                .with_message("failed to parse TLS key")
-                .with_path(key_path)
-                .with_source(err)
-        })?
-        .ok_or_else(|| {
-            Error::new(ErrorKind::Usage)
-                .with_message("TLS key file contains no private key")
-                .with_path(key_path)
-        })?;
-
-    build_server_config(certs, key)
+fn format_cert_fingerprint(cert_der: &[u8]) -> String {
+    let digest = Sha256::digest(cert_der);
+    let mut out = String::from("SHA256:");
+    for (idx, byte) in digest.iter().enumerate() {
+        if idx > 0 {
+            out.push(':');
+        }
+        out.push_str(&format!("{byte:02X}"));
+    }
+    out
 }
 
 fn build_server_config(
@@ -1316,6 +1361,8 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             tls_self_signed: false,
+            tls_self_signed_material: None,
+            tls_fingerprint: None,
             max_body_bytes: 1024 * 1024,
             max_tail_timeout_ms: 30_000,
             max_concurrent_tails: 64,
@@ -1339,6 +1386,8 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             tls_self_signed: false,
+            tls_self_signed_material: None,
+            tls_fingerprint: None,
             max_body_bytes: 1024 * 1024,
             max_tail_timeout_ms: 30_000,
             max_concurrent_tails: 64,
@@ -1362,6 +1411,8 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             tls_self_signed: false,
+            tls_self_signed_material: None,
+            tls_fingerprint: None,
             max_body_bytes: 1024 * 1024,
             max_tail_timeout_ms: 30_000,
             max_concurrent_tails: 64,
@@ -1385,6 +1436,8 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             tls_self_signed: false,
+            tls_self_signed_material: None,
+            tls_fingerprint: None,
             max_body_bytes: 1024 * 1024,
             max_tail_timeout_ms: 30_000,
             max_concurrent_tails: 64,
@@ -1408,6 +1461,8 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             tls_self_signed: false,
+            tls_self_signed_material: None,
+            tls_fingerprint: None,
             max_body_bytes: 1024 * 1024,
             max_tail_timeout_ms: 30_000,
             max_concurrent_tails: 64,
@@ -1431,6 +1486,8 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             tls_self_signed: false,
+            tls_self_signed_material: None,
+            tls_fingerprint: None,
             max_body_bytes: 0,
             max_tail_timeout_ms: 30_000,
             max_concurrent_tails: 64,
@@ -1505,6 +1562,8 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             tls_self_signed: false,
+            tls_self_signed_material: None,
+            tls_fingerprint: None,
             max_body_bytes: 1024 * 1024,
             max_tail_timeout_ms: 30_000,
             max_concurrent_tails: 64,
@@ -1532,6 +1591,8 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             tls_self_signed: false,
+            tls_self_signed_material: None,
+            tls_fingerprint: None,
             max_body_bytes: 1024 * 1024,
             max_tail_timeout_ms: 30_000,
             max_concurrent_tails: 64,
