@@ -497,24 +497,44 @@ pls follow incidents --since 2h --tag sev1 --where '.data.code == 503'
 
 Expose your local pools over HTTP so another machine can read and write.
 
-**On the server:**
+**On the server (secure default):**
 
 ```bash
-# Local-only (loopback) — good for same-machine tools
-pls serve
+# Generate token + TLS artifacts and keep the printed fingerprint for out-of-band verification
+plasmite serve init --bind 0.0.0.0:9700 --output-dir ./.plasmite-serve
 
-# LAN-accessible — bootstraps TLS + bearer token
-pls serve init
+# Start secure server with generated artifacts
+plasmite serve \
+  --bind 0.0.0.0:9700 \
+  --allow-non-loopback \
+  --token-file ./.plasmite-serve/serve-token.txt \
+  --tls-cert ./.plasmite-serve/serve-cert.pem \
+  --tls-key ./.plasmite-serve/serve-key.pem
 ```
 
-**On the client** — same CLI, just pass a URL:
+**On the client** — same CLI, just pass a URL plus auth/trust flags:
 
 ```bash
-pls feed http://server:9700/events '{"sensor": "temp", "value": 23.5}'
-pls follow http://server:9700/events --tail 20
+plasmite feed https://server:9700/events \
+  --token-file ./.plasmite-serve/serve-token.txt \
+  --tls-ca ./.plasmite-serve/serve-cert.pem \
+  '{"sensor": "temp", "value": 23.5}'
+
+plasmite follow https://server:9700/events \
+  --token-file ./.plasmite-serve/serve-token.txt \
+  --tls-ca ./.plasmite-serve/serve-cert.pem \
+  --tail 20
 ```
 
-A built-in web UI is available at `http://server:9700/ui`.
+Development-only shortcut when trust bootstrapping is unavailable:
+
+```bash
+plasmite follow https://server:9700/events --tail 20 --tls-skip-verify
+```
+
+curl remains useful for API debugging, but native `plasmite feed` / `plasmite follow` should be the first-line operator workflow.
+
+A built-in web UI is available at `https://server:9700/ui`.
 
 ### Browser page served separately (CORS)
 
