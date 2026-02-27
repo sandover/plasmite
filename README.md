@@ -5,7 +5,7 @@
 
 **Easy interprocess communication.**
 
-What would it take to make IPC easier and more robust and more fun?
+What would it take to make IPC pleasant and predictable?
 
 - Reading and writing processes come and go... so **message channels should outlast them**
 - Machines crash... so **channels should persist on disk**
@@ -17,35 +17,69 @@ What would it take to make IPC easier and more robust and more fun?
 
 So, there's **Plasmite**.
 
+Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed channels called "pools", which are ring buffers. There's no daemon or broker for local IPC, no fancy config, and it's quick (~600k msg/sec on a laptop). Readers mmap the pool file and walk frames in place, and payloads use [Lite3](https://github.com/fastserial/lite3), a zero-copy JSON binary encoding.
+
+For IPC across machines, `pls serve` exposes local pools securely, and serves a minimal web UI too.
+
 <table width="100%">
-<tr><th>Alice's terminal</th><th>Bob's terminal</th></tr>
+<tr><th>Alice's terminal</th><th>Bob's terminal (local)</th><th>Carol's terminal (remote)</th></tr>
 <tr>
 <td><pre lang="bash"># Alice creates a channel
-pls pool create my-channel</pre></td>
+pls pool create channel</pre></td>
+<td></td>
 <td></td>
 </tr>
 <tr>
 <td></td>
 <td><pre lang="bash"># Bob starts reading
-pls follow my-channel</pre></td>
+pls follow channel</pre></td>
+<td></td>
 </tr>
 <tr>
 <td><pre lang="bash"># Alice writes a message
-pls feed my-channel \
+pls feed channel \
   '{"from": "alice",
     "msg": "hello world"}'</pre></td>
+<td></td>
 <td></td>
 </tr>
 <tr>
 <td></td>
-<td><pre># Bob sees it arrive
+<td><pre># Bob sees it on stdout
 { "data": {"from": "alice", "msg": "hello world"}, ... }</pre></td>
+<td></td>
+</tr>
+<tr>
+<td><pre lang="bash"># Alice serves her pools
+pls serve init
+pls serve</pre></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td><pre lang="bash"># Carol follows remotely
+pls follow http://alice:9700/channel</pre></td>
+</tr>
+<tr>
+<td><pre lang="bash"># Alice writes
+pls feed channel \
+  '{"from": "alice",
+    "msg": "hi all"}'</pre></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td></td>
+<td><pre># Bob sees it
+{ "data": {"from": "alice", "msg": "hi all"}, ... }</pre></td>
+<td><pre># Carol sees it
+{ "data": {"from": "alice", "msg": "hi all"}, ... }</pre></td>
 </tr>
 </table>
 
-Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed channels called "pools", which are ring buffers. There's no daemon, no broker, and no fancy config required, and it's quick (~600k msg/sec on a laptop).
-
-For IPC across machines, `pls serve` exposes your local pools securely, and serves a minimal web UI too.
+The APIs all work in the same style.
 
 ## Why not just...
 
@@ -53,7 +87,7 @@ For IPC across machines, `pls serve` exposes your local pools securely, and serv
 |---|---|---|
 | **Kafka** or **RabbitMQ** | Lots of machinery: partitions, groups, exchanges, bindings, oh my. | `pls feed` / `pls follow` for local IPC. Add `pls serve` for remote access. No cluster required. |
 | **Redis / NATS** | Still a server you run, monitor, and connect to — even for same-machine messaging. Messages live in server memory; if the server dies, messaging stops. | No server process for local IPC. Pools persist on disk independent of any process. Add `pls serve` when you need remote access. |
-| **Log files / `tail -f`** | You parse with regex and it breaks when the format changes. Logs grow until you rotate, and rotation breaks `tail -f`. No way to replay from a specific point. No remote access without setting up syslog. | Structured JSON with sequence numbers. Bounded disk usage. Replay from any point with `--since` or `--from`. `pls serve` for remote access. |
+| **Log files / `tail -f`** | You parse with regex and it breaks when the format changes. Logs grow until you rotate, and rotation breaks `tail -f`. No way to replay from a specific point. No remote access without setting up syslog. | Structured JSON with sequence numbers. Bounded disk usage. Replay from any point with `--since` or `--tail`. `pls serve` for remote access. |
 | **Ad-hoc files (temp files, locks, polled dirs)** | Readers poll for new files. Locking is manual — a crash leaves a stale lock. Files accumulate and you write your own cleanup. No ordering unless you bake it into filenames. | Readers stream in real time. Writers append concurrently without explicit locks. Ring buffer keeps disk bounded, messages stay ordered. `pls serve` for remote access. |
 | **SQLite as a queue** | No `LISTEN`/`NOTIFY` — readers poll. Writers contend on the write-ahead log. You design a schema, write migrations, vacuum. SQLite explicitly discourages network access to the DB file. | Follow/replay without polling. No `SQLITE_BUSY`. No schema, no migrations, no cleanup. `pls serve` for remote access. |
 | **OS primitives (pipes, sockets, shm)** | Named pipes: if the reader dies, the writer blocks or gets SIGPIPE. One reader only, nothing survives a reboot. Unix sockets: you implement your own framing and reconnection. Shared memory: you coordinate with semaphores, and a crash while holding a lock is a mess. None work across machines. | Multiple readers and writers, crash-safe, persistent across reboots. `pls serve` to go cross-machine. |
@@ -123,9 +157,13 @@ Each line you type becomes a message. Bob sees Alice's messages as they arrive (
 Start a server and your pools are available over HTTP. Clients use the same CLI — just pass a URL.
 
 ```bash
-pls serve                          # loopback-only by default
-pls serve init                     # bootstrap TLS + token for LAN access
+# on the server
+pls serve init                     # one-time: bootstrap TLS cert + bearer token
+pls serve                          # start serving (LAN-accessible after init)
+```
 
+```bash
+# on a client
 pls feed http://server:9700/events '{"sensor": "temp", "value": 23.5}'
 pls follow http://server:9700/events --tail 20
 ```
