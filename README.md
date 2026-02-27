@@ -37,7 +37,7 @@ pls follow channel</pre></td>
 </tr>
 <tr>
 <td><pre lang="bash"># Alice writes a message
-pls feed channel \
+pls feed channel 
   '{"from": "alice",
     "msg": "hello world"}'</pre></td>
 <td></td>
@@ -46,7 +46,10 @@ pls feed channel \
 <tr>
 <td></td>
 <td><pre># Bob sees it on stdout
-{ "data": {"from": "alice", "msg": "hello world"}, ... }</pre></td>
+{ "data": 
+  {"from": "alice", 
+   "msg": "hello world"}, 
+ ... }</pre></td>
 <td></td>
 </tr>
 <tr>
@@ -60,11 +63,12 @@ pls serve</pre></td>
 <td></td>
 <td></td>
 <td><pre lang="bash"># Carol follows remotely
-pls follow http://alice:9700/channel</pre></td>
+pls follow 
+  http://alice:9700/channel</pre></td>
 </tr>
 <tr>
 <td><pre lang="bash"># Alice writes
-pls feed channel \
+pls feed channel 
   '{"from": "alice",
     "msg": "hi all"}'</pre></td>
 <td></td>
@@ -73,9 +77,15 @@ pls feed channel \
 <tr>
 <td></td>
 <td><pre># Bob sees it
-{ "data": {"from": "alice", "msg": "hi all"}, ... }</pre></td>
+{ "data": 
+  {"from": "alice", 
+  "msg": "hi all"}, 
+  ... }</pre></td>
 <td><pre># Carol sees it
-{ "data": {"from": "alice", "msg": "hi all"}, ... }</pre></td>
+{ "data": 
+  {"from": "alice", 
+  "msg": "hi all"}, 
+  ... }</pre></td>
 </tr>
 </table>
 
