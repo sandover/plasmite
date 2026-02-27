@@ -5,6 +5,8 @@
 # Invariants: Uses an isolated `tmp/` workspace and explicit `--dir` for all pool operations.
 # Invariants: Continues through expected failures, records per-command exit status, and cleans
 # transient artifacts unless `KEEP_WORKDIR=1` is set.
+# Invariants: Runs commands through a pseudo-terminal so TTY-gated human output is captured.
+# Invariants: Strips ANSI/control escape sequences from captured output for plain-text logs.
 
 set -u -o pipefail
 
@@ -49,21 +51,38 @@ run_plasmite() {
   "${PLASMITE_BIN}" "$@"
 }
 
+run_with_tty() {
+  script -q /dev/null "$@"
+}
+
+sanitize_output() {
+  printf '%s' "$1" | tr -d $'\004\b' | perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g; s/\e\][^\a]*(?:\a|\e\\)//g; s/\r//g; s/\^D//g;'
+}
+
 record_case() {
   local label="$1"
   local expected="$2"
   shift 2
+  local -a command=("$@")
+  local -a display=("${command[@]}")
+  local -a exec_command=("${command[@]}")
+
+  if [[ "${#display[@]}" -gt 0 && "${display[0]}" == "run_plasmite" ]]; then
+    display=("plasmite" "${display[@]:1}")
+    exec_command=("${PLASMITE_BIN}" "${command[@]:1}")
+  fi
 
   {
     printf '\n=== %s ===\n' "${label}"
     printf '$'
-    printf ' %q' "$@"
+    printf ' %q' "${display[@]}"
     printf '\n'
   } >> "${LOG_PATH}"
 
   local output=""
   local status=0
-  output="$("$@" 2>&1)" || status=$?
+  output="$(run_with_tty "${exec_command[@]}" 2>&1)" || status=$?
+  output="$(sanitize_output "${output}")"
 
   if [[ -n "${output}" ]]; then
     printf '%s\n' "${output}" >> "${LOG_PATH}"
@@ -123,10 +142,8 @@ record_case "version" zero run_plasmite version
 
 record_case "create pools" zero run_plasmite --dir "${POOL_DIR}" pool create "${POOL_MAIN}" "${POOL_AUX}" --size 1M
 record_case "create duplicate pool" nonzero run_plasmite --dir "${POOL_DIR}" pool create "${POOL_MAIN}"
-record_case "pool list (human)" zero run_plasmite --dir "${POOL_DIR}" pool list
-record_case "pool list (json)" zero run_plasmite --dir "${POOL_DIR}" pool list --json
-record_case "pool info (human)" zero run_plasmite --dir "${POOL_DIR}" pool info "${POOL_MAIN}"
-record_case "pool info (json)" zero run_plasmite --dir "${POOL_DIR}" pool info "${POOL_MAIN}" --json
+record_case "pool list" zero run_plasmite --dir "${POOL_DIR}" pool list
+record_case "pool info" zero run_plasmite --dir "${POOL_DIR}" pool info "${POOL_MAIN}"
 record_case "pool info missing" nonzero run_plasmite --dir "${POOL_DIR}" pool info "${MISSING_POOL}"
 
 record_case "feed inline json with tag" zero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" '{"kind":"inline","ok":true}' --tag ux
@@ -134,14 +151,13 @@ record_case "feed from file" zero run_plasmite --dir "${POOL_DIR}" feed "${POOL_
 record_case "feed mixed jsonl with skip errors" any run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" --file "${WORK_DIR}/mixed.jsonl" --in jsonl --errors skip
 record_case "fetch existing seq" zero run_plasmite --dir "${POOL_DIR}" fetch "${POOL_MAIN}" 1
 record_case "fetch missing seq" nonzero run_plasmite --dir "${POOL_DIR}" fetch "${POOL_MAIN}" 999999
-record_case "follow tail one (jsonl)" zero run_plasmite --dir "${POOL_DIR}" follow "${POOL_MAIN}" --tail 2 --one --jsonl
-record_case "follow timeout on quiet pool" nonzero run_plasmite --dir "${POOL_DIR}" follow "${POOL_AUX}" --timeout 300ms --one --jsonl
+record_case "follow tail one" zero run_plasmite --dir "${POOL_DIR}" follow "${POOL_MAIN}" --tail 2 --one
+record_case "follow timeout on quiet pool" nonzero run_plasmite --dir "${POOL_DIR}" follow "${POOL_AUX}" --timeout 300ms --one
 
 record_case "doctor one pool" zero run_plasmite --dir "${POOL_DIR}" doctor "${POOL_MAIN}"
-record_case "doctor all pools json" zero run_plasmite --dir "${POOL_DIR}" doctor --all --json
+record_case "doctor all pools" zero run_plasmite --dir "${POOL_DIR}" doctor --all
 
-record_case "serve check (human)" zero run_plasmite --dir "${POOL_DIR}" serve check
-record_case "serve check (json)" zero run_plasmite --dir "${POOL_DIR}" serve check --json
+record_case "serve check" zero run_plasmite --dir "${POOL_DIR}" serve check
 record_case "serve init fresh dir" zero run_plasmite --dir "${POOL_DIR}" serve init --output-dir "${INIT_DIR}"
 record_case "serve init without force on existing files" nonzero run_plasmite --dir "${POOL_DIR}" serve init --output-dir "${INIT_DIR}"
 record_case "serve init with force" zero run_plasmite --dir "${POOL_DIR}" serve init --output-dir "${INIT_DIR}" --force
@@ -151,7 +167,7 @@ record_case "delete missing pool" nonzero run_plasmite --dir "${POOL_DIR}" pool 
 record_case "create pool for partial delete case" zero run_plasmite --dir "${POOL_DIR}" pool create "${POOL_PARTIAL}"
 record_case "delete mixed existing+missing" nonzero run_plasmite --dir "${POOL_DIR}" pool delete "${POOL_PARTIAL}" "${MISSING_POOL}"
 record_case "delete main pool" zero run_plasmite --dir "${POOL_DIR}" pool delete "${POOL_MAIN}"
-record_case "pool list after deletes" zero run_plasmite --dir "${POOL_DIR}" pool list --json
+record_case "pool list after deletes" zero run_plasmite --dir "${POOL_DIR}" pool list
 record_case "invalid subcommand UX" nonzero run_plasmite --dir "${POOL_DIR}" pool unknown-subcommand
 
 {
