@@ -640,6 +640,33 @@ fn pool_info_default_is_human_readable() {
 }
 
 #[test]
+fn pool_info_missing_does_not_emit_path_or_causes() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "info",
+            "channel",
+        ])
+        .output()
+        .expect("pool info");
+    assert_eq!(output.status.code(), Some(3));
+    let err = parse_error_json(&output.stderr);
+    let error = err.get("error").and_then(|value| value.as_object()).expect("error");
+    assert_eq!(error.get("kind").and_then(|value| value.as_str()), Some("NotFound"));
+    assert_eq!(error.get("message").and_then(|value| value.as_str()), Some("not found"));
+    assert!(error.get("path").is_none(), "path should not be emitted for missing pool name");
+    assert!(
+        error.get("causes").is_none(),
+        "causes should not be emitted for missing pool name"
+    );
+}
+
+#[test]
 fn readme_quickstart_flow() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");

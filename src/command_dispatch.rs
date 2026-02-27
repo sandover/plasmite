@@ -181,7 +181,15 @@ pub(super) fn dispatch_command(
                 let pool_ref = PoolRef::path(path);
                 let info = client
                     .pool_info(&pool_ref)
-                    .map_err(|err| add_missing_pool_hint(err, &name, &name))?;
+                    .map_err(|err| {
+                        if err.kind() == ErrorKind::NotFound {
+                            let base =
+                                Error::new(ErrorKind::NotFound).with_message("not found");
+                            add_missing_pool_hint(base, &name, &name)
+                        } else {
+                            err
+                        }
+                    })?;
                 if json {
                     emit_json(pool_info_json(&name, &info), color_mode);
                 } else {
