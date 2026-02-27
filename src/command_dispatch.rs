@@ -526,11 +526,6 @@ pub(super) fn dispatch_command(
                 .as_deref()
                 .map(|value| parse_since(value, now))
                 .transpose()?;
-            if let Some(since_ns) = since_ns {
-                if since_ns > now {
-                    return Ok(RunOutcome::ok());
-                }
-            }
             let timeout_input = timeout.as_deref();
             let timeout = timeout_input.map(parse_duration).transpose()?;
             let exact_follow_create_hint = follow_exact_create_command_hint(
@@ -593,6 +588,11 @@ pub(super) fn dispatch_command(
                             ));
                         }
                     };
+                    if let Some(since_ns) = since_ns {
+                        if since_ns > now {
+                            return Ok(RunOutcome::ok());
+                        }
+                    }
                     let mut send_pool = Pool::open(&path)?;
                     let follow_tx = event_tx.clone();
                     let follow_cfg = cfg.clone();
@@ -917,11 +917,6 @@ pub(super) fn dispatch_command(
                                 ));
                         }
                     }
-                    if let Some(since_ns) = since_ns {
-                        if since_ns > now {
-                            return Ok(RunOutcome::ok());
-                        }
-                    }
                     let pool_handle = match Pool::open(&path) {
                         Ok(pool_handle) => pool_handle,
                         Err(err) if create && err.kind() == ErrorKind::NotFound => {
@@ -938,6 +933,11 @@ pub(super) fn dispatch_command(
                             ));
                         }
                     };
+                    if let Some(since_ns) = since_ns {
+                        if since_ns > now {
+                            return Ok(RunOutcome::ok());
+                        }
+                    }
                     let outcome = follow_pool(&pool_handle, &pool, &path, cfg)?;
                     Ok(outcome)
                 }
