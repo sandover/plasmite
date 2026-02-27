@@ -22,74 +22,66 @@ Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and 
 For IPC across machines, `pls serve` exposes local pools securely, and serves a minimal web UI too.
 
 <table width="100%">
-<tr><th>Alice's terminal</th><th>Bob's terminal<br/>(local)</th><th>Carol's terminal<br/>(remote)</th></tr>
+<tr><th colspan="2">Local IPC</th></tr>
+<tr><th>Alice's terminal</th><th>Bob's terminal</th></tr>
 <tr>
-<td><pre lang="bash"># Alice creates a channel
-pls pool create channel</pre></td>
-<td></td>
+<td><b>Alice creates a channel</b><br/><code>pls pool create channel</code></td>
 <td></td>
 </tr>
 <tr>
 <td></td>
-<td><pre lang="bash"># Bob starts reading
-pls follow channel</pre></td>
-<td></td>
+<td><b>Bob starts reading</b><br/><code>pls follow channel</code></td>
 </tr>
 <tr>
-<td><pre lang="bash"># Alice writes a message
-pls feed channel 
+<td><b>Alice writes a message</b><br/><pre lang="bash"><code>pls feed channel 
   '{"from": "alice",
-    "msg": "hello world"}'</pre></td>
-<td></td>
+    "msg": "hello world"}'</code></pre></td>
 <td></td>
 </tr>
 <tr>
 <td></td>
-<td><pre># Bob sees it on stdout
-{ "data": 
+<td><b>Bob sees it on stdout</b><br/><pre><code>{ "data": 
   {"from": "alice", 
    "msg": "hello world"}, 
- ... }</pre></td>
-<td></td>
-</tr>
-<tr>
-<td><pre lang="bash"># Alice serves her pools
-pls serve init
-pls serve</pre></td>
-<td></td>
-<td></td>
-</tr>
-<tr>
-<td></td>
-<td></td>
-<td><pre lang="bash"># Carol follows remotely
-pls follow 
-  http://alice:9700/channel</pre></td>
-</tr>
-<tr>
-<td><pre lang="bash"># Alice writes
-pls feed channel 
-  '{"from": "alice",
-    "msg": "hi all"}'</pre></td>
-<td></td>
-<td></td>
-</tr>
-<tr>
-<td></td>
-<td><pre># Bob sees it
-{ "data": 
-  {"from": "alice", 
-  "msg": "hi all"}, 
-  ... }</pre></td>
-<td><pre># Carol sees it
-{ "data": 
-  {"from": "alice", 
-  "msg": "hi all"}, 
-  ... }</pre></td>
+ ... }</code></pre></td>
 </tr>
 </table>
 
-The APIs all work in the same style.
+<table width="100%">
+<tr><th colspan="3">Remote IPC</th></tr>
+<tr><th>Alice</th><th>Bob</th><th>Carol (remote)</th></tr>
+<tr>
+<td><b>Alice runs pool server</b><br/><code>pls serve init</code><br/><code>pls serve</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td><b>Carol follows remotely</b><br/><pre lang="bash"><code>pls follow 
+  http://alice:9700/channel</code></pre></td>
+</tr>
+<tr>
+<td><b>Alice writes</b><br/><pre lang="bash"><code>pls feed channel 
+  '{"from": "alice",
+    "msg": "hi all"}'</code></pre></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td></td>
+<td><b>Bob sees it</b><br/><pre><code>{ "data": 
+  {"from": "alice", 
+  "msg": "hi all"}, 
+  ... }</code></pre></td>
+<td><b>Carol sees it</b><br/><pre><code>{ "data": 
+  {"from": "alice", 
+  "msg": "hi all"}, 
+  ... }</code></pre></td>
+</tr>
+</table>
+
+Plasmite APIs have the same usage style as the CLI.
 
 ## Why not just...
 
