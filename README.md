@@ -22,7 +22,7 @@ Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and 
 For IPC across machines, `pls serve` exposes local pools securely, and serves a minimal web UI too.
 
 <table width="100%">
-<tr><th>Alice's terminal</th><th>Bob's terminal (local)</th><th>Carol's terminal (remote)</th></tr>
+<tr><th>Alice's terminal</th><th>Bob's terminal<br/>(local)</th><th>Carol's terminal<br/>(remote)</th></tr>
 <tr>
 <td><pre lang="bash"># Alice creates a channel
 pls pool create channel</pre></td>
