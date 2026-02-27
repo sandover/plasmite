@@ -33,6 +33,7 @@ pub struct ServeInitResult {
     pub server_commands: Vec<String>,
     pub client_commands: Vec<String>,
     pub curl_client_commands: Vec<String>,
+    pub overwrote_existing: bool,
 }
 
 pub fn init(config: ServeInitConfig) -> Result<ServeInitResult, Error> {
@@ -41,6 +42,11 @@ pub fn init(config: ServeInitConfig) -> Result<ServeInitResult, Error> {
     let tls_cert = resolve_artifact_path(&output_dir, &config.tls_cert);
     let tls_key = resolve_artifact_path(&output_dir, &config.tls_key);
     ensure_distinct_paths(&[&token_file, &tls_cert, &tls_key])?;
+
+    let existing_count = [&token_file, &tls_cert, &tls_key]
+        .iter()
+        .filter(|path| path.exists())
+        .count();
 
     if !config.force {
         for path in [&token_file, &tls_cert, &tls_key] {
@@ -134,6 +140,7 @@ pub fn init(config: ServeInitConfig) -> Result<ServeInitResult, Error> {
         server_commands: vec![serve_cmd],
         client_commands: vec![feed_cmd, follow_cmd],
         curl_client_commands: vec![append_cmd, tail_cmd],
+        overwrote_existing: config.force && existing_count > 0,
     })
 }
 

@@ -25,6 +25,19 @@ fn cmd() -> Command {
     Command::new(exe)
 }
 
+fn cmd_tty(args: &[&str]) -> std::process::Output {
+    let exe = env!("CARGO_BIN_EXE_plasmite");
+    Command::new("script")
+        .args(["-q", "/dev/null", exe])
+        .args(args)
+        .output()
+        .expect("script tty")
+}
+
+fn sanitize_tty_text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).replace(['\u{4}', '\u{8}', '\r'], "")
+}
+
 static SERVER_LOCK: Mutex<()> = Mutex::new(());
 
 struct ServeProcess {
@@ -656,10 +669,22 @@ fn pool_info_missing_does_not_emit_path_or_causes() {
         .expect("pool info");
     assert_eq!(output.status.code(), Some(3));
     let err = parse_error_json(&output.stderr);
-    let error = err.get("error").and_then(|value| value.as_object()).expect("error");
-    assert_eq!(error.get("kind").and_then(|value| value.as_str()), Some("NotFound"));
-    assert_eq!(error.get("message").and_then(|value| value.as_str()), Some("not found"));
-    assert!(error.get("path").is_none(), "path should not be emitted for missing pool name");
+    let error = err
+        .get("error")
+        .and_then(|value| value.as_object())
+        .expect("error");
+    assert_eq!(
+        error.get("kind").and_then(|value| value.as_str()),
+        Some("NotFound")
+    );
+    assert_eq!(
+        error.get("message").and_then(|value| value.as_str()),
+        Some("not found")
+    );
+    assert!(
+        error.get("path").is_none(),
+        "path should not be emitted for missing pool name"
+    );
     assert!(
         error.get("causes").is_none(),
         "causes should not be emitted for missing pool name"
@@ -1001,6 +1026,40 @@ fn follow_timeout_exits_when_no_output() {
         .expect("follow");
     assert_eq!(output.status.code().unwrap(), 124);
     assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn follow_timeout_on_tty_prints_message() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let output = cmd_tty(&[
+        "--color",
+        "never",
+        "--dir",
+        pool_dir.to_str().unwrap(),
+        "follow",
+        "demo",
+        "--one",
+        "--timeout",
+        "200ms",
+    ]);
+    assert_eq!(output.status.code(), Some(124));
+    let text = sanitize_tty_text(&output.stdout);
+    assert!(text.contains("No messages received (timed out after 200ms)."));
 }
 
 #[test]
@@ -2448,6 +2507,43 @@ fn emit_auto_skip_reports_oversize() {
             == Some("Oversize")
     });
     assert!(oversize.is_some());
+}
+
+#[test]
+fn feed_file_tty_emits_human_receipts() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let input_file = temp.path().join("events.jsonl");
+    std::fs::write(&input_file, "{\"x\":1}\n{\"x\":2}\n").expect("write input");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "demo",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let output = cmd_tty(&[
+        "--color",
+        "never",
+        "--dir",
+        pool_dir.to_str().unwrap(),
+        "feed",
+        "demo",
+        "--file",
+        input_file.to_str().unwrap(),
+        "--in",
+        "jsonl",
+    ]);
+    assert!(output.status.success());
+    let text = sanitize_tty_text(&output.stdout);
+    assert_eq!(text.matches("fed seq=").count(), 2);
+    assert!(!text.contains("\"seq\":"));
 }
 
 #[test]
@@ -5026,8 +5122,9 @@ fn serve_check_human_uses_readable_limits_and_fingerprint() {
         .expect("serve check");
     assert!(output.status.success());
     let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
-    assert!(stdout.contains("limits: body=1M timeout=30s concurrency=64"));
-    assert!(stdout.contains("tls_fingerprint: SHA256:"));
+    assert!(stdout.contains("Configuration valid."));
+    assert!(stdout.contains("Limits: body 1M, timeout 30s, concurrency 64"));
+    assert!(stdout.contains("Fingerprint: SHA256:"));
 }
 
 #[test]
@@ -5078,7 +5175,7 @@ fn serve_check_defaults_to_human_output() {
         .expect("serve check");
     assert!(output.status.success());
     let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
-    assert!(stdout.contains("plasmite serve check"));
+    assert!(stdout.contains("Configuration valid."));
 }
 
 #[test]
@@ -5201,6 +5298,44 @@ fn serve_init_requires_force_for_existing_artifacts() {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     assert!(hint.contains("--force"));
+}
+
+#[test]
+fn serve_init_tty_reports_created_and_overwritten() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let out_dir = temp.path().join("serve-init");
+
+    let first = cmd_tty(&[
+        "--color",
+        "never",
+        "serve",
+        "init",
+        "--output-dir",
+        out_dir.to_str().unwrap(),
+        "--bind",
+        "0.0.0.0:9700",
+    ]);
+    assert!(first.status.success());
+    let first_text = sanitize_tty_text(&first.stdout);
+    assert!(first_text.contains("Secure serving initialized."));
+    assert!(first_text.contains("Output directory:"));
+    assert!(first_text.contains("Files created:"));
+
+    let second = cmd_tty(&[
+        "--color",
+        "never",
+        "serve",
+        "init",
+        "--output-dir",
+        out_dir.to_str().unwrap(),
+        "--bind",
+        "0.0.0.0:9700",
+        "--force",
+    ]);
+    assert!(second.status.success());
+    let second_text = sanitize_tty_text(&second.stdout);
+    assert!(second_text.contains("Secure serving re-initialized."));
+    assert!(second_text.contains("Files overwritten:"));
 }
 
 #[test]

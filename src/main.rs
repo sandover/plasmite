@@ -1314,19 +1314,12 @@ fn emit_doctor_human(report: &ValidationReport) {
         return;
     }
 
-    let label = report
-        .pool_ref
-        .clone()
-        .unwrap_or_else(|| report.path.to_string_lossy().to_string());
+    let label = doctor_display_label(report);
     match report.status {
         ValidationStatus::Ok => {
             println!("{label}: healthy");
-            println!(
-                "  messages:  {} ({})",
-                report.issue_count,
-                format_seq_range(report.last_good_seq, report.last_good_seq)
-            );
-            println!("  checked:   {} frames, 0 issues", report.issue_count);
+            println!("  messages:  {}", doctor_messages_summary(report));
+            println!("  checked:   header/index/ring consistency, 0 issues");
         }
         ValidationStatus::Corrupt => {
             let issue = report
@@ -1335,14 +1328,9 @@ fn emit_doctor_human(report: &ValidationReport) {
                 .map(|value| value.message.clone())
                 .unwrap_or_else(|| "corruption detected".to_string());
             println!("{label}: corrupt");
+            println!("  messages:  {}", doctor_messages_summary(report));
             println!(
-                "  messages:  {} ({})",
-                report.issue_count,
-                format_seq_range(report.last_good_seq, report.last_good_seq)
-            );
-            println!(
-                "  checked:   {} frames, {} issues",
-                report.issue_count,
+                "  checked:   header/index/ring consistency, {} issues",
                 report.issues.len()
             );
             println!("  detail:    {issue}");
@@ -1367,32 +1355,45 @@ fn emit_doctor_human_summary(reports: &[ValidationReport]) {
         .filter(|report| report.status == ValidationStatus::Corrupt)
         .count();
     if corrupt == 0 {
-        println!("All {} pools healthy", reports.len());
+        println!("All {} pools healthy.", reports.len());
+        println!();
+        for report in reports {
+            println!("  {}   0 issues", doctor_display_label(report));
+        }
     } else {
-        println!("{corrupt} of {} pools has issues", reports.len());
-    }
-    let rows = reports
-        .iter()
-        .map(|report| {
-            let label = report
-                .pool_ref
-                .clone()
-                .unwrap_or_else(|| report.path.to_string_lossy().to_string());
-            let status = if report.status == ValidationStatus::Corrupt {
-                "CORRUPT".to_string()
+        println!("{corrupt} of {} pools unhealthy.", reports.len());
+        println!();
+        for report in reports {
+            let label = doctor_display_label(report);
+            if report.status == ValidationStatus::Corrupt {
+                println!(
+                    "  ✗ {label}   {} issues (run `pls doctor {label}` for detail)",
+                    report.issues.len()
+                );
             } else {
-                "OK".to_string()
-            };
-            let issue_count = report.issues.len().to_string();
-            let detail = report
-                .issues
-                .first()
-                .map(|issue| issue.message.clone())
-                .unwrap_or_default();
-            vec![label, status, issue_count, detail]
-        })
-        .collect::<Vec<_>>();
-    emit_table(&["POOL", "STATUS", "ISSUES", "DETAIL"], &rows);
+                println!("  ✓ {label}   0 issues");
+            }
+        }
+    }
+}
+
+fn doctor_display_label(report: &ValidationReport) -> String {
+    if let Some(pool_ref) = report.pool_ref.as_deref() {
+        let looks_like_path = pool_ref.contains('/') || pool_ref.contains('\\');
+        if !looks_like_path {
+            return pool_ref.to_string();
+        }
+    }
+    short_display_path(&report.path, report.path.parent())
+}
+
+fn doctor_messages_summary(report: &ValidationReport) -> String {
+    let seq_range = format_seq_range(report.last_good_seq, report.last_good_seq);
+    if seq_range == "-" {
+        "empty".to_string()
+    } else {
+        format!("visible count unavailable ({seq_range})")
+    }
 }
 
 fn report_json(report: &ValidationReport) -> Value {
@@ -1552,7 +1553,10 @@ fn list_pools(pool_dir: &Path, client: &LocalClient) -> Vec<Value> {
 fn emit_pool_list_table(pools: &[Value], pool_dir: &Path) {
     let interactive = io::stdout().is_terminal();
     if interactive && pools.is_empty() {
-        println!("No pools found in {}", pool_dir.display());
+        println!(
+            "No pools found in {}",
+            display_pool_dir_for_humans(pool_dir)
+        );
         println!();
         println!("  Create one: plasmite pool create <name>");
         return;
@@ -1916,29 +1920,154 @@ fn reject_remote_only_flags_for_local_target(
 }
 
 fn emit_serve_init_human(result: &serve_init::ServeInitResult) {
-    println!("Generated TLS + token artifacts");
+    let token_path = Path::new(&result.token_file);
+    let cert_path = Path::new(&result.tls_cert);
+    let key_path = Path::new(&result.tls_key);
+    let (output_dir, token_label, cert_label, key_label) =
+        serve_init_artifact_labels(token_path, cert_path, key_path);
+    let token_file = display_handoff_path_from_path(token_path);
+    let tls_cert = display_handoff_path_from_path(cert_path);
+    let tls_key = display_handoff_path_from_path(key_path);
+    let bind = extract_bind_from_server_commands(&result.server_commands)
+        .unwrap_or_else(|| "0.0.0.0:9700".to_string());
+    let port = bind
+        .parse::<SocketAddr>()
+        .map(|addr| addr.port())
+        .unwrap_or(9700);
+    let (headline, files_heading) = if result.overwrote_existing {
+        ("Secure serving re-initialized.", "Files overwritten:")
+    } else {
+        ("Secure serving initialized.", "Files created:")
+    };
+
+    println!("{headline}");
+    println!("Clients on your network can now read and write your pools over HTTPS.");
     println!();
-    println!("server:");
-    println!("  token_file: {}", result.token_file);
-    println!("  tls_cert:   {}", result.tls_cert);
-    println!("  tls_key:    {}", result.tls_key);
-    println!("  tls_fingerprint: {}", result.tls_fingerprint);
-    for (idx, cmd) in result.server_commands.iter().enumerate() {
-        println!("  {}. {}", idx + 1, cmd);
+    if let Some(output_dir) = output_dir {
+        println!("  Output directory: {output_dir}");
+        println!();
     }
+    println!("  {files_heading}");
+    println!("    token   {token_label}");
+    println!("    cert    {cert_label}");
+    println!("    key     {key_label}");
     println!();
-    println!("clients:");
-    for cmd in &result.client_commands {
-        println!("  {cmd}");
-    }
-    println!("  curl:");
-    for cmd in &result.curl_client_commands {
-        println!("    {cmd}");
-    }
+    println!("  Fingerprint (share this with clients to verify the cert):");
+    println!("    {}", result.tls_fingerprint);
     println!();
-    println!("notes:");
-    println!("  - token value is not printed; read it from token_file when needed");
-    println!("  - share token and fingerprint with collaborators out-of-band");
+    println!("  Start serving your pools:");
+    println!();
+    println!("    pls serve --bind {bind} --allow-non-loopback \\");
+    println!("      --token-file {token_file} \\");
+    println!("      --tls-cert {tls_cert} --tls-key {tls_key}");
+    println!();
+    println!("  From another machine, read and write pools by URL:");
+    println!();
+    println!("    pls feed https://THIS-HOST:{port}/demo \\");
+    println!("      --token-file {token_file} \\");
+    println!("      --tls-ca {tls_cert} \\");
+    println!("      '{{\"hello\":\"world\"}}'");
+    println!();
+    println!("    pls follow https://THIS-HOST:{port}/demo \\");
+    println!("      --token-file {token_file} \\");
+    println!("      --tls-ca {tls_cert} --tail 10");
+    println!();
+    println!("  Or with curl:");
+    println!("    TOKEN=$(cat {token_file})");
+    println!("    curl -k -H \"Authorization: Bearer $TOKEN\" \\");
+    println!("      https://THIS-HOST:{port}/v0/pools/demo/tail?timeout_ms=5000");
+    println!();
+    println!("  The token is in the file, not printed here. Share the token");
+    println!("  and fingerprint with collaborators out-of-band (e.g. paste");
+    println!("  in a DM). Clients use the fingerprint to verify the cert");
+    println!("  on first connect.");
+}
+
+fn serve_init_artifact_labels(
+    token_path: &Path,
+    cert_path: &Path,
+    key_path: &Path,
+) -> (Option<String>, String, String, String) {
+    let common_parent = token_path.parent().and_then(|parent| {
+        if cert_path.parent() == Some(parent) && key_path.parent() == Some(parent) {
+            Some(parent)
+        } else {
+            None
+        }
+    });
+    if let Some(parent) = common_parent {
+        return (
+            Some(display_pool_dir_for_humans(parent)),
+            display_artifact_name(token_path),
+            display_artifact_name(cert_path),
+            display_artifact_name(key_path),
+        );
+    }
+    (
+        None,
+        display_handoff_path_from_path(token_path),
+        display_handoff_path_from_path(cert_path),
+        display_handoff_path_from_path(key_path),
+    )
+}
+
+fn display_artifact_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_string())
+        .unwrap_or_else(|| display_handoff_path_from_path(path))
+}
+
+fn display_handoff_path_from_path(path: &Path) -> String {
+    let to_dot_relative = |value: &Path| {
+        let rendered = value.display().to_string();
+        if rendered.starts_with("./") || rendered.starts_with("../") {
+            rendered
+        } else {
+            format!("./{rendered}")
+        }
+    };
+
+    if path.is_relative() {
+        return to_dot_relative(path);
+    }
+    if let Ok(cwd) = std::env::current_dir()
+        && let Ok(relative) = path.strip_prefix(&cwd)
+        && !relative.as_os_str().is_empty()
+    {
+        return to_dot_relative(relative);
+    }
+    path.display().to_string()
+}
+
+fn display_pool_dir_for_humans(pool_dir: &Path) -> String {
+    let rendered = if let Ok(cwd) = std::env::current_dir()
+        && let Ok(relative) = pool_dir.strip_prefix(&cwd)
+        && !relative.as_os_str().is_empty()
+    {
+        format!("./{}", relative.display())
+    } else if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
+        && let Ok(relative) = pool_dir.strip_prefix(home)
+        && !relative.as_os_str().is_empty()
+    {
+        format!("~/{}", relative.display())
+    } else {
+        pool_dir.display().to_string()
+    };
+    if rendered.ends_with('/') {
+        rendered
+    } else {
+        format!("{rendered}/")
+    }
+}
+
+fn extract_bind_from_server_commands(commands: &[String]) -> Option<String> {
+    let command = commands.first()?;
+    let tokens = command.split_whitespace().collect::<Vec<_>>();
+    tokens
+        .windows(2)
+        .find(|window| window[0] == "--bind")
+        .map(|window| window[1].to_string())
 }
 
 fn emit_serve_startup_guidance(config: &serve::ServeConfig) {
@@ -1956,106 +2085,105 @@ fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<String> {
     let host = display_host(config.bind.ip());
     let base_url = format!("{scheme}://{host}:{}", config.bind.port());
     let web_ui_url = format!("{base_url}/ui");
-    let web_ui_pool_url = format!("{base_url}/ui/pools/demo");
-    let pool = "demo";
-    let append_url = format!("{base_url}/v0/pools/{pool}/append");
-    let tail_url = format!("{base_url}/v0/pools/{pool}/tail?timeout_ms=5000");
+    let append_url = format!("{base_url}/v0/pools/demo/append");
     let curl_tls_flag = if config.tls_self_signed { " -k" } else { "" };
-    let auth_header = if config.token.is_some() {
-        " -H 'Authorization: Bearer <token>'"
+    let scope = serve_scope(config.bind.ip());
+    let auth = if config.token.is_some() {
+        "bearer"
     } else {
-        ""
+        "none"
     };
-
-    let auth_line = if config.token.is_some() {
-        if config.token_file_used {
-            "auth: bearer token (from --token-file; value not shown)"
-        } else {
-            "auth: bearer token (from --token; value not shown)"
-        }
-    } else {
-        "auth: none"
-    };
-
-    let tls_line = if config.tls_self_signed {
-        "tls: self-signed"
+    let tls = if config.tls_self_signed {
+        "self-signed"
     } else if tls_enabled {
-        "tls: enabled"
+        "on"
     } else {
-        "tls: disabled"
+        "off"
+    };
+    let access = match config.access_mode {
+        serve::AccessMode::ReadOnly => "read-only",
+        serve::AccessMode::WriteOnly => "write-only",
+        serve::AccessMode::ReadWrite => "read-write",
+    };
+    let cors = if config.cors_allowed_origins.is_empty() {
+        "same-origin"
+    } else {
+        "allowlist"
     };
 
-    let access_line = match config.access_mode {
-        serve::AccessMode::ReadOnly => "access: read-only",
-        serve::AccessMode::WriteOnly => "access: write-only",
-        serve::AccessMode::ReadWrite => "access: read-write",
-    };
-    let cors_line = serve_cors_line(config);
+    let mut feed_cmd = format!("pls feed {base_url}/demo");
+    let mut follow_cmd = format!("pls follow {base_url}/demo");
+    if config.token.is_some() {
+        if config.token_file_used {
+            feed_cmd.push_str(" --token-file <token-file>");
+            follow_cmd.push_str(" --token-file <token-file>");
+        } else {
+            feed_cmd.push_str(" --token <token>");
+            follow_cmd.push_str(" --token <token>");
+        }
+    }
+    if tls_enabled {
+        feed_cmd.push_str(" --tls-ca <tls-cert>");
+        follow_cmd.push_str(" --tls-ca <tls-cert>");
+    }
+    feed_cmd.push_str(" '{\"hello\":\"world\"}'");
+    follow_cmd.push_str(" --tail 10");
 
     let mut lines = vec![
-        "plasmite serve".to_string(),
-        format!("  listen: {}", config.bind),
-        format!("  base_url: {base_url}"),
-        format!("  web_ui: {web_ui_url}"),
-        format!("  web_ui_pool: {web_ui_pool_url}"),
-        format!("  {auth_line}"),
-        format!("  {tls_line}"),
-        format!("  {access_line}"),
-        format!("  {cors_line}"),
-        "  stop: press Ctrl-C".to_string(),
+        format!("Serving pools on {base_url} ({scope})"),
+        String::new(),
+        format!("  UI:   {web_ui_url}"),
+        format!("  Auth: {auth}    TLS: {tls}    Access: {access}    CORS: {cors}"),
     ];
 
     if let Some(fingerprint) = config.tls_fingerprint.as_deref() {
-        lines.push(format!("  tls_fingerprint: {fingerprint}"));
+        lines.push(format!("  Fingerprint: {fingerprint}"));
     }
 
-    if config.token.is_some() {
-        let client_tls_flag = if tls_enabled {
-            " --tls-ca <tls-cert>"
-        } else {
-            ""
-        };
-        let feed_cmd = format!(
-            "  plasmite feed {base_url}/demo --token-file <token-file>{client_tls_flag} '{{\"hello\":\"world\"}}'"
-        );
-        let follow_cmd = format!(
-            "  plasmite follow {base_url}/demo --token-file <token-file>{client_tls_flag} --tail 10"
-        );
-        lines.push("clients connect with:".to_string());
-        lines.push(feed_cmd);
-        lines.push(follow_cmd);
-        lines.push(format!(
-            "  curl{curl_tls_flag} -sS -X POST{auth_header} -H 'content-type: application/json' --data '{{\"hello\":\"world\"}}' '{append_url}'"
-        ));
-        lines.push(format!(
-            "  curl{curl_tls_flag} -N -sS{auth_header} '{tail_url}'"
-        ));
-    } else {
-        lines.push("try:".to_string());
-        lines.push(format!(
-            "  curl{curl_tls_flag} -sS -X POST{auth_header} -H 'content-type: application/json' --data '{{\"hello\":\"world\"}}' '{append_url}'"
-        ));
-        lines.push(format!(
-            "  curl{curl_tls_flag} -N -sS{auth_header} '{tail_url}'"
-        ));
+    lines.push(String::new());
+    lines.push("Try it:".to_string());
+    lines.push(String::new());
+    lines.push(format!("  {feed_cmd}"));
+    lines.push(format!("  {follow_cmd}"));
+    lines.push(String::new());
+    if config.token.is_some() && config.token_file_used {
+        lines.push("  TOKEN=$(cat <token-file>)".to_string());
     }
+    let auth_header = if config.token.is_some() {
+        if config.token_file_used {
+            " -H \"Authorization: Bearer $TOKEN\""
+        } else {
+            " -H 'Authorization: Bearer <token>'"
+        }
+    } else {
+        ""
+    };
+    lines.push(format!(
+        "  curl{curl_tls_flag} -sS -X POST{auth_header} -H 'content-type: application/json' \\"
+    ));
+    lines.push("    --data '{\"hello\":\"world\"}' \\".to_string());
+    lines.push(format!("    '{append_url}'"));
+    lines.push(String::new());
+    lines.push("Press Ctrl-C to stop.".to_string());
 
     if config.token.is_some() && config.token_file_used {
-        lines
-            .push("note: the token value is not printed; read it from your token file".to_string());
-    }
-    if config.tls_self_signed {
-        lines.push("note: self-signed TLS; use --tls-ca with plasmite clients or -k for temporary curl testing".to_string());
-    }
-    if config.bind.ip().is_unspecified() {
+        lines.push(String::new());
         lines.push(
-            "note: replace 127.0.0.1 in examples with your host IP or DNS name for remote clients."
+            "The token is in the file, not printed here. Share token and fingerprint out-of-band."
                 .to_string(),
         );
     }
 
-    lines.push(String::new());
-
+    if config.tls_self_signed {
+        lines.push("Self-signed TLS: clients should trust the cert with --tls-ca.".to_string());
+    }
+    if config.bind.ip().is_unspecified() {
+        lines.push(String::new());
+        lines.push(
+            "Replace THIS-HOST/127.0.0.1 with your host IP or DNS name for remote clients."
+                .to_string(),
+        );
+    }
     lines
 }
 
@@ -2123,68 +2251,62 @@ fn emit_serve_check_report(config: &serve::ServeConfig, color_mode: ColorMode, j
 
 fn build_serve_check_lines(config: &serve::ServeConfig) -> Vec<String> {
     let tls_enabled = serve_tls_enabled(config);
-    let base_url = format!(
-        "{}://{}:{}",
-        serve_scheme(config),
-        display_host(config.bind.ip()),
-        config.bind.port()
-    );
-    let auth_line = if config.token.is_some() {
-        if config.token_file_used {
-            "auth: bearer token (from --token-file; value not shown)"
-        } else {
-            "auth: bearer token (from --token; value not shown)"
-        }
+    let auth = if config.token.is_some() {
+        "bearer token"
     } else {
-        "auth: none"
+        "none"
     };
-    let tls_line = if config.tls_self_signed {
-        "tls: self-signed"
+    let tls = if config.tls_self_signed {
+        "self-signed"
     } else if tls_enabled {
-        "tls: enabled"
+        "on"
     } else {
-        "tls: disabled"
+        "off"
     };
-    let access_line = match config.access_mode {
+    let access = match config.access_mode {
         serve::AccessMode::ReadOnly => "access: read-only",
         serve::AccessMode::WriteOnly => "access: write-only",
         serve::AccessMode::ReadWrite => "access: read-write",
     };
-    let cors_line = serve_cors_line(config);
-
+    let access = access.strip_prefix("access: ").unwrap_or(access);
+    let cors = if config.cors_allowed_origins.is_empty() {
+        "same-origin"
+    } else {
+        "allowlist"
+    };
     let mut lines = vec![
-        "plasmite serve check".to_string(),
-        "  status: valid".to_string(),
-        format!("  listen: {}", config.bind),
-        format!("  base_url: {base_url}"),
-        format!("  web_ui: {base_url}/ui"),
-        format!("  web_ui_pool: {base_url}/ui/pools/demo"),
-        format!("  {auth_line}"),
-        format!("  {tls_line}"),
-        format!("  {access_line}"),
-        format!("  {cors_line}"),
+        "Configuration valid.".to_string(),
+        String::new(),
         format!(
-            "  limits: body={} timeout={} concurrency={}",
+            "  Bind:   {} ({})",
+            config.bind,
+            serve_scope(config.bind.ip())
+        ),
+        format!("  Auth: {auth}    TLS: {tls}    Access: {access}    CORS: {cors}"),
+        format!(
+            "  Limits: body {}, timeout {}, concurrency {}",
             format_bytes(config.max_body_bytes),
             format_timeout_ms(config.max_tail_timeout_ms),
             config.max_concurrent_tails
         ),
     ];
     if let Some(fingerprint) = config.tls_fingerprint.as_deref() {
-        lines.push(format!("  tls_fingerprint: {fingerprint}"));
-    }
-
-    if config.bind.ip().is_unspecified() {
-        lines.push(
-            "note: listening on all interfaces; remote clients must use your host IP or DNS name."
-                .to_string(),
-        );
-    }
-    if config.tls_self_signed {
-        lines.push("note: self-signed TLS; clients must trust the generated cert".to_string());
+        lines.push(format!("  Fingerprint: {fingerprint}"));
     }
     lines.push(String::new());
+    lines.push("Start with: pls serve".to_string());
+
     lines
+}
+
+fn serve_scope(ip: std::net::IpAddr) -> &'static str {
+    if ip.is_loopback() {
+        "loopback only"
+    } else if ip.is_unspecified() {
+        "all interfaces"
+    } else {
+        "network reachable"
+    }
 }
 
 fn serve_scheme(config: &serve::ServeConfig) -> &'static str {
@@ -2197,13 +2319,6 @@ fn serve_scheme(config: &serve::ServeConfig) -> &'static str {
 
 fn serve_tls_enabled(config: &serve::ServeConfig) -> bool {
     config.tls_self_signed || (config.tls_cert.is_some() && config.tls_key.is_some())
-}
-
-fn serve_cors_line(config: &serve::ServeConfig) -> String {
-    if config.cors_allowed_origins.is_empty() {
-        return "cors: disabled (same-origin only)".to_string();
-    }
-    format!("cors: {}", config.cors_allowed_origins.join(", "))
 }
 
 fn serve_config_from_run_args(
@@ -2543,7 +2658,12 @@ fn emit_pool_info_pretty(pool_ref: &str, info: &plasmite::api::PoolInfo) {
             _ => 0,
         });
     println!("{pool_ref}");
-    println!("  path: {}", info.path.display());
+    println!(
+        "  path: {}",
+        short_display_path(&info.path, info.path.parent())
+    );
+    let messages_summary =
+        format_pool_messages_summary(count, info.bounds.oldest_seq, info.bounds.newest_seq);
     if let Some(metrics) = &info.metrics {
         let whole = metrics.utilization.used_percent_hundredths / 100;
         let frac = metrics.utilization.used_percent_hundredths % 100;
@@ -2554,38 +2674,24 @@ fn emit_pool_info_pretty(pool_ref: &str, info: &plasmite::api::PoolInfo) {
             whole,
             frac
         );
+        println!("  messages: {messages_summary}");
         println!(
-            "  messages: {} ({})",
-            count,
-            format_seq_range(info.bounds.oldest_seq, info.bounds.newest_seq)
+            "  oldest: {}",
+            format_pool_time_summary(
+                metrics.age.oldest_age_ms,
+                metrics.age.oldest_time.as_deref()
+            )
         );
         println!(
-            "  oldest: {} ({})",
-            format_relative_time(metrics.age.oldest_age_ms),
-            metrics
-                .age
-                .oldest_time
-                .as_deref()
-                .map(format_timestamp_human)
-                .unwrap_or_else(|| "-".to_string()),
-        );
-        println!(
-            "  newest: {} ({})",
-            format_relative_time(metrics.age.newest_age_ms),
-            metrics
-                .age
-                .newest_time
-                .as_deref()
-                .map(format_timestamp_human)
-                .unwrap_or_else(|| "-".to_string()),
+            "  newest: {}",
+            format_pool_time_summary(
+                metrics.age.newest_age_ms,
+                metrics.age.newest_time.as_deref()
+            )
         );
     } else {
         println!("  size: {}", format_bytes(info.file_size));
-        println!(
-            "  messages: {} ({})",
-            count,
-            format_seq_range(info.bounds.oldest_seq, info.bounds.newest_seq)
-        );
+        println!("  messages: {messages_summary}");
     }
     println!(
         "  index: {} slots ({})",
@@ -2597,6 +2703,31 @@ fn emit_pool_info_pretty(pool_ref: &str, info: &plasmite::api::PoolInfo) {
         format_bytes(info.ring_size),
         info.ring_offset
     );
+}
+
+fn format_pool_messages_summary(count: u64, oldest: Option<u64>, newest: Option<u64>) -> String {
+    let seq_range = format_seq_range(oldest, newest);
+    if count == 0 {
+        if seq_range == "-" {
+            return "empty".to_string();
+        }
+        return format!("0 visible ({seq_range})");
+    }
+    if seq_range == "-" {
+        return count.to_string();
+    }
+    format!("{count} ({seq_range})")
+}
+
+fn format_pool_time_summary(age_ms: Option<u64>, timestamp: Option<&str>) -> String {
+    let Some(timestamp) = timestamp else {
+        return "none".to_string();
+    };
+    format!(
+        "{} ({})",
+        format_relative_time(age_ms),
+        format_timestamp_human(timestamp)
+    )
 }
 
 fn emit_feed_receipt_human(receipt: &Value) {
@@ -2804,12 +2935,12 @@ fn notice_time_now() -> Option<String> {
 fn emit_notice(notice: &Notice, color_mode: ColorMode) {
     let is_tty = io::stderr().is_terminal();
     if is_tty {
-        eprintln!(
-            "{} {} (pool: {})",
-            colorize_label("notice:", color_mode.use_color(is_tty), AnsiColor::Yellow),
-            notice.message,
-            notice.pool
-        );
+        let label = colorize_label("notice:", color_mode.use_color(is_tty), AnsiColor::Yellow);
+        if notice.cmd == "feed" {
+            eprintln!("{label} {}", notice.message);
+        } else {
+            eprintln!("{label} {} (pool: {})", notice.message, notice.pool);
+        }
         return;
     }
 
@@ -2890,7 +3021,7 @@ fn error_text(err: &Error, use_color: bool) -> String {
         lines.push(format!(
             "{} {}",
             colorize_label("path:", use_color, AnsiColor::Yellow),
-            path.display()
+            display_handoff_path_from_path(path)
         ));
     }
     if let Some(seq) = err.seq() {
@@ -2915,6 +3046,12 @@ fn error_text(err: &Error, use_color: bool) -> String {
     }
 
     lines.join("\n")
+}
+
+fn emit_follow_timeout_human(timeout_label: &str) {
+    if io::stderr().is_terminal() {
+        eprintln!("No messages received (timed out after {timeout_label}).");
+    }
 }
 
 fn clap_error_summary(err: &clap::Error) -> String {
@@ -3046,10 +3183,18 @@ fn ingest_failure_notice(
         time: notice_time_now().unwrap_or_else(|| "unknown".to_string()),
         cmd: "feed".to_string(),
         pool: pool_ref.to_string(),
-        message: failure.message.clone(),
+        message: ingest_failure_message(failure),
         details,
     };
     emit_notice(&notice, color_mode);
+}
+
+fn ingest_failure_message(failure: &IngestFailure) -> String {
+    match failure.error_kind.as_str() {
+        "Parse" => "Skipped invalid JSON.".to_string(),
+        "Oversize" => "Skipped oversized record.".to_string(),
+        _ => format!("Skipped record: {}.", failure.message),
+    }
 }
 
 fn ingest_summary_notice(
@@ -3068,7 +3213,11 @@ fn ingest_summary_notice(
         time: notice_time_now().unwrap_or_else(|| "unknown".to_string()),
         cmd: "feed".to_string(),
         pool: pool_ref.to_string(),
-        message: "ingestion completed with skipped records".to_string(),
+        message: format!(
+            "Finished with {} skipped record{}.",
+            outcome.failed,
+            if outcome.failed == 1 { "" } else { "s" }
+        ),
         details,
     };
     emit_notice(&notice, color_mode);
@@ -3137,9 +3286,8 @@ fn ingest_from_stdin<R: Read>(
                 Ok((seq, timestamp_ns))
             })?;
             if emit_receipt {
-                emit_message(
+                emit_feed_receipt(
                     feed_receipt_json(seq, timestamp_ns, ctx.tags)?,
-                    false,
                     ctx.color_mode,
                 );
             }
@@ -3180,7 +3328,7 @@ fn ingest_from_stdin_remote<R: Read>(
                     .append_json_now(&data, ctx.tags, ctx.durability)
             })?;
             if emit_receipt {
-                emit_message(feed_receipt_from_message(&message), false, ctx.color_mode);
+                emit_feed_receipt(feed_receipt_from_message(&message), ctx.color_mode);
             }
             Ok(())
         },
@@ -3950,17 +4098,20 @@ mod tests {
         config.tls_self_signed = true;
         config.tls_fingerprint = Some("SHA256:AA:BB".to_string());
         let text = build_serve_startup_lines(&config).join("\n");
-        assert!(text.contains("clients connect with:"));
+        assert!(text.contains("Serving pools on https://127.0.0.1:9700 (loopback only)"));
+        assert!(text.contains("Auth: bearer    TLS: self-signed"));
         assert!(text.contains("--token-file <token-file> --tls-ca <tls-cert>"));
-        assert!(text.contains("tls_fingerprint: SHA256:AA:BB"));
+        assert!(text.contains("Fingerprint: SHA256:AA:BB"));
     }
 
     #[test]
     fn serve_startup_banner_local_mode_stays_compact() {
         let config = test_serve_config();
         let text = build_serve_startup_lines(&config).join("\n");
-        assert!(!text.contains("clients connect with:"));
-        assert!(text.contains("try:"));
+        assert!(text.contains("Serving pools on http://127.0.0.1:9700 (loopback only)"));
+        assert!(text.contains("Auth: none    TLS: off    Access: read-write    CORS: same-origin"));
+        assert!(text.contains("Try it:"));
+        assert!(text.contains("Press Ctrl-C to stop."));
     }
 
     #[test]

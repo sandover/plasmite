@@ -179,17 +179,14 @@ pub(super) fn dispatch_command(
                 let client = LocalClient::new().with_pool_dir(&pool_dir);
                 let path = resolve_poolref(&name, &pool_dir)?;
                 let pool_ref = PoolRef::path(path);
-                let info = client
-                    .pool_info(&pool_ref)
-                    .map_err(|err| {
-                        if err.kind() == ErrorKind::NotFound {
-                            let base =
-                                Error::new(ErrorKind::NotFound).with_message("not found");
-                            add_missing_pool_hint(base, &name, &name)
-                        } else {
-                            err
-                        }
-                    })?;
+                let info = client.pool_info(&pool_ref).map_err(|err| {
+                    if err.kind() == ErrorKind::NotFound {
+                        let base = Error::new(ErrorKind::NotFound).with_message("not found");
+                        add_missing_pool_hint(base, &name, &name)
+                    } else {
+                        err
+                    }
+                })?;
                 if json {
                     emit_json(pool_info_json(&name, &info), color_mode);
                 } else {
@@ -203,6 +200,11 @@ pub(super) fn dispatch_command(
                 let mut failed = Vec::new();
                 let mut table_rows = Vec::new();
                 let mut first_error_kind = None;
+                enum HumanDeleteStatus {
+                    Ok,
+                    Err { kind: ErrorKind, detail: String },
+                }
+                let mut human_rows = Vec::<(String, HumanDeleteStatus)>::new();
 
                 for name in names {
                     let result = if name.contains("://") {
@@ -240,11 +242,12 @@ pub(super) fn dispatch_command(
                                 "path": path.display().to_string(),
                             }));
                             table_rows.push(vec![
-                                name,
+                                name.clone(),
                                 "OK".to_string(),
                                 display_path,
                                 String::new(),
                             ]);
+                            human_rows.push((name, HumanDeleteStatus::Ok));
                         }
                         Err(err) => {
                             if first_error_kind.is_none() {
@@ -256,10 +259,22 @@ pub(super) fn dispatch_command(
                                 .unwrap_or_else(|| "-".to_string());
                             let detail = err.message().unwrap_or("error").to_string();
                             failed.push(json!({
-                                "pool": name,
+                                "pool": name.clone(),
                                 "error": error_json(&err)["error"].clone(),
                             }));
-                            table_rows.push(vec![name, "ERR".to_string(), display_path, detail]);
+                            table_rows.push(vec![
+                                name.clone(),
+                                "ERR".to_string(),
+                                display_path,
+                                detail.clone(),
+                            ]);
+                            human_rows.push((
+                                name,
+                                HumanDeleteStatus::Err {
+                                    kind: err.kind(),
+                                    detail,
+                                },
+                            ));
                         }
                     }
                 }
@@ -273,28 +288,66 @@ pub(super) fn dispatch_command(
                         color_mode,
                     );
                 } else if io::stdout().is_terminal() {
-                    let total = table_rows.len();
+                    let total = human_rows.len();
                     let deleted_count = deleted.len();
-                    if total == 1 && deleted_count == 1 {
-                        if let Some(row) = table_rows.first() {
-                            println!("Deleted {}", row.first().cloned().unwrap_or_default());
-                            println!("  path: {}", row.get(2).cloned().unwrap_or_default());
+                    if total == 1 {
+                        if let Some((name, status)) = human_rows.first() {
+                            match status {
+                                HumanDeleteStatus::Ok => {
+                                    println!("Deleted pool \"{name}\".");
+                                }
+                                HumanDeleteStatus::Err {
+                                    kind: ErrorKind::NotFound,
+                                    ..
+                                } => {
+                                    println!("Pool \"{name}\" not found. Nothing to delete.");
+                                    println!();
+                                    println!(
+                                        "  Pool directory: {}",
+                                        display_pool_dir_for_humans(&pool_dir)
+                                    );
+                                    println!("  List pools:     pls pool list");
+                                }
+                                HumanDeleteStatus::Err { detail, .. } => {
+                                    println!("Failed to delete pool \"{name}\".");
+                                    println!();
+                                    println!("  Reason:         {detail}");
+                                    println!(
+                                        "  Pool directory: {}",
+                                        display_pool_dir_for_humans(&pool_dir)
+                                    );
+                                }
+                            }
                         }
                     } else if failed.is_empty() {
-                        println!("Deleted {deleted_count} pools");
-                        for row in table_rows
-                            .iter()
-                            .filter(|row| row.get(1).is_some_and(|value| value == "OK"))
-                        {
-                            println!(
-                                "  - {} ({})",
-                                row.first().cloned().unwrap_or_default(),
-                                row.get(2).cloned().unwrap_or_default()
-                            );
+                        println!("Deleted {deleted_count} pools.");
+                        println!();
+                        for (name, status) in &human_rows {
+                            if matches!(status, HumanDeleteStatus::Ok) {
+                                println!("  ✓ {name}");
+                            }
                         }
+                        println!();
+                        println!(
+                            "  Pool directory: {}",
+                            display_pool_dir_for_humans(&pool_dir)
+                        );
                     } else {
-                        println!("Deleted {deleted_count} of {total} pools");
-                        emit_table(&["NAME", "STATUS", "PATH", "DETAIL"], &table_rows);
+                        println!("Deleted {deleted_count} of {total} pools.");
+                        println!();
+                        for (name, status) in &human_rows {
+                            match status {
+                                HumanDeleteStatus::Ok => println!("  ✓ {name}"),
+                                HumanDeleteStatus::Err { detail, .. } => {
+                                    println!("  ✗ {name} — {detail}");
+                                }
+                            }
+                        }
+                        println!();
+                        println!(
+                            "  Pool directory: {}",
+                            display_pool_dir_for_humans(&pool_dir)
+                        );
                     }
                 } else {
                     emit_table(&["NAME", "STATUS", "PATH", "DETAIL"], &table_rows);
@@ -1007,6 +1060,11 @@ pub(super) fn dispatch_command(
                         }
                     }
                     let outcome = follow_pool(&pool_handle, &pool, &path, cfg)?;
+                    if outcome.exit_code == 124 {
+                        if let Some(timeout_input) = timeout_input {
+                            emit_follow_timeout_human(timeout_input);
+                        }
+                    }
                     Ok(outcome)
                 }
                 PoolTarget::Remote { base_url, pool } => {
@@ -1032,6 +1090,11 @@ pub(super) fn dispatch_command(
                         client = client.with_tls_skip_verify();
                     }
                     let outcome = follow_remote(&client, &pool, &cfg)?;
+                    if outcome.exit_code == 124 {
+                        if let Some(timeout_input) = timeout_input {
+                            emit_follow_timeout_human(timeout_input);
+                        }
+                    }
                     Ok(outcome)
                 }
             }
