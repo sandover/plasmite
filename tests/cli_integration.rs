@@ -2878,6 +2878,28 @@ fn follow_since_future_exits_empty() {
 }
 
 #[test]
+fn follow_since_future_missing_pool_reports_not_found() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let follower = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "follow",
+            "missing",
+            "--since",
+            "2999-01-01T00:00:00Z",
+        ])
+        .output()
+        .expect("follow");
+    assert_eq!(follower.status.code(), Some(3));
+    let err = parse_error_json(&follower.stderr);
+    let inner = err.get("error").and_then(|v| v.as_object()).expect("error");
+    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("NotFound"));
+}
+
+#[test]
 fn follow_format_jsonl_matches_jsonl_alias() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
@@ -4544,6 +4566,47 @@ fn duplex_remote_url_rejects_create_flag() {
     assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Usage"));
     let message = inner.get("message").and_then(|v| v.as_str()).unwrap_or("");
     assert!(message.contains("does not support --create"));
+}
+
+#[test]
+fn duplex_remote_url_rejects_since_even_when_future() {
+    let output = cmd()
+        .args([
+            "duplex",
+            "http://127.0.0.1:65535/chat",
+            "--since",
+            "2999-01-01T00:00:00Z",
+        ])
+        .output()
+        .expect("duplex");
+    assert_eq!(output.status.code(), Some(2));
+    let err = parse_error_json(&output.stderr);
+    let inner = err.get("error").and_then(|v| v.as_object()).expect("error");
+    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Usage"));
+    let message = inner.get("message").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(message.contains("does not support --since"));
+}
+
+#[test]
+fn duplex_since_future_missing_pool_reports_not_found() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "duplex",
+            "missing",
+            "--since",
+            "2999-01-01T00:00:00Z",
+        ])
+        .output()
+        .expect("duplex");
+    assert_eq!(output.status.code(), Some(3));
+    let err = parse_error_json(&output.stderr);
+    let inner = err.get("error").and_then(|v| v.as_object()).expect("error");
+    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("NotFound"));
 }
 
 #[test]
