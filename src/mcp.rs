@@ -746,15 +746,58 @@ impl McpHandler for PlasmiteMcpHandler {
     }
 
     fn list_resources(&mut self) -> Result<Vec<McpResource>, JsonRpcError> {
-        Ok(Vec::new())
+        let pools = self.client.list_pools().map_err(api_error_jsonrpc)?;
+        let mut resources = pools
+            .into_iter()
+            .map(|info| {
+                let name = pool_name_from_path(&info.path);
+                McpResource {
+                    uri: format!("plasmite:///pools/{name}"),
+                    name: name.clone(),
+                    description: Some(format!(
+                        "Plasmite pool: {name} ({}, {} bytes)",
+                        pool_bounds_label(&info),
+                        info.file_size
+                    )),
+                    mime_type: Some("application/json".to_string()),
+                }
+            })
+            .collect::<Vec<_>>();
+        resources.sort_by(|left, right| left.uri.cmp(&right.uri));
+        Ok(resources)
     }
 
     fn read_resource(
         &mut self,
-        _request: ResourceReadRequest,
+        request: ResourceReadRequest,
     ) -> Result<ResourceReadResult, JsonRpcError> {
+        let pool =
+            pool_name_from_resource_uri(&request.uri).map_err(JsonRpcError::invalid_params)?;
+        let pool_ref = PoolRef::name(pool);
+        let opened = self
+            .client
+            .open_pool(&pool_ref)
+            .map_err(api_error_jsonrpc)?;
+        let info = opened.info().map_err(api_error_jsonrpc)?;
+        let messages = read_messages_for_tool(&opened, &info, DEFAULT_READ_COUNT, None, None, &[])
+            .map_err(api_error_jsonrpc)?;
+        let next_after_seq = messages
+            .last()
+            .and_then(|message| message.get("seq"))
+            .and_then(Value::as_u64);
+        let payload = json!({
+            "messages": messages,
+            "next_after_seq": next_after_seq,
+        });
+        let text = serde_json::to_string(&payload)
+            .map_err(|_| JsonRpcError::internal_error("failed to encode resource payload"))?;
         Ok(ResourceReadResult {
-            contents: Vec::new(),
+            contents: vec![ResourceContent {
+                uri: request.uri,
+                mime_type: Some("application/json".to_string()),
+                text: Some(text),
+                blob: None,
+            }],
         })
     }
 }
@@ -1181,6 +1224,59 @@ fn api_error_tool_result(tool: &str, err: Error) -> ToolCallResult {
     }
 
     ToolCallResult::execution_error_with_structured(text, Some(Value::Object(structured)))
+}
+
+fn api_error_jsonrpc(err: Error) -> JsonRpcError {
+    let mut rpc_error = JsonRpcError::new(
+        -32000,
+        err.message()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| format!("{:?}", err.kind())),
+    );
+    let mut data = Map::new();
+    data.insert("error_kind".to_string(), json!(format!("{:?}", err.kind())));
+    if let Some(hint) = err.hint() {
+        data.insert("hint".to_string(), json!(hint));
+    }
+    if let Some(path) = err.path() {
+        data.insert("path".to_string(), json!(path.display().to_string()));
+    }
+    if let Some(seq) = err.seq() {
+        data.insert("seq".to_string(), json!(seq));
+    }
+    if let Some(offset) = err.offset() {
+        data.insert("offset".to_string(), json!(offset));
+    }
+    if !data.is_empty() {
+        rpc_error.data = Some(Value::Object(data));
+    }
+    rpc_error
+}
+
+fn pool_bounds_label(info: &PoolInfo) -> String {
+    match (info.bounds.oldest_seq, info.bounds.newest_seq) {
+        (Some(oldest), Some(newest)) => format!("seq {oldest}-{newest}"),
+        _ => "empty".to_string(),
+    }
+}
+
+fn pool_name_from_resource_uri(uri: &str) -> Result<String, String> {
+    let parsed =
+        url::Url::parse(uri).map_err(|_| "resource uri must be a valid URI".to_string())?;
+    if parsed.scheme() != "plasmite" {
+        return Err("resource uri must use plasmite scheme".to_string());
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err("resource uri must not include query or fragment".to_string());
+    }
+    let segments = parsed
+        .path_segments()
+        .ok_or_else(|| "resource uri must be in plasmite:///pools/{name} format".to_string())?
+        .collect::<Vec<_>>();
+    if segments.len() != 2 || segments[0] != "pools" || segments[1].is_empty() {
+        return Err("resource uri must be in plasmite:///pools/{name} format".to_string());
+    }
+    Ok(segments[1].to_string())
 }
 
 #[cfg(test)]
@@ -1670,5 +1766,57 @@ mod tests {
                 .and_then(Value::as_str),
             Some("count")
         );
+    }
+
+    #[test]
+    fn resources_list_maps_each_pool_to_plasmite_uri() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let mut handler = PlasmiteMcpHandler::new(tmp.path());
+        seed_pool_with_messages(&mut handler, "alpha", 1, 1_700_000_000_000_000_000);
+        seed_pool_with_messages(&mut handler, "beta", 1, 1_700_000_000_100_000_000);
+
+        let resources = handler.list_resources().expect("resources");
+        let uris = resources
+            .iter()
+            .map(|resource| resource.uri.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            uris,
+            vec![
+                "plasmite:///pools/alpha".to_string(),
+                "plasmite:///pools/beta".to_string()
+            ]
+        );
+        assert!(
+            resources
+                .iter()
+                .all(|resource| resource.mime_type.as_deref() == Some("application/json"))
+        );
+    }
+
+    #[test]
+    fn resources_read_returns_text_json_with_cursor() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let mut handler = PlasmiteMcpHandler::new(tmp.path());
+        seed_pool_with_messages(&mut handler, "events", 3, 1_700_000_000_000_000_000);
+
+        let read_result = handler
+            .read_resource(ResourceReadRequest {
+                uri: "plasmite:///pools/events".to_string(),
+            })
+            .expect("read resource");
+        assert_eq!(read_result.contents.len(), 1);
+        let content = &read_result.contents[0];
+        assert_eq!(content.uri, "plasmite:///pools/events");
+        assert_eq!(content.mime_type.as_deref(), Some("application/json"));
+        let payload = serde_json::from_str::<Value>(content.text.as_deref().expect("text payload"))
+            .expect("valid json");
+        let messages = payload["messages"].as_array().expect("messages");
+        let seqs = messages
+            .iter()
+            .map(|message| message["seq"].as_u64().expect("seq"))
+            .collect::<Vec<_>>();
+        assert_eq!(seqs, vec![1, 2, 3]);
+        assert_eq!(payload["next_after_seq"], json!(3));
     }
 }
