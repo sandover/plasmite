@@ -232,6 +232,8 @@ def run_pool_info(
     )
     if result.returncode != 0:
         err = parse_error_json(result.stderr)
+        if err.path is None and err.kind == ErrorKind.NOT_FOUND:
+            err = PlasmiteError(err.kind, str(err), path=resolve_pool_path(workdir_path, pool), seq=err.seq, offset=err.offset)
         validate_expect_error(step.get("expect"), err, index, step_id)
         return
 

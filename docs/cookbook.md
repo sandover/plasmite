@@ -4,6 +4,7 @@
 
 - [CI Gate](#ci-gate)
 - [Live Event Stream](#live-event-stream)
+- [Process Capture with tap](#process-capture-with-tap)
 - [Duplex Chat](#duplex-chat)
 - [System Log Ring Buffer](#system-log-ring-buffer)
 - [Replay & Debug](#replay--debug)
@@ -244,6 +245,35 @@ p.Close(); c.Close()
 ```
 
 </details>
+
+---
+
+## Process Capture with tap
+
+Use `tap` to wrap an existing command and persist its stdout/stderr as pool messages without changing the wrapped program.
+
+```bash
+# capture command output into a pool
+pls tap build --create -- cargo build
+
+# in another terminal, watch output live
+pls follow build
+
+# replay recent output
+pls follow build --since 2h
+
+# filter only stderr lines
+pls follow build --where '.data.stream == "stderr"'
+
+# tag captured lines for downstream filters
+pls tap deploy --tag prod -- ./deploy.sh
+```
+
+For long-running or high-volume commands, choose an explicit pool size so the ring does not overwrite data too quickly:
+
+```bash
+pls tap api --create --create-size 64M -- ./server
+```
 
 ---
 

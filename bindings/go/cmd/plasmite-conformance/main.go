@@ -391,6 +391,11 @@ func runPoolInfo(repoRoot string, workdirPath string, step map[string]any, index
 			if parseErr != nil {
 				return stepErr(index, stepID, fmt.Sprintf("pool info failed: %v", err))
 			}
+			// pool info CLI errors can omit `path`; synthesize the local pool path
+			// so conformance checks remain aligned with bindings that return it.
+			if parsed.Path == "" && parsed.Kind == plasmite.ErrorNotFound {
+				parsed.Path = resolvePoolPath(pool, workdirPath)
+			}
 			return validateExpectError(step["expect"], parsed, index, stepID)
 		}
 		return stepErr(index, stepID, fmt.Sprintf("pool info failed: %v", err))

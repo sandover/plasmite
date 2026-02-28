@@ -82,6 +82,7 @@ It keeps only script-level guarantees; signatures, walkthroughs, and examples li
 The following are implemented but not frozen in v0.0.1 and may evolve within v0:
 
 - `plasmite duplex`
+- `plasmite tap`
 - `plasmite serve`
 - `plasmite doctor`
 - Remote shorthand refs in CLI commands
@@ -90,6 +91,7 @@ The following are implemented but not frozen in v0.0.1 and may evolve within v0:
 Current remote shorthand constraints (documented, non-frozen):
 
 - URL refs are explicit remote opt-in in core commands that accept pool refs.
+- `tap` currently accepts local pool refs only; URL refs are rejected with an actionable usage hint.
 - `duplex` remote refs reject `--create` and `--since`; use `--tail` for remote history.
 - `follow` remote refs reject `--since` and `--replay`; use `--tail` for remote history.
 

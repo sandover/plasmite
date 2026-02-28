@@ -577,6 +577,48 @@ NOTES
     },
     #[command(
         arg_required_else_help = true,
+        about = "Capture command output into a local pool",
+        long_about = r#"Run a command, capture stdout/stderr as line messages, and append them to a local pool.
+
+Use `--` to separate tap flags from the wrapped command argv."#,
+        after_help = r#"EXAMPLES
+  $ plasmite tap build --create -- cargo build
+  $ plasmite follow build
+  $ plasmite follow build --where '.data.stream == "stderr"'
+  $ plasmite tap deploy --tag prod -- ./deploy.sh
+  $ plasmite tap api --create --create-size 64M -- ./server
+
+NOTES
+  - `--` is required before wrapped command args
+  - Use --create-size for long-running/high-volume captures
+  - `tap` accepts local pool refs only in v0"#
+    )]
+    Tap {
+        #[arg(help = "Pool ref: local name/path")]
+        pool: String,
+        #[arg(long, help = "Create local pool if missing before tapping")]
+        create: bool,
+        #[arg(
+            long = "create-size",
+            help = "Pool size when creating (bytes or K/M/G)"
+        )]
+        create_size: Option<String>,
+        #[arg(long, help = "Repeatable tag for captured line messages")]
+        tag: Vec<String>,
+        #[arg(short = 'q', long, help = "Suppress child stdout/stderr passthrough")]
+        quiet: bool,
+        #[arg(long, default_value = "fast", help = "Durability mode: fast|flush")]
+        durability: String,
+        #[arg(
+            last = true,
+            allow_hyphen_values = true,
+            value_name = "COMMAND",
+            help = "Wrapped command and args (must follow `--`)"
+        )]
+        command: Vec<String>,
+    },
+    #[command(
+        arg_required_else_help = true,
         about = "Send and follow from one command",
         long_about = r#"Read and write a pool from one process.
 

@@ -249,7 +249,15 @@ function runPoolInfo(repoRoot, workdirPath, step, index, stepId) {
     { encoding: "utf8" }
   );
   if (result.status !== 0) {
-    const err = parseErrorJSON(result.stderr);
+    let err = parseErrorJSON(result.stderr);
+    const parsed = parseError(err);
+    if (!parsed.hasPath && parsed.kind === "NotFound") {
+      err = makePlasmiteError({
+        kind: parsed.kind,
+        message: parsed.message,
+        path: resolvePoolPath(workdirPath, pool),
+      });
+    }
     validateExpectError(step.expect, err, index, stepId);
     return;
   }

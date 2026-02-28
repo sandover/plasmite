@@ -4,6 +4,12 @@ This guide covers deploying `plasmite serve` for remote pool access.
 
 For the normative protocol contract, see `spec/remote/v0/SPEC.md`.
 
+## Tap + serving
+
+`plasmite tap` writes messages to local pools. Once those pools exist, `plasmite serve`
+exposes them using the same remote read/write behavior as any other pool. No special
+server mode is required for tapped pools.
+
 ## Quick local start
 
 ```bash
