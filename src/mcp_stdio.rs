@@ -36,7 +36,7 @@ pub(super) fn serve(pool_dir: PathBuf) -> Result<(), Error> {
             return Ok(());
         }
 
-        let message = line.trim_end_matches(|ch| ch == '\n' || ch == '\r');
+        let message = line.trim_end_matches(['\n', '\r']);
         if message.is_empty() {
             continue;
         }

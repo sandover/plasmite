@@ -299,7 +299,7 @@ impl<H: McpHandler> McpDispatcher<H> {
     pub fn dispatch_value(&mut self, value: Value) -> DispatchOutcome {
         match parse_jsonrpc_request(value) {
             Ok(request) => self.dispatch_request(request),
-            Err(response) => DispatchOutcome::Response(response),
+            Err(response) => DispatchOutcome::Response(*response),
         }
     }
 
@@ -611,7 +611,7 @@ impl PlasmiteMcpHandler {
         let messages =
             match read_messages_for_tool(&opened, &info, count, after_seq, since_ns, &tags) {
                 Ok(messages) => messages,
-                Err(err) => return api_error_tool_result("plasmite_read", err),
+                Err(err) => return api_error_tool_result("plasmite_read", *err),
             };
         let next_after_seq = messages
             .last()
@@ -780,7 +780,7 @@ impl McpHandler for PlasmiteMcpHandler {
             .map_err(api_error_jsonrpc)?;
         let info = opened.info().map_err(api_error_jsonrpc)?;
         let messages = read_messages_for_tool(&opened, &info, DEFAULT_READ_COUNT, None, None, &[])
-            .map_err(api_error_jsonrpc)?;
+            .map_err(|err| api_error_jsonrpc(*err))?;
         let next_after_seq = messages
             .last()
             .and_then(|message| message.get("seq"))
@@ -806,21 +806,21 @@ pub fn parse_jsonrpc_line(line: &str) -> Result<Value, JsonRpcError> {
     serde_json::from_str::<Value>(line).map_err(|_| JsonRpcError::parse_error("invalid JSON"))
 }
 
-fn parse_jsonrpc_request(value: Value) -> Result<JsonRpcRequest, JsonRpcResponse> {
+fn parse_jsonrpc_request(value: Value) -> Result<JsonRpcRequest, Box<JsonRpcResponse>> {
     let mut object = match value {
         Value::Object(object) => object,
         _ => {
-            return Err(JsonRpcResponse::error(
+            return Err(Box::new(JsonRpcResponse::error(
                 JsonRpcId::Null,
                 JsonRpcError::invalid_request("request must be a JSON object"),
-            ));
+            )));
         }
     };
 
     let mut id: Option<JsonRpcId> = None;
     if let Some(raw_id) = object.remove("id") {
         let parsed_id = parse_jsonrpc_id(raw_id)
-            .map_err(|error| JsonRpcResponse::error(JsonRpcId::Null, error))?;
+            .map_err(|error| Box::new(JsonRpcResponse::error(JsonRpcId::Null, error)))?;
         id = Some(parsed_id);
     }
     let error_id = id.clone().unwrap_or(JsonRpcId::Null);
@@ -829,26 +829,26 @@ fn parse_jsonrpc_request(value: Value) -> Result<JsonRpcRequest, JsonRpcResponse
         .remove("jsonrpc")
         .and_then(|value| value.as_str().map(ToString::to_string))
         .ok_or_else(|| {
-            JsonRpcResponse::error(
+            Box::new(JsonRpcResponse::error(
                 error_id.clone(),
                 JsonRpcError::invalid_request("missing jsonrpc field"),
-            )
+            ))
         })?;
     if jsonrpc != JSON_RPC_VERSION {
-        return Err(JsonRpcResponse::error(
+        return Err(Box::new(JsonRpcResponse::error(
             error_id,
             JsonRpcError::invalid_request("jsonrpc must be \"2.0\""),
-        ));
+        )));
     }
 
     let method = object
         .remove("method")
         .and_then(|value| value.as_str().map(ToString::to_string))
         .ok_or_else(|| {
-            JsonRpcResponse::error(
+            Box::new(JsonRpcResponse::error(
                 id.clone().unwrap_or(JsonRpcId::Null),
                 JsonRpcError::invalid_request("missing method field"),
-            )
+            ))
         })?;
 
     let params = object.remove("params");
@@ -1078,7 +1078,7 @@ fn read_messages_for_tool(
     after_seq: Option<u64>,
     since_ns: Option<u64>,
     required_tags: &[String],
-) -> Result<Vec<Value>, Error> {
+) -> Result<Vec<Value>, Box<Error>> {
     let (Some(oldest), Some(newest)) = (info.bounds.oldest_seq, info.bounds.newest_seq) else {
         return Ok(Vec::new());
     };
@@ -1099,17 +1099,19 @@ fn read_messages_for_tool(
         let message = match pool.get_message(seq) {
             Ok(message) => message,
             Err(err) if err.kind() == ErrorKind::NotFound => continue,
-            Err(err) => return Err(err),
+            Err(err) => return Err(Box::new(err)),
         };
         if !message_has_tags(&message.meta.tags, required_tags) {
             continue;
         }
         if let Some(since_ns) = since_ns {
-            let message_ns = parse_rfc3339_ns(&message.time).map_err(|parse_err| {
-                Error::new(ErrorKind::Corrupt)
-                    .with_message("stored message has invalid timestamp")
-                    .with_source(parse_err)
-            })?;
+            let message_ns = parse_rfc3339_ns(&message.time)
+                .map_err(|parse_err| {
+                    Error::new(ErrorKind::Corrupt)
+                        .with_message("stored message has invalid timestamp")
+                        .with_source(parse_err)
+                })
+                .map_err(Box::new)?;
             if message_ns < since_ns {
                 continue;
             }
@@ -1265,6 +1267,9 @@ fn pool_name_from_resource_uri(uri: &str) -> Result<String, String> {
         url::Url::parse(uri).map_err(|_| "resource uri must be a valid URI".to_string())?;
     if parsed.scheme() != "plasmite" {
         return Err("resource uri must use plasmite scheme".to_string());
+    }
+    if parsed.host_str().is_some() {
+        return Err("resource uri must be in plasmite:///pools/{name} format".to_string());
     }
     if parsed.query().is_some() || parsed.fragment().is_some() {
         return Err("resource uri must not include query or fragment".to_string());
@@ -1818,5 +1823,23 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(seqs, vec![1, 2, 3]);
         assert_eq!(payload["next_after_seq"], json!(3));
+    }
+
+    #[test]
+    fn resources_read_rejects_host_qualified_uri() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let mut handler = PlasmiteMcpHandler::new(tmp.path());
+        seed_pool_with_messages(&mut handler, "events", 1, 1_700_000_000_000_000_000);
+
+        let err = handler
+            .read_resource(ResourceReadRequest {
+                uri: "plasmite://localhost/pools/events".to_string(),
+            })
+            .expect_err("expected invalid resource URI");
+        assert_eq!(err.code, INVALID_PARAMS_CODE);
+        assert_eq!(
+            err.message,
+            "resource uri must be in plasmite:///pools/{name} format"
+        );
     }
 }

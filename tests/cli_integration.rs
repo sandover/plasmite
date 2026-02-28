@@ -283,7 +283,7 @@ fn help_pool_lists_pool_subcommands() {
     let output = cmd().args(["help", "pool"]).output().expect("help pool");
     assert!(output.status.success());
     let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
-    assert!(stdout.contains("Usage: plasmite pool <COMMAND>"));
+    assert!(stdout.contains("Usage: plasmite pool [OPTIONS] <COMMAND>"));
     assert!(stdout.contains("list    List pools in the pool directory"));
 }
 

@@ -929,10 +929,11 @@ fn remote_write_only_allows_append_but_rejects_reads() -> TestResult<()> {
     Ok(())
 }
 
-fn mcp_post(base_url: &str, payload: &Value) -> Result<ureq::Response, ureq::Error> {
+fn mcp_post(base_url: &str, payload: &Value) -> Result<ureq::Response, Box<ureq::Error>> {
     ureq::post(&format!("{base_url}/mcp"))
         .set("Content-Type", "application/json")
         .send_string(&payload.to_string())
+        .map_err(Box::new)
 }
 
 #[test]
