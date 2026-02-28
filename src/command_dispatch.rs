@@ -673,7 +673,7 @@ pub(super) fn dispatch_command(
             })?;
 
             let lifecycle_tags = vec!["lifecycle".to_string()];
-            tap_append_message(
+            if let Err(err) = tap_append_message(
                 &mut pool_handle,
                 durability,
                 &lifecycle_tags,
@@ -681,7 +681,10 @@ pub(super) fn dispatch_command(
                     "kind": "start",
                     "cmd": command,
                 }),
-            )?;
+            ) {
+                tap_terminate_child(&mut child);
+                return Err(err);
+            }
 
             let start_time = Instant::now();
             let (event_tx, event_rx) = mpsc::channel();
@@ -697,7 +700,7 @@ pub(super) fn dispatch_command(
                 match event_rx.recv_timeout(Duration::from_millis(25)) {
                     Ok(TapEvent::Line { stream, raw_line }) => {
                         line_count = line_count.saturating_add(1);
-                        tap_append_message(
+                        if let Err(err) = tap_append_message(
                             &mut pool_handle,
                             durability,
                             &tag,
@@ -706,7 +709,10 @@ pub(super) fn dispatch_command(
                                 "stream": stream.as_str(),
                                 "line": trim_tap_line_endings(&raw_line),
                             }),
-                        )?;
+                        ) {
+                            tap_terminate_child(&mut child);
+                            return Err(err);
+                        }
                     }
                     Ok(TapEvent::ReaderError(err)) => {
                         if reader_error.is_none() {
@@ -1424,6 +1430,12 @@ fn tap_spawn_error(command: &[String], err: std::io::Error) -> Error {
         .with_message("failed to spawn wrapped command")
         .with_hint("Check command arguments and executable permissions.")
         .with_source(err)
+}
+
+fn tap_terminate_child(child: &mut std::process::Child) {
+    // Best-effort cleanup: command may have already exited.
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[cfg(unix)]
