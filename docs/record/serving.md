@@ -132,6 +132,26 @@ Rules:
 - `GET /v0/ui/pools` — list pools
 - `GET /v0/ui/pools/<pool>/events` — SSE stream for one pool
 
+## MCP endpoint (`/mcp`, experimental)
+
+`plasmite serve` also exposes an experimental MCP endpoint at `/mcp`.
+
+Transport profile in v1:
+- `POST /mcp` accepts exactly one JSON-RPC message.
+- JSON-RPC requests return one JSON-RPC response with `Content-Type: application/json`.
+- Accepted JSON-RPC notifications/responses return `202 Accepted` with no body.
+- `GET /mcp` returns `405 Method Not Allowed`.
+
+Protocol and header notes:
+- `MCP-Protocol-Version` is optional in v1.
+- If `MCP-Protocol-Version` is present, supported value is `2025-11-25`; invalid/unsupported values return `400`.
+- If `Origin` is present and syntactically invalid, request is rejected with `403`.
+
+Security and policy posture:
+- `/mcp` uses the same bearer auth and TLS expectations as `/v0/*`.
+- `--access` mode restrictions apply to MCP operations.
+- v1 is intentionally minimal: no MCP resource subscriptions and no SSE mode for MCP POST responses.
+
 ## Server limits
 
 Configurable via flags:

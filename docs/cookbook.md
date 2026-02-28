@@ -9,6 +9,7 @@
 - [System Log Ring Buffer](#system-log-ring-buffer)
 - [Replay & Debug](#replay--debug)
 - [Remote Pool Access](#remote-pool-access)
+- [MCP Agent Access](#mcp-agent-access)
 - [When Plasmite Isn't the Right Fit](#when-plasmite-isnt-the-right-fit)
 - [Next Steps](#next-steps)
 
@@ -430,6 +431,56 @@ plasmite follow https://server:9700/events --tail 20 --tls-skip-verify
 curl remains useful for API debugging, but native `plasmite feed` / `plasmite follow` should be the first-line operator workflow.
 
 A built-in web UI is available at `https://server:9700/ui`.
+
+## MCP Agent Access
+
+Plasmite can also be used as an MCP server for agent harnesses.
+
+### Local MCP server (stdio)
+
+```json
+{
+  "mcpServers": {
+    "plasmite": {
+      "command": "plasmite",
+      "args": ["mcp", "--dir", "/path/to/pools"]
+    }
+  }
+}
+```
+
+### Remote MCP server (`/mcp`)
+
+```json
+{
+  "mcpServers": {
+    "plasmite-remote": {
+      "type": "streamable-http",
+      "url": "https://server:9700/mcp"
+    }
+  }
+}
+```
+
+Remote MCP uses the same auth/TLS posture as `plasmite serve`:
+- if server auth is enabled, clients send the same bearer token;
+- if TLS is enabled, clients trust the same certificate/CA material.
+
+### Polling pattern (`plasmite_read` + `after_seq`)
+
+MCP tools are request/response, so polling is the v1 pattern:
+
+1. Call `plasmite_read` with `pool` and optional filters.
+2. Save `next_after_seq` from the result.
+3. Call again with `after_seq` to read only newer messages.
+
+`plasmite_read` details in v1:
+- default `count` is 20, maximum is 200;
+- without `after_seq`, it returns the last `count` matching messages (ascending);
+- with `after_seq`, it returns messages where `seq > after_seq` (ascending);
+- if both `since` and `after_seq` are set, both filters apply (intersection).
+
+v1 intentionally does not implement MCP resource subscriptions or POST-SSE mode.
 
 ### Browser page served separately (CORS)
 
