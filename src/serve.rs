@@ -19,7 +19,7 @@ use rcgen::{Certificate, CertificateParams, SanType};
 use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::future::IntoFuture;
@@ -43,8 +43,14 @@ use crate::pool_info_json::pool_info_json;
 use plasmite::api::{
     Durability, Error, ErrorKind, LocalClient, PoolApiExt, PoolOptions, PoolRef, TailOptions, lite3,
 };
+use plasmite::mcp::{
+    DispatchOutcome, JsonRpcError as McpJsonRpcError, McpDispatcher, McpHandler, McpResource,
+    McpTool, PlasmiteMcpHandler, ResourceReadRequest, ResourceReadResult, ToolCallRequest,
+    ToolCallResult,
+};
 
 const UI_INDEX_HTML: &str = include_str!("../ui/index.html");
+const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 
 #[derive(Clone, Debug)]
 pub struct ServeConfig {
@@ -162,6 +168,7 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
 
     let mut app = Router::new()
         .route("/healthz", get(healthz))
+        .route("/mcp", post(mcp_post).get(mcp_get))
         .route("/ui", get(ui_index))
         .route("/ui/pools/:pool", get(ui_pool))
         .route("/v0/pools", post(create_pool).get(list_pools))
@@ -668,6 +675,194 @@ struct AppendLite3Query {
 
 async fn healthz() -> Response {
     json_response(json!({ "ok": true }))
+}
+
+async fn mcp_get() -> Response {
+    let mut response = Response::new(Body::empty());
+    *response.status_mut() = StatusCode::METHOD_NOT_ALLOWED;
+    response
+        .headers_mut()
+        .insert("plasmite-version", HeaderValue::from_static("0"));
+    response
+}
+
+async fn mcp_post(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> Response {
+    if let Err(err) = authorize(&headers, &state) {
+        return error_response(err);
+    }
+    if let Err(err) = validate_mcp_protocol_version(&headers) {
+        return error_response_with_status(err, StatusCode::BAD_REQUEST);
+    }
+    if let Err(err) = validate_mcp_origin_header(&headers) {
+        return error_response_with_status(err, StatusCode::FORBIDDEN);
+    }
+    if is_jsonrpc_response_payload(&payload) {
+        return accepted_response();
+    }
+
+    let handler = ServeMcpHandler::new(state.client.clone(), state.access_mode);
+    let mut dispatcher = McpDispatcher::new(handler);
+    match dispatcher.dispatch_value(payload) {
+        DispatchOutcome::NoResponse => accepted_response(),
+        DispatchOutcome::Response(response) => {
+            let payload = match serde_json::to_value(response) {
+                Ok(value) => value,
+                Err(err) => {
+                    return error_response(
+                        Error::new(ErrorKind::Internal)
+                            .with_message("failed to encode MCP response")
+                            .with_source(err),
+                    );
+                }
+            };
+            json_response(payload)
+        }
+    }
+}
+
+struct ServeMcpHandler {
+    inner: PlasmiteMcpHandler,
+    access_mode: AccessMode,
+}
+
+impl ServeMcpHandler {
+    fn new(client: LocalClient, access_mode: AccessMode) -> Self {
+        Self {
+            inner: PlasmiteMcpHandler::with_client(client),
+            access_mode,
+        }
+    }
+}
+
+impl McpHandler for ServeMcpHandler {
+    fn list_tools(&mut self) -> Result<Vec<McpTool>, McpJsonRpcError> {
+        self.inner.list_tools()
+    }
+
+    fn call_tool(&mut self, request: ToolCallRequest) -> Result<ToolCallResult, McpJsonRpcError> {
+        if mcp_tool_requires_read(&request.name) && !self.access_mode.allows_read() {
+            return Ok(mcp_access_denied_tool_result(
+                "read operations",
+                request.name.as_str(),
+            ));
+        }
+        if mcp_tool_requires_write(&request.name) && !self.access_mode.allows_write() {
+            return Ok(mcp_access_denied_tool_result(
+                "write operations",
+                request.name.as_str(),
+            ));
+        }
+        self.inner.call_tool(request)
+    }
+
+    fn list_resources(&mut self) -> Result<Vec<McpResource>, McpJsonRpcError> {
+        if !self.access_mode.allows_read() {
+            return Err(mcp_access_denied_rpc_error("read operations"));
+        }
+        self.inner.list_resources()
+    }
+
+    fn read_resource(
+        &mut self,
+        request: ResourceReadRequest,
+    ) -> Result<ResourceReadResult, McpJsonRpcError> {
+        if !self.access_mode.allows_read() {
+            return Err(mcp_access_denied_rpc_error("read operations"));
+        }
+        self.inner.read_resource(request)
+    }
+}
+
+fn mcp_tool_requires_read(name: &str) -> bool {
+    matches!(
+        name,
+        "plasmite_pool_list" | "plasmite_pool_info" | "plasmite_fetch" | "plasmite_read"
+    )
+}
+
+fn mcp_tool_requires_write(name: &str) -> bool {
+    matches!(
+        name,
+        "plasmite_pool_create" | "plasmite_pool_delete" | "plasmite_feed"
+    )
+}
+
+fn mcp_access_denied_tool_result(action: &str, tool: &str) -> ToolCallResult {
+    ToolCallResult::execution_error_with_structured(
+        format!("forbidden: access mode disallows {action}"),
+        Some(json!({
+            "error_kind": "Permission",
+            "tool": tool,
+            "hint": "Adjust --access to permit this operation.",
+        })),
+    )
+}
+
+fn mcp_access_denied_rpc_error(action: &str) -> McpJsonRpcError {
+    let mut error =
+        McpJsonRpcError::new(-32000, format!("forbidden: access mode disallows {action}"));
+    error.data = Some(json!({
+        "error_kind": "Permission",
+        "hint": "Adjust --access to permit this operation.",
+    }));
+    error
+}
+
+fn validate_mcp_protocol_version(headers: &HeaderMap) -> Result<(), Error> {
+    let Some(protocol) = headers.get("MCP-Protocol-Version") else {
+        return Ok(());
+    };
+    let value = protocol.to_str().map_err(|_| {
+        Error::new(ErrorKind::Usage)
+            .with_message("invalid MCP-Protocol-Version header")
+            .with_hint(format!("Use MCP-Protocol-Version: {MCP_PROTOCOL_VERSION}."))
+    })?;
+    if value != MCP_PROTOCOL_VERSION {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("unsupported MCP-Protocol-Version")
+            .with_hint(format!("Use MCP-Protocol-Version: {MCP_PROTOCOL_VERSION}.")));
+    }
+    Ok(())
+}
+
+fn validate_mcp_origin_header(headers: &HeaderMap) -> Result<(), Error> {
+    let Some(origin) = headers.get(header::ORIGIN) else {
+        return Ok(());
+    };
+    let value = origin.to_str().map_err(|_| {
+        Error::new(ErrorKind::Permission)
+            .with_message("forbidden: invalid Origin header")
+            .with_hint("Send a valid Origin URI or omit Origin.")
+    })?;
+    normalize_cors_origin(value).map_err(|_| {
+        Error::new(ErrorKind::Permission)
+            .with_message("forbidden: invalid Origin header")
+            .with_hint("Send a valid Origin URI or omit Origin.")
+    })?;
+    Ok(())
+}
+
+fn is_jsonrpc_response_payload(payload: &Value) -> bool {
+    let Some(object) = payload.as_object() else {
+        return false;
+    };
+    object.get("jsonrpc").and_then(Value::as_str) == Some("2.0")
+        && object.contains_key("id")
+        && !object.contains_key("method")
+        && (object.contains_key("result") || object.contains_key("error"))
+}
+
+fn accepted_response() -> Response {
+    let mut response = Response::new(Body::empty());
+    *response.status_mut() = StatusCode::ACCEPTED;
+    response
+        .headers_mut()
+        .insert("plasmite-version", HeaderValue::from_static("0"));
+    response
 }
 
 async fn ui_index() -> Response {

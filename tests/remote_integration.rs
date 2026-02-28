@@ -929,6 +929,207 @@ fn remote_write_only_allows_append_but_rejects_reads() -> TestResult<()> {
     Ok(())
 }
 
+fn mcp_post(base_url: &str, payload: &Value) -> Result<ureq::Response, ureq::Error> {
+    ureq::post(&format!("{base_url}/mcp"))
+        .set("Content-Type", "application/json")
+        .send_string(&payload.to_string())
+}
+
+#[test]
+fn remote_mcp_http_profile_request_notification_and_get() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::start(temp_dir.path())?;
+
+    let initialize = mcp_post(
+        &server.base_url,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {}
+        }),
+    )
+    .expect("initialize");
+    assert_eq!(initialize.status(), 200);
+    assert!(
+        initialize
+            .header("content-type")
+            .unwrap_or_default()
+            .starts_with("application/json")
+    );
+    let init_json: Value = serde_json::from_str(&initialize.into_string()?)?;
+    assert_eq!(init_json["id"], json!(1));
+
+    let notification = mcp_post(
+        &server.base_url,
+        &json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {}
+        }),
+    )
+    .expect("notification");
+    assert_eq!(notification.status(), 202);
+    assert_eq!(notification.into_string()?, "");
+
+    let response_payload = mcp_post(
+        &server.base_url,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 42,
+            "result": {}
+        }),
+    )
+    .expect("response payload");
+    assert_eq!(response_payload.status(), 202);
+    assert_eq!(response_payload.into_string()?, "");
+
+    match ureq::get(&format!("{}/mcp", server.base_url)).call() {
+        Ok(_) => return Err("expected GET /mcp to be rejected".into()),
+        Err(ureq::Error::Status(code, _)) => assert_eq!(code, 405),
+        Err(err) => return Err(err.into()),
+    }
+
+    Ok(())
+}
+
+#[test]
+fn remote_mcp_protocol_version_header_validation() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::start(temp_dir.path())?;
+    let payload = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "ping",
+        "params": {}
+    });
+
+    match ureq::post(&format!("{}/mcp", server.base_url))
+        .set("Content-Type", "application/json")
+        .set("MCP-Protocol-Version", "not-supported")
+        .send_string(&payload.to_string())
+    {
+        Ok(_) => return Err("expected unsupported protocol version to fail".into()),
+        Err(ureq::Error::Status(code, _)) => assert_eq!(code, 400),
+        Err(err) => return Err(err.into()),
+    }
+
+    let supported = ureq::post(&format!("{}/mcp", server.base_url))
+        .set("Content-Type", "application/json")
+        .set("MCP-Protocol-Version", "2025-11-25")
+        .send_string(&payload.to_string())
+        .expect("supported protocol");
+    assert_eq!(supported.status(), 200);
+
+    let absent = mcp_post(&server.base_url, &payload).expect("missing protocol version allowed");
+    assert_eq!(absent.status(), 200);
+    Ok(())
+}
+
+#[test]
+fn remote_mcp_origin_header_validation() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::start(temp_dir.path())?;
+    let payload = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "ping",
+        "params": {}
+    });
+
+    match ureq::post(&format!("{}/mcp", server.base_url))
+        .set("Content-Type", "application/json")
+        .set("Origin", "not a valid origin")
+        .send_string(&payload.to_string())
+    {
+        Ok(_) => return Err("expected invalid Origin to fail".into()),
+        Err(ureq::Error::Status(code, _)) => assert_eq!(code, 403),
+        Err(err) => return Err(err.into()),
+    }
+
+    let valid = ureq::post(&format!("{}/mcp", server.base_url))
+        .set("Content-Type", "application/json")
+        .set("Origin", "https://demo.wratify.ai")
+        .send_string(&payload.to_string())
+        .expect("valid Origin");
+    assert_eq!(valid.status(), 200);
+    Ok(())
+}
+
+#[test]
+fn remote_mcp_access_mode_restricts_tools() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let pool_dir = temp_dir.path();
+    let local = LocalClient::new().with_pool_dir(pool_dir);
+    local.create_pool(&PoolRef::name("mcp-access"), PoolOptions::new(1024 * 1024))?;
+
+    let write_only = TestServer::start_with_access(pool_dir, "write-only")?;
+    let read_result = mcp_post(
+        &write_only.base_url,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_pool_list",
+                "arguments": {}
+            }
+        }),
+    )
+    .expect("write-only read tool");
+    let read_json: Value = serde_json::from_str(&read_result.into_string()?)?;
+    assert_eq!(read_json["result"]["isError"], json!(true));
+    assert_eq!(
+        read_json["result"]["structuredContent"]["error_kind"],
+        json!("Permission")
+    );
+
+    let write_result = mcp_post(
+        &write_only.base_url,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_feed",
+                "arguments": {
+                    "pool": "mcp-access",
+                    "data": {"ok": true}
+                }
+            }
+        }),
+    )
+    .expect("write tool");
+    let write_json: Value = serde_json::from_str(&write_result.into_string()?)?;
+    assert_ne!(write_json["result"]["isError"], json!(true));
+
+    drop(write_only);
+    let read_only = TestServer::start_with_access(pool_dir, "read-only")?;
+    let denied_write = mcp_post(
+        &read_only.base_url,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_feed",
+                "arguments": {
+                    "pool": "mcp-access",
+                    "data": {"ok": true}
+                }
+            }
+        }),
+    )
+    .expect("read-only write tool");
+    let denied_json: Value = serde_json::from_str(&denied_write.into_string()?)?;
+    assert_eq!(denied_json["result"]["isError"], json!(true));
+    assert_eq!(
+        denied_json["result"]["structuredContent"]["error_kind"],
+        json!("Permission")
+    );
+    Ok(())
+}
+
 fn pick_port() -> TestResult<u16> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let port = listener.local_addr()?.port();
