@@ -482,6 +482,34 @@ MCP tools are request/response, so polling is the v1 pattern:
 
 v1 intentionally does not implement MCP resource subscriptions or POST-SSE mode.
 
+### Coordination conventions (experimental, recommended)
+
+MCP tools are generic. For multi-agent coordination, provide explicit conventions in your agent instructions.
+
+Recommended `claims` pattern:
+
+1. Use one shared pool (for example `claims`).
+2. Prefer tags over jq for routing:
+   - `claim`
+   - `agent:<agent-id>`
+   - `file:<path>` for each claimed file
+3. Claim by feeding an event with current files:
+   - `data`: `{"agent":"amp-1","files":["src/auth.rs"]}`
+4. Release by feeding an empty files list:
+   - `data`: `{"agent":"amp-1","files":[]}`
+5. Readers treat claims as leases by time window (for example `since: "10m"`), then reconstruct latest claim per agent client-side.
+
+Important v1 limits:
+- No server TTL/auto-expiry for stale claims.
+- No `latest_by` read primitive yet; state reconstruction is client-side.
+- No atomic claim operation; read-then-write races are possible, so claims are advisory.
+
+### CI split pattern (writer outside MCP, reader via MCP)
+
+For CI status, a simple split works well:
+- CI pipeline writes with CLI/API (`plasmite feed` or HTTP `/v0/pools/.../messages`).
+- Agents read with MCP (`plasmite_read`, `count: 1`, optional `after_seq` polling).
+
 ### Browser page served separately (CORS)
 
 If a browser app is hosted on another origin (for example `https://demo.wratify.ai`), configure `pls serve` with an explicit allowlist:
