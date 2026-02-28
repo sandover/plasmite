@@ -10,6 +10,7 @@ A developer should be able to create, inspect, stream, and automate message work
 
 - Local and host-adjacent process coordination.
 - Script-friendly event logging and replay.
+- Zero-integration process output capture via `plasmite tap`, then filter/replay with `follow`.
 - Lightweight service-to-service messaging for small deployments.
 - Embedded queue semantics through language bindings.
 
@@ -51,6 +52,7 @@ These are checkable, not aspirational.
 - New commands or flags do not change the help output or behavior of existing commands as a side effect.
 - Pool operations complete without requiring network access when operating on local pools.
 - Every error returned by the CLI includes either a `hint` field or a documentation reference.
+- A user can capture and replay any command's stdout/stderr using only `tap` and `follow`, with no changes to the wrapped program.
 
 ## Strategy implications
 

@@ -28,6 +28,7 @@ mod color_json;
 mod command_dispatch;
 mod ingest;
 mod jq_filter;
+mod mcp_stdio;
 mod pool_info_json;
 mod pool_paths;
 mod serve;
@@ -191,6 +192,7 @@ LEARN MORE
 struct Cli {
     #[arg(
         long,
+        global = true,
         help = "Pool directory for named pools (default: ~/.plasmite/pools)",
         value_hint = ValueHint::DirPath
     )]
@@ -426,6 +428,17 @@ NOTES
         run: ServeRunArgs,
     },
     #[command(
+        about = "Serve MCP tools and resources on stdio",
+        long_about = r#"Start an experimental MCP server on stdio.
+
+Reads newline-delimited JSON-RPC requests from stdin and writes newline-delimited JSON-RPC responses to stdout.
+The process exits when stdin closes."#,
+        after_help = r#"EXAMPLES
+  $ plasmite mcp
+  $ plasmite mcp --dir /path/to/pools"#
+    )]
+    Mcp,
+    #[command(
         arg_required_else_help = true,
         about = "Fetch one message by sequence number",
         long_about = r#"Fetch a specific message by its seq number and print as JSON."#,
@@ -574,6 +587,48 @@ NOTES
             help_heading = "Remote auth/TLS"
         )]
         tls_skip_verify: bool,
+    },
+    #[command(
+        arg_required_else_help = true,
+        about = "Capture command output into a local pool",
+        long_about = r#"Run a command, capture stdout/stderr as line messages, and append them to a local pool.
+
+Use `--` to separate tap flags from the wrapped command argv."#,
+        after_help = r#"EXAMPLES
+  $ plasmite tap build --create -- cargo build
+  $ plasmite follow build
+  $ plasmite follow build --where '.data.stream == "stderr"'
+  $ plasmite tap deploy --tag prod -- ./deploy.sh
+  $ plasmite tap api --create --create-size 64M -- ./server
+
+NOTES
+  - `--` is required before wrapped command args
+  - Use --create-size for long-running/high-volume captures
+  - `tap` accepts local pool refs only in v0"#
+    )]
+    Tap {
+        #[arg(help = "Pool ref: local name/path")]
+        pool: String,
+        #[arg(long, help = "Create local pool if missing before tapping")]
+        create: bool,
+        #[arg(
+            long = "create-size",
+            help = "Pool size when creating (bytes or K/M/G)"
+        )]
+        create_size: Option<String>,
+        #[arg(long, help = "Repeatable tag for captured line messages")]
+        tag: Vec<String>,
+        #[arg(short = 'q', long, help = "Suppress child stdout/stderr passthrough")]
+        quiet: bool,
+        #[arg(long, default_value = "fast", help = "Durability mode: fast|flush")]
+        durability: String,
+        #[arg(
+            last = true,
+            allow_hyphen_values = true,
+            value_name = "COMMAND",
+            help = "Wrapped command and args (must follow `--`)"
+        )]
+        command: Vec<String>,
     },
     #[command(
         arg_required_else_help = true,
@@ -2041,6 +2096,9 @@ fn emit_serve_init_human(result: &serve_init::ServeInitResult) {
     println!("      --token-file {token_file} \\");
     println!("      --tls-ca {tls_cert} --tail 10");
     println!();
+    println!("  MCP endpoint for agent clients:");
+    println!("    https://{remote_url_host}:{port}/mcp");
+    println!();
     println!("  Or with curl:");
     println!("    TOKEN=$(cat {token_file})");
     println!("    curl -k -H \"Authorization: Bearer $TOKEN\" \\");
@@ -2189,6 +2247,7 @@ fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<String> {
     let host = display_host(config.bind.ip());
     let base_url = format!("{scheme}://{host}:{}", config.bind.port());
     let web_ui_url = format!("{base_url}/ui");
+    let mcp_url = format!("{base_url}/mcp");
     let append_url = format!("{base_url}/v0/pools/demo/append");
     let curl_tls_flag = if config.tls_self_signed { " -k" } else { "" };
     let scope = serve_scope(config.bind.ip());
@@ -2237,6 +2296,7 @@ fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<String> {
         format!("Serving pools on {base_url} ({scope})"),
         String::new(),
         format!("  UI:   {web_ui_url}"),
+        format!("  MCP:  {mcp_url}"),
         format!("  Auth: {auth}    TLS: {tls}    Access: {access}    CORS: {cors}"),
     ];
 
@@ -2337,6 +2397,7 @@ fn emit_serve_check_report(config: &serve::ServeConfig, color_mode: ColorMode, j
                 "base_url": base_url,
                 "web_ui": format!("{base_url}/ui"),
                 "web_ui_pool": format!("{base_url}/ui/pools/demo"),
+                "mcp": format!("{base_url}/mcp"),
                 "auth": auth_mode,
                 "tls": tls_mode,
                 "tls_fingerprint": config.tls_fingerprint,
@@ -2355,6 +2416,12 @@ fn emit_serve_check_report(config: &serve::ServeConfig, color_mode: ColorMode, j
 
 fn build_serve_check_lines(config: &serve::ServeConfig) -> Vec<String> {
     let tls_enabled = serve_tls_enabled(config);
+    let base_url = format!(
+        "{}://{}:{}",
+        serve_scheme(config),
+        display_host(config.bind.ip()),
+        config.bind.port()
+    );
     let auth = if config.token.is_some() {
         "bearer token"
     } else {
@@ -2386,6 +2453,7 @@ fn build_serve_check_lines(config: &serve::ServeConfig) -> Vec<String> {
             config.bind,
             serve_scope(config.bind.ip())
         ),
+        format!("  MCP:    {base_url}/mcp"),
         format!("  Auth: {auth}    TLS: {tls}    Access: {access}    CORS: {cors}"),
         format!(
             "  Limits: body {}, timeout {}, concurrency {}",
@@ -4210,6 +4278,7 @@ mod tests {
         config.tls_fingerprint = Some("SHA256:AA:BB".to_string());
         let text = build_serve_startup_lines(&config).join("\n");
         assert!(text.contains("Serving pools on https://127.0.0.1:9700 (loopback only)"));
+        assert!(text.contains("MCP:  https://127.0.0.1:9700/mcp"));
         assert!(text.contains("Auth: bearer    TLS: self-signed"));
         assert!(text.contains("--token-file <token-file> --tls-ca <tls-cert>"));
         assert!(text.contains("Fingerprint: SHA256:AA:BB"));
@@ -4220,6 +4289,7 @@ mod tests {
         let config = test_serve_config();
         let text = build_serve_startup_lines(&config).join("\n");
         assert!(text.contains("Serving pools on http://127.0.0.1:9700 (loopback only)"));
+        assert!(text.contains("MCP:  http://127.0.0.1:9700/mcp"));
         assert!(text.contains("Auth: none    TLS: off    Access: read-write    CORS: same-origin"));
         assert!(text.contains("Try it:"));
         assert!(text.contains("Press Ctrl-C to stop."));

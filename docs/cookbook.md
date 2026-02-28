@@ -4,10 +4,12 @@
 
 - [CI Gate](#ci-gate)
 - [Live Event Stream](#live-event-stream)
+- [Process Capture with tap](#process-capture-with-tap)
 - [Duplex Chat](#duplex-chat)
 - [System Log Ring Buffer](#system-log-ring-buffer)
 - [Replay & Debug](#replay--debug)
 - [Remote Pool Access](#remote-pool-access)
+- [MCP Agent Access](#mcp-agent-access)
 - [When Plasmite Isn't the Right Fit](#when-plasmite-isnt-the-right-fit)
 - [Next Steps](#next-steps)
 
@@ -247,6 +249,35 @@ p.Close(); c.Close()
 
 ---
 
+## Process Capture with tap
+
+Use `tap` to wrap an existing command and persist its stdout/stderr as pool messages without changing the wrapped program.
+
+```bash
+# capture command output into a pool
+pls tap build --create -- cargo build
+
+# in another terminal, watch output live
+pls follow build
+
+# replay recent output
+pls follow build --since 2h
+
+# filter only stderr lines
+pls follow build --where '.data.stream == "stderr"'
+
+# tag captured lines for downstream filters
+pls tap deploy --tag prod -- ./deploy.sh
+```
+
+For long-running or high-volume commands, choose an explicit pool size so the ring does not overwrite data too quickly:
+
+```bash
+pls tap api --create --create-size 64M -- ./server
+```
+
+---
+
 ## Duplex Chat
 
 `duplex` runs send and follow in one process. Type a line and it's appended; messages from the other side print as they arrive.
@@ -400,6 +431,56 @@ plasmite follow https://server:9700/events --tail 20 --tls-skip-verify
 curl remains useful for API debugging, but native `plasmite feed` / `plasmite follow` should be the first-line operator workflow.
 
 A built-in web UI is available at `https://server:9700/ui`.
+
+## MCP Agent Access
+
+Plasmite can also be used as an MCP server for agent harnesses.
+
+### Local MCP server (stdio)
+
+```json
+{
+  "mcpServers": {
+    "plasmite": {
+      "command": "plasmite",
+      "args": ["mcp", "--dir", "/path/to/pools"]
+    }
+  }
+}
+```
+
+### Remote MCP server (`/mcp`)
+
+```json
+{
+  "mcpServers": {
+    "plasmite-remote": {
+      "type": "streamable-http",
+      "url": "https://server:9700/mcp"
+    }
+  }
+}
+```
+
+Remote MCP uses the same auth/TLS posture as `plasmite serve`:
+- if server auth is enabled, clients send the same bearer token;
+- if TLS is enabled, clients trust the same certificate/CA material.
+
+### Polling pattern (`plasmite_read` + `after_seq`)
+
+MCP tools are request/response, so polling is the v1 pattern:
+
+1. Call `plasmite_read` with `pool` and optional filters.
+2. Save `next_after_seq` from the result.
+3. Call again with `after_seq` to read only newer messages.
+
+`plasmite_read` details in v1:
+- default `count` is 20, maximum is 200;
+- without `after_seq`, it returns the last `count` matching messages (ascending);
+- with `after_seq`, it returns messages where `seq > after_seq` (ascending);
+- if both `since` and `after_seq` are set, both filters apply (intersection).
+
+v1 intentionally does not implement MCP resource subscriptions or POST-SSE mode.
 
 ### Browser page served separately (CORS)
 

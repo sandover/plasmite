@@ -99,9 +99,23 @@ Plasmite is transport-agnostic at the core.
 
 - Local mode: CLI/API calls directly into core operations.
 - Remote mode: `plasmite serve` adapts HTTP request/response into the same core calls.
+- Process capture mode (`plasmite tap`): CLI spawns a child process, reads stdout/stderr on separate threads, and appends line messages through the same local append path as `feed`.
 - Future transports must be adapters over the existing core, not alternate correctness engines.
 
 Invariant: Adding a new transport must not require changes to `src/core`. If a proposed transport requires core changes to function correctly, the design is wrong.
+
+## Tap execution model (CLI adapter)
+
+`tap` is an interface-layer adapter over existing local pool operations:
+
+1. Parse tap arguments and resolve a local pool ref.
+2. Spawn child process with inherited stdin and piped stdout/stderr.
+3. Run one reader thread per stream (`stdout`, `stderr`) and frame each line as a JSON message.
+4. Emit lifecycle messages (`start`, then `exit`) around captured output.
+5. Append all messages via the shared local append path; tap does not introduce a parallel storage path.
+6. On Unix, forward SIGINT/SIGTERM received by tap to the child, then drain buffered output before emitting the exit lifecycle message.
+
+Invariant: tap may add ingestion behavior, but it must not fork correctness semantics from the shared append/read contracts.
 
 ## Extension seams
 

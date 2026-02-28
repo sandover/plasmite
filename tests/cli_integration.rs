@@ -27,11 +27,36 @@ fn cmd() -> Command {
 
 fn cmd_tty(args: &[&str]) -> std::process::Output {
     let exe = env!("CARGO_BIN_EXE_plasmite");
-    Command::new("script")
-        .args(["-q", "/dev/null", exe])
-        .args(args)
-        .output()
-        .expect("script tty")
+    #[cfg(target_os = "linux")]
+    {
+        // util-linux script requires -c for command execution; otherwise leading
+        // wrapped-command flags (for example --dir) are parsed as script flags.
+        let mut argv = Vec::with_capacity(args.len() + 1);
+        argv.push(exe);
+        argv.extend_from_slice(args);
+        let command = argv
+            .into_iter()
+            .map(shell_quote)
+            .collect::<Vec<_>>()
+            .join(" ");
+        Command::new("script")
+            .args(["-q", "-e", "-c", &command, "/dev/null"])
+            .output()
+            .expect("script tty")
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Command::new("script")
+            .args(["-q", "/dev/null", exe])
+            .args(args)
+            .output()
+            .expect("script tty")
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn shell_quote(arg: &str) -> String {
+    format!("'{}'", arg.replace('\'', "'\\''"))
 }
 
 fn sanitize_tty_text(bytes: &[u8]) -> String {
@@ -146,6 +171,25 @@ fn parse_error_json(output: &[u8]) -> Value {
 
 fn parse_notice_json(line: &str) -> Value {
     parse_json(line.trim())
+}
+
+fn fetch_message(pool_dir: &Path, pool: &str, seq: u64) -> Value {
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().expect("pool_dir"),
+            "fetch",
+            pool,
+            &seq.to_string(),
+        ])
+        .output()
+        .expect("fetch");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    parse_json(std::str::from_utf8(&output.stdout).expect("utf8"))
 }
 
 fn assert_actionable_usage_feedback(
@@ -264,7 +308,7 @@ fn help_pool_lists_pool_subcommands() {
     let output = cmd().args(["help", "pool"]).output().expect("help pool");
     assert!(output.status.success());
     let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
-    assert!(stdout.contains("Usage: plasmite pool <COMMAND>"));
+    assert!(stdout.contains("Usage: plasmite pool [OPTIONS] <COMMAND>"));
     assert!(stdout.contains("list    List pools in the pool directory"));
 }
 
@@ -299,6 +343,430 @@ fn follow_with_no_args_prints_help() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = std::str::from_utf8(&output.stderr).expect("utf8");
     assert!(stderr.contains("Usage: plasmite follow"));
+}
+
+#[test]
+fn tap_with_no_args_prints_help() {
+    let output = cmd().args(["tap"]).output().expect("tap");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = std::str::from_utf8(&output.stderr).expect("utf8");
+    assert!(stderr.contains("Usage: plasmite tap"));
+    assert!(stderr.contains("Capture command output into a local pool"));
+}
+
+#[test]
+fn tap_help_renders_examples() {
+    let output = cmd().args(["tap", "--help"]).output().expect("tap help");
+    assert!(output.status.success());
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+    assert!(stdout.contains("plasmite tap build --create -- cargo build"));
+    assert!(stdout.contains("plasmite tap api --create --create-size 64M -- ./server"));
+    assert!(stdout.contains("`--` is required before wrapped command args"));
+}
+
+#[test]
+fn tap_requires_wrapped_command_after_separator() {
+    let output = cmd().args(["tap", "build"]).output().expect("tap");
+    assert_actionable_usage_feedback(
+        &output,
+        "tap requires a wrapped command after `--`",
+        "plasmite tap <pool> -- <command...>",
+    );
+}
+
+#[test]
+fn tap_remote_url_rejected_as_local_only() {
+    let output = cmd()
+        .args(["tap", "http://127.0.0.1:65535/demo", "--", "echo", "hi"])
+        .output()
+        .expect("tap");
+    assert_actionable_usage_feedback(
+        &output,
+        "tap accepts local pool refs only",
+        "Use a local pool name/path",
+    );
+}
+
+#[test]
+fn tap_non_tty_stderr_suppresses_status_lines() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "tap",
+            "demo",
+            "--create",
+            "--",
+            "echo",
+            "hello",
+        ])
+        .output()
+        .expect("tap");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::str::from_utf8(&output.stdout).expect("utf8"),
+        "hello\n"
+    );
+    let stderr = std::str::from_utf8(&output.stderr).expect("utf8");
+    assert!(!stderr.contains("tapping"));
+    assert!(!stderr.contains("tapped"));
+}
+
+#[test]
+fn tap_tty_stderr_emits_startup_and_completion_lines() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let output = cmd_tty(&[
+        "--dir",
+        pool_dir.to_str().unwrap(),
+        "tap",
+        "demo",
+        "--create",
+        "--",
+        "echo",
+        "hello",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = sanitize_tty_text(&output.stdout);
+    assert!(text.contains("tapping demo <- echo hello"), "output={text}");
+    assert!(text.contains("tapped 1 lines ("), "output={text}");
+    assert!(text.contains("-> demo exit 0"), "output={text}");
+}
+
+#[test]
+fn tap_basic_capture_writes_start_line_and_exit_messages() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let tap = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "tap",
+            "demo",
+            "--create",
+            "--",
+            "echo",
+            "hello",
+        ])
+        .output()
+        .expect("tap");
+    assert!(
+        tap.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&tap.stderr)
+    );
+
+    let start = fetch_message(&pool_dir, "demo", 1);
+    let line = fetch_message(&pool_dir, "demo", 2);
+    let exit = fetch_message(&pool_dir, "demo", 3);
+
+    assert_eq!(start["data"]["kind"], "start");
+    assert_eq!(start["data"]["cmd"], json!(["echo", "hello"]));
+    assert_eq!(start["meta"]["tags"], json!(["lifecycle"]));
+
+    assert_eq!(line["data"]["kind"], "line");
+    assert_eq!(line["data"]["stream"], "stdout");
+    assert_eq!(line["data"]["line"], "hello");
+
+    assert_eq!(exit["data"]["kind"], "exit");
+    assert_eq!(exit["data"]["code"], 0);
+    assert!(exit["data"]["elapsed_ms"].as_u64().is_some());
+    assert_eq!(exit["meta"]["tags"], json!(["lifecycle"]));
+}
+
+#[test]
+fn tap_captures_stderr_lines() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let tap = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "tap",
+            "errpool",
+            "--create",
+            "--",
+            "sh",
+            "-c",
+            "echo err >&2",
+        ])
+        .output()
+        .expect("tap");
+    assert!(
+        tap.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&tap.stderr)
+    );
+
+    let line = fetch_message(&pool_dir, "errpool", 2);
+    assert_eq!(line["data"]["stream"], "stderr");
+    assert_eq!(line["data"]["line"], "err");
+}
+
+#[test]
+fn tap_forwards_exit_code_and_records_exit_lifecycle_code() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let tap = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "tap",
+            "failpool",
+            "--create",
+            "--",
+            "false",
+        ])
+        .output()
+        .expect("tap");
+    assert_eq!(tap.status.code(), Some(1));
+
+    let exit = fetch_message(&pool_dir, "failpool", 2);
+    assert_eq!(exit["data"]["kind"], "exit");
+    assert_eq!(exit["data"]["code"], 1);
+    assert!(exit["data"].get("signal").is_none());
+}
+
+#[test]
+fn tap_applies_user_tags_to_lines_and_lifecycle_tag_to_start_exit() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let tap = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "tap",
+            "tagpool",
+            "--create",
+            "--tag",
+            "ci",
+            "--tag",
+            "build",
+            "--",
+            "echo",
+            "ok",
+        ])
+        .output()
+        .expect("tap");
+    assert!(
+        tap.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&tap.stderr)
+    );
+
+    let start = fetch_message(&pool_dir, "tagpool", 1);
+    let line = fetch_message(&pool_dir, "tagpool", 2);
+    let exit = fetch_message(&pool_dir, "tagpool", 3);
+    assert_eq!(start["meta"]["tags"], json!(["lifecycle"]));
+    assert_eq!(line["meta"]["tags"], json!(["ci", "build"]));
+    assert_eq!(exit["meta"]["tags"], json!(["lifecycle"]));
+}
+
+#[test]
+fn tap_quiet_suppresses_passthrough_but_capture_still_works() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let tap = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "tap",
+            "quietpool",
+            "--create",
+            "-q",
+            "--",
+            "echo",
+            "hello",
+        ])
+        .output()
+        .expect("tap");
+    assert!(
+        tap.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&tap.stderr)
+    );
+    assert!(
+        tap.stdout.is_empty(),
+        "stdout should be empty in quiet mode"
+    );
+
+    let line = fetch_message(&pool_dir, "quietpool", 2);
+    assert_eq!(line["data"]["line"], "hello");
+}
+
+#[test]
+fn tap_multiline_capture_preserves_line_order() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let tap = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "tap",
+            "mpool",
+            "--create",
+            "--",
+            "sh",
+            "-c",
+            "echo a; echo b; echo c",
+        ])
+        .output()
+        .expect("tap");
+    assert!(
+        tap.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&tap.stderr)
+    );
+
+    let l1 = fetch_message(&pool_dir, "mpool", 2);
+    let l2 = fetch_message(&pool_dir, "mpool", 3);
+    let l3 = fetch_message(&pool_dir, "mpool", 4);
+    let exit = fetch_message(&pool_dir, "mpool", 5);
+    assert_eq!(l1["data"]["line"], "a");
+    assert_eq!(l2["data"]["line"], "b");
+    assert_eq!(l3["data"]["line"], "c");
+    assert_eq!(exit["data"]["kind"], "exit");
+}
+
+#[test]
+fn tap_captures_unterminated_final_line() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let tap = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "tap",
+            "nolf",
+            "--create",
+            "--",
+            "python3",
+            "-c",
+            "import sys; sys.stdout.write('tail-without-newline')",
+        ])
+        .output()
+        .expect("tap");
+    assert!(
+        tap.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&tap.stderr)
+    );
+
+    let line = fetch_message(&pool_dir, "nolf", 2);
+    assert_eq!(line["data"]["line"], "tail-without-newline");
+}
+
+#[test]
+fn tap_preserves_long_line_without_truncation() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let tap = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "tap",
+            "longline",
+            "--create",
+            "--",
+            "python3",
+            "-c",
+            "print('x' * 65536)",
+        ])
+        .output()
+        .expect("tap");
+    assert!(
+        tap.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&tap.stderr)
+    );
+
+    let line = fetch_message(&pool_dir, "longline", 2);
+    let captured = line["data"]["line"].as_str().expect("line string");
+    assert_eq!(captured.len(), 65536);
+    assert!(captured.chars().all(|ch| ch == 'x'));
+}
+
+#[test]
+fn tap_missing_wrapped_executable_is_actionable_nonzero_error() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "tap",
+            "missingcmd",
+            "--create",
+            "--",
+            "nonexistent-command-xyz",
+        ])
+        .output()
+        .expect("tap");
+    assert_actionable_usage_feedback(
+        &output,
+        "wrapped command not found",
+        "Check PATH or use an absolute executable path",
+    );
+}
+
+#[test]
+fn tap_missing_pool_without_create_has_create_hint() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "tap",
+            "missingpool",
+            "--",
+            "echo",
+            "x",
+        ])
+        .output()
+        .expect("tap");
+    assert_eq!(output.status.code(), Some(3));
+    let err = parse_error_json(&output.stderr);
+    let inner = err.get("error").and_then(|v| v.as_object()).expect("error");
+    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("NotFound"));
+    let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(
+        hint.contains("--create"),
+        "expected --create hint in '{hint}'"
+    );
+}
+
+#[test]
+fn tap_empty_command_after_separator_is_usage_error() {
+    let output = cmd()
+        .args(["tap", "demo", "--create", "--"])
+        .output()
+        .expect("tap");
+    assert_actionable_usage_feedback(
+        &output,
+        "tap requires a wrapped command after `--`",
+        "plasmite tap <pool> -- <command...>",
+    );
 }
 
 #[test]
@@ -5224,6 +5692,8 @@ fn serve_check_outputs_resolved_config() {
     assert_eq!(status, "valid");
     let base_url = check.get("base_url").and_then(|v| v.as_str()).unwrap_or("");
     assert!(base_url.contains("127.0.0.1:9700"));
+    let mcp = check.get("mcp").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(mcp.ends_with("/mcp"));
 }
 
 #[test]
@@ -5258,6 +5728,7 @@ fn serve_check_human_uses_readable_limits_and_fingerprint() {
     assert!(output.status.success());
     let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
     assert!(stdout.contains("Configuration valid."));
+    assert!(stdout.contains("MCP:    https://127.0.0.1:9700/mcp"));
     assert!(stdout.contains("Limits: body 1M, timeout 30s, concurrency 64"));
     assert!(stdout.contains("Fingerprint: SHA256:"));
 }
@@ -6415,4 +6886,249 @@ fn follow_replay_zero_speed_emits_without_delay() {
         elapsed < Duration::from_millis(300),
         "--replay 0 should emit without delay, took {elapsed:?}"
     );
+}
+
+fn mcp_send_request(stdin: &mut impl Write, request: &Value) {
+    serde_json::to_writer(&mut *stdin, request).expect("write request");
+    stdin.write_all(b"\n").expect("write newline");
+    stdin.flush().expect("flush request");
+}
+
+fn mcp_read_response(stdout: &mut BufReader<impl Read>) -> Value {
+    let mut line = String::new();
+    let read = stdout.read_line(&mut line).expect("read response");
+    assert!(read > 0, "expected MCP response line");
+    parse_json(line.trim())
+}
+
+#[test]
+fn mcp_stdio_initialize_and_tool_resource_flow() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let mut child = cmd()
+        .args(["mcp", "--dir", pool_dir.to_str().expect("pool dir")])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn mcp");
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = BufReader::new(child.stdout.take().expect("stdout"));
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {}
+        }),
+    );
+    let initialize = mcp_read_response(&mut stdout);
+    assert_eq!(initialize["id"], json!(1));
+    assert_eq!(initialize["result"]["protocolVersion"], json!("2025-11-25"));
+    assert_eq!(
+        initialize["result"]["capabilities"]["tools"]["listChanged"],
+        json!(false)
+    );
+    assert_eq!(
+        initialize["result"]["capabilities"]["resources"]["listChanged"],
+        json!(false)
+    );
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {}
+        }),
+    );
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "ping",
+            "params": {}
+        }),
+    );
+    let ping = mcp_read_response(&mut stdout);
+    assert_eq!(ping["id"], json!(2));
+    assert_eq!(ping["result"], json!({}));
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 22,
+            "method": "tools/list",
+            "params": {}
+        }),
+    );
+    let tools_list = mcp_read_response(&mut stdout);
+    assert_eq!(tools_list["id"], json!(22));
+    let tool_names = tools_list["result"]["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert!(tool_names.contains(&"plasmite_pool_create"));
+    assert!(tool_names.contains(&"plasmite_read"));
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_pool_create",
+                "arguments": { "name": "demo" }
+            }
+        }),
+    );
+    let create = mcp_read_response(&mut stdout);
+    assert_eq!(create["id"], json!(3));
+    assert_eq!(
+        create["result"]["structuredContent"]["pool"]["name"],
+        json!("demo")
+    );
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_feed",
+                "arguments": {
+                    "pool": "demo",
+                    "data": {"msg": "hello"},
+                    "tags": ["chat"]
+                }
+            }
+        }),
+    );
+    let feed = mcp_read_response(&mut stdout);
+    let seq = feed["result"]["structuredContent"]["message"]["seq"]
+        .as_u64()
+        .expect("seq");
+    assert_eq!(feed["id"], json!(4));
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 41,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_read",
+                "arguments": {
+                    "pool": "demo",
+                    "after_seq": seq.saturating_sub(1),
+                    "since": "1970-01-01T00:00:00Z",
+                    "count": 5
+                }
+            }
+        }),
+    );
+    let read = mcp_read_response(&mut stdout);
+    assert_eq!(read["id"], json!(41));
+    assert_eq!(
+        read["result"]["structuredContent"]["messages"][0]["seq"],
+        json!(seq)
+    );
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 42,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_fetch",
+                "arguments": {
+                    "pool": "demo",
+                    "seq": seq
+                }
+            }
+        }),
+    );
+    let fetch = mcp_read_response(&mut stdout);
+    assert_eq!(fetch["id"], json!(42));
+    assert_eq!(
+        fetch["result"]["structuredContent"]["message"]["data"]["msg"],
+        json!("hello")
+    );
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "resources/list",
+            "params": {}
+        }),
+    );
+    let resources = mcp_read_response(&mut stdout);
+    assert_eq!(resources["id"], json!(5));
+    assert_eq!(
+        resources["result"]["resources"][0]["uri"],
+        json!("plasmite:///pools/demo")
+    );
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "resources/read",
+            "params": {
+                "uri": "plasmite:///pools/demo"
+            }
+        }),
+    );
+    let resource_read = mcp_read_response(&mut stdout);
+    assert_eq!(resource_read["id"], json!(6));
+    let text_payload = resource_read["result"]["contents"][0]["text"]
+        .as_str()
+        .expect("resource text");
+    let payload = parse_json(text_payload);
+    assert_eq!(payload["next_after_seq"], json!(seq));
+    assert_eq!(payload["messages"][0]["data"]["msg"], json!("hello"));
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_pool_delete",
+                "arguments": {
+                    "pool": "demo"
+                }
+            }
+        }),
+    );
+    let delete = mcp_read_response(&mut stdout);
+    assert_eq!(delete["id"], json!(7));
+    assert_ne!(delete["result"]["isError"], json!(true));
+
+    drop(stdin);
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().expect("try_wait") {
+            assert!(status.success(), "mcp exited non-zero: {status}");
+            break;
+        }
+        if start.elapsed() > Duration::from_secs(3) {
+            panic!("mcp process did not exit after stdin close");
+        }
+        sleep(Duration::from_millis(20));
+    }
 }
