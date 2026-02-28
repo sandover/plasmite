@@ -28,6 +28,7 @@ mod color_json;
 mod command_dispatch;
 mod ingest;
 mod jq_filter;
+mod mcp_stdio;
 mod pool_info_json;
 mod pool_paths;
 mod serve;
@@ -191,6 +192,7 @@ LEARN MORE
 struct Cli {
     #[arg(
         long,
+        global = true,
         help = "Pool directory for named pools (default: ~/.plasmite/pools)",
         value_hint = ValueHint::DirPath
     )]
@@ -425,6 +427,17 @@ NOTES
         #[command(flatten)]
         run: ServeRunArgs,
     },
+    #[command(
+        about = "Serve MCP tools and resources on stdio",
+        long_about = r#"Start an experimental MCP server on stdio.
+
+Reads newline-delimited JSON-RPC requests from stdin and writes newline-delimited JSON-RPC responses to stdout.
+The process exits when stdin closes."#,
+        after_help = r#"EXAMPLES
+  $ plasmite mcp
+  $ plasmite mcp --dir /path/to/pools"#
+    )]
+    Mcp,
     #[command(
         arg_required_else_help = true,
         about = "Fetch one message by sequence number",

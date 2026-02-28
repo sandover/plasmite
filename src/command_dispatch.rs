@@ -127,6 +127,10 @@ pub(super) fn dispatch_command(
                 Ok(RunOutcome::ok())
             }
         },
+        Command::Mcp => {
+            mcp_stdio::serve(pool_dir)?;
+            Ok(RunOutcome::ok())
+        }
         Command::Pool { command } => match command {
             PoolCommand::Create {
                 names,

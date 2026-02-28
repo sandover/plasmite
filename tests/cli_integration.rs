@@ -6859,3 +6859,164 @@ fn follow_replay_zero_speed_emits_without_delay() {
         "--replay 0 should emit without delay, took {elapsed:?}"
     );
 }
+
+fn mcp_send_request(stdin: &mut impl Write, request: &Value) {
+    serde_json::to_writer(&mut *stdin, request).expect("write request");
+    stdin.write_all(b"\n").expect("write newline");
+    stdin.flush().expect("flush request");
+}
+
+fn mcp_read_response(stdout: &mut BufReader<impl Read>) -> Value {
+    let mut line = String::new();
+    let read = stdout.read_line(&mut line).expect("read response");
+    assert!(read > 0, "expected MCP response line");
+    parse_json(line.trim())
+}
+
+#[test]
+fn mcp_stdio_initialize_and_tool_resource_flow() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let mut child = cmd()
+        .args(["mcp", "--dir", pool_dir.to_str().expect("pool dir")])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn mcp");
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = BufReader::new(child.stdout.take().expect("stdout"));
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {}
+        }),
+    );
+    let initialize = mcp_read_response(&mut stdout);
+    assert_eq!(initialize["id"], json!(1));
+    assert_eq!(initialize["result"]["protocolVersion"], json!("2025-11-25"));
+    assert_eq!(
+        initialize["result"]["capabilities"]["tools"]["listChanged"],
+        json!(false)
+    );
+    assert_eq!(
+        initialize["result"]["capabilities"]["resources"]["listChanged"],
+        json!(false)
+    );
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {}
+        }),
+    );
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "ping",
+            "params": {}
+        }),
+    );
+    let ping = mcp_read_response(&mut stdout);
+    assert_eq!(ping["id"], json!(2));
+    assert_eq!(ping["result"], json!({}));
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_pool_create",
+                "arguments": { "name": "demo" }
+            }
+        }),
+    );
+    let create = mcp_read_response(&mut stdout);
+    assert_eq!(create["id"], json!(3));
+    assert_eq!(
+        create["result"]["structuredContent"]["pool"]["name"],
+        json!("demo")
+    );
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_feed",
+                "arguments": {
+                    "pool": "demo",
+                    "data": {"msg": "hello"},
+                    "tags": ["chat"]
+                }
+            }
+        }),
+    );
+    let feed = mcp_read_response(&mut stdout);
+    let seq = feed["result"]["structuredContent"]["message"]["seq"]
+        .as_u64()
+        .expect("seq");
+    assert_eq!(feed["id"], json!(4));
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "resources/list",
+            "params": {}
+        }),
+    );
+    let resources = mcp_read_response(&mut stdout);
+    assert_eq!(resources["id"], json!(5));
+    assert_eq!(
+        resources["result"]["resources"][0]["uri"],
+        json!("plasmite:///pools/demo")
+    );
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "resources/read",
+            "params": {
+                "uri": "plasmite:///pools/demo"
+            }
+        }),
+    );
+    let resource_read = mcp_read_response(&mut stdout);
+    assert_eq!(resource_read["id"], json!(6));
+    let text_payload = resource_read["result"]["contents"][0]["text"]
+        .as_str()
+        .expect("resource text");
+    let payload = parse_json(text_payload);
+    assert_eq!(payload["next_after_seq"], json!(seq));
+    assert_eq!(payload["messages"][0]["data"]["msg"], json!("hello"));
+
+    drop(stdin);
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().expect("try_wait") {
+            assert!(status.success(), "mcp exited non-zero: {status}");
+            break;
+        }
+        if start.elapsed() > Duration::from_secs(3) {
+            panic!("mcp process did not exit after stdin close");
+        }
+        sleep(Duration::from_millis(20));
+    }
+}
