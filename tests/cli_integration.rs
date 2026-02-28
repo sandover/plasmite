@@ -653,6 +653,44 @@ fn pool_info_default_is_human_readable() {
 }
 
 #[test]
+fn pool_info_tty_is_compact_and_hides_ring_offset() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "pretty",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let info = cmd_tty(&[
+        "--color",
+        "never",
+        "--dir",
+        pool_dir.to_str().unwrap(),
+        "pool",
+        "info",
+        "pretty",
+    ]);
+    assert!(info.status.success());
+    let stdout = sanitize_tty_text(&info.stdout);
+    assert!(stdout.contains("pretty"));
+    assert!(stdout.contains("path:      pretty.plasmite"));
+    assert!(stdout.contains("messages:  empty"));
+    assert!(stdout.contains("oldest:    —"));
+    assert!(stdout.contains("newest:    —"));
+    assert!(stdout.contains("index:     4096 slots (64K)"));
+    assert!(stdout.contains("ring:      956K"));
+    assert!(!stdout.contains("offset"));
+}
+
+#[test]
 fn pool_info_missing_does_not_emit_path_or_causes() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
@@ -4073,6 +4111,103 @@ fn doctor_defaults_to_human_output() {
 }
 
 #[test]
+fn doctor_tty_reports_count_and_seq_range_for_healthy_pool() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "doctorpool",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    for idx in 1..=4 {
+        let feed = cmd()
+            .args([
+                "--dir",
+                pool_dir.to_str().unwrap(),
+                "feed",
+                "doctorpool",
+                &format!("{{\"x\":{idx}}}"),
+            ])
+            .output()
+            .expect("feed");
+        assert!(feed.status.success());
+    }
+
+    let doctor = cmd_tty(&[
+        "--color",
+        "never",
+        "--dir",
+        pool_dir.to_str().unwrap(),
+        "doctor",
+        "doctorpool",
+    ]);
+    assert!(doctor.status.success());
+    let stdout = sanitize_tty_text(&doctor.stdout);
+    assert!(stdout.contains("doctorpool: healthy"));
+    assert!(stdout.contains("messages:  4 (seq 1..4)"));
+    assert!(stdout.contains("checked:   header, index, ring — 0 issues"));
+}
+
+#[test]
+fn doctor_all_tty_uses_pool_names_and_message_counts() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "tour-main",
+            "tour-aux",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    for idx in 1..=4 {
+        let feed = cmd()
+            .args([
+                "--dir",
+                pool_dir.to_str().unwrap(),
+                "feed",
+                "tour-main",
+                &format!("{{\"x\":{idx}}}"),
+            ])
+            .output()
+            .expect("feed");
+        assert!(feed.status.success());
+    }
+
+    let doctor = cmd_tty(&[
+        "--color",
+        "never",
+        "--dir",
+        pool_dir.to_str().unwrap(),
+        "doctor",
+        "--all",
+    ]);
+    assert!(doctor.status.success());
+    let stdout = sanitize_tty_text(&doctor.stdout);
+    assert!(stdout.contains("All 2 pools healthy."));
+    assert!(stdout.contains("tour-main"));
+    assert!(stdout.contains("4 messages"));
+    assert!(stdout.contains("tour-aux"));
+    assert!(stdout.contains("0 messages"));
+    assert!(stdout.contains("0 issues"));
+    assert!(!stdout.contains(".plasmite"));
+}
+
+#[test]
 fn doctor_rejects_pool_with_all() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
@@ -5320,6 +5455,23 @@ fn serve_init_tty_reports_created_and_overwritten() {
     assert!(first_text.contains("Secure serving initialized."));
     assert!(first_text.contains("Output directory:"));
     assert!(first_text.contains("Files created:"));
+    assert!(first_text.contains("    pls serve \\"));
+    assert!(first_text.contains("      --bind 0.0.0.0:9700 \\"));
+    assert!(first_text.contains("      --allow-non-loopback \\"));
+    assert!(first_text.contains("      --token-file "));
+    assert!(first_text.contains("      --tls-cert "));
+    assert!(first_text.contains("      --tls-key "));
+    assert!(!first_text.contains("THIS-HOST"));
+    let feed_line = first_text
+        .lines()
+        .find(|line| line.contains("pls feed https://"))
+        .expect("feed line");
+    assert!(feed_line.contains(":9700/demo \\"));
+    let follow_line = first_text
+        .lines()
+        .find(|line| line.contains("pls follow https://"))
+        .expect("follow line");
+    assert!(follow_line.contains(":9700/demo \\"));
 
     let second = cmd_tty(&[
         "--color",

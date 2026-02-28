@@ -7,7 +7,7 @@
 #![allow(clippy::result_large_err)]
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Read};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1319,7 +1319,7 @@ fn emit_doctor_human(report: &ValidationReport) {
         ValidationStatus::Ok => {
             println!("{label}: healthy");
             println!("  messages:  {}", doctor_messages_summary(report));
-            println!("  checked:   header/index/ring consistency, 0 issues");
+            println!("  checked:   header, index, ring — 0 issues");
         }
         ValidationStatus::Corrupt => {
             let issue = report
@@ -1330,7 +1330,7 @@ fn emit_doctor_human(report: &ValidationReport) {
             println!("{label}: corrupt");
             println!("  messages:  {}", doctor_messages_summary(report));
             println!(
-                "  checked:   header/index/ring consistency, {} issues",
+                "  checked:   header, index, ring — {} issues",
                 report.issues.len()
             );
             println!("  detail:    {issue}");
@@ -1354,24 +1354,42 @@ fn emit_doctor_human_summary(reports: &[ValidationReport]) {
         .iter()
         .filter(|report| report.status == ValidationStatus::Corrupt)
         .count();
+    let labels = reports.iter().map(doctor_display_label).collect::<Vec<_>>();
+    let message_labels = reports
+        .iter()
+        .map(doctor_messages_count_label)
+        .collect::<Vec<_>>();
+    let label_width = labels.iter().map(|value| value.len()).max().unwrap_or(0);
+    let message_width = message_labels
+        .iter()
+        .map(|value| value.len())
+        .max()
+        .unwrap_or(0);
     if corrupt == 0 {
         println!("All {} pools healthy.", reports.len());
         println!();
-        for report in reports {
-            println!("  {}   0 issues", doctor_display_label(report));
+        for idx in 0..reports.len() {
+            println!(
+                "  {:<label_width$}   {:<message_width$}   0 issues",
+                labels[idx], message_labels[idx]
+            );
         }
     } else {
         println!("{corrupt} of {} pools unhealthy.", reports.len());
         println!();
-        for report in reports {
-            let label = doctor_display_label(report);
+        for (idx, report) in reports.iter().enumerate() {
+            let label = &labels[idx];
+            let messages = &message_labels[idx];
             if report.status == ValidationStatus::Corrupt {
                 println!(
-                    "  ✗ {label}   {} issues (run `pls doctor {label}` for detail)",
-                    report.issues.len()
+                    "  ✗ {:<label_width$}   {:<message_width$}   {} issues (run `pls doctor {}` for detail)",
+                    label,
+                    messages,
+                    report.issues.len(),
+                    label
                 );
             } else {
-                println!("  ✓ {label}   0 issues");
+                println!("  ✓ {label:<label_width$}   {messages:<message_width$}   0 issues");
             }
         }
     }
@@ -1384,16 +1402,62 @@ fn doctor_display_label(report: &ValidationReport) -> String {
             return pool_ref.to_string();
         }
     }
+    if let Some(stem) = report.path.file_stem().and_then(|value| value.to_str()) {
+        return stem.to_string();
+    }
     short_display_path(&report.path, report.path.parent())
 }
 
 fn doctor_messages_summary(report: &ValidationReport) -> String {
+    if let Some(stats) = doctor_message_stats(report) {
+        let seq_range = format_seq_range(stats.oldest_seq, stats.newest_seq);
+        if stats.count == 0 {
+            return "empty".to_string();
+        }
+        if seq_range == "-" {
+            return stats.count.to_string();
+        }
+        return format!("{} ({seq_range})", stats.count);
+    }
+
     let seq_range = format_seq_range(report.last_good_seq, report.last_good_seq);
     if seq_range == "-" {
         "empty".to_string()
     } else {
         format!("visible count unavailable ({seq_range})")
     }
+}
+
+fn doctor_messages_count_label(report: &ValidationReport) -> String {
+    if let Some(stats) = doctor_message_stats(report) {
+        return format!("{} messages", stats.count);
+    }
+    if report.status == ValidationStatus::Ok {
+        "messages unknown".to_string()
+    } else {
+        report
+            .last_good_seq
+            .map(|seq| format!("up to seq {seq}"))
+            .unwrap_or_else(|| "messages unknown".to_string())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DoctorMessageStats {
+    count: u64,
+    oldest_seq: Option<u64>,
+    newest_seq: Option<u64>,
+}
+
+fn doctor_message_stats(report: &ValidationReport) -> Option<DoctorMessageStats> {
+    let info = LocalClient::new()
+        .pool_info(&PoolRef::path(report.path.clone()))
+        .ok()?;
+    Some(DoctorMessageStats {
+        count: message_count_from_info(&info),
+        oldest_seq: info.bounds.oldest_seq,
+        newest_seq: info.bounds.newest_seq,
+    })
 }
 
 fn report_json(report: &ValidationReport) -> Value {
@@ -1930,6 +1994,8 @@ fn emit_serve_init_human(result: &serve_init::ServeInitResult) {
     let tls_key = display_handoff_path_from_path(key_path);
     let bind = extract_bind_from_server_commands(&result.server_commands)
         .unwrap_or_else(|| "0.0.0.0:9700".to_string());
+    let remote_host = detect_serve_init_remote_host(&bind);
+    let remote_url_host = url_host_component(&remote_host);
     let port = bind
         .parse::<SocketAddr>()
         .map(|addr| addr.port())
@@ -1957,30 +2023,68 @@ fn emit_serve_init_human(result: &serve_init::ServeInitResult) {
     println!();
     println!("  Start serving your pools:");
     println!();
-    println!("    pls serve --bind {bind} --allow-non-loopback \\");
+    println!("    pls serve \\");
+    println!("      --bind {bind} \\");
+    println!("      --allow-non-loopback \\");
     println!("      --token-file {token_file} \\");
-    println!("      --tls-cert {tls_cert} --tls-key {tls_key}");
+    println!("      --tls-cert {tls_cert} \\");
+    println!("      --tls-key {tls_key}");
     println!();
     println!("  From another machine, read and write pools by URL:");
     println!();
-    println!("    pls feed https://THIS-HOST:{port}/demo \\");
+    println!("    pls feed https://{remote_url_host}:{port}/demo \\");
     println!("      --token-file {token_file} \\");
     println!("      --tls-ca {tls_cert} \\");
     println!("      '{{\"hello\":\"world\"}}'");
     println!();
-    println!("    pls follow https://THIS-HOST:{port}/demo \\");
+    println!("    pls follow https://{remote_url_host}:{port}/demo \\");
     println!("      --token-file {token_file} \\");
     println!("      --tls-ca {tls_cert} --tail 10");
     println!();
     println!("  Or with curl:");
     println!("    TOKEN=$(cat {token_file})");
     println!("    curl -k -H \"Authorization: Bearer $TOKEN\" \\");
-    println!("      https://THIS-HOST:{port}/v0/pools/demo/tail?timeout_ms=5000");
+    println!("      https://{remote_url_host}:{port}/v0/pools/demo/tail?timeout_ms=5000");
     println!();
     println!("  The token is in the file, not printed here. Share the token");
     println!("  and fingerprint with collaborators out-of-band (e.g. paste");
     println!("  in a DM). Clients use the fingerprint to verify the cert");
     println!("  on first connect.");
+}
+
+fn detect_serve_init_remote_host(bind: &str) -> String {
+    if let Ok(addr) = bind.parse::<SocketAddr>() {
+        let ip = addr.ip();
+        if !ip.is_unspecified() && !ip.is_loopback() {
+            return ip.to_string();
+        }
+    }
+    detect_primary_non_loopback_ip()
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|| "YOUR-HOST".to_string())
+}
+
+fn detect_primary_non_loopback_ip() -> Option<IpAddr> {
+    detect_non_loopback_ip_via("0.0.0.0:0", "8.8.8.8:53")
+        .or_else(|| detect_non_loopback_ip_via("[::]:0", "[2001:4860:4860::8888]:53"))
+}
+
+fn detect_non_loopback_ip_via(bind_addr: &str, probe_addr: &str) -> Option<IpAddr> {
+    let socket = UdpSocket::bind(bind_addr).ok()?;
+    socket.connect(probe_addr).ok()?;
+    let ip = socket.local_addr().ok()?.ip();
+    if ip.is_loopback() || ip.is_unspecified() {
+        None
+    } else {
+        Some(ip)
+    }
+}
+
+fn url_host_component(host: &str) -> String {
+    if host.contains(':') && !host.starts_with('[') && !host.ends_with(']') {
+        return format!("[{host}]");
+    }
+    host.to_string()
 }
 
 fn serve_init_artifact_labels(
@@ -2180,7 +2284,7 @@ fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<String> {
     if config.bind.ip().is_unspecified() {
         lines.push(String::new());
         lines.push(
-            "Replace THIS-HOST/127.0.0.1 with your host IP or DNS name for remote clients."
+            "Replace YOUR-HOST/127.0.0.1 with your host IP or DNS name for remote clients."
                 .to_string(),
         );
     }
@@ -2649,17 +2753,10 @@ fn emit_pool_info_pretty(pool_ref: &str, info: &plasmite::api::PoolInfo) {
         return;
     }
 
-    let count = info
-        .metrics
-        .as_ref()
-        .map(|metrics| metrics.message_count)
-        .unwrap_or_else(|| match (info.bounds.oldest_seq, info.bounds.newest_seq) {
-            (Some(oldest), Some(newest)) => newest.saturating_sub(oldest).saturating_add(1),
-            _ => 0,
-        });
+    let count = message_count_from_info(info);
     println!("{pool_ref}");
     println!(
-        "  path: {}",
+        "  path:      {}",
         short_display_path(&info.path, info.path.parent())
     );
     let messages_summary =
@@ -2668,41 +2765,55 @@ fn emit_pool_info_pretty(pool_ref: &str, info: &plasmite::api::PoolInfo) {
         let whole = metrics.utilization.used_percent_hundredths / 100;
         let frac = metrics.utilization.used_percent_hundredths % 100;
         println!(
-            "  size: {} ({} used, {}.{:02}%)",
+            "  size:      {} ({} used, {}.{:02}%)",
             format_bytes(info.file_size),
             format_bytes(metrics.utilization.used_bytes),
             whole,
             frac
         );
-        println!("  messages: {messages_summary}");
+        println!("  messages:  {messages_summary}");
         println!(
-            "  oldest: {}",
+            "  oldest:    {}",
             format_pool_time_summary(
                 metrics.age.oldest_age_ms,
                 metrics.age.oldest_time.as_deref()
             )
         );
         println!(
-            "  newest: {}",
+            "  newest:    {}",
             format_pool_time_summary(
                 metrics.age.newest_age_ms,
                 metrics.age.newest_time.as_deref()
             )
         );
     } else {
-        println!("  size: {}", format_bytes(info.file_size));
-        println!("  messages: {messages_summary}");
+        println!("  size:      {}", format_bytes(info.file_size));
+        println!("  messages:  {messages_summary}");
     }
     println!(
-        "  index: {} slots ({})",
+        "  index:     {} slots ({})",
         info.index_capacity,
         format_bytes(info.index_size_bytes)
     );
-    println!(
-        "  ring: {} (offset {})",
-        format_bytes(info.ring_size),
-        info.ring_offset
-    );
+    println!("  ring:      {}", format_bytes(info.ring_size));
+}
+
+fn message_count_from_info(info: &plasmite::api::PoolInfo) -> u64 {
+    info.metrics
+        .as_ref()
+        .map(|metrics| metrics.message_count)
+        .unwrap_or_else(|| {
+            message_count_from_bounds(info.bounds.oldest_seq, info.bounds.newest_seq)
+        })
+}
+
+fn message_count_from_bounds(oldest: Option<u64>, newest: Option<u64>) -> u64 {
+    match (oldest, newest) {
+        (Some(oldest), Some(newest)) if newest >= oldest => {
+            newest.saturating_sub(oldest).saturating_add(1)
+        }
+        _ => 0,
+    }
 }
 
 fn format_pool_messages_summary(count: u64, oldest: Option<u64>, newest: Option<u64>) -> String {
@@ -2721,7 +2832,7 @@ fn format_pool_messages_summary(count: u64, oldest: Option<u64>, newest: Option<
 
 fn format_pool_time_summary(age_ms: Option<u64>, timestamp: Option<&str>) -> String {
     let Some(timestamp) = timestamp else {
-        return "none".to_string();
+        return "—".to_string();
     };
     format!(
         "{} ({})",
