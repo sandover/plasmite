@@ -27,11 +27,34 @@ fn cmd() -> Command {
 
 fn cmd_tty(args: &[&str]) -> std::process::Output {
     let exe = env!("CARGO_BIN_EXE_plasmite");
+    #[cfg(target_os = "linux")]
+    {
+        // util-linux script requires -c for command execution; otherwise leading
+        // wrapped-command flags (for example --dir) are parsed as script flags.
+        let mut argv = Vec::with_capacity(args.len() + 1);
+        argv.push(exe);
+        argv.extend_from_slice(args);
+        let command = argv
+            .into_iter()
+            .map(shell_quote)
+            .collect::<Vec<_>>()
+            .join(" ");
+        return Command::new("script")
+            .args(["-q", "-e", "-c", &command, "/dev/null"])
+            .output()
+            .expect("script tty");
+    }
+    #[cfg(not(target_os = "linux"))]
     Command::new("script")
         .args(["-q", "/dev/null", exe])
         .args(args)
         .output()
         .expect("script tty")
+}
+
+#[cfg(target_os = "linux")]
+fn shell_quote(arg: &str) -> String {
+    format!("'{}'", arg.replace('\'', "'\\''"))
 }
 
 fn sanitize_tty_text(bytes: &[u8]) -> String {
