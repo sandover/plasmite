@@ -5667,6 +5667,8 @@ fn serve_check_outputs_resolved_config() {
     assert_eq!(status, "valid");
     let base_url = check.get("base_url").and_then(|v| v.as_str()).unwrap_or("");
     assert!(base_url.contains("127.0.0.1:9700"));
+    let mcp = check.get("mcp").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(mcp.ends_with("/mcp"));
 }
 
 #[test]
@@ -5701,6 +5703,7 @@ fn serve_check_human_uses_readable_limits_and_fingerprint() {
     assert!(output.status.success());
     let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
     assert!(stdout.contains("Configuration valid."));
+    assert!(stdout.contains("MCP:    https://127.0.0.1:9700/mcp"));
     assert!(stdout.contains("Limits: body 1M, timeout 30s, concurrency 64"));
     assert!(stdout.contains("Fingerprint: SHA256:"));
 }

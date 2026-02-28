@@ -2096,6 +2096,9 @@ fn emit_serve_init_human(result: &serve_init::ServeInitResult) {
     println!("      --token-file {token_file} \\");
     println!("      --tls-ca {tls_cert} --tail 10");
     println!();
+    println!("  MCP endpoint for agent clients:");
+    println!("    https://{remote_url_host}:{port}/mcp");
+    println!();
     println!("  Or with curl:");
     println!("    TOKEN=$(cat {token_file})");
     println!("    curl -k -H \"Authorization: Bearer $TOKEN\" \\");
@@ -2244,6 +2247,7 @@ fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<String> {
     let host = display_host(config.bind.ip());
     let base_url = format!("{scheme}://{host}:{}", config.bind.port());
     let web_ui_url = format!("{base_url}/ui");
+    let mcp_url = format!("{base_url}/mcp");
     let append_url = format!("{base_url}/v0/pools/demo/append");
     let curl_tls_flag = if config.tls_self_signed { " -k" } else { "" };
     let scope = serve_scope(config.bind.ip());
@@ -2292,6 +2296,7 @@ fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<String> {
         format!("Serving pools on {base_url} ({scope})"),
         String::new(),
         format!("  UI:   {web_ui_url}"),
+        format!("  MCP:  {mcp_url}"),
         format!("  Auth: {auth}    TLS: {tls}    Access: {access}    CORS: {cors}"),
     ];
 
@@ -2392,6 +2397,7 @@ fn emit_serve_check_report(config: &serve::ServeConfig, color_mode: ColorMode, j
                 "base_url": base_url,
                 "web_ui": format!("{base_url}/ui"),
                 "web_ui_pool": format!("{base_url}/ui/pools/demo"),
+                "mcp": format!("{base_url}/mcp"),
                 "auth": auth_mode,
                 "tls": tls_mode,
                 "tls_fingerprint": config.tls_fingerprint,
@@ -2410,6 +2416,12 @@ fn emit_serve_check_report(config: &serve::ServeConfig, color_mode: ColorMode, j
 
 fn build_serve_check_lines(config: &serve::ServeConfig) -> Vec<String> {
     let tls_enabled = serve_tls_enabled(config);
+    let base_url = format!(
+        "{}://{}:{}",
+        serve_scheme(config),
+        display_host(config.bind.ip()),
+        config.bind.port()
+    );
     let auth = if config.token.is_some() {
         "bearer token"
     } else {
@@ -2441,6 +2453,7 @@ fn build_serve_check_lines(config: &serve::ServeConfig) -> Vec<String> {
             config.bind,
             serve_scope(config.bind.ip())
         ),
+        format!("  MCP:    {base_url}/mcp"),
         format!("  Auth: {auth}    TLS: {tls}    Access: {access}    CORS: {cors}"),
         format!(
             "  Limits: body {}, timeout {}, concurrency {}",
@@ -4265,6 +4278,7 @@ mod tests {
         config.tls_fingerprint = Some("SHA256:AA:BB".to_string());
         let text = build_serve_startup_lines(&config).join("\n");
         assert!(text.contains("Serving pools on https://127.0.0.1:9700 (loopback only)"));
+        assert!(text.contains("MCP:  https://127.0.0.1:9700/mcp"));
         assert!(text.contains("Auth: bearer    TLS: self-signed"));
         assert!(text.contains("--token-file <token-file> --tls-ca <tls-cert>"));
         assert!(text.contains("Fingerprint: SHA256:AA:BB"));
@@ -4275,6 +4289,7 @@ mod tests {
         let config = test_serve_config();
         let text = build_serve_startup_lines(&config).join("\n");
         assert!(text.contains("Serving pools on http://127.0.0.1:9700 (loopback only)"));
+        assert!(text.contains("MCP:  http://127.0.0.1:9700/mcp"));
         assert!(text.contains("Auth: none    TLS: off    Access: read-write    CORS: same-origin"));
         assert!(text.contains("Try it:"));
         assert!(text.contains("Press Ctrl-C to stop."));
