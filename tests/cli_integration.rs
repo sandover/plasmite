@@ -39,17 +39,19 @@ fn cmd_tty(args: &[&str]) -> std::process::Output {
             .map(shell_quote)
             .collect::<Vec<_>>()
             .join(" ");
-        return Command::new("script")
+        Command::new("script")
             .args(["-q", "-e", "-c", &command, "/dev/null"])
             .output()
-            .expect("script tty");
+            .expect("script tty")
     }
     #[cfg(not(target_os = "linux"))]
-    Command::new("script")
-        .args(["-q", "/dev/null", exe])
-        .args(args)
-        .output()
-        .expect("script tty")
+    {
+        Command::new("script")
+            .args(["-q", "/dev/null", exe])
+            .args(args)
+            .output()
+            .expect("script tty")
+    }
 }
 
 #[cfg(target_os = "linux")]
