@@ -192,7 +192,6 @@ LEARN MORE
 struct Cli {
     #[arg(
         long,
-        global = true,
         help = "Pool directory for named pools (default: ~/.plasmite/pools)",
         value_hint = ValueHint::DirPath
     )]
@@ -437,7 +436,14 @@ The process exits when stdin closes."#,
   $ plasmite mcp
   $ plasmite mcp --dir /path/to/pools"#
     )]
-    Mcp,
+    Mcp {
+        #[arg(
+            long,
+            help = "Pool directory for named pools (default: ~/.plasmite/pools)",
+            value_hint = ValueHint::DirPath
+        )]
+        dir: Option<PathBuf>,
+    },
     #[command(
         arg_required_else_help = true,
         about = "Fetch one message by sequence number",

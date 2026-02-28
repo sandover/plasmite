@@ -127,8 +127,9 @@ pub(super) fn dispatch_command(
                 Ok(RunOutcome::ok())
             }
         },
-        Command::Mcp => {
-            mcp_stdio::serve(pool_dir)?;
+        Command::Mcp { dir } => {
+            let mcp_pool_dir = dir.unwrap_or(pool_dir);
+            mcp_stdio::serve(mcp_pool_dir)?;
             Ok(RunOutcome::ok())
         }
         Command::Pool { command } => match command {

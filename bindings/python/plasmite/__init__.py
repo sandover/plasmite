@@ -97,12 +97,12 @@ class InternalError(PlasmiteError):
     pass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class MessageMeta:
     tags: list[str]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class Message:
     seq: int
     time: datetime
@@ -504,7 +504,7 @@ class Client:
         self.close()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class Lite3Frame:
     seq: int
     timestamp_ns: int
