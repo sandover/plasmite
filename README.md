@@ -11,7 +11,7 @@ What would it take to make IPC pleasant and predictable?
 - Machines crash... so **channels should persist on disk**
 - Disks are finite... so **channels should be bounded in size**
 - Message brokers bring complexity and ceremony... so for local IPC, **don't require a broker**
-- Observability is crucial... so **messages must be inspectable**
+- Observability matters... so **messages must be inspectable**
 - Schemas are great... but **schemas should be optional**
 - Latency matters... so **IPC should be fast**, zero-copy wherever possible
 
@@ -73,21 +73,23 @@ For IPC across machines, `pls serve` exposes local pools securely, and serves a 
 </tr>
 </table>
 
-Plasmite APIs have the same usage style as the CLI.
+The APIs work the same way as the CLI.
 
 ## Why not just...
 
 | | Drawbacks | Plasmite |
 |---|---|---|
-| **Kafka**, **RabbitMQ**,  | Lots of machinery: partitions, groups, exchanges, bindings, oh my. | Minimal machinery, no config, and only run a server if you need one. |
-| **Redis / NATS** | Server required even for local messaging. Messages live in server memory; if the server dies, messaging stops. | Pools persist on disk independent of any process. |
-| **Log files / `tail -f`** | Messages are unstructured. Logs grow and have to be rotated (and rotating logs breaks `tail -f`). No way to replay from a specific point. No remote access without setting up syslog. | Messages are JSON with sequence numbers. Bounded disk usage. Replay from any point. Remote access is easy. |
-| **Ad-hoc files (temp files, locks, polled dirs)** | Readers have to poll for new files. Locking is manual; crashes leave a stale lock. Files accumulate. No ordering unless you bake it into filenames. | Readers stream in real time. Writers append concurrently without explicit locks. Ring buffer keeps disk bounded, messages stay ordered. |
-| **SQLite as a queue** | Readers have to poll. Writers contend. Have to design a schema, write migrations. SQLite explicitly discourages network access to the DB file. | Follow & replay without polling. No `SQLITE_BUSY`. No schema, no migrations, no cleanup, easy remote access. |
-| **OS primitives (pipes, sockets, shm)** | Named pipes mean if the reader dies, the writer blocks or gets SIGPIPE. With sockets you have to implement your own framing and reconnection. Shared memory has to be coordinated with semaphores, and a crash while holding a lock is bad news. Machine-local only. | Multiple readers and writers, crash-safe, persistent across reboots. |
-| **ZeroMQ** | Messages vanish when processes restart. The pattern matrix is expressive but hard to get right. Binary protocol means you can't inspect messages with standard tools. | Messages persist across restarts. Human-readable JSON is easy to massage with `jq`. |
+| **Kafka**, **RabbitMQ**,  | Lots of machinery: partitions, groups, exchanges, bindings, oh my. | No config, no broker, no partitions, no topology — `feed` and `follow`. |
+| **Redis / NATS** | Server required even for local messaging. Messages live in server memory; if the server dies, messaging stops. | Pools persist on disk independent of any process. No server needed locally. |
+| **Log files / `tail -f`** | Messages are unstructured. Logs grow and have to be rotated (and rotating logs breaks `tail -f`). No way to replay from a specific point. No remote access without setting up syslog. | Messages are JSON with sequence numbers. Bounded disk usage. Replay from any point. Remote access built in. |
+| **Ad-hoc files (temp files, locks, polled dirs)** | Readers have to poll for new files. Locking is manual; crashes leave a stale lock. Files accumulate. No ordering unless you bake it into filenames. | Readers stream in real time. Writers append concurrently without explicit locks, and messages are ordered. Ring buffer bounds disk usage.  |
+| **SQLite as a queue** | Readers have to poll. Writers contend. Have to design & migrate schemas. SQLite explicitly discourages network access to the DB file. | Follow & replay without polling. No `SQLITE_BUSY`. No schema, no migrations, no cleanup, easy remote access. |
+| **OS primitives (pipes, sockets, shm)** | Named pipes mean if the reader dies, the writer blocks or gets SIGPIPE. With sockets you have to implement your own framing and reconnection. Shared memory has to be coordinated with semaphores, and a crash while holding a lock is bad news. Machine-local only. | Many readers, many writers, crash-safe, persistent across reboots. Works over the network too. |
+| **ZeroMQ** | Messages vanish when processes restart. The pattern matrix is expressive but hard to get right. Binary protocol means you can't inspect messages with standard tools. | Messages persist across restarts. One model: append, follow, replay. Plain JSON you can pipe through `jq`. |
 
-**Use cases** — CI gates, live event streams, duplex chat, system log ring buffers, replay & debug — all in the **[Cookbook](docs/cookbook.md)**. Plasmite is designed for single-host and host-adjacent messaging. If you need multi-host cluster replication, schema registries, or workflow orchestration, see [When Plasmite Isn't the Right Fit](docs/cookbook.md#when-plasmite-isnt-the-right-fit).
+**Use cases** — CI gates, live event streams, duplex chat, system log ring buffers, replay & debug — all in the **[Cookbook](docs/cookbook.md)**. 
+
+Plasmite is for single-host and host-adjacent messaging. If you need multi-host cluster replication, schema registries, or workflow orchestration, see [When Plasmite Isn't the Right Fit](docs/cookbook.md#when-plasmite-isnt-the-right-fit).
 
 ## Install
 
