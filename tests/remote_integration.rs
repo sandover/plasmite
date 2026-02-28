@@ -994,6 +994,148 @@ fn remote_mcp_http_profile_request_notification_and_get() -> TestResult<()> {
 }
 
 #[test]
+fn remote_mcp_tool_flow_via_http_post() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::start(temp_dir.path())?;
+
+    let tools_list = mcp_post(
+        &server.base_url,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list",
+            "params": {}
+        }),
+    )
+    .expect("tools/list");
+    let tools_json: Value = serde_json::from_str(&tools_list.into_string()?)?;
+    let names = tools_json["result"]["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert!(names.contains(&"plasmite_pool_create"));
+    assert!(names.contains(&"plasmite_pool_delete"));
+
+    let create = mcp_post(
+        &server.base_url,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_pool_create",
+                "arguments": { "name": "flow" }
+            }
+        }),
+    )
+    .expect("create");
+    let create_json: Value = serde_json::from_str(&create.into_string()?)?;
+    assert_eq!(
+        create_json["result"]["structuredContent"]["pool"]["name"],
+        json!("flow")
+    );
+
+    let feed_one = mcp_post(
+        &server.base_url,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_feed",
+                "arguments": { "pool": "flow", "data": {"n": 1} }
+            }
+        }),
+    )
+    .expect("feed one");
+    let feed_one_json: Value = serde_json::from_str(&feed_one.into_string()?)?;
+    let first_seq = feed_one_json["result"]["structuredContent"]["message"]["seq"]
+        .as_u64()
+        .expect("first seq");
+
+    let feed_two = mcp_post(
+        &server.base_url,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_feed",
+                "arguments": { "pool": "flow", "data": {"n": 2} }
+            }
+        }),
+    )
+    .expect("feed two");
+    let feed_two_json: Value = serde_json::from_str(&feed_two.into_string()?)?;
+    let second_seq = feed_two_json["result"]["structuredContent"]["message"]["seq"]
+        .as_u64()
+        .expect("second seq");
+
+    let read = mcp_post(
+        &server.base_url,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_read",
+                "arguments": {
+                    "pool": "flow",
+                    "since": "1970-01-01T00:00:00Z",
+                    "after_seq": first_seq,
+                    "count": 10
+                }
+            }
+        }),
+    )
+    .expect("read");
+    let read_json: Value = serde_json::from_str(&read.into_string()?)?;
+    assert_eq!(
+        read_json["result"]["structuredContent"]["messages"][0]["seq"],
+        json!(second_seq)
+    );
+
+    let fetch = mcp_post(
+        &server.base_url,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_fetch",
+                "arguments": { "pool": "flow", "seq": second_seq }
+            }
+        }),
+    )
+    .expect("fetch");
+    let fetch_json: Value = serde_json::from_str(&fetch.into_string()?)?;
+    assert_eq!(
+        fetch_json["result"]["structuredContent"]["message"]["data"]["n"],
+        json!(2)
+    );
+
+    let delete = mcp_post(
+        &server.base_url,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_pool_delete",
+                "arguments": { "pool": "flow" }
+            }
+        }),
+    )
+    .expect("delete");
+    let delete_json: Value = serde_json::from_str(&delete.into_string()?)?;
+    assert_ne!(delete_json["result"]["isError"], json!(true));
+
+    Ok(())
+}
+
+#[test]
 fn remote_mcp_protocol_version_header_validation() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::start(temp_dir.path())?;

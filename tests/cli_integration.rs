@@ -6934,6 +6934,26 @@ fn mcp_stdio_initialize_and_tool_resource_flow() {
         &mut stdin,
         &json!({
             "jsonrpc": "2.0",
+            "id": 22,
+            "method": "tools/list",
+            "params": {}
+        }),
+    );
+    let tools_list = mcp_read_response(&mut stdout);
+    assert_eq!(tools_list["id"], json!(22));
+    let tool_names = tools_list["result"]["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert!(tool_names.contains(&"plasmite_pool_create"));
+    assert!(tool_names.contains(&"plasmite_read"));
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
             "id": 3,
             "method": "tools/call",
             "params": {
@@ -6975,6 +6995,52 @@ fn mcp_stdio_initialize_and_tool_resource_flow() {
         &mut stdin,
         &json!({
             "jsonrpc": "2.0",
+            "id": 41,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_read",
+                "arguments": {
+                    "pool": "demo",
+                    "after_seq": seq.saturating_sub(1),
+                    "since": "1970-01-01T00:00:00Z",
+                    "count": 5
+                }
+            }
+        }),
+    );
+    let read = mcp_read_response(&mut stdout);
+    assert_eq!(read["id"], json!(41));
+    assert_eq!(
+        read["result"]["structuredContent"]["messages"][0]["seq"],
+        json!(seq)
+    );
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 42,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_fetch",
+                "arguments": {
+                    "pool": "demo",
+                    "seq": seq
+                }
+            }
+        }),
+    );
+    let fetch = mcp_read_response(&mut stdout);
+    assert_eq!(fetch["id"], json!(42));
+    assert_eq!(
+        fetch["result"]["structuredContent"]["message"]["data"]["msg"],
+        json!("hello")
+    );
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
             "id": 5,
             "method": "resources/list",
             "params": {}
@@ -7006,6 +7072,24 @@ fn mcp_stdio_initialize_and_tool_resource_flow() {
     let payload = parse_json(text_payload);
     assert_eq!(payload["next_after_seq"], json!(seq));
     assert_eq!(payload["messages"][0]["data"]["msg"], json!("hello"));
+
+    mcp_send_request(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_pool_delete",
+                "arguments": {
+                    "pool": "demo"
+                }
+            }
+        }),
+    );
+    let delete = mcp_read_response(&mut stdout);
+    assert_eq!(delete["id"], json!(7));
+    assert_ne!(delete["result"]["isError"], json!(true));
 
     drop(stdin);
     let start = Instant::now();
