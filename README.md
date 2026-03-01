@@ -25,15 +25,14 @@ For IPC across machines, `pls serve` exposes local pools securely, runs an MCP s
 
 <table width="100%">
   <tr>
-    <th align="left">Alice's terminal</th>
-    <th align="left">Bob's terminal</th>
+    <th align="left">Alice</th>
+    <th align="left">Bob (a local reader)</th>
   </tr>
   <tr>
     <td valign="top">
       <b>Alice creates a channel</b><br/>
       <code>pls pool create channel</code>
       <br/><br/>
-      <br/>
       <b>Alice writes a message</b><br/>
       <code>pls feed channel</code><br/>
       <code>'{"from": "A", "msg": "hello world"}'</code>
@@ -42,7 +41,7 @@ For IPC across machines, `pls serve` exposes local pools securely, runs an MCP s
     <br/>
       <br/><b>Bob starts reading</b><br/>
       <code>pls follow channel</code>
-      <br/><br/><br/><br/>
+      <br/><br/><br/>
       <b>Bob sees it on stdout</b><br/>
       <code>{ "data": {"from": "A", "msg": "hello world"}, ... }</code>
     </td>
@@ -55,7 +54,7 @@ For IPC across machines, `pls serve` exposes local pools securely, runs an MCP s
   <tr>
     <th align="left">Alice</th>
     <th align="left">Bob</th>
-    <th align="left">Carol</th>
+    <th align="left">Carol (remote)</th>
   </tr>
   <tr>
     <td valign="top">
@@ -77,8 +76,9 @@ For IPC across machines, `pls serve` exposes local pools securely, runs an MCP s
     </td>
     <td valign="bottom">
       <b>Carol follows remotely</b><br/>
-      <code>pls follow http://alice:9700/channel</code>
-      <br/><br/><br/><br/><br/>
+      <code>pls follow 
+  http://alice:9700/channel</code>
+      <br/><br/><br/><br/>
       <b>Carol sees it</b><br/>
       <code>{ "data": {"from": "A", "msg": "hi all"}, ... }</code>
     </td>
