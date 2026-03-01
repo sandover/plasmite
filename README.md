@@ -19,58 +19,73 @@ So, there's **Plasmite**.
 
 Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed channels called "pools", which are ring buffers. There's no daemon or broker for local IPC, no fancy config, and it's quick (~600k msg/sec on a laptop). Readers mmap the pool file and walk frames in place, and payloads use [Lite3](https://github.com/fastserial/lite3), a zero-copy JSON binary encoding.
 
-For IPC across machines, `pls serve` exposes local pools securely, and serves a minimal web UI too.
+For IPC across machines, `pls serve` exposes local pools securely, runs an MCP server, and serves a minimal web UI too.
 
 #### Local IPC
 
 <table width="100%">
-<tr><th>Alice's terminal</th><th>Bob's terminal</th></tr>
-<tr>
-<td><b>Alice creates a channel</b><br/><code>pls pool create channel</code></td>
-<td></td>
-</tr>
-<tr>
-<td></td>
-<td><b>Bob starts reading</b><br/><code>pls follow channel</code></td>
-</tr>
-<tr>
-<td><b>Alice writes a message</b><br/><code>pls feed channel 
-  '{"from": "alice", "msg": "hello world"}'</code></td>
-<td></td>
-</tr>
-<tr>
-<td></td>
-<td><b>Bob sees it on stdout</b><br/><code>{ "data": 
-  {"from": "alice", "msg": "hello world"}, ... }</code></td>
-</tr>
+  <tr>
+    <th align="left">Alice's terminal</th>
+    <th align="left">Bob's terminal</th>
+  </tr>
+  <tr>
+    <td valign="top">
+      <b>Alice creates a channel</b><br/>
+      <code>pls pool create channel</code>
+      <br/><br/>
+      <br/>
+      <b>Alice writes a message</b><br/>
+      <code>pls feed channel</code><br/>
+      <code>'{"from": "alice", "msg": "hello world"}'</code>
+    </td>
+    <td valign="bottom">
+    <br/>
+      <br/><b>Bob starts reading</b><br/>
+      <code>pls follow channel</code>
+      <br/><br/>
+      <br/>
+      <br/>
+      <br/>
+      <b>Bob sees it on stdout</b><br/>
+      <code>{ "data": {"from": "alice", "msg": "hello world"}, ... }</code>
+    </td>
+  </tr>
 </table>
 
 #### Remote IPC
 
 <table width="100%">
-<tr><th>Alice</th><th>Bob</th><th>Carol</th></tr>
-<tr>
-<td><b>Alice runs pool server</b><br/><code>pls serve init</code><br/><code>pls serve</code></td>
-<td></td>
-<td></td>
-</tr>
-<tr>
-<td></td>
-<td><i>(Bob never quit his follow process, so he's still watching.)</i></td>
-<td><b>Carol follows remotely</b><br/>
-<code>pls follow http://alice:9700/channel</code></td>
-</tr>
-<tr>
-<td><b>Alice writes</b><br/><code>pls feed channel 
-  '{"from": "alice", "msg": "hi all"}'</code></td>
-<td></td>
-<td></td>
-</tr>
-<tr>
-<td></td>
-<td><b>Bob sees it</b><br/><code>{ "data": {"from": "alice", "msg": "hi all"}, ... }</code></td>
-<td><b>Carol sees it</b><br/><code>{ "data": {"from": "alice", "msg": "hi all"}, ... }</code></td>
-</tr>
+  <tr>
+    <th align="left">Alice</th>
+    <th align="left">Bob</th>
+    <th align="left">Carol</th>
+  </tr>
+  <tr>
+    <td valign="top">
+      <b>Alice runs pool server</b><br/>
+      <code>pls serve init</code><br/>
+      <code>pls serve</code>
+      <br/><br/><br/>
+      <b>Alice writes</b><br/>
+      <code>pls feed channel</code><br/>
+      <code>'{"from": "alice", "msg": "hi all"}'</code>
+    </td>
+    <td valign="bottom">
+      <br/><br/>
+      <i>(Bob never quit his follow process, so he's still watching.)</i>
+      <br/><br/>
+      <br/><br/><br/>
+      <b>Bob sees it</b><br/>
+      <code>{ "data": {"from": "alice", "msg": "hi all"}, ... }</code>
+    </td>
+    <td valign="bottom">
+      <b>Carol follows remotely</b><br/>
+      <code>pls follow http://alice:9700/channel</code>
+      <br/><br/><br/><br/><br/>
+      <b>Carol sees it</b><br/>
+      <code>{ "data": {"from": "alice", "msg": "hi all"}, ... }</code>
+    </td>
+  </tr>
 </table>
 
 The APIs work the same way as the CLI.
