@@ -36,7 +36,7 @@ For IPC across machines, `pls serve` exposes local pools securely, runs an MCP s
       <br/>
       <b>Alice writes a message</b><br/>
       <code>pls feed channel</code><br/>
-      <code>'{"from": "alice", "msg": "hello world"}'</code>
+      <code>'{"from": "A", "msg": "hello world"}'</code>
     </td>
     <td valign="bottom">
     <br/>
@@ -44,7 +44,7 @@ For IPC across machines, `pls serve` exposes local pools securely, runs an MCP s
       <code>pls follow channel</code>
       <br/><br/><br/><br/>
       <b>Bob sees it on stdout</b><br/>
-      <code>{ "data": {"from": "alice", "msg": "hello world"}, ... }</code>
+      <code>{ "data": {"from": "A", "msg": "hello world"}, ... }</code>
     </td>
   </tr>
 </table>
@@ -65,7 +65,7 @@ For IPC across machines, `pls serve` exposes local pools securely, runs an MCP s
       <br/><br/><br/>
       <b>Alice writes</b><br/>
       <code>pls feed channel</code><br/>
-      <code>'{"from": "alice", "msg": "hi all"}'</code>
+      <code>'{"from": "A", "msg": "hi all"}'</code>
     </td>
     <td valign="bottom">
       <br/><br/>
@@ -73,14 +73,14 @@ For IPC across machines, `pls serve` exposes local pools securely, runs an MCP s
       <br/><br/>
       <br/><br/><br/>
       <b>Bob sees it</b><br/>
-      <code>{ "data": {"from": "alice", "msg": "hi all"}, ... }</code>
+      <code>{ "data": {"from": "A", "msg": "hi all"}, ... }</code>
     </td>
     <td valign="bottom">
       <b>Carol follows remotely</b><br/>
       <code>pls follow http://alice:9700/channel</code>
       <br/><br/><br/><br/><br/>
       <b>Carol sees it</b><br/>
-      <code>{ "data": {"from": "alice", "msg": "hi all"}, ... }</code>
+      <code>{ "data": {"from": "A", "msg": "hi all"}, ... }</code>
     </td>
   </tr>
 </table>
