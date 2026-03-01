@@ -895,7 +895,7 @@ struct ServeInitArgs {
     output_dir: PathBuf,
     #[arg(
         long,
-        default_value = "serve-token.txt",
+        default_value = "plasmite-auth-token.txt",
         value_name = "PATH",
         help = "Token output path (relative to --output-dir unless absolute)",
         value_hint = ValueHint::FilePath
@@ -903,7 +903,7 @@ struct ServeInitArgs {
     token_file: PathBuf,
     #[arg(
         long = "tls-cert",
-        default_value = "serve-cert.pem",
+        default_value = "plasmite-tls-cert.pem",
         value_name = "PATH",
         help = "TLS certificate output path (relative to --output-dir unless absolute)",
         value_hint = ValueHint::FilePath
@@ -911,7 +911,7 @@ struct ServeInitArgs {
     tls_cert: PathBuf,
     #[arg(
         long = "tls-key",
-        default_value = "serve-key.pem",
+        default_value = "plasmite-tls-key.pem",
         value_name = "PATH",
         help = "TLS private key output path (relative to --output-dir unless absolute)",
         value_hint = ValueHint::FilePath

@@ -403,22 +403,22 @@ plasmite serve init --bind 0.0.0.0:9700 --output-dir ./.plasmite-serve
 plasmite serve \
   --bind 0.0.0.0:9700 \
   --allow-non-loopback \
-  --token-file ./.plasmite-serve/serve-token.txt \
-  --tls-cert ./.plasmite-serve/serve-cert.pem \
-  --tls-key ./.plasmite-serve/serve-key.pem
+  --token-file ./.plasmite-serve/plasmite-auth-token.txt \
+  --tls-cert ./.plasmite-serve/plasmite-tls-cert.pem \
+  --tls-key ./.plasmite-serve/plasmite-tls-key.pem
 ```
 
 **On a client** (same CLI, plus auth/trust flags):
 
 ```bash
 plasmite feed https://server:9700/events \
-  --token-file ./.plasmite-serve/serve-token.txt \
-  --tls-ca ./.plasmite-serve/serve-cert.pem \
+  --token-file ./.plasmite-serve/plasmite-auth-token.txt \
+  --tls-ca ./.plasmite-serve/plasmite-tls-cert.pem \
   '{"sensor": "temp", "value": 23.5}'
 
 plasmite follow https://server:9700/events \
-  --token-file ./.plasmite-serve/serve-token.txt \
-  --tls-ca ./.plasmite-serve/serve-cert.pem \
+  --token-file ./.plasmite-serve/plasmite-auth-token.txt \
+  --tls-ca ./.plasmite-serve/plasmite-tls-cert.pem \
   --tail 20
 ```
 

@@ -40,9 +40,9 @@ plasmite serve init --bind 0.0.0.0:9700 --output-dir ./.plasmite-serve
 plasmite serve \
   --bind 0.0.0.0:9700 \
   --allow-non-loopback \
-  --token-file ./.plasmite-serve/serve-token.txt \
-  --tls-cert ./.plasmite-serve/serve-cert.pem \
-  --tls-key ./.plasmite-serve/serve-key.pem
+  --token-file ./.plasmite-serve/plasmite-auth-token.txt \
+  --tls-cert ./.plasmite-serve/plasmite-tls-cert.pem \
+  --tls-key ./.plasmite-serve/plasmite-tls-key.pem
 ```
 
 `serve init`, `serve check`, and secure startup banners display:
@@ -58,14 +58,14 @@ Prefer native client commands over raw curl:
 ```bash
 # Feed with bearer token file + trusted cert
 plasmite feed https://server:9700/events \
-  --token-file ./.plasmite-serve/serve-token.txt \
-  --tls-ca ./.plasmite-serve/serve-cert.pem \
+  --token-file ./.plasmite-serve/plasmite-auth-token.txt \
+  --tls-ca ./.plasmite-serve/plasmite-tls-cert.pem \
   '{"sensor":"temp","value":23.5}'
 
 # Follow with same trust/auth material
 plasmite follow https://server:9700/events \
-  --token-file ./.plasmite-serve/serve-token.txt \
-  --tls-ca ./.plasmite-serve/serve-cert.pem \
+  --token-file ./.plasmite-serve/plasmite-auth-token.txt \
+  --tls-ca ./.plasmite-serve/plasmite-tls-cert.pem \
   --tail 20
 ```
 
@@ -85,11 +85,11 @@ Three options, from easiest to most controlled:
 
 ```bash
 # Self-signed (development / demos)
-plasmite serve --tls-self-signed --allow-non-loopback --token-file ./serve-token.txt
+plasmite serve --tls-self-signed --allow-non-loopback --token-file ./plasmite-auth-token.txt
 
 # Generated cert/key (via serve init)
 plasmite serve init
-plasmite serve --tls-cert serve-cert.pem --tls-key serve-key.pem
+plasmite serve --tls-cert plasmite-tls-cert.pem --tls-key plasmite-tls-key.pem
 
 # Bring your own cert
 plasmite serve --tls-cert /etc/letsencrypt/live/pool.example.com/fullchain.pem \

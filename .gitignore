@@ -27,6 +27,12 @@ conformance/work-*/
 .scratch/
 tmp/
 .ergo/lock
+serve-token.txt
+serve-cert.pem
+serve-key.pem
+plasmite-auth-token.txt
+plasmite-tls-cert.pem
+plasmite-tls-key.pem
 .idea/
 .vscode/
 *.swp
