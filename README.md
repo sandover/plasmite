@@ -42,10 +42,7 @@ For IPC across machines, `pls serve` exposes local pools securely, runs an MCP s
     <br/>
       <br/><b>Bob starts reading</b><br/>
       <code>pls follow channel</code>
-      <br/><br/>
-      <br/>
-      <br/>
-      <br/>
+      <br/><br/><br/><br/>
       <b>Bob sees it on stdout</b><br/>
       <code>{ "data": {"from": "alice", "msg": "hello world"}, ... }</code>
     </td>
