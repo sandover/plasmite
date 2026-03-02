@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-03-02
+
+### Added
+- Experimental Model Context Protocol (MCP) v1 support via `plasmite mcp` (stdio) and the `/mcp` HTTP adapter.
+- `plasmite tap` for process-output capture workflows.
+- `just sdk-from-source` to build release-style SDK tarballs from source for C consumers.
+
+### Changed
+- `plasmite serve` startup output now surfaces MCP endpoint details for faster operator discovery.
+- `plasmite serve init` default artifact names are now more user-friendly:
+  - `plasmite-auth-token.txt`
+  - `plasmite-tls-cert.pem`
+  - `plasmite-tls-key.pem`
+- SDK packaging docs now include source-build guidance and improved Linux `pkg-config` static-link metadata.
+
+### Fixed
+- Linux TTY integration testing now works reliably with `util-linux script`.
+- `mcp --dir` handling is now command-scoped to preserve top-level CLI behavior.
+- Additional MCP and remote integration regressions found during audit were corrected and covered by tests.
+
 ## [0.5.1] - 2026-02-26
 
 ### Fixed
