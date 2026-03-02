@@ -30,16 +30,16 @@ For IPC across machines, `pls serve` exposes local pools securely, runs an MCP s
   </tr>
   <tr>
     <td valign="top">
-      <b>Alice creates a channel</b><br/>
+      <b>Alice creates a channel (aka a pool)</b><br/>
       <code>pls pool create channel</code>
       <br/><br/>
-      <b>Alice writes a message</b><br/>
+      <b>Alice sends a message</b><br/>
       <code>pls feed channel</code><br/>
       <code>'{"from": "A", "msg": "hello world"}'</code>
     </td>
     <td valign="bottom">
     <br/>
-      <br/><b>Bob starts reading</b><br/>
+      <br/><b>Bob starts watching</b><br/>
       <code>pls follow channel</code>
       <br/><br/><br/>
       <b>Bob sees it on stdout</b><br/>
@@ -62,20 +62,20 @@ For IPC across machines, `pls serve` exposes local pools securely, runs an MCP s
       <code>pls serve init</code><br/>
       <code>pls serve</code>
       <br/><br/><br/>
-      <b>Alice writes</b><br/>
+      <b>Alice sends</b><br/>
       <code>pls feed channel</code><br/>
       <code>'{"from": "A", "msg": "hi all"}'</code>
     </td>
     <td valign="bottom">
       <br/><br/>
-      <i>(Bob never quit his follow process, so he's still watching.)</i>
+      <i>(Bob never quit his follow process, so he's <u>still watching the same pool</u>.)</i>
       <br/><br/>
       <br/><br/><br/>
       <b>Bob sees it</b><br/>
       <code>{ "data": {"from": "A", "msg": "hi all"}, ... }</code>
     </td>
     <td valign="bottom">
-      <b>Carol follows remotely</b><br/>
+      <b>Carol watches remotely</b><br/>
       <code>pls follow 
   http://alice:9700/channel</code>
       <br/><br/><br/><br/>
@@ -87,19 +87,19 @@ For IPC across machines, `pls serve` exposes local pools securely, runs an MCP s
 
 The APIs work the same way as the CLI.
 
-## Why not just...
+## Comparison with other styles of IPC
 
 | | Drawbacks | Plasmite |
 |---|---|---|
-| **Kafka**, **RabbitMQ**,  | Lots of machinery: partitions, groups, exchanges, bindings, oh my. | No config, no broker, no partitions, no topology — `feed` and `follow`. |
-| **Redis / NATS** | Server required even for local messaging. Messages live in server memory; if the server dies, messaging stops. | Pools persist on disk independent of any process. No server needed locally. |
-| **Log files / `tail -f`** | Messages are unstructured. Logs grow and have to be rotated (and rotating logs breaks `tail -f`). No way to replay from a specific point. No remote access without setting up syslog. | Messages are JSON with sequence numbers. Bounded disk usage. Replay from any point. Remote access built in. |
+| **Kafka**, **RabbitMQ**,  | Lots of machinery: partitions, groups, exchanges, bindings, oh my. | Covers the 80/20 cases: no config, no broker, no partitions, no topology. |
+| **Redis / NATS** | Server required even for local messaging. Messages live in server memory; if the server dies, messaging stops. | Pools persist on disk independent of any process. Server only if you need one. |
+| **Log files / `tail -f`** | Messages are unstructured. Logs grow and must be rotated (which breaks `tail -f`). Can't easily replay from a specific point. No remote access without setting up syslog. | Messages have structure and sequence numbers. Disk usage is bounded. Replay from any point. Remote access is idiomatic. |
 | **Ad-hoc files (temp files, locks, polled dirs)** | Readers have to poll for new files. Locking is manual; crashes leave a stale lock. Files accumulate. No ordering unless you bake it into filenames. | Readers stream in real time. Writers append concurrently without explicit locks, and messages are ordered. Ring buffer bounds disk usage.  |
 | **SQLite as a queue** | Readers have to poll. Writers contend. Have to design & migrate schemas. SQLite explicitly discourages network access to the DB file. | Follow & replay without polling. No `SQLITE_BUSY`. No schema, no migrations, no cleanup, easy remote access. |
-| **OS primitives (pipes, sockets, shm)** | Named pipes mean if the reader dies, the writer blocks or gets SIGPIPE. With sockets you have to implement your own framing and reconnection. Shared memory has to be coordinated with semaphores, and a crash while holding a lock is bad news. Machine-local only. | Many readers, many writers, crash-safe, persistent across reboots. Works over the network too. |
-| **ZeroMQ** | Messages vanish when processes restart. The pattern matrix is expressive but hard to get right. Binary protocol means you can't inspect messages with standard tools. | Messages persist. One mental model: append, follow, replay. Plain JSON you can pipe through `jq`. |
+| **OS primitives (pipes, sockets, shm)** | Named pipes mean if the reader dies, the writer blocks or gets SIGPIPE. With sockets you have to implement your own framing and reconnection. Shared memory has to be coordinated with semaphores; be careful not to crash while holding a lock. Machine-local only. | Many readers, many writers, crash-safe, persistent across reboots. |
+| **ZeroMQ** | Messages vanish when processes restart. The pattern matrix is expressive but hard to get right. Binary protocol means you can't inspect messages with standard tools. | Messages persist. One mental model fits most cases. Plain JSON you can pipe through `jq`. |
 
-**Use cases** — CI gates, live event streams, duplex chat, system log ring buffers, replay & debug — all in the **[Cookbook](docs/cookbook.md)**. 
+**Use cases** — CI gates, live event streams, duplex chat, system log ring buffers, replay & debug: see the **[Cookbook](docs/cookbook.md)**. 
 
 Plasmite is for single-host and host-adjacent messaging. If you need multi-host cluster replication, schema registries, or workflow orchestration, see [When Plasmite Isn't the Right Fit](docs/cookbook.md#when-plasmite-isnt-the-right-fit).
 
@@ -111,20 +111,20 @@ Plasmite is for single-host and host-adjacent messaging. If you need multi-host 
 brew install sandover/tap/plasmite
 ```
 
-Installs the CLI (`plasmite` + `pls`) and the full SDK (`libplasmite`, C header, pkg-config). Go bindings link against this SDK, so install Homebrew first if you're using Go.
+Installs the CLI (`plasmite` + `pls`) and the full SDK (`libplasmite`, C header, pkg-config). Go bindings link against this SDK, so install Homebrew first if using Go.
 
 ### Rust
 
 ```bash
-cargo install plasmite     # CLI only (plasmite + pls)
-cargo add plasmite         # use as a library in your Rust project
+cargo install plasmite     # CLI only
+cargo add plasmite         # use as a library in Rust projects
 ```
 
 ### Python
 
 ```bash
 uv tool install plasmite   # standalone CLI + Python bindings
-uv add plasmite            # add to an existing uv-managed project
+uv add plasmite            # add to a uv-managed project
 ```
 
 The wheel includes pre-built native bindings.
@@ -135,7 +135,7 @@ The wheel includes pre-built native bindings.
 npm i -g plasmite
 ```
 
-The package includes pre-built native bindings.
+Package includes pre-built native bindings.
 
 ### Go
 
@@ -143,7 +143,7 @@ The package includes pre-built native bindings.
 go get github.com/sandover/plasmite/bindings/go/local
 ```
 
-Bindings only (no CLI). Links against `libplasmite` via cgo, so you'll need the SDK on your system first — via Homebrew on macOS, or from a [GitHub Releases](https://github.com/sandover/plasmite/releases) tarball on Linux.
+Bindings only (no CLI). Links against `libplasmite` via cgo, so first get the SDK via Homebrew on macOS, or from a [GitHub Releases](https://github.com/sandover/plasmite/releases) tarball on Linux.
 
 ### Pre-built binaries
 
@@ -151,24 +151,22 @@ Tarballs for Linux and macOS are on [GitHub Releases](https://github.com/sandove
 
 Windows builds (`x86_64-pc-windows-msvc`) are available via npm and PyPI. See the [distribution docs](docs/record/distribution.md) for the full install matrix.
 
-## Commands
+## Command Overview
 
 | Command | What it does |
 |---|---|
 | `feed POOL DATA` | Send a message (`--create` to auto-create the pool) |
-| `follow POOL` | Follow messages (`--create` auto-creates missing local pools) |
+| `follow POOL` | Follow messages (`--create` to auto-create) |
 | `fetch POOL SEQ` | Fetch one message by sequence number |
 | `pool create NAME` | Create a pool (`--size 8M` for larger) |
 | `pool list` | List pools |
 | `pool info NAME` | Show pool metadata and metrics |
 | `pool delete NAME...` | Delete one or more pools |
-| `duplex POOL` | Read and write from one command (`--me` for chat mode) |
+| `duplex POOL` | 2-way session with a pool (`--me` for chat mode) |
 | `doctor POOL \| --all` | Validate pool integrity |
 | `serve` | HTTP server (loopback default; non-loopback opt-in) |
 
 `pls` and `plasmite` are the same binary. Shell completion: `plasmite completion bash|zsh|fish`.
-Remote pools support read and write; `--create` is local-only.
-For scripting, use `--json` with `pool create`, `pool list`, `pool delete`, `doctor`, and `serve check`.
 
 ## How it works
 
@@ -193,11 +191,11 @@ Default pool directory: `~/.plasmite/pools/`.
 | Message overhead (framing) | 72-79 bytes per message (64B header + 8B commit marker + alignment) |
 | Default pool size | 1 MB |
 
-**How reads work**: The pool file is memory-mapped. Readers walk committed frames directly from the mapped region — no read syscalls, no buffer copies. Payloads are stored in [Lite3](https://github.com/fastserial/lite3), a zero-copy binary format that is byte-for-byte JSON-compatible — every valid JSON document has an equivalent Lite3 representation and vice versa. Lite3 supports field lookup by offset, so tag filtering and `--where` predicates run without deserializing the full message. JSON conversion happens only at the output boundary.
+**How reads work**: The pool file is memory-mapped. Readers walk frames directly from the mapped region — no read syscalls, no buffer copies. Payloads are stored in [Lite3](https://github.com/fastserial/lite3), a zero-copy binary format that is byte-for-byte JSON-compatible. Every valid JSON document has an equivalent Lite3 representation and vice versa. Lite3 supports field lookup by offset, so tag filtering and `--where` predicates run without deserializing the full message. JSON conversion happens only at the output boundary.
 
-**How writes work**: Writers acquire an OS file lock, plan frame placement (including ring wrap), write the frame as `Writing`, then flip it to `Committed` and update the header. The lock is held only for the memcpy + header update — no allocation or encoding happens under the lock.
+**How writes work**: Writers acquire an OS file lock, plan frame placement (including ring wrap), write the frame as `Writing`, then flip it to `Committed` and update the header. The lock is held only for the memcpy + header update; no allocation or encoding happens under the lock.
 
-**How lookups work**: Each pool includes an inline index — a fixed-size hash table mapping sequence numbers to byte offsets. `fetch POOL 42` usually jumps directly to the right frame. If the slot is stale or collided, the reader scans forward from the tail. You can tune this with `--index-capacity` at pool creation time.
+**How lookups work**: Each pool includes an inline index: a fixed-size hash table mapping sequence numbers to byte offsets. `fetch POOL 42` usually jumps directly to the right frame. If the slot is stale or collided, the reader scans forward from the tail. Can set `--index-capacity` at pool creation time.
 
 Algorithmic complexity below uses **N** = visible messages in the pool (depends on message sizes and pool capacity), **M** = index slot count.
 
