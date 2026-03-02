@@ -17,7 +17,7 @@ What would it take to make IPC pleasant and predictable?
 
 So, there's **Plasmite**.
 
-Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed channels called "pools", which are ring buffers. There's no daemon or broker for local IPC, no fancy config, and it's fast enough for low-latency local workflows. Throughput depends on payload size, durability mode, and hardware, so Plasmite ships a benchmark harness instead of promising one fixed headline number. Readers mmap the pool file and walk frames in place, and payloads use [Lite3](https://github.com/fastserial/lite3), a zero-copy JSON binary encoding.
+Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed channels called "pools", which are ring buffers. There's no daemon or broker for local IPC, no fancy config, and it's fast -- 50k+ 1KB msgs/sec on a laptop. Readers mmap the pool file and walk frames in place, and payloads use [Lite3](https://github.com/fastserial/lite3), a zero-copy JSON binary encoding.
 
 For IPC across machines, `pls serve` exposes local pools securely, runs an MCP server, and serves a minimal web UI too.
 
@@ -183,13 +183,15 @@ Default pool directory: `~/.plasmite/pools/`.
 
 ## Performance
 
-| Metric | |
+| Metric | Typical (local, `Durability::Fast`) |
 |---|---|
-| Append throughput | Workload-dependent; benchmark with `just bench` or `cargo run --release --example plasmite-bench -- --help` |
-| Read | Lock-free, zero-copy via mmap |
-| On-disk format | [Lite3](https://github.com/fastserial/lite3) (zero-copy, JSON-compatible binary); field access without deserialization |
+| `feed` throughput | ~50k+ msgs/sec (1KB JSON messages, single writer) |
+| `follow` throughput | ~50k+ msgs/sec (1KB messages, single follower) |
 | Message overhead (framing) | 72-79 bytes per message (64B header + 8B commit marker + alignment) |
-| Default pool size | 1 MB |
+| Read path | Lock-free, zero-copy via mmap |
+| On-disk format | [Lite3](https://github.com/fastserial/lite3) (zero-copy, JSON-compatible binary); field access without deserialization |
+
+These figures are from Plasmite’s built-in benchmark harness (`plasmite-bench`) using local pools, `Durability::Fast`, and ~1KB JSON payloads. The benchmark message `data` is an object like `{"filler":"xxxx..."}` (and in the cross-process follow run it also includes `sent_ns` and a final `done=true` marker).
 
 **How reads work**: The pool file is memory-mapped. Readers walk frames directly from the mapped region — no read syscalls, no buffer copies. Payloads are stored in [Lite3](https://github.com/fastserial/lite3), a zero-copy binary format that is byte-for-byte JSON-compatible. Every valid JSON document has an equivalent Lite3 representation and vice versa. Lite3 supports field lookup by offset, so tag filtering and `--where` predicates run without deserializing the full message. JSON conversion happens only at the output boundary.
 
@@ -197,7 +199,16 @@ Default pool directory: `~/.plasmite/pools/`.
 
 **How lookups work**: Each pool includes an inline index: a fixed-size hash table mapping sequence numbers to byte offsets. `fetch POOL 42` usually jumps directly to the right frame. If the slot is stale or collided, the reader scans forward from the tail. Can set `--index-capacity` at pool creation time.
 
-Algorithmic complexity below uses **N** = visible messages in the pool (depends on message sizes and pool capacity), **M** = index slot count.
+To reproduce throughput on your machine, use the benchmark harness:
+
+```bash
+just bench
+# or:
+cargo build --release --example plasmite-bench
+./target/release/examples/plasmite-bench --pool-size 64M --payload-bytes 1024 --messages 20000 --writers 1 --durability fast --format both
+```
+
+Algorithmic complexity below uses **N** = visible messages in the pool (depends on message sizes and pool capacity), **M** = index slot count, **k** = messages emitted by `--tail`, **R** = replayed messages.
 
 | Operation | Complexity | Notes |
 |---|---|---|
