@@ -8,7 +8,7 @@ multiple processes can read and write concurrently. Use it for IPC, event
 sourcing, job queues, or anywhere you'd reach for Redis or a database-backed
 queue but don't want to run a server.
 
-- ~50k+ 1KB msgs/sec append throughput on a laptop (single writer, `Durability::Fast`)
+- ~60k 1KB msgs/sec append throughput on a laptop (single writer, `Durability::Fast`)
 - Lock-free, zero-copy reads via mmap
 - Crash-safe writes with configurable durability
 - Bounded disk usage (ring buffer — old messages overwritten when full)
@@ -229,37 +229,9 @@ match report.status {
 }
 ```
 
-### Lite3 (binary framing)
-
-For high-throughput paths that skip JSON encoding:
-
-```rust
-use plasmite::api::{PoolApiExt, Durability};
-
-let seq = pool.append_lite3_now(b"raw payload bytes", Durability::Fast)?;
-let frame = pool.get_lite3(seq)?;
-// frame.seq, frame.timestamp_ns, frame.payload
-```
-
 ## CLI
 
-The crate also installs the `plasmite` and `pls` CLI binaries:
-
-```bash
-cargo install plasmite
-
-pls feed events --create '{"kind": "signup", "user": "alice"}'
-pls follow events
-pls serve
-```
-
-## Language bindings
-
-Plasmite also has native bindings for
-[Node.js](https://www.npmjs.com/package/plasmite),
-[Python](https://pypi.org/project/plasmite/), and
-[Go](https://github.com/sandover/plasmite/tree/main/bindings/go) — all
-through the same C ABI, so pools are interoperable across languages.
+`cargo install plasmite` also installs the `plasmite` (and `pls`) CLI. See the [full README](https://github.com/sandover/plasmite) for CLI docs, cookbook, and language bindings ([Node](https://www.npmjs.com/package/plasmite), [Python](https://pypi.org/project/plasmite/), [Go](https://github.com/sandover/plasmite/tree/main/bindings/go)).
 
 ## License
 
