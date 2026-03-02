@@ -51,7 +51,14 @@ if [[ -f "$release_dir/libplasmite.a" ]]; then
   cp "$release_dir/libplasmite.a" "$sdk_dir/lib/libplasmite.a"
 fi
 
-cat > "$sdk_dir/lib/pkgconfig/plasmite.pc" <<EOF
+libs_private=""
+if [[ "$target" == *linux* ]]; then
+  # Keep static consumers working with `pkg-config --static --libs plasmite`.
+  libs_private="Libs.private: -lpthread -ldl -lm"
+fi
+
+{
+cat <<EOF
 prefix=\${pcfiledir}/../..
 exec_prefix=\${prefix}
 libdir=\${exec_prefix}/lib
@@ -61,7 +68,13 @@ Name: plasmite
 Description: Plasmite C ABI library
 Version: ${version}
 Libs: -L\${libdir} -lplasmite
+EOF
+if [[ -n "$libs_private" ]]; then
+  echo "$libs_private"
+fi
+cat <<EOF
 Cflags: -I\${includedir}
 EOF
+} > "$sdk_dir/lib/pkgconfig/plasmite.pc"
 
 tar -C "$sdk_dir" -czf "$root_dir/dist/plasmite_${version}_${platform}.tar.gz" .

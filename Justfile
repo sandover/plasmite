@@ -100,6 +100,27 @@ conformance-all:
 cross-artifact-smoke:
 	./scripts/cross_artifact_smoke.sh
 
+# Build a release-style SDK tarball from source (for C/libplasmite consumers).
+# Defaults target Linux x86_64; override for other targets/platform tags.
+sdk-from-source target="x86_64-unknown-linux-gnu" platform="linux_amd64":
+	version="$$(sed -n 's/^version = \"\([0-9A-Za-z\.\-+]*\)\"$$/\1/p' Cargo.toml | head -n 1)"; \
+	if [[ -z "$$version" ]]; then \
+	  echo "failed to detect version from Cargo.toml" >&2; \
+	  exit 1; \
+	fi; \
+	cargo build --release --target "{{target}}" --bins; \
+	if [[ "{{target}}" == *windows-msvc ]]; then \
+	  cargo rustc --release --target "{{target}}" --lib --crate-type=cdylib; \
+	elif [[ "{{target}}" == *apple-darwin ]]; then \
+	  cargo rustc --release --target "{{target}}" --lib --crate-type=cdylib -- -C link-arg=-Wl,-install_name,@rpath/libplasmite.dylib; \
+	else \
+	  cargo rustc --release --target "{{target}}" --lib --crate-type=cdylib -- -C link-arg=-Wl,-soname,libplasmite.so; \
+	fi; \
+	cargo rustc --release --target "{{target}}" --lib --crate-type=staticlib; \
+	./scripts/package_release_sdk.sh "{{target}}" "{{platform}}" "$$version"; \
+	./scripts/cross_artifact_smoke.sh "dist/plasmite_$${version}_{{platform}}.tar.gz"; \
+	echo "sdk-from-source complete: dist/plasmite_$${version}_{{platform}}.tar.gz"
+
 # Ensure scratch workspace exists.
 scratch:
 	mkdir -p .scratch

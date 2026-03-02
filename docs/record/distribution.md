@@ -64,3 +64,4 @@ The `plasmite.pc` file must:
 - Be named `plasmite` (not `libplasmite`)
 - Provide `Cflags: -I...` for `include/plasmite.h`
 - Provide `Libs: -L... -lplasmite`
+- For Linux SDK artifacts, provide `Libs.private: -lpthread -ldl -lm` so `pkg-config --static --libs plasmite` resolves required system libraries.

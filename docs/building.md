@@ -75,6 +75,45 @@ lib/libplasmite.a               # optional
 lib/pkgconfig/plasmite.pc
 ```
 
+## Source SDK build (C `libplasmite` consumers)
+
+If you want to link a C program against `include/plasmite.h` and `libplasmite`,
+build a local SDK tarball from source in release-style layout:
+
+```bash
+just sdk-from-source
+```
+
+Default output:
+
+```text
+dist/plasmite_<version>_linux_amd64.tar.gz
+```
+
+This command builds `plasmite` + `pls`, builds shared/static `libplasmite`,
+packages `bin/`, `include/`, `lib/`, `lib/pkgconfig/plasmite.pc`, and runs
+artifact smoke checks.
+
+Use the SDK from your C build via `pkg-config`:
+
+```bash
+tar -xzf dist/plasmite_<version>_linux_amd64.tar.gz -C /path/to/sdk
+export PKG_CONFIG_PATH=/path/to/sdk/lib/pkgconfig
+pkg-config --cflags --libs plasmite
+```
+
+For static linking on Linux:
+
+```bash
+pkg-config --cflags --static --libs plasmite
+```
+
+You can override target/platform tags:
+
+```bash
+just sdk-from-source aarch64-apple-darwin darwin_arm64
+```
+
 `release.yml` uploads build artifacts only (SDK tarballs, Python dist artifacts, npm tarball, and release metadata).
 
 `.github/workflows/release-publish.yml` (publish stage) consumes a successful build run's artifacts, runs registry preflight checks, syncs/verifies the Homebrew tap formula, publishes crates/npm/PyPI, and then creates/updates the GitHub release with SDK tarballs + `sha256sums.txt`.
@@ -120,6 +159,9 @@ If you need to force a specific build run (for example, during incident recovery
 
 - **Source build fails with `cl.exe` errors (`__builtin_expect`, `__attribute__`, parsing errors in `lite3.h`)**
   - Prefer official install channels (`uv tool install plasmite`, `npm i -g plasmite`) over local source builds.
+- **Source build fails with Lite3 parse errors near `case` labels**
+  - Vendored Lite3 requires a C23-capable C compiler (it uses declarations immediately after labels).
+  - Install a newer compiler and retry (for example by setting `CC` explicitly), then rebuild.
 - **`feed` fails with `failed to encode json as lite3`**
   - Use remote refs (`http://host:port/<pool>`) so encoding occurs on the remote server.
 - **Emergency fallback artifact integrity**
