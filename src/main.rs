@@ -3851,6 +3851,14 @@ fn follow_pool(
     let tail_wait = cfg.one && cfg.tail > 0;
     let mut timeout_deadline = cfg.timeout.map(|duration| Instant::now() + duration);
     let mut notify_enabled = cfg.notify;
+    let mut notify_handle = if notify_enabled {
+        notify::open_for_path(pool_path)
+    } else {
+        None
+    };
+    if notify_enabled && notify_handle.is_none() {
+        notify_enabled = false;
+    }
 
     let bump_timeout = |deadline: &mut Option<Instant>| {
         if let Some(duration) = cfg.timeout {
@@ -4086,10 +4094,15 @@ fn follow_pool(
                     let remaining = deadline.duration_since(now);
                     let wait_for = std::cmp::min(backoff, remaining);
                     if notify_enabled {
-                        match notify::wait_for_path(pool_path, wait_for) {
+                        match notify_handle
+                            .as_mut()
+                            .map(|handle| handle.wait(wait_for))
+                            .unwrap_or(NotifyWait::Unavailable)
+                        {
                             NotifyWait::Signaled | NotifyWait::TimedOut => {}
                             NotifyWait::Unavailable => {
                                 notify_enabled = false;
+                                notify_handle = None;
                                 std::thread::sleep(wait_for);
                             }
                         }
@@ -4097,10 +4110,15 @@ fn follow_pool(
                         std::thread::sleep(wait_for);
                     }
                 } else if notify_enabled {
-                    match notify::wait_for_path(pool_path, backoff) {
+                    match notify_handle
+                        .as_mut()
+                        .map(|handle| handle.wait(backoff))
+                        .unwrap_or(NotifyWait::Unavailable)
+                    {
                         NotifyWait::Signaled | NotifyWait::TimedOut => {}
                         NotifyWait::Unavailable => {
                             notify_enabled = false;
+                            notify_handle = None;
                             std::thread::sleep(backoff);
                         }
                     }

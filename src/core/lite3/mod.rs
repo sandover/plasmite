@@ -8,7 +8,8 @@ use std::io;
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use serde_json::{Map, Value};
+use serde::Serialize;
+use serde_json::Value;
 
 use crate::core::error::{Error, ErrorKind};
 
@@ -242,20 +243,21 @@ pub fn encode_message(meta_tags: &[String], data: &Value) -> Result<Lite3Buf, Er
         return Err(Error::new(ErrorKind::Usage).with_message("data must be object"));
     }
 
-    let tags = meta_tags
-        .iter()
-        .cloned()
-        .map(Value::String)
-        .collect::<Vec<_>>();
+    #[derive(Serialize)]
+    struct MetaEnvelope<'a> {
+        tags: &'a [String],
+    }
 
-    let mut meta = Map::new();
-    meta.insert("tags".to_string(), Value::Array(tags));
+    #[derive(Serialize)]
+    struct MessageEnvelope<'a> {
+        meta: MetaEnvelope<'a>,
+        data: &'a Value,
+    }
 
-    let mut root = Map::new();
-    root.insert("meta".to_string(), Value::Object(meta));
-    root.insert("data".to_string(), data.clone());
-
-    let json = Value::Object(root);
+    let json = MessageEnvelope {
+        meta: MetaEnvelope { tags: meta_tags },
+        data,
+    };
     let json_str = serde_json::to_string(&json).map_err(|err| {
         Error::new(ErrorKind::Usage)
             .with_message("failed to serialize json")

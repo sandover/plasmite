@@ -4,7 +4,7 @@
 //! Invariants: Wait results are best-effort; callers must fall back to polling.
 //! Invariants: Unavailable notify never blocks progress.
 
-use crate::core::notify::{WaitOutcome, open_for_path};
+use crate::core::notify::{WaitOutcome, open_for_path as core_open_for_path};
 use std::path::Path;
 use std::time::Duration;
 
@@ -15,13 +15,29 @@ pub enum NotifyWait {
     Unavailable,
 }
 
-pub fn wait_for_path(path: &Path, timeout: Duration) -> NotifyWait {
-    match open_for_path(path) {
-        Ok(semaphore) => match semaphore.wait(timeout) {
+pub struct NotifyHandle {
+    inner: crate::core::notify::PoolSemaphore,
+}
+
+impl NotifyHandle {
+    pub fn wait(&mut self, timeout: Duration) -> NotifyWait {
+        match self.inner.wait(timeout) {
             Ok(WaitOutcome::Signaled) => NotifyWait::Signaled,
             Ok(WaitOutcome::TimedOut) => NotifyWait::TimedOut,
             Err(_) => NotifyWait::Unavailable,
-        },
-        Err(_) => NotifyWait::Unavailable,
+        }
     }
+}
+
+pub fn open_for_path(path: &Path) -> Option<NotifyHandle> {
+    core_open_for_path(path)
+        .ok()
+        .map(|inner| NotifyHandle { inner })
+}
+
+pub fn wait_for_path(path: &Path, timeout: Duration) -> NotifyWait {
+    let Some(mut handle) = open_for_path(path) else {
+        return NotifyWait::Unavailable;
+    };
+    handle.wait(timeout)
 }
