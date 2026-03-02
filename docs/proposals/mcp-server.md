@@ -2,7 +2,7 @@
 
 ## Summary
 
-Add a built-in [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server to Plasmite, exposing pool operations as MCP tools and pools as MCP resources. Two entry points: `plasmite mcp` for local stdio transport and a `/mcp` endpoint on the existing `plasmite serve` HTTP server.
+Add a built-in [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server to Plasmite, exposing pool operations as MCP tools. Two entry points: `plasmite mcp` for local stdio transport and a `/mcp` endpoint on the existing `plasmite serve` HTTP server.
 
 ## Experimental posture (v1)
 
@@ -17,11 +17,11 @@ Design constraints for v1:
 
 Known constraints in v1 (intentional):
 
+- Three tools only: `plasmite_pool_list`, `plasmite_feed`, `plasmite_read`. Pool management is an operator concern.
 - No server-side TTL/expiry for coordination messages; freshness is client-side policy.
 - No built-in "latest per key" read mode; clients reconstruct current state from events.
 - No atomic claim/check-and-set primitive; coordination remains advisory.
 - `where` is jq-based; use tags for simple routing when possible.
-- `plasmite_pool_list` exposes structural pool info only (no descriptions/prefix filtering yet).
 
 ## Motivation
 
@@ -113,15 +113,14 @@ For interoperability with MCP clients, `/mcp` follows these wire-level rules:
 ```json
 {
   "capabilities": {
-    "tools": { "listChanged": false },
-    "resources": { "subscribe": false, "listChanged": false }
+    "tools": { "listChanged": false }
   }
 }
 ```
 
 ### Tools
 
-Tools are the primary interface. Each maps directly to an existing core operation.
+The v1 tool surface is intentionally minimal: discover, write, read. Pool creation, deletion, and inspection are operator actions (CLI, web UI), not agent actions.
 
 #### `plasmite_pool_list`
 
@@ -139,55 +138,6 @@ List available pools.
 ```
 
 Returns: JSON array of pool info objects (name, path, capacity, bounds).
-
-#### `plasmite_pool_create`
-
-```json
-{
-  "name": "plasmite_pool_create",
-  "description": "Create a new pool. Returns pool info on success.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "name": { "type": "string", "description": "Pool name" },
-      "size": { "type": "integer", "description": "Pool size in bytes (default: 1048576)" }
-    },
-    "required": ["name"]
-  }
-}
-```
-
-#### `plasmite_pool_info`
-
-```json
-{
-  "name": "plasmite_pool_info",
-  "description": "Get metadata and metrics for a pool.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "pool": { "type": "string", "description": "Pool name" }
-    },
-    "required": ["pool"]
-  }
-}
-```
-
-#### `plasmite_pool_delete`
-
-```json
-{
-  "name": "plasmite_pool_delete",
-  "description": "Delete a pool.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "pool": { "type": "string", "description": "Pool name" }
-    },
-    "required": ["pool"]
-  }
-}
-```
 
 #### `plasmite_feed`
 
@@ -211,23 +161,6 @@ Returns: JSON array of pool info objects (name, path, capacity, bounds).
       }
     },
     "required": ["pool", "data"]
-  }
-}
-```
-
-#### `plasmite_fetch`
-
-```json
-{
-  "name": "plasmite_fetch",
-  "description": "Fetch a single message by sequence number.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "pool": { "type": "string", "description": "Pool name" },
-      "seq": { "type": "integer", "description": "Sequence number" }
-    },
-    "required": ["pool", "seq"]
   }
 }
 ```
@@ -268,49 +201,6 @@ Ordering rules:
 - If `after_seq` is not set, return the last `count` matching messages, still in ascending `seq` order.
 - If both `since` and `after_seq` are set, apply both filters (intersection): messages must satisfy the time window and `seq > after_seq`.
 
-### Resources
-
-Pools are exposed as MCP resources for passive context. An agent (or its harness) can read a pool resource for recent state and poll again as needed.
-
-Resource URIs follow the pattern `plasmite:///pools/{name}`.
-
-#### Resource list
-
-`resources/list` returns one resource per pool:
-
-```json
-{
-  "uri": "plasmite:///pools/events",
-  "name": "events",
-  "description": "Plasmite pool: events (seq 1–4207, 1.0 MB)",
-  "mimeType": "application/json"
-}
-```
-
-#### Resource read
-
-`resources/read` for a pool URI returns the most recent messages (default 20) as MCP resource contents. This gives agents passive context without invoking a tool.
-
-Shape:
-
-```json
-{
-  "contents": [
-    {
-      "uri": "plasmite:///pools/events",
-      "mimeType": "application/json",
-      "text": "{\"messages\":[...],\"next_after_seq\":4207}"
-    }
-  ]
-}
-```
-
-`text` contains UTF-8 JSON with ascending messages and a `next_after_seq` cursor.
-
-#### Resource subscriptions
-
-Subscriptions and resource change notifications are intentionally out of scope for experimental v1. Clients poll via `plasmite_read` (`after_seq`) or call `resources/read` again.
-
 ### What `follow` is not
 
 MCP tools are request/response. A tool cannot stream indefinitely. `plasmite_read` returns a batch and the agent polls with `after_seq` if it wants to keep up. This is the right fit for agents, which operate in think→act→observe cycles, not continuous stream processing.
@@ -333,7 +223,7 @@ MCP HTTP ──┘
 
 ```
 src/
-  mcp.rs              — MCP tool/resource definitions, JSON-RPC dispatch
+  mcp.rs              — MCP tool definitions, JSON-RPC dispatch
   mcp_stdio.rs        — stdio transport (`plasmite mcp`)
   serve.rs            — adds /mcp route using mcp.rs handlers
 ```
@@ -382,8 +272,8 @@ Starts an MCP server on stdio. Runs until stdin closes or the client sends a shu
 
 The `/mcp` endpoint is added unconditionally when `plasmite serve` runs. No new flags required. It participates in existing `--access` mode restrictions:
 
-- `read-only`: `plasmite_feed`, `plasmite_pool_create`, `plasmite_pool_delete` return 403-equivalent JSON-RPC errors.
-- `write-only`: `plasmite_read`, `plasmite_fetch`, `plasmite_pool_info`, `plasmite_pool_list` return 403-equivalent errors.
+- `read-only`: `plasmite_feed` returns 403-equivalent JSON-RPC errors.
+- `write-only`: `plasmite_read`, `plasmite_pool_list` return 403-equivalent errors.
 - `read-write` (default): all tools available.
 
 A `--no-mcp` flag can suppress the endpoint if needed, but the default is on.
@@ -392,17 +282,18 @@ A `--no-mcp` flag can suppress the endpoint if needed, but the default is on.
 
 ### In scope
 
-- MCP tool definitions for pool CRUD, feed, fetch, and batch read.
-- MCP resource definitions for pool list/read.
+- MCP tool definitions for pool list, feed, and batch read.
 - stdio and streamable HTTP transports.
 - Reuse of existing auth, TLS, access-mode, and core API infrastructure.
 
 ### Out of scope
 
+- **Pool CRUD / inspection tools**: Pool creation, deletion, and info are operator actions via CLI or web UI, not agent tools. Agents create pools implicitly via `create: true` on `plasmite_feed`.
+- **Single-message fetch**: `plasmite_read` covers all read patterns; fetch-by-seq is a debug tool.
+- **MCP Resources**: Tools already cover pool discovery and reading. Resources can be added later if harnesses evolve to use them proactively.
 - **MCP Prompts**: No templated prompt definitions. Plasmite is a data layer, not a prompt source.
 - **MCP Sampling**: No server-initiated LLM calls. Plasmite never calls an LLM.
 - **Live streaming tools**: MCP tools are request/response. Streaming stays in CLI/HTTP/UI.
-- **Resource subscriptions + change notifications**: No `resources/subscribe` or `notifications/resources/*` in experimental v1.
 - **Agent-specific conventions in protocol**: Pool naming and claim policy are not encoded in MCP methods, but we do document a default convention in cookbook/agent instructions for launch.
 - **MCP SDK dependency**: Implement the protocol directly; adopt an SDK later if one proves valuable.
 - **HTTP session management**: No `MCP-Session-Id` state machine in v1.
@@ -411,7 +302,7 @@ A `--no-mcp` flag can suppress the endpoint if needed, but the default is on.
 ## Testing
 
 - **Unit tests**: JSON-RPC dispatch in `mcp.rs` — valid requests, invalid params, error mapping.
-- **Integration tests (stdio)**: Spawn `plasmite mcp` as a child process, send JSON-RPC on stdin, validate responses on stdout. Test tool invocations end-to-end: create pool → feed → read → fetch → delete.
+- **Integration tests (stdio)**: Spawn `plasmite mcp` as a child process, send JSON-RPC on stdin, validate responses on stdout. Test tool invocations end-to-end: list → feed (with create) → read.
 - **Integration tests (HTTP)**: Same tool invocations via HTTP POST to `/mcp`.
 - **Conformance**: Validate against the MCP Inspector (`npx @modelcontextprotocol/inspector`) for protocol compliance.
 
@@ -430,16 +321,20 @@ After implementation, add a "Agent Coordination" section to `docs/cookbook.md` s
 ## v1 policy decisions
 
 1. **Tool names**: Use `plasmite_*` prefix for collision safety.
-2. **Read cap**: `plasmite_read` max batch size is fixed at 200 in v1 (not configurable).
-3. **Read ordering**: All reads return ascending `seq`; polling is `after_seq`-based.
-4. **HTTP transport shape**: POST JSON request/response only in v1; GET `/mcp` returns 405.
-5. **Resources behavior**: `resources/list` + `resources/read` only; no subscriptions/notifications in v1.
-6. **Coordination semantics**: claims are advisory and non-atomic in v1.
-7. **Claims freshness**: no server TTL; clients apply time-window filtering.
-8. **Pool discovery scope**: pool list is intentionally minimal (no description/prefix query in v1).
+2. **Tool surface**: Three tools only — `plasmite_pool_list`, `plasmite_feed`, `plasmite_read`.
+3. **Read cap**: `plasmite_read` max batch size is fixed at 200 in v1 (not configurable).
+4. **Read ordering**: All reads return ascending `seq`; polling is `after_seq`-based.
+5. **HTTP transport shape**: POST JSON request/response only in v1; GET `/mcp` returns 405.
+6. **No MCP Resources in v1**: Tools cover pool discovery and reading; resources add implementation surface for minimal practical value while harnesses primarily use tools.
+7. **Coordination semantics**: claims are advisory and non-atomic in v1.
+8. **Claims freshness**: no server TTL; clients apply time-window filtering.
+9. **Pool discovery scope**: pool list is intentionally minimal (no description/prefix query in v1).
 
 ## Post-v1 candidates (based on field usage)
 
+- MCP Resources (`resources/list`, `resources/read`) for passive context injection by harnesses.
+- `plasmite_pool_create` / `plasmite_pool_info` / `plasmite_pool_delete` tools if agents need direct pool management.
+- `plasmite_fetch` tool for single-message lookup by sequence number.
 - `plasmite_feed` optional `ttl` lease expiry for coordination messages.
 - `plasmite_read` optional `latest_by` / `distinct_by` selector for state reconstruction.
 - Optional atomic coordination helper (claim-if-clear or compare-and-swap style).
@@ -450,29 +345,25 @@ After implementation, add a "Agent Coordination" section to `docs/cookbook.md` s
 ## Implementation checklist (v1)
 
 1. **Protocol skeleton**
-   - Implement `initialize`, `initialized`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/read`.
+   - Implement `initialize`, `initialized`, `ping`, `tools/list`, `tools/call`.
    - Enforce JSON-RPC shape and request/notification semantics.
 2. **Transport compliance**
    - `plasmite mcp`: newline-delimited JSON-RPC over stdio.
    - `/mcp`: POST JSON behavior, `Accept` negotiation, `202` semantics, `MCP-Protocol-Version` handling, GET returns 405.
    - Validate `Origin` on HTTP requests.
 3. **Tool surface**
-   - Implement all proposed `plasmite_*` tools with JSON Schema validation.
+   - Implement `plasmite_pool_list`, `plasmite_feed`, `plasmite_read` with JSON Schema validation.
    - Ensure `plasmite_read` ordering/cursor behavior is deterministic (ascending + `after_seq`).
-4. **Resource surface**
-   - Expose pool resources at `plasmite:///pools/{name}`.
-   - Return `resources/read` in MCP `contents[]` shape.
-   - No subscriptions/notifications in v1.
-5. **Auth + access mode**
+4. **Auth + access mode**
    - Reuse existing bearer-token auth and `--access` gating for `/mcp`.
    - Keep stdio unauthenticated.
-6. **Error semantics**
+5. **Error semantics**
    - Use JSON-RPC errors for protocol issues.
    - Use `result.isError: true` for tool execution failures with actionable messages.
-7. **Tests**
+6. **Tests**
    - Unit tests for request routing, schema validation, and error mapping behavior.
-   - Integration tests for stdio and HTTP transports (CRUD + feed/read/fetch + access-mode denials).
+   - Integration tests for stdio and HTTP transports (list + feed/read + access-mode denials).
    - Inspector-based conformance sanity check.
-8. **Docs**
+7. **Docs**
    - Add cookbook section for agent coordination and polling with `after_seq`.
    - Add serving docs note for `/mcp` transport semantics and required headers.
