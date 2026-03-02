@@ -17,7 +17,7 @@ What would it take to make IPC pleasant and predictable?
 
 So, there's **Plasmite**.
 
-Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed channels called "pools", which are ring buffers. There's no daemon or broker for local IPC, no fancy config, and it's quick (~600k msg/sec on a laptop). Readers mmap the pool file and walk frames in place, and payloads use [Lite3](https://github.com/fastserial/lite3), a zero-copy JSON binary encoding.
+Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed channels called "pools", which are ring buffers. There's no daemon or broker for local IPC, no fancy config, and it's fast enough for low-latency local workflows. Throughput depends on payload size, durability mode, and hardware, so Plasmite ships a benchmark harness instead of promising one fixed headline number. Readers mmap the pool file and walk frames in place, and payloads use [Lite3](https://github.com/fastserial/lite3), a zero-copy JSON binary encoding.
 
 For IPC across machines, `pls serve` exposes local pools securely, runs an MCP server, and serves a minimal web UI too.
 
@@ -185,7 +185,7 @@ Default pool directory: `~/.plasmite/pools/`.
 
 | Metric | |
 |---|---|
-| Append throughput | ~600k msg/sec (single writer, M3 MacBook) |
+| Append throughput | Workload-dependent; benchmark with `just bench` or `cargo run --release --example plasmite-bench -- --help` |
 | Read | Lock-free, zero-copy via mmap |
 | On-disk format | [Lite3](https://github.com/fastserial/lite3) (zero-copy, JSON-compatible binary); field access without deserialization |
 | Message overhead (framing) | 72-79 bytes per message (64B header + 8B commit marker + alignment) |
