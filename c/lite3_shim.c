@@ -74,6 +74,26 @@ int plasmite_lite3_get_val_ofs(
         return 0;
 }
 
+int plasmite_lite3_get_bool(
+        const unsigned char *buf,
+        size_t buf_len,
+        size_t ofs,
+        const char *key,
+        bool *out)
+{
+        return lite3_get_bool(buf, buf_len, ofs, key, out);
+}
+
+int plasmite_lite3_get_i64(
+        const unsigned char *buf,
+        size_t buf_len,
+        size_t ofs,
+        const char *key,
+        int64_t *out)
+{
+        return lite3_get_i64(buf, buf_len, ofs, key, out);
+}
+
 int plasmite_lite3_count(
         const unsigned char *buf,
         size_t buf_len,
@@ -96,6 +116,32 @@ int plasmite_lite3_arr_get_type(
         }
         if (out_type) {
                 *out_type = (uint8_t)type;
+        }
+        return 0;
+}
+
+int plasmite_lite3_arr_get_str(
+        const unsigned char *buf,
+        size_t buf_len,
+        size_t ofs,
+        uint32_t index,
+        const char **out_ptr,
+        size_t *out_len)
+{
+        lite3_str value = {0};
+        int ret = lite3_arr_get_str(buf, buf_len, ofs, index, &value);
+        if (ret < 0) {
+                return ret;
+        }
+        const char *ptr = LITE3_STR(buf, value);
+        if (!ptr) {
+                return -1;
+        }
+        if (out_ptr) {
+                *out_ptr = ptr;
+        }
+        if (out_len) {
+                *out_len = (size_t)value.len;
         }
         return 0;
 }

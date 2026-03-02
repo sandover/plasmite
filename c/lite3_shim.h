@@ -9,6 +9,7 @@ Invariants: Returned heap pointers are freed by calling `plasmite_lite3_free`.
 #define PLASMITE_LITE3_SHIM_H
 
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -51,6 +52,20 @@ int plasmite_lite3_get_val_ofs(
         const char *key,
         size_t *out_ofs);
 
+int plasmite_lite3_get_bool(
+        const unsigned char *buf,
+        size_t buf_len,
+        size_t ofs,
+        const char *key,
+        bool *out);
+
+int plasmite_lite3_get_i64(
+        const unsigned char *buf,
+        size_t buf_len,
+        size_t ofs,
+        const char *key,
+        int64_t *out);
+
 int plasmite_lite3_count(
         const unsigned char *buf,
         size_t buf_len,
@@ -63,6 +78,14 @@ int plasmite_lite3_arr_get_type(
         size_t ofs,
         uint32_t index,
         uint8_t *out_type);
+
+int plasmite_lite3_arr_get_str(
+        const unsigned char *buf,
+        size_t buf_len,
+        size_t ofs,
+        uint32_t index,
+        const char **out_ptr,
+        size_t *out_len);
 
 int plasmite_lite3_last_errno(void);
 

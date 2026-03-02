@@ -741,21 +741,24 @@ fn message_from_frame(frame: &crate::api::FrameRef<'_>) -> Result<crate::api::Me
     let tags_ofs = doc
         .key_offset_at(meta_ofs, "tags")
         .map_err(|err| err.with_message("missing meta.tags"))?;
-    let tags_json = doc.to_json_at(tags_ofs, false)?;
-    let tags_value: Value = serde_json::from_str(&tags_json).map_err(|err| {
-        Error::new(ErrorKind::Corrupt)
-            .with_message("invalid payload json")
-            .with_source(err)
-    })?;
-    let tags = tags_value
-        .as_array()
-        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("meta.tags must be array"))?
-        .iter()
-        .map(|item| item.as_str().map(|s| s.to_string()))
-        .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| {
+    let tags_count = doc
+        .count_at(tags_ofs)
+        .map_err(|_| Error::new(ErrorKind::Corrupt).with_message("meta.tags must be array"))?;
+    let mut tags = Vec::with_capacity(tags_count as usize);
+    for index in 0..tags_count {
+        let item_type = doc.array_item_type(tags_ofs, index).map_err(|_| {
             Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
         })?;
+        if item_type != crate::api::lite3::sys::LITE3_TYPE_STRING {
+            return Err(
+                Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
+            );
+        }
+        let tag = doc.array_string_at(tags_ofs, index).map_err(|_| {
+            Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
+        })?;
+        tags.push(tag);
+    }
 
     let data_ofs = doc
         .key_offset("data")

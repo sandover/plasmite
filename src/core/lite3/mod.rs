@@ -158,6 +158,75 @@ impl<'a> Lite3DocRef<'a> {
         get_key_offset_at(self.bytes, ofs, key)
     }
 
+    pub fn count_at(&self, ofs: usize) -> Result<u32, Error> {
+        array_count(self.bytes, ofs)
+    }
+
+    pub fn array_item_type(&self, ofs: usize, index: u32) -> Result<u8, Error> {
+        array_item_type(self.bytes, ofs, index)
+    }
+
+    pub fn array_string_at(&self, ofs: usize, index: u32) -> Result<String, Error> {
+        let mut out_ptr: *const std::os::raw::c_char = std::ptr::null();
+        let mut out_len: usize = 0;
+        let ret = unsafe {
+            sys::plasmite_lite3_arr_get_str(
+                self.bytes.as_ptr(),
+                self.bytes.len(),
+                ofs,
+                index,
+                &mut out_ptr as *mut *const std::os::raw::c_char,
+                &mut out_len as *mut usize,
+            )
+        };
+        if ret < 0 || out_ptr.is_null() {
+            return Err(
+                Error::new(ErrorKind::Corrupt).with_message("missing or invalid array item")
+            );
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(out_ptr as *const u8, out_len) };
+        let text = std::str::from_utf8(bytes).map_err(|err| {
+            Error::new(ErrorKind::Corrupt)
+                .with_message("invalid utf-8")
+                .with_source(err)
+        })?;
+        Ok(text.to_string())
+    }
+
+    pub fn bool_at_key(&self, ofs: usize, key: &str) -> Result<bool, Error> {
+        let mut out = false;
+        let ret = unsafe {
+            sys::plasmite_lite3_get_bool(
+                self.bytes.as_ptr(),
+                self.bytes.len(),
+                ofs,
+                c_key(key).as_ptr(),
+                &mut out as *mut bool,
+            )
+        };
+        if ret < 0 {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("missing or invalid key"));
+        }
+        Ok(out)
+    }
+
+    pub fn i64_at_key(&self, ofs: usize, key: &str) -> Result<i64, Error> {
+        let mut out: i64 = 0;
+        let ret = unsafe {
+            sys::plasmite_lite3_get_i64(
+                self.bytes.as_ptr(),
+                self.bytes.len(),
+                ofs,
+                c_key(key).as_ptr(),
+                &mut out as *mut i64,
+            )
+        };
+        if ret < 0 {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("missing or invalid key"));
+        }
+        Ok(out)
+    }
+
     pub fn type_at_key(&self, ofs: usize, key: &str) -> Result<u8, Error> {
         let value = unsafe {
             sys::plasmite_lite3_get_type(
@@ -372,5 +441,22 @@ mod tests {
         let buf = Lite3Buf::from_json_str(json).expect("lite3");
         let err = validate_bytes(buf.as_slice()).expect_err("should fail");
         assert_eq!(err.kind(), crate::core::error::ErrorKind::Corrupt);
+    }
+
+    #[test]
+    fn typed_key_getters_work() {
+        let data = json!({"done": true, "sent_ns": 42});
+        let buf = encode_message(&["event".to_string()], &data).expect("encode");
+        let doc = buf.as_doc();
+        let data_ofs = doc.key_offset("data").expect("data offset");
+        let meta_ofs = doc.key_offset("meta").expect("meta offset");
+        let tags_ofs = doc.key_offset_at(meta_ofs, "tags").expect("tags offset");
+        assert!(doc.bool_at_key(data_ofs, "done").expect("done"));
+        assert_eq!(doc.i64_at_key(data_ofs, "sent_ns").expect("sent_ns"), 42);
+        assert_eq!(doc.count_at(tags_ofs).expect("tags count"), 1);
+        assert_eq!(
+            doc.array_string_at(tags_ofs, 0).expect("tag 0"),
+            "event".to_string()
+        );
     }
 }

@@ -55,6 +55,22 @@ unsafe extern "C" {
         out_ofs: *mut usize,
     ) -> c_int;
 
+    pub fn plasmite_lite3_get_bool(
+        buf: *const c_uchar,
+        buf_len: usize,
+        ofs: usize,
+        key: *const c_char,
+        out: *mut bool,
+    ) -> c_int;
+
+    pub fn plasmite_lite3_get_i64(
+        buf: *const c_uchar,
+        buf_len: usize,
+        ofs: usize,
+        key: *const c_char,
+        out: *mut i64,
+    ) -> c_int;
+
     pub fn plasmite_lite3_count(
         buf: *const c_uchar,
         buf_len: usize,
@@ -68,6 +84,15 @@ unsafe extern "C" {
         ofs: usize,
         index: u32,
         out_type: *mut c_uchar,
+    ) -> c_int;
+
+    pub fn plasmite_lite3_arr_get_str(
+        buf: *const c_uchar,
+        buf_len: usize,
+        ofs: usize,
+        index: u32,
+        out_ptr: *mut *const c_char,
+        out_len: *mut usize,
     ) -> c_int;
 
     pub fn plasmite_lite3_last_errno() -> c_int;

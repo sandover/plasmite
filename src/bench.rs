@@ -124,6 +124,15 @@ pub fn run_bench(args: BenchArgs, program_version: &str) -> Result<(), Error> {
                 )?;
                 results.extend(append);
 
+                let follow_local = bench_follow_local(
+                    &pool_path,
+                    *pool_size,
+                    *payload_bytes,
+                    args.messages,
+                    *durability,
+                )?;
+                results.push(follow_local);
+
                 let follow = bench_follow(
                     &work_dir,
                     &pool_path,
@@ -430,7 +439,15 @@ impl BenchRow {
                 }
             }
             "multi_writer" => "multi_writer".to_string(),
-            "follow" => "follow".to_string(),
+            "follow" => {
+                if self.notes.contains("single-process") {
+                    "follow:local".to_string()
+                } else if self.notes.contains("cross-process") {
+                    "follow:xproc".to_string()
+                } else {
+                    "follow".to_string()
+                }
+            }
             other => other.to_string(),
         }
     }
@@ -455,7 +472,15 @@ impl BenchRow {
                 }
             }
             "multi_writer" => "cross-process".to_string(),
-            "follow" => "writer+follower".to_string(),
+            "follow" => {
+                if self.notes.contains("single-process") {
+                    "single-process decode".to_string()
+                } else if self.notes.contains("cross-process") {
+                    "writer+follower".to_string()
+                } else {
+                    self.notes.clone()
+                }
+            }
             _ => self.notes.clone(),
         }
     }
@@ -525,6 +550,14 @@ fn bench_append(
         durability,
         Some("core payload reused"),
     );
+    let core = with_runtime_metadata(
+        core,
+        "feed_append_core",
+        "single_process",
+        "payload_reused",
+        "none",
+        "append",
+    );
 
     let _ = std::fs::remove_file(pool_path);
     let mut pool = Pool::create(pool_path, PoolOptions::new(pool_size))?;
@@ -546,8 +579,101 @@ fn bench_append(
         durability,
         Some("includes Lite3 encode per msg"),
     );
+    let end_to_end = with_runtime_metadata(
+        end_to_end,
+        "feed_append_e2e",
+        "single_process",
+        "lite3_encode_per_msg",
+        "none",
+        "append",
+    );
 
     Ok(vec![core, end_to_end])
+}
+
+fn bench_follow_local(
+    pool_path: &Path,
+    pool_size: u64,
+    payload_bytes: usize,
+    messages: u64,
+    durability: Durability,
+) -> Result<Value, Error> {
+    let _ = std::fs::remove_file(pool_path);
+    let mut pool = Pool::create(pool_path, PoolOptions::new(pool_size))?;
+    for i in 0..messages {
+        let is_done = i + 1 == messages;
+        let payload = payload_for_bytes(payload_bytes, Some(now_ns()? ^ i), is_done)?;
+        append_with_durability(&mut pool, payload.as_slice(), durability)?;
+    }
+
+    let mut cursor = Cursor::new();
+    let start = Instant::now();
+    let mut latencies_ms = Vec::new();
+    let mut seen = 0u64;
+    loop {
+        match cursor.next(&pool)? {
+            CursorResult::Message(frame) => {
+                let data = decode_payload_data(frame.payload)?;
+                if let Some(sent_ns) = data.sent_ns {
+                    let now = now_ns()?;
+                    let delta = now.saturating_sub(sent_ns);
+                    latencies_ms.push(delta as f64 / 1_000_000.0);
+                }
+                seen += 1;
+                if data.done {
+                    break;
+                }
+            }
+            CursorResult::WouldBlock => break,
+            CursorResult::FellBehind => continue,
+        }
+    }
+
+    let dur = start.elapsed();
+    latencies_ms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let dur_secs = dur.as_secs_f64().max(1e-9);
+    let dur_ms = dur_secs * 1000.0;
+    let ms_per_msg = if seen == 0 { 0.0 } else { dur_ms / seen as f64 };
+    let msgs_per_sec = if seen == 0 {
+        0.0
+    } else {
+        seen as f64 / dur_secs
+    };
+    let mb = (payload_bytes as f64 * seen as f64) / (1024.0 * 1024.0);
+    let mb_per_sec = mb / dur_secs;
+
+    let mut entry = BTreeMap::new();
+    entry.insert("bench".to_string(), json!("follow"));
+    entry.insert("lane".to_string(), json!("follow_local_processing"));
+    entry.insert("runtime_path".to_string(), json!("follow_cursor"));
+    entry.insert("process_mode".to_string(), json!("single_process"));
+    entry.insert(
+        "encode_mode".to_string(),
+        json!("lite3_encode_per_msg_setup"),
+    );
+    entry.insert("decode_mode".to_string(), json!("lite3_typed_fields"));
+    entry.insert("pool_size".to_string(), json!(pool_size));
+    entry.insert("payload_bytes".to_string(), json!(payload_bytes));
+    entry.insert("messages".to_string(), json!(seen));
+    entry.insert("writers".to_string(), json!(1));
+    entry.insert(
+        "durability".to_string(),
+        json!(durability_label(durability)),
+    );
+    entry.insert("duration_ms".to_string(), json!(dur_ms));
+    entry.insert("ms_per_msg".to_string(), json!(ms_per_msg));
+    entry.insert("msgs_per_sec".to_string(), json!(msgs_per_sec));
+    entry.insert("mb_per_sec".to_string(), json!(mb_per_sec));
+    entry.insert(
+        "latency_ms".to_string(),
+        json!(latency_summary(&latencies_ms)),
+    );
+    entry.insert(
+        "notes".to_string(),
+        json!("single-process: prewritten decode"),
+    );
+
+    Ok(Value::Object(entry.into_iter().collect()))
 }
 
 fn bench_follow(
@@ -617,9 +743,22 @@ fn bench_follow(
     } else {
         dur_ms as f64 / seen as f64
     };
+    let dur_secs = (dur_ms as f64 / 1000.0).max(1e-9);
+    let msgs_per_sec = if seen == 0 {
+        0.0
+    } else {
+        seen as f64 / dur_secs
+    };
+    let mb = (payload_bytes as f64 * seen as f64) / (1024.0 * 1024.0);
+    let mb_per_sec = mb / dur_secs;
 
     let mut entry = BTreeMap::new();
     entry.insert("bench".to_string(), json!("follow"));
+    entry.insert("lane".to_string(), json!("follow_cross_process"));
+    entry.insert("runtime_path".to_string(), json!("follow_cursor"));
+    entry.insert("process_mode".to_string(), json!("cross_process"));
+    entry.insert("encode_mode".to_string(), json!("lite3_encode_per_msg"));
+    entry.insert("decode_mode".to_string(), json!("lite3_typed_fields"));
     entry.insert("pool_size".to_string(), json!(pool_size));
     entry.insert("payload_bytes".to_string(), json!(payload_bytes));
     entry.insert("messages".to_string(), json!(seen));
@@ -630,6 +769,8 @@ fn bench_follow(
     );
     entry.insert("duration_ms".to_string(), json!(dur_ms));
     entry.insert("ms_per_msg".to_string(), json!(ms_per_msg));
+    entry.insert("msgs_per_sec".to_string(), json!(msgs_per_sec));
+    entry.insert("mb_per_sec".to_string(), json!(mb_per_sec));
     entry.insert(
         "latency_ms".to_string(),
         follower_json
@@ -684,7 +825,7 @@ fn bench_get_scan(
         let start = Instant::now();
         let _frame = pool.get(seq)?;
         let dur = start.elapsed();
-        out.push(result_entry(
+        let entry = result_entry(
             "get_scan",
             pool_size,
             payload_bytes,
@@ -693,6 +834,19 @@ fn bench_get_scan(
             dur,
             durability,
             Some(&format!("{mode_label}:{label}")),
+        );
+        let (lane, runtime_path) = if mode_label == "indexed" {
+            ("fetch_get_indexed", "index_lookup")
+        } else {
+            ("fetch_get_scan_only", "scan_lookup")
+        };
+        out.push(with_runtime_metadata(
+            entry,
+            lane,
+            "single_process",
+            "none",
+            "none",
+            runtime_path,
         ));
     }
     Ok(out)
@@ -738,7 +892,7 @@ fn bench_multi_writer(
     }
 
     let dur = suite_start.elapsed();
-    Ok(result_entry(
+    let entry = result_entry(
         "multi_writer",
         pool_size,
         payload_bytes,
@@ -747,6 +901,14 @@ fn bench_multi_writer(
         dur,
         durability,
         Some("cross-process writers"),
+    );
+    Ok(with_runtime_metadata(
+        entry,
+        "feed_multi_writer",
+        "cross_process",
+        "lite3_encode_per_msg",
+        "none",
+        "append_contention",
     ))
 }
 
@@ -788,13 +950,13 @@ fn run_follower_worker(args: WorkerArgs) -> Result<(), Error> {
         match cursor.next(&pool)? {
             CursorResult::Message(frame) => {
                 let data = decode_payload_data(frame.payload)?;
-                if let Some(sent_ns) = data.get("sent_ns").and_then(|v| v.as_u64()) {
+                if let Some(sent_ns) = data.sent_ns {
                     let now = now_ns()?;
                     let delta = now.saturating_sub(sent_ns);
                     latencies_ms.push(delta as f64 / 1_000_000.0);
                 }
                 seen += 1;
-                if data.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
+                if data.done {
                     break;
                 }
             }
@@ -822,27 +984,57 @@ fn run_follower_worker(args: WorkerArgs) -> Result<(), Error> {
     Ok(())
 }
 
-fn decode_payload_data(payload: &[u8]) -> Result<BTreeMap<String, Value>, Error> {
-    let doc = lite3::Lite3DocRef::new(payload);
-    let json_str = doc.to_json(false)?;
-    let value: Value = serde_json::from_str(&json_str).map_err(|err| {
-        Error::new(ErrorKind::Corrupt)
-            .with_message("invalid payload json")
-            .with_source(err)
-    })?;
-    let obj = value
-        .as_object()
-        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("payload is not object"))?;
-    let data = obj
-        .get("data")
-        .and_then(|v| v.as_object())
-        .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("payload data missing"))?;
+#[derive(Clone, Copy, Debug, Default)]
+struct BenchPayloadData {
+    sent_ns: Option<u64>,
+    done: bool,
+}
 
-    let mut out = BTreeMap::new();
-    for (key, value) in data {
-        out.insert(key.clone(), value.clone());
+fn decode_payload_data(payload: &[u8]) -> Result<BenchPayloadData, Error> {
+    let doc = lite3::Lite3DocRef::new(payload);
+    let data_type = doc
+        .type_at_key(0, "data")
+        .map_err(|err| err.with_message("payload data missing"))?;
+    if data_type != lite3::sys::LITE3_TYPE_OBJECT {
+        return Err(Error::new(ErrorKind::Corrupt).with_message("payload data is not object"));
     }
-    Ok(out)
+    let data_ofs = doc
+        .key_offset("data")
+        .map_err(|err| err.with_message("payload data missing"))?;
+
+    let sent_ns = match doc.type_at_key(data_ofs, "sent_ns") {
+        Ok(ty) if ty == lite3::sys::LITE3_TYPE_I64 => {
+            let value = doc
+                .i64_at_key(data_ofs, "sent_ns")
+                .map_err(|err| err.with_message("payload data.sent_ns must be i64"))?;
+            if value < 0 {
+                return Err(
+                    Error::new(ErrorKind::Corrupt).with_message("payload data.sent_ns must be u64")
+                );
+            }
+            Some(value as u64)
+        }
+        Ok(_) => {
+            return Err(
+                Error::new(ErrorKind::Corrupt).with_message("payload data.sent_ns must be u64")
+            );
+        }
+        Err(_) => None,
+    };
+
+    let done = match doc.type_at_key(data_ofs, "done") {
+        Ok(ty) if ty == lite3::sys::LITE3_TYPE_BOOL => doc
+            .bool_at_key(data_ofs, "done")
+            .map_err(|err| err.with_message("payload data.done must be bool"))?,
+        Ok(_) => {
+            return Err(
+                Error::new(ErrorKind::Corrupt).with_message("payload data.done must be bool")
+            );
+        }
+        Err(_) => false,
+    };
+
+    Ok(BenchPayloadData { sent_ns, done })
 }
 
 fn payload_for_bytes(
@@ -916,6 +1108,25 @@ fn write_json_file(path: &Path, value: &Value) -> Result<(), Error> {
     }
     std::fs::write(path, bytes)
         .map_err(|err| Error::new(ErrorKind::Io).with_path(path).with_source(err))
+}
+
+fn with_runtime_metadata(
+    mut entry: Value,
+    lane: &str,
+    process_mode: &str,
+    encode_mode: &str,
+    decode_mode: &str,
+    runtime_path: &str,
+) -> Value {
+    let Value::Object(map) = &mut entry else {
+        return entry;
+    };
+    map.insert("lane".to_string(), json!(lane));
+    map.insert("process_mode".to_string(), json!(process_mode));
+    map.insert("encode_mode".to_string(), json!(encode_mode));
+    map.insert("decode_mode".to_string(), json!(decode_mode));
+    map.insert("runtime_path".to_string(), json!(runtime_path));
+    entry
 }
 
 #[allow(clippy::too_many_arguments)]

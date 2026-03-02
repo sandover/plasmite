@@ -183,70 +183,34 @@ Default pool directory: `~/.plasmite/pools/`.
 
 ## Performance
 
-| Metric | Typical (local, `Durability::Fast`) |
+| Metric | |
 |---|---|
-| `feed` throughput | ~50k+ msgs/sec (1KB JSON messages, single writer) |
-| `follow` throughput | ~50k+ msgs/sec (1KB messages, single follower) |
-| Message overhead (framing) | 72-79 bytes per message (64B header + 8B commit marker + alignment) |
-| Read path | Lock-free, zero-copy via mmap |
-| On-disk format | [Lite3](https://github.com/fastserial/lite3) (zero-copy, JSON-compatible binary); field access without deserialization |
+| Write throughput | ~60k msg/sec (1KB payload, single writer) |
+| Read throughput | ~3M msg/sec (in-process, lock-free) |
+| Indexed lookup | ~1.5M lookups/sec |
+| Message overhead | 72–79 bytes (header + commit marker + alignment) |
+| Default pool size | 1 MB |
 
-These figures are from Plasmite’s built-in benchmark harness (`plasmite-bench`) using local pools, `Durability::Fast`, and ~1KB JSON payloads. The benchmark message `data` is an object like `{"filler":"xxxx..."}` (and in the cross-process follow run it also includes `sent_ns` and a final `done=true` marker).
+Measured locally on M3 MacBook, `Durability::Fast`. Reproduce with `scripts/bench_runtime_lanes.sh`.
 
-**How reads work**: The pool file is memory-mapped. Readers walk frames directly from the mapped region — no read syscalls, no buffer copies. Payloads are stored in [Lite3](https://github.com/fastserial/lite3), a zero-copy binary format that is byte-for-byte JSON-compatible. Every valid JSON document has an equivalent Lite3 representation and vice versa. Lite3 supports field lookup by offset, so tag filtering and `--where` predicates run without deserializing the full message. JSON conversion happens only at the output boundary.
+**How reads work**: The pool file is memory-mapped. Readers walk frames directly — no read syscalls, no buffer copies. Payloads use [Lite3](https://github.com/fastserial/lite3), a zero-copy binary encoding that supports field lookup by offset, so tag filtering and `--where` predicates run without deserializing the full message. JSON conversion happens only at the output boundary.
 
-**How writes work**: Writers acquire an OS file lock, plan frame placement (including ring wrap), write the frame as `Writing`, then flip it to `Committed` and update the header. The lock is held only for the memcpy + header update; no allocation or encoding happens under the lock.
+**How writes work**: Writers acquire an OS file lock, write the frame as `Writing`, flip it to `Committed`, and update the header. The lock is held only for memcpy + header update — no allocation or encoding under the lock.
 
-**How lookups work**: Each pool includes an inline index: a fixed-size hash table mapping sequence numbers to byte offsets. `fetch POOL 42` usually jumps directly to the right frame. If the slot is stale or collided, the reader scans forward from the tail. Can set `--index-capacity` at pool creation time.
+**How lookups work**: Each pool has an inline index (hash table mapping seq → byte offset). `fetch POOL 42` jumps directly to the frame. If the slot is stale or collided, it scans forward from the tail.
 
-To reproduce throughput on your machine, use the benchmark harness:
-
-```bash
-just bench
-# or:
-cargo build --release --example plasmite-bench
-./target/release/examples/plasmite-bench --pool-size 64M --payload-bytes 1024 --messages 20000 --writers 1 --durability fast --format both
-```
-
-Algorithmic complexity below uses **N** = visible messages in the pool (depends on message sizes and pool capacity), **M** = index slot count, **k** = messages emitted by `--tail`, **R** = replayed messages.
-
-| Operation | Complexity | Notes |
-|---|---|---|
-| Append | O(1) + O(payload bytes) | Writes one frame, updates one index slot, publishes the header. `durability=flush` adds OS flush cost. |
-| Get by seq (`fetch POOL SEQ`) | Usually O(1); O(N) worst case | If the index slot matches, it's a direct jump. If the slot is overwritten/stale/invalid (or M=0), it scans forward from the tail until it finds (or passes) the target seq. |
-| Tail / follow (`follow --tail`) | O(k) to emit k; then O(1)/message | Steady-state work is per message. Tag filters are cheap; `--where` runs a jq predicate per message. |
-| Replay window (`follow --since ... --replay`) | O(R) | Linear in the number of replayed messages. |
-| Validate (`doctor`, `pool info` warnings) | O(N) | Full ring scan. Index checks are sampled/best-effort diagnostics. |
-
-## Bindings
-
-Native bindings:
-
-```go
-client, _ := plasmite.NewClient("./data")
-pool, _ := client.CreatePool(plasmite.PoolRefName("events"), 1024*1024)
-pool.Append(map[string]any{"sensor": "temp", "value": 23.5}, nil, plasmite.DurabilityFast)
-```
-
-```python
-from plasmite import Client, Durability
-client = Client("./data")
-pool = client.create_pool("events", 1024*1024)
-pool.append_json(b'{"sensor": "temp", "value": 23.5}', [], Durability.FAST)
-```
-
-```javascript
-const { Client, Durability } = require("plasmite")
-const client = new Client("./data")
-const pool = client.createPool("events", 1024 * 1024)
-pool.appendJson(Buffer.from('{"sensor": "temp", "value": 23.5}'), [], Durability.Fast)
-```
-
-See [Go bindings](bindings/go/README.md), [Python bindings](bindings/python/README.md), and [Node bindings](bindings/node/README.md).
+| Operation | Complexity |
+|---|---|
+| Append | O(1) |
+| Fetch by seq | O(1) typical, O(N) worst case |
+| Follow / tail | O(1) per message |
+| Replay window | O(R) messages replayed |
 
 ## More
 
 **Specs**: [CLI](spec/v0/SPEC.md) | [API](spec/api/v0/SPEC.md) | [Remote protocol](spec/remote/v0/SPEC.md)
+
+**Bindings**: [Go](bindings/go/README.md) | [Python](bindings/python/README.md) | [Node](bindings/node/README.md)
 
 **Guides**: [Serving & remote access](docs/record/serving.md) | [Distribution](docs/record/distribution.md)
 
