@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-03-03
+
+### Changed
+- Follow/message decode hot paths now use Lite3 typed field access for scalar/tag extraction instead of avoidable JSON round-trips.
+- Benchmark output now labels runtime lanes explicitly (feed, follow, fetch, contention) and includes stable scenario metadata for docs promotion.
+- Added `scripts/bench_runtime_lanes.sh` to generate one reproducible benchmark artifact for README updates.
+
+### Performance
+- Local benchmark comparisons against `v0.6.0` show clear feed-path wins (append end-to-end median `ms/msg` improved by roughly 15% in the built-in benchmark matrix).
+- A focused 1KB/64MB/`Durability::Fast` 5-run follow-up showed higher cross-process `follow` throughput vs `v0.6.0` (about +9%) on the same machine.
+- Follow-up regression analysis (`compare_local_benchmarks.sh`) found no threshold-blocking regressions; remaining `get_scan` slow cases are small, scenario-specific candidates below release gate policy.
+
 ## [0.6.0] - 2026-03-02
 
 ### Added
