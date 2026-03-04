@@ -2,9 +2,9 @@
 
 [![CI](https://github.com/sandover/plasmite/actions/workflows/ci.yml/badge.svg)](https://github.com/sandover/plasmite/actions/workflows/ci.yml)
 [![Homebrew Tap](https://img.shields.io/badge/Homebrew-Tap-2EA44F?logo=homebrew&logoColor=white)](https://github.com/sandover/homebrew-tap)
-[![crates.io](https://img.shields.io/crates/v/plasmite?logo=rust)](https://lib.rs/crates/plasmite)
+[![crates.io](https://img.shields.io/crates/v/plasmite?logo=rust)](https://crates.io/crates/plasmite)
 [![PyPI](https://img.shields.io/pypi/v/plasmite?logo=pypi)](https://pypi.org/project/plasmite/)
-[![npm](https://img.shields.io/npm/v/plasmite?logo=npm)](https://registry.npmjs.org/plasmite)
+[![npm](https://img.shields.io/npm/v/plasmite?logo=npm)](https://www.npmjs.com/package/plasmite)
 [![Go Reference](https://pkg.go.dev/badge/github.com/sandover/plasmite/bindings/go/local.svg)](https://pkg.go.dev/github.com/sandover/plasmite/bindings/go/local)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
