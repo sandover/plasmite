@@ -3,10 +3,10 @@
 //! Role: Canonical JSON <-> Lite3 boundary for payloads stored in pool frames.
 //! Invariants: Buffer growth is capped (`MAX_LITE3_BUF`) to avoid unbounded allocation.
 //! Invariants: All FFI interaction is confined to this module + `sys`.
+#[cfg(test)]
+use std::cell::Cell;
 use std::ffi::CString;
 use std::io;
-#[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -106,13 +106,13 @@ impl<'a> Lite3DocRef<'a> {
 
     pub fn to_json(&self, pretty: bool) -> Result<String, Error> {
         #[cfg(test)]
-        TO_JSON_CALLS.fetch_add(1, Ordering::Relaxed);
+        TO_JSON_CALLS.with(|count| count.set(count.get() + 1));
         self.to_json_at(0, pretty)
     }
 
     pub fn to_json_at(&self, ofs: usize, pretty: bool) -> Result<String, Error> {
         #[cfg(test)]
-        TO_JSON_AT_CALLS.fetch_add(1, Ordering::Relaxed);
+        TO_JSON_AT_CALLS.with(|count| count.set(count.get() + 1));
         let mut out_len: usize = 0;
         let ptr = unsafe {
             if pretty {
@@ -184,7 +184,7 @@ impl<'a> Lite3DocRef<'a> {
                 Error::new(ErrorKind::Corrupt).with_message("missing or invalid array item")
             );
         }
-        let bytes = unsafe { std::slice::from_raw_parts(out_ptr as *const u8, out_len) };
+        let bytes = unsafe { std::slice::from_raw_parts(out_ptr.cast::<u8>(), out_len) };
         let text = std::str::from_utf8(bytes).map_err(|err| {
             Error::new(ErrorKind::Corrupt)
                 .with_message("invalid utf-8")
@@ -394,21 +394,22 @@ fn array_item_type(bytes: &[u8], ofs: usize, index: u32) -> Result<u8, Error> {
 }
 
 #[cfg(test)]
-static TO_JSON_CALLS: AtomicUsize = AtomicUsize::new(0);
-#[cfg(test)]
-static TO_JSON_AT_CALLS: AtomicUsize = AtomicUsize::new(0);
+std::thread_local! {
+    static TO_JSON_CALLS: Cell<usize> = const { Cell::new(0) };
+    static TO_JSON_AT_CALLS: Cell<usize> = const { Cell::new(0) };
+}
 
 #[cfg(test)]
 pub(crate) fn reset_json_counters() {
-    TO_JSON_CALLS.store(0, Ordering::Relaxed);
-    TO_JSON_AT_CALLS.store(0, Ordering::Relaxed);
+    TO_JSON_CALLS.with(|count| count.set(0));
+    TO_JSON_AT_CALLS.with(|count| count.set(0));
 }
 
 #[cfg(test)]
 pub(crate) fn json_counter_snapshot() -> (usize, usize) {
     (
-        TO_JSON_CALLS.load(Ordering::Relaxed),
-        TO_JSON_AT_CALLS.load(Ordering::Relaxed),
+        TO_JSON_CALLS.with(Cell::get),
+        TO_JSON_AT_CALLS.with(Cell::get),
     )
 }
 
