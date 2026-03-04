@@ -1,7 +1,7 @@
 # Plasmite
 
 [![CI](https://github.com/sandover/plasmite/actions/workflows/ci.yml/badge.svg)](https://github.com/sandover/plasmite/actions/workflows/ci.yml)
-[![Homebrew](https://img.shields.io/homebrew/v/sandover/tap/plasmite?logo=homebrew)](https://github.com/sandover/homebrew-tap)
+[![Homebrew Tap](https://img.shields.io/badge/Homebrew-Tap-2EA44F?logo=homebrew&logoColor=white)](https://github.com/sandover/homebrew-tap)
 [![crates.io](https://img.shields.io/crates/v/plasmite?logo=rust)](https://lib.rs/crates/plasmite)
 [![PyPI](https://img.shields.io/pypi/v/plasmite?logo=pypi)](https://pypi.org/project/plasmite/)
 [![npm](https://img.shields.io/npm/v/plasmite?logo=npm)](https://registry.npmjs.org/plasmite)
