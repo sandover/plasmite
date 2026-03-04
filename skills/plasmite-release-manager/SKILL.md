@@ -24,6 +24,7 @@ Authoritative runbook for Plasmite releases. Keep execution fail-closed and alig
 7. Tooling pins in workflows are policy:
    - `RELEASE_RUST_TOOLCHAIN=1.88.0`
    - `CARGO_BINSTALL_VERSION=1.17.5`
+8. Do not release from a commit with red or missing `ci.yml`; the release commit must have a completed/successful CI run.
 
 ## Pre-Release Setup
 
@@ -40,6 +41,10 @@ Authoritative runbook for Plasmite releases. Keep execution fail-closed and alig
    - `bash scripts/bump_version.sh <version>`
 5. Initialize/reopen release evidence (derives `base_tag`):
    - `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`
+6. Confirm the release commit is green in `ci.yml` before tagging/publishing:
+   - `release_sha="$(git rev-parse HEAD)"`
+   - `gh run list --workflow ci.yml --commit "$release_sha" --limit 1 --json headSha,status,conclusion,url`
+   - Require one run where `headSha == release_sha`, `status == completed`, and `conclusion == success`.
 
 ## Required QA Gates
 
@@ -117,3 +122,10 @@ Mandatory checks:
    - `curl -sS https://pypi.org/pypi/plasmite/json | jq -r '.info.version'`
 5. Homebrew formula:
    - `gh api repos/sandover/homebrew-tap/contents/Formula/plasmite.rb -H "Accept: application/vnd.github.raw"`
+6. CI status for the release commit:
+   - `release_sha="$(git rev-list -n 1 <release_target>)"`
+   - `gh run list --workflow ci.yml --commit "$release_sha" --limit 1 --json headSha,status,conclusion,url`
+   - Require one run where `headSha == release_sha`, `status == completed`, and `conclusion == success`.
+7. Delivery smoke script (required for live releases):
+   - local: `bash scripts/post_release_delivery_smoke.sh --version <X.Y.Z>`
+   - CI option: `gh workflow run post-release-smoke.yml -f release_version=<X.Y.Z>`

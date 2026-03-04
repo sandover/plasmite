@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Purpose: Validate released package delivery and minimal runtime behavior across channels.
+# Key inputs: --version, --channels, --max-wait-minutes.
+# Role: Deterministic post-release smoke runner for local use and workflow dispatch.
+# Invariants: Required channels (npm, pypi, crates) must pass or exit non-zero.
+# Invariants: Homebrew validation reads published tap formula content, not local brew state.
 set -euo pipefail
 
 usage() {
@@ -17,7 +22,7 @@ Channels:
   npm       npm + pnpm install/runtime check (pnpm best-effort when unavailable)
   pypi      uv install/runtime check
   crates    cargo install/runtime check
-  homebrew  formula visibility check (advisory)
+  homebrew  published tap formula version check (advisory)
 
 Environment:
   PLASMITE_KEEP_SCRATCH=1      Preserve scratch workdirs/logs under .scratch/
@@ -153,17 +158,28 @@ check_crates_channel() {
 }
 
 check_homebrew_channel() {
-  if ! command -v brew >/dev/null 2>&1; then
-    echo "[homebrew] brew unavailable on this host; skipping" >&2
+  local formula_text
+  if command -v gh >/dev/null 2>&1; then
+    formula_text="$(gh api repos/sandover/homebrew-tap/contents/Formula/plasmite.rb -H "Accept: application/vnd.github.raw")" || {
+      echo "[homebrew] failed to fetch tap formula via gh api" >&2
+      return 1
+    }
+  elif command -v curl >/dev/null 2>&1; then
+    formula_text="$(curl -fsSL "https://raw.githubusercontent.com/sandover/homebrew-tap/main/Formula/plasmite.rb")" || {
+      echo "[homebrew] failed to fetch tap formula via curl" >&2
+      return 1
+    }
+  else
+    echo "[homebrew] gh or curl is required to fetch tap formula" >&2
     return 3
-  fi
-  if ! command -v jq >/dev/null 2>&1; then
-    echo "[homebrew] jq is required for version parsing" >&2
-    return 1
   fi
 
   local stable
-  stable="$(brew info sandover/tap/plasmite --json=v2 | jq -r '.formulae[0].versions.stable // empty')"
+  stable="$(printf '%s\n' "$formula_text" | sed -n 's/^  version "\([^"]*\)"$/\1/p' | head -n 1)"
+  if [[ -z "$stable" ]]; then
+    echo "[homebrew] could not parse formula version from tap" >&2
+    return 1
+  fi
   if [[ "$stable" != "$VERSION" ]]; then
     echo "[homebrew] expected stable=$VERSION, got '${stable:-<empty>}'" >&2
     return 1
@@ -178,10 +194,12 @@ run_channel_with_retry() {
 
   while true; do
     echo "[$channel] attempt $attempt"
-    set +e
-    "$fn_name"
-    local status=$?
-    set -e
+    local status=0
+    if "$fn_name"; then
+      status=0
+    else
+      status=$?
+    fi
 
     if [[ $status -eq 0 ]]; then
       echo "[$channel] OK"
@@ -247,10 +265,12 @@ for raw_channel in "${selected_channels[@]}"; do
   validate_channel_name "$channel"
 
   fn="check_${channel}_channel"
-  set +e
-  run_channel_with_retry "$channel" "$fn"
-  status=$?
-  set -e
+  status=0
+  if run_channel_with_retry "$channel" "$fn"; then
+    status=0
+  else
+    status=$?
+  fi
 
   if [[ $status -eq 0 ]]; then
     echo "$channel: PASS" >> "$summary_file"
