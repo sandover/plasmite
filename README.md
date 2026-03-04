@@ -1,6 +1,11 @@
 # Plasmite
 
 [![CI](https://github.com/sandover/plasmite/actions/workflows/ci.yml/badge.svg)](https://github.com/sandover/plasmite/actions/workflows/ci.yml)
+[![Homebrew](https://img.shields.io/homebrew/v/sandover/tap/plasmite?logo=homebrew)](https://github.com/sandover/homebrew-tap)
+[![crates.io](https://img.shields.io/crates/v/plasmite?logo=rust)](https://lib.rs/crates/plasmite)
+[![PyPI](https://img.shields.io/pypi/v/plasmite?logo=pypi)](https://pypi.org/project/plasmite/)
+[![npm](https://img.shields.io/npm/v/plasmite?logo=npm)](https://registry.npmjs.org/plasmite)
+[![Go Reference](https://pkg.go.dev/badge/github.com/sandover/plasmite/bindings/go/local.svg)](https://pkg.go.dev/github.com/sandover/plasmite/bindings/go/local)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **Easy interprocess communication.**
@@ -153,18 +158,30 @@ Windows builds (`x86_64-pc-windows-msvc`) are available via npm and PyPI. See th
 
 ## Command Overview
 
-| Command | What it does |
+**Messaging**
+
+| | |
 |---|---|
-| `feed POOL DATA` | Send a message (`--create` to auto-create the pool) |
-| `follow POOL` | Follow messages (`--create` to auto-create) |
-| `fetch POOL SEQ` | Fetch one message by sequence number |
-| `pool create NAME` | Create a pool (`--size 8M` for larger) |
+| `feed` *pool* *data* | Send a message |
+| `follow` *pool* | Follow messages |
+| `fetch` *pool* *seq* | Fetch one message by sequence number |
+| `duplex` *pool* | 2-way session with a pool |
+
+**Pool management**
+
+| | |
+|---|---|
+| `pool create` *name* | Create a pool |
 | `pool list` | List pools |
-| `pool info NAME` | Show pool metadata and metrics |
-| `pool delete NAME...` | Delete one or more pools |
-| `duplex POOL` | 2-way session with a pool (`--me` for chat mode) |
-| `doctor POOL \| --all` | Validate pool integrity |
-| `serve` | HTTP server (loopback default; non-loopback opt-in) |
+| `pool info` *name* | Show pool metadata and metrics |
+| `pool delete` *name…* | Delete one or more pools |
+| `doctor` *pool* ǀ `--all` | Validate pool integrity |
+
+**Server**
+
+| | |
+|---|---|
+| `serve` | HTTP server |
 
 `pls` and `plasmite` are the same binary. Shell completion: `plasmite completion bash|zsh|fish`.
 
