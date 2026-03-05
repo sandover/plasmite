@@ -42,6 +42,7 @@ jobs:
       - name: Run post-release delivery smoke
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           PLASMITE_KEEP_SCRATCH: "1"
         run: |
           set -euo pipefail

@@ -160,18 +160,19 @@ check_crates_channel() {
 check_homebrew_channel() {
   local formula_text
   if command -v gh >/dev/null 2>&1; then
-    formula_text="$(gh api repos/sandover/homebrew-tap/contents/Formula/plasmite.rb -H "Accept: application/vnd.github.raw")" || {
-      echo "[homebrew] failed to fetch tap formula via gh api" >&2
-      return 1
-    }
-  elif command -v curl >/dev/null 2>&1; then
-    formula_text="$(curl -fsSL "https://raw.githubusercontent.com/sandover/homebrew-tap/main/Formula/plasmite.rb")" || {
-      echo "[homebrew] failed to fetch tap formula via curl" >&2
-      return 1
-    }
-  else
-    echo "[homebrew] gh or curl is required to fetch tap formula" >&2
-    return 3
+    formula_text="$(gh api repos/sandover/homebrew-tap/contents/Formula/plasmite.rb -H "Accept: application/vnd.github.raw" 2>/dev/null || true)"
+  fi
+
+  if [[ -z "${formula_text:-}" ]]; then
+    if command -v curl >/dev/null 2>&1; then
+      formula_text="$(curl -fsSL "https://raw.githubusercontent.com/sandover/homebrew-tap/main/Formula/plasmite.rb")" || {
+        echo "[homebrew] failed to fetch tap formula via curl" >&2
+        return 1
+      }
+    else
+      echo "[homebrew] gh or curl is required to fetch tap formula" >&2
+      return 3
+    fi
   fi
 
   local stable
