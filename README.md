@@ -132,7 +132,7 @@ uv tool install plasmite   # standalone CLI + Python bindings
 uv add plasmite            # add to a uv-managed project
 ```
 
-The wheel includes pre-built native bindings.
+PyPI ships pre-built native bindings on macOS and Windows x86_64. On Linux today, prefer Homebrew or a GitHub release tarball for the system SDK; see the distribution docs for the current matrix.
 
 ### Node
 

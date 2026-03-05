@@ -4,10 +4,16 @@ These bindings wrap the `libplasmite` C ABI via `ctypes`.
 
 ## Installation
 
-Wheels are designed to bundle native assets under `plasmite/_native/`:
+Published wheels bundle native assets under `plasmite/_native/` on the platforms where wheels are currently shipped:
 
 - `libplasmite.(dylib|so)` for ctypes loading
 - `plasmite` CLI binary (invoked via Python console script entrypoint)
+
+Current packaged-wheel targets:
+- macOS: `x86_64`, `arm64`
+- Windows: `x86_64`
+
+Linux currently falls back to source distribution, so runtime use there should come from a system SDK install (for example Homebrew or a GitHub release tarball) unless/until Linux wheels are added.
 
 ### Using uv (recommended)
 
