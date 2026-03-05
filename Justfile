@@ -74,6 +74,12 @@ ci-full: fmt clippy hardening-fast check-version-alignment abi-smoke hardening-b
 # Alias for full CI gate.
 ci: ci-full
 
+# Canonical release candidate gate before tagging/publishing.
+# Keep this focused on deterministic checks that map to release-manager required gates.
+# Note: `bindings-test` includes node_pack_smoke + node_remote_only_smoke.
+release-gate: fmt clippy test bindings-test check-version-alignment
+	bash scripts/python_wheel_smoke.sh
+
 # Build shared library artifacts for local ABI usage.
 abi:
 	cargo build --lib

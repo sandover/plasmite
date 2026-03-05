@@ -1,5 +1,8 @@
 # Release Hygiene (Mechanical Flow)
 
+> Archived reference. The authoritative operator runbook is `skills/plasmite-release-manager/SKILL.md`.
+> If instructions conflict, follow `SKILL.md`.
+
 Run this only after all required QA gates pass and no blocker tasks remain.
 
 ## Preconditions

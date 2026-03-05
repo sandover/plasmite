@@ -51,13 +51,11 @@ Authoritative runbook for Plasmite releases. Keep execution fail-closed and alig
 Run before any publish dispatch:
 
 - Changelog: verify `CHANGELOG.md` has a `## [<version>] - <date>` section (not `[Unreleased]`) and the version matches the release target.
-- `cargo fmt --all`
-- `cargo clippy --all-targets -- -D warnings`
-- `cargo test`
-- `just bindings-test`
-- `bash scripts/node_pack_smoke.sh`
-- `bash scripts/node_remote_only_smoke.sh`
-- `bash scripts/python_wheel_smoke.sh`
+- Canonical gate: `just release-gate`
+  - This is the single source of truth for required deterministic pre-release checks.
+  - Includes `bindings-test` (which runs `node_pack_smoke.sh` and `node_remote_only_smoke.sh`) plus `python_wheel_smoke.sh`.
+  - Keep this recipe aligned with release policy instead of duplicating command lists in multiple docs.
+
 Run conditional gates when relevant:
 
 - dependency/security changes: `cargo audit --db .scratch/advisory-db --no-fetch --ignore yanked`
@@ -127,5 +125,6 @@ Mandatory checks:
    - `gh run list --workflow ci.yml --commit "$release_sha" --limit 1 --json headSha,status,conclusion,url`
    - Require one run where `headSha == release_sha`, `status == completed`, and `conclusion == success`.
 7. Delivery smoke script (required for live releases):
-   - local: `bash scripts/post_release_delivery_smoke.sh --version <X.Y.Z>`
+   - fast lane (default): `bash scripts/post_release_delivery_smoke.sh --version <X.Y.Z>`
+   - deep lane (slower, includes cargo-install validation): `bash scripts/post_release_delivery_smoke.sh --version <X.Y.Z> --channels npm,pypi,crates,homebrew`
    - CI option: `gh workflow run post-release-smoke.yml -f release_version=<X.Y.Z>`

@@ -1,5 +1,8 @@
 # Delivery Verification
 
+> Archived reference. The authoritative operator runbook is `skills/plasmite-release-manager/SKILL.md`.
+> If instructions conflict, follow `SKILL.md`.
+
 Use this after release workflows finish.
 
 Inputs:

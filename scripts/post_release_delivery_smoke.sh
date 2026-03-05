@@ -14,14 +14,14 @@ Validate post-release install + minimal runtime behavior across delivery channel
 
 Options:
   --version <X.Y.Z>            Required release version (without leading v)
-  --channels <csv>             Channels to check (default: npm,pypi,crates,homebrew)
+  --channels <csv>             Channels to check (default: npm,pypi,homebrew)
   --max-wait-minutes <n>       Retry budget for propagation checks (default: 20)
   -h, --help                   Show this help
 
 Channels:
   npm       npm + pnpm install/runtime check (pnpm best-effort when unavailable)
   pypi      uv install/runtime check
-  crates    cargo install/runtime check
+  crates    cargo install/runtime check (deep lane; slower)
   homebrew  published tap formula version check (advisory)
 
 Environment:
@@ -30,7 +30,7 @@ USAGE
 }
 
 VERSION=""
-CHANNELS="npm,pypi,crates,homebrew"
+CHANNELS="npm,pypi,homebrew"
 MAX_WAIT_MINUTES=20
 
 while [[ $# -gt 0 ]]; do

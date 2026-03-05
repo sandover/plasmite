@@ -1,5 +1,8 @@
 # Pre-Release QA Gates
 
+> Archived reference. The authoritative operator runbook is `skills/plasmite-release-manager/SKILL.md`.
+> If instructions conflict, follow `SKILL.md`.
+
 For each gate:
 - collect evidence
 - decide pass/fail

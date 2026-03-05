@@ -103,6 +103,9 @@ jobs:
             fi
           else
             build_run_id="$requested_build_run_id"
+            echo "warning: build_run_id path is for incident recovery; prefer release_tag for routine publishes." >&2
+            echo "::warning::build_run_id path is for incident recovery; prefer release_tag for routine publishes."
+            echo "⚠️ Using build_run_id incident-recovery path. Prefer release_tag for routine publishes." >> "$GITHUB_STEP_SUMMARY"
           fi
 
           run_json="$(gh run view "$build_run_id" --repo "$GITHUB_REPOSITORY" --json workflowName,conclusion,url)"

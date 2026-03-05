@@ -10,7 +10,7 @@ on:
       channels:
         description: "Comma-separated channels (npm,pypi,crates,homebrew)"
         required: false
-        default: "npm,pypi,crates,homebrew"
+        default: "npm,pypi,homebrew"
         type: string
       max_wait_minutes:
         description: "Retry budget in minutes"

@@ -60,6 +60,42 @@ jobs:
             "source_workflow": "${GITHUB_WORKFLOW}"
           }
           META
+      - name: Require green ci.yml for release SHA
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ci_runs="$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow ci.yml \
+            --commit "$GITHUB_SHA" \
+            --limit 5 \
+            --json headSha,status,conclusion,url)"
+
+          success_url="$(
+            jq -r --arg sha "$GITHUB_SHA" '
+              map(select(.headSha==$sha and .status=="completed" and .conclusion=="success"))
+              | first
+              | .url // empty
+            ' <<<"$ci_runs"
+          )"
+
+          if [[ -z "$success_url" ]]; then
+            echo "error: refusing release because ci.yml is not green for commit $GITHUB_SHA." >&2
+            echo "hint: wait for CI to complete successfully on this commit, then rerun release." >&2
+            jq -r --arg sha "$GITHUB_SHA" '
+              map(select(.headSha==$sha))
+              | if length == 0 then
+                  "ci runs found: none"
+                else
+                  ("ci runs found:\n" + (map("- status=" + .status + " conclusion=" + (.conclusion // "null") + " url=" + .url) | join("\n")))
+                end
+            ' <<<"$ci_runs" >&2
+            exit 1
+          fi
+
+          echo "ci gate passed: $success_url"
       - uses: actions/upload-artifact@v4
         with:
           name: release-metadata
