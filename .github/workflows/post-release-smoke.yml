@@ -8,9 +8,9 @@ on:
         required: true
         type: string
       channels:
-        description: "Comma-separated channels (npm,pypi,crates,homebrew)"
+        description: "Comma-separated channels for the ubuntu runner (default: npm,homebrew)"
         required: false
-        default: "npm,pypi,homebrew"
+        default: "npm,homebrew"
         type: string
       max_wait_minutes:
         description: "Retry budget in minutes"

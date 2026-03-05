@@ -127,4 +127,5 @@ Mandatory checks:
 7. Delivery smoke script (required for live releases):
    - fast lane (default): `bash scripts/post_release_delivery_smoke.sh --version <X.Y.Z>`
    - deep lane (slower, includes cargo-install validation): `bash scripts/post_release_delivery_smoke.sh --version <X.Y.Z> --channels npm,pypi,crates,homebrew`
-   - CI option: `gh workflow run post-release-smoke.yml -f release_version=<X.Y.Z>`
+   - CI option (ubuntu-safe default): `gh workflow run post-release-smoke.yml -f release_version=<X.Y.Z>`
+   - Today that workflow defaults to `npm,homebrew`; use the local smoke script on a wheel-supporting host for PyPI runtime validation.
