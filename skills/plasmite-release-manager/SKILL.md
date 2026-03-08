@@ -23,7 +23,6 @@ Authoritative runbook for Plasmite releases. Keep execution fail-closed and alig
 6. Homebrew tap is updated locally (not via CI secret). The maintainer pushes the formula from their `../homebrew-tap` checkout; the `sync-homebrew-tap` CI job verifies alignment.
 7. Tooling pins in workflows are policy:
    - `RELEASE_RUST_TOOLCHAIN=1.88.0`
-   - `CARGO_BINSTALL_VERSION=1.17.5`
 8. Do not release from a commit with red or missing `ci.yml`; the release commit must have a completed/successful CI run.
 
 ## Pre-Release Setup
@@ -43,7 +42,7 @@ Authoritative runbook for Plasmite releases. Keep execution fail-closed and alig
    - `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`
 6. Confirm the release commit is green in `ci.yml` before tagging/publishing:
    - `release_sha="$(git rev-parse HEAD)"`
-   - `gh run list --workflow ci.yml --commit "$release_sha" --limit 1 --json headSha,status,conclusion,url`
+   - `gh run list --workflow ci.yml --commit "$release_sha" --limit 5 --json headSha,status,conclusion,url`
    - Require one run where `headSha == release_sha`, `status == completed`, and `conclusion == success`.
 
 ## Required QA Gates
@@ -122,7 +121,7 @@ Mandatory checks:
    - `gh api repos/sandover/homebrew-tap/contents/Formula/plasmite.rb -H "Accept: application/vnd.github.raw"`
 6. CI status for the release commit:
    - `release_sha="$(git rev-list -n 1 <release_target>)"`
-   - `gh run list --workflow ci.yml --commit "$release_sha" --limit 1 --json headSha,status,conclusion,url`
+   - `gh run list --workflow ci.yml --commit "$release_sha" --limit 5 --json headSha,status,conclusion,url`
    - Require one run where `headSha == release_sha`, `status == completed`, and `conclusion == success`.
 7. Delivery smoke script (required for live releases):
    - fast lane (default): `bash scripts/post_release_delivery_smoke.sh --version <X.Y.Z>`
