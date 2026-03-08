@@ -318,6 +318,7 @@ fn remote_tail_cancel_under_active_writes_is_prompt() -> TestResult<()> {
     let done = Arc::new(AtomicBool::new(false));
 
     let (tail_started_tx, tail_started_rx) = mpsc::channel::<()>();
+    let (first_message_tx, first_message_rx) = mpsc::channel::<()>();
 
     let done_writer = Arc::clone(&done);
     let writer = std::thread::spawn(move || -> Result<(), String> {
@@ -361,6 +362,11 @@ fn remote_tail_cancel_under_active_writes_is_prompt() -> TestResult<()> {
                 .map_err(|err| err.to_string())?
                 .is_some()
             {
+                if observed == 0 {
+                    first_message_tx
+                        .send(())
+                        .map_err(|err| format!("failed to signal first message: {err}"))?;
+                }
                 observed += 1;
             }
             if observed > 2_000 || done_tail.load(Ordering::Acquire) {
@@ -372,15 +378,17 @@ fn remote_tail_cancel_under_active_writes_is_prompt() -> TestResult<()> {
     tail_started_rx
         .recv_timeout(Duration::from_secs(1))
         .map_err(|err| format!("tail failed to start: {err}"))?;
-    sleep(Duration::from_millis(120));
+    first_message_rx
+        .recv_timeout(Duration::from_secs(1))
+        .map_err(|err| format!("tail did not observe a message before cancel: {err}"))?;
 
     let start = Instant::now();
     cancel.store(true, Ordering::Release);
-    done.store(true, Ordering::Release);
     let observed = reader
         .join()
         .map_err(|_| std::io::Error::other("reader thread panicked"))?
         .map_err(std::io::Error::other)?;
+    done.store(true, Ordering::Release);
     assert!(
         start.elapsed() < Duration::from_secs(1),
         "cancellation path was unexpectedly slow"

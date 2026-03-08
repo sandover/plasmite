@@ -144,7 +144,9 @@ If you need to force a specific build run (for example, during incident recovery
 ## Linux arm64 policy
 
 - `aarch64-unknown-linux-gnu` is currently best-effort.
-- It is not a release-gating target in `release.yml` or `release-publish.yml`.
+- It is not a blocking CI target in `.github/workflows/ci.yml`.
+- It is not built or published in the blocking release matrix in `.github/workflows/release.yml`.
+- It is not a release-gating target in `release-publish.yml`.
 - ARM64 Linux users should build from source unless/until gated support is reintroduced.
 
 ## Windows support policy
