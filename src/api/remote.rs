@@ -15,12 +15,13 @@ use crate::core::pool::{
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::io::{BufRead, BufReader, Cursor, Read};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use ureq::rustls::client::danger::{
     HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
 };
+use ureq::rustls::pki_types::pem::PemObject;
 use ureq::rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use ureq::rustls::{DigitallySignedStruct, Error as TlsError, SignatureScheme};
 use url::Url;
@@ -260,8 +261,7 @@ impl RemoteClient {
                 .with_path(path)
                 .with_source(err)
         })?;
-        let mut cert_reader = Cursor::new(cert_bytes);
-        let certs = rustls_pemfile::certs(&mut cert_reader)
+        let certs = CertificateDer::pem_slice_iter(&cert_bytes)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|err| {
                 Error::new(ErrorKind::Usage)

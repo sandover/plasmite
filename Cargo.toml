@@ -53,7 +53,6 @@ url = "2"
 signal-hook = "0.3"
 rcgen = "0.12"
 rustls = "0.23"
-rustls-pemfile = "2"
 tokio-rustls = "0.26"
 hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["server", "server-auto", "tokio", "service", "http1", "http2"] }

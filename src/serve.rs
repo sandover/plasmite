@@ -17,13 +17,13 @@ use hyper_util::server::conn::auto::Builder as AutoBuilder;
 use hyper_util::service::TowerToHyperService;
 use rcgen::{Certificate, CertificateParams, SanType};
 use rustls::ServerConfig;
+use rustls::pki_types::pem::{Error as PemError, PemObject};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::future::IntoFuture;
-use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -392,19 +392,15 @@ fn load_tls_config_from_pem(cert_path: &Path, key_path: &Path) -> Result<ServerC
             .with_source(err)
     })?;
 
-    let mut key_reader = Cursor::new(key_bytes);
-    let key = rustls_pemfile::private_key(&mut key_reader)
-        .map_err(|err| {
-            Error::new(ErrorKind::Io)
-                .with_message("failed to parse TLS key")
-                .with_path(key_path)
-                .with_source(err)
-        })?
-        .ok_or_else(|| {
-            Error::new(ErrorKind::Usage)
-                .with_message("TLS key file contains no private key")
-                .with_path(key_path)
-        })?;
+    let key = PrivateKeyDer::from_pem_reader(key_bytes.as_slice()).map_err(|err| match err {
+        PemError::NoItemsFound => Error::new(ErrorKind::Usage)
+            .with_message("TLS key file contains no private key")
+            .with_path(key_path),
+        _ => Error::new(ErrorKind::Io)
+            .with_message("failed to parse TLS key")
+            .with_path(key_path)
+            .with_source(err),
+    })?;
 
     build_server_config(certs, key)
 }
@@ -417,8 +413,7 @@ fn load_certificates_from_pem(cert_path: &Path) -> Result<Vec<CertificateDer<'st
             .with_source(err)
     })?;
 
-    let mut cert_reader = Cursor::new(cert_bytes);
-    let certs = rustls_pemfile::certs(&mut cert_reader)
+    let certs = CertificateDer::pem_slice_iter(&cert_bytes)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|err| {
             Error::new(ErrorKind::Io)
