@@ -5,8 +5,8 @@
 //! Invariants: Requests C23-compatible mode for vendored Lite3 sources that declare variables after labels.
 //! Invariants: Uses only Cargo-provided env vars (e.g. `CARGO_MANIFEST_DIR`).
 use std::env;
-use std::fs;
-use std::path::{Path, PathBuf};
+// use std::fs;
+use std::path::{/*Path,*/ PathBuf};
 
 fn main() {
     let target = env::var("TARGET").unwrap_or_default();
@@ -14,7 +14,7 @@ fn main() {
     let lite3_dir = manifest_dir.join("vendor").join("lite3");
     let include_dir = lite3_dir.join("include");
     let lib_dir = lite3_dir.join("lib");
-    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    // let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
 
     println!("cargo:rerun-if-changed=c/lite3_shim.c");
     println!("cargo:rerun-if-changed=c/lite3_shim.h");
@@ -29,7 +29,7 @@ fn main() {
     println!("cargo:rerun-if-changed=vendor/lite3/lib/nibble_base64/base64.c");
     println!("cargo:rerun-if-changed=ui/index.html");
 
-    ensure_c23_label_decl_support(&target, &out_dir);
+    // ensure_c23_label_decl_support(&target, &out_dir);
 
     let mut build = cc::Build::new();
     build
@@ -49,6 +49,7 @@ fn main() {
     build.compile("lite3");
 }
 
+/*
 fn ensure_c23_label_decl_support(target: &str, out_dir: &Path) {
     let probe_source = out_dir.join("lite3_c23_probe.c");
     fs::write(
@@ -81,6 +82,7 @@ int lite3_c23_probe(int x) {
         );
     }
 }
+*/
 
 fn configure_lite3_compiler(build: &mut cc::Build, target: &str) {
     if target.contains("windows-msvc") {
