@@ -326,7 +326,7 @@ Changing this setting also requires changing other settings. See `struct node` i
 
 #ifndef DOXYGEN_IGNORE
 #define LITE3_NODE_SIZE_SHIFT 6
-#define LITE3_NODE_SIZE_MASK ((u32)~((1 << 6) - 1)) // 26 MSB
+#define LITE3_NODE_SIZE_MASK ((uint32_t)~((1 << 6) - 1)) // 26 MSB
 
 #define LITE3_DJB2_HASH_SEED ((uint32_t)5381)
 #endif // DOXYGEN_IGNORE
@@ -1155,7 +1155,9 @@ static inline int _lite3_set_by_index(unsigned char *buf, size_t *__restrict ino
         int ret;
         if ((ret = _lite3_verify_arr_set(buf,  inout_buflen, ofs, bufsz)) < 0)
                 return ret;
-        uint32_t size = (*(uint32_t *)(buf + ofs + LITE3_NODE_SIZE_KC_OFFSET)) >> LITE3_NODE_SIZE_SHIFT;
+        uint32_t size;
+        memcpy(&size, buf + ofs + LITE3_NODE_SIZE_KC_OFFSET, sizeof(size));
+        size >>= LITE3_NODE_SIZE_SHIFT;
         if (LITE3_UNLIKELY(index > size)) {
                 LITE3_PRINT_ERROR("INVALID ARGUMENT: ARRAY INDEX %u OUT OF BOUNDS (size == %u)\n", index, size);
                 errno = EINVAL;
@@ -1173,7 +1175,9 @@ static inline int _lite3_set_by_append(unsigned char *buf, size_t *__restrict in
         int ret;
         if ((ret = _lite3_verify_arr_set(buf, inout_buflen, ofs, bufsz)) < 0)
                 return ret;
-        uint32_t size = (*(uint32_t *)(buf + ofs + LITE3_NODE_SIZE_KC_OFFSET)) >> LITE3_NODE_SIZE_SHIFT;
+        uint32_t size;
+        memcpy(&size, buf + ofs + LITE3_NODE_SIZE_KC_OFFSET, sizeof(size));
+        size >>= LITE3_NODE_SIZE_SHIFT;
         lite3_key_data key_data = {
                 .hash = size,
                 .size = 0,
@@ -1728,7 +1732,9 @@ static inline int _lite3_get_by_index(const unsigned char *buf, size_t buflen, s
         int ret;
         if ((ret = _lite3_verify_arr_get(buf, buflen, ofs)) < 0)
                 return ret;
-        uint32_t size = (*(uint32_t *)(buf + ofs + LITE3_NODE_SIZE_KC_OFFSET)) >> LITE3_NODE_SIZE_SHIFT;
+        uint32_t size;
+        memcpy(&size, buf + ofs + LITE3_NODE_SIZE_KC_OFFSET, sizeof(size));
+        size >>= LITE3_NODE_SIZE_SHIFT;
         if (LITE3_UNLIKELY(index >= size)) {
                 LITE3_PRINT_ERROR("INVALID ARGUMENT: ARRAY INDEX %u OUT OF BOUNDS (size == %u)\n", index, size);
                 errno = EINVAL;
@@ -1894,7 +1900,8 @@ static inline int lite3_count(
                 errno = EINVAL;
                 return -1;
         }
-        *out = (*(uint32_t *)(buf + ofs + LITE3_NODE_SIZE_KC_OFFSET)) >> LITE3_NODE_SIZE_SHIFT;
+        memcpy(out, buf + ofs + LITE3_NODE_SIZE_KC_OFFSET, sizeof(*out));
+        *out >>= LITE3_NODE_SIZE_SHIFT;
         return ret;
 }
 
