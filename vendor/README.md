@@ -6,8 +6,8 @@ directly, rather than fetching at build time.
 ## Lite3
 
 - Upstream: https://github.com/fastserial/lite3
-- Pinned commit: ac7fc194612fb5d78a978e2c618be4d69fe0fcbb
-- Pin date: 2026-01-30
+- Pinned commit: 7b62398a35e9647f0d6bb709d714bd9cd2100182
+- Pin date: 2026-03-28
 
 ### Update procedure
 
