@@ -4012,3 +4012,8 @@
 {"type":"message","ts":"2026-07-24T23:37:39.433757Z","data":{"task_id":"3CKMA6","kind":"done","text":"Replaced ci aliases and hardening lanes with check, integration, and release-gate; updated PR/main CI and contributor docs; just check and just integration pass locally.","ts":"2026-07-24T23:37:39.433757Z"}}
 {"type":"unclaim","ts":"2026-07-24T23:37:39.433757Z","data":{"id":"3CKMA6","ts":"2026-07-24T23:37:39.433757Z"}}
 {"type":"state","ts":"2026-07-24T23:37:39.433757Z","data":{"id":"3CKMA6","state":"done","ts":"2026-07-24T23:37:39.433757Z"}}
+{"type":"claim","ts":"2026-07-24T23:38:16.034111Z","data":{"id":"7ENTTH","agent_id":"gpt-5.6@macbook-pro","ts":"2026-07-24T23:38:16.034111Z"}}
+{"type":"state","ts":"2026-07-24T23:38:16.034111Z","data":{"id":"7ENTTH","state":"doing","ts":"2026-07-24T23:38:16.034111Z"}}
+{"type":"message","ts":"2026-07-24T23:44:25.468537Z","data":{"task_id":"7ENTTH","kind":"done","text":"Unified the release build into one four-platform matrix using a shared artifact helper; source SDK recipe and full release gate pass locally.","ts":"2026-07-24T23:44:25.468537Z"}}
+{"type":"unclaim","ts":"2026-07-24T23:44:25.468537Z","data":{"id":"7ENTTH","ts":"2026-07-24T23:44:25.468537Z"}}
+{"type":"state","ts":"2026-07-24T23:44:25.468537Z","data":{"id":"7ENTTH","state":"done","ts":"2026-07-24T23:44:25.468537Z"}}

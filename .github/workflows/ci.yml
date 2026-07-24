@@ -87,13 +87,7 @@ jobs:
       - run: cd bindings/node && npm ci
       - name: Build SDK artifacts for packaging smoke
         shell: bash
-        run: |
-          cargo build --release --target "${{ matrix.target }}" --bins
-          if [[ "${{ matrix.target }}" == *apple-darwin ]]; then
-            cargo rustc --release --target "${{ matrix.target }}" --lib --crate-type=cdylib -- -C link-arg=-Wl,-install_name,@rpath/libplasmite.dylib
-          else
-            cargo rustc --release --target "${{ matrix.target }}" --lib --crate-type=cdylib -- -C link-arg=-Wl,-soname,libplasmite.so
-          fi
+        run: ./scripts/build_release_artifacts.sh "${{ matrix.target }}"
       - name: Node npm pack/install smoke
         env:
           PLASMITE_SDK_DIR: ${{ github.workspace }}/target/${{ matrix.target }}/release

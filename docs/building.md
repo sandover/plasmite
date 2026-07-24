@@ -96,6 +96,11 @@ This command builds `plasmite` + `pls`, builds shared/static `libplasmite`,
 packages `bin/`, `include/`, `lib/`, `lib/pkgconfig/plasmite.pc`, and runs
 artifact smoke checks.
 
+`scripts/build_release_artifacts.sh <target-triple> [--static]` is the shared
+release build entrypoint. The release workflow invokes it once per platform,
+then reuses those artifacts for the SDK, Python wheel, and Node package instead
+of maintaining separate Cargo command blocks for each distribution channel.
+
 Use the SDK from your C build via `pkg-config`:
 
 ```bash
