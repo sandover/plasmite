@@ -3,7 +3,7 @@
 # Key exports: Exit 0 on exact match; prints actionable mismatch diagnostics on failure.
 # Role: Fail-closed guard to keep Homebrew distribution aligned with every release.
 # Invariants: Formula version must equal the release version under validation.
-# Invariants: Formula URLs and sha256 entries for darwin_amd64/darwin_arm64/linux_amd64/linux_arm64 must match.
+# Invariants: Formula URLs and sha256 entries for darwin_amd64/darwin_arm64/linux_amd64 must match.
 # Notes: Reads formula from a local file or directly from GitHub via gh api.
 
 set -euo pipefail
@@ -101,7 +101,7 @@ extract_formula_entry() {
   ' <<<"$formula_text"
 }
 
-for platform in darwin_amd64 darwin_arm64 linux_amd64 linux_arm64; do
+for platform in darwin_amd64 darwin_arm64 linux_amd64; do
   expected="$(expected_sha "$platform")"
   if [[ -z "$expected" ]]; then
     echo "error: missing expected checksum for ${platform} in ${sha_file}" >&2

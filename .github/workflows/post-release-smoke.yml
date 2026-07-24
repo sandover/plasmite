@@ -8,9 +8,9 @@ on:
         required: true
         type: string
       channels:
-        description: "Comma-separated channels for the ubuntu runner (default: npm,homebrew)"
+        description: "Comma-separated registry channels for the Ubuntu runner (default: npm,pypi,crates)"
         required: false
-        default: "npm,homebrew"
+        default: "npm,pypi,crates"
         type: string
       max_wait_minutes:
         description: "Retry budget in minutes"
@@ -58,3 +58,19 @@ jobs:
           name: post-release-smoke-${{ github.run_id }}
           path: .scratch/post-release-smoke-*
           if-no-files-found: ignore
+
+  homebrew-smoke:
+    runs-on: macos-latest
+    steps:
+      - name: Install the released Homebrew formula
+        shell: bash
+        env:
+          VERSION: ${{ inputs.release_version }}
+        run: |
+          set -euo pipefail
+          brew install sandover/tap/plasmite
+          actual="$(plasmite --version)"
+          if [[ "$actual" != "plasmite $VERSION" ]]; then
+            echo "error: expected plasmite $VERSION from Homebrew, got '$actual'." >&2
+            exit 1
+          fi

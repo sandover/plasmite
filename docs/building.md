@@ -118,7 +118,9 @@ just sdk-from-source aarch64-apple-darwin darwin_arm64
 
 `.github/workflows/release-publish.yml` (publish stage) consumes a successful build run's artifacts, runs registry preflight checks, syncs/verifies the Homebrew tap formula, publishes crates/npm/PyPI, and then creates/updates the GitHub release with SDK tarballs + `sha256sums.txt`.
 
-Before any registry publish steps run, `release-publish.yml` updates `sandover/homebrew-tap` from build artifacts and verifies alignment (version + URLs + checksums). Live publish requires `HOMEBREW_TAP_TOKEN` so the workflow can commit/push tap updates.
+Before any registry publish steps run, `release-publish.yml` verifies that the independently maintained `sandover/homebrew-tap` formula is aligned with the build artifacts (version + URLs + checksums). Update and push that formula locally before a live publish; CI never mutates tap history.
+
+After publishing, dispatch `post-release-smoke.yml`. Its macOS Homebrew job installs `sandover/tap/plasmite` and verifies `plasmite --version` for the released version.
 
 For low-risk workflow validation after release workflow changes, run a no-publish rehearsal:
 

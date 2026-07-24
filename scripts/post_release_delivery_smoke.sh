@@ -2,8 +2,8 @@
 # Purpose: Validate released package delivery and minimal runtime behavior across channels.
 # Key inputs: --version, --channels, --max-wait-minutes.
 # Role: Deterministic post-release smoke runner for local use and workflow dispatch.
-# Invariants: Required channels (npm, pypi, crates) must pass or exit non-zero.
-# Invariants: Homebrew validation reads published tap formula content, not local brew state.
+# Invariants: Required registry channels (npm, pypi, crates) must pass or exit non-zero.
+# Notes: Homebrew installation is checked separately on macOS by post-release-smoke.yml.
 set -euo pipefail
 
 usage() {
@@ -14,7 +14,7 @@ Validate post-release install + minimal runtime behavior across delivery channel
 
 Options:
   --version <X.Y.Z>            Required release version (without leading v)
-  --channels <csv>             Channels to check (default: npm,pypi,homebrew)
+  --channels <csv>             Channels to check (default: npm,pypi,crates)
   --max-wait-minutes <n>       Retry budget for propagation checks (default: 20)
   -h, --help                   Show this help
 
@@ -22,7 +22,6 @@ Channels:
   npm       npm + pnpm install/runtime check (pnpm best-effort when unavailable)
   pypi      uv install/runtime check
   crates    cargo install/runtime check (deep lane; slower)
-  homebrew  published tap formula version check (advisory)
 
 Environment:
   PLASMITE_KEEP_SCRATCH=1      Preserve scratch workdirs/logs under .scratch/
@@ -30,7 +29,7 @@ USAGE
 }
 
 VERSION=""
-CHANNELS="npm,pypi,homebrew"
+CHANNELS="npm,pypi,crates"
 MAX_WAIT_MINUTES=20
 
 while [[ $# -gt 0 ]]; do
@@ -157,36 +156,6 @@ check_crates_channel() {
   "$cargo_root/bin/plasmite" --version | grep -q "$VERSION"
 }
 
-check_homebrew_channel() {
-  local formula_text
-  if command -v gh >/dev/null 2>&1; then
-    formula_text="$(gh api repos/sandover/homebrew-tap/contents/Formula/plasmite.rb -H "Accept: application/vnd.github.raw" 2>/dev/null || true)"
-  fi
-
-  if [[ -z "${formula_text:-}" ]]; then
-    if command -v curl >/dev/null 2>&1; then
-      formula_text="$(curl -fsSL "https://raw.githubusercontent.com/sandover/homebrew-tap/main/Formula/plasmite.rb")" || {
-        echo "[homebrew] failed to fetch tap formula via curl" >&2
-        return 1
-      }
-    else
-      echo "[homebrew] gh or curl is required to fetch tap formula" >&2
-      return 3
-    fi
-  fi
-
-  local stable
-  stable="$(printf '%s\n' "$formula_text" | sed -n 's/^  version "\([^"]*\)"$/\1/p' | head -n 1)"
-  if [[ -z "$stable" ]]; then
-    echo "[homebrew] could not parse formula version from tap" >&2
-    return 1
-  fi
-  if [[ "$stable" != "$VERSION" ]]; then
-    echo "[homebrew] expected stable=$VERSION, got '${stable:-<empty>}'" >&2
-    return 1
-  fi
-}
-
 run_channel_with_retry() {
   local channel="$1"
   local fn_name="$2"
@@ -239,7 +208,7 @@ run_channel_with_retry() {
 
 validate_channel_name() {
   case "$1" in
-    npm|pypi|crates|homebrew)
+    npm|pypi|crates)
       ;;
     *)
       echo "error: unknown channel '$1'" >&2

@@ -69,7 +69,7 @@ Costs below are intentionally qualitative; exact runtimes vary by machine and Gi
 
 4. **Homebrew parity (GitHub, release-blocking)**
    - Purpose: prevent a release where Homebrew points at stale or mismatched tarballs.
-   - Gate (GitHub, `release-publish.yml`): CI computes the expected formula delta and verifies exact version/URL/checksum alignment against the tap state.
+   - Gates: `release-publish.yml` verifies exact version/URL/checksum alignment against the tap state; `post-release-smoke.yml` installs the released formula on macOS and runs `plasmite --version`.
    - Policy split: maintainers update + push `../homebrew-tap` locally; CI only verifies alignment and never mutates tap history.
    - Cost: cheap (automated diff + verification).
 
@@ -103,7 +103,7 @@ GitHub runners are shared machines, so benchmark numbers can swing due to factor
 Purpose: verify that fresh installs resolve + run across public channels after publish completes.
 
 - Required channels: `npm`, `pypi`, `crates`.
-- Advisory channel: `homebrew` (tracked and triaged, but does not block release-complete status by itself).
+- Required channel: `homebrew` (macOS install + runtime smoke).
 - Runner: `scripts/post_release_delivery_smoke.sh` (manual/local) or `.github/workflows/post-release-smoke.yml` (`workflow_dispatch`).
 
 Per-channel checks:
@@ -111,7 +111,7 @@ Per-channel checks:
 - `npm`: install `plasmite@<version>` in isolated npm + pnpm workdirs and run `plasmite --version`.
 - `pypi`: use `uv tool run --from plasmite==<version> plasmite --version`.
 - `crates`: `cargo install plasmite --version <version>` into isolated `CARGO_HOME`/`--root`, then run the installed binary.
-- `homebrew` (advisory): verify tap formula stable version resolves to `<version>`.
+- `homebrew`: `brew install sandover/tap/plasmite`, then verify `plasmite --version` is `<version>` on macOS.
 
 Retry/backoff/propagation policy:
 
@@ -122,7 +122,7 @@ Retry/backoff/propagation policy:
 Failure policy:
 
 - Any required-channel failure => release is **not** complete; open/track follow-up and rerun smoke.
-- Advisory-only failure (currently Homebrew) => release may be marked complete with a documented follow-up owner.
+- Any Homebrew failure => release is **not** complete; fix the formula or release artifact and rerun smoke.
 
 ## Release Policy
 
