@@ -137,7 +137,7 @@ task_body=$(cat <<EOF
 
 ## Automated Validation Gates
 - Re-run gate: ${check_name}
-- \`just ci-fast\`
+- \`just check\`
 
 ## Consult Me
 - If this fix changes public CLI/API/binding behavior or release scope, stop and request maintainer decision before continuing.

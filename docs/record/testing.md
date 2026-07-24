@@ -11,22 +11,17 @@ Run everything (unit + integration):
 cargo test
 ```
 
-## Execution lanes (pragmatic policy)
+## Validation hierarchy
 
-Plasmite uses three test lanes so we can add risk coverage without introducing
-release complexity or fragile gating.
+There are three top-level commands, ordered by cost and coverage:
 
-- **Lane A (fast, deterministic):** local developer machine + pull-request CI path.
-  - Command: `just hardening-fast`
-  - Included by: `just ci-fast` (and therefore PR CI)
-  - Intended for deterministic checks with bounded runtime overhead.
-  - Includes `bash scripts/cookbook_smoke.sh` for golden cookbook coverage.
-- **Lane B (broad, deterministic):** main/scheduled full CI path.
-  - Command: `just hardening-broad`
-  - Included by: `just ci` / `just ci-full`
-  - Intended for broader deterministic compatibility checks.
-- **Lane C (manual/on-demand):** developer-invoked deep checks only.
-  - Not part of required CI or release-publish automation.
+- `just check`: formatting, linting, Rust tests, and version alignment. Run it
+  before every push; pull requests run the same command.
+- `just integration`: cookbook, ABI, conformance, cross-artifact, and language
+  binding checks. It requires Go, Node, Python, and `uv`.
+- `just release-gate`: `check` + `integration` + Python wheel installation
+  smoke. Run it before merging, tagging, or publishing; main and scheduled CI
+  run it on Linux and macOS.
 
 ### Cookbook smoke checks
 
@@ -48,7 +43,6 @@ and loopback operations:
 Policy constraints:
 
 - Prefer deterministic tests; avoid flaky timing assumptions.
-- No new release workflow stages or release-publish gates for hardening tests.
 - Keep checks runnable on local macOS and standard GitHub CI runners.
 
 ## Test suites

@@ -39,10 +39,12 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-For full CI-parity checks in this repo, run:
+Use the named gates instead of CI aliases:
 
 ```bash
-just ci
+just check          # core Rust + version checks; use before every push
+just integration    # bindings, ABI, cookbook, and cross-artifact checks
+just release-gate   # check + integration + Python wheel smoke
 ```
 
 Packaging smoke (npm pack + wheel install) is covered in CI pull requests by

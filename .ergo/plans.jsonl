@@ -4007,3 +4007,8 @@
 {"type":"message","ts":"2026-07-24T23:34:05.349948Z","data":{"task_id":"OGXCYN","kind":"done","text":"Aligned Homebrew to the three official SDK targets, added a macOS install smoke, verified formula alignment/audit/reinstall for 0.6.1.","ts":"2026-07-24T23:34:05.349948Z"}}
 {"type":"unclaim","ts":"2026-07-24T23:34:05.349948Z","data":{"id":"OGXCYN","ts":"2026-07-24T23:34:05.349948Z"}}
 {"type":"state","ts":"2026-07-24T23:34:05.349948Z","data":{"id":"OGXCYN","state":"done","ts":"2026-07-24T23:34:05.349948Z"}}
+{"type":"claim","ts":"2026-07-24T23:34:50.762657Z","data":{"id":"3CKMA6","agent_id":"gpt-5.6@macbook-pro","ts":"2026-07-24T23:34:50.762657Z"}}
+{"type":"state","ts":"2026-07-24T23:34:50.762657Z","data":{"id":"3CKMA6","state":"doing","ts":"2026-07-24T23:34:50.762657Z"}}
+{"type":"message","ts":"2026-07-24T23:37:39.433757Z","data":{"task_id":"3CKMA6","kind":"done","text":"Replaced ci aliases and hardening lanes with check, integration, and release-gate; updated PR/main CI and contributor docs; just check and just integration pass locally.","ts":"2026-07-24T23:37:39.433757Z"}}
+{"type":"unclaim","ts":"2026-07-24T23:37:39.433757Z","data":{"id":"3CKMA6","ts":"2026-07-24T23:37:39.433757Z"}}
+{"type":"state","ts":"2026-07-24T23:37:39.433757Z","data":{"id":"3CKMA6","state":"done","ts":"2026-07-24T23:37:39.433757Z"}}

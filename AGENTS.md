@@ -38,7 +38,7 @@ When you add, rename, move, or delete a doc in `docs/` or `spec/`, update the tr
 # CI hygiene (required before pushing code)
 - Run `cargo fmt --all`.
 - Run `cargo clippy --all-targets -- -D warnings`.
-- Before push, run and pass `just ci-fast`; before merge/release, run and pass `just ci`.
+- Before push, run and pass `just check`; before merge/release, run and pass `just release-gate`.
 - Do not add new `#[allow(clippy::...)]` without explicit justification in the commit body.
 
 # Guidance

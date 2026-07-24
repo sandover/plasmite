@@ -529,7 +529,7 @@ Then the page can:
 ## Cookbook Golden Checks
 
 The following sections are covered by `scripts/cookbook_smoke.sh` and enforced in
-`just ci-fast`:
+`just integration`:
 
 - CI Gate
 - Live Event Stream (build progress, multi-writer event bus)

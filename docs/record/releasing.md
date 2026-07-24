@@ -228,7 +228,7 @@ For every release, the following versions must be identical:
 ### Required Workflow
 
 1. Run `scripts/bump_version.sh <version>` to apply one version everywhere.
-2. Run `just check-version-alignment` (or `just ci-fast`) to verify no drift.
+2. Run `just check` to verify version alignment alongside formatting, linting, and tests.
 3. Commit all manifest updates together.
 
 ### Guardrails

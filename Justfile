@@ -18,19 +18,9 @@ clippy:
 test:
 	cargo test
 
-# Lane A: deterministic fast hardening checks for local iteration + PR CI.
-# Keep runtime bounded and avoid flaky timing-sensitive scenarios.
-hardening-fast: test cookbook-smoke
-	@echo "hardening-fast complete"
-
 cookbook-smoke:
 	bash scripts/cookbook_smoke.sh
 	@echo "cookbook-smoke complete"
-
-# Lane B: broader deterministic hardening checks for full/main CI.
-# This lane is intentionally broader than Lane A but still release-agnostic.
-hardening-broad: conformance-all cross-artifact-smoke
-	@echo "hardening-broad complete"
 
 # Verify version alignment across release surfaces.
 check-version-alignment:
@@ -65,19 +55,15 @@ bindings-node-typecheck:
 # Run all language bindings tests and checks.
 bindings-test: bindings-go-test bindings-python-test bindings-node-test bindings-node-typecheck
 
-# Fast local CI parity gate used during iteration.
-ci-fast: fmt clippy hardening-fast check-version-alignment bindings-go-contract-test bindings-node-typecheck
+# Core, deterministic checks for every local change and pull request.
+check: fmt clippy test check-version-alignment
 
-# Full CI parity gate including ABI/conformance/cross-artifact checks.
-ci-full: fmt clippy hardening-fast check-version-alignment abi-smoke hardening-broad bindings-node-typecheck
+# Cross-language and artifact checks. Requires Go, Node, Python, and uv.
+# `bindings-test` includes node pack and remote-only smoke tests.
+integration: cookbook-smoke abi-smoke conformance-all cross-artifact-smoke bindings-test
 
-# Alias for full CI gate.
-ci: ci-full
-
-# Canonical release candidate gate before tagging/publishing.
-# Keep this focused on deterministic checks that map to release-manager required gates.
-# Note: `bindings-test` includes node_pack_smoke + node_remote_only_smoke.
-release-gate: fmt clippy test bindings-test check-version-alignment
+# Canonical release candidate gate before merging, tagging, or publishing.
+release-gate: check integration
 	bash scripts/python_wheel_smoke.sh
 
 # Build shared library artifacts for local ABI usage.
@@ -240,4 +226,4 @@ _serve-kill:
 	done
 
 # Run full release readiness checks.
-release-check: ci audit
+release-check: release-gate audit
