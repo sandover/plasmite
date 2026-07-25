@@ -472,7 +472,10 @@ MCP tools are request/response, so polling is the v1 pattern:
 
 1. Call `plasmite_read` with `pool` and optional filters.
 2. Save `next_after_seq` from the result.
-3. Call again with `after_seq` to read only newer messages.
+3. Call `plasmite_wait` with that `after_seq` cursor for an idle, bounded wait,
+   or call `plasmite_read` again for an immediate non-blocking check.
+4. Save the returned cursor and repeat. A timed-out wait returns an empty
+   message batch with `timed_out: true`.
 
 `plasmite_read` details in v1:
 - default `count` is 20, maximum is 200;
@@ -480,7 +483,8 @@ MCP tools are request/response, so polling is the v1 pattern:
 - with `after_seq`, it returns messages where `seq > after_seq` (ascending);
 - if both `since` and `after_seq` are set, both filters apply (intersection).
 
-v1 intentionally does not implement MCP resource subscriptions or POST-SSE mode.
+v1 intentionally does not implement MCP resource subscriptions or POST-SSE
+mode. `plasmite_wait` is a bounded request/response tool, not a live stream.
 
 ### Coordination conventions (experimental, recommended)
 

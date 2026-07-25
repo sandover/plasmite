@@ -699,9 +699,29 @@ async fn mcp_post(
         return accepted_response();
     }
 
-    let handler = ServeMcpHandler::new(state.client.clone(), state.access_mode);
-    let mut dispatcher = McpDispatcher::new(handler);
-    match dispatcher.dispatch_value(payload) {
+    let dispatch_state = state.clone();
+    let dispatch = tokio::task::spawn_blocking(move || {
+        let handler = ServeMcpHandler::new(
+            dispatch_state.client.clone(),
+            dispatch_state.access_mode,
+            dispatch_state.tail_semaphore.clone(),
+        );
+        let mut dispatcher = McpDispatcher::new(handler);
+        dispatcher.dispatch_value(payload)
+    })
+    .await;
+    let outcome = match dispatch {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            return error_response(
+                Error::new(ErrorKind::Internal)
+                    .with_message("MCP request task failed")
+                    .with_source(err),
+            );
+        }
+    };
+
+    match outcome {
         DispatchOutcome::NoResponse => accepted_response(),
         DispatchOutcome::Response(response) => {
             let payload = match serde_json::to_value(response) {
@@ -722,13 +742,15 @@ async fn mcp_post(
 struct ServeMcpHandler {
     inner: PlasmiteMcpHandler,
     access_mode: AccessMode,
+    wait_semaphore: Arc<Semaphore>,
 }
 
 impl ServeMcpHandler {
-    fn new(client: LocalClient, access_mode: AccessMode) -> Self {
+    fn new(client: LocalClient, access_mode: AccessMode, wait_semaphore: Arc<Semaphore>) -> Self {
         Self {
             inner: PlasmiteMcpHandler::with_client(client),
             access_mode,
+            wait_semaphore,
         }
     }
 }
@@ -751,6 +773,14 @@ impl McpHandler for ServeMcpHandler {
                 request.name.as_str(),
             ));
         }
+        let _wait_permit = if request.name == "plasmite_wait" {
+            match self.wait_semaphore.clone().try_acquire_owned() {
+                Ok(permit) => Some(permit),
+                Err(_) => return Ok(mcp_wait_busy_tool_result()),
+            }
+        } else {
+            None
+        };
         self.inner.call_tool(request)
     }
 
@@ -775,7 +805,11 @@ impl McpHandler for ServeMcpHandler {
 fn mcp_tool_requires_read(name: &str) -> bool {
     matches!(
         name,
-        "plasmite_pool_list" | "plasmite_pool_info" | "plasmite_fetch" | "plasmite_read"
+        "plasmite_pool_list"
+            | "plasmite_pool_info"
+            | "plasmite_fetch"
+            | "plasmite_read"
+            | "plasmite_wait"
     )
 }
 
@@ -793,6 +827,17 @@ fn mcp_access_denied_tool_result(action: &str, tool: &str) -> ToolCallResult {
             "error_kind": "Permission",
             "tool": tool,
             "hint": "Adjust --access to permit this operation.",
+        })),
+    )
+}
+
+fn mcp_wait_busy_tool_result() -> ToolCallResult {
+    ToolCallResult::execution_error_with_structured(
+        "busy: too many concurrent tail or MCP wait requests",
+        Some(json!({
+            "error_kind": "Busy",
+            "tool": "plasmite_wait",
+            "hint": "Try again later or reduce long-lived read concurrency.",
         })),
     )
 }
@@ -1532,9 +1577,89 @@ fn is_access_forbidden(err: &Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccessMode, ErrorKind, ServeConfig, build_cors_layer, normalize_cors_origins,
-        normalize_tags, parse_tags_from_query, serve, validate_config,
+        AccessMode, AppState, ErrorKind, LocalClient, McpHandler, PoolOptions, PoolRef,
+        ServeConfig, ServeMcpHandler, ToolCallRequest, build_cors_layer, mcp_post,
+        normalize_cors_origins, normalize_tags, parse_tags_from_query, serve, validate_config,
     };
+    use axum::Json;
+    use axum::extract::State;
+    use axum::http::HeaderMap;
+    use serde_json::json;
+    use std::sync::Arc;
+    use tokio::sync::Semaphore;
+
+    #[test]
+    fn mcp_wait_shares_long_lived_reader_budget() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let wait_semaphore = Arc::new(Semaphore::new(1));
+        let _permit = wait_semaphore
+            .clone()
+            .try_acquire_owned()
+            .expect("reserve only permit");
+        let mut handler = ServeMcpHandler::new(
+            LocalClient::new().with_pool_dir(temp.path()),
+            AccessMode::ReadOnly,
+            wait_semaphore,
+        );
+
+        let result = handler
+            .call_tool(ToolCallRequest {
+                name: "plasmite_wait".to_string(),
+                arguments: json!({
+                    "pool": "events",
+                    "after_seq": 0,
+                    "timeout_ms": 10
+                })
+                .as_object()
+                .expect("object")
+                .clone(),
+            })
+            .expect("tool result");
+
+        assert!(result.is_error);
+        assert_eq!(
+            result.structured_content.expect("structured error")["error_kind"],
+            json!("Busy")
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mcp_wait_does_not_block_async_runtime_worker() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let client = LocalClient::new().with_pool_dir(temp.path());
+        client
+            .create_pool(&PoolRef::name("events"), PoolOptions::new(1024 * 1024))
+            .expect("create pool");
+        let state = Arc::new(AppState {
+            client,
+            token: None,
+            access_mode: AccessMode::ReadOnly,
+            max_tail_timeout_ms: 30_000,
+            tail_semaphore: Arc::new(Semaphore::new(1)),
+        });
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "plasmite_wait",
+                "arguments": {
+                    "pool": "events",
+                    "after_seq": 0,
+                    "timeout_ms": 200
+                }
+            }
+        });
+
+        let started = std::time::Instant::now();
+        let request = tokio::spawn(mcp_post(State(state), HeaderMap::new(), Json(payload)));
+        tokio::task::yield_now().await;
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(100),
+            "MCP wait blocked the async runtime worker"
+        );
+        let _response = request.await.expect("request task");
+    }
 
     #[tokio::test]
     async fn serve_rejects_non_loopback_bind() {

@@ -150,6 +150,17 @@ Protocol and header notes:
 Security and policy posture:
 - `/mcp` uses the same bearer auth and TLS expectations as `/v0/*`.
 - `--access` mode restrictions apply to MCP operations.
+- MCP tool definitions publish standard behavior annotations. Pool listing,
+  metadata, fetch, read, and bounded wait operations are read-only and
+  idempotent; feed and create operations are mutating; pool deletion is
+  destructive. Clients may use these hints when deciding whether a tool call
+  needs approval.
+- `plasmite_wait` accepts a required `after_seq` cursor and waits up to
+  `timeout_ms` (default 10 seconds, maximum 60 seconds). It returns the same
+  ascending message batch and `next_after_seq` cursor as `plasmite_read`, plus
+  `timed_out` so idle agents do not need shell-based sleeps.
+- MCP waits share the `--max-tail-concurrency` budget with HTTP tail streams.
+  Calls beyond that limit return a structured `Busy` tool error.
 - v1 is intentionally minimal: no MCP resource subscriptions and no SSE mode for MCP POST responses.
 
 ## Server limits
@@ -160,7 +171,7 @@ Configurable via flags:
 |---|---|---|
 | `--max-body-bytes` | 1 MB | Maximum request body size |
 | `--max-tail-timeout-ms` | 30 s | Maximum tail stream timeout |
-| `--max-tail-concurrency` | 64 | Maximum concurrent tail streams |
+| `--max-tail-concurrency` | 64 | Maximum concurrent tail streams and MCP waits |
 
 ## Reverse proxy
 
