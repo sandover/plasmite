@@ -27,6 +27,14 @@ const MAX_READ_COUNT: usize = 200;
 const DEFAULT_WAIT_TIMEOUT_MS: u64 = 10_000;
 const MAX_WAIT_TIMEOUT_MS: u64 = 60_000;
 const WAIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const MCP_INSTRUCTIONS: &str = concat!(
+    "Use plasmite_read for immediate inspection and plasmite_wait for a bounded wait. ",
+    "Resume with next_after_seq, which is the highest sequence conclusively examined even when ",
+    "filters return no messages. Check fell_behind before assuming the stream is complete. ",
+    "Tool failures set isError and include a structured error_kind. plasmite_feed is ",
+    "non-idempotent, so do not retry it after an ambiguous transport failure unless your payload ",
+    "has an application-level stable identifier."
+);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -144,6 +152,7 @@ pub struct InitializeResult {
     pub capabilities: ServerCapabilities,
     #[serde(rename = "serverInfo")]
     pub server_info: ServerInfo,
+    pub instructions: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,6 +186,8 @@ pub struct McpTool {
     pub description: String,
     #[serde(rename = "inputSchema")]
     pub input_schema: Value,
+    #[serde(rename = "outputSchema")]
+    pub output_schema: Value,
     pub annotations: ToolAnnotations,
 }
 
@@ -228,6 +239,138 @@ impl ToolAnnotations {
             open_world_hint: false,
         }
     }
+}
+
+fn tool_output_schema(success_schema: Value) -> Value {
+    json!({
+        "type": "object",
+        "oneOf": [
+            success_schema,
+            {
+                "type": "object",
+                "properties": {
+                    "tool": {"type": "string"},
+                    "error_kind": {"type": "string"},
+                    "message": {"type": "string"},
+                    "hint": {"type": "string"},
+                    "path": {"type": "string"},
+                    "seq": {"type": "integer", "minimum": 0},
+                    "offset": {"type": "integer", "minimum": 0},
+                    "field": {"type": "string"},
+                    "detail": {"type": "string"}
+                },
+                "required": ["tool", "error_kind"],
+                "additionalProperties": false
+            }
+        ]
+    })
+}
+
+fn message_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "seq": {"type": "integer", "minimum": 0},
+            "time": {"type": "string"},
+            "meta": {
+                "type": "object",
+                "properties": {
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                    }
+                },
+                "required": ["tags"],
+                "additionalProperties": false
+            },
+            "data": {}
+        },
+        "required": ["seq", "time", "meta", "data"],
+        "additionalProperties": false
+    })
+}
+
+fn pool_info_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "path": {"type": "string"},
+            "file_size": {"type": "integer", "minimum": 0},
+            "index_offset": {"type": "integer", "minimum": 0},
+            "index_capacity": {"type": "integer", "minimum": 0},
+            "index_size_bytes": {"type": "integer", "minimum": 0},
+            "ring_offset": {"type": "integer", "minimum": 0},
+            "ring_size": {"type": "integer", "minimum": 0},
+            "bounds": {
+                "type": "object",
+                "properties": {
+                    "oldest": {"type": "integer", "minimum": 0},
+                    "newest": {"type": "integer", "minimum": 0}
+                },
+                "additionalProperties": false
+            },
+            "metrics": {"type": "object"}
+        },
+        "required": [
+            "name",
+            "path",
+            "file_size",
+            "index_offset",
+            "index_capacity",
+            "index_size_bytes",
+            "ring_offset",
+            "ring_size",
+            "bounds"
+        ],
+        "additionalProperties": false
+    })
+}
+
+fn property_output_schema(name: &str, value_schema: Value) -> Value {
+    let mut properties = Map::new();
+    properties.insert(name.to_string(), value_schema);
+    tool_output_schema(json!({
+        "type": "object",
+        "properties": properties,
+        "required": [name],
+        "additionalProperties": false
+    }))
+}
+
+fn read_output_schema(include_timeout: bool) -> Value {
+    let mut properties = json!({
+        "messages": {
+            "type": "array",
+            "items": message_output_schema()
+        },
+        "next_after_seq": {"type": ["integer", "null"], "minimum": 0},
+        "last_returned_seq": {"type": ["integer", "null"], "minimum": 0},
+        "oldest_available_seq": {"type": ["integer", "null"], "minimum": 0},
+        "newest_available_seq": {"type": ["integer", "null"], "minimum": 0},
+        "fell_behind": {"type": "boolean"}
+    });
+    let mut required = vec![
+        "messages",
+        "next_after_seq",
+        "last_returned_seq",
+        "oldest_available_seq",
+        "newest_available_seq",
+        "fell_behind",
+    ];
+    if include_timeout {
+        properties
+            .as_object_mut()
+            .expect("read output properties must be an object")
+            .insert("timed_out".to_string(), json!({"type": "boolean"}));
+        required.push("timed_out");
+    }
+    tool_output_schema(json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": false
+    }))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -436,6 +579,7 @@ impl<H: McpHandler> McpDispatcher<H> {
                 name: self.metadata.name.clone(),
                 version: self.metadata.version.clone(),
             },
+            instructions: MCP_INSTRUCTIONS.to_string(),
         }
     }
 }
@@ -662,23 +806,16 @@ impl PlasmiteMcpHandler {
             Ok(info) => info,
             Err(err) => return api_error_tool_result("plasmite_read", err),
         };
-        let messages =
-            match read_messages_for_tool(&opened, &info, count, after_seq, since_ns, &tags) {
-                Ok(messages) => messages,
-                Err(err) => return api_error_tool_result("plasmite_read", *err),
-            };
-        let next_after_seq = messages
-            .last()
-            .and_then(|message| message.get("seq"))
-            .and_then(Value::as_u64)
-            .or(after_seq);
+        let batch = match read_messages_for_tool(&opened, &info, count, after_seq, since_ns, &tags)
+        {
+            Ok(batch) => batch,
+            Err(err) => return api_error_tool_result("plasmite_read", *err),
+        };
+        let message_count = batch.messages.len();
 
         ToolCallResult::success_with_structured(
-            format!("Read {} message(s) from `{pool}`.", messages.len()),
-            json!({
-                "messages": messages,
-                "next_after_seq": next_after_seq,
-            }),
+            format!("Read {message_count} message(s) from `{pool}`."),
+            read_batch_json_value(batch, None),
         )
     }
 
@@ -728,30 +865,27 @@ impl PlasmiteMcpHandler {
         };
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
         let mut notify = crate::api::notify::open_for_path(opened.path());
+        let mut cursor = after_seq;
+        let mut fell_behind = false;
 
         loop {
             let info = match opened.info() {
                 Ok(info) => info,
                 Err(err) => return api_error_tool_result("plasmite_wait", err),
             };
-            let messages =
-                match read_messages_for_tool(&opened, &info, count, Some(after_seq), None, &tags) {
-                    Ok(messages) => messages,
+            let mut batch =
+                match read_messages_for_tool(&opened, &info, count, Some(cursor), None, &tags) {
+                    Ok(batch) => batch,
                     Err(err) => return api_error_tool_result("plasmite_wait", *err),
                 };
-            if !messages.is_empty() {
-                let next_after_seq = messages
-                    .last()
-                    .and_then(|message| message.get("seq"))
-                    .and_then(Value::as_u64)
-                    .unwrap_or(after_seq);
+            fell_behind |= batch.fell_behind;
+            batch.fell_behind = fell_behind;
+            cursor = batch.next_after_seq.unwrap_or(cursor);
+            if !batch.messages.is_empty() {
+                let message_count = batch.messages.len();
                 return ToolCallResult::success_with_structured(
-                    format!("Received {} message(s) from `{pool}`.", messages.len()),
-                    json!({
-                        "messages": messages,
-                        "next_after_seq": next_after_seq,
-                        "timed_out": false,
-                    }),
+                    format!("Received {message_count} message(s) from `{pool}`."),
+                    read_batch_json_value(batch, Some(false)),
                 );
             }
 
@@ -759,11 +893,7 @@ impl PlasmiteMcpHandler {
             if now >= deadline {
                 return ToolCallResult::success_with_structured(
                     format!("No new messages arrived in `{pool}` before the timeout."),
-                    json!({
-                        "messages": [],
-                        "next_after_seq": after_seq,
-                        "timed_out": true,
-                    }),
+                    read_batch_json_value(batch, Some(true)),
                 );
             }
 
@@ -796,6 +926,13 @@ impl McpHandler for PlasmiteMcpHandler {
                     "type": "object",
                     "properties": {}
                 }),
+                output_schema: property_output_schema(
+                    "pools",
+                    json!({
+                        "type": "array",
+                        "items": pool_info_output_schema()
+                    }),
+                ),
                 annotations: ToolAnnotations::read_only(),
             },
             McpTool {
@@ -809,6 +946,7 @@ impl McpHandler for PlasmiteMcpHandler {
                     },
                     "required": ["name"]
                 }),
+                output_schema: property_output_schema("pool", pool_info_output_schema()),
                 annotations: ToolAnnotations::additive_idempotent(),
             },
             McpTool {
@@ -821,6 +959,7 @@ impl McpHandler for PlasmiteMcpHandler {
                     },
                     "required": ["pool"]
                 }),
+                output_schema: property_output_schema("pool", pool_info_output_schema()),
                 annotations: ToolAnnotations::read_only(),
             },
             McpTool {
@@ -833,6 +972,17 @@ impl McpHandler for PlasmiteMcpHandler {
                     },
                     "required": ["pool"]
                 }),
+                output_schema: property_output_schema(
+                    "deleted",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "pool": {"type": "string"}
+                        },
+                        "required": ["pool"],
+                        "additionalProperties": false
+                    }),
+                ),
                 annotations: ToolAnnotations::destructive(),
             },
             McpTool {
@@ -848,6 +998,7 @@ impl McpHandler for PlasmiteMcpHandler {
                     },
                     "required": ["pool", "data"]
                 }),
+                output_schema: property_output_schema("message", message_output_schema()),
                 annotations: ToolAnnotations::additive(),
             },
             McpTool {
@@ -861,6 +1012,7 @@ impl McpHandler for PlasmiteMcpHandler {
                     },
                     "required": ["pool", "seq"]
                 }),
+                output_schema: property_output_schema("message", message_output_schema()),
                 annotations: ToolAnnotations::read_only(),
             },
             McpTool {
@@ -878,6 +1030,7 @@ impl McpHandler for PlasmiteMcpHandler {
                     },
                     "required": ["pool"]
                 }),
+                output_schema: read_output_schema(false),
                 annotations: ToolAnnotations::read_only(),
             },
             McpTool {
@@ -894,6 +1047,7 @@ impl McpHandler for PlasmiteMcpHandler {
                     },
                     "required": ["pool", "after_seq"]
                 }),
+                output_schema: read_output_schema(true),
                 annotations: ToolAnnotations::read_only(),
             },
         ])
@@ -954,16 +1108,9 @@ impl McpHandler for PlasmiteMcpHandler {
             .open_pool(&pool_ref)
             .map_err(api_error_jsonrpc)?;
         let info = opened.info().map_err(api_error_jsonrpc)?;
-        let messages = read_messages_for_tool(&opened, &info, DEFAULT_READ_COUNT, None, None, &[])
+        let batch = read_messages_for_tool(&opened, &info, DEFAULT_READ_COUNT, None, None, &[])
             .map_err(|err| api_error_jsonrpc(*err))?;
-        let next_after_seq = messages
-            .last()
-            .and_then(|message| message.get("seq"))
-            .and_then(Value::as_u64);
-        let payload = json!({
-            "messages": messages,
-            "next_after_seq": next_after_seq,
-        });
+        let payload = read_batch_json_value(batch, None);
         let text = serde_json::to_string(&payload)
             .map_err(|_| JsonRpcError::internal_error("failed to encode resource payload"))?;
         Ok(ResourceReadResult {
@@ -1246,6 +1393,51 @@ fn message_json_value(message: &crate::api::Message) -> Value {
     })
 }
 
+struct ReadBatch {
+    messages: Vec<Value>,
+    next_after_seq: Option<u64>,
+    last_returned_seq: Option<u64>,
+    oldest_available_seq: Option<u64>,
+    newest_available_seq: Option<u64>,
+    fell_behind: bool,
+}
+
+impl ReadBatch {
+    fn empty(
+        after_seq: Option<u64>,
+        oldest_available_seq: Option<u64>,
+        newest_available_seq: Option<u64>,
+        fell_behind: bool,
+    ) -> Self {
+        Self {
+            messages: Vec::new(),
+            next_after_seq: after_seq,
+            last_returned_seq: None,
+            oldest_available_seq,
+            newest_available_seq,
+            fell_behind,
+        }
+    }
+}
+
+fn read_batch_json_value(batch: ReadBatch, timed_out: Option<bool>) -> Value {
+    let mut value = json!({
+        "messages": batch.messages,
+        "next_after_seq": batch.next_after_seq,
+        "last_returned_seq": batch.last_returned_seq,
+        "oldest_available_seq": batch.oldest_available_seq,
+        "newest_available_seq": batch.newest_available_seq,
+        "fell_behind": batch.fell_behind,
+    });
+    if let Some(timed_out) = timed_out {
+        value
+            .as_object_mut()
+            .expect("read batch must be an object")
+            .insert("timed_out".to_string(), json!(timed_out));
+    }
+    value
+}
+
 fn read_messages_for_tool(
     pool: &crate::api::Pool,
     info: &PoolInfo,
@@ -1253,24 +1445,51 @@ fn read_messages_for_tool(
     after_seq: Option<u64>,
     since_ns: Option<u64>,
     required_tags: &[String],
-) -> Result<Vec<Value>, Box<Error>> {
+) -> Result<ReadBatch, Box<Error>> {
     let (Some(oldest), Some(newest)) = (info.bounds.oldest_seq, info.bounds.newest_seq) else {
-        return Ok(Vec::new());
+        return Ok(ReadBatch::empty(after_seq, None, None, false));
     };
+    let fell_behind = after_seq.is_some_and(|cursor| {
+        cursor
+            .checked_add(1)
+            .is_some_and(|next_seq| next_seq < oldest)
+    });
     if count == 0 {
-        return Ok(Vec::new());
+        return Ok(ReadBatch::empty(
+            after_seq,
+            Some(oldest),
+            Some(newest),
+            fell_behind,
+        ));
     }
 
     let start_seq = match after_seq {
-        Some(after_seq) => oldest.max(after_seq.saturating_add(1)),
+        Some(after_seq) => {
+            let Some(next_seq) = after_seq.checked_add(1) else {
+                return Ok(ReadBatch::empty(
+                    Some(after_seq),
+                    Some(oldest),
+                    Some(newest),
+                    fell_behind,
+                ));
+            };
+            oldest.max(next_seq)
+        }
         None => oldest,
     };
     if start_seq > newest {
-        return Ok(Vec::new());
+        return Ok(ReadBatch::empty(
+            after_seq,
+            Some(oldest),
+            Some(newest),
+            fell_behind,
+        ));
     }
 
     let mut messages = Vec::new();
+    let mut next_after_seq = after_seq;
     for seq in start_seq..=newest {
+        next_after_seq = Some(seq);
         let message = match pool.get_message(seq) {
             Ok(message) => message,
             Err(err) if err.kind() == ErrorKind::NotFound => continue,
@@ -1305,7 +1524,18 @@ fn read_messages_for_tool(
             messages.remove(0);
         }
     }
-    Ok(messages)
+    let last_returned_seq = messages
+        .last()
+        .and_then(|message| message.get("seq"))
+        .and_then(Value::as_u64);
+    Ok(ReadBatch {
+        messages,
+        next_after_seq,
+        last_returned_seq,
+        oldest_available_seq: Some(oldest),
+        newest_available_seq: Some(newest),
+        fell_behind,
+    })
 }
 
 fn message_has_tags(message_tags: &[String], required_tags: &[String]) -> bool {
@@ -1480,6 +1710,7 @@ mod tests {
                 name: "plasmite_pool_list".to_string(),
                 description: "List pools".to_string(),
                 input_schema: json!({"type":"object","properties":{}}),
+                output_schema: property_output_schema("pools", json!({"type": "array"})),
                 annotations: ToolAnnotations::read_only(),
             }])
         }
@@ -1561,6 +1792,11 @@ mod tests {
             json!(false)
         );
         assert_eq!(result["serverInfo"]["name"], json!("plasmite"));
+        assert!(
+            result["instructions"]
+                .as_str()
+                .is_some_and(|instructions| instructions.contains("next_after_seq"))
+        );
     }
 
     #[test]
@@ -1599,21 +1835,23 @@ mod tests {
             Some(json!({})),
         )));
         assert_eq!(list_response.error, None);
+        let list_result = list_response.result.expect("tools list result");
+        let tools = list_result["tools"].as_array().expect("tools");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], json!("plasmite_pool_list"));
         assert_eq!(
-            list_response.result.expect("tools list result")["tools"]
-                .as_array()
-                .expect("tools"),
-            &vec![json!({
-                "name":"plasmite_pool_list",
-                "description":"List pools",
-                "inputSchema":{"type":"object","properties":{}},
-                "annotations":{
-                    "readOnlyHint":true,
-                    "destructiveHint":false,
-                    "idempotentHint":true,
-                    "openWorldHint":false
-                }
-            })]
+            tools[0]["inputSchema"],
+            json!({"type":"object","properties":{}})
+        );
+        assert_eq!(tools[0]["outputSchema"]["type"], json!("object"));
+        assert_eq!(
+            tools[0]["annotations"],
+            json!({
+                "readOnlyHint":true,
+                "destructiveHint":false,
+                "idempotentHint":true,
+                "openWorldHint":false
+            })
         );
 
         let call_response = expect_response(dispatcher.dispatch_value(request(
@@ -1897,6 +2135,41 @@ mod tests {
     }
 
     #[test]
+    fn plasmite_tools_advertise_structured_output_schemas() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let mut handler = PlasmiteMcpHandler::new(tmp.path());
+        let tools = handler.list_tools().expect("list tools");
+
+        assert_eq!(tools.len(), 8);
+        for tool in &tools {
+            assert_eq!(tool.output_schema["type"], json!("object"), "{}", tool.name);
+            assert_eq!(
+                tool.output_schema["oneOf"].as_array().map(Vec::len),
+                Some(2),
+                "{}",
+                tool.name
+            );
+        }
+
+        let read = tools
+            .iter()
+            .find(|tool| tool.name == "plasmite_read")
+            .expect("read tool");
+        assert_eq!(
+            read.output_schema["oneOf"][0]["properties"]["fell_behind"]["type"],
+            json!("boolean")
+        );
+        let wait = tools
+            .iter()
+            .find(|tool| tool.name == "plasmite_wait")
+            .expect("wait tool");
+        assert_eq!(
+            wait.output_schema["oneOf"][0]["properties"]["timed_out"]["type"],
+            json!("boolean")
+        );
+    }
+
+    #[test]
     fn plasmite_wait_returns_available_messages_after_cursor() {
         let tmp = tempfile::tempdir().expect("tmp");
         let mut handler = PlasmiteMcpHandler::new(tmp.path());
@@ -1916,6 +2189,10 @@ mod tests {
         let structured = wait_result.structured_content.expect("structured");
         assert_eq!(structured["timed_out"], json!(false));
         assert_eq!(structured["next_after_seq"], json!(3));
+        assert_eq!(structured["last_returned_seq"], json!(3));
+        assert_eq!(structured["oldest_available_seq"], json!(1));
+        assert_eq!(structured["newest_available_seq"], json!(3));
+        assert_eq!(structured["fell_behind"], json!(false));
         assert_eq!(
             structured["messages"].as_array().expect("messages").len(),
             2
@@ -1942,7 +2219,105 @@ mod tests {
         let structured = wait_result.structured_content.expect("structured");
         assert_eq!(structured["timed_out"], json!(true));
         assert_eq!(structured["next_after_seq"], json!(1));
+        assert_eq!(structured["last_returned_seq"], Value::Null);
+        assert_eq!(structured["oldest_available_seq"], json!(1));
+        assert_eq!(structured["newest_available_seq"], json!(1));
+        assert_eq!(structured["fell_behind"], json!(false));
         assert_eq!(structured["messages"], json!([]));
+    }
+
+    #[test]
+    fn plasmite_wait_timeout_advances_past_filtered_messages() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let mut handler = PlasmiteMcpHandler::new(tmp.path());
+        seed_pool_with_messages(&mut handler, "events", 3, 1_700_000_000_000_000_000);
+
+        let wait_result = handler
+            .call_tool(ToolCallRequest {
+                name: "plasmite_wait".to_string(),
+                arguments: map_args(json!({
+                    "pool": "events",
+                    "after_seq": 0,
+                    "tags": ["missing"],
+                    "timeout_ms": 10
+                })),
+            })
+            .expect("wait");
+        let structured = wait_result.structured_content.expect("structured");
+        assert_eq!(structured["timed_out"], json!(true));
+        assert_eq!(structured["messages"], json!([]));
+        assert_eq!(structured["next_after_seq"], json!(3));
+        assert_eq!(structured["last_returned_seq"], Value::Null);
+    }
+
+    #[test]
+    fn plasmite_read_advances_cursor_past_filtered_messages() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let mut handler = PlasmiteMcpHandler::new(tmp.path());
+        seed_pool_with_messages(&mut handler, "events", 3, 1_700_000_000_000_000_000);
+
+        let read_result = handler
+            .call_tool(ToolCallRequest {
+                name: "plasmite_read".to_string(),
+                arguments: map_args(json!({
+                    "pool": "events",
+                    "after_seq": 0,
+                    "tags": ["missing"]
+                })),
+            })
+            .expect("read");
+        let structured = read_result.structured_content.expect("structured");
+        assert_eq!(structured["messages"], json!([]));
+        assert_eq!(structured["next_after_seq"], json!(3));
+        assert_eq!(structured["last_returned_seq"], Value::Null);
+        assert_eq!(structured["oldest_available_seq"], json!(1));
+        assert_eq!(structured["newest_available_seq"], json!(3));
+        assert_eq!(structured["fell_behind"], json!(false));
+    }
+
+    #[test]
+    fn plasmite_read_reports_when_cursor_fell_behind_retention() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let mut handler = PlasmiteMcpHandler::new(tmp.path());
+        let pool_ref = PoolRef::name("events");
+        handler
+            .client
+            .create_pool(&pool_ref, PoolOptions::new(DEFAULT_POOL_SIZE_BYTES))
+            .expect("create pool");
+        let mut opened = handler.client.open_pool(&pool_ref).expect("open pool");
+        let padding = "x".repeat(32 * 1024);
+        for idx in 0..40_u64 {
+            opened
+                .append_json(
+                    &json!({"value": idx, "padding": padding.as_str()}),
+                    &[],
+                    AppendOptions::new(1_700_000_000_000_000_000 + idx, Durability::Fast),
+                )
+                .expect("append");
+        }
+        let oldest = opened
+            .info()
+            .expect("info")
+            .bounds
+            .oldest_seq
+            .expect("oldest");
+        assert!(oldest > 1, "test pool must overwrite early messages");
+
+        let read_result = handler
+            .call_tool(ToolCallRequest {
+                name: "plasmite_read".to_string(),
+                arguments: map_args(json!({
+                    "pool": "events",
+                    "after_seq": 0,
+                    "count": 1
+                })),
+            })
+            .expect("read");
+        let structured = read_result.structured_content.expect("structured");
+        assert_eq!(structured["fell_behind"], json!(true));
+        assert_eq!(structured["oldest_available_seq"], json!(oldest));
+        assert_eq!(structured["messages"][0]["seq"], json!(oldest));
+        assert_eq!(structured["next_after_seq"], json!(oldest));
     }
 
     #[test]
@@ -1993,6 +2368,12 @@ mod tests {
             .map(|message| message["seq"].as_u64().expect("seq"))
             .collect::<Vec<_>>();
         assert_eq!(seqs, vec![5, 6, 7]);
+        let structured = read_result.structured_content.expect("structured");
+        assert_eq!(structured["next_after_seq"], json!(7));
+        assert_eq!(structured["last_returned_seq"], json!(7));
+        assert_eq!(structured["oldest_available_seq"], json!(1));
+        assert_eq!(structured["newest_available_seq"], json!(10));
+        assert_eq!(structured["fell_behind"], json!(false));
     }
 
     #[test]
@@ -2097,6 +2478,10 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(seqs, vec![1, 2, 3]);
         assert_eq!(payload["next_after_seq"], json!(3));
+        assert_eq!(payload["last_returned_seq"], json!(3));
+        assert_eq!(payload["oldest_available_seq"], json!(1));
+        assert_eq!(payload["newest_available_seq"], json!(3));
+        assert_eq!(payload["fell_behind"], json!(false));
     }
 
     #[test]

@@ -150,15 +150,25 @@ Protocol and header notes:
 Security and policy posture:
 - `/mcp` uses the same bearer auth and TLS expectations as `/v0/*`.
 - `--access` mode restrictions apply to MCP operations.
+- Tool discovery is access-aware: read-only servers list only read tools,
+  write-only servers list only write tools, and read-write servers list both.
+  Authorization is still enforced when each tool executes.
 - MCP tool definitions publish standard behavior annotations. Pool listing,
   metadata, fetch, read, and bounded wait operations are read-only and
   idempotent; feed and create operations are mutating; pool deletion is
   destructive. Clients may use these hints when deciding whether a tool call
   needs approval.
+- Tool definitions include JSON output schemas for both successful structured
+  results and structured tool errors. Initialization instructions summarize
+  read/wait cursor usage and retry safety.
 - `plasmite_wait` accepts a required `after_seq` cursor and waits up to
   `timeout_ms` (default 10 seconds, maximum 60 seconds). It returns the same
-  ascending message batch and `next_after_seq` cursor as `plasmite_read`, plus
+  ascending message batch and cursor metadata as `plasmite_read`, plus
   `timed_out` so idle agents do not need shell-based sleeps.
+- Read and wait results set `next_after_seq` to the highest sequence examined,
+  even when filters return no messages. `last_returned_seq` identifies the
+  last match. `oldest_available_seq`, `newest_available_seq`, and
+  `fell_behind` expose retention bounds and cursor gaps.
 - MCP waits share the `--max-tail-concurrency` budget with HTTP tail streams.
   Calls beyond that limit return a structured `Busy` tool error.
 - v1 is intentionally minimal: no MCP resource subscriptions and no SSE mode for MCP POST responses.

@@ -482,6 +482,14 @@ MCP tools are request/response, so polling is the v1 pattern:
 - without `after_seq`, it returns the last `count` matching messages (ascending);
 - with `after_seq`, it returns messages where `seq > after_seq` (ascending);
 - if both `since` and `after_seq` are set, both filters apply (intersection).
+- `next_after_seq` is the highest sequence examined, not merely the last
+  matching message, so filtered polling does not repeatedly rescan messages;
+- `last_returned_seq` is the last matching message, or `null` for an empty
+  batch;
+- `oldest_available_seq` and `newest_available_seq` report current retention
+  bounds;
+- `fell_behind: true` means retention overtook the supplied cursor, so the
+  returned batch begins at the oldest message still available.
 
 v1 intentionally does not implement MCP resource subscriptions or POST-SSE
 mode. `plasmite_wait` is a bounded request/response tool, not a live stream.

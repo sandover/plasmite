@@ -757,7 +757,12 @@ impl ServeMcpHandler {
 
 impl McpHandler for ServeMcpHandler {
     fn list_tools(&mut self) -> Result<Vec<McpTool>, McpJsonRpcError> {
-        self.inner.list_tools()
+        let mut tools = self.inner.list_tools()?;
+        tools.retain(|tool| {
+            (!mcp_tool_requires_read(&tool.name) || self.access_mode.allows_read())
+                && (!mcp_tool_requires_write(&tool.name) || self.access_mode.allows_write())
+        });
+        Ok(tools)
     }
 
     fn call_tool(&mut self, request: ToolCallRequest) -> Result<ToolCallResult, McpJsonRpcError> {
@@ -1587,6 +1592,43 @@ mod tests {
     use serde_json::json;
     use std::sync::Arc;
     use tokio::sync::Semaphore;
+
+    #[test]
+    fn mcp_tool_discovery_respects_access_mode() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let client = LocalClient::new().with_pool_dir(temp.path());
+        let semaphore = Arc::new(Semaphore::new(1));
+
+        let tool_names = |access_mode| {
+            let mut handler = ServeMcpHandler::new(client.clone(), access_mode, semaphore.clone());
+            handler
+                .list_tools()
+                .expect("list tools")
+                .into_iter()
+                .map(|tool| tool.name)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            tool_names(AccessMode::ReadOnly),
+            vec![
+                "plasmite_pool_list",
+                "plasmite_pool_info",
+                "plasmite_fetch",
+                "plasmite_read",
+                "plasmite_wait",
+            ]
+        );
+        assert_eq!(
+            tool_names(AccessMode::WriteOnly),
+            vec![
+                "plasmite_pool_create",
+                "plasmite_pool_delete",
+                "plasmite_feed",
+            ]
+        );
+        assert_eq!(tool_names(AccessMode::ReadWrite).len(), 8);
+    }
 
     #[test]
     fn mcp_wait_shares_long_lived_reader_budget() {
