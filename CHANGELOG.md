@@ -6,33 +6,69 @@ All notable changes to this project will be documented in this file.
 
 ## [0.7.0] - 2026-07-27
 
-### Added
-- MCP agents now receive a concise operating model at initialization, including
-  pool discovery, bounded retention, safe create/feed behavior, and guidance
-  that sequence numbers are optional for ordinary use.
-- MCP tool and resource schemas now describe defaults, bounds, filtering,
-  retry safety, cursor semantics, and access-mode capabilities directly.
-- Added a focused CLI operating guide covering pool references, input and
-  output modes, top-level option placement, errors, and special exits.
-- Added mechanical coverage for the complete public command/help inventory and
-  material command constraints.
+Plasmite 0.7.0 makes the system much easier and safer to approach—especially
+for coding agents connecting through MCP with no prior Plasmite knowledge.
 
-### Changed
-- `plasmite_wait` now acts like a live tail when `after_seq` is omitted, with a
-  configurable bounded timeout; cursors remain available for resumable loops.
-- CLI root and command help now provide a compact first workflow, complete
-  navigation, accurate local/remote boundaries, and previously runtime-only
-  constraints without adding another command or documentation framework.
-- MCP listing treats a missing pool directory as an empty installation, and
-  MCP errors provide actionable recovery guidance.
+### Agents can orient themselves
 
-### Fixed
-- Creating an existing pool now returns `AlreadyExists` without truncating the
-  pool or losing retained messages.
-- Invalid pool layouts fail before creating a file.
-- `serve init` rejects parent serve options it would otherwise ignore, `tap`
-  renders its wrapped command as required, and version help matches its
-  terminal-adaptive output.
+An MCP client now receives a concise explanation of pools, messages, bounded
+retention, and the available operations when it connects. Tool discovery
+reflects the server's access mode, and tool schemas describe their defaults,
+limits, filtering behavior, output, and retry safety.
+
+Agents can start by listing pools, understand whether to read or wait, and
+recover from common mistakes without needing the Plasmite CLI or an
+operator-written primer.
+
+### Sequence numbers are optional for normal use
+
+Most users no longer need to think about sequence numbers:
+
+- `plasmite_read` returns recent messages by default.
+- `plasmite_wait` without `after_seq` starts at the live edge, like `tail -f`.
+- Wait time is bounded and configurable.
+- Sequence cursors remain available for advanced replay, resumable polling,
+  and reliable repeated wait loops.
+
+### Pool creation is safer
+
+Creating a pool that already exists now returns `AlreadyExists` without
+truncating the file or losing retained messages. Invalid pool layouts also
+fail before leaving a partial file behind.
+
+MCP errors now explain practical recovery choices: use the existing pool,
+create a missing one when appropriate, or check the available pool names.
+
+### The CLI is easier to navigate
+
+Root help now provides the product mental model, a first local workflow, the
+complete command inventory, output guidance, and durable links to further
+documentation.
+
+Command help now exposes important behavior before failure, including input
+selection, local-versus-remote support, required option relationships, server
+safety limits, and special exit statuses. A focused CLI guide owns the shared
+operating model while the cookbook remains the home for recipes.
+
+### Contract corrections
+
+- MCP rejects unknown arguments instead of silently ignoring them.
+- MCP tag filters clearly use all-tags matching; empty tags are rejected.
+- MCP no longer advertises jq `where` filtering, which is not implemented on
+  that surface.
+- `serve init` rejects parent serve options it would otherwise ignore.
+- `tap` correctly renders its required wrapped command after `--`.
+- Version help now matches its terminal-adaptive output.
+
+### Release and packaging reliability
+
+- Release builds now use one consistent platform-artifact path, with stronger
+  provenance and version-alignment checks before publication.
+- Homebrew parity is verified before a release can complete, and post-release
+  smoke coverage checks the real installation paths across package channels.
+- Release status reporting is simpler while retaining fail-closed publishing,
+  security, and delivery gates.
+- Rust TLS dependencies were updated to clear the current security audit.
 
 ## [0.6.1] - 2026-03-03
 
