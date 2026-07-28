@@ -122,12 +122,48 @@ pub fn tls_fingerprint_from_cert_path(cert_path: &Path) -> Result<String, Error>
 }
 
 #[derive(Clone)]
+struct StorageExecutor {
+    permits: Arc<Semaphore>,
+}
+
+impl StorageExecutor {
+    fn new(capacity: usize) -> Self {
+        Self {
+            permits: Arc::new(Semaphore::new(capacity.max(1))),
+        }
+    }
+
+    async fn run<T, F>(&self, operation: F) -> Result<T, Error>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, Error> + Send + 'static,
+    {
+        let permit = self.permits.clone().try_acquire_owned().map_err(|_| {
+            Error::new(ErrorKind::Busy)
+                .with_message("server storage executor is saturated")
+                .with_hint("Retry after an in-flight storage request completes.")
+        })?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            operation()
+        })
+        .await
+        .map_err(|err| {
+            Error::new(ErrorKind::Internal)
+                .with_message("server storage task failed")
+                .with_source(err)
+        })?
+    }
+}
+
+#[derive(Clone)]
 struct AppState {
     client: LocalClient,
     token: Option<String>,
     access_mode: AccessMode,
     max_tail_timeout_ms: u64,
     tail_semaphore: Arc<Semaphore>,
+    storage_executor: StorageExecutor,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -166,6 +202,9 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
         access_mode: config.access_mode,
         max_tail_timeout_ms: config.max_tail_timeout_ms,
         tail_semaphore: Arc::new(Semaphore::new(config.max_concurrent_tails)),
+        // Reuse the existing server concurrency budget instead of adding another
+        // public tuning flag. Storage operations are shorter lived than tails.
+        storage_executor: StorageExecutor::new(config.max_concurrent_tails),
     });
 
     let mut app = Router::new()
@@ -998,7 +1037,12 @@ async fn list_pools(State(state): State<Arc<AppState>>, headers: HeaderMap) -> R
     if let Err(err) = ensure_read_access(&state) {
         return error_response(err);
     }
-    match state.client.list_pools() {
+    let client = state.client.clone();
+    match state
+        .storage_executor
+        .run(move || client.list_pools())
+        .await
+    {
         Ok(pools) => {
             let mut out = Vec::new();
             for info in pools {
@@ -1565,9 +1609,9 @@ fn is_access_forbidden(err: &Error) -> bool {
 mod tests {
     use super::{
         AccessMode, AppState, Error, ErrorKind, LocalClient, McpHandler, McpToolAccess,
-        PoolOptions, PoolRef, ServeConfig, ServeMcpHandler, ToolCallRequest, build_cors_layer,
-        error_response, mcp_post, mcp_tool_allowed, normalize_cors_origins, normalize_tags,
-        parse_tags_from_query, serve, validate_config,
+        PoolOptions, PoolRef, ServeConfig, ServeMcpHandler, StorageExecutor, ToolCallRequest,
+        build_cors_layer, error_response, mcp_post, mcp_tool_allowed, normalize_cors_origins,
+        normalize_tags, parse_tags_from_query, serve, validate_config,
     };
     use axum::Json;
     use axum::extract::State;
@@ -1575,6 +1619,63 @@ mod tests {
     use serde_json::json;
     use std::sync::Arc;
     use tokio::sync::Semaphore;
+
+    #[tokio::test]
+    async fn storage_executor_maps_success_and_core_errors() {
+        let executor = StorageExecutor::new(1);
+        assert_eq!(
+            executor.run(|| Ok::<_, Error>(42)).await.expect("success"),
+            42
+        );
+        let err = executor
+            .run(|| Err::<(), _>(Error::new(ErrorKind::NotFound)))
+            .await
+            .expect_err("core error");
+        assert_eq!(err.kind(), ErrorKind::NotFound);
+    }
+
+    #[tokio::test]
+    async fn storage_executor_maps_task_failure() {
+        let executor = StorageExecutor::new(1);
+        let err = executor
+            .run(|| -> Result<(), Error> { panic!("injected task failure") })
+            .await
+            .expect_err("join error");
+        assert_eq!(err.kind(), ErrorKind::Internal);
+        assert_eq!(err.message(), Some("server storage task failed"));
+    }
+
+    #[tokio::test]
+    async fn storage_executor_rejects_saturation_without_queueing() {
+        let executor = StorageExecutor::new(1);
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let active = {
+            let executor = executor.clone();
+            tokio::spawn(async move {
+                executor
+                    .run(move || {
+                        started_tx.send(()).expect("signal start");
+                        release_rx.recv().expect("release task");
+                        Ok(())
+                    })
+                    .await
+            })
+        };
+        started_rx.await.expect("task started");
+
+        let err = executor
+            .run(|| Ok::<_, Error>(()))
+            .await
+            .expect_err("saturated");
+        assert_eq!(err.kind(), ErrorKind::Busy);
+
+        release_tx.send(()).expect("release active task");
+        active
+            .await
+            .expect("join active task")
+            .expect("active result");
+    }
 
     #[test]
     fn mcp_tool_discovery_respects_access_mode() {
@@ -1707,6 +1808,7 @@ mod tests {
             access_mode: AccessMode::ReadOnly,
             max_tail_timeout_ms: 30_000,
             tail_semaphore: Arc::new(Semaphore::new(1)),
+            storage_executor: StorageExecutor::new(1),
         });
         let payload = json!({
             "jsonrpc": "2.0",
