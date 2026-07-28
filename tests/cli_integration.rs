@@ -418,6 +418,16 @@ fn version_help_describes_adaptive_output() {
 }
 
 #[test]
+fn version_non_tty_emits_machine_readable_json() {
+    let output = cmd().arg("version").output().expect("version");
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let value = parse_json(std::str::from_utf8(&output.stdout).expect("utf8"));
+    assert_eq!(value["name"], "plasmite");
+    assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
+}
+
+#[test]
 fn tap_remote_url_rejected_as_local_only() {
     let output = cmd()
         .args(["tap", "http://127.0.0.1:65535/demo", "--", "echo", "hi"])

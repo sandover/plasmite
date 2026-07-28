@@ -24,6 +24,7 @@ use std::error::Error as StdError;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use url::Url;
 
+mod cli;
 mod color_json;
 mod command_dispatch;
 mod ingest;
@@ -35,6 +36,8 @@ mod pool_paths;
 mod serve;
 mod serve_init;
 
+use cli::output::emit_json;
+use cli::{CliContext, CommandResult as RunOutcome};
 use color_json::colorize_json;
 use ingest::{ErrorPolicy, IngestConfig, IngestFailure, IngestMode, IngestOutcome, ingest};
 use interface_wire::{ErrorKindWire, MessageWire, error_policy};
@@ -49,25 +52,10 @@ use plasmite::notice::{Notice, notice_json};
 use pool_info_json::{bounds_json, pool_info_json};
 use pool_paths::{PoolNameResolveError, default_pool_dir, resolve_named_pool_path};
 
-#[derive(Copy, Clone, Debug)]
-struct RunOutcome {
-    exit_code: i32,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PoolTarget {
     LocalPath(PathBuf),
     Remote { base_url: String, pool: String },
-}
-
-impl RunOutcome {
-    fn ok() -> Self {
-        Self { exit_code: 0 }
-    }
-
-    fn with_code(exit_code: i32) -> Self {
-        Self { exit_code }
-    }
 }
 
 fn main() {
@@ -122,7 +110,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
     let pool_dir = cli.dir.unwrap_or_else(default_pool_dir);
     let color_mode = cli.color;
 
-    let result = command_dispatch::dispatch_command(cli.command, pool_dir, color_mode);
+    let result = cli::dispatch(cli.command, CliContext::new(pool_dir, color_mode));
 
     result
         .map_err(add_corrupt_hint)
@@ -2980,20 +2968,6 @@ fn emit_feed_receipt(value: Value, color_mode: ColorMode) {
     }
 }
 
-fn emit_version_output(color_mode: ColorMode) {
-    if io::stdout().is_terminal() {
-        println!("plasmite {}", env!("CARGO_PKG_VERSION"));
-    } else {
-        emit_json(
-            json!({
-                "name": "plasmite",
-                "version": env!("CARGO_PKG_VERSION"),
-            }),
-            color_mode,
-        );
-    }
-}
-
 fn short_display_path(path: &Path, base_dir: Option<&Path>) -> String {
     if let Some(base) = base_dir {
         if let Ok(relative) = path.strip_prefix(base) {
@@ -3070,24 +3044,6 @@ fn format_table_line(cells: &[String], widths: &[usize]) -> String {
 
 fn human_age(age_ms: Option<u64>) -> String {
     format_relative_time(age_ms)
-}
-
-fn emit_json(value: serde_json::Value, color_mode: ColorMode) {
-    let is_tty = io::stdout().is_terminal();
-    let use_color = color_mode.use_color(is_tty);
-    let pretty = is_tty || use_color;
-    let json = if pretty {
-        if use_color {
-            colorize_json(&value, true)
-        } else {
-            serde_json::to_string_pretty(&value)
-                .unwrap_or_else(|_| "{\"error\":\"json encode failed\"}".to_string())
-        }
-    } else {
-        serde_json::to_string(&value)
-            .unwrap_or_else(|_| "{\"error\":\"json encode failed\"}".to_string())
-    };
-    println!("{json}");
 }
 
 #[derive(Copy, Clone, Debug)]

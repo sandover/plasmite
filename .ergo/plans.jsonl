@@ -451,3 +451,8 @@
 {"type":"message","ts":"2026-07-28T23:16:25.366492Z","data":{"task_id":"I3QGTT","kind":"done","text":"Replaced duplicate port-probing fixtures with one shared child-process harness using OS-assigned ports and atomic readiness publication; removed global locks, retries, and duplicated readiness code.\n\nBoth full integration suites pass; 20 consecutive remote/TLS/duplex/follow samples passed; server epic gate passed cargo fmt, strict clippy, and just check.","ts":"2026-07-28T23:16:25.366492Z"}}
 {"type":"unclaim","ts":"2026-07-28T23:16:25.366492Z","data":{"id":"I3QGTT","ts":"2026-07-28T23:16:25.366492Z"}}
 {"type":"state","ts":"2026-07-28T23:16:25.366492Z","data":{"id":"I3QGTT","state":"done","ts":"2026-07-28T23:16:25.366492Z"}}
+{"type":"claim","ts":"2026-07-28T23:16:36.658975Z","data":{"id":"WI56TS","agent_id":"codex@mac","ts":"2026-07-28T23:16:36.658975Z"}}
+{"type":"state","ts":"2026-07-28T23:16:36.658975Z","data":{"id":"WI56TS","state":"doing","ts":"2026-07-28T23:16:36.658975Z"}}
+{"type":"message","ts":"2026-07-28T23:19:49.435856Z","data":{"task_id":"WI56TS","kind":"done","text":"Added ordinary CLI modules for context, command results, output, utility handlers, and explicit routing; migrated version output as the representative command while preserving the legacy path for unmigrated families.\n\nBinary unit tests, focused version integration tests, and cargo check pass; non-TTY version JSON is now explicitly covered.","ts":"2026-07-28T23:19:49.435856Z"}}
+{"type":"unclaim","ts":"2026-07-28T23:19:49.435856Z","data":{"id":"WI56TS","ts":"2026-07-28T23:19:49.435856Z"}}
+{"type":"state","ts":"2026-07-28T23:19:49.435856Z","data":{"id":"WI56TS","state":"done","ts":"2026-07-28T23:19:49.435856Z"}}

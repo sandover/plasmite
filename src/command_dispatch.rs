@@ -18,10 +18,6 @@ pub(super) fn dispatch_command(
             clap_complete::aot::generate(shell, &mut cmd, "plasmite", &mut io::stdout());
             Ok(RunOutcome::ok())
         }
-        Command::Version => {
-            emit_version_output(color_mode);
-            Ok(RunOutcome::ok())
-        }
         Command::Doctor { pool, all, json } => {
             if all && pool.is_some() {
                 return Err(Error::new(ErrorKind::Usage)
@@ -1319,6 +1315,7 @@ pub(super) fn dispatch_command(
                 }
             }
         }
+        Command::Version => unreachable!("version is routed by cli::dispatch"),
     }
 }
 
