@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-28
+
+### Improved
+
+- MCP initialization now tells agents that the visible tool list reflects the
+  server's effective access mode.
+- MCP guidance now distinguishes exact sequence lookup with `plasmite_fetch`
+  from recent, time-windowed, and resumable reads with `plasmite_read`.
+- MCP output schemas enumerate every stable `error_kind`, allowing clients to
+  reason about failures without prior Plasmite knowledge.
+
+### Release maintenance
+
+- npm publication now uses trusted OpenID Connect publishing instead of an
+  expiring repository token.
+- PyPI delivery checks now use the Python 3.11 wheel target explicitly.
+
 ## [0.7.0] - 2026-07-27
 
 Plasmite 0.7.0 makes the system much easier and safer to approach—especially
