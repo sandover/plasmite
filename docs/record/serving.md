@@ -161,10 +161,12 @@ Security and policy posture:
 - Tool definitions include JSON output schemas for both successful structured
   results and structured tool errors. Initialization instructions summarize
   read/wait cursor usage and retry safety.
-- `plasmite_wait` accepts a required `after_seq` cursor and waits up to
-  `timeout_ms` (default 10 seconds, maximum 60 seconds). It returns the same
-  ascending message batch and cursor metadata as `plasmite_read`, plus
-  `timed_out` so idle agents do not need shell-based sleeps.
+- `plasmite_wait` waits up to `timeout_ms` (default 10 seconds, maximum 60
+  seconds). Without `after_seq`, it snapshots the pool's current end and waits
+  only for later messages, like a live tail. With `after_seq`, it first catches
+  up from that cursor. It returns the same ascending message batch and cursor
+  metadata as `plasmite_read`, plus `timed_out` so idle agents do not need
+  shell-based sleeps.
 - Read and wait results set `next_after_seq` to the highest sequence examined,
   even when filters return no messages. `last_returned_seq` identifies the
   last match. `oldest_available_seq`, `newest_available_seq`, and

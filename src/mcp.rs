@@ -29,6 +29,7 @@ const MAX_WAIT_TIMEOUT_MS: u64 = 60_000;
 const WAIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const MCP_INSTRUCTIONS: &str = concat!(
     "Use plasmite_read for immediate inspection and plasmite_wait for a bounded wait. ",
+    "Call plasmite_wait without after_seq to wait for messages appended from now on. ",
     "Resume with next_after_seq, which is the highest sequence conclusively examined even when ",
     "filters return no messages. Check fell_behind before assuming the stream is complete. ",
     "Tool failures set isError and include a structured error_kind. plasmite_feed is ",
@@ -824,7 +825,7 @@ impl PlasmiteMcpHandler {
             Ok(name) => name,
             Err(result) => return invalid_argument_result("plasmite_wait", "pool", result),
         };
-        let after_seq = match required_u64_arg(args, "after_seq") {
+        let after_seq = match optional_u64_arg(args, "after_seq") {
             Ok(value) => value,
             Err(result) => return invalid_argument_result("plasmite_wait", "after_seq", result),
         };
@@ -863,9 +864,15 @@ impl PlasmiteMcpHandler {
             Ok(pool) => pool,
             Err(err) => return api_error_tool_result("plasmite_wait", err),
         };
+        let mut cursor = match after_seq {
+            Some(cursor) => cursor,
+            None => match opened.info() {
+                Ok(info) => info.bounds.newest_seq.unwrap_or(0),
+                Err(err) => return api_error_tool_result("plasmite_wait", err),
+            },
+        };
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
         let mut notify = crate::api::notify::open_for_path(opened.path());
-        let mut cursor = after_seq;
         let mut fell_behind = false;
 
         loop {
@@ -1035,17 +1042,17 @@ impl McpHandler for PlasmiteMcpHandler {
             },
             McpTool {
                 name: "plasmite_wait".to_string(),
-                description: "Wait up to a bounded timeout for messages after a known sequence number. Returns immediately when matching messages are available, or returns `timed_out: true` with an empty batch.".to_string(),
+                description: "Wait up to a bounded timeout for new messages. Without `after_seq`, start at the pool's current end like a live tail. With `after_seq`, first return messages after that cursor. Returns `timed_out: true` with an empty batch when no matching messages arrive.".to_string(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
                         "pool": {"type":"string","description":"Pool name"},
-                        "after_seq": {"type":"integer","description":"Wait for messages with seq greater than this cursor"},
+                        "after_seq": {"type":"integer","description":"Optional resume cursor; omit to wait only for messages appended from now on"},
                         "count": {"type":"integer","description":"Max messages to return (default: 20, max: 200)"},
                         "timeout_ms": {"type":"integer","description":"Bounded wait in milliseconds (default: 10000, max: 60000)"},
                         "tags": {"type":"array","items":{"type":"string"},"description":"Filter by tags"}
                     },
-                    "required": ["pool", "after_seq"]
+                    "required": ["pool"]
                 }),
                 output_schema: read_output_schema(true),
                 annotations: ToolAnnotations::read_only(),
@@ -2163,10 +2170,35 @@ mod tests {
             .iter()
             .find(|tool| tool.name == "plasmite_wait")
             .expect("wait tool");
+        assert_eq!(wait.input_schema["required"], json!(["pool"]));
         assert_eq!(
             wait.output_schema["oneOf"][0]["properties"]["timed_out"]["type"],
             json!("boolean")
         );
+    }
+
+    #[test]
+    fn plasmite_wait_without_cursor_starts_at_live_tail() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let mut handler = PlasmiteMcpHandler::new(tmp.path());
+        seed_pool_with_messages(&mut handler, "events", 3, 1_700_000_000_000_000_000);
+
+        let wait_result = handler
+            .call_tool(ToolCallRequest {
+                name: "plasmite_wait".to_string(),
+                arguments: map_args(json!({
+                    "pool": "events",
+                    "timeout_ms": 10
+                })),
+            })
+            .expect("wait");
+        assert!(!wait_result.is_error);
+        let structured = wait_result.structured_content.expect("structured");
+        assert_eq!(structured["timed_out"], json!(true));
+        assert_eq!(structured["messages"], json!([]));
+        assert_eq!(structured["next_after_seq"], json!(3));
+        assert_eq!(structured["last_returned_seq"], Value::Null);
+        assert_eq!(structured["fell_behind"], json!(false));
     }
 
     #[test]

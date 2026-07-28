@@ -466,9 +466,15 @@ Remote MCP uses the same auth/TLS posture as `plasmite serve`:
 - if server auth is enabled, clients send the same bearer token;
 - if TLS is enabled, clients trust the same certificate/CA material.
 
-### Polling pattern (`plasmite_read` + `after_seq`)
+### Waiting and polling
 
 MCP tools are request/response, so polling is the v1 pattern:
+
+For tail-like use, call `plasmite_wait` with a pool and no `after_seq`. It
+snapshots the pool's current end and waits only for messages appended
+afterward.
+
+For resumable polling:
 
 1. Call `plasmite_read` with `pool` and optional filters.
 2. Save `next_after_seq` from the result.
@@ -476,6 +482,9 @@ MCP tools are request/response, so polling is the v1 pattern:
    or call `plasmite_read` again for an immediate non-blocking check.
 4. Save the returned cursor and repeat. A timed-out wait returns an empty
    message batch with `timed_out: true`.
+
+Supplying `after_seq` lets a reader catch up on messages appended while it was
+offline. Omitting it intentionally starts at the live edge.
 
 `plasmite_read` details in v1:
 - default `count` is 20, maximum is 200;
