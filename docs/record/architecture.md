@@ -42,6 +42,22 @@ Interface layer  →  Core domain layer  →  Platform layer
 
 **Cross-layer rule:** Interface layers must not fork storage correctness logic into per-surface implementations. A single shared validator used by diagnostics is acceptable; embedding bespoke ring/frame/seq rules inside CLI handlers, HTTP handlers, and ABI wrappers independently is a violation.
 
+## Interface representation and error ownership
+
+Stable machine data has one internal representation in `src/interface_wire.rs`.
+Message envelopes, pool metadata, retained bounds, metrics, error-kind names,
+and default error mappings are defined there. The library and binary compile
+that same source privately, so sharing these contracts does not add supported
+public Rust API.
+
+Core `Error` values own failure facts: kind, explicit message, hint, path,
+sequence number, offset, and source chain. Interface adapters own presentation.
+The CLI chooses text or JSON and an exit code, HTTP chooses a status and response
+envelope, and MCP chooses tool or JSON-RPC error content. Explicit messages and
+hints supplied by a command remain authoritative; shared policy supplies only
+the stable defaults. Permission failures may map to HTTP 401 or 403 according to
+request authorization context without changing their shared `Permission` kind.
+
 ## Data model and on-disk layout
 
 A pool file is:

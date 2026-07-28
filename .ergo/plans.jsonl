@@ -411,3 +411,8 @@
 {"type":"message","ts":"2026-07-28T22:51:33.352253Z","data":{"task_id":"BUHJNN","kind":"done","text":"Defined an exhaustive shared interface error policy for CLI fallback messages and exit codes, HTTP status defaults, and MCP error-kind names. Preserved explicit messages, hints, status overrides, and transport-specific envelopes. Verified with cargo check and focused table-driven/interface tests.","ts":"2026-07-28T22:51:33.352253Z"}}
 {"type":"unclaim","ts":"2026-07-28T22:51:33.352253Z","data":{"id":"BUHJNN","ts":"2026-07-28T22:51:33.352253Z"}}
 {"type":"state","ts":"2026-07-28T22:51:33.352253Z","data":{"id":"BUHJNN","state":"done","ts":"2026-07-28T22:51:33.352253Z"}}
+{"type":"claim","ts":"2026-07-28T22:51:53.336268Z","data":{"id":"XEU4A4","agent_id":"codex@mac","ts":"2026-07-28T22:51:53.336268Z"}}
+{"type":"state","ts":"2026-07-28T22:51:53.336268Z","data":{"id":"XEU4A4","state":"doing","ts":"2026-07-28T22:51:53.336268Z"}}
+{"type":"message","ts":"2026-07-28T22:53:58.837715Z","data":{"task_id":"XEU4A4","kind":"done","text":"Completed shared error presentation across CLI, HTTP, and MCP; added exhaustive kind/status/exit parity tests and documented representation and presentation ownership. The integrated shared-interface epic passed cargo fmt, strict Clippy, and just check.","ts":"2026-07-28T22:53:58.837715Z"}}
+{"type":"unclaim","ts":"2026-07-28T22:53:58.837715Z","data":{"id":"XEU4A4","ts":"2026-07-28T22:53:58.837715Z"}}
+{"type":"state","ts":"2026-07-28T22:53:58.837715Z","data":{"id":"XEU4A4","state":"done","ts":"2026-07-28T22:53:58.837715Z"}}

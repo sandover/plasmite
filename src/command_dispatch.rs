@@ -5,6 +5,7 @@
 //! Invariants: Helpers in `main.rs` remain the source of command business logic.
 
 use super::*;
+use plasmite::api::to_exit_code;
 
 pub(super) fn dispatch_command(
     command: Command,

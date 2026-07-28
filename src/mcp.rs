@@ -1762,10 +1762,11 @@ fn with_missing_pool_hint(err: Error, pool: &str, allow_create: bool) -> Error {
 }
 
 fn api_error_tool_result(tool: &str, err: Error) -> ToolCallResult {
+    let policy = error_policy(interface_error_kind(err.kind()));
     let mut text = err
         .message()
         .map(ToString::to_string)
-        .unwrap_or_else(|| format!("{:?}", err.kind()));
+        .unwrap_or_else(|| policy.mcp_error_kind.to_string());
     if let Some(hint) = err.hint() {
         text = format!("{text}. {hint}");
     }
@@ -1796,11 +1797,12 @@ fn api_error_tool_result(tool: &str, err: Error) -> ToolCallResult {
 }
 
 fn api_error_jsonrpc(err: Error) -> JsonRpcError {
+    let policy = error_policy(interface_error_kind(err.kind()));
     let mut rpc_error = JsonRpcError::new(
         -32000,
         err.message()
             .map(ToString::to_string)
-            .unwrap_or_else(|| format!("{:?}", err.kind())),
+            .unwrap_or_else(|| policy.mcp_error_kind.to_string()),
     );
     let mut data = Map::new();
     data.insert(
@@ -2138,6 +2140,29 @@ mod tests {
         let result = response.result.expect("result");
         assert_eq!(result["isError"], json!(true));
         assert_eq!(result["content"][0]["text"], json!("pool not found"));
+    }
+
+    #[test]
+    fn mcp_error_presenter_preserves_every_stable_error_kind() {
+        let cases = [
+            (ErrorKind::Internal, "Internal"),
+            (ErrorKind::Usage, "Usage"),
+            (ErrorKind::NotFound, "NotFound"),
+            (ErrorKind::AlreadyExists, "AlreadyExists"),
+            (ErrorKind::Busy, "Busy"),
+            (ErrorKind::Permission, "Permission"),
+            (ErrorKind::Corrupt, "Corrupt"),
+            (ErrorKind::Io, "Io"),
+        ];
+
+        for (kind, name) in cases {
+            let result = api_error_tool_result("plasmite_test", Error::new(kind));
+            assert!(result.is_error);
+            assert_eq!(
+                result.structured_content.expect("structured error")["error_kind"],
+                json!(name)
+            );
+        }
     }
 
     fn map_args(value: Value) -> Map<String, Value> {

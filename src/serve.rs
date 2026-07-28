@@ -1546,7 +1546,9 @@ fn error_response_with_status(err: Error, status: StatusCode) -> Response {
 
 fn error_body(err: &Error) -> ErrorBody {
     ErrorBody {
-        kind: format!("{:?}", err.kind()),
+        kind: error_policy(interface_error_kind(err.kind()))
+            .mcp_error_kind
+            .to_string(),
         message: err.message().unwrap_or("error").to_string(),
         path: err.path().map(|path| path.to_string_lossy().to_string()),
         seq: err.seq(),
@@ -1562,10 +1564,10 @@ fn is_access_forbidden(err: &Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccessMode, AppState, ErrorKind, LocalClient, McpHandler, McpToolAccess, PoolOptions,
-        PoolRef, ServeConfig, ServeMcpHandler, ToolCallRequest, build_cors_layer, mcp_post,
-        mcp_tool_allowed, normalize_cors_origins, normalize_tags, parse_tags_from_query, serve,
-        validate_config,
+        AccessMode, AppState, Error, ErrorKind, LocalClient, McpHandler, McpToolAccess,
+        PoolOptions, PoolRef, ServeConfig, ServeMcpHandler, ToolCallRequest, build_cors_layer,
+        error_response, mcp_post, mcp_tool_allowed, normalize_cors_origins, normalize_tags,
+        parse_tags_from_query, serve, validate_config,
     };
     use axum::Json;
     use axum::extract::State;
@@ -1609,6 +1611,32 @@ mod tests {
             ]
         );
         assert_eq!(tool_names(AccessMode::ReadWrite).len(), 8);
+    }
+
+    #[test]
+    fn http_error_presenter_preserves_status_policy_for_every_kind() {
+        let cases = [
+            (ErrorKind::Internal, 500),
+            (ErrorKind::Usage, 400),
+            (ErrorKind::NotFound, 404),
+            (ErrorKind::AlreadyExists, 409),
+            (ErrorKind::Busy, 423),
+            (ErrorKind::Permission, 401),
+            (ErrorKind::Corrupt, 500),
+            (ErrorKind::Io, 500),
+        ];
+
+        for (kind, status) in cases {
+            assert_eq!(error_response(Error::new(kind)).status().as_u16(), status);
+        }
+        assert_eq!(
+            error_response(
+                Error::new(ErrorKind::Permission).with_message("forbidden: read access required")
+            )
+            .status()
+            .as_u16(),
+            403
+        );
     }
 
     #[test]

@@ -3198,7 +3198,10 @@ fn error_causes(err: &Error) -> Vec<String> {
 
 fn error_json(err: &Error) -> Value {
     let mut inner = Map::new();
-    inner.insert("kind".to_string(), json!(format!("{:?}", err.kind())));
+    inner.insert(
+        "kind".to_string(),
+        json!(error_policy(interface_error_kind(err.kind())).mcp_error_kind),
+    );
     inner.insert("message".to_string(), json!(error_message(err)));
     if let Some(hint) = err.hint() {
         inner.insert("hint".to_string(), json!(hint));
@@ -4279,10 +4282,10 @@ fn follow_replay(pool: &Pool, cfg: &FollowConfig) -> Result<RunOutcome, Error> {
 mod tests {
     use super::{
         Cli, Error, ErrorKind, PoolTarget, RetryConfig, build_serve_startup_lines,
-        duplex_requires_me_when_tty, error_text, format_bytes, format_relative_time,
-        format_seq_range, format_timestamp_human, matches_required_tags, parse_duplex_tty_line,
-        parse_duration, parse_size, read_token_file, render_table, resolve_pool_target,
-        retry_with_config, short_display_path,
+        duplex_requires_me_when_tty, error_json, error_policy, error_text, format_bytes,
+        format_relative_time, format_seq_range, format_timestamp_human, interface_error_kind,
+        matches_required_tags, parse_duplex_tty_line, parse_duration, parse_size, read_token_file,
+        render_table, resolve_pool_target, retry_with_config, short_display_path,
     };
     use clap::CommandFactory;
     use serde_json::json;
@@ -4425,6 +4428,29 @@ mod tests {
         .collect::<Vec<_>>();
         inventory.sort_by(|left, right| left.0.cmp(&right.0));
         assert_eq!(inventory, expected);
+    }
+
+    #[test]
+    fn cli_error_presenter_preserves_all_stable_kinds_and_exit_codes() {
+        let cases = [
+            (ErrorKind::Internal, "Internal", 1),
+            (ErrorKind::Usage, "Usage", 2),
+            (ErrorKind::NotFound, "NotFound", 3),
+            (ErrorKind::AlreadyExists, "AlreadyExists", 4),
+            (ErrorKind::Busy, "Busy", 5),
+            (ErrorKind::Permission, "Permission", 6),
+            (ErrorKind::Corrupt, "Corrupt", 7),
+            (ErrorKind::Io, "Io", 8),
+        ];
+
+        for (kind, name, exit_code) in cases {
+            let value = error_json(&Error::new(kind));
+            assert_eq!(value["error"]["kind"], json!(name));
+            assert_eq!(
+                error_policy(interface_error_kind(kind)).cli_exit_code,
+                exit_code
+            );
+        }
     }
 
     fn collect_cli_inventory(
