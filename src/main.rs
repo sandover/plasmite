@@ -2,7 +2,7 @@
 //! Role: Binary crate root; parses args, runs commands, emits JSON on stdout.
 //! Invariants: Commands emit stable stdout formats (human or JSON by command/flags).
 //! Invariants: Non-interactive errors are emitted as JSON on stderr.
-//! Invariants: Process exit code is derived from `api::to_exit_code`.
+//! Invariants: Process exit code is derived from the shared interface error policy.
 //! Invariants: All pool mutations go through `api::Pool` (locks + mmap safety).
 #![allow(clippy::result_large_err)]
 use std::ffi::OsString;
@@ -37,14 +37,13 @@ mod serve_init;
 
 use color_json::colorize_json;
 use ingest::{ErrorPolicy, IngestConfig, IngestFailure, IngestMode, IngestOutcome, ingest};
-use interface_wire::MessageWire;
+use interface_wire::{ErrorKindWire, MessageWire, error_policy};
 use jq_filter::{JqFilter, compile_filters, matches_all};
 use plasmite::api::{
     AppendOptions, Cursor, CursorResult, Durability, Error, ErrorKind, FrameRef, Lite3DocRef,
     LocalClient, Pool, PoolOptions, PoolRef, RemoteClient, RemotePool, TailOptions,
     ValidationIssue, ValidationReport, ValidationStatus, lite3,
     notify::{self, NotifyWait},
-    to_exit_code,
 };
 use plasmite::notice::{Notice, notice_json};
 use pool_info_json::{bounds_json, pool_info_json};
@@ -76,7 +75,7 @@ fn main() {
         Ok(outcome) => outcome.exit_code,
         Err((err, color_mode)) => {
             emit_error(&err, color_mode);
-            to_exit_code(err.kind())
+            error_policy(interface_error_kind(err.kind())).cli_exit_code
         }
     };
     std::process::exit(exit_code);
@@ -3169,15 +3168,21 @@ fn error_message(err: &Error) -> String {
     if let Some(message) = err.message() {
         return message.to_string();
     }
-    match err.kind() {
-        ErrorKind::Internal => "internal error".to_string(),
-        ErrorKind::Usage => "usage error".to_string(),
-        ErrorKind::NotFound => "not found".to_string(),
-        ErrorKind::AlreadyExists => "already exists".to_string(),
-        ErrorKind::Busy => "resource is busy".to_string(),
-        ErrorKind::Permission => "permission denied".to_string(),
-        ErrorKind::Corrupt => "corrupt data".to_string(),
-        ErrorKind::Io => "i/o error".to_string(),
+    error_policy(interface_error_kind(err.kind()))
+        .cli_message
+        .to_string()
+}
+
+fn interface_error_kind(kind: ErrorKind) -> ErrorKindWire {
+    match kind {
+        ErrorKind::Internal => ErrorKindWire::Internal,
+        ErrorKind::Usage => ErrorKindWire::Usage,
+        ErrorKind::NotFound => ErrorKindWire::NotFound,
+        ErrorKind::AlreadyExists => ErrorKindWire::AlreadyExists,
+        ErrorKind::Busy => ErrorKindWire::Busy,
+        ErrorKind::Permission => ErrorKindWire::Permission,
+        ErrorKind::Corrupt => ErrorKindWire::Corrupt,
+        ErrorKind::Io => ErrorKindWire::Io,
     }
 }
 

@@ -14,7 +14,8 @@ use crate::api::{
     Durability, Error, ErrorKind, LocalClient, PoolApiExt, PoolInfo, PoolOptions, PoolRef,
 };
 use crate::interface_wire::{
-    BoundsWire, MessageWire, PoolAgeWire, PoolInfoWire, PoolMetricsWire, PoolUtilizationWire,
+    BoundsWire, ErrorKindWire, MessageWire, PoolAgeWire, PoolInfoWire, PoolMetricsWire,
+    PoolUtilizationWire, error_policy,
 };
 
 const JSON_RPC_VERSION: &str = "2.0";
@@ -1771,7 +1772,10 @@ fn api_error_tool_result(tool: &str, err: Error) -> ToolCallResult {
 
     let mut structured = Map::new();
     structured.insert("tool".to_string(), json!(tool));
-    structured.insert("error_kind".to_string(), json!(format!("{:?}", err.kind())));
+    structured.insert(
+        "error_kind".to_string(),
+        json!(error_policy(interface_error_kind(err.kind())).mcp_error_kind),
+    );
     if let Some(message) = err.message() {
         structured.insert("message".to_string(), json!(message));
     }
@@ -1799,7 +1803,10 @@ fn api_error_jsonrpc(err: Error) -> JsonRpcError {
             .unwrap_or_else(|| format!("{:?}", err.kind())),
     );
     let mut data = Map::new();
-    data.insert("error_kind".to_string(), json!(format!("{:?}", err.kind())));
+    data.insert(
+        "error_kind".to_string(),
+        json!(error_policy(interface_error_kind(err.kind())).mcp_error_kind),
+    );
     if let Some(hint) = err.hint() {
         data.insert("hint".to_string(), json!(hint));
     }
@@ -1816,6 +1823,19 @@ fn api_error_jsonrpc(err: Error) -> JsonRpcError {
         rpc_error.data = Some(Value::Object(data));
     }
     rpc_error
+}
+
+fn interface_error_kind(kind: ErrorKind) -> ErrorKindWire {
+    match kind {
+        ErrorKind::Internal => ErrorKindWire::Internal,
+        ErrorKind::Usage => ErrorKindWire::Usage,
+        ErrorKind::NotFound => ErrorKindWire::NotFound,
+        ErrorKind::AlreadyExists => ErrorKindWire::AlreadyExists,
+        ErrorKind::Busy => ErrorKindWire::Busy,
+        ErrorKind::Permission => ErrorKindWire::Permission,
+        ErrorKind::Corrupt => ErrorKindWire::Corrupt,
+        ErrorKind::Io => ErrorKindWire::Io,
+    }
 }
 
 fn pool_name_from_resource_uri(uri: &str) -> Result<String, String> {

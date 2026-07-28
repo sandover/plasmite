@@ -93,6 +93,67 @@ pub(crate) enum ErrorKindWire {
     Io,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ErrorPolicy {
+    pub(crate) cli_message: &'static str,
+    pub(crate) cli_exit_code: i32,
+    pub(crate) http_status: u16,
+    pub(crate) mcp_error_kind: &'static str,
+}
+
+pub(crate) const fn error_policy(kind: ErrorKindWire) -> ErrorPolicy {
+    match kind {
+        ErrorKindWire::Internal => ErrorPolicy {
+            cli_message: "internal error",
+            cli_exit_code: 1,
+            http_status: 500,
+            mcp_error_kind: "Internal",
+        },
+        ErrorKindWire::Usage => ErrorPolicy {
+            cli_message: "usage error",
+            cli_exit_code: 2,
+            http_status: 400,
+            mcp_error_kind: "Usage",
+        },
+        ErrorKindWire::NotFound => ErrorPolicy {
+            cli_message: "not found",
+            cli_exit_code: 3,
+            http_status: 404,
+            mcp_error_kind: "NotFound",
+        },
+        ErrorKindWire::AlreadyExists => ErrorPolicy {
+            cli_message: "already exists",
+            cli_exit_code: 4,
+            http_status: 409,
+            mcp_error_kind: "AlreadyExists",
+        },
+        ErrorKindWire::Busy => ErrorPolicy {
+            cli_message: "resource is busy",
+            cli_exit_code: 5,
+            http_status: 423,
+            mcp_error_kind: "Busy",
+        },
+        ErrorKindWire::Permission => ErrorPolicy {
+            cli_message: "permission denied",
+            cli_exit_code: 6,
+            http_status: 401,
+            mcp_error_kind: "Permission",
+        },
+        ErrorKindWire::Corrupt => ErrorPolicy {
+            cli_message: "corrupt data",
+            cli_exit_code: 7,
+            http_status: 500,
+            mcp_error_kind: "Corrupt",
+        },
+        ErrorKindWire::Io => ErrorPolicy {
+            cli_message: "i/o error",
+            cli_exit_code: 8,
+            http_status: 500,
+            mcp_error_kind: "Io",
+        },
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ErrorContextWire {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -113,7 +174,7 @@ pub(crate) struct ErrorContextWire {
 mod tests {
     use super::{
         BoundsWire, ErrorContextWire, ErrorKindWire, MessageMetaWire, MessageWire, PoolAgeWire,
-        PoolInfoWire, PoolMetricsWire, PoolUtilizationWire,
+        PoolInfoWire, PoolMetricsWire, PoolUtilizationWire, error_policy,
     };
     use serde_json::json;
 
@@ -231,6 +292,46 @@ mod tests {
                 serde_json::to_value(kind).expect("serialize error kind"),
                 json!(name)
             );
+        }
+    }
+
+    #[test]
+    fn every_error_kind_has_stable_interface_defaults() {
+        let cases = [
+            (
+                ErrorKindWire::Internal,
+                "internal error",
+                1,
+                500,
+                "Internal",
+            ),
+            (ErrorKindWire::Usage, "usage error", 2, 400, "Usage"),
+            (ErrorKindWire::NotFound, "not found", 3, 404, "NotFound"),
+            (
+                ErrorKindWire::AlreadyExists,
+                "already exists",
+                4,
+                409,
+                "AlreadyExists",
+            ),
+            (ErrorKindWire::Busy, "resource is busy", 5, 423, "Busy"),
+            (
+                ErrorKindWire::Permission,
+                "permission denied",
+                6,
+                401,
+                "Permission",
+            ),
+            (ErrorKindWire::Corrupt, "corrupt data", 7, 500, "Corrupt"),
+            (ErrorKindWire::Io, "i/o error", 8, 500, "Io"),
+        ];
+
+        for (kind, message, exit_code, http_status, mcp_error_kind) in cases {
+            let policy = error_policy(kind);
+            assert_eq!(policy.cli_message, message);
+            assert_eq!(policy.cli_exit_code, exit_code);
+            assert_eq!(policy.http_status, http_status);
+            assert_eq!(policy.mcp_error_kind, mcp_error_kind);
         }
     }
 

@@ -39,7 +39,8 @@ use tower_service::Service;
 use tracing_subscriber::EnvFilter;
 use url::Url;
 
-use crate::interface_wire::MessageWire;
+use crate::interface_error_kind;
+use crate::interface_wire::{MessageWire, error_policy};
 use crate::pool_info_json::pool_info_json;
 use plasmite::api::{
     Durability, Error, ErrorKind, LocalClient, PoolApiExt, PoolOptions, PoolRef, TailOptions, lite3,
@@ -1523,21 +1524,11 @@ fn durability_from_str(value: Option<&str>) -> Durability {
 }
 
 fn error_response(err: Error) -> Response {
-    let status = match err.kind() {
-        ErrorKind::Usage => StatusCode::BAD_REQUEST,
-        ErrorKind::NotFound => StatusCode::NOT_FOUND,
-        ErrorKind::AlreadyExists => StatusCode::CONFLICT,
-        ErrorKind::Busy => StatusCode::LOCKED,
-        ErrorKind::Permission => {
-            if is_access_forbidden(&err) {
-                StatusCode::FORBIDDEN
-            } else {
-                StatusCode::UNAUTHORIZED
-            }
-        }
-        ErrorKind::Corrupt | ErrorKind::Io | ErrorKind::Internal => {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
+    let status = if err.kind() == ErrorKind::Permission && is_access_forbidden(&err) {
+        StatusCode::FORBIDDEN
+    } else {
+        StatusCode::from_u16(error_policy(interface_error_kind(err.kind())).http_status)
+            .expect("error policy contains valid HTTP status")
     };
     error_response_with_status(err, status)
 }
