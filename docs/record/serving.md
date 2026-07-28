@@ -199,6 +199,18 @@ Configurable via flags:
 MCP waits have their own fixed maximum of 60 seconds; they share the concurrency
 budget but not `--max-tail-timeout-ms`.
 
+The server also uses `--max-tail-concurrency` as the admission limit for
+ordinary pool operations such as create, list, append, and get. These
+synchronous filesystem and memory-map operations run outside Tokio's async
+runtime workers. When all admitted operations are active, another ordinary
+storage request fails immediately with the stable `Busy` response (HTTP 423)
+and can be retried after an in-flight operation completes. The server does not
+build an unbounded storage queue.
+
+Long-lived HTTP tail streams and MCP waits use their existing specialized
+budget. Health checks and MCP request routing remain responsive while ordinary
+storage work is active or saturated.
+
 ## Reverse proxy
 
 When fronting `plasmite serve` with nginx, Caddy, or similar:

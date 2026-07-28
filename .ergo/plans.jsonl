@@ -436,3 +436,8 @@
 {"type":"message","ts":"2026-07-28T23:03:51.611407Z","data":{"task_id":"R5NVLL","kind":"done","text":"Added a bounded, non-queueing Tokio blocking executor with consistent Busy, core-error, and join-error mapping. Capacity deliberately reuses the existing server concurrency budget; dropped request futures do not cancel already-running blocking work, so permits remain held until operations finish. Verified focused success, failure, saturation, and remote-list behavior.","ts":"2026-07-28T23:03:51.611407Z"}}
 {"type":"unclaim","ts":"2026-07-28T23:03:51.611407Z","data":{"id":"R5NVLL","ts":"2026-07-28T23:03:51.611407Z"}}
 {"type":"state","ts":"2026-07-28T23:03:51.611407Z","data":{"id":"R5NVLL","state":"done","ts":"2026-07-28T23:03:51.611407Z"}}
+{"type":"claim","ts":"2026-07-28T23:03:57.677659Z","data":{"id":"AAO4DK","agent_id":"codex@mac","ts":"2026-07-28T23:03:57.677659Z"}}
+{"type":"state","ts":"2026-07-28T23:03:57.677659Z","data":{"id":"AAO4DK","state":"doing","ts":"2026-07-28T23:03:57.677659Z"}}
+{"type":"message","ts":"2026-07-28T23:06:51.220984Z","data":{"task_id":"AAO4DK","kind":"done","text":"Routed pool lifecycle, append, get, info, list, and Lite3 preflight operations through the bounded executor; access checks remain ahead of admission.\n\nVerified saturation returns HTTP 423 while health and MCP remain responsive; cargo test --test remote_integration and cargo check pass; documented admission and cancellation behavior.","ts":"2026-07-28T23:06:51.220984Z"}}
+{"type":"unclaim","ts":"2026-07-28T23:06:51.220984Z","data":{"id":"AAO4DK","ts":"2026-07-28T23:06:51.220984Z"}}
+{"type":"state","ts":"2026-07-28T23:06:51.220984Z","data":{"id":"AAO4DK","state":"done","ts":"2026-07-28T23:06:51.220984Z"}}

@@ -979,9 +979,11 @@ async fn create_pool(
         Err(err) => return error_response(err),
     };
     let size_bytes = payload.size_bytes.unwrap_or(1024 * 1024);
+    let client = state.client.clone();
     let result = state
-        .client
-        .create_pool(&pool_ref, PoolOptions::new(size_bytes));
+        .storage_executor
+        .run(move || client.create_pool(&pool_ref, PoolOptions::new(size_bytes)))
+        .await;
     match result {
         Ok(info) => json_response(json!({ "pool": pool_info_json(&payload.pool, &info) })),
         Err(err) => error_response(err),
@@ -1003,7 +1005,12 @@ async fn open_pool(
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
     };
-    match state.client.pool_info(&pool_ref) {
+    let client = state.client.clone();
+    match state
+        .storage_executor
+        .run(move || client.pool_info(&pool_ref))
+        .await
+    {
         Ok(info) => json_response(json!({ "pool": pool_info_json(&payload.pool, &info) })),
         Err(err) => error_response(err),
     }
@@ -1024,7 +1031,12 @@ async fn pool_info(
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
     };
-    match state.client.pool_info(&pool_ref) {
+    let client = state.client.clone();
+    match state
+        .storage_executor
+        .run(move || client.pool_info(&pool_ref))
+        .await
+    {
         Ok(info) => json_response(json!({ "pool": pool_info_json(&pool, &info) })),
         Err(err) => error_response(err),
     }
@@ -1076,7 +1088,12 @@ async fn delete_pool(
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
     };
-    match state.client.delete_pool(&pool_ref) {
+    let client = state.client.clone();
+    match state
+        .storage_executor
+        .run(move || client.delete_pool(&pool_ref))
+        .await
+    {
         Ok(()) => json_response(json!({ "ok": true })),
         Err(err) => error_response(err),
     }
@@ -1100,11 +1117,17 @@ async fn append_message(
     };
     let durability = durability_from_str(payload.durability.as_deref());
     let tags = payload.tags.unwrap_or_default();
+    let data = payload.data;
 
+    let client = state.client.clone();
     let result = state
-        .client
-        .open_pool(&pool_ref)
-        .and_then(|mut pool| pool.append_json_now(&payload.data, &tags, durability));
+        .storage_executor
+        .run(move || {
+            client
+                .open_pool(&pool_ref)
+                .and_then(|mut pool| pool.append_json_now(&data, &tags, durability))
+        })
+        .await;
     match result {
         Ok(message) => json_response(json!({ "message": message_json(&message) })),
         Err(err) => error_response(err),
@@ -1145,10 +1168,16 @@ async fn append_lite3(
     };
     let durability = durability_from_str(query.durability.as_deref());
     let payload = payload.to_vec();
-    let result = state.client.open_pool(&pool_ref).and_then(|mut pool| {
-        let seq = pool.append_lite3_now(&payload, durability)?;
-        pool.get_message(seq)
-    });
+    let client = state.client.clone();
+    let result = state
+        .storage_executor
+        .run(move || {
+            client.open_pool(&pool_ref).and_then(|mut pool| {
+                let seq = pool.append_lite3_now(&payload, durability)?;
+                pool.get_message(seq)
+            })
+        })
+        .await;
     match result {
         Ok(message) => json_response(json!({ "message": message_json(&message) })),
         Err(err) => error_response(err),
@@ -1170,10 +1199,15 @@ async fn get_message(
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
     };
+    let client = state.client.clone();
     let result = state
-        .client
-        .open_pool(&pool_ref)
-        .and_then(|pool| pool.get_message(seq));
+        .storage_executor
+        .run(move || {
+            client
+                .open_pool(&pool_ref)
+                .and_then(|pool| pool.get_message(seq))
+        })
+        .await;
 
     match result {
         Ok(message) => json_response(json!({ "message": message_json(&message) })),
@@ -1196,12 +1230,18 @@ async fn get_lite3(
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
     };
-    let result = state.client.open_pool(&pool_ref).and_then(|pool| {
-        let frame = pool.get_lite3(seq)?;
-        let payload = frame.payload.to_vec();
-        lite3::validate_bytes(&payload)?;
-        Ok(payload)
-    });
+    let client = state.client.clone();
+    let result = state
+        .storage_executor
+        .run(move || {
+            client.open_pool(&pool_ref).and_then(|pool| {
+                let frame = pool.get_lite3(seq)?;
+                let payload = frame.payload.to_vec();
+                lite3::validate_bytes(&payload)?;
+                Ok(payload)
+            })
+        })
+        .await;
     match result {
         Ok(payload) => {
             let mut response = Response::new(Body::from(Bytes::copy_from_slice(&payload)));
@@ -1252,7 +1292,7 @@ async fn tail_lite3(
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
     };
-    if let Err(err) = precheck_lite3_since_seq(&state.client, &pool_ref, query.since_seq) {
+    if let Err(err) = precheck_lite3_since_seq(&state, &pool_ref, query.since_seq).await {
         return error_response(err);
     }
     let runtime = match prepare_tail_runtime(&state, &query, raw_query.as_deref()) {
@@ -1290,19 +1330,26 @@ fn tail_pool_ref_from_request(
     pool_ref_from_request(pool)
 }
 
-fn precheck_lite3_since_seq(
-    client: &LocalClient,
+async fn precheck_lite3_since_seq(
+    state: &Arc<AppState>,
     pool_ref: &PoolRef,
     since_seq: Option<u64>,
 ) -> Result<(), Error> {
     let Some(since_seq) = since_seq else {
         return Ok(());
     };
-    let precheck = client.open_pool(pool_ref).and_then(|pool| {
-        let frame = pool.get_lite3(since_seq)?;
-        lite3::validate_bytes(frame.payload)?;
-        Ok(())
-    });
+    let client = state.client.clone();
+    let pool_ref = pool_ref.clone();
+    let precheck = state
+        .storage_executor
+        .run(move || {
+            client.open_pool(&pool_ref).and_then(|pool| {
+                let frame = pool.get_lite3(since_seq)?;
+                lite3::validate_bytes(frame.payload)?;
+                Ok(())
+            })
+        })
+        .await;
     match precheck {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
@@ -1610,8 +1657,8 @@ mod tests {
     use super::{
         AccessMode, AppState, Error, ErrorKind, LocalClient, McpHandler, McpToolAccess,
         PoolOptions, PoolRef, ServeConfig, ServeMcpHandler, StorageExecutor, ToolCallRequest,
-        build_cors_layer, error_response, mcp_post, mcp_tool_allowed, normalize_cors_origins,
-        normalize_tags, parse_tags_from_query, serve, validate_config,
+        build_cors_layer, error_response, healthz, list_pools, mcp_post, mcp_tool_allowed,
+        normalize_cors_origins, normalize_tags, parse_tags_from_query, serve, validate_config,
     };
     use axum::Json;
     use axum::extract::State;
@@ -1669,6 +1716,62 @@ mod tests {
             .await
             .expect_err("saturated");
         assert_eq!(err.kind(), ErrorKind::Busy);
+
+        release_tx.send(()).expect("release active task");
+        active
+            .await
+            .expect("join active task")
+            .expect("active result");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn saturated_storage_keeps_health_and_mcp_responsive() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = Arc::new(AppState {
+            client: LocalClient::new().with_pool_dir(temp.path()),
+            token: None,
+            access_mode: AccessMode::ReadWrite,
+            max_tail_timeout_ms: 30_000,
+            tail_semaphore: Arc::new(Semaphore::new(1)),
+            storage_executor: StorageExecutor::new(1),
+        });
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let active = {
+            let executor = state.storage_executor.clone();
+            tokio::spawn(async move {
+                executor
+                    .run(move || {
+                        started_tx.send(()).expect("signal start");
+                        release_rx.recv().expect("release task");
+                        Ok(())
+                    })
+                    .await
+            })
+        };
+        started_rx.await.expect("storage task started");
+
+        let busy = list_pools(State(state.clone()), HeaderMap::new()).await;
+        assert_eq!(busy.status(), axum::http::StatusCode::LOCKED);
+
+        let mcp_payload = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": super::MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "1"}
+            }
+        });
+        tokio::time::timeout(std::time::Duration::from_millis(100), async {
+            let health = healthz().await;
+            assert_eq!(health.status(), axum::http::StatusCode::OK);
+            let mcp = mcp_post(State(state), HeaderMap::new(), Json(mcp_payload)).await;
+            assert_eq!(mcp.status(), axum::http::StatusCode::OK);
+        })
+        .await
+        .expect("health and MCP remained responsive");
 
         release_tx.send(()).expect("release active task");
         active

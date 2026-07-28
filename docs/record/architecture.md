@@ -120,6 +120,20 @@ Plasmite is transport-agnostic at the core.
 
 Invariant: Adding a new transport must not require changes to `src/core`. If a proposed transport requires core changes to function correctly, the design is wrong.
 
+The HTTP adapter runs synchronous pool operations on Tokio's blocking worker
+pool. A semaphore admits at most `--max-tail-concurrency` ordinary storage
+operations at once; reusing this existing server budget avoids a second tuning
+surface. Admission is immediate. A request that arrives when every permit is in
+use receives the shared `Busy` error instead of waiting in an unbounded queue.
+Long-lived tail streams and MCP waits retain their specialized concurrency
+path, so ordinary storage pressure does not occupy an async runtime worker or
+prevent health and MCP routing from making progress.
+
+Once admitted, a blocking operation runs to completion even if its requesting
+future is dropped. Its permit remains held until the operation exits. This
+preserves the synchronous core's ownership and locking rules during request
+cancellation.
+
 ## Tap execution model (CLI adapter)
 
 `tap` is an interface-layer adapter over existing local pool operations:
