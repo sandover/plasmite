@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
+use std::future::Future;
 use std::future::IntoFuture;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -184,7 +185,39 @@ impl AccessMode {
 }
 
 pub async fn serve(config: ServeConfig) -> Result<(), Error> {
-    let cors_allowed_origins = preflight_config(&config)?;
+    let prepared = prepare_server(&config).await?;
+    let listener = tokio::net::TcpListener::bind(config.bind)
+        .await
+        .map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_message(if prepared.tls_config.is_some() {
+                    "failed to bind TLS server"
+                } else {
+                    "failed to bind server"
+                })
+                .with_source(err)
+        })?;
+    serve_with_listener(prepared, listener, shutdown_signal()).await
+}
+
+async fn serve_with_listener(
+    prepared: PreparedServer,
+    listener: tokio::net::TcpListener,
+    shutdown: impl Future<Output = ()>,
+) -> Result<(), Error> {
+    if let Some(tls_config) = prepared.tls_config {
+        return serve_tls(listener, prepared.app, tls_config, shutdown).await;
+    }
+    serve_plain(listener, prepared.app, shutdown).await
+}
+
+struct PreparedServer {
+    app: Router,
+    tls_config: Option<Arc<ServerConfig>>,
+}
+
+async fn prepare_server(config: &ServeConfig) -> Result<PreparedServer, Error> {
+    let cors_allowed_origins = preflight_config(config)?;
 
     init_tracing();
 
@@ -193,12 +226,12 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
         .try_into()
         .map_err(|_| Error::new(ErrorKind::Usage).with_message("--max-body-bytes is too large"))?;
 
-    let tls_config = build_tls_config(&config).await?;
+    let tls_config = build_tls_config(config).await?;
     let cors_layer = build_cors_layer(&cors_allowed_origins)?;
 
     let state = Arc::new(AppState {
-        client: LocalClient::new().with_pool_dir(config.pool_dir),
-        token: config.token,
+        client: LocalClient::new().with_pool_dir(config.pool_dir.clone()),
+        token: config.token.clone(),
         access_mode: config.access_mode,
         max_tail_timeout_ms: config.max_tail_timeout_ms,
         tail_semaphore: Arc::new(Semaphore::new(config.max_concurrent_tails)),
@@ -233,10 +266,7 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
         app = app.layer(cors_layer);
     }
 
-    if let Some(tls_config) = tls_config {
-        return serve_tls(config.bind, app, tls_config).await;
-    }
-    serve_plain(config.bind, app).await
+    Ok(PreparedServer { app, tls_config })
 }
 
 pub fn preflight_config(config: &ServeConfig) -> Result<Vec<String>, Error> {
@@ -499,13 +529,11 @@ fn build_server_config(
     Ok(config)
 }
 
-async fn serve_plain(bind: SocketAddr, app: Router) -> Result<(), Error> {
-    let listener = tokio::net::TcpListener::bind(bind).await.map_err(|err| {
-        Error::new(ErrorKind::Io)
-            .with_message("failed to bind server")
-            .with_source(err)
-    })?;
-
+async fn serve_plain(
+    listener: tokio::net::TcpListener,
+    app: Router,
+    shutdown: impl Future<Output = ()>,
+) -> Result<(), Error> {
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let server = axum::serve(listener, app)
         .with_graceful_shutdown(async {
@@ -522,7 +550,7 @@ async fn serve_plain(bind: SocketAddr, app: Router) -> Result<(), Error> {
                     .with_source(err)
             })?;
         }
-        _ = shutdown_signal() => {
+        _ = shutdown => {
             let _ = shutdown_tx.send(());
             match tokio::time::timeout(Duration::from_secs(10), &mut server).await {
                 Ok(result) => result.map_err(|err| {
@@ -540,21 +568,16 @@ async fn serve_plain(bind: SocketAddr, app: Router) -> Result<(), Error> {
 }
 
 async fn serve_tls(
-    bind: SocketAddr,
+    listener: tokio::net::TcpListener,
     app: Router,
     tls_config: Arc<ServerConfig>,
+    shutdown: impl Future<Output = ()>,
 ) -> Result<(), Error> {
-    let listener = tokio::net::TcpListener::bind(bind).await.map_err(|err| {
-        Error::new(ErrorKind::Io)
-            .with_message("failed to bind TLS server")
-            .with_source(err)
-    })?;
     let acceptor = TlsAcceptor::from(tls_config);
     let builder = AutoBuilder::new(TokioExecutor::new());
     let mut make_service = app.into_make_service();
     let mut tasks = JoinSet::new();
 
-    let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
 
     loop {
@@ -590,14 +613,13 @@ async fn serve_tls(
         }
     }
 
-    let deadline = tokio::time::sleep(Duration::from_secs(10));
-    tokio::pin!(deadline);
-    loop {
-        tokio::select! {
-            _ = &mut deadline => break,
-            Some(_) = tasks.join_next() => {}
-            else => break,
-        }
+    let drain = async { while tasks.join_next().await.is_some() {} };
+    if tokio::time::timeout(Duration::from_secs(10), drain)
+        .await
+        .is_err()
+    {
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
     }
 
     Ok(())
@@ -1658,7 +1680,8 @@ mod tests {
         AccessMode, AppState, Error, ErrorKind, LocalClient, McpHandler, McpToolAccess,
         PoolOptions, PoolRef, ServeConfig, ServeMcpHandler, StorageExecutor, ToolCallRequest,
         build_cors_layer, error_response, healthz, list_pools, mcp_post, mcp_tool_allowed,
-        normalize_cors_origins, normalize_tags, parse_tags_from_query, serve, validate_config,
+        normalize_cors_origins, normalize_tags, parse_tags_from_query, prepare_server, serve,
+        serve_with_listener, validate_config,
     };
     use axum::Json;
     use axum::extract::State;
@@ -1935,6 +1958,80 @@ mod tests {
             "MCP wait blocked the async runtime worker"
         );
         let _response = request.await.expect("request task");
+    }
+
+    fn listener_test_config(
+        pool_dir: &std::path::Path,
+        bind: std::net::SocketAddr,
+        tls_self_signed: bool,
+    ) -> ServeConfig {
+        ServeConfig {
+            bind,
+            pool_dir: pool_dir.to_path_buf(),
+            token: None,
+            cors_allowed_origins: Vec::new(),
+            access_mode: AccessMode::ReadWrite,
+            allow_non_loopback: false,
+            insecure_no_tls: false,
+            token_file_used: false,
+            tls_cert: None,
+            tls_key: None,
+            tls_self_signed,
+            tls_self_signed_material: None,
+            tls_fingerprint: None,
+            max_body_bytes: 1024 * 1024,
+            max_tail_timeout_ms: 30_000,
+            max_concurrent_tails: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn prebound_plain_listener_has_bounded_shutdown() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("pre-bind listener");
+        let addr = listener.local_addr().expect("assigned address");
+        let config = listener_test_config(temp.path(), addr, false);
+        let prepared = prepare_server(&config).await.expect("prepare server");
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(serve_with_listener(prepared, listener, async {
+            let _ = shutdown_rx.await;
+        }));
+
+        let stream = tokio::net::TcpStream::connect(addr)
+            .await
+            .expect("connect to transferred listener");
+        drop(stream);
+        shutdown_tx.send(()).expect("request shutdown");
+        tokio::time::timeout(std::time::Duration::from_secs(1), server)
+            .await
+            .expect("bounded shutdown")
+            .expect("join server")
+            .expect("server result");
+    }
+
+    #[tokio::test]
+    async fn prebound_tls_listener_has_bounded_shutdown() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("pre-bind listener");
+        let addr = listener.local_addr().expect("assigned address");
+        let config = listener_test_config(temp.path(), addr, true);
+        let prepared = prepare_server(&config).await.expect("prepare server");
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(serve_with_listener(prepared, listener, async {
+            let _ = shutdown_rx.await;
+        }));
+
+        tokio::task::yield_now().await;
+        shutdown_tx.send(()).expect("request shutdown");
+        tokio::time::timeout(std::time::Duration::from_secs(1), server)
+            .await
+            .expect("bounded shutdown")
+            .expect("join server")
+            .expect("server result");
     }
 
     #[tokio::test]

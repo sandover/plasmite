@@ -441,3 +441,8 @@
 {"type":"message","ts":"2026-07-28T23:06:51.220984Z","data":{"task_id":"AAO4DK","kind":"done","text":"Routed pool lifecycle, append, get, info, list, and Lite3 preflight operations through the bounded executor; access checks remain ahead of admission.\n\nVerified saturation returns HTTP 423 while health and MCP remain responsive; cargo test --test remote_integration and cargo check pass; documented admission and cancellation behavior.","ts":"2026-07-28T23:06:51.220984Z"}}
 {"type":"unclaim","ts":"2026-07-28T23:06:51.220984Z","data":{"id":"AAO4DK","ts":"2026-07-28T23:06:51.220984Z"}}
 {"type":"state","ts":"2026-07-28T23:06:51.220984Z","data":{"id":"AAO4DK","state":"done","ts":"2026-07-28T23:06:51.220984Z"}}
+{"type":"claim","ts":"2026-07-28T23:06:57.895523Z","data":{"id":"DHQ3IT","agent_id":"codex@mac","ts":"2026-07-28T23:06:57.895523Z"}}
+{"type":"state","ts":"2026-07-28T23:06:57.895523Z","data":{"id":"DHQ3IT","state":"doing","ts":"2026-07-28T23:06:57.895523Z"}}
+{"type":"message","ts":"2026-07-28T23:10:31.866279Z","data":{"task_id":"DHQ3IT","kind":"done","text":"Split server preparation, listener ownership, and execution so internal tests can transfer an already-bound ephemeral listener with an explicit shutdown future.\n\nPlain and self-signed TLS lifecycle tests pass; fixed empty TLS task draining so shutdown completes immediately; cargo check passes.","ts":"2026-07-28T23:10:31.866279Z"}}
+{"type":"unclaim","ts":"2026-07-28T23:10:31.866279Z","data":{"id":"DHQ3IT","ts":"2026-07-28T23:10:31.866279Z"}}
+{"type":"state","ts":"2026-07-28T23:10:31.866279Z","data":{"id":"DHQ3IT","state":"done","ts":"2026-07-28T23:10:31.866279Z"}}
