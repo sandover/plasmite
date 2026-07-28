@@ -476,3 +476,8 @@
 {"type":"message","ts":"2026-07-28T23:35:43.649867Z","data":{"task_id":"F424FT","kind":"done","text":"Deleted the wildcard dispatch module; moved clap contracts, tap, serve, MCP/completion, command routing, and shared CLI mechanics into explicit src/cli modules. main.rs now owns only bootstrap/exit plus unit tests.\n\nNo CLI module uses wildcard parent imports; binary unit tests, all 172 CLI integration tests, cargo check, and command inventory/help contracts pass; architecture record documents ownership and dependency direction.","ts":"2026-07-28T23:35:43.649867Z"}}
 {"type":"unclaim","ts":"2026-07-28T23:35:43.649867Z","data":{"id":"F424FT","ts":"2026-07-28T23:35:43.649867Z"}}
 {"type":"state","ts":"2026-07-28T23:35:43.649867Z","data":{"id":"F424FT","state":"done","ts":"2026-07-28T23:35:43.649867Z"}}
+{"type":"claim","ts":"2026-07-28T23:35:43.680771Z","data":{"id":"EH5S53","agent_id":"codex@mac","ts":"2026-07-28T23:35:43.680771Z"}}
+{"type":"state","ts":"2026-07-28T23:35:43.680771Z","data":{"id":"EH5S53","state":"doing","ts":"2026-07-28T23:35:43.680771Z"}}
+{"type":"message","ts":"2026-07-28T23:40:13.546863Z","data":{"task_id":"EH5S53","kind":"done","text":"Split the 172 CLI integration scenarios into six command-family suites with a shared harness.\n\nValidated each replacement target, cargo check --tests, cargo fmt, strict clippy, and just check.","ts":"2026-07-28T23:40:13.546863Z"}}
+{"type":"unclaim","ts":"2026-07-28T23:40:13.546863Z","data":{"id":"EH5S53","ts":"2026-07-28T23:40:13.546863Z"}}
+{"type":"state","ts":"2026-07-28T23:40:13.546863Z","data":{"id":"EH5S53","state":"done","ts":"2026-07-28T23:40:13.546863Z"}}

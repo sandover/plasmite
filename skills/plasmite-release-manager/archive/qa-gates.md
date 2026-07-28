@@ -106,7 +106,7 @@ Block if:
 ## 6) API/CLI Stability & Compatibility
 
 Evidence commands:
-- `cargo test -q --test cli_integration`
+- `cargo test -q --tests`
 - `cargo test -q --test remote_integration`
 - `cargo test -q`
 

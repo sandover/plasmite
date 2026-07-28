@@ -71,18 +71,42 @@ What they cover (high level):
 
 ### Integration tests (`tests/`)
 
-Run the end-to-end CLI contract tests:
+The black-box CLI suites share process, terminal, JSON, temporary-pool, server,
+and MCP helpers under `tests/support/`. Run every command-family target:
 
 ```bash
-cargo test --test cli_integration
+cargo test --test cli_pool
+cargo test --test cli_feed_fetch
+cargo test --test cli_follow_duplex
+cargo test --test cli_serve_remote
+cargo test --test cli_tap
+cargo test --test cli_help_output
 ```
 
-What they cover (high level):
-- `pool create` / `feed` / `fetch` / `follow` minimal flows
-- JSON-on-stdout success output shapes
-- JSON-on-stderr error output shapes + exit codes
-- Streaming JSON stdin behavior for `feed`
-- `follow` behavior (bounded waits)
+The targets are divided by behavior:
+
+- `cli_pool`: pool lifecycle, metadata, diagnostics, permissions, and corrupt
+  file behavior.
+- `cli_feed_fetch`: local and remote ingestion, input framing, retries,
+  receipts, and exact lookup.
+- `cli_follow_duplex`: local and remote streaming, filters, replay, timeouts,
+  duplex send/receive, and cancellation.
+- `cli_serve_remote`: serve initialization and validation, server limits, TLS,
+  response headers, and MCP stdio.
+- `cli_tap`: child lifecycle, stream capture and passthrough, tags, signals,
+  and exit propagation.
+- `cli_help_output`: command discovery, completions, adaptive color and JSON,
+  error envelopes, and exit codes.
+
+Run the HTTP protocol and remote-client suite separately:
+
+```bash
+cargo test --test remote_integration
+```
+
+All server-backed CLI and remote tests use an operating-system-assigned port
+published by the child after binding. They do not probe and release candidate
+ports or serialize the suite behind a global port lock.
 
 Run the multi-process lock smoke test:
 
