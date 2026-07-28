@@ -366,12 +366,38 @@ fn tap_help_renders_examples() {
 
 #[test]
 fn tap_requires_wrapped_command_after_separator() {
+    let help = cmd().args(["tap", "--help"]).output().expect("tap help");
+    assert!(help.status.success());
+    let stdout = std::str::from_utf8(&help.stdout).expect("utf8");
+    assert!(stdout.contains("Usage: plasmite tap [OPTIONS] <POOL> -- <COMMAND>..."));
+
     let output = cmd().args(["tap", "build"]).output().expect("tap");
-    assert_actionable_usage_feedback(
-        &output,
-        "tap requires a wrapped command after `--`",
-        "plasmite tap <pool> -- <command...>",
+    assert_eq!(output.status.code(), Some(2));
+    let error = parse_error_json(&output.stderr);
+    assert_eq!(error["error"]["kind"], "Usage");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("required arguments"))
     );
+    assert!(
+        error["error"]["hint"]
+            .as_str()
+            .is_some_and(|hint| hint.contains("plasmite tap --help"))
+    );
+}
+
+#[test]
+fn version_help_describes_adaptive_output() {
+    let output = cmd()
+        .args(["version", "--help"])
+        .output()
+        .expect("version help");
+    assert!(output.status.success());
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+    assert!(stdout.contains("human-readable version information on a terminal"));
+    assert!(stdout.contains("stdout is redirected or piped"));
+    assert!(stdout.contains("machine-readable JSON"));
 }
 
 #[test]
@@ -5676,6 +5702,58 @@ fn serve_init_help_is_available() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Generate token + TLS artifacts"));
+}
+
+#[test]
+fn serve_init_rejects_ignored_parent_options() {
+    let cases: &[(&[&str], &str)] = &[
+        (&["--bind", "127.0.0.1:9701"], "--bind"),
+        (&["--access", "read-only"], "--access"),
+        (&["--cors-origin", "https://example.com"], "--cors-origin"),
+        (&["--token", "secret"], "--token"),
+        (&["--token-file", "token.txt"], "--token-file"),
+        (&["--tls-cert", "cert.pem"], "--tls-cert"),
+        (&["--tls-key", "key.pem"], "--tls-key"),
+        (&["--tls-self-signed"], "--tls-self-signed"),
+        (&["--allow-non-loopback"], "--allow-non-loopback"),
+        (&["--insecure-no-tls"], "--insecure-no-tls"),
+        (&["--max-body-bytes", "2"], "--max-body-bytes"),
+        (&["--max-tail-timeout-ms", "2"], "--max-tail-timeout-ms"),
+        (&["--max-tail-concurrency", "2"], "--max-tail-concurrency"),
+    ];
+
+    for (parent_args, option) in cases {
+        let mut args = vec!["serve"];
+        args.extend_from_slice(parent_args);
+        args.push("init");
+        let output = cmd().args(args).output().expect("serve init");
+        assert_eq!(output.status.code(), Some(2), "{option}");
+        let error = parse_error_json(&output.stderr);
+        assert_eq!(error["error"]["kind"], "Usage", "{option}");
+        assert!(
+            error["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains(option)),
+            "{option}"
+        );
+        assert!(
+            error["error"]["hint"]
+                .as_str()
+                .is_some_and(|hint| hint.contains(option)),
+            "{option}"
+        );
+    }
+}
+
+#[test]
+fn serve_check_help_describes_parent_option_placement() {
+    let output = cmd()
+        .args(["serve", "check", "--help"])
+        .output()
+        .expect("serve check help");
+    assert!(output.status.success());
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+    assert!(stdout.contains("Serve configuration options belong before `check`"));
 }
 
 #[test]

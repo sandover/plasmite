@@ -630,6 +630,7 @@ NOTES
         durability: String,
         #[arg(
             last = true,
+            required = true,
             allow_hyphen_values = true,
             value_name = "COMMAND",
             help = "Wrapped command and args (must follow `--`)"
@@ -713,10 +714,13 @@ NOTES
         json: bool,
     },
     #[command(
-        about = "Print version info as JSON",
-        long_about = r#"Emit version info as JSON (stable, machine-readable)."#,
+        about = "Print version information",
+        long_about = r#"Print human-readable version information on a terminal.
+
+When stdout is redirected or piped, emit stable machine-readable JSON."#,
         after_help = r#"EXAMPLES
-  $ plasmite version"#
+  $ plasmite version
+  $ plasmite version | jq -r '.version'"#
     )]
     Version,
     #[command(
@@ -867,6 +871,7 @@ NOTES
   $ plasmite serve --token-file ~/.plasmite/token --tls-self-signed check
 
 NOTES
+  - Serve configuration options belong before `check`; only --json follows it
   - Exits non-zero when config is invalid
   - Does not bind sockets or start background tasks
   - Human-readable output is the default; use --json for machine output"#

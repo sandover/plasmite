@@ -70,6 +70,7 @@ pub(super) fn dispatch_command(
         }
         Command::Serve { subcommand, run } => match subcommand {
             Some(ServeSubcommand::Init(args)) => {
+                reject_ignored_serve_init_args(&run)?;
                 let bind: SocketAddr = args.bind.parse().map_err(|_| {
                     Error::new(ErrorKind::Usage)
                         .with_message("invalid bind address")
@@ -1318,6 +1319,50 @@ pub(super) fn dispatch_command(
             }
         }
     }
+}
+
+fn reject_ignored_serve_init_args(run: &ServeRunArgs) -> Result<(), Error> {
+    let ignored = if run.bind != "127.0.0.1:9700" {
+        Some(("--bind", true))
+    } else if !matches!(run.access, AccessModeCli::ReadWrite) {
+        Some(("--access", false))
+    } else if !run.cors_origin.is_empty() {
+        Some(("--cors-origin", false))
+    } else if run.token.is_some() {
+        Some(("--token", false))
+    } else if run.token_file.is_some() {
+        Some(("--token-file", true))
+    } else if run.tls_cert.is_some() {
+        Some(("--tls-cert", true))
+    } else if run.tls_key.is_some() {
+        Some(("--tls-key", true))
+    } else if run.tls_self_signed {
+        Some(("--tls-self-signed", false))
+    } else if run.allow_non_loopback {
+        Some(("--allow-non-loopback", false))
+    } else if run.insecure_no_tls {
+        Some(("--insecure-no-tls", false))
+    } else if run.max_body_bytes != DEFAULT_MAX_BODY_BYTES {
+        Some(("--max-body-bytes", false))
+    } else if run.max_tail_timeout_ms != DEFAULT_MAX_TAIL_TIMEOUT_MS {
+        Some(("--max-tail-timeout-ms", false))
+    } else if run.max_tail_concurrency != DEFAULT_MAX_TAIL_CONCURRENCY {
+        Some(("--max-tail-concurrency", false))
+    } else {
+        None
+    };
+
+    let Some((option, has_init_equivalent)) = ignored else {
+        return Ok(());
+    };
+    let hint = if has_init_equivalent {
+        format!("Place `{option}` after `init`, or remove it from this command.")
+    } else {
+        format!("Remove `{option}`; it configures `serve` and `serve check`, not `serve init`.")
+    };
+    Err(Error::new(ErrorKind::Usage)
+        .with_message(format!("serve init does not use parent option {option}"))
+        .with_hint(hint))
 }
 
 #[derive(Clone, Copy)]
