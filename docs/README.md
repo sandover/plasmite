@@ -9,6 +9,13 @@ Plasmite documentation is intentionally split into:
 
 - Docs of record: `docs/record/README.md`
 - Specs index: `spec/README.md`
+- CLI operating model: `docs/cli.md`
+- Task-oriented CLI recipes: `docs/cookbook.md`
+
+## Design audits and proposals
+
+- CLI and help system audit: `docs/proposals/cli-help-system.md`
+- MCP server proposal: `docs/proposals/mcp-server.md`
 
 ## Normative specs
 

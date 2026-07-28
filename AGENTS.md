@@ -8,7 +8,12 @@ docs/
 │
 │   Top-level reference
 ├── building.md                                — Build system + vendoring; read when touching build/release tooling
+├── cli.md                                     — CLI operating model; read when resolving pool refs, input/output modes, or exits
 ├── cookbook.md                                — Task-oriented examples; read when you want copy/paste CLI workflows
+│
+│   Design audits and proposals
+├── proposals/cli-help-system.md               — CLI/help audit and reform model; read before redesigning command discovery
+├── proposals/mcp-server.md                    — MCP design history; read when revisiting the MCP surface
 │
 │   Docs of record
 ├── record/README.md                           — Docs of record index; start here for stable policies and runbooks

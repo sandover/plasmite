@@ -33,8 +33,10 @@ It keeps only script-level guarantees; signatures, walkthroughs, and examples li
 
 ### Machine-Readable Interfaces
 
-- Global `--dir` selects the local pool directory.
-- Non-streaming commands provide stable machine output via `--json`.
+- Top-level `--dir`, placed before the command, selects the local pool directory.
+- Commands that expose `--json` provide stable machine-readable output through it.
+- `fetch` always emits one JSON message envelope.
+- `version` emits human text to a TTY and JSON when piped.
 - Streaming reads provide stable JSON Lines via `--format jsonl` or `--jsonl`.
 - `feed` append receipts include `seq`, `time`, and `meta` (not echoed `data`).
 
@@ -75,7 +77,10 @@ It keeps only script-level guarantees; signatures, walkthroughs, and examples li
 
 ### Platforms
 
-- Supported in v0.0.1: macOS and Linux.
+- The frozen v0.0.1 baseline supports macOS and Linux.
+- Current official CLI delivery also includes Windows x86_64 through npm and
+  PyPI. The current distribution matrix is maintained in
+  `docs/record/distribution.md`.
 
 ## Non-Contract Surface
 
@@ -83,7 +88,9 @@ The following are implemented but not frozen in v0.0.1 and may evolve within v0:
 
 - `plasmite duplex`
 - `plasmite tap`
-- `plasmite serve`
+- `plasmite serve`, including `serve init` and `serve check`
+- `plasmite mcp`
+- `plasmite completion`
 - `plasmite doctor`
 - Remote shorthand refs in CLI commands
 - Notice payload details and frequency controls
@@ -97,6 +104,6 @@ Current remote shorthand constraints (documented, non-frozen):
 
 ## References
 
-- CLI docs of record: `docs/record/vision.md`
+- CLI operating model: `docs/cli.md`
 - Remote protocol contract: `spec/remote/v0/SPEC.md`
 - Public API contract: `spec/api/v0/SPEC.md`

@@ -592,5 +592,5 @@ Plasmite is great for local and small-team IPC, but it's not the answer to every
 - **Go bindings**: [bindings/go/README.md](../bindings/go/README.md)
 - **Node bindings**: [../bindings/node/README.md](../bindings/node/README.md)
 - **CLI spec**: [../spec/v0/SPEC.md](../spec/v0/SPEC.md)
-- **Pattern matching & filtering**: [spec/v0/SPEC.md § follow](../spec/v0/SPEC.md)
+- **Pattern matching & filtering**: [Live Event Stream](#live-event-stream)
 - **README**: [../README.md](../README.md)

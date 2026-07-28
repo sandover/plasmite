@@ -166,6 +166,7 @@ Windows builds (`x86_64-pc-windows-msvc`) are available via npm and PyPI. See th
 | `follow` *pool* | Follow messages |
 | `fetch` *pool* *seq* | Fetch one message by sequence number |
 | `duplex` *pool* | 2-way session with a pool |
+| `tap` *pool* `--` *command…* | Capture a process's output |
 
 **Pool management**
 
@@ -182,8 +183,18 @@ Windows builds (`x86_64-pc-windows-msvc`) are available via npm and PyPI. See th
 | | |
 |---|---|
 | `serve` | HTTP server |
+| `serve init` | Create serving configuration and credentials |
+| `serve check` | Validate serving configuration |
 
-`pls` and `plasmite` are the same binary. Shell completion: `plasmite completion bash|zsh|fish`.
+**Agent and CLI support**
+
+| | |
+|---|---|
+| `mcp` | Run the Model Context Protocol server over stdin/stdout |
+| `version` | Print version information |
+| `completion` *shell* | Generate shell completion |
+
+`pls` and `plasmite` are the same binary. See the [CLI guide](docs/cli.md) for pool references, input and output modes, and exit behavior.
 
 ## How it works
 
@@ -194,7 +205,7 @@ A pool is a single `.plasmite` file containing a persistent ring buffer:
 - **Bounded retention** — old messages overwritten when full (default 1 MB, configurable)
 - **Crash-safe** — processes crash and restart; torn writes never propagate
 
-Every message carries a **seq** (monotonic), a **time** (nanosecond precision), optional **tags**, and your JSON **data**. Tags and `--where` (jq predicates) compose for filtering. See the [CLI spec § pattern matching](spec/v0/SPEC.md).
+Every message carries a **seq** (monotonic), a **time** (nanosecond precision), optional **tags**, and your JSON **data**. Tags and `--where` (jq predicates) compose for filtering. See [Live Event Stream](docs/cookbook.md#live-event-stream).
 
 Default pool directory: `~/.plasmite/pools/`.
 
@@ -229,7 +240,7 @@ Measured locally on M3 MacBook, `Durability::Fast`. Reproduce with `scripts/benc
 
 **Bindings**: [Go](bindings/go/README.md) | [Python](bindings/python/README.md) | [Node](bindings/node/README.md)
 
-**Guides**: [Serving & remote access](docs/record/serving.md) | [Distribution](docs/record/distribution.md)
+**Guides**: [CLI](docs/cli.md) | [Serving & remote access](docs/record/serving.md) | [Distribution](docs/record/distribution.md)
 
 **Contributing**: See `AGENTS.md` for CI hygiene; `docs/record/releasing.md` for release process
 
