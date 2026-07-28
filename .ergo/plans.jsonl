@@ -416,3 +416,8 @@
 {"type":"message","ts":"2026-07-28T22:53:58.837715Z","data":{"task_id":"XEU4A4","kind":"done","text":"Completed shared error presentation across CLI, HTTP, and MCP; added exhaustive kind/status/exit parity tests and documented representation and presentation ownership. The integrated shared-interface epic passed cargo fmt, strict Clippy, and just check.","ts":"2026-07-28T22:53:58.837715Z"}}
 {"type":"unclaim","ts":"2026-07-28T22:53:58.837715Z","data":{"id":"XEU4A4","ts":"2026-07-28T22:53:58.837715Z"}}
 {"type":"state","ts":"2026-07-28T22:53:58.837715Z","data":{"id":"XEU4A4","state":"done","ts":"2026-07-28T22:53:58.837715Z"}}
+{"type":"claim","ts":"2026-07-28T22:54:18.106837Z","data":{"id":"STIMLJ","agent_id":"codex@mac","ts":"2026-07-28T22:54:18.106837Z"}}
+{"type":"state","ts":"2026-07-28T22:54:18.106837Z","data":{"id":"STIMLJ","state":"doing","ts":"2026-07-28T22:54:18.106837Z"}}
+{"type":"message","ts":"2026-07-28T22:55:35.306659Z","data":{"task_id":"STIMLJ","kind":"done","text":"Added a documented canonical JSON target manifest for the four current native targets and their SDK, Node, Python, Homebrew, and cargo-binstall capabilities. Added fail-closed validation and malformed-fixture tests for duplicates, missing fields, and unsupported Homebrew combinations.","ts":"2026-07-28T22:55:35.306659Z"}}
+{"type":"unclaim","ts":"2026-07-28T22:55:35.306659Z","data":{"id":"STIMLJ","ts":"2026-07-28T22:55:35.306659Z"}}
+{"type":"state","ts":"2026-07-28T22:55:35.306659Z","data":{"id":"STIMLJ","state":"done","ts":"2026-07-28T22:55:35.306659Z"}}
