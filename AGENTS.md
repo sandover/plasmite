@@ -1,5 +1,5 @@
-This repository inherits global agent policy from `/Users/brandonharvey/AGENTS.md`.
-Keep this file limited to plasmite-specific deltas.
+This repository adds Plasmite-specific instructions to the shared global policy
+in `~/.config/AGENTS.md`.
 
 ## Project Docs Map
 ```
