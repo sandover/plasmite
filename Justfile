@@ -73,7 +73,7 @@ abi:
 
 # Build release shared library artifacts.
 abi-release:
-	cargo build --release --lib
+	cargo build --release
 	@ls -1 target/release/libplasmite.* 2>/dev/null || true
 
 # Build ABI artifacts and run ABI smoke unit.
