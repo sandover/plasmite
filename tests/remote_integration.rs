@@ -10,122 +10,20 @@ use plasmite::api::{
     RemoteClient, TailOptions,
 };
 use serde_json::{Value, json};
-use std::io::Read;
-use std::net::{SocketAddr, TcpListener};
-use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, mpsc};
+use std::sync::{Arc, mpsc};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+pub mod support;
+use support::server::TestServer;
+
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
-
-static SERVER_LOCK: Mutex<()> = Mutex::new(());
-
-struct TestServer {
-    child: Child,
-    base_url: String,
-    token: Option<String>,
-    _server_guard: MutexGuard<'static, ()>,
-}
-
-impl TestServer {
-    fn start(pool_dir: &std::path::Path) -> TestResult<Self> {
-        Self::start_with_options(pool_dir, None, None, &[])
-    }
-
-    fn start_with_token(pool_dir: &std::path::Path, token: Option<&str>) -> TestResult<Self> {
-        Self::start_with_options(pool_dir, token, None, &[])
-    }
-
-    fn start_with_access(pool_dir: &std::path::Path, access: &str) -> TestResult<Self> {
-        Self::start_with_options(pool_dir, None, Some(access), &[])
-    }
-
-    fn start_with_cors(pool_dir: &std::path::Path, cors_origins: &[&str]) -> TestResult<Self> {
-        Self::start_with_options(pool_dir, None, None, cors_origins)
-    }
-
-    fn start_with_options(
-        pool_dir: &std::path::Path,
-        token: Option<&str>,
-        access: Option<&str>,
-        cors_origins: &[&str],
-    ) -> TestResult<Self> {
-        let guard = SERVER_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        let mut last_err: Option<Box<dyn std::error::Error>> = None;
-        for _attempt in 0..3 {
-            let port = pick_port()?;
-            let bind = format!("127.0.0.1:{port}");
-            let base_url = format!("http://{bind}");
-
-            let mut command = Command::new(env!("CARGO_BIN_EXE_plasmite"));
-            command
-                .arg("--dir")
-                .arg(pool_dir)
-                .arg("serve")
-                .arg("--bind")
-                .arg(&bind)
-                .stdout(Stdio::null())
-                .stderr(Stdio::piped());
-            if let Some(access) = access {
-                command.arg("--access").arg(access);
-            }
-            if let Some(token) = token {
-                command.arg("--token").arg(token);
-            }
-            for origin in cors_origins {
-                command.arg("--cors-origin").arg(origin);
-            }
-            let mut child = command.spawn()?;
-
-            match wait_for_server(&mut child, bind.parse()?) {
-                Ok(()) => {
-                    return Ok(Self {
-                        child,
-                        base_url,
-                        token: token.map(str::to_string),
-                        _server_guard: guard,
-                    });
-                }
-                Err(err) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    last_err = Some(err);
-                    sleep(Duration::from_millis(30));
-                }
-            }
-        }
-
-        Err(last_err.unwrap_or_else(|| "server failed to start".into()))
-    }
-
-    fn client(&self) -> TestResult<RemoteClient> {
-        Ok(RemoteClient::new(self.base_url.clone())?)
-    }
-
-    fn client_with_token(&self) -> TestResult<RemoteClient> {
-        let mut client = RemoteClient::new(self.base_url.clone())?;
-        if let Some(token) = &self.token {
-            client = client.with_token(token.clone());
-        }
-        Ok(client)
-    }
-}
-
-impl Drop for TestServer {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
 
 #[test]
 fn remote_append_and_get() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start(temp_dir.path())?;
+    let server = TestServer::try_start(temp_dir.path())?;
     let client = server.client()?;
     let pool_ref = PoolRef::name("chat");
 
@@ -143,7 +41,7 @@ fn remote_append_and_get() -> TestResult<()> {
 #[test]
 fn remote_append_get_tail_lite3() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start(temp_dir.path())?;
+    let server = TestServer::try_start(temp_dir.path())?;
     let client = server.client()?;
     let pool_ref = PoolRef::name("lite3");
 
@@ -195,7 +93,7 @@ fn remote_lite3_invalid_payloads_error() -> TestResult<()> {
     raw_pool.append_with_options(&[0x01], AppendOptions::new(123, Durability::Fast))?;
     drop(raw_pool);
 
-    let server = TestServer::start(pool_dir)?;
+    let server = TestServer::try_start(pool_dir)?;
     let client = server.client()?;
     let pool_ref = PoolRef::name("bad-lite3");
     let pool = client.open_pool(&pool_ref)?;
@@ -225,7 +123,7 @@ fn remote_lite3_invalid_payloads_error() -> TestResult<()> {
 #[test]
 fn remote_tail_streams_in_order() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start(temp_dir.path())?;
+    let server = TestServer::try_start(temp_dir.path())?;
     let client = server.client()?;
     let pool_ref = PoolRef::name("tail");
 
@@ -252,7 +150,7 @@ fn remote_tail_streams_in_order() -> TestResult<()> {
 #[test]
 fn remote_tail_reconnects_with_stable_since_seq_without_duplicates() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start(temp_dir.path())?;
+    let server = TestServer::try_start(temp_dir.path())?;
     let client = server.client()?;
     let pool_ref = PoolRef::name("tail-reconnect");
 
@@ -304,7 +202,7 @@ fn remote_tail_reconnects_with_stable_since_seq_without_duplicates() -> TestResu
 #[test]
 fn remote_tail_cancel_under_active_writes_is_prompt() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start(temp_dir.path())?;
+    let server = TestServer::try_start(temp_dir.path())?;
     let base_client = server.client()?;
     let pool_ref = PoolRef::name("tail-cancel-active");
 
@@ -408,7 +306,7 @@ fn remote_tail_cancel_under_active_writes_is_prompt() -> TestResult<()> {
 #[test]
 fn remote_errors_propagate_kind() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start(temp_dir.path())?;
+    let server = TestServer::try_start(temp_dir.path())?;
     let client = server.client()?;
     let err = match client.open_pool(&PoolRef::name("missing")) {
         Ok(_) => return Err("expected missing pool error".into()),
@@ -421,7 +319,7 @@ fn remote_errors_propagate_kind() -> TestResult<()> {
 #[test]
 fn remote_auth_requires_valid_token() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start_with_token(temp_dir.path(), Some("secret"))?;
+    let server = TestServer::try_start_with_token(temp_dir.path(), Some("secret"))?;
 
     let missing = server.client()?;
     let err = missing.list_pools().expect_err("missing token");
@@ -446,7 +344,7 @@ fn remote_auth_requires_valid_token() -> TestResult<()> {
 #[test]
 fn remote_auth_rejects_malformed_bearer_headers() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start_with_token(temp_dir.path(), Some("secret"))?;
+    let server = TestServer::try_start_with_token(temp_dir.path(), Some("secret"))?;
     let list_url = format!("{}/v0/pools", server.base_url);
 
     let malformed = ["", "Token secret"];
@@ -484,7 +382,7 @@ fn remote_auth_rejects_malformed_bearer_headers() -> TestResult<()> {
 #[test]
 fn remote_rejects_path_pool_names() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start(temp_dir.path())?;
+    let server = TestServer::try_start(temp_dir.path())?;
 
     let create_url = format!("{}/v0/pools", server.base_url);
     let create_body = r#"{"pool":"/tmp/evil","size_bytes":1024}"#;
@@ -524,7 +422,7 @@ fn remote_rejects_path_pool_names() -> TestResult<()> {
 #[test]
 fn remote_list_delete_and_info() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start(temp_dir.path())?;
+    let server = TestServer::try_start(temp_dir.path())?;
     let client = server.client()?;
     let pool_ref = PoolRef::name("info");
 
@@ -553,7 +451,7 @@ fn remote_list_delete_and_info() -> TestResult<()> {
 fn remote_corrupt_errors() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let pool_dir = temp_dir.path();
-    let server = TestServer::start(pool_dir)?;
+    let server = TestServer::try_start(pool_dir)?;
     let client = server.client()?;
 
     let corrupt_path = pool_dir.join("bad.plasmite");
@@ -569,7 +467,7 @@ fn remote_corrupt_errors() -> TestResult<()> {
 #[test]
 fn remote_tail_respects_limits_and_timeouts() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start(temp_dir.path())?;
+    let server = TestServer::try_start(temp_dir.path())?;
     let client = server.client()?;
     let pool_ref = PoolRef::name("tail-limits");
 
@@ -611,7 +509,7 @@ fn remote_tail_respects_limits_and_timeouts() -> TestResult<()> {
 #[test]
 fn remote_tail_filters_by_tags() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start(temp_dir.path())?;
+    let server = TestServer::try_start(temp_dir.path())?;
     let client = server.client()?;
     let pool_ref = PoolRef::name("tail-tags");
 
@@ -645,7 +543,7 @@ fn remote_tail_filters_by_tags() -> TestResult<()> {
 #[test]
 fn remote_tail_filters_by_tags_with_commas() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start(temp_dir.path())?;
+    let server = TestServer::try_start(temp_dir.path())?;
     let client = server.client()?;
     let pool_ref = PoolRef::name("tail-tags-commas");
 
@@ -679,7 +577,7 @@ fn remote_tail_filters_by_tags_with_commas() -> TestResult<()> {
 #[test]
 fn remote_ui_routes_serve_single_page_html() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start(temp_dir.path())?;
+    let server = TestServer::try_start(temp_dir.path())?;
 
     let ui = ureq::get(&format!("{}/ui", server.base_url))
         .call()
@@ -709,7 +607,7 @@ fn remote_ui_routes_serve_single_page_html() -> TestResult<()> {
 #[test]
 fn remote_ui_events_stream_sends_sse_and_requires_auth() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start_with_token(temp_dir.path(), Some("secret"))?;
+    let server = TestServer::try_start_with_token(temp_dir.path(), Some("secret"))?;
     let client = server.client_with_token()?;
     let pool_ref = PoolRef::name("ui-events");
 
@@ -748,7 +646,7 @@ fn remote_ui_events_stream_sends_sse_and_requires_auth() -> TestResult<()> {
 fn remote_ui_routes_emit_cors_headers_for_allowed_origin() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let origin = "https://demo.wratify.ai";
-    let server = TestServer::start_with_cors(temp_dir.path(), &[origin])?;
+    let server = TestServer::try_start_with_cors(temp_dir.path(), &[origin])?;
     let client = server.client()?;
     let pool_ref = PoolRef::name("cors-allowed");
 
@@ -803,7 +701,7 @@ fn remote_ui_routes_reject_disallowed_preflight_origin() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let allowed_origin = "https://demo.wratify.ai";
     let disallowed_origin = "https://evil.example";
-    let server = TestServer::start_with_cors(temp_dir.path(), &[allowed_origin])?;
+    let server = TestServer::try_start_with_cors(temp_dir.path(), &[allowed_origin])?;
 
     let pools_resp = ureq::get(&format!("{}/v0/ui/pools", server.base_url))
         .set("Origin", disallowed_origin)
@@ -848,7 +746,7 @@ fn remote_ui_routes_reject_wildcard_and_other_disallowed_origins() -> TestResult
     let temp_dir = tempfile::tempdir()?;
     let allowed_origin = "https://demo.wratify.ai";
     let test_origins = ["*", "https://evil.example"];
-    let server = TestServer::start_with_cors(temp_dir.path(), &[allowed_origin])?;
+    let server = TestServer::try_start_with_cors(temp_dir.path(), &[allowed_origin])?;
 
     for origin in test_origins {
         let pools_resp = ureq::get(&format!("{}/v0/ui/pools", server.base_url))
@@ -894,7 +792,7 @@ fn remote_read_only_allows_reads_but_rejects_writes() -> TestResult<()> {
     let mut pool = local.open_pool(&pool_ref)?;
     let created = pool.append_json_now(&json!({"n": 1}), &[], Durability::Fast)?;
 
-    let server = TestServer::start_with_access(pool_dir, "read-only")?;
+    let server = TestServer::try_start_with_access(pool_dir, "read-only")?;
     let client = server.client()?;
     let remote_pool = client.open_pool(&pool_ref)?;
     let fetched = remote_pool.get_message(created.seq)?;
@@ -915,7 +813,7 @@ fn remote_write_only_allows_append_but_rejects_reads() -> TestResult<()> {
     let pool_ref = PoolRef::name("wo-demo");
     local.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
 
-    let server = TestServer::start_with_access(pool_dir, "write-only")?;
+    let server = TestServer::try_start_with_access(pool_dir, "write-only")?;
     let append_url = format!("{}/v0/pools/wo-demo/append", server.base_url);
     let append_body = r#"{"data":{"n":1},"tags":[],"durability":"fast"}"#;
     let append = ureq::post(&append_url)
@@ -947,7 +845,7 @@ fn mcp_post(base_url: &str, payload: &Value) -> Result<ureq::Response, Box<ureq:
 #[test]
 fn remote_mcp_http_profile_request_notification_and_get() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start(temp_dir.path())?;
+    let server = TestServer::try_start(temp_dir.path())?;
 
     let initialize = mcp_post(
         &server.base_url,
@@ -1005,7 +903,7 @@ fn remote_mcp_http_profile_request_notification_and_get() -> TestResult<()> {
 #[test]
 fn remote_mcp_tool_flow_via_http_post() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start(temp_dir.path())?;
+    let server = TestServer::try_start(temp_dir.path())?;
 
     let tools_list = mcp_post(
         &server.base_url,
@@ -1147,7 +1045,7 @@ fn remote_mcp_tool_flow_via_http_post() -> TestResult<()> {
 #[test]
 fn remote_mcp_protocol_version_header_validation() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start(temp_dir.path())?;
+    let server = TestServer::try_start(temp_dir.path())?;
     let payload = json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -1180,7 +1078,7 @@ fn remote_mcp_protocol_version_header_validation() -> TestResult<()> {
 #[test]
 fn remote_mcp_origin_header_validation() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::start(temp_dir.path())?;
+    let server = TestServer::try_start(temp_dir.path())?;
     let payload = json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -1214,7 +1112,7 @@ fn remote_mcp_access_mode_restricts_tools() -> TestResult<()> {
     let local = LocalClient::new().with_pool_dir(pool_dir);
     local.create_pool(&PoolRef::name("mcp-access"), PoolOptions::new(1024 * 1024))?;
 
-    let write_only = TestServer::start_with_access(pool_dir, "write-only")?;
+    let write_only = TestServer::try_start_with_access(pool_dir, "write-only")?;
     let read_result = mcp_post(
         &write_only.base_url,
         &json!({
@@ -1255,7 +1153,7 @@ fn remote_mcp_access_mode_restricts_tools() -> TestResult<()> {
     assert_ne!(write_json["result"]["isError"], json!(true));
 
     drop(write_only);
-    let read_only = TestServer::start_with_access(pool_dir, "read-only")?;
+    let read_only = TestServer::try_start_with_access(pool_dir, "read-only")?;
     let denied_write = mcp_post(
         &read_only.base_url,
         &json!({
@@ -1279,44 +1177,4 @@ fn remote_mcp_access_mode_restricts_tools() -> TestResult<()> {
         json!("Permission")
     );
     Ok(())
-}
-
-fn pick_port() -> TestResult<u16> {
-    let listener = TcpListener::bind("127.0.0.1:0")?;
-    let port = listener.local_addr()?.port();
-    drop(listener);
-    Ok(port)
-}
-
-fn wait_for_server(child: &mut Child, addr: SocketAddr) -> TestResult<()> {
-    // Use healthz endpoint - it's not subject to access control and works for all modes
-    let url = format!("http://{addr}/healthz");
-    let start = Instant::now();
-    loop {
-        if let Some(status) = child.try_wait()? {
-            let mut stderr = String::new();
-            if let Some(mut pipe) = child.stderr.take() {
-                let _ = pipe.read_to_string(&mut stderr);
-            }
-            let detail = stderr.trim();
-            return Err(format!(
-                "server exited before ready (status: {status}, stderr: {})",
-                if detail.is_empty() { "<empty>" } else { detail }
-            )
-            .into());
-        }
-        if let Ok(resp) = ureq::get(&url).call() {
-            if resp.status() == 200 {
-                sleep(Duration::from_millis(30));
-                if child.try_wait()?.is_none() {
-                    return Ok(());
-                }
-                continue;
-            }
-        }
-        if start.elapsed() > Duration::from_secs(8) {
-            return Err("server did not start in time".into());
-        }
-        sleep(Duration::from_millis(20));
-    }
 }

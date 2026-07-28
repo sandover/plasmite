@@ -446,3 +446,8 @@
 {"type":"message","ts":"2026-07-28T23:10:31.866279Z","data":{"task_id":"DHQ3IT","kind":"done","text":"Split server preparation, listener ownership, and execution so internal tests can transfer an already-bound ephemeral listener with an explicit shutdown future.\n\nPlain and self-signed TLS lifecycle tests pass; fixed empty TLS task draining so shutdown completes immediately; cargo check passes.","ts":"2026-07-28T23:10:31.866279Z"}}
 {"type":"unclaim","ts":"2026-07-28T23:10:31.866279Z","data":{"id":"DHQ3IT","ts":"2026-07-28T23:10:31.866279Z"}}
 {"type":"state","ts":"2026-07-28T23:10:31.866279Z","data":{"id":"DHQ3IT","state":"done","ts":"2026-07-28T23:10:31.866279Z"}}
+{"type":"claim","ts":"2026-07-28T23:10:31.896252Z","data":{"id":"I3QGTT","agent_id":"codex@mac","ts":"2026-07-28T23:10:31.896252Z"}}
+{"type":"state","ts":"2026-07-28T23:10:31.896252Z","data":{"id":"I3QGTT","state":"doing","ts":"2026-07-28T23:10:31.896252Z"}}
+{"type":"message","ts":"2026-07-28T23:16:25.366492Z","data":{"task_id":"I3QGTT","kind":"done","text":"Replaced duplicate port-probing fixtures with one shared child-process harness using OS-assigned ports and atomic readiness publication; removed global locks, retries, and duplicated readiness code.\n\nBoth full integration suites pass; 20 consecutive remote/TLS/duplex/follow samples passed; server epic gate passed cargo fmt, strict clippy, and just check.","ts":"2026-07-28T23:16:25.366492Z"}}
+{"type":"unclaim","ts":"2026-07-28T23:16:25.366492Z","data":{"id":"I3QGTT","ts":"2026-07-28T23:16:25.366492Z"}}
+{"type":"state","ts":"2026-07-28T23:16:25.366492Z","data":{"id":"I3QGTT","state":"done","ts":"2026-07-28T23:16:25.366492Z"}}

@@ -54,6 +54,7 @@ use plasmite::mcp::{
 
 const UI_INDEX_HTML: &str = include_str!("../ui/index.html");
 const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
+const READY_FILE_ENV: &str = "PLASMITE_SERVE_READY_FILE";
 
 #[derive(Clone, Debug)]
 pub struct ServeConfig {
@@ -197,7 +198,29 @@ pub async fn serve(config: ServeConfig) -> Result<(), Error> {
                 })
                 .with_source(err)
         })?;
+    notify_ready_file(&listener)?;
     serve_with_listener(prepared, listener, shutdown_signal()).await
+}
+
+fn notify_ready_file(listener: &tokio::net::TcpListener) -> Result<(), Error> {
+    let Some(path) = std::env::var_os(READY_FILE_ENV) else {
+        return Ok(());
+    };
+    let addr = listener.local_addr().map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message("failed to inspect bound server address")
+            .with_source(err)
+    })?;
+    let path = PathBuf::from(path);
+    let temporary_path = path.with_extension("tmp");
+    std::fs::write(&temporary_path, addr.to_string())
+        .and_then(|()| std::fs::rename(&temporary_path, &path))
+        .map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_message("failed to publish bound server address")
+                .with_path(path)
+                .with_source(err)
+        })
 }
 
 async fn serve_with_listener(

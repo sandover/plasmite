@@ -6,12 +6,12 @@
 use std::fs::File;
 use std::io::Write;
 use std::io::{BufRead, BufReader, Read};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 use std::{thread::sleep, time::Instant};
@@ -19,6 +19,9 @@ use std::{thread::sleep, time::Instant};
 use fs2::FileExt;
 use rcgen::{Certificate, CertificateParams, SanType};
 use serde_json::{Value, json};
+
+pub mod support;
+use support::server::TestServer as ServeProcess;
 
 fn cmd() -> Command {
     let exe = env!("CARGO_BIN_EXE_plasmite");
@@ -61,81 +64,6 @@ fn shell_quote(arg: &str) -> String {
 
 fn sanitize_tty_text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).replace(['\u{4}', '\u{8}', '\r'], "")
-}
-
-static SERVER_LOCK: Mutex<()> = Mutex::new(());
-
-struct ServeProcess {
-    child: Child,
-    base_url: String,
-    _server_guard: MutexGuard<'static, ()>,
-}
-
-impl ServeProcess {
-    fn start(pool_dir: &std::path::Path) -> Self {
-        Self::start_with_args(pool_dir, &[])
-    }
-
-    fn start_with_args(pool_dir: &std::path::Path, extra_args: &[&str]) -> Self {
-        Self::start_with_args_and_scheme(pool_dir, extra_args, "http")
-    }
-
-    fn start_with_args_and_scheme(
-        pool_dir: &std::path::Path,
-        extra_args: &[&str],
-        scheme: &str,
-    ) -> Self {
-        let guard = SERVER_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        let mut last_error = String::from("server failed to start");
-        for _attempt in 0..5 {
-            let port = pick_port().expect("port");
-            let bind = format!("127.0.0.1:{port}");
-            let base_url = format!("{scheme}://{bind}");
-
-            let mut command = cmd();
-            command.args([
-                "--dir",
-                pool_dir.to_str().unwrap(),
-                "serve",
-                "--bind",
-                &bind,
-            ]);
-            if !extra_args.is_empty() {
-                command.args(extra_args);
-            }
-            let mut child = command
-                .stdout(Stdio::null())
-                .stderr(Stdio::piped())
-                .spawn()
-                .expect("spawn serve");
-
-            match wait_for_server(&mut child, bind.parse().expect("addr"), scheme) {
-                Ok(()) => {
-                    return Self {
-                        child,
-                        base_url,
-                        _server_guard: guard,
-                    };
-                }
-                Err(err) => {
-                    last_error = err.to_string();
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    sleep(Duration::from_millis(30));
-                }
-            }
-        }
-        panic!("server ready: {last_error}");
-    }
-}
-
-impl Drop for ServeProcess {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
 }
 
 fn parse_json(value: &str) -> Value {
@@ -227,71 +155,6 @@ fn assert_actionable_usage_feedback(
         hint.contains(expected_hint_fragment),
         "expected hint to contain '{expected_hint_fragment}', got '{hint}'"
     );
-}
-
-fn pick_port() -> std::io::Result<u16> {
-    let start = Instant::now();
-    loop {
-        match TcpListener::bind("127.0.0.1:0") {
-            Ok(listener) => {
-                let port = listener.local_addr()?.port();
-                drop(listener);
-                return Ok(port);
-            }
-            Err(err)
-                if matches!(
-                    err.kind(),
-                    std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::AddrNotAvailable
-                ) && start.elapsed() <= Duration::from_secs(2) =>
-            {
-                sleep(Duration::from_millis(20));
-            }
-            Err(err) => return Err(err),
-        }
-    }
-}
-
-fn wait_for_server(child: &mut Child, addr: SocketAddr, scheme: &str) -> std::io::Result<()> {
-    let health_url = format!("http://{addr}/healthz");
-    let start = Instant::now();
-    loop {
-        if let Some(status) = child.try_wait()? {
-            let mut stderr = String::new();
-            if let Some(mut pipe) = child.stderr.take() {
-                let _ = pipe.read_to_string(&mut stderr);
-            }
-            let detail = stderr.trim();
-            let message = format!(
-                "server exited before ready (status: {status}, stderr: {})",
-                if detail.is_empty() { "<empty>" } else { detail }
-            );
-            return Err(std::io::Error::other(message));
-        }
-        let listener_ready = if scheme == "http" {
-            ureq::get(&health_url)
-                .call()
-                .is_ok_and(|response| response.status() == 200)
-        } else {
-            TcpStream::connect(addr).is_ok()
-        };
-        if listener_ready {
-            // The port is selected before the server starts, so another process
-            // can briefly claim it. Give our child time to report a bind failure
-            // before accepting the healthy listener as ours.
-            sleep(Duration::from_millis(30));
-            if child.try_wait()?.is_none() {
-                return Ok(());
-            }
-            continue;
-        }
-        if start.elapsed() > Duration::from_secs(8) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "server did not start in time",
-            ));
-        }
-        sleep(Duration::from_millis(20));
-    }
 }
 
 #[test]
