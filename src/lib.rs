@@ -6,6 +6,7 @@
 mod abi;
 pub mod api;
 mod core;
+mod interface_wire;
 pub mod mcp;
 pub mod notice;
 mod pool_paths;

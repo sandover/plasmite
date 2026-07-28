@@ -27,6 +27,7 @@ use url::Url;
 mod color_json;
 mod command_dispatch;
 mod ingest;
+mod interface_wire;
 mod jq_filter;
 mod mcp_stdio;
 mod pool_info_json;
