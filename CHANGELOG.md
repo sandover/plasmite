@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-27
+
+### Added
+- MCP agents now receive a concise operating model at initialization, including
+  pool discovery, bounded retention, safe create/feed behavior, and guidance
+  that sequence numbers are optional for ordinary use.
+- MCP tool and resource schemas now describe defaults, bounds, filtering,
+  retry safety, cursor semantics, and access-mode capabilities directly.
+- Added a focused CLI operating guide covering pool references, input and
+  output modes, top-level option placement, errors, and special exits.
+- Added mechanical coverage for the complete public command/help inventory and
+  material command constraints.
+
+### Changed
+- `plasmite_wait` now acts like a live tail when `after_seq` is omitted, with a
+  configurable bounded timeout; cursors remain available for resumable loops.
+- CLI root and command help now provide a compact first workflow, complete
+  navigation, accurate local/remote boundaries, and previously runtime-only
+  constraints without adding another command or documentation framework.
+- MCP listing treats a missing pool directory as an empty installation, and
+  MCP errors provide actionable recovery guidance.
+
+### Fixed
+- Creating an existing pool now returns `AlreadyExists` without truncating the
+  pool or losing retained messages.
+- Invalid pool layouts fail before creating a file.
+- `serve init` rejects parent serve options it would otherwise ignore, `tap`
+  renders its wrapped command as required, and version help matches its
+  terminal-adaptive output.
+
 ## [0.6.1] - 2026-03-03
 
 ### Changed

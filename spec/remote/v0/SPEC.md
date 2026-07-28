@@ -97,7 +97,11 @@ It captures stable wire-level compatibility guarantees only.
 ## Non-Contract Surface
 
 Routes outside the stable endpoint set above are not part of the remote v0 compatibility surface.
-Examples: `/healthz`, `/ui`, `/v0/ui/...`.
+Examples: `/healthz`, `/ui`, `/v0/ui/...`, `/mcp`.
+
+`/mcp` is experimental and not covered by the v0 stability contract. Its
+current transport and security behavior is documented in
+`docs/record/serving.md`.
 
 ## References
 

@@ -434,7 +434,34 @@ A built-in web UI is available at `https://server:9700/ui`.
 
 ## MCP Agent Access
 
-Plasmite can also be used as an MCP server for agent harnesses.
+Plasmite can also be used as an MCP server for agent harnesses. A remote MCP
+client does not need the Plasmite CLI installed.
+
+At initialization, the server explains the core model:
+
+- a pool is a named, persistent, fixed-size stream of JSON messages;
+- feeding appends a message; it never updates an existing message;
+- pools are ring buffers, so old messages are overwritten as capacity fills;
+- messages contain `data`, optional `tags`, time, and an automatic sequence
+  number that most users can ignore;
+- `plasmite_pool_list` is the normal first tool when the target pool is
+  unknown;
+- `plasmite_read` inspects recent or historical messages, while
+  `plasmite_wait` waits once for future messages.
+
+Tool discovery reflects the server's access mode, so a read-only or write-only
+server exposes only the operations the agent can actually call. Existing pools
+also appear as MCP resources; reading one returns up to the latest 20 messages.
+Tag filters require every specified tag. MCP does not currently expose jq
+`where` filtering.
+
+`plasmite_feed` is an append, not an upsert. If its transport fails after an
+ambiguous response, retrying can append a duplicate; use an application-level
+stable identifier when retries must be safe.
+
+Creating a pool that already exists returns `AlreadyExists` without changing
+the pool or its messages. Use the existing pool as-is unless the task explicitly
+requires discarding it.
 
 ### Local MCP server (stdio)
 
@@ -468,13 +495,16 @@ Remote MCP uses the same auth/TLS posture as `plasmite serve`:
 
 ### Waiting and polling
 
-MCP tools are request/response, so polling is the v1 pattern:
+MCP tools are request/response, so each wait returns one batch or times out.
 
 For tail-like use, call `plasmite_wait` with a pool and no `after_seq`. It
 snapshots the pool's current end and waits only for messages appended
-afterward.
+afterward. This cursor-free form is for starting a wait. In a repeated wait
+loop, pass each result's `next_after_seq` into the next call as `after_seq`;
+otherwise messages appended between calls can be skipped.
 
-For resumable polling:
+Sequence numbers are automatic metadata, not a normal prerequisite. For
+advanced resumable polling:
 
 1. Call `plasmite_read` with `pool` and optional filters.
 2. Save `next_after_seq` from the result.

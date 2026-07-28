@@ -55,7 +55,10 @@ impl PoolHeader {
             .ok_or_else(|| Error::new(ErrorKind::Usage).with_message("index capacity too large"))?;
         if file_size <= ring_offset {
             return Err(Error::new(ErrorKind::Usage)
-                .with_message("file_size must exceed header and index size"));
+                .with_message("file_size must exceed header and index size")
+                .with_hint(format!(
+                    "Choose a file size greater than {ring_offset} bytes."
+                )));
         }
         let ring_size = file_size - ring_offset;
         Ok(Self {
@@ -416,6 +419,8 @@ pub struct Pool {
 impl Pool {
     pub fn create(path: impl AsRef<Path>, options: PoolOptions) -> Result<Self, Error> {
         let path = path.as_ref().to_path_buf();
+        let index_capacity = options.resolved_index_capacity();
+        let header = PoolHeader::new(options.file_size, index_capacity)?;
 
         // Creating a pool is a mutating operation; ensure the parent directory exists so
         // API/binding users don't need to `mkdir -p` for common first-run flows.
@@ -437,8 +442,7 @@ impl Pool {
         }
 
         let mut file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .read(true)
             .write(true)
             .open(&path)
@@ -446,13 +450,19 @@ impl Pool {
                 let kind = map_io_error_kind(&err);
                 let message = match kind {
                     ErrorKind::NotFound => "parent directory not found",
+                    ErrorKind::AlreadyExists => "pool already exists",
                     ErrorKind::Permission => "failed to create pool file (permission denied)",
                     _ => "failed to create pool file",
                 };
-                Error::new(kind)
+                let error = Error::new(kind)
                     .with_message(message)
                     .with_path(&path)
-                    .with_source(err)
+                    .with_source(err);
+                if kind == ErrorKind::AlreadyExists {
+                    error.with_hint("Choose a different name or delete the existing pool first.")
+                } else {
+                    error
+                }
             })?;
 
         file.set_len(options.file_size).map_err(|err| {
@@ -463,8 +473,6 @@ impl Pool {
                 .with_source(err)
         })?;
 
-        let index_capacity = options.resolved_index_capacity();
-        let header = PoolHeader::new(options.file_size, index_capacity)?;
         write_header(&mut file, &header, &path)?;
 
         let mmap = unsafe {
@@ -928,6 +936,7 @@ fn lock_error_kind(err: &io::Error) -> ErrorKind {
 fn map_io_error_kind(err: &io::Error) -> ErrorKind {
     match err.kind() {
         io::ErrorKind::NotFound => ErrorKind::NotFound,
+        io::ErrorKind::AlreadyExists => ErrorKind::AlreadyExists,
         io::ErrorKind::PermissionDenied => ErrorKind::Permission,
         _ => ErrorKind::Io,
     }
@@ -1185,6 +1194,43 @@ mod tests {
 
         let reopened = Pool::open(&path).expect("open pool");
         assert_eq!(reopened.header().file_size, 1024 * 1024);
+    }
+
+    #[test]
+    fn create_existing_pool_returns_already_exists_without_truncating() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool =
+            Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create original pool");
+        pool.append(b"preserve-me").expect("append");
+        drop(pool);
+
+        let err = match Pool::create(&path, PoolOptions::new(2 * 1024 * 1024)) {
+            Ok(_) => panic!("existing pool must not be replaced"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), ErrorKind::AlreadyExists);
+        assert!(err.hint().is_some());
+
+        let reopened = Pool::open(&path).expect("reopen original pool");
+        assert_eq!(
+            reopened.get(1).expect("original message").payload,
+            b"preserve-me"
+        );
+        assert_eq!(reopened.header().file_size, 1024 * 1024);
+    }
+
+    #[test]
+    fn invalid_layout_does_not_create_pool_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+
+        let err = match Pool::create(&path, PoolOptions::new(1024)) {
+            Ok(_) => panic!("invalid layout must fail"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), ErrorKind::Usage);
+        assert!(!path.exists());
     }
 
     #[test]

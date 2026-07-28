@@ -92,12 +92,16 @@ impl LocalClient {
 
     pub fn list_pools(&self) -> ApiResult<Vec<PoolInfo>> {
         let mut pools = Vec::new();
-        let entries = std::fs::read_dir(&self.pool_dir).map_err(|err| {
-            Error::new(map_io_error_kind(&err))
-                .with_message("failed to read pool directory")
-                .with_path(&self.pool_dir)
-                .with_source(err)
-        })?;
+        let entries = match std::fs::read_dir(&self.pool_dir) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(pools),
+            Err(err) => {
+                return Err(Error::new(map_io_error_kind(&err))
+                    .with_message("failed to read pool directory")
+                    .with_path(&self.pool_dir)
+                    .with_source(err));
+            }
+        };
 
         for entry in entries {
             let entry = entry.map_err(|err| {
@@ -224,6 +228,16 @@ mod tests {
     fn local_client_defaults_pool_dir() {
         let client = LocalClient::new();
         assert!(client.pool_dir().to_string_lossy().contains(".plasmite"));
+    }
+
+    #[test]
+    fn list_pools_returns_empty_when_directory_does_not_exist() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pool_dir = temp.path().join("missing");
+        let client = LocalClient::new().with_pool_dir(&pool_dir);
+
+        assert_eq!(client.list_pools().expect("list pools").len(), 0);
+        assert!(!pool_dir.exists());
     }
 
     #[test]

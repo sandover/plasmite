@@ -1,5 +1,9 @@
 # Proposal: Built-in MCP Server
 
+> Historical proposal. The implemented experimental MCP surface has evolved
+> beyond this original design. See `docs/record/serving.md`,
+> `docs/cookbook.md#mcp-agent-access`, and `src/mcp.rs` for current behavior.
+
 ## Summary
 
 Add a built-in [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server to Plasmite, exposing pool operations as MCP tools. Two entry points: `plasmite mcp` for local stdio transport and a `/mcp` endpoint on the existing `plasmite serve` HTTP server.

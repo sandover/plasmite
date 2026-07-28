@@ -159,8 +159,19 @@ Security and policy posture:
   destructive. Clients may use these hints when deciding whether a tool call
   needs approval.
 - Tool definitions include JSON output schemas for both successful structured
-  results and structured tool errors. Initialization instructions summarize
-  read/wait cursor usage and retry safety.
+  results and structured tool errors. Initialization instructions explain the
+  pool/message model, bounded retention, safe first action, ordinary read/wait
+  behavior, advanced cursor usage, and feed retry safety.
+- Sequence numbers are automatic metadata. Ordinary MCP list, feed, read, and
+  wait workflows do not require callers to provide or manage them. Exact fetch
+  and resumable delivery expose sequence numbers as advanced controls.
+- Creating an existing pool returns `AlreadyExists` without changing it; MCP
+  guidance directs callers to use the preserved pool as-is.
+- MCP tag filters require all specified tags. jq `where` filtering is not
+  advertised because it is not implemented on the MCP surface.
+- MCP pool resources describe capacity and recent-message behavior without
+  exposing transient sequence bounds. Reading a pool resource returns up to the
+  latest 20 retained messages.
 - `plasmite_wait` waits up to `timeout_ms` (default 10 seconds, maximum 60
   seconds). Without `after_seq`, it snapshots the pool's current end and waits
   only for later messages, like a live tail. With `after_seq`, it first catches
@@ -182,8 +193,11 @@ Configurable via flags:
 | Flag | Default | Purpose |
 |---|---|---|
 | `--max-body-bytes` | 1 MB | Maximum request body size |
-| `--max-tail-timeout-ms` | 30 s | Maximum tail stream timeout |
+| `--max-tail-timeout-ms` | 30 s | Maximum HTTP tail-stream timeout |
 | `--max-tail-concurrency` | 64 | Maximum concurrent tail streams and MCP waits |
+
+MCP waits have their own fixed maximum of 60 seconds; they share the concurrency
+budget but not `--max-tail-timeout-ms`.
 
 ## Reverse proxy
 
