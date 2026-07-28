@@ -39,6 +39,7 @@ use tower_service::Service;
 use tracing_subscriber::EnvFilter;
 use url::Url;
 
+use crate::interface_wire::MessageWire;
 use crate::pool_info_json::pool_info_json;
 use plasmite::api::{
     Durability, Error, ErrorKind, LocalClient, PoolApiExt, PoolOptions, PoolRef, TailOptions, lite3,
@@ -1464,12 +1465,13 @@ fn pool_ref_from_request(pool: &str) -> Result<PoolRef, Error> {
 }
 
 fn message_json(message: &plasmite::api::Message) -> serde_json::Value {
-    json!({
-        "seq": message.seq,
-        "time": message.time.clone(),
-        "meta": { "tags": message.meta.tags.clone() },
-        "data": message.data.clone(),
-    })
+    serde_json::to_value(MessageWire::new(
+        message.seq,
+        message.time.clone(),
+        message.meta.tags.clone(),
+        message.data.clone(),
+    ))
+    .expect("message wire data is serializable")
 }
 
 fn normalize_tags(raw: Vec<String>) -> Vec<String> {

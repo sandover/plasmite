@@ -12,6 +12,7 @@ use crate::core::pool::{
     AppendOptions, Bounds, Durability, PoolAgeMetrics, PoolInfo, PoolMetrics, PoolOptions,
     PoolUtilization,
 };
+use crate::interface_wire::{MessageWire, PoolInfoWire, PoolMetricsWire};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -110,17 +111,17 @@ struct ResolvedPool {
 
 #[derive(Deserialize)]
 struct PoolEnvelope {
-    pool: RemotePoolInfo,
+    pool: PoolInfoWire,
 }
 
 #[derive(Deserialize)]
 struct PoolsEnvelope {
-    pools: Vec<RemotePoolInfo>,
+    pools: Vec<PoolInfoWire>,
 }
 
 #[derive(Deserialize)]
 struct MessageEnvelope {
-    message: RemoteMessage,
+    message: MessageWire,
 }
 
 #[derive(Deserialize)]
@@ -131,67 +132,6 @@ struct Lite3AppendEnvelope {
 #[derive(Deserialize)]
 struct Lite3AppendMessage {
     seq: u64,
-}
-
-#[derive(Deserialize)]
-struct RemoteMessage {
-    seq: u64,
-    time: String,
-    meta: RemoteMeta,
-    data: Value,
-}
-
-#[derive(Deserialize)]
-struct RemoteMeta {
-    tags: Vec<String>,
-}
-
-#[derive(Deserialize)]
-struct RemotePoolInfo {
-    name: Option<String>,
-    path: String,
-    file_size: u64,
-    #[serde(default)]
-    index_offset: u64,
-    #[serde(default)]
-    index_capacity: u32,
-    #[serde(default)]
-    index_size_bytes: u64,
-    ring_offset: u64,
-    ring_size: u64,
-    #[serde(default)]
-    bounds: RemoteBounds,
-    #[serde(default)]
-    metrics: Option<RemotePoolMetrics>,
-}
-
-#[derive(Deserialize, Default)]
-struct RemoteBounds {
-    oldest: Option<u64>,
-    newest: Option<u64>,
-}
-
-#[derive(Deserialize)]
-struct RemotePoolMetrics {
-    message_count: u64,
-    seq_span: u64,
-    utilization: RemotePoolUtilization,
-    age: RemotePoolAgeMetrics,
-}
-
-#[derive(Deserialize)]
-struct RemotePoolUtilization {
-    used_bytes: u64,
-    free_bytes: u64,
-    used_percent: f64,
-}
-
-#[derive(Deserialize)]
-struct RemotePoolAgeMetrics {
-    oldest_time: Option<String>,
-    newest_time: Option<String>,
-    oldest_age_ms: Option<u64>,
-    newest_age_ms: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -677,7 +617,7 @@ impl RemoteTail {
             if line.trim().is_empty() {
                 continue;
             }
-            let message: RemoteMessage = serde_json::from_str(&line).map_err(|err| {
+            let message: MessageWire = serde_json::from_str(&line).map_err(|err| {
                 Error::new(ErrorKind::Internal)
                     .with_message("invalid tail message json")
                     .with_source(err)
@@ -904,7 +844,7 @@ fn error_kind_from_status(status: u16) -> ErrorKind {
     }
 }
 
-fn pool_info_from_remote(pool_ref: &str, pool: RemotePoolInfo) -> PoolInfo {
+fn pool_info_from_remote(pool_ref: &str, pool: PoolInfoWire) -> PoolInfo {
     let path = if pool.path.is_empty() {
         PathBuf::from(pool_ref)
     } else {
@@ -926,7 +866,7 @@ fn pool_info_from_remote(pool_ref: &str, pool: RemotePoolInfo) -> PoolInfo {
     }
 }
 
-fn pool_metrics_from_remote(metrics: RemotePoolMetrics) -> PoolMetrics {
+fn pool_metrics_from_remote(metrics: PoolMetricsWire) -> PoolMetrics {
     let used_percent_hundredths = if metrics.utilization.used_percent.is_finite() {
         let rounded = (metrics.utilization.used_percent * 100.0).round();
         rounded.clamp(0.0, 10_000.0) as u64
@@ -950,7 +890,7 @@ fn pool_metrics_from_remote(metrics: RemotePoolMetrics) -> PoolMetrics {
     }
 }
 
-fn message_from_remote(remote: RemoteMessage) -> Message {
+fn message_from_remote(remote: MessageWire) -> Message {
     Message {
         seq: remote.seq,
         time: remote.time,

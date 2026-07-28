@@ -37,6 +37,7 @@ mod serve_init;
 
 use color_json::colorize_json;
 use ingest::{ErrorPolicy, IngestConfig, IngestFailure, IngestMode, IngestOutcome, ingest};
+use interface_wire::MessageWire;
 use jq_filter::{JqFilter, compile_filters, matches_all};
 use plasmite::api::{
     AppendOptions, Cursor, CursorResult, Durability, Error, ErrorKind, FrameRef, Lite3DocRef,
@@ -3604,24 +3605,34 @@ fn feed_receipt_from_message(message: &plasmite::api::Message) -> Value {
 }
 
 fn message_to_json(message: &plasmite::api::Message) -> Value {
-    json!({
-        "seq": message.seq,
-        "time": message.time,
-        "meta": {
-            "tags": message.meta.tags,
-        },
-        "data": message.data,
-    })
+    serde_json::to_value(MessageWire::new(
+        message.seq,
+        message.time.clone(),
+        message.meta.tags.clone(),
+        message.data.clone(),
+    ))
+    .expect("message wire data is serializable")
 }
 
 fn message_from_frame(frame: &FrameRef<'_>) -> Result<Value, Error> {
     let (meta, data) = decode_payload(frame.payload)?;
-    Ok(json!({
-        "seq": frame.seq,
-        "time": format_ts(frame.timestamp_ns)?,
-        "meta": meta,
-        "data": data,
-    }))
+    let tags = serde_json::from_value(
+        meta.get("tags")
+            .cloned()
+            .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("missing meta.tags"))?,
+    )
+    .map_err(|err| {
+        Error::new(ErrorKind::Corrupt)
+            .with_message("meta.tags is not an array of strings")
+            .with_source(err)
+    })?;
+    Ok(serde_json::to_value(MessageWire::new(
+        frame.seq,
+        format_ts(frame.timestamp_ns)?,
+        tags,
+        data,
+    ))
+    .expect("message wire data is serializable"))
 }
 
 fn output_value(message: Value, data_only: bool) -> Value {

@@ -13,6 +13,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::api::{
     Durability, Error, ErrorKind, LocalClient, PoolApiExt, PoolInfo, PoolOptions, PoolRef,
 };
+use crate::interface_wire::{
+    BoundsWire, MessageWire, PoolAgeWire, PoolInfoWire, PoolMetricsWire, PoolUtilizationWire,
+};
 
 const JSON_RPC_VERSION: &str = "2.0";
 const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
@@ -1474,59 +1477,46 @@ fn pool_name_from_path(path: &Path) -> String {
 }
 
 fn pool_info_json_value(pool_ref: &str, info: &PoolInfo) -> Value {
-    let mut map = Map::new();
-    map.insert("name".to_string(), json!(pool_ref));
-    map.insert("path".to_string(), json!(info.path.display().to_string()));
-    map.insert("file_size".to_string(), json!(info.file_size));
-    map.insert("index_offset".to_string(), json!(info.index_offset));
-    map.insert("index_capacity".to_string(), json!(info.index_capacity));
-    map.insert("index_size_bytes".to_string(), json!(info.index_size_bytes));
-    map.insert("ring_offset".to_string(), json!(info.ring_offset));
-    map.insert("ring_size".to_string(), json!(info.ring_size));
-    map.insert("bounds".to_string(), pool_bounds_json_value(info));
-    if let Some(metrics) = &info.metrics {
-        map.insert(
-            "metrics".to_string(),
-            json!({
-                "message_count": metrics.message_count,
-                "seq_span": metrics.seq_span,
-                "utilization": {
-                    "used_bytes": metrics.utilization.used_bytes,
-                    "free_bytes": metrics.utilization.free_bytes,
-                    "used_percent": (metrics.utilization.used_percent_hundredths as f64) / 100.0
-                },
-                "age": {
-                    "oldest_time": metrics.age.oldest_time,
-                    "newest_time": metrics.age.newest_time,
-                    "oldest_age_ms": metrics.age.oldest_age_ms,
-                    "newest_age_ms": metrics.age.newest_age_ms
-                }
-            }),
-        );
-    }
-    Value::Object(map)
-}
-
-fn pool_bounds_json_value(info: &PoolInfo) -> Value {
-    let mut map = Map::new();
-    if let Some(oldest) = info.bounds.oldest_seq {
-        map.insert("oldest".to_string(), json!(oldest));
-    }
-    if let Some(newest) = info.bounds.newest_seq {
-        map.insert("newest".to_string(), json!(newest));
-    }
-    Value::Object(map)
+    let wire = PoolInfoWire {
+        name: Some(pool_ref.to_string()),
+        path: info.path.display().to_string(),
+        file_size: info.file_size,
+        index_offset: info.index_offset,
+        index_capacity: info.index_capacity,
+        index_size_bytes: info.index_size_bytes,
+        ring_offset: info.ring_offset,
+        ring_size: info.ring_size,
+        bounds: BoundsWire {
+            oldest: info.bounds.oldest_seq,
+            newest: info.bounds.newest_seq,
+        },
+        metrics: info.metrics.as_ref().map(|metrics| PoolMetricsWire {
+            message_count: metrics.message_count,
+            seq_span: metrics.seq_span,
+            utilization: PoolUtilizationWire {
+                used_bytes: metrics.utilization.used_bytes,
+                free_bytes: metrics.utilization.free_bytes,
+                used_percent: (metrics.utilization.used_percent_hundredths as f64) / 100.0,
+            },
+            age: PoolAgeWire {
+                oldest_time: metrics.age.oldest_time.clone(),
+                newest_time: metrics.age.newest_time.clone(),
+                oldest_age_ms: metrics.age.oldest_age_ms,
+                newest_age_ms: metrics.age.newest_age_ms,
+            },
+        }),
+    };
+    serde_json::to_value(wire).expect("pool-info wire data is serializable")
 }
 
 fn message_json_value(message: &crate::api::Message) -> Value {
-    json!({
-        "seq": message.seq,
-        "time": message.time.clone(),
-        "meta": {
-            "tags": message.meta.tags.clone(),
-        },
-        "data": message.data.clone(),
-    })
+    serde_json::to_value(MessageWire::new(
+        message.seq,
+        message.time.clone(),
+        message.meta.tags.clone(),
+        message.data.clone(),
+    ))
+    .expect("message wire data is serializable")
 }
 
 struct ReadBatch {

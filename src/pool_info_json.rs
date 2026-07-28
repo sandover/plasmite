@@ -4,51 +4,57 @@
 //! Invariants: Stable key names/order for v0 pool info payloads.
 //! Invariants: Metrics block is emitted only when source metrics exist.
 
+use crate::interface_wire::{
+    BoundsWire, PoolAgeWire, PoolInfoWire, PoolMetricsWire, PoolUtilizationWire,
+};
 use plasmite::api::{Bounds, PoolInfo, PoolMetrics};
-use serde_json::{Map, Value, json};
+use serde_json::Value;
 
 pub(crate) fn bounds_json(bounds: Bounds) -> Value {
-    let mut map = Map::new();
-    if let Some(oldest) = bounds.oldest_seq {
-        map.insert("oldest".to_string(), json!(oldest));
-    }
-    if let Some(newest) = bounds.newest_seq {
-        map.insert("newest".to_string(), json!(newest));
-    }
-    Value::Object(map)
+    serde_json::to_value(bounds_wire(bounds)).expect("bounds wire data is serializable")
 }
 
 pub(crate) fn pool_info_json(pool_ref: &str, info: &PoolInfo) -> Value {
-    let mut map = Map::new();
-    map.insert("name".to_string(), json!(pool_ref));
-    map.insert("path".to_string(), json!(info.path.display().to_string()));
-    map.insert("file_size".to_string(), json!(info.file_size));
-    map.insert("index_offset".to_string(), json!(info.index_offset));
-    map.insert("index_capacity".to_string(), json!(info.index_capacity));
-    map.insert("index_size_bytes".to_string(), json!(info.index_size_bytes));
-    map.insert("ring_offset".to_string(), json!(info.ring_offset));
-    map.insert("ring_size".to_string(), json!(info.ring_size));
-    map.insert("bounds".to_string(), bounds_json(info.bounds));
-    if let Some(metrics) = &info.metrics {
-        map.insert("metrics".to_string(), pool_metrics_json(metrics));
-    }
-    Value::Object(map)
+    serde_json::to_value(pool_info_wire(pool_ref, info))
+        .expect("pool-info wire data is serializable")
 }
 
-fn pool_metrics_json(metrics: &PoolMetrics) -> Value {
-    json!({
-        "message_count": metrics.message_count,
-        "seq_span": metrics.seq_span,
-        "utilization": {
-            "used_bytes": metrics.utilization.used_bytes,
-            "free_bytes": metrics.utilization.free_bytes,
-            "used_percent": (metrics.utilization.used_percent_hundredths as f64) / 100.0,
+fn pool_info_wire(pool_ref: &str, info: &PoolInfo) -> PoolInfoWire {
+    PoolInfoWire {
+        name: Some(pool_ref.to_string()),
+        path: info.path.display().to_string(),
+        file_size: info.file_size,
+        index_offset: info.index_offset,
+        index_capacity: info.index_capacity,
+        index_size_bytes: info.index_size_bytes,
+        ring_offset: info.ring_offset,
+        ring_size: info.ring_size,
+        bounds: bounds_wire(info.bounds),
+        metrics: info.metrics.as_ref().map(pool_metrics_wire),
+    }
+}
+
+fn bounds_wire(bounds: Bounds) -> BoundsWire {
+    BoundsWire {
+        oldest: bounds.oldest_seq,
+        newest: bounds.newest_seq,
+    }
+}
+
+fn pool_metrics_wire(metrics: &PoolMetrics) -> PoolMetricsWire {
+    PoolMetricsWire {
+        message_count: metrics.message_count,
+        seq_span: metrics.seq_span,
+        utilization: PoolUtilizationWire {
+            used_bytes: metrics.utilization.used_bytes,
+            free_bytes: metrics.utilization.free_bytes,
+            used_percent: (metrics.utilization.used_percent_hundredths as f64) / 100.0,
         },
-        "age": {
-            "oldest_time": metrics.age.oldest_time,
-            "newest_time": metrics.age.newest_time,
-            "oldest_age_ms": metrics.age.oldest_age_ms,
-            "newest_age_ms": metrics.age.newest_age_ms,
+        age: PoolAgeWire {
+            oldest_time: metrics.age.oldest_time.clone(),
+            newest_time: metrics.age.newest_time.clone(),
+            oldest_age_ms: metrics.age.oldest_age_ms,
+            newest_age_ms: metrics.age.newest_age_ms,
         },
-    })
+    }
 }

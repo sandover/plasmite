@@ -19,6 +19,17 @@ pub(crate) struct MessageMetaWire {
     pub(crate) tags: Vec<String>,
 }
 
+impl MessageWire {
+    pub(crate) fn new(seq: u64, time: String, tags: Vec<String>, data: Value) -> Self {
+        Self {
+            seq,
+            time,
+            meta: MessageMetaWire { tags },
+            data,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct BoundsWire {
     #[serde(skip_serializing_if = "Option::is_none")]

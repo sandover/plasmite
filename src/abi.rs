@@ -785,13 +785,13 @@ fn write_message_buf(
     if out_message.is_null() {
         return Err(Error::new(ErrorKind::Usage).with_message("out_message is null"));
     }
-    let json = serde_json::json!({
-        "seq": message.seq,
-        "time": message.time,
-        "meta": { "tags": message.meta.tags },
-        "data": message.data,
-    });
-    let json_bytes = serde_json::to_vec(&json).map_err(|err| {
+    let wire = crate::interface_wire::MessageWire::new(
+        message.seq,
+        message.time,
+        message.meta.tags,
+        message.data,
+    );
+    let json_bytes = serde_json::to_vec(&wire).map_err(|err| {
         Error::new(ErrorKind::Internal)
             .with_message("failed to serialize message")
             .with_source(err)
