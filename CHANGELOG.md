@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-07-28
+
+### Improved
+
+- Errors and JSON message representations are now consistent across the CLI,
+  Rust API, C ABI, HTTP API, and MCP server.
+- MCP capability discovery now comes from the same authoritative descriptors
+  used to execute tools, preventing advertised and implemented behavior from
+  drifting apart.
+- The HTTP server now runs blocking pool storage work through a bounded
+  executor. When storage capacity is saturated, it returns a structured busy
+  response while health checks and MCP traffic remain responsive.
+- Server startup accepts pre-bound listeners and explicit shutdown signals,
+  enabling race-free ephemeral ports and predictable teardown in integrations.
+
+### Maintenance
+
+- Release builds, packages, delivery checks, and support documentation now
+  share one canonical target manifest.
+- CLI implementation is organized by command family behind small execution
+  boundaries, reducing coupling without introducing a command framework.
+- The 172 CLI integration scenarios are split into focused command-family
+  suites with a shared race-free server harness.
+
 ## [0.7.1] - 2026-07-28
 
 ### Improved
