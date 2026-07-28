@@ -5,6 +5,7 @@
 
 mod context;
 mod doctor;
+mod feed;
 pub(super) mod output;
 mod pool;
 mod result;
@@ -23,6 +24,43 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             doctor::run(doctor::DoctorArgs { pool, all, json }, &context)
         }
         Command::Pool { command } => pool::run(command, &context),
+        Command::Feed {
+            pool,
+            tag,
+            data,
+            file,
+            durability,
+            create,
+            create_size,
+            retry,
+            retry_delay,
+            input,
+            errors,
+            token,
+            token_file,
+            tls_ca,
+            tls_skip_verify,
+        } => feed::run(
+            feed::FeedArgs {
+                pool,
+                tags: tag,
+                data,
+                file,
+                durability,
+                create,
+                create_size,
+                retry,
+                retry_delay,
+                input,
+                errors,
+                token,
+                token_file,
+                tls_ca,
+                tls_skip_verify,
+            },
+            &context,
+        ),
+        Command::Fetch { pool, seq } => feed::fetch(&pool, seq, &context),
         command => crate::command_dispatch::dispatch_command(
             command,
             context.pool_dir().to_path_buf(),
