@@ -8,9 +8,9 @@ on:
         required: true
         type: string
       channels:
-        description: "Comma-separated registry channels for the Ubuntu runner (default: npm,pypi,crates)"
+        description: "Optional comma-separated registry channels; blank derives manifest defaults"
         required: false
-        default: "npm,pypi,crates"
+        default: ""
         type: string
       max_wait_minutes:
         description: "Retry budget in minutes"

@@ -2,7 +2,7 @@
 # Purpose: Update homebrew-tap Formula/plasmite.rb to match a specific release.
 # Key exports: Rewrites version, release URLs, and sha256 values for supported targets.
 # Role: Keep Homebrew distribution aligned with every Plasmite release.
-# Invariants: Requires darwin_amd64, darwin_arm64, and linux_amd64 checksums.
+# Invariants: Requires checksums for every Homebrew target in release/targets.json.
 # Notes: Checksums can come from an existing GitHub release, a release build run ID, or a local sums file.
 
 set -euo pipefail
@@ -87,17 +87,16 @@ load_sha_from_file() {
     exit 1
   fi
 
-  darwin_amd64_sha="$(grep "plasmite_${version}_darwin_amd64.tar.gz" "$file" | awk '{print $1}' | head -n1)"
-  darwin_arm64_sha="$(grep "plasmite_${version}_darwin_arm64.tar.gz" "$file" | awk '{print $1}' | head -n1)"
-  linux_amd64_sha="$(grep "plasmite_${version}_linux_amd64.tar.gz" "$file" | awk '{print $1}' | head -n1)"
-
-  if [[ -z "$darwin_amd64_sha" || -z "$darwin_arm64_sha" || -z "$linux_amd64_sha" ]]; then
-    echo "error: failed to extract required checksums for v${version} from $file" >&2
-    echo "  darwin_amd64: ${darwin_amd64_sha:-<missing>}" >&2
-    echo "  darwin_arm64: ${darwin_arm64_sha:-<missing>}" >&2
-    echo "  linux_amd64: ${linux_amd64_sha:-<missing>}" >&2
-    exit 1
-  fi
+  local platform
+  local sha
+  while IFS= read -r platform; do
+    [[ -n "$platform" ]] || continue
+    sha="$(grep "plasmite_${version}_${platform}.tar.gz" "$file" | awk '{print $1}' | head -n1)"
+    if [[ -z "$sha" ]]; then
+      echo "error: missing checksum for ${platform} in $file" >&2
+      exit 1
+    fi
+  done < <("$root_dir/scripts/release_channel_targets.sh" homebrew official sdk_platform)
 }
 
 if [[ -n "$sha256_file" ]]; then
@@ -120,21 +119,26 @@ else
   verification_sha_file="$tmp_dir/sha256sums.txt"
 fi
 
-export version version_tag darwin_amd64_sha darwin_arm64_sha linux_amd64_sha formula_file
+export version version_tag formula_file
 
 perl -0777 -i.bak -pe '
   s/version "\d+\.\d+\.\d+"/version "$ENV{version}"/g;
   s#/download/v\d+\.\d+\.\d+/#/download/$ENV{version_tag}/#g;
-  s/plasmite_\d+\.\d+\.\d+_darwin_amd64\.tar\.gz/plasmite_$ENV{version}_darwin_amd64.tar.gz/g;
-  s/plasmite_\d+\.\d+\.\d+_darwin_arm64\.tar\.gz/plasmite_$ENV{version}_darwin_arm64.tar.gz/g;
-  s/plasmite_\d+\.\d+\.\d+_linux_amd64\.tar\.gz/plasmite_$ENV{version}_linux_amd64.tar.gz/g;
-  s/PLACEHOLDER_DARWIN_AMD64_SHA256/$ENV{darwin_amd64_sha}/g;
-  s/PLACEHOLDER_DARWIN_ARM64_SHA256/$ENV{darwin_arm64_sha}/g;
-  s/PLACEHOLDER_LINUX_AMD64_SHA256/$ENV{linux_amd64_sha}/g;
-  s#(plasmite_$ENV{version}_darwin_amd64\.tar\.gz"\n\s*sha256 ")([^"]+)#$1$ENV{darwin_amd64_sha}#g;
-  s#(plasmite_$ENV{version}_darwin_arm64\.tar\.gz"\n\s*sha256 ")([^"]+)#$1$ENV{darwin_arm64_sha}#g;
-  s#(plasmite_$ENV{version}_linux_amd64\.tar\.gz"\n\s*sha256 ")([^"]+)#$1$ENV{linux_amd64_sha}#g;
 ' "$formula_file"
+
+while IFS= read -r platform; do
+  [[ -n "$platform" ]] || continue
+  sha="$(grep "plasmite_${version}_${platform}.tar.gz" "$verification_sha_file" | awk '{print $1}' | head -n1)"
+  placeholder="$(printf '%s' "$platform" | tr '[:lower:]' '[:upper:]')"
+  export platform sha placeholder
+  perl -0777 -i.bak -pe '
+    my $platform = quotemeta($ENV{platform});
+    my $placeholder = quotemeta("PLACEHOLDER_" . $ENV{placeholder} . "_SHA256");
+    s/plasmite_\d+\.\d+\.\d+_${platform}\.tar\.gz/plasmite_$ENV{version}_$ENV{platform}.tar.gz/g;
+    s/$placeholder/$ENV{sha}/g;
+    s#(plasmite_$ENV{version}_${platform}\.tar\.gz"\n\s*sha256 ")([^"]+)#$1$ENV{sha}#g;
+  ' "$formula_file"
+done < <("$root_dir/scripts/release_channel_targets.sh" homebrew official sdk_platform)
 
 rm -f "${formula_file}.bak"
 

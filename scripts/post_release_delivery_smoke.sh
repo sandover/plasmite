@@ -14,8 +14,9 @@ Validate post-release install + minimal runtime behavior across delivery channel
 
 Options:
   --version <X.Y.Z>            Required release version (without leading v)
-  --channels <csv>             Channels to check (default: npm,pypi,crates)
+  --channels <csv>             Channels to check (default: manifest registry channels + crates)
   --max-wait-minutes <n>       Retry budget for propagation checks (default: 20)
+  --list-channels              Print the derived default channels without installing
   -h, --help                   Show this help
 
 Channels:
@@ -29,8 +30,9 @@ USAGE
 }
 
 VERSION=""
-CHANNELS="npm,pypi,crates"
+CHANNELS=""
 MAX_WAIT_MINUTES=20
+LIST_CHANNELS=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -46,6 +48,10 @@ while [[ $# -gt 0 ]]; do
       MAX_WAIT_MINUTES="${2:-}"
       shift 2
       ;;
+    --list-channels)
+      LIST_CHANNELS=true
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -57,6 +63,26 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -z "$CHANNELS" ]]; then
+  manifest_channels="$(
+    jq -r '
+      [.targets[].channels
+       | to_entries[]
+       | select(.value == "official")
+       | .key
+       | select(. == "npm" or . == "pypi")]
+      | unique
+      | join(",")
+    ' "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/release/targets.json"
+  )"
+  CHANNELS="${manifest_channels},crates"
+fi
+
+if [[ "$LIST_CHANNELS" == true ]]; then
+  printf '%s\n' "$CHANNELS"
+  exit 0
+fi
 
 if [[ -z "$VERSION" ]]; then
   echo "error: --version is required" >&2

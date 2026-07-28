@@ -2,6 +2,12 @@
 
 This document defines what users get from each install channel, supported platforms, and the stable on-disk SDK layout.
 
+Native target identifiers and per-target channel tiers are owned by
+`release/targets.json`. This document explains the support policy in human
+terms and intentionally repeats important identifiers so readers do not need to
+inspect build data. `scripts/validate_distribution_targets.sh` fails when those
+lists drift apart.
+
 ## Support Tiers
 
 A platform/channel combination is `official` only when all of these are true:

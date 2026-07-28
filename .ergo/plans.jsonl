@@ -426,3 +426,8 @@
 {"type":"message","ts":"2026-07-28T22:58:16.191421Z","data":{"task_id":"M6UI2D","kind":"done","text":"Release workflow now renders its build matrix from the canonical manifest; build, SDK, Node, and Node smoke packaging resolve target metadata through shared lookups. Deterministic tests cover an added non-publishing target. Verified scripts, workflow YAML, matrix output, and a real Apple Silicon release SDK build/package/smoke without publishing.","ts":"2026-07-28T22:58:16.191421Z"}}
 {"type":"unclaim","ts":"2026-07-28T22:58:16.191421Z","data":{"id":"M6UI2D","ts":"2026-07-28T22:58:16.191421Z"}}
 {"type":"state","ts":"2026-07-28T22:58:16.191421Z","data":{"id":"M6UI2D","state":"done","ts":"2026-07-28T22:58:16.191421Z"}}
+{"type":"claim","ts":"2026-07-28T22:58:25.341754Z","data":{"id":"52IX66","agent_id":"codex@mac","ts":"2026-07-28T22:58:25.341754Z"}}
+{"type":"state","ts":"2026-07-28T22:58:25.341754Z","data":{"id":"52IX66","state":"doing","ts":"2026-07-28T22:58:25.341754Z"}}
+{"type":"message","ts":"2026-07-28T23:00:44.9116Z","data":{"task_id":"52IX66","kind":"done","text":"Made Homebrew target selection, post-release registry defaults, and distribution documentation checks consume release/targets.json. Added network-free Homebrew update/alignment fixtures and a non-mutating channel-list smoke mode. The integrated release-target epic passed cargo fmt, strict Clippy, and just check.","ts":"2026-07-28T23:00:44.9116Z"}}
+{"type":"unclaim","ts":"2026-07-28T23:00:44.9116Z","data":{"id":"52IX66","ts":"2026-07-28T23:00:44.9116Z"}}
+{"type":"state","ts":"2026-07-28T23:00:44.9116Z","data":{"id":"52IX66","state":"done","ts":"2026-07-28T23:00:44.9116Z"}}

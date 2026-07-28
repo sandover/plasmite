@@ -20,6 +20,12 @@ ln -snf "$(pwd)/skills/plasmite-release-manager" "${CODEX_HOME}/skills/plasmite-
 
 If this file and the skill ever disagree, follow the skill and then update this file or the skill to re-align.
 
+Native release target identity is separately owned by `release/targets.json`.
+The build workflow, packaging scripts, Homebrew alignment, and post-release
+channel selection consume that manifest. `docs/record/distribution.md` remains
+the human-authored support policy, with its target identifiers checked against
+the manifest rather than generated from it.
+
 ## Build + Release, in Plain English
 
 Think of a Plasmite release as answering two questions:
