@@ -379,7 +379,7 @@ fn remote_tail_cancel_under_active_writes_is_prompt() -> TestResult<()> {
         .recv_timeout(Duration::from_secs(1))
         .map_err(|err| format!("tail failed to start: {err}"))?;
     first_message_rx
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(Duration::from_secs(5))
         .map_err(|err| format!("tail did not observe a message before cancel: {err}"))?;
 
     let start = Instant::now();

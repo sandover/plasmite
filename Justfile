@@ -30,7 +30,7 @@ check-version-alignment:
 bindings-go-test:
 	cargo build -p plasmite
 	mkdir -p tmp/go-cache tmp/go-tmp
-	cd bindings/go && GOCACHE="$(pwd)/../../tmp/go-cache" GOTMPDIR="$(pwd)/../../tmp/go-tmp" PLASMITE_LIB_DIR="$(pwd)/../../target/debug" PKG_CONFIG="/usr/bin/true" CGO_CFLAGS="-I$(pwd)/../../include" CGO_LDFLAGS="-L$(pwd)/../../target/debug" go test ./...
+	cd bindings/go && GOCACHE="$(pwd)/../../tmp/go-cache" GOTMPDIR="$(pwd)/../../tmp/go-tmp" PLASMITE_LIB_DIR="$(pwd)/../../target/debug" LD_LIBRARY_PATH="$(pwd)/../../target/debug:${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="$(pwd)/../../target/debug:${DYLD_LIBRARY_PATH:-}" PKG_CONFIG="/usr/bin/true" CGO_CFLAGS="-I$(pwd)/../../include" CGO_LDFLAGS="-L$(pwd)/../../target/debug" go test ./...
 
 # Run Go API contract tests without CGO.
 bindings-go-contract-test:
