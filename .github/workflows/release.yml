@@ -22,6 +22,7 @@ jobs:
     outputs:
       tag: ${{ steps.ctx.outputs.tag }}
       version: ${{ steps.ctx.outputs.version }}
+      matrix: ${{ steps.targets.outputs.matrix }}
     steps:
       - id: ctx
         shell: bash
@@ -48,7 +49,22 @@ jobs:
           version="${tag#v}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ctx.outputs.tag }}
+      - id: targets
+        name: Validate and render release targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/validate_release_targets.sh
+          echo "matrix=$(./scripts/render_release_matrix.sh)" >> "$GITHUB_OUTPUT"
+      - name: Record release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.ctx.outputs.tag }}"
+          version="${{ steps.ctx.outputs.version }}"
           mkdir -p .scratch/release-metadata
           cat > .scratch/release-metadata/metadata.json <<META
           {
@@ -108,35 +124,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            sdk_platform: linux_amd64
-            node_platform: linux-x64
-            sdk: true
-            upload_sdist: true
-            upload_wheel: false
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-            sdk_platform: darwin_amd64
-            node_platform: darwin-x64
-            sdk: true
-            upload_sdist: false
-            upload_wheel: true
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            sdk_platform: darwin_arm64
-            node_platform: darwin-arm64
-            sdk: true
-            upload_sdist: false
-            upload_wheel: true
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            sdk_platform: windows_amd64
-            node_platform: win32-x64
-            sdk: false
-            upload_sdist: false
-            upload_wheel: true
+        include: ${{ fromJSON(needs.release-context.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -192,7 +180,7 @@ jobs:
       - name: Package SDK
         if: matrix.sdk
         shell: bash
-        run: ./scripts/package_release_sdk.sh "${{ matrix.target }}" "${{ matrix.sdk_platform }}" "${{ needs.release-context.outputs.version }}"
+        run: ./scripts/package_release_sdk.sh "${{ matrix.target }}" "${{ needs.release-context.outputs.version }}"
       - name: Smoke test packaged SDK
         if: matrix.sdk
         shell: bash
@@ -209,7 +197,7 @@ jobs:
         run: cd bindings/node && npm run build
       - name: Stage node native payload
         shell: bash
-        run: ./scripts/package_node_natives.sh "${{ matrix.node_platform }}" "${{ github.workspace }}/target/${{ matrix.target }}/release" "${{ github.workspace }}/bindings/node/index.node"
+        run: ./scripts/package_node_natives.sh "${{ matrix.target }}" "${{ github.workspace }}/target/${{ matrix.target }}/release" "${{ github.workspace }}/bindings/node/index.node"
       - name: Windows node pack/install smoke
         if: matrix.node_platform == 'win32-x64'
         shell: bash

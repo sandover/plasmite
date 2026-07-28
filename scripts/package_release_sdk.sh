@@ -8,16 +8,21 @@
 
 set -euo pipefail
 
-if [[ $# -ne 3 ]]; then
-  echo "usage: $0 <target-triple> <platform-tag> <version>" >&2
+if [[ $# -ne 2 ]]; then
+  echo "usage: $0 <target-triple> <version>" >&2
   exit 1
 fi
 
 target="$1"
-platform="$2"
-version="$3"
-
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+version="$2"
+platform="$("$root_dir/scripts/release_target_field.sh" "$target" sdk_platform)"
+build_sdk="$("$root_dir/scripts/release_target_field.sh" "$target" build_sdk)"
+if [[ "$build_sdk" != "true" ]]; then
+  echo "error: release target does not produce an SDK archive: $target" >&2
+  exit 1
+fi
+
 release_dir="$root_dir/target/$target/release"
 mkdir -p "$root_dir/.scratch"
 

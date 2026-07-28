@@ -54,7 +54,14 @@ archive_has_member() {
   if [[ ! -f "$NODE_DIR/index.node" ]]; then
     PLASMITE_LIB_DIR="$SDK_DIR/lib" npm run build >/dev/null
   fi
-  "$ROOT/scripts/package_node_natives.sh" "$CURRENT_PLATFORM" "$SDK_DIR" "$NODE_DIR/index.node"
+  current_target="$(jq -r --arg platform "$CURRENT_PLATFORM" '
+    [.targets[] | select(.node_platform == $platform)][0].rust_target // empty
+  ' "$ROOT/release/targets.json")"
+  if [[ -z "$current_target" ]]; then
+    echo "failed to resolve Rust target for Node platform: $CURRENT_PLATFORM" >&2
+    exit 1
+  fi
+  "$ROOT/scripts/package_node_natives.sh" "$current_target" "$SDK_DIR" "$NODE_DIR/index.node"
   PLASMITE_SDK_DIR="$SDK_DIR" PLASMITE_LIB_DIR="$SDK_DIR/lib" npm pack >/dev/null
 )
 

@@ -14,11 +14,11 @@ NODE_DIR="$ROOT/bindings/node"
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/package_node_natives.sh <platform> <sdk_dir> [addon_path]
+  scripts/package_node_natives.sh <target-triple> <sdk_dir> [addon_path]
 
 Examples:
-  scripts/package_node_natives.sh linux-x64 target/release bindings/node/index.node
-  scripts/package_node_natives.sh darwin-arm64 target/aarch64-apple-darwin/release
+  scripts/package_node_natives.sh x86_64-unknown-linux-gnu target/release bindings/node/index.node
+  scripts/package_node_natives.sh aarch64-apple-darwin target/aarch64-apple-darwin/release
 USAGE
 }
 
@@ -27,9 +27,10 @@ if [[ "$#" -lt 2 || "$#" -gt 3 ]]; then
   exit 2
 fi
 
-platform="$1"
+target="$1"
 sdk_dir="$2"
 addon_path="${3:-$NODE_DIR/index.node}"
+platform="$("$ROOT/scripts/release_target_field.sh" "$target" node_platform)"
 
 if [[ ! -d "$sdk_dir" ]]; then
   echo "error: sdk_dir does not exist: $sdk_dir" >&2

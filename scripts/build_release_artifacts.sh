@@ -23,6 +23,9 @@ if [[ $# -lt 1 || $# -gt 2 ]]; then
 fi
 
 target="$1"
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+"$root_dir/scripts/release_target_field.sh" "$target" node_platform >/dev/null
+
 build_static=false
 if [[ $# -eq 2 ]]; then
   if [[ "$2" != "--static" ]]; then

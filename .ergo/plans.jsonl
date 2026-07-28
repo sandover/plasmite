@@ -421,3 +421,8 @@
 {"type":"message","ts":"2026-07-28T22:55:35.306659Z","data":{"task_id":"STIMLJ","kind":"done","text":"Added a documented canonical JSON target manifest for the four current native targets and their SDK, Node, Python, Homebrew, and cargo-binstall capabilities. Added fail-closed validation and malformed-fixture tests for duplicates, missing fields, and unsupported Homebrew combinations.","ts":"2026-07-28T22:55:35.306659Z"}}
 {"type":"unclaim","ts":"2026-07-28T22:55:35.306659Z","data":{"id":"STIMLJ","ts":"2026-07-28T22:55:35.306659Z"}}
 {"type":"state","ts":"2026-07-28T22:55:35.306659Z","data":{"id":"STIMLJ","state":"done","ts":"2026-07-28T22:55:35.306659Z"}}
+{"type":"claim","ts":"2026-07-28T22:55:41.024148Z","data":{"id":"M6UI2D","agent_id":"codex@mac","ts":"2026-07-28T22:55:41.024148Z"}}
+{"type":"state","ts":"2026-07-28T22:55:41.024148Z","data":{"id":"M6UI2D","state":"doing","ts":"2026-07-28T22:55:41.024148Z"}}
+{"type":"message","ts":"2026-07-28T22:58:16.191421Z","data":{"task_id":"M6UI2D","kind":"done","text":"Release workflow now renders its build matrix from the canonical manifest; build, SDK, Node, and Node smoke packaging resolve target metadata through shared lookups. Deterministic tests cover an added non-publishing target. Verified scripts, workflow YAML, matrix output, and a real Apple Silicon release SDK build/package/smoke without publishing.","ts":"2026-07-28T22:58:16.191421Z"}}
+{"type":"unclaim","ts":"2026-07-28T22:58:16.191421Z","data":{"id":"M6UI2D","ts":"2026-07-28T22:58:16.191421Z"}}
+{"type":"state","ts":"2026-07-28T22:58:16.191421Z","data":{"id":"M6UI2D","state":"done","ts":"2026-07-28T22:58:16.191421Z"}}
