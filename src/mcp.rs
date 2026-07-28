@@ -30,18 +30,20 @@ const WAIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const MCP_INSTRUCTIONS: &str = concat!(
     "Plasmite stores JSON messages in named, persistent, fixed-size streams called pools. ",
     "Pools are append-only ring buffers: feeding appends a message, and the oldest messages are ",
-    "overwritten as capacity fills. Use only the tools available under this server's access mode. ",
+    "overwritten as capacity fills. The visible tool list is the server's effective access mode; ",
+    "tools that the server does not permit are omitted. ",
     "When plasmite_pool_list is available and the target pool is unknown, start there; create or ",
     "delete a pool only when the task requires it. If listing is unavailable, use a pool name ",
     "supplied by the task or operator; plasmite_feed with create true can create a missing pool. ",
     "Messages contain data, optional tags, time, and an automatic sequence number; most users can ",
-    "ignore sequence numbers. Use plasmite_read to inspect retained messages and plasmite_wait ",
-    "without after_seq to wait only for future messages. Prefer plasmite_wait over repeated ",
-    "plasmite_read polling when idle. Tag filters require all specified tags. Use after_seq, ",
-    "next_after_seq, and fell_behind for resumable delivery and repeated wait loops. Tool failures ",
-    "set isError and include a structured error_kind. plasmite_feed is non-idempotent, so after an ",
-    "ambiguous transport failure retry only when the payload has an application-level stable ",
-    "identifier."
+    "ignore sequence numbers. Use plasmite_fetch only for exact lookup of one retained sequence ",
+    "number. Use plasmite_read for recent messages, time windows, and resumable ranges. Use ",
+    "plasmite_wait without after_seq to wait only for future messages. Prefer plasmite_wait over ",
+    "repeated plasmite_read polling when idle. Tag filters require all specified tags. Use ",
+    "after_seq, next_after_seq, and fell_behind for resumable delivery and repeated wait loops. ",
+    "Tool failures set isError and include a structured error_kind. plasmite_feed is ",
+    "non-idempotent, so after an ambiguous transport failure retry only when the payload has an ",
+    "application-level stable identifier."
 );
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -259,7 +261,19 @@ fn tool_output_schema(success_schema: Value) -> Value {
                 "description": "Tool failure with a stable error_kind and optional actionable context.",
                 "properties": {
                     "tool": {"type": "string"},
-                    "error_kind": {"type": "string"}
+                    "error_kind": {
+                        "type": "string",
+                        "enum": [
+                            "Internal",
+                            "Usage",
+                            "NotFound",
+                            "AlreadyExists",
+                            "Busy",
+                            "Permission",
+                            "Corrupt",
+                            "Io"
+                        ]
+                    }
                 },
                 "required": ["tool", "error_kind"]
             }
@@ -1926,6 +1940,8 @@ mod tests {
             instructions.contains("append-only ring buffers")
                 && instructions.contains("most users can ignore sequence numbers")
                 && instructions.contains("target pool is unknown")
+                && instructions.contains("visible tool list is the server's effective access mode")
+                && instructions.contains("plasmite_fetch only for exact lookup")
         }));
     }
 
@@ -2456,6 +2472,21 @@ mod tests {
             assert_eq!(
                 tool.output_schema["oneOf"].as_array().map(Vec::len),
                 Some(2),
+                "{}",
+                tool.name
+            );
+            assert_eq!(
+                tool.output_schema["oneOf"][1]["properties"]["error_kind"]["enum"],
+                json!([
+                    "Internal",
+                    "Usage",
+                    "NotFound",
+                    "AlreadyExists",
+                    "Busy",
+                    "Permission",
+                    "Corrupt",
+                    "Io"
+                ]),
                 "{}",
                 tool.name
             );
