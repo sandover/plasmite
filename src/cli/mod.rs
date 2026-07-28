@@ -3,19 +3,23 @@
 //! Role: Route parsed commands to cohesive command-family modules.
 //! Invariants: Command modules depend on explicit context and output helpers.
 
+pub(crate) mod args;
 mod context;
 mod doctor;
 mod feed;
 pub(super) mod output;
 mod pool;
 mod result;
+mod server;
 mod stream;
+pub(crate) mod support;
+mod tap;
 mod utility;
 
 pub(super) use context::CliContext;
 pub(super) use result::CommandResult;
 
-use crate::Command;
+use args::Command;
 use plasmite::api::Error;
 
 pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandResult, Error> {
@@ -128,10 +132,32 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             },
             &context,
         ),
-        command => crate::command_dispatch::dispatch_command(
+        Command::Tap {
+            pool,
+            create,
+            create_size,
+            tag,
+            quiet,
+            durability,
             command,
-            context.pool_dir().to_path_buf(),
-            context.color_mode(),
+        } => tap::run(
+            tap::TapArgs {
+                pool,
+                create,
+                create_size,
+                tags: tag,
+                quiet,
+                durability,
+                command,
+            },
+            &context,
         ),
+        Command::Serve { subcommand, run } => server::run(subcommand, run, &context),
+        Command::Mcp { dir } => {
+            utility::run(utility::UtilityCommand::Mcp { pool_dir: dir }, &context)
+        }
+        Command::Completion { shell } => {
+            utility::run(utility::UtilityCommand::Completion { shell }, &context)
+        }
     }
 }

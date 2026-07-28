@@ -25,7 +25,7 @@ These are operational constraints, not labels. Each states a violation condition
 Interface layer  →  Core domain layer  →  Platform layer
 ```
 
-**Interface layer** (`src/main.rs`, `src/command_dispatch.rs`, `src/api/*`, `src/serve.rs`, `src/abi.rs`):
+**Interface layer** (`src/main.rs`, `src/cli/*`, `src/api/*`, `src/serve.rs`, `src/abi.rs`):
 - Must: parse and validate inputs, invoke core operations, map results to user-facing formats.
 - Must not: duplicate storage correctness logic across multiple interface surfaces.
 - Allowed exception: one shared validation-report implementation may perform read-only ring/frame checks when exposed through API/CLI diagnostics.
@@ -57,6 +57,38 @@ envelope, and MCP chooses tool or JSON-RPC error content. Explicit messages and
 hints supplied by a command remain authoritative; shared policy supplies only
 the stable defaults. Permission failures may map to HTTP 401 or 403 according to
 request authorization context without changing their shared `Permission` kind.
+
+## CLI ownership
+
+The `plasmite` binary uses ordinary Rust modules with one-way dependencies:
+
+```
+main.rs → cli::args + cli::dispatch → command-family module → cli::support → API/core
+                                  ↘ cli::output + cli::result
+```
+
+`main.rs` owns process concerns only: normalized argument parsing, construction
+of the small `CliContext`, final error presentation, and process exit.
+`cli::args` owns the clap syntax and help contract. `cli::dispatch` converts
+parsed variants into explicit argument structures for these command families:
+
+- `pool` and `doctor` for lifecycle, metadata, and diagnostics;
+- `feed` and `fetch` for ingestion and exact lookup;
+- `stream` for follow and duplex;
+- `tap` for child-process capture;
+- `server` for serve configuration, initialization, and presentation;
+- `utility` for version, completion, and MCP stdio.
+
+`CliContext` contains only the resolved pool directory and color mode.
+`CommandResult` carries the selected exit code back to `main.rs`. Shared
+rendering, retry, ingestion, and streaming mechanics live in `cli::support`;
+machine-readable JSON rendering lives in `cli::output`. Command modules use
+explicit imports and concrete functions. There is no command framework,
+service container, or handler trait hierarchy.
+
+Invariant: argument modules do not execute commands, command-family modules do
+not terminate the process, and shared CLI helpers do not reimplement storage
+semantics owned by the API and core layers.
 
 ## Data model and on-disk layout
 
