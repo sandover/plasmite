@@ -111,7 +111,7 @@ impl ServeProcess {
                 .spawn()
                 .expect("spawn serve");
 
-            match wait_for_server(&mut child, bind.parse().expect("addr")) {
+            match wait_for_server(&mut child, bind.parse().expect("addr"), scheme) {
                 Ok(()) => {
                     return Self {
                         child,
@@ -251,12 +251,10 @@ fn pick_port() -> std::io::Result<u16> {
     }
 }
 
-fn wait_for_server(child: &mut Child, addr: SocketAddr) -> std::io::Result<()> {
+fn wait_for_server(child: &mut Child, addr: SocketAddr, scheme: &str) -> std::io::Result<()> {
+    let health_url = format!("http://{addr}/healthz");
     let start = Instant::now();
     loop {
-        if TcpStream::connect(addr).is_ok() {
-            return Ok(());
-        }
         if let Some(status) = child.try_wait()? {
             let mut stderr = String::new();
             if let Some(mut pipe) = child.stderr.take() {
@@ -268,6 +266,23 @@ fn wait_for_server(child: &mut Child, addr: SocketAddr) -> std::io::Result<()> {
                 if detail.is_empty() { "<empty>" } else { detail }
             );
             return Err(std::io::Error::other(message));
+        }
+        let listener_ready = if scheme == "http" {
+            ureq::get(&health_url)
+                .call()
+                .is_ok_and(|response| response.status() == 200)
+        } else {
+            TcpStream::connect(addr).is_ok()
+        };
+        if listener_ready {
+            // The port is selected before the server starts, so another process
+            // can briefly claim it. Give our child time to report a bind failure
+            // before accepting the healthy listener as ours.
+            sleep(Duration::from_millis(30));
+            if child.try_wait()?.is_none() {
+                return Ok(());
+            }
+            continue;
         }
         if start.elapsed() > Duration::from_secs(8) {
             return Err(std::io::Error::new(

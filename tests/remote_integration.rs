@@ -1293,11 +1293,6 @@ fn wait_for_server(child: &mut Child, addr: SocketAddr) -> TestResult<()> {
     let url = format!("http://{addr}/healthz");
     let start = Instant::now();
     loop {
-        if let Ok(resp) = ureq::get(&url).call() {
-            if resp.status() == 200 {
-                return Ok(());
-            }
-        }
         if let Some(status) = child.try_wait()? {
             let mut stderr = String::new();
             if let Some(mut pipe) = child.stderr.take() {
@@ -1309,6 +1304,15 @@ fn wait_for_server(child: &mut Child, addr: SocketAddr) -> TestResult<()> {
                 if detail.is_empty() { "<empty>" } else { detail }
             )
             .into());
+        }
+        if let Ok(resp) = ureq::get(&url).call() {
+            if resp.status() == 200 {
+                sleep(Duration::from_millis(30));
+                if child.try_wait()?.is_none() {
+                    return Ok(());
+                }
+                continue;
+            }
         }
         if start.elapsed() > Duration::from_secs(8) {
             return Err("server did not start in time".into());
