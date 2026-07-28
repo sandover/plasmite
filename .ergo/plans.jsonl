@@ -466,3 +466,8 @@
 {"type":"message","ts":"2026-07-28T23:24:21.950219Z","data":{"task_id":"KHEFDO","kind":"done","text":"Moved local/remote feed orchestration and exact fetch into an explicit CLI module that reuses the existing ingestion, retry, Lite3, and wire helpers; removed both bodies from the legacy router.\n\nFocused feed, fetch, and emit integration groups pass across file/stdin, skip, retry, local, remote, auth, and TLS paths; cargo check passes.","ts":"2026-07-28T23:24:21.950219Z"}}
 {"type":"unclaim","ts":"2026-07-28T23:24:21.950219Z","data":{"id":"KHEFDO","ts":"2026-07-28T23:24:21.950219Z"}}
 {"type":"state","ts":"2026-07-28T23:24:21.950219Z","data":{"id":"KHEFDO","state":"done","ts":"2026-07-28T23:24:21.950219Z"}}
+{"type":"claim","ts":"2026-07-28T23:24:21.986352Z","data":{"id":"7SKOIF","agent_id":"codex@mac","ts":"2026-07-28T23:24:21.986352Z"}}
+{"type":"state","ts":"2026-07-28T23:24:21.986352Z","data":{"id":"7SKOIF","state":"doing","ts":"2026-07-28T23:24:21.986352Z"}}
+{"type":"message","ts":"2026-07-28T23:27:22.014537Z","data":{"task_id":"7SKOIF","kind":"done","text":"Moved follow and duplex orchestration into one explicit streaming module, retaining the shared filter, formatter, ingestion, cancellation, local, and remote execution helpers.\n\nBinary unit tests plus 49 focused follow and 6 focused duplex integration tests pass, including replay timing, timeout, TLS, filtering, remote send/receive, and self-echo behavior; cargo check passes.","ts":"2026-07-28T23:27:22.014537Z"}}
+{"type":"unclaim","ts":"2026-07-28T23:27:22.014537Z","data":{"id":"7SKOIF","ts":"2026-07-28T23:27:22.014537Z"}}
+{"type":"state","ts":"2026-07-28T23:27:22.014537Z","data":{"id":"7SKOIF","state":"done","ts":"2026-07-28T23:27:22.014537Z"}}

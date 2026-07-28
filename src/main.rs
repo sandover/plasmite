@@ -41,7 +41,7 @@ use cli::{CliContext, CommandResult as RunOutcome};
 use color_json::colorize_json;
 use ingest::{ErrorPolicy, IngestConfig, IngestFailure, IngestMode, IngestOutcome, ingest};
 use interface_wire::{ErrorKindWire, MessageWire, error_policy};
-use jq_filter::{JqFilter, compile_filters, matches_all};
+use jq_filter::{JqFilter, matches_all};
 use plasmite::api::{
     AppendOptions, Cursor, CursorResult, Durability, Error, ErrorKind, FrameRef, Lite3DocRef,
     LocalClient, Pool, PoolOptions, PoolRef, RemoteClient, RemotePool, TailOptions,

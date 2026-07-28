@@ -9,6 +9,7 @@ mod feed;
 pub(super) mod output;
 mod pool;
 mod result;
+mod stream;
 mod utility;
 
 pub(super) use context::CliContext;
@@ -61,6 +62,72 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             &context,
         ),
         Command::Fetch { pool, seq } => feed::fetch(&pool, seq, &context),
+        Command::Follow {
+            pool,
+            create,
+            tail,
+            one,
+            jsonl,
+            timeout,
+            data_only,
+            format,
+            since,
+            where_expr,
+            tags,
+            quiet_drops,
+            no_notify,
+            replay,
+            token,
+            token_file,
+            tls_ca,
+            tls_skip_verify,
+        } => stream::follow(
+            stream::FollowArgs {
+                pool,
+                create,
+                tail,
+                one,
+                jsonl,
+                timeout,
+                data_only,
+                format,
+                since,
+                where_expr,
+                tags,
+                quiet_drops,
+                no_notify,
+                replay,
+                token,
+                token_file,
+                tls_ca,
+                tls_skip_verify,
+            },
+            &context,
+        ),
+        Command::Duplex {
+            pool,
+            me,
+            create,
+            tail,
+            jsonl,
+            timeout,
+            format,
+            since,
+            echo_self,
+        } => stream::duplex(
+            stream::DuplexArgs {
+                pool,
+                me,
+                create,
+                tail,
+                jsonl,
+                timeout,
+                format,
+                since,
+                echo_self,
+            },
+            &context,
+        ),
         command => crate::command_dispatch::dispatch_command(
             command,
             context.pool_dir().to_path_buf(),
