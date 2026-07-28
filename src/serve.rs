@@ -46,8 +46,8 @@ use plasmite::api::{
 };
 use plasmite::mcp::{
     DispatchOutcome, JsonRpcError as McpJsonRpcError, McpDispatcher, McpHandler, McpResource,
-    McpTool, PlasmiteMcpHandler, ResourceReadRequest, ResourceReadResult, ToolCallRequest,
-    ToolCallResult,
+    McpTool, McpToolAccess, PlasmiteMcpHandler, ResourceReadRequest, ResourceReadResult,
+    ToolCallRequest, ToolCallResult,
 };
 
 const UI_INDEX_HTML: &str = include_str!("../ui/index.html");
@@ -759,25 +759,23 @@ impl ServeMcpHandler {
 impl McpHandler for ServeMcpHandler {
     fn list_tools(&mut self) -> Result<Vec<McpTool>, McpJsonRpcError> {
         let mut tools = self.inner.list_tools()?;
-        tools.retain(|tool| {
-            (!mcp_tool_requires_read(&tool.name) || self.access_mode.allows_read())
-                && (!mcp_tool_requires_write(&tool.name) || self.access_mode.allows_write())
-        });
+        tools.retain(|tool| mcp_tool_allowed(self.access_mode, tool.access));
         Ok(tools)
     }
 
     fn call_tool(&mut self, request: ToolCallRequest) -> Result<ToolCallResult, McpJsonRpcError> {
-        if mcp_tool_requires_read(&request.name) && !self.access_mode.allows_read() {
-            return Ok(mcp_access_denied_tool_result(
-                "read operations",
-                request.name.as_str(),
-            ));
-        }
-        if mcp_tool_requires_write(&request.name) && !self.access_mode.allows_write() {
-            return Ok(mcp_access_denied_tool_result(
-                "write operations",
-                request.name.as_str(),
-            ));
+        let access = self
+            .inner
+            .list_tools()?
+            .into_iter()
+            .find(|tool| tool.name == request.name)
+            .map(|tool| tool.access);
+        if let Some(access) = access.filter(|access| !mcp_tool_allowed(self.access_mode, *access)) {
+            let action = match access {
+                McpToolAccess::Read => "read operations",
+                McpToolAccess::Write => "write operations",
+            };
+            return Ok(mcp_access_denied_tool_result(action, &request.name));
         }
         let _wait_permit = if request.name == "plasmite_wait" {
             match self.wait_semaphore.clone().try_acquire_owned() {
@@ -808,22 +806,11 @@ impl McpHandler for ServeMcpHandler {
     }
 }
 
-fn mcp_tool_requires_read(name: &str) -> bool {
-    matches!(
-        name,
-        "plasmite_pool_list"
-            | "plasmite_pool_info"
-            | "plasmite_fetch"
-            | "plasmite_read"
-            | "plasmite_wait"
-    )
-}
-
-fn mcp_tool_requires_write(name: &str) -> bool {
-    matches!(
-        name,
-        "plasmite_pool_create" | "plasmite_pool_delete" | "plasmite_feed"
-    )
+fn mcp_tool_allowed(access_mode: AccessMode, tool_access: McpToolAccess) -> bool {
+    match tool_access {
+        McpToolAccess::Read => access_mode.allows_read(),
+        McpToolAccess::Write => access_mode.allows_write(),
+    }
 }
 
 fn mcp_access_denied_tool_result(action: &str, tool: &str) -> ToolCallResult {
@@ -1584,9 +1571,10 @@ fn is_access_forbidden(err: &Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccessMode, AppState, ErrorKind, LocalClient, McpHandler, PoolOptions, PoolRef,
-        ServeConfig, ServeMcpHandler, ToolCallRequest, build_cors_layer, mcp_post,
-        normalize_cors_origins, normalize_tags, parse_tags_from_query, serve, validate_config,
+        AccessMode, AppState, ErrorKind, LocalClient, McpHandler, McpToolAccess, PoolOptions,
+        PoolRef, ServeConfig, ServeMcpHandler, ToolCallRequest, build_cors_layer, mcp_post,
+        mcp_tool_allowed, normalize_cors_origins, normalize_tags, parse_tags_from_query, serve,
+        validate_config,
     };
     use axum::Json;
     use axum::extract::State;
@@ -1630,6 +1618,26 @@ mod tests {
             ]
         );
         assert_eq!(tool_names(AccessMode::ReadWrite).len(), 8);
+    }
+
+    #[test]
+    fn mcp_tool_access_is_descriptor_driven_for_new_names() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let client = LocalClient::new().with_pool_dir(temp.path());
+        let semaphore = Arc::new(Semaphore::new(1));
+        let mut handler = ServeMcpHandler::new(client, AccessMode::ReadOnly, semaphore);
+        let mut test_tool = handler
+            .inner
+            .list_tools()
+            .expect("list tools")
+            .into_iter()
+            .next()
+            .expect("tool descriptor");
+        test_tool.name = "plasmite_test_only_tool".to_string();
+        test_tool.access = McpToolAccess::Write;
+
+        assert!(!mcp_tool_allowed(AccessMode::ReadOnly, test_tool.access));
+        assert!(mcp_tool_allowed(AccessMode::WriteOnly, test_tool.access));
     }
 
     #[test]

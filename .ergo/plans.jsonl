@@ -401,3 +401,8 @@
 {"type":"message","ts":"2026-07-28T22:47:21.551341Z","data":{"task_id":"KU2ETS","kind":"done","text":"Adopted canonical message and pool wire types across CLI, HTTP, MCP, remote decoding, and the C ABI. Verified with cargo check plus focused wire, CLI, and remote contract tests; broad validation is deferred to the shared-interface epic boundary.","ts":"2026-07-28T22:47:21.551341Z"}}
 {"type":"unclaim","ts":"2026-07-28T22:47:21.551341Z","data":{"id":"KU2ETS","ts":"2026-07-28T22:47:21.551341Z"}}
 {"type":"state","ts":"2026-07-28T22:47:21.551341Z","data":{"id":"KU2ETS","state":"done","ts":"2026-07-28T22:47:21.551341Z"}}
+{"type":"claim","ts":"2026-07-28T22:47:27.815053Z","data":{"id":"DFB2HG","agent_id":"codex@mac","ts":"2026-07-28T22:47:27.815053Z"}}
+{"type":"state","ts":"2026-07-28T22:47:27.815053Z","data":{"id":"DFB2HG","state":"doing","ts":"2026-07-28T22:47:27.815053Z"}}
+{"type":"message","ts":"2026-07-28T22:49:39.359397Z","data":{"task_id":"DFB2HG","kind":"done","text":"Moved MCP read/write capability onto each tool descriptor and made HTTP discovery and execution enforcement consult that catalog. A test-only unknown tool name proves capability handling no longer depends on a second name list. Verified with cargo check and focused MCP/server/remote access-mode tests.","ts":"2026-07-28T22:49:39.359397Z"}}
+{"type":"unclaim","ts":"2026-07-28T22:49:39.359397Z","data":{"id":"DFB2HG","ts":"2026-07-28T22:49:39.359397Z"}}
+{"type":"state","ts":"2026-07-28T22:49:39.359397Z","data":{"id":"DFB2HG","state":"done","ts":"2026-07-28T22:49:39.359397Z"}}

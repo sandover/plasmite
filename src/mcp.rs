@@ -202,6 +202,15 @@ pub struct McpTool {
     #[serde(rename = "outputSchema")]
     pub output_schema: Value,
     pub annotations: ToolAnnotations,
+    #[serde(skip)]
+    pub access: McpToolAccess,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum McpToolAccess {
+    #[default]
+    Read,
+    Write,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1051,6 +1060,7 @@ impl McpHandler for PlasmiteMcpHandler {
                     }),
                 ),
                 annotations: ToolAnnotations::read_only(),
+                access: McpToolAccess::Read,
             },
             McpTool {
                 name: "plasmite_pool_create".to_string(),
@@ -1066,6 +1076,7 @@ impl McpHandler for PlasmiteMcpHandler {
                 }),
                 output_schema: property_output_schema("pool", pool_info_output_schema()),
                 annotations: ToolAnnotations::additive_idempotent(),
+                access: McpToolAccess::Write,
             },
             McpTool {
                 name: "plasmite_pool_info".to_string(),
@@ -1080,6 +1091,7 @@ impl McpHandler for PlasmiteMcpHandler {
                 }),
                 output_schema: property_output_schema("pool", pool_info_output_schema()),
                 annotations: ToolAnnotations::read_only(),
+                access: McpToolAccess::Read,
             },
             McpTool {
                 name: "plasmite_pool_delete".to_string(),
@@ -1104,6 +1116,7 @@ impl McpHandler for PlasmiteMcpHandler {
                     }),
                 ),
                 annotations: ToolAnnotations::destructive(),
+                access: McpToolAccess::Write,
             },
             McpTool {
                 name: "plasmite_feed".to_string(),
@@ -1121,6 +1134,7 @@ impl McpHandler for PlasmiteMcpHandler {
                 }),
                 output_schema: property_output_schema("message", message_output_schema()),
                 annotations: ToolAnnotations::additive(),
+                access: McpToolAccess::Write,
             },
             McpTool {
                 name: "plasmite_fetch".to_string(),
@@ -1136,6 +1150,7 @@ impl McpHandler for PlasmiteMcpHandler {
                 }),
                 output_schema: property_output_schema("message", message_output_schema()),
                 annotations: ToolAnnotations::read_only(),
+                access: McpToolAccess::Read,
             },
             McpTool {
                 name: "plasmite_read".to_string(),
@@ -1154,6 +1169,7 @@ impl McpHandler for PlasmiteMcpHandler {
                 }),
                 output_schema: read_output_schema(false),
                 annotations: ToolAnnotations::read_only(),
+                access: McpToolAccess::Read,
             },
             McpTool {
                 name: "plasmite_wait".to_string(),
@@ -1172,6 +1188,7 @@ impl McpHandler for PlasmiteMcpHandler {
                 }),
                 output_schema: read_output_schema(true),
                 annotations: ToolAnnotations::read_only(),
+                access: McpToolAccess::Read,
             },
         ])
     }
@@ -1846,6 +1863,7 @@ mod tests {
                 input_schema: json!({"type":"object","properties":{}}),
                 output_schema: property_output_schema("pools", json!({"type": "array"})),
                 annotations: ToolAnnotations::read_only(),
+                access: McpToolAccess::Read,
             }])
         }
 
