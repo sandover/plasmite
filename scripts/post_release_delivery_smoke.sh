@@ -20,7 +20,7 @@ Options:
 
 Channels:
   npm       npm + pnpm install/runtime check (pnpm best-effort when unavailable)
-  pypi      uv install/runtime check
+  pypi      uv install/runtime check with Python 3.11
   crates    cargo install/runtime check (deep lane; slower)
 
 Environment:
@@ -141,7 +141,7 @@ check_pypi_channel() {
   fi
   local uv_cache_dir="$scratch_root/uv-cache"
   mkdir -p "$uv_cache_dir"
-  UV_CACHE_DIR="$uv_cache_dir" uv tool run --from "plasmite==$VERSION" plasmite --version | grep -q "$VERSION"
+  UV_CACHE_DIR="$uv_cache_dir" uv tool run --python 3.11 --from "plasmite==$VERSION" plasmite --version | grep -q "$VERSION"
 }
 
 check_crates_channel() {
