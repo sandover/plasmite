@@ -63,7 +63,7 @@ check: fmt clippy test check-version-alignment
 integration: cookbook-smoke abi-smoke conformance-all cross-artifact-smoke bindings-test
 
 # Canonical release candidate gate before merging, tagging, or publishing.
-release-gate: check integration
+release-gate: check integration abi-release
 	bash scripts/python_wheel_smoke.sh
 
 # Build shared library artifacts for local ABI usage.
