@@ -357,6 +357,83 @@ fn every_public_command_has_usable_help() {
 }
 
 #[test]
+fn short_help_exposes_material_command_constraints() {
+    let cases: &[(&[&str], &[&str])] = &[
+        (
+            &["pool", "create", "-h"],
+            &["index slots", "at most half the pool"],
+        ),
+        (
+            &["feed", "-h"],
+            &[
+                "requires --create",
+                "requires --retry > 0",
+                "Choose one input source",
+                "exits 1",
+                "remote refs only",
+            ],
+        ),
+        (
+            &["follow", "-h"],
+            &[
+                "finite SPEED >= 0",
+                "requires --tail or --since",
+                "They reject --create",
+                "Exit 124",
+            ],
+        ),
+        (
+            &["tap", "-h"],
+            &[
+                "<POOL> -- <COMMAND>...",
+                "requires --create",
+                "wrapped command's exit status",
+            ],
+        ),
+        (
+            &["duplex", "-h"],
+            &[
+                "Terminal input requires --me",
+                "remote refs expose no auth/TLS",
+                "Exits 124",
+            ],
+        ),
+        (
+            &["doctor", "-h"],
+            &["<POOL|--all>", "Exits nonzero when corruption"],
+        ),
+        (
+            &["serve", "-h"],
+            &[
+                "requires --tls-key",
+                "must be positive",
+                "put serve options before `check`",
+            ],
+        ),
+        (
+            &["serve", "init", "-h"],
+            &["paths must be distinct", "JSON when piped"],
+        ),
+        (
+            &["serve", "check", "-h"],
+            &["options belong before `check`", "Exits non-zero"],
+        ),
+    ];
+
+    for (args, fragments) in cases {
+        let output = cmd().args(*args).output().expect("short help");
+        assert!(output.status.success(), "{args:?}");
+        let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+        for fragment in *fragments {
+            assert!(
+                stdout.contains(fragment),
+                "{args:?} help omitted {fragment:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn help_subcommand_is_enabled() {
     let output = cmd().arg("help").output().expect("help");
     assert!(output.status.success());
@@ -440,12 +517,12 @@ fn tap_requires_wrapped_command_after_separator() {
     assert!(
         error["error"]["message"]
             .as_str()
-            .is_some_and(|message| message.contains("required arguments"))
+            .is_some_and(|message| message.contains("requires a wrapped command after `--`"))
     );
     assert!(
         error["error"]["hint"]
             .as_str()
-            .is_some_and(|hint| hint.contains("plasmite tap --help"))
+            .is_some_and(|hint| hint.contains("plasmite tap <pool> -- <command...>"))
     );
 }
 

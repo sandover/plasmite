@@ -277,7 +277,12 @@ inline JSON, file input (-f/--file), or streams via stdin (auto-detected)."#,
         after_help = r#"EXAMPLES
   $ plasmite feed foo '{"hello": "world"}'                      # inline JSON
   $ plasmite feed foo --tag sev1 '{"msg": "alert"}'             # with tags
-  $ jq -c '.[]' data.json | plasmite feed foo                   # stream from pipe"#,
+  $ jq -c '.[]' data.json | plasmite feed foo                   # stream from pipe
+
+INPUT AND OUTPUT
+  - Choose one input source: inline DATA, --file, or stdin
+  - Receipts are human-readable on a terminal and JSON when piped
+  - --errors skip continues after bad records and exits 1 if any were rejected"#,
         after_long_help = r#"EXAMPLES
   # Inline JSON
   $ plasmite feed foo '{"hello": "world"}'
@@ -329,20 +334,23 @@ NOTES
         create: bool,
         #[arg(
             long = "create-size",
-            help = "Pool size when creating (bytes or K/M/G)"
+            help = "Pool size when creating (bytes or K/M/G; requires --create)"
         )]
         create_size: Option<String>,
         #[arg(long, default_value_t = 0, help = "Retry count for transient failures")]
         retry: u32,
-        #[arg(long, help = "Delay between retries (e.g. 50ms, 1s, 2m)")]
+        #[arg(
+            long,
+            help = "Delay between retries (e.g. 50ms, 1s, 2m; requires --retry > 0)"
+        )]
         retry_delay: Option<String>,
         #[arg(
             short = 'i',
             long = "in",
             default_value = "auto",
             value_enum,
-            help = "Input mode for stdin streams",
-            long_help = r#"Input mode for stdin streams
+            help = "Input mode for file or stdin streams",
+            long_help = r#"Input mode for file or stdin streams
 
   auto   Detect from stream prefix (JSONL, JSON-seq 0x1e, SSE data:)
   jsonl  One JSON object per line
@@ -356,19 +364,19 @@ NOTES
             long = "errors",
             default_value = "stop",
             value_enum,
-            help = "Stream error policy: stop|skip"
+            help = "File/stdin error policy: stop|skip"
         )]
         errors: ErrorPolicyCli,
         #[arg(
             long,
-            help = "Bearer token for remote refs (dev-only; prefer --token-file)",
+            help = "Bearer token for remote refs only (dev-only; prefer --token-file)",
             help_heading = "Remote auth/TLS"
         )]
         token: Option<String>,
         #[arg(
             long,
             value_name = "PATH",
-            help = "Read bearer token from file for remote refs",
+            help = "Read bearer token from file for remote refs only",
             value_hint = ValueHint::FilePath,
             help_heading = "Remote auth/TLS"
         )]
@@ -376,14 +384,14 @@ NOTES
         #[arg(
             long = "tls-ca",
             value_name = "PATH",
-            help = "Trust this PEM CA/certificate for remote TLS",
+            help = "Trust this PEM CA/certificate for remote refs only",
             value_hint = ValueHint::FilePath,
             help_heading = "Remote auth/TLS"
         )]
         tls_ca: Option<PathBuf>,
         #[arg(
             long = "tls-skip-verify",
-            help = "Disable remote TLS certificate verification (unsafe; dev-only)",
+            help = "Disable TLS verification for remote refs only (unsafe; dev-only)",
             help_heading = "Remote auth/TLS"
         )]
         tls_skip_verify: bool,
@@ -396,7 +404,11 @@ Implements the remote protocol spec under spec/remote/v0/SPEC.md."#,
         after_help = r#"EXAMPLES
   $ plasmite serve                                              # loopback, no auth
   $ plasmite serve init                                         # bootstrap TLS + token
-  $ plasmite serve check                                        # validate config"#,
+  $ plasmite serve check                                        # validate config
+
+CONSTRAINTS
+  - Request body, tail timeout, and tail concurrency limits must be positive
+  - `init` has its own artifact options; put serve options before `check`"#,
         after_long_help = r#"EXAMPLES
   $ plasmite serve
   $ plasmite serve --bind 127.0.0.1:9701 --token devtoken
@@ -468,7 +480,11 @@ Use `--replay N` with `--tail` or `--since` to replay with timing."#,
   $ plasmite follow foo                                           # follow live
   $ plasmite follow foo --tail 10                                 # last 10 + live
   $ plasmite follow foo --where '.data.ok == true' --one          # match & exit
-  $ plasmite follow foo --format jsonl | jq '.data'               # pipe to jq"#,
+  $ plasmite follow foo --format jsonl | jq '.data'               # pipe to jq
+
+LOCAL AND REMOTE
+  Remote refs support --tail, filters, --one, --timeout, output, and auth/TLS.
+  They reject --create, --since, --replay, --no-notify, and --quiet-drops."#,
         after_long_help = r#"EXAMPLES
   # Follow for new messages
   $ plasmite follow foo
@@ -560,19 +576,19 @@ NOTES
         #[arg(
             long = "replay",
             value_name = "SPEED",
-            help = "Replay with timing (1 = realtime, 2 = 2x, 0.5 = half; 0 = no delay). Requires --tail or --since"
+            help = "Replay local history at finite SPEED >= 0; requires --tail or --since"
         )]
         replay: Option<f64>,
         #[arg(
             long,
-            help = "Bearer token for remote refs (dev-only; prefer --token-file)",
+            help = "Bearer token for remote refs only (dev-only; prefer --token-file)",
             help_heading = "Remote auth/TLS"
         )]
         token: Option<String>,
         #[arg(
             long,
             value_name = "PATH",
-            help = "Read bearer token from file for remote refs",
+            help = "Read bearer token from file for remote refs only",
             value_hint = ValueHint::FilePath,
             help_heading = "Remote auth/TLS"
         )]
@@ -580,14 +596,14 @@ NOTES
         #[arg(
             long = "tls-ca",
             value_name = "PATH",
-            help = "Trust this PEM CA/certificate for remote TLS",
+            help = "Trust this PEM CA/certificate for remote refs only",
             value_hint = ValueHint::FilePath,
             help_heading = "Remote auth/TLS"
         )]
         tls_ca: Option<PathBuf>,
         #[arg(
             long = "tls-skip-verify",
-            help = "Disable remote TLS certificate verification (unsafe; dev-only)",
+            help = "Disable TLS verification for remote refs only (unsafe; dev-only)",
             help_heading = "Remote auth/TLS"
         )]
         tls_skip_verify: bool,
@@ -595,6 +611,7 @@ NOTES
     #[command(
         arg_required_else_help = true,
         about = "Capture command output into a local pool",
+        override_usage = "plasmite tap [OPTIONS] <POOL> -- <COMMAND>...",
         long_about = r#"Run a command, capture stdout/stderr as line messages, and append them to a local pool.
 
 Use `--` to separate tap flags from the wrapped command argv."#,
@@ -605,10 +622,11 @@ Use `--` to separate tap flags from the wrapped command argv."#,
   $ plasmite tap deploy --tag prod -- ./deploy.sh
   $ plasmite tap api --create --create-size 64M -- ./server
 
-NOTES
+CAPTURE AND EXIT
   - `--` is required before wrapped command args
   - Use --create-size for long-running/high-volume captures
-  - `tap` accepts local pool refs only in v0"#
+  - Emits start, stdout/stderr line, and exit messages
+  - Returns the wrapped command's exit status; `tap` accepts local pools only"#
     )]
     Tap {
         #[arg(help = "Pool ref: local name/path")]
@@ -617,7 +635,7 @@ NOTES
         create: bool,
         #[arg(
             long = "create-size",
-            help = "Pool size when creating (bytes or K/M/G)"
+            help = "Pool size when creating (bytes or K/M/G; requires --create)"
         )]
         create_size: Option<String>,
         #[arg(long, help = "Repeatable tag for captured line messages")]
@@ -628,7 +646,6 @@ NOTES
         durability: String,
         #[arg(
             last = true,
-            required = true,
             allow_hyphen_values = true,
             value_name = "COMMAND",
             help = "Wrapped command and args (must follow `--`)"
@@ -648,7 +665,11 @@ NOTES
   Duplex exits when stdin ends (EOF) or when the receive side ends (e.g. timeout/error).
 
 Notes:
-- Remote refs do not support `--create` or `--since` (use `--tail` for remote)."#
+- Remote refs do not support `--create` or `--since` (use `--tail` for remote)."#,
+        after_help = r#"INPUT AND EXIT
+  - Terminal input requires --me and sends one chat message per non-empty line
+  - Piped input is a JSON stream; remote refs expose no auth/TLS options
+  - Exits 124 on timeout"#
     )]
     Duplex {
         #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
@@ -692,6 +713,7 @@ Notes:
     #[command(
         arg_required_else_help = true,
         about = "Diagnose pool health",
+        override_usage = "plasmite doctor [OPTIONS] <POOL|--all>",
         long_about = r#"Validate one pool (or all pools) and emit a diagnostic report."#,
         after_help = r#"EXAMPLES
   $ plasmite doctor foo
@@ -783,7 +805,7 @@ NOTES
         size: Option<String>,
         #[arg(
             long = "index-capacity",
-            help = "Inline index slot count (default: auto-size; 0 disables index)"
+            help = "Inline index slots (default: auto; 0 disables; may use at most half the pool)"
         )]
         index_capacity: Option<u32>,
         #[arg(long, help = "Emit JSON instead of human-readable output")]
@@ -857,7 +879,9 @@ enum ServeSubcommand {
 
 NOTES
   - Writes token/cert/key files without printing secret token values
-  - Refuses to overwrite existing artifacts unless --force is set"#
+  - Token, certificate, and key output paths must be distinct
+  - Refuses to overwrite existing artifacts unless --force is set
+  - Output is human-readable on a terminal and JSON when piped"#
     )]
     Init(ServeInitArgs),
     #[command(
@@ -956,13 +980,13 @@ struct ServeRunArgs {
     token: Option<String>,
     #[arg(long, value_name = "PATH", help = "Read bearer token from file", value_hint = ValueHint::FilePath, help_heading = "Authentication")]
     token_file: Option<PathBuf>,
-    #[arg(long, value_name = "PATH", help = "TLS certificate path (PEM)", value_hint = ValueHint::FilePath, help_heading = "TLS")]
+    #[arg(long, value_name = "PATH", help = "TLS certificate path (PEM; requires --tls-key)", value_hint = ValueHint::FilePath, help_heading = "TLS")]
     tls_cert: Option<PathBuf>,
-    #[arg(long, value_name = "PATH", help = "TLS key path (PEM)", value_hint = ValueHint::FilePath, help_heading = "TLS")]
+    #[arg(long, value_name = "PATH", help = "TLS key path (PEM; requires --tls-cert)", value_hint = ValueHint::FilePath, help_heading = "TLS")]
     tls_key: Option<PathBuf>,
     #[arg(
         long,
-        help = "Generate a self-signed TLS cert for this run",
+        help = "Generate a self-signed TLS cert (conflicts with --tls-cert/--tls-key)",
         help_heading = "TLS"
     )]
     tls_self_signed: bool,
@@ -981,21 +1005,21 @@ struct ServeRunArgs {
     #[arg(
         long,
         default_value_t = DEFAULT_MAX_BODY_BYTES,
-        help = "Max request body size in bytes",
+        help = "Max request body size in bytes (must be positive)",
         help_heading = "Safety"
     )]
     max_body_bytes: u64,
     #[arg(
         long,
         default_value_t = DEFAULT_MAX_TAIL_TIMEOUT_MS,
-        help = "Max tail timeout in milliseconds",
+        help = "Max tail timeout in milliseconds (must be positive)",
         help_heading = "Safety"
     )]
     max_tail_timeout_ms: u64,
     #[arg(
         long,
         default_value_t = DEFAULT_MAX_TAIL_CONCURRENCY,
-        help = "Max concurrent tail streams",
+        help = "Max concurrent tail streams (must be positive)",
         help_heading = "Safety"
     )]
     max_tail_concurrency: usize,
