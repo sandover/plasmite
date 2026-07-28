@@ -280,18 +280,45 @@ fn wait_for_server(child: &mut Child, addr: SocketAddr) -> std::io::Result<()> {
 }
 
 #[test]
-fn top_level_help_lists_common_pool_operations() {
+fn top_level_help_orients_and_routes_readers() {
     let output = cmd().arg("--help").output().expect("help");
     assert!(output.status.success());
     let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+    assert!(stdout.contains("persistent, bounded stream"));
+    assert!(stdout.contains("feed` appends"));
+    assert!(stdout.contains("FIRST LOCAL WORKFLOW"));
+    assert!(stdout.contains("plasmite pool create chat"));
+    assert!(stdout.contains("Use --json or --format jsonl"));
+    assert!(stdout.contains("Top-level options precede the command"));
+    assert!(stdout.contains("plasmite <command> --help"));
+    assert!(stdout.contains("/blob/main/docs/cli.md"));
+    assert!(stdout.contains("/blob/main/docs/cookbook.md"));
     assert!(
         stdout.lines().any(|l| {
             let t = l.trim();
             t.starts_with("pool") && t.ends_with("Manage pool files")
         }),
-        "expected 'pool ... Manage pool files' in help output"
+        "expected the generated command inventory"
     );
-    assert!(stdout.contains("plasmite pool list"));
+    for command in [
+        "feed",
+        "serve",
+        "mcp",
+        "fetch",
+        "follow",
+        "tap",
+        "duplex",
+        "doctor",
+        "version",
+        "completion",
+    ] {
+        assert!(
+            stdout
+                .lines()
+                .any(|line| line.trim_start().starts_with(command)),
+            "root help omitted {command}"
+        );
+    }
 }
 
 #[test]

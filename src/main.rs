@@ -150,7 +150,7 @@ where
 #[command(
     name = "plasmite",
     version,
-    about = "Persistent message pools for local IPC",
+    about = "Persistent JSON message pools for local and host-adjacent IPC",
     help_template = r#"{about-with-newline}
 {before-help}USAGE
   {usage}
@@ -164,28 +164,26 @@ OPTIONS
 {after-help}
 "#,
     long_about = None,
-    before_help = r#"Multiple processes can write and read concurrently. Messages are JSON.
-
-Mental model:
-  - `feed` sends messages (write)
-  - `follow` follows messages (read/stream)
-  - `fetch` fetches one message by seq
+    before_help = r#"A pool is a persistent, bounded stream that multiple processes can write and read.
+Messages are JSON: `feed` appends, `follow` streams, and `fetch` reads one by sequence.
 "#,
-    after_help = r#"EXAMPLES
+    after_help = r#"FIRST LOCAL WORKFLOW
   $ plasmite pool create chat
-  $ plasmite follow chat              # Terminal 1: bob follows (waits for messages)
-  $ plasmite feed chat '{"from": "alice", "msg": "hello"}'   # Terminal 2: alice sends
-  # bob sees: {"seq":1,"time":"...","meta":{"tags":[]},"data":{"from":"alice","msg":"hello"}}
+  $ plasmite follow chat                                      # Terminal 1
+  $ plasmite feed chat '{"from":"alice","msg":"hello"}'       # Terminal 2
 
-LEARN MORE
-  Common pool operations:
-    plasmite pool create <name>
-    plasmite pool info <name>
-    plasmite pool list
-    plasmite pool delete <name>...
+OUTPUT
+  Commands default to readable terminal output. Use --json or --format jsonl
+  where offered for scripts; command help describes adaptive output.
 
+OPTIONS AND HELP
+  Top-level options precede the command: plasmite --dir ./pools follow chat
+  Command options follow it:              plasmite follow --tail 10 chat
   $ plasmite <command> --help
-  https://github.com/sandover/plasmite"#,
+
+GUIDES
+  CLI model: https://github.com/sandover/plasmite/blob/main/docs/cli.md
+  Recipes:   https://github.com/sandover/plasmite/blob/main/docs/cookbook.md"#,
     arg_required_else_help = true,
     disable_help_subcommand = false
 )]
