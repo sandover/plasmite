@@ -295,6 +295,41 @@ fn top_level_help_lists_common_pool_operations() {
 }
 
 #[test]
+fn every_public_command_has_usable_help() {
+    let cases: &[(&[&str], &str)] = &[
+        (&["--help"], "plasmite [OPTIONS] <COMMAND>"),
+        (&["pool", "--help"], "plasmite pool <COMMAND>"),
+        (&["pool", "create", "--help"], "plasmite pool create"),
+        (&["pool", "info", "--help"], "plasmite pool info"),
+        (&["pool", "delete", "--help"], "plasmite pool delete"),
+        (&["pool", "list", "--help"], "plasmite pool list"),
+        (&["feed", "--help"], "plasmite feed"),
+        (&["serve", "--help"], "plasmite serve"),
+        (&["serve", "init", "--help"], "plasmite serve init"),
+        (&["serve", "check", "--help"], "plasmite serve check"),
+        (&["mcp", "--help"], "plasmite mcp"),
+        (&["fetch", "--help"], "plasmite fetch"),
+        (&["follow", "--help"], "plasmite follow"),
+        (&["tap", "--help"], "plasmite tap"),
+        (&["duplex", "--help"], "plasmite duplex"),
+        (&["doctor", "--help"], "plasmite doctor"),
+        (&["version", "--help"], "plasmite version"),
+        (&["completion", "--help"], "plasmite completion"),
+        (&["help"], "plasmite [OPTIONS] <COMMAND>"),
+    ];
+
+    for (args, usage_path) in cases {
+        let output = cmd().args(*args).output().expect("command help");
+        assert!(output.status.success(), "{usage_path}");
+        let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+        assert!(
+            stdout.contains(usage_path),
+            "help for {usage_path} did not contain its command path"
+        );
+    }
+}
+
+#[test]
 fn help_subcommand_is_enabled() {
     let output = cmd().arg("help").output().expect("help");
     assert!(output.status.success());

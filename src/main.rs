@@ -4239,17 +4239,188 @@ fn follow_replay(pool: &Pool, cfg: &FollowConfig) -> Result<RunOutcome, Error> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Error, ErrorKind, PoolTarget, RetryConfig, build_serve_startup_lines,
+        Cli, Error, ErrorKind, PoolTarget, RetryConfig, build_serve_startup_lines,
         duplex_requires_me_when_tty, error_text, format_bytes, format_relative_time,
         format_seq_range, format_timestamp_human, matches_required_tags, parse_duplex_tty_line,
         parse_duration, parse_size, read_token_file, render_table, resolve_pool_target,
         retry_with_config, short_display_path,
     };
+    use clap::CommandFactory;
     use serde_json::json;
     use std::io::Cursor;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn cli_command_inventory() {
+        Cli::command().debug_assert();
+        let mut command = Cli::command();
+        command.build();
+        let mut inventory = Vec::new();
+        collect_cli_inventory(&command, "plasmite", &mut inventory);
+
+        let expected = vec![
+            ("plasmite", vec!["color", "dir", "help", "version"]),
+            ("plasmite completion", vec!["help"]),
+            ("plasmite doctor", vec!["all", "help", "json"]),
+            (
+                "plasmite duplex",
+                vec![
+                    "create",
+                    "echo-self",
+                    "format",
+                    "help",
+                    "jsonl",
+                    "me",
+                    "since",
+                    "tail",
+                    "timeout",
+                ],
+            ),
+            (
+                "plasmite feed",
+                vec![
+                    "create",
+                    "create-size",
+                    "durability",
+                    "errors",
+                    "file",
+                    "help",
+                    "in",
+                    "retry",
+                    "retry-delay",
+                    "tag",
+                    "tls-ca",
+                    "tls-skip-verify",
+                    "token",
+                    "token-file",
+                ],
+            ),
+            ("plasmite fetch", vec!["help"]),
+            (
+                "plasmite follow",
+                vec![
+                    "create",
+                    "data-only",
+                    "format",
+                    "help",
+                    "jsonl",
+                    "no-notify",
+                    "one",
+                    "quiet-drops",
+                    "replay",
+                    "since",
+                    "tag",
+                    "tail",
+                    "timeout",
+                    "tls-ca",
+                    "tls-skip-verify",
+                    "token",
+                    "token-file",
+                    "where",
+                ],
+            ),
+            ("plasmite help", vec![]),
+            ("plasmite mcp", vec!["dir", "help"]),
+            ("plasmite pool", vec!["help"]),
+            (
+                "plasmite pool create",
+                vec!["help", "index-capacity", "json", "size"],
+            ),
+            ("plasmite pool delete", vec!["help", "json"]),
+            ("plasmite pool info", vec!["help", "json"]),
+            ("plasmite pool list", vec!["help", "json"]),
+            (
+                "plasmite serve",
+                vec![
+                    "access",
+                    "allow-non-loopback",
+                    "bind",
+                    "cors-origin",
+                    "help",
+                    "insecure-no-tls",
+                    "max-body-bytes",
+                    "max-tail-concurrency",
+                    "max-tail-timeout-ms",
+                    "tls-cert",
+                    "tls-key",
+                    "tls-self-signed",
+                    "token",
+                    "token-file",
+                ],
+            ),
+            ("plasmite serve check", vec!["help", "json"]),
+            (
+                "plasmite serve init",
+                vec![
+                    "bind",
+                    "force",
+                    "help",
+                    "output-dir",
+                    "tls-cert",
+                    "tls-key",
+                    "token-file",
+                ],
+            ),
+            (
+                "plasmite tap",
+                vec![
+                    "create",
+                    "create-size",
+                    "durability",
+                    "help",
+                    "quiet",
+                    "tag",
+                ],
+            ),
+            ("plasmite version", vec!["help"]),
+        ]
+        .into_iter()
+        .map(|(path, options)| {
+            (
+                path.to_string(),
+                options.into_iter().map(str::to_string).collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
+        inventory.sort_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(inventory, expected);
+    }
+
+    fn collect_cli_inventory(
+        command: &clap::Command,
+        path: &str,
+        inventory: &mut Vec<(String, Vec<String>)>,
+    ) {
+        let mut options = command
+            .get_arguments()
+            .filter(|arg| !arg.is_hide_set())
+            .filter_map(|arg| arg.get_long())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        options.sort_unstable();
+        inventory.push((path.to_string(), options));
+
+        let mut subcommands = command
+            .get_subcommands()
+            .filter(|subcommand| !subcommand.is_hide_set())
+            .collect::<Vec<_>>();
+        subcommands.sort_by_key(|subcommand| subcommand.get_name());
+        for subcommand in subcommands {
+            if subcommand.get_name() == "help" {
+                if path == "plasmite" {
+                    inventory.push(("plasmite help".to_string(), Vec::new()));
+                }
+                continue;
+            }
+            collect_cli_inventory(
+                subcommand,
+                &format!("{path} {}", subcommand.get_name()),
+                inventory,
+            );
+        }
+    }
 
     fn read_json_stream<R, F>(reader: R, mut on_value: F) -> Result<usize, Error>
     where
