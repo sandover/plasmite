@@ -19,7 +19,9 @@ Authoritative runbook for Plasmite releases. Keep execution fail-closed and alig
 2. `release-publish` must gate registry publish on Homebrew tap sync/alignment.
 3. Release remains fail-closed across channels (no partial success treated as done).
 4. Registry/package versions must equal `release_target`.
-5. Secrets must exist: `NPM_TOKEN`, `PYPI_API_TOKEN`, `CARGO_REGISTRY_TOKEN`.
+5. npm trusted publishing must authorize `sandover/plasmite` and
+   `release-publish.yml`; secrets must exist for `PYPI_API_TOKEN` and
+   `CARGO_REGISTRY_TOKEN`.
 6. Homebrew tap is updated locally (not via CI secret). The maintainer pushes the formula from their `../homebrew-tap` checkout; the `sync-homebrew-tap` CI job verifies alignment.
 7. Tooling pins in workflows are policy:
    - `RELEASE_RUST_TOOLCHAIN=1.88.0`

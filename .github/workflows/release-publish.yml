@@ -144,13 +144,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [resolve-build-run]
     steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
       - name: Validate registry readiness
         shell: bash
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
@@ -161,21 +157,6 @@ jobs:
             echo "hint: $2" >&2
             exit 1
           }
-
-          if [[ -z "${NPM_TOKEN:-}" ]]; then
-            preflight_fail "NPM_TOKEN not set for publish-preflight." "Set NPM_TOKEN in repository secrets before running release-publish."
-          fi
-          if [[ "${NPM_TOKEN}" != npm_* ]]; then
-            preflight_fail "NPM_TOKEN format does not match npm access token expectations." "Use an npm automation/granular publish token (commonly starts with 'npm_') and ensure bypass-2FA publishing is enabled."
-          fi
-          if ! NPM_CONFIG_TOKEN="$NPM_TOKEN" npm whoami >/tmp/npm-whoami.out 2>/tmp/npm-whoami.err; then
-            npm_err="$(cat /tmp/npm-whoami.err)"
-            if grep -qi "EOTP\\|one-time pass\\|otp" <<<"$npm_err"; then
-              preflight_fail "npm token requires OTP interaction and is not CI-publish-ready." "Create/use an automation token with bypass-2FA publishing permissions."
-            fi
-            echo "warning: npm whoami failed during publish-preflight; continuing to publish stage for final token validation." >&2
-            echo "warning: npm whoami stderr: ${npm_err}" >&2
-          fi
 
           if [[ -z "${PYPI_API_TOKEN:-}" ]]; then
             preflight_fail "PYPI_API_TOKEN not set for publish-preflight." "Set PYPI_API_TOKEN in repository secrets before running release-publish."
@@ -356,6 +337,10 @@ jobs:
   publish-npm:
     runs-on: ubuntu-latest
     needs: [resolve-build-run, publish-preflight, collect-build-artifacts]
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -363,16 +348,16 @@ jobs:
           path: release-inputs
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
+      - name: Use trusted publishing compatible npm
+        run: npm install --global npm@11.5.1
       - name: Rehearsal mode
         if: needs.resolve-build-run.outputs.rehearsal == 'true'
         run: 'echo "publish-npm rehearsal: skipping npm publish."'
       - name: Publish to npm
         if: needs.resolve-build-run.outputs.rehearsal != 'true'
         shell: bash
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           shopt -s nullglob
