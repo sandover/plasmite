@@ -49,7 +49,7 @@ use plasmite::api::{
     notify::{self, NotifyWait},
 };
 use plasmite::notice::{Notice, notice_json};
-use pool_info_json::{bounds_json, pool_info_json};
+use pool_info_json::bounds_json;
 use pool_paths::{PoolNameResolveError, default_pool_dir, resolve_named_pool_path};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

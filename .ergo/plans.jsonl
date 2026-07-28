@@ -456,3 +456,8 @@
 {"type":"message","ts":"2026-07-28T23:19:49.435856Z","data":{"task_id":"WI56TS","kind":"done","text":"Added ordinary CLI modules for context, command results, output, utility handlers, and explicit routing; migrated version output as the representative command while preserving the legacy path for unmigrated families.\n\nBinary unit tests, focused version integration tests, and cargo check pass; non-TTY version JSON is now explicitly covered.","ts":"2026-07-28T23:19:49.435856Z"}}
 {"type":"unclaim","ts":"2026-07-28T23:19:49.435856Z","data":{"id":"WI56TS","ts":"2026-07-28T23:19:49.435856Z"}}
 {"type":"state","ts":"2026-07-28T23:19:49.435856Z","data":{"id":"WI56TS","state":"done","ts":"2026-07-28T23:19:49.435856Z"}}
+{"type":"claim","ts":"2026-07-28T23:19:49.467355Z","data":{"id":"7XYCOH","agent_id":"codex@mac","ts":"2026-07-28T23:19:49.467355Z"}}
+{"type":"state","ts":"2026-07-28T23:19:49.467355Z","data":{"id":"7XYCOH","state":"doing","ts":"2026-07-28T23:19:49.467355Z"}}
+{"type":"message","ts":"2026-07-28T23:22:26.479587Z","data":{"task_id":"7XYCOH","kind":"done","text":"Moved pool create/info/list/delete and doctor orchestration into explicit CLI family modules; the legacy router now contains only unreachable guards for those already-routed variants.\n\nFocused pool and doctor integration groups pass with preserved JSON, human output, hints, and exit behavior; cargo check passes.","ts":"2026-07-28T23:22:26.479587Z"}}
+{"type":"unclaim","ts":"2026-07-28T23:22:26.479587Z","data":{"id":"7XYCOH","ts":"2026-07-28T23:22:26.479587Z"}}
+{"type":"state","ts":"2026-07-28T23:22:26.479587Z","data":{"id":"7XYCOH","state":"done","ts":"2026-07-28T23:22:26.479587Z"}}
