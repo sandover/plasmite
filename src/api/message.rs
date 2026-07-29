@@ -35,6 +35,14 @@ pub struct TailOptions {
     pub poll_interval: Duration,
     pub timeout: Option<Duration>,
     pub notify: bool,
+    pub gap_policy: GapPolicy,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GapPolicy {
+    #[default]
+    Continue,
+    Error,
 }
 
 impl TailOptions {
@@ -46,6 +54,7 @@ impl TailOptions {
             poll_interval: Duration::from_millis(50),
             timeout: None,
             notify: true,
+            gap_policy: GapPolicy::Continue,
         }
     }
 }
@@ -63,6 +72,8 @@ pub struct Tail<'a> {
     seen: usize,
     deadline: Option<Instant>,
     notify: Option<PoolSemaphore>,
+    expected_seq: Option<u64>,
+    terminated: bool,
 }
 
 pub struct Lite3Tail<'a> {
@@ -72,6 +83,8 @@ pub struct Lite3Tail<'a> {
     seen: usize,
     deadline: Option<Instant>,
     notify: Option<PoolSemaphore>,
+    expected_seq: Option<u64>,
+    terminated: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -163,6 +176,7 @@ impl Replay {
 impl<'a> Tail<'a> {
     fn new(pool: &'a Pool, options: TailOptions) -> Self {
         let deadline = options.timeout.map(|duration| Instant::now() + duration);
+        let expected_seq = options.since_seq;
         let notify = if options.notify {
             open_for_path(pool.path()).ok()
         } else {
@@ -175,10 +189,15 @@ impl<'a> Tail<'a> {
             seen: 0,
             deadline,
             notify,
+            expected_seq,
+            terminated: false,
         }
     }
 
     pub fn next_message(&mut self) -> Result<Option<Message>, Error> {
+        if self.terminated {
+            return Ok(None);
+        }
         if let Some(max) = self.options.max_messages {
             if self.seen >= max {
                 return Ok(None);
@@ -194,10 +213,19 @@ impl<'a> Tail<'a> {
 
             match self.cursor.next(self.pool)? {
                 CursorResult::Message(frame) => {
-                    if let Some(min_seq) = self.options.since_seq {
-                        if frame.seq < min_seq {
-                            continue;
+                    let should_process = match observe_sequence(
+                        &mut self.expected_seq,
+                        frame.seq,
+                        self.options.gap_policy,
+                    ) {
+                        Ok(should_process) => should_process,
+                        Err(err) => {
+                            self.terminated = true;
+                            return Err(err);
                         }
+                    };
+                    if !should_process {
+                        continue;
                     }
                     let message = message_from_frame(&frame)?;
                     if !has_required_tags(&message.meta.tags, self.options.tags.as_slice()) {
@@ -235,6 +263,7 @@ impl<'a> Tail<'a> {
 impl<'a> Lite3Tail<'a> {
     fn new(pool: &'a Pool, options: TailOptions) -> Self {
         let deadline = options.timeout.map(|duration| Instant::now() + duration);
+        let expected_seq = options.since_seq;
         let notify = if options.notify {
             open_for_path(pool.path()).ok()
         } else {
@@ -247,10 +276,15 @@ impl<'a> Lite3Tail<'a> {
             seen: 0,
             deadline,
             notify,
+            expected_seq,
+            terminated: false,
         }
     }
 
     pub fn next_frame(&mut self) -> Result<Option<FrameRef<'a>>, Error> {
+        if self.terminated {
+            return Ok(None);
+        }
         if let Some(max) = self.options.max_messages {
             if self.seen >= max {
                 return Ok(None);
@@ -266,10 +300,19 @@ impl<'a> Lite3Tail<'a> {
 
             match self.cursor.next(self.pool)? {
                 CursorResult::Message(frame) => {
-                    if let Some(min_seq) = self.options.since_seq {
-                        if frame.seq < min_seq {
-                            continue;
+                    let should_process = match observe_sequence(
+                        &mut self.expected_seq,
+                        frame.seq,
+                        self.options.gap_policy,
+                    ) {
+                        Ok(should_process) => should_process,
+                        Err(err) => {
+                            self.terminated = true;
+                            return Err(err);
                         }
+                    };
+                    if !should_process {
+                        continue;
                     }
                     let (meta, _) = decode_payload(frame.payload)?;
                     if !has_required_tags(&meta.tags, self.options.tags.as_slice()) {
@@ -302,6 +345,31 @@ impl<'a> Lite3Tail<'a> {
             }
         }
     }
+}
+
+pub(crate) fn observe_sequence(
+    expected_seq: &mut Option<u64>,
+    available_seq: u64,
+    policy: GapPolicy,
+) -> Result<bool, Error> {
+    let Some(expected) = *expected_seq else {
+        *expected_seq = available_seq.checked_add(1);
+        return Ok(true);
+    };
+    if available_seq < expected {
+        return Ok(false);
+    }
+    if available_seq > expected && policy == GapPolicy::Error {
+        let last_missing = available_seq - 1;
+        return Err(Error::new(ErrorKind::RetentionGap)
+            .with_message(format!(
+                "messages {expected}-{last_missing} are no longer retained; the next available message is {available_seq}"
+            ))
+            .with_hint("Inspect current pool bounds, then reopen the tail or rebuild from an authoritative source.")
+            .with_seq(expected));
+    }
+    *expected_seq = available_seq.checked_add(1);
+    Ok(true)
 }
 
 fn has_required_tags(message_tags: &[String], required_tags: &[String]) -> bool {
@@ -509,9 +577,10 @@ fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Meta, PoolApiExt, ReplayOptions, TailOptions, decode_payload};
+    use super::{GapPolicy, Meta, PoolApiExt, ReplayOptions, TailOptions, decode_payload};
+    use crate::core::error::ErrorKind;
     use crate::core::lite3::{encode_message, json_counter_snapshot, reset_json_counters};
-    use crate::core::pool::{Pool, PoolOptions};
+    use crate::core::pool::{Durability, Pool, PoolOptions};
     use serde_json::json;
     use tempfile::tempdir;
 
@@ -608,6 +677,153 @@ mod tests {
         let message = tail.next_message().expect("tail").expect("message");
         assert_eq!(message.seq, second.seq);
         assert_eq!(message.data, json!({"n": 2}));
+    }
+
+    fn append_until_oldest_after(pool: &mut Pool, seq: u64) {
+        for n in 0..10_000_u64 {
+            pool.append_json_now(
+                &json!({"n": n, "padding": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}),
+                &["drop".to_string()],
+                Durability::Fast,
+            )
+            .expect("append while filling pool");
+            if pool
+                .info()
+                .expect("pool info")
+                .bounds
+                .oldest_seq
+                .is_some_and(|oldest| oldest > seq)
+            {
+                return;
+            }
+        }
+        panic!("pool bounds did not advance beyond sequence {seq}");
+    }
+
+    #[test]
+    fn tail_error_policy_reports_overwrite_after_position_is_established() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut writer = Pool::create(&path, PoolOptions::new(4096 + 1024).with_index_capacity(0))
+            .expect("create");
+        let first = writer
+            .append_json_now(&json!({"n": 1}), &["keep".to_string()], Durability::Fast)
+            .expect("append first");
+        let strict_reader = Pool::open(&path).expect("open strict reader");
+        let continuing_reader = Pool::open(&path).expect("open continuing reader");
+
+        let mut strict_options = TailOptions::new();
+        strict_options.since_seq = Some(first.seq);
+        strict_options.gap_policy = GapPolicy::Error;
+        let mut strict = strict_reader.tail(strict_options);
+        assert_eq!(
+            strict
+                .next_message()
+                .expect("first strict read")
+                .expect("first message")
+                .seq,
+            first.seq
+        );
+
+        let mut continuing_options = TailOptions::new();
+        continuing_options.since_seq = Some(first.seq);
+        let mut continuing = continuing_reader.tail(continuing_options);
+        assert_eq!(
+            continuing
+                .next_message()
+                .expect("first continuing read")
+                .expect("first message")
+                .seq,
+            first.seq
+        );
+
+        append_until_oldest_after(&mut writer, first.seq + 1);
+        let oldest = writer
+            .info()
+            .expect("pool info")
+            .bounds
+            .oldest_seq
+            .expect("oldest");
+
+        let err = strict.next_message().expect_err("strict tail must fail");
+        assert_eq!(err.kind(), ErrorKind::RetentionGap);
+        assert_eq!(err.seq(), Some(first.seq + 1));
+        assert!(
+            err.message()
+                .is_some_and(|message| message.contains(&oldest.to_string()))
+        );
+        assert!(
+            strict
+                .next_message()
+                .expect("terminated strict tail")
+                .is_none()
+        );
+
+        let resumed = continuing
+            .next_message()
+            .expect("default tail continues")
+            .expect("retained message");
+        assert_eq!(resumed.seq, oldest);
+    }
+
+    #[test]
+    fn stale_start_fails_before_tag_filtering_but_implicit_start_does_not() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut writer = Pool::create(&path, PoolOptions::new(4096 + 1024).with_index_capacity(0))
+            .expect("create");
+        let first = writer
+            .append_json_now(&json!({"n": 1}), &["keep".to_string()], Durability::Fast)
+            .expect("append first");
+        append_until_oldest_after(&mut writer, first.seq);
+        let oldest = writer
+            .info()
+            .expect("pool info")
+            .bounds
+            .oldest_seq
+            .expect("oldest");
+
+        let strict_reader = Pool::open(&path).expect("open strict reader");
+        let mut strict_options = TailOptions::new();
+        strict_options.since_seq = Some(first.seq);
+        strict_options.tags = vec!["never".to_string()];
+        strict_options.gap_policy = GapPolicy::Error;
+        let mut strict = strict_reader.tail(strict_options);
+        let err = strict.next_message().expect_err("stale start must fail");
+        assert_eq!(err.kind(), ErrorKind::RetentionGap);
+        assert_eq!(err.seq(), Some(first.seq));
+
+        let implicit_reader = Pool::open(&path).expect("open implicit reader");
+        let mut implicit_options = TailOptions::new();
+        implicit_options.max_messages = Some(1);
+        implicit_options.gap_policy = GapPolicy::Error;
+        let mut implicit = implicit_reader.tail(implicit_options);
+        let message = implicit
+            .next_message()
+            .expect("implicit read")
+            .expect("retained message");
+        assert_eq!(message.seq, oldest);
+    }
+
+    #[test]
+    fn lite3_tail_reports_stale_start() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut writer = Pool::create(&path, PoolOptions::new(4096 + 1024).with_index_capacity(0))
+            .expect("create");
+        let first = writer
+            .append_json_now(&json!({"n": 1}), &[], Durability::Fast)
+            .expect("append first");
+        append_until_oldest_after(&mut writer, first.seq);
+
+        let reader = Pool::open(&path).expect("open reader");
+        let mut options = TailOptions::new();
+        options.since_seq = Some(first.seq);
+        options.gap_policy = GapPolicy::Error;
+        let mut tail = reader.tail_lite3(options);
+        let err = tail.next_frame().expect_err("stale Lite3 start must fail");
+        assert_eq!(err.kind(), ErrorKind::RetentionGap);
+        assert_eq!(err.seq(), Some(first.seq));
     }
 
     #[test]

@@ -33,6 +33,7 @@ from plasmite import (
     MessageMeta,
     NotFoundError,
     PlasmiteError,
+    RetentionGapError,
     parse_message,
 )
 
@@ -55,6 +56,19 @@ class BindingTests(unittest.TestCase):
 
     def _new_pool(self, client: Client, name: str) -> Any:
         return client.create_pool(name, TEST_POOL_SIZE_BYTES)
+
+    def _fill_past(self, pool: Any, seq: int) -> None:
+        for n in range(10_000):
+            pool.append(
+                {"n": n, "padding": "x" * 4096},
+                ["drop"],
+                Durability.FAST,
+            )
+            try:
+                pool.get(seq)
+            except NotFoundError:
+                return
+        self.fail(f"pool did not overwrite sequence {seq}")
 
     @contextmanager
     def _client_pool(self, name: str) -> Iterator[tuple[Client, Any]]:
@@ -163,6 +177,53 @@ class BindingTests(unittest.TestCase):
             message = results[0]
             self.assertIsInstance(message, Message)
             self.assertEqual(message.data["kind"], "keep")
+
+    def test_tail_can_fail_when_retention_overtakes_filtered_consumer(self) -> None:
+        with self._new_client() as client:
+            pool = client.create_pool("tail-gap", 64 * 1024)
+            first = pool.append({"kind": "first"}, ["keep"])
+            self._fill_past(pool, first.seq)
+
+            with self.assertRaises(RetentionGapError) as raised:
+                next(
+                    pool.tail(
+                        since_seq=first.seq,
+                        timeout_ms=50,
+                        tags=["never"],
+                        error_on_gap=True,
+                    )
+                )
+            self.assertEqual(raised.exception.kind, ErrorKind.RETENTION_GAP)
+            self.assertEqual(raised.exception.seq, first.seq)
+
+            continuing = next(
+                pool.tail(
+                    since_seq=first.seq,
+                    max_messages=1,
+                    timeout_ms=50,
+                )
+            )
+            self.assertGreater(continuing.seq, first.seq)
+            pool.close()
+
+    def test_lite3_stream_can_fail_on_retention_gap(self) -> None:
+        with self._new_client() as client:
+            pool = client.create_pool("lite3-gap", 64 * 1024)
+            first = pool.append({"kind": "first"}, [])
+            self._fill_past(pool, first.seq)
+
+            stream = pool.open_lite3_stream(
+                since_seq=first.seq,
+                timeout_ms=50,
+                error_on_gap=True,
+            )
+            try:
+                with self.assertRaises(RetentionGapError) as raised:
+                    stream.next()
+                self.assertEqual(raised.exception.seq, first.seq)
+            finally:
+                stream.close()
+                pool.close()
 
     def test_replay_filters_by_tags_before_max_messages(self) -> None:
         with self._client_pool("replay-tags") as (_, pool):
@@ -274,6 +335,10 @@ class BindingTests(unittest.TestCase):
     def test_error_subclasses_are_raised(self) -> None:
         with self._new_client() as client:
             self.assertIs(plasmite._ERROR_KIND_TO_CLASS[ErrorKind.ALREADY_EXISTS], AlreadyExistsError)
+            self.assertIs(
+                plasmite._ERROR_KIND_TO_CLASS[ErrorKind.RETENTION_GAP],
+                RetentionGapError,
+            )
             with self.assertRaises(NotFoundError):
                 client.open_pool("missing")
 

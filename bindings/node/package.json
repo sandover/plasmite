@@ -40,7 +40,7 @@
     "prepare-native": "node scripts/prepare_native_assets.js",
     "build": "napi build --cargo-cwd native",
     "check:type-surface": "node scripts/check_type_surface.js",
-    "test": "npm run build && npm run check:type-surface && node --test test/*.test.js",
+    "test": "npm run build && npm run prepare-native && npm run check:type-surface && node --test test/*.test.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "prepack": "npm run build && npm run prepare-native",
     "prepublishOnly": "npm run typecheck"

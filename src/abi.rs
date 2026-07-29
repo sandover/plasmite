@@ -11,7 +11,7 @@
 //! Notes: Remote pool refs are not supported in v0.
 #![allow(clippy::result_large_err)]
 
-use crate::api::{LocalClient, PoolApiExt, PoolOptions, PoolRef};
+use crate::api::{GapPolicy, LocalClient, PoolApiExt, PoolOptions, PoolRef, observe_sequence};
 use crate::core::error::{Error, ErrorKind};
 use crate::core::pool::Pool;
 use serde_json::Value;
@@ -35,7 +35,9 @@ pub struct plsm_pool {
 pub struct plsm_stream {
     pool: Pool,
     cursor: crate::api::Cursor,
-    since_seq: Option<u64>,
+    expected_seq: Option<u64>,
+    gap_policy: GapPolicy,
+    terminated: bool,
     max_messages: Option<usize>,
     seen: usize,
     poll_interval: Duration,
@@ -46,7 +48,9 @@ pub struct plsm_stream {
 pub struct plsm_lite3_stream {
     pool: Pool,
     cursor: crate::api::Cursor,
-    since_seq: Option<u64>,
+    expected_seq: Option<u64>,
+    gap_policy: GapPolicy,
+    terminated: bool,
     max_messages: Option<usize>,
     seen: usize,
     poll_interval: Duration,
@@ -76,6 +80,27 @@ pub struct plsm_error {
     offset: u64,
     has_seq: u8,
     has_offset: u8,
+}
+
+#[repr(C)]
+pub struct plsm_stream_options {
+    struct_size: u32,
+    gap_policy: u32,
+    since_seq: u64,
+    max_messages: u64,
+    timeout_ms: u64,
+    has_since: u32,
+    has_max: u32,
+    has_timeout: u32,
+    reserved: u32,
+}
+
+#[derive(Clone, Copy)]
+struct StreamOpenOptions {
+    since_seq: Option<u64>,
+    max_messages: Option<usize>,
+    timeout: Option<Duration>,
+    gap_policy: GapPolicy,
 }
 
 #[unsafe(no_mangle)]
@@ -345,6 +370,31 @@ pub extern "C" fn plsm_stream_open(
     out_stream: *mut *mut plsm_stream,
     out_err: *mut *mut plsm_error,
 ) -> i32 {
+    let options = plsm_stream_options {
+        struct_size: std::mem::size_of::<plsm_stream_options>() as u32,
+        gap_policy: 0,
+        since_seq,
+        max_messages,
+        timeout_ms,
+        has_since,
+        has_max,
+        has_timeout,
+        reserved: 0,
+    };
+    plsm_stream_open_ex(pool, &options, out_stream, out_err)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_stream_open_ex(
+    pool: *mut plsm_pool,
+    options: *const plsm_stream_options,
+    out_stream: *mut *mut plsm_stream,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    let options = match parse_stream_options(options, out_err) {
+        Ok(options) => options,
+        Err(code) => return code,
+    };
     let pool = match borrow_pool(pool, out_err) {
         Ok(pool) => pool,
         Err(code) => return code,
@@ -355,22 +405,7 @@ pub extern "C" fn plsm_stream_open(
             Error::new(ErrorKind::Usage).with_message("out_stream is null"),
         );
     }
-    let since = if has_since != 0 {
-        Some(since_seq)
-    } else {
-        None
-    };
-    let max = if has_max != 0 {
-        Some(max_messages as usize)
-    } else {
-        None
-    };
-    let timeout = if has_timeout != 0 {
-        Some(Duration::from_millis(timeout_ms))
-    } else {
-        None
-    };
-    let deadline = timeout.map(|duration| Instant::now() + duration);
+    let deadline = options.timeout.map(|duration| Instant::now() + duration);
     let info = match pool.pool.info() {
         Ok(info) => info,
         Err(err) => return fail(out_err, err),
@@ -382,8 +417,10 @@ pub extern "C" fn plsm_stream_open(
     let handle = Box::new(plsm_stream {
         pool,
         cursor: crate::api::Cursor::new(),
-        since_seq: since,
-        max_messages: max,
+        expected_seq: options.since_seq,
+        gap_policy: options.gap_policy,
+        terminated: false,
+        max_messages: options.max_messages,
         seen: 0,
         poll_interval: Duration::from_millis(50),
         deadline,
@@ -404,6 +441,9 @@ pub extern "C" fn plsm_stream_next(
         Ok(stream) => stream,
         Err(code) => return code,
     };
+    if stream.terminated {
+        return 0;
+    }
     if let Some(max) = stream.max_messages {
         if stream.seen >= max {
             return 0;
@@ -419,9 +459,12 @@ pub extern "C" fn plsm_stream_next(
 
         match stream.cursor.next(&stream.pool) {
             Ok(crate::api::CursorResult::Message(frame)) => {
-                if let Some(min_seq) = stream.since_seq {
-                    if frame.seq < min_seq {
-                        continue;
+                match observe_sequence(&mut stream.expected_seq, frame.seq, stream.gap_policy) {
+                    Ok(true) => {}
+                    Ok(false) => continue,
+                    Err(err) => {
+                        stream.terminated = true;
+                        return fail(out_err, err);
                     }
                 }
                 let message = match message_from_frame(&frame) {
@@ -455,6 +498,31 @@ pub extern "C" fn plsm_lite3_stream_open(
     out_stream: *mut *mut plsm_lite3_stream,
     out_err: *mut *mut plsm_error,
 ) -> i32 {
+    let options = plsm_stream_options {
+        struct_size: std::mem::size_of::<plsm_stream_options>() as u32,
+        gap_policy: 0,
+        since_seq,
+        max_messages,
+        timeout_ms,
+        has_since,
+        has_max,
+        has_timeout,
+        reserved: 0,
+    };
+    plsm_lite3_stream_open_ex(pool, &options, out_stream, out_err)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_lite3_stream_open_ex(
+    pool: *mut plsm_pool,
+    options: *const plsm_stream_options,
+    out_stream: *mut *mut plsm_lite3_stream,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    let options = match parse_stream_options(options, out_err) {
+        Ok(options) => options,
+        Err(code) => return code,
+    };
     let pool = match borrow_pool(pool, out_err) {
         Ok(pool) => pool,
         Err(code) => return code,
@@ -465,22 +533,7 @@ pub extern "C" fn plsm_lite3_stream_open(
             Error::new(ErrorKind::Usage).with_message("out_stream is null"),
         );
     }
-    let since = if has_since != 0 {
-        Some(since_seq)
-    } else {
-        None
-    };
-    let max = if has_max != 0 {
-        Some(max_messages as usize)
-    } else {
-        None
-    };
-    let timeout = if has_timeout != 0 {
-        Some(Duration::from_millis(timeout_ms))
-    } else {
-        None
-    };
-    let deadline = timeout.map(|duration| Instant::now() + duration);
+    let deadline = options.timeout.map(|duration| Instant::now() + duration);
     let info = match pool.pool.info() {
         Ok(info) => info,
         Err(err) => return fail(out_err, err),
@@ -492,8 +545,10 @@ pub extern "C" fn plsm_lite3_stream_open(
     let handle = Box::new(plsm_lite3_stream {
         pool,
         cursor: crate::api::Cursor::new(),
-        since_seq: since,
-        max_messages: max,
+        expected_seq: options.since_seq,
+        gap_policy: options.gap_policy,
+        terminated: false,
+        max_messages: options.max_messages,
         seen: 0,
         poll_interval: Duration::from_millis(50),
         deadline,
@@ -514,6 +569,9 @@ pub extern "C" fn plsm_lite3_stream_next(
         Ok(stream) => stream,
         Err(code) => return code,
     };
+    if stream.terminated {
+        return 0;
+    }
     if let Some(max) = stream.max_messages {
         if stream.seen >= max {
             return 0;
@@ -529,9 +587,12 @@ pub extern "C" fn plsm_lite3_stream_next(
 
         match stream.cursor.next(&stream.pool) {
             Ok(crate::api::CursorResult::Message(frame)) => {
-                if let Some(min_seq) = stream.since_seq {
-                    if frame.seq < min_seq {
-                        continue;
+                match observe_sequence(&mut stream.expected_seq, frame.seq, stream.gap_policy) {
+                    Ok(true) => {}
+                    Ok(false) => continue,
+                    Err(err) => {
+                        stream.terminated = true;
+                        return fail(out_err, err);
                     }
                 }
                 stream.seen += 1;
@@ -612,6 +673,65 @@ pub extern "C" fn plsm_error_free(err: *mut plsm_error) {
             drop(CString::from_raw(err.path));
         }
     }
+}
+
+fn parse_stream_options(
+    options: *const plsm_stream_options,
+    out_err: *mut *mut plsm_error,
+) -> Result<StreamOpenOptions, i32> {
+    if options.is_null() {
+        return Err(fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("stream options are null"),
+        ));
+    }
+    let struct_size = unsafe { std::ptr::addr_of!((*options).struct_size).read() } as usize;
+    let required_size = std::mem::size_of::<plsm_stream_options>();
+    if struct_size < required_size {
+        return Err(fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message(format!(
+                "stream options are too small: got {struct_size} bytes, need at least {required_size}"
+            )),
+        ));
+    }
+    let options = unsafe { &*options };
+    if options.reserved != 0 {
+        return Err(fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("stream options reserved field must be zero"),
+        ));
+    }
+    let gap_policy = match options.gap_policy {
+        0 => GapPolicy::Continue,
+        1 => GapPolicy::Error,
+        _ => {
+            return Err(fail(
+                out_err,
+                Error::new(ErrorKind::Usage).with_message("invalid gap policy"),
+            ));
+        }
+    };
+    let max_messages = if options.has_max != 0 {
+        match usize::try_from(options.max_messages) {
+            Ok(max) => Some(max),
+            Err(_) => {
+                return Err(fail(
+                    out_err,
+                    Error::new(ErrorKind::Usage)
+                        .with_message("max_messages exceeds platform limits"),
+                ));
+            }
+        }
+    } else {
+        None
+    };
+    Ok(StreamOpenOptions {
+        since_seq: (options.has_since != 0).then_some(options.since_seq),
+        max_messages,
+        timeout: (options.has_timeout != 0).then(|| Duration::from_millis(options.timeout_ms)),
+        gap_policy,
+    })
 }
 
 fn borrow_client<'a>(
@@ -864,6 +984,7 @@ fn error_kind_code(kind: ErrorKind) -> i32 {
         ErrorKind::Permission => 6,
         ErrorKind::Corrupt => 7,
         ErrorKind::Io => 8,
+        ErrorKind::RetentionGap => 9,
     }
 }
 
@@ -927,6 +1048,66 @@ mod tests {
         let kind = owned.kind;
         plsm_error_free(err);
         (kind, message, path, seq, offset)
+    }
+
+    fn default_stream_options() -> plsm_stream_options {
+        plsm_stream_options {
+            struct_size: std::mem::size_of::<plsm_stream_options>() as u32,
+            gap_policy: 0,
+            since_seq: 0,
+            max_messages: 0,
+            timeout_ms: 0,
+            has_since: 0,
+            has_max: 0,
+            has_timeout: 0,
+            reserved: 0,
+        }
+    }
+
+    fn append_json_for_test(pool: *mut plsm_pool, value: &Value, err: &mut *mut plsm_error) -> u64 {
+        let bytes = serde_json::to_vec(value).expect("json");
+        let mut out = plsm_buf {
+            data: std::ptr::null_mut(),
+            len: 0,
+        };
+        let rc = plsm_pool_append_json(
+            pool,
+            bytes.as_ptr(),
+            bytes.len(),
+            std::ptr::null(),
+            0,
+            0,
+            &mut out,
+            err,
+        );
+        assert_eq!(rc, 0, "append failed");
+        let seq = parse_buf(&out)["seq"].as_u64().expect("seq");
+        plsm_buf_free(&mut out);
+        seq
+    }
+
+    fn fill_pool_past(pool: *mut plsm_pool, seq: u64, err: &mut *mut plsm_error) -> u64 {
+        for n in 0..10_000_u64 {
+            append_json_for_test(
+                pool,
+                &serde_json::json!({
+                    "n": n,
+                    "padding": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                }),
+                err,
+            );
+            let oldest = unsafe { &*pool }
+                .pool
+                .info()
+                .expect("pool info")
+                .bounds
+                .oldest_seq
+                .expect("oldest");
+            if oldest > seq {
+                return oldest;
+            }
+        }
+        panic!("pool bounds did not advance beyond sequence {seq}");
     }
 
     #[test]
@@ -1060,6 +1241,162 @@ mod tests {
         if !err.is_null() {
             plsm_error_free(err);
         }
+    }
+
+    #[test]
+    fn stream_open_ex_validates_versioned_options() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pool_dir = temp.path().join("pools");
+        std::fs::create_dir_all(&pool_dir).expect("mkdir");
+        let pool_dir_c = CString::new(pool_dir.to_string_lossy().as_ref()).expect("cstr");
+        let mut client: *mut plsm_client = std::ptr::null_mut();
+        let mut pool: *mut plsm_pool = std::ptr::null_mut();
+        let mut stream: *mut plsm_stream = std::ptr::null_mut();
+        let mut err: *mut plsm_error = std::ptr::null_mut();
+        assert_eq!(
+            plsm_client_new(pool_dir_c.as_ptr(), &mut client, &mut err),
+            0
+        );
+        let pool_name = CString::new("stream-options").expect("cstr");
+        assert_eq!(
+            plsm_pool_create(client, pool_name.as_ptr(), 8192, &mut pool, &mut err),
+            0
+        );
+
+        assert_eq!(
+            plsm_stream_open_ex(pool, std::ptr::null(), &mut stream, &mut err),
+            -1
+        );
+        assert_eq!(take_error(err).0, error_kind_code(ErrorKind::Usage));
+
+        let mut options = default_stream_options();
+        options.struct_size -= 1;
+        assert_eq!(
+            plsm_stream_open_ex(pool, &options, &mut stream, &mut err),
+            -1
+        );
+        assert_eq!(take_error(err).0, error_kind_code(ErrorKind::Usage));
+
+        let mut options = default_stream_options();
+        options.reserved = 1;
+        assert_eq!(
+            plsm_stream_open_ex(pool, &options, &mut stream, &mut err),
+            -1
+        );
+        assert_eq!(take_error(err).0, error_kind_code(ErrorKind::Usage));
+
+        let mut options = default_stream_options();
+        options.gap_policy = 99;
+        assert_eq!(
+            plsm_stream_open_ex(pool, &options, &mut stream, &mut err),
+            -1
+        );
+        assert_eq!(take_error(err).0, error_kind_code(ErrorKind::Usage));
+
+        #[repr(C)]
+        struct FutureOptions {
+            v1: plsm_stream_options,
+            future: u64,
+        }
+        let mut future = FutureOptions {
+            v1: default_stream_options(),
+            future: 42,
+        };
+        future.v1.struct_size = std::mem::size_of::<FutureOptions>() as u32;
+        assert_eq!(
+            plsm_stream_open_ex(pool, &future.v1, &mut stream, &mut err),
+            0
+        );
+        assert_eq!(future.future, 42);
+        plsm_stream_free(stream);
+
+        plsm_pool_free(pool);
+        plsm_client_free(client);
+    }
+
+    #[test]
+    fn stream_open_ex_reports_retention_gaps_for_json_and_lite3() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pool_dir = temp.path().join("pools");
+        std::fs::create_dir_all(&pool_dir).expect("mkdir");
+        let pool_dir_c = CString::new(pool_dir.to_string_lossy().as_ref()).expect("cstr");
+        let mut client: *mut plsm_client = std::ptr::null_mut();
+        let mut pool: *mut plsm_pool = std::ptr::null_mut();
+        let mut err: *mut plsm_error = std::ptr::null_mut();
+        assert_eq!(
+            plsm_client_new(pool_dir_c.as_ptr(), &mut client, &mut err),
+            0
+        );
+        let pool_name = CString::new("stream-gap").expect("cstr");
+        assert_eq!(
+            plsm_pool_create(client, pool_name.as_ptr(), 8192, &mut pool, &mut err),
+            0
+        );
+        let first = append_json_for_test(pool, &serde_json::json!({"n": 1}), &mut err);
+        let oldest = fill_pool_past(pool, first, &mut err);
+
+        let mut options = default_stream_options();
+        options.gap_policy = 1;
+        options.since_seq = first;
+        options.has_since = 1;
+
+        let mut stream: *mut plsm_stream = std::ptr::null_mut();
+        assert_eq!(
+            plsm_stream_open_ex(pool, &options, &mut stream, &mut err),
+            0
+        );
+        let mut out = plsm_buf {
+            data: std::ptr::null_mut(),
+            len: 0,
+        };
+        assert_eq!(plsm_stream_next(stream, &mut out, &mut err), -1);
+        let (kind, message, _path, seq, _offset) = take_error(err);
+        assert_eq!(kind, error_kind_code(ErrorKind::RetentionGap));
+        assert_eq!(seq, Some(first));
+        assert!(message.contains("the next available message is"));
+        assert_eq!(plsm_stream_next(stream, &mut out, &mut err), 0);
+        plsm_stream_free(stream);
+
+        let mut lite3_stream: *mut plsm_lite3_stream = std::ptr::null_mut();
+        assert_eq!(
+            plsm_lite3_stream_open_ex(pool, &options, &mut lite3_stream, &mut err),
+            0
+        );
+        let mut frame = plsm_lite3_frame {
+            seq: 0,
+            timestamp_ns: 0,
+            flags: 0,
+            payload: plsm_buf {
+                data: std::ptr::null_mut(),
+                len: 0,
+            },
+        };
+        assert_eq!(
+            plsm_lite3_stream_next(lite3_stream, &mut frame, &mut err),
+            -1
+        );
+        let (kind, _message, _path, seq, _offset) = take_error(err);
+        assert_eq!(kind, error_kind_code(ErrorKind::RetentionGap));
+        assert_eq!(seq, Some(first));
+        plsm_lite3_stream_free(lite3_stream);
+
+        options.gap_policy = 0;
+        let mut continuing: *mut plsm_stream = std::ptr::null_mut();
+        assert_eq!(
+            plsm_stream_open_ex(pool, &options, &mut continuing, &mut err),
+            0
+        );
+        assert_eq!(plsm_stream_next(continuing, &mut out, &mut err), 1);
+        assert!(
+            parse_buf(&out)["seq"]
+                .as_u64()
+                .is_some_and(|seq| seq >= oldest)
+        );
+        plsm_buf_free(&mut out);
+        plsm_stream_free(continuing);
+
+        plsm_pool_free(pool);
+        plsm_client_free(client);
     }
 
     #[test]

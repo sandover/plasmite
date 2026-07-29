@@ -42,6 +42,7 @@ const (
 	ErrorPermission    ErrorKind = api.ErrorPermission
 	ErrorCorrupt       ErrorKind = api.ErrorCorrupt
 	ErrorIO            ErrorKind = api.ErrorIO
+	ErrorRetentionGap  ErrorKind = api.ErrorRetentionGap
 )
 
 type Error = api.Error
@@ -305,6 +306,10 @@ func (p *Pool) GetLite3(seq uint64) (*Lite3Frame, error) {
 }
 
 func (p *Pool) OpenStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (api.Stream, error) {
+	return p.openStream(sinceSeq, maxMessages, timeoutMs, false)
+}
+
+func (p *Pool) openStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64, errorOnGap bool) (api.Stream, error) {
 	if p == nil || p.ptr == nil {
 		return nil, closedError("pool")
 	}
@@ -329,17 +334,32 @@ func (p *Pool) OpenStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint
 
 	var cStream *C.plsm_stream_t
 	var cErr *C.plsm_error_t
-	rc := C.plsm_stream_open(
-		p.ptr,
-		sinceVal,
-		hasSince,
-		maxVal,
-		hasMax,
-		timeoutVal,
-		hasTimeout,
-		&cStream,
-		&cErr,
-	)
+	var rc C.int
+	if errorOnGap {
+		options := C.plsm_stream_options_t{
+			struct_size:  C.uint32_t(C.sizeof_plsm_stream_options_t),
+			gap_policy:   C.uint32_t(C.PLSM_GAP_ERROR),
+			since_seq:    sinceVal,
+			max_messages: maxVal,
+			timeout_ms:   timeoutVal,
+			has_since:    hasSince,
+			has_max:      hasMax,
+			has_timeout:  hasTimeout,
+		}
+		rc = C.plsm_stream_open_ex(p.ptr, &options, &cStream, &cErr)
+	} else {
+		rc = C.plsm_stream_open(
+			p.ptr,
+			sinceVal,
+			hasSince,
+			maxVal,
+			hasMax,
+			timeoutVal,
+			hasTimeout,
+			&cStream,
+			&cErr,
+		)
+	}
 	if rc != 0 {
 		return nil, fromCError(cErr)
 	}
@@ -347,6 +367,10 @@ func (p *Pool) OpenStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint
 }
 
 func (p *Pool) OpenLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (api.Lite3Stream, error) {
+	return p.openLite3Stream(sinceSeq, maxMessages, timeoutMs, false)
+}
+
+func (p *Pool) openLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64, errorOnGap bool) (api.Lite3Stream, error) {
 	if p == nil || p.ptr == nil {
 		return nil, closedError("pool")
 	}
@@ -371,17 +395,32 @@ func (p *Pool) OpenLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs 
 
 	var cStream *C.plsm_lite3_stream_t
 	var cErr *C.plsm_error_t
-	rc := C.plsm_lite3_stream_open(
-		p.ptr,
-		sinceVal,
-		hasSince,
-		maxVal,
-		hasMax,
-		timeoutVal,
-		hasTimeout,
-		&cStream,
-		&cErr,
-	)
+	var rc C.int
+	if errorOnGap {
+		options := C.plsm_stream_options_t{
+			struct_size:  C.uint32_t(C.sizeof_plsm_stream_options_t),
+			gap_policy:   C.uint32_t(C.PLSM_GAP_ERROR),
+			since_seq:    sinceVal,
+			max_messages: maxVal,
+			timeout_ms:   timeoutVal,
+			has_since:    hasSince,
+			has_max:      hasMax,
+			has_timeout:  hasTimeout,
+		}
+		rc = C.plsm_lite3_stream_open_ex(p.ptr, &options, &cStream, &cErr)
+	} else {
+		rc = C.plsm_lite3_stream_open(
+			p.ptr,
+			sinceVal,
+			hasSince,
+			maxVal,
+			hasMax,
+			timeoutVal,
+			hasTimeout,
+			&cStream,
+			&cErr,
+		)
+	}
 	if rc != 0 {
 		return nil, fromCError(cErr)
 	}
@@ -477,7 +516,7 @@ func (p *Pool) Tail(ctx context.Context, opts TailOptions) (<-chan *api.Message,
 				left := *opts.MaxMessages - delivered
 				remaining = &left
 			}
-			stream, err := p.OpenStream(since, remaining, &timeoutValue)
+			stream, err := p.openStream(since, remaining, &timeoutValue, opts.ErrorOnGap)
 			if err != nil {
 				errs <- err
 				return
@@ -563,7 +602,7 @@ func (p *Pool) TailLite3(ctx context.Context, opts TailOptions) (<-chan *Lite3Fr
 				left := *opts.MaxMessages - delivered
 				remaining = &left
 			}
-			stream, err := p.OpenLite3Stream(since, remaining, &timeoutValue)
+			stream, err := p.openLite3Stream(since, remaining, &timeoutValue, opts.ErrorOnGap)
 			if err != nil {
 				errs <- err
 				return

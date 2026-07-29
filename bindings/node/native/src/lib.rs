@@ -59,6 +59,19 @@ struct plsm_error_t {
     has_offset: u8,
 }
 
+#[repr(C)]
+struct plsm_stream_options_t {
+    struct_size: u32,
+    gap_policy: u32,
+    since_seq: u64,
+    max_messages: u64,
+    timeout_ms: u64,
+    has_since: u32,
+    has_max: u32,
+    has_timeout: u32,
+    reserved: u32,
+}
+
 unsafe extern "C" {
     fn plsm_client_new(
         pool_dir: *const c_char,
@@ -127,6 +140,12 @@ unsafe extern "C" {
         out_stream: *mut *mut plsm_stream_t,
         out_err: *mut *mut plsm_error_t,
     ) -> c_int;
+    fn plsm_stream_open_ex(
+        pool: *mut plsm_pool_t,
+        options: *const plsm_stream_options_t,
+        out_stream: *mut *mut plsm_stream_t,
+        out_err: *mut *mut plsm_error_t,
+    ) -> c_int;
 
     fn plsm_lite3_stream_open(
         pool: *mut plsm_pool_t,
@@ -136,6 +155,12 @@ unsafe extern "C" {
         has_max: u32,
         timeout_ms: u64,
         has_timeout: u32,
+        out_stream: *mut *mut plsm_lite3_stream_t,
+        out_err: *mut *mut plsm_error_t,
+    ) -> c_int;
+    fn plsm_lite3_stream_open_ex(
+        pool: *mut plsm_pool_t,
+        options: *const plsm_stream_options_t,
         out_stream: *mut *mut plsm_lite3_stream_t,
         out_err: *mut *mut plsm_error_t,
     ) -> c_int;
@@ -178,6 +203,7 @@ pub enum ErrorKind {
     Permission = 6,
     Corrupt = 7,
     Io = 8,
+    RetentionGap = 9,
 }
 
 #[napi]
@@ -333,24 +359,30 @@ impl Pool {
         since_seq: Option<Either<u32, BigInt>>,
         max_messages: Option<Either<u32, BigInt>>,
         timeout_ms: Option<Either<u32, BigInt>>,
+        error_on_gap: bool,
     ) -> Result<Stream> {
         let since_seq = since_seq.map(|value| to_u64(value, "since_seq")).transpose()?;
         let max_messages = max_messages.map(|value| to_u64(value, "max_messages")).transpose()?;
         let timeout_ms = timeout_ms.map(|value| to_u64(value, "timeout_ms")).transpose()?;
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
-        let rc = unsafe {
-            plsm_stream_open(
-                self.ptr,
-                since_seq.unwrap_or(0),
-                if since_seq.is_some() { 1 } else { 0 },
-                max_messages.unwrap_or(0),
-                if max_messages.is_some() { 1 } else { 0 },
-                timeout_ms.unwrap_or(0),
-                if timeout_ms.is_some() { 1 } else { 0 },
-                &mut out,
-                &mut err,
-            )
+        let rc = if error_on_gap {
+            let options = stream_options(since_seq, max_messages, timeout_ms, true);
+            unsafe { plsm_stream_open_ex(self.ptr, &options, &mut out, &mut err) }
+        } else {
+            unsafe {
+                plsm_stream_open(
+                    self.ptr,
+                    since_seq.unwrap_or(0),
+                    if since_seq.is_some() { 1 } else { 0 },
+                    max_messages.unwrap_or(0),
+                    if max_messages.is_some() { 1 } else { 0 },
+                    timeout_ms.unwrap_or(0),
+                    if timeout_ms.is_some() { 1 } else { 0 },
+                    &mut out,
+                    &mut err,
+                )
+            }
         };
         if rc != 0 {
             return Err(take_error(err));
@@ -364,24 +396,30 @@ impl Pool {
         since_seq: Option<Either<u32, BigInt>>,
         max_messages: Option<Either<u32, BigInt>>,
         timeout_ms: Option<Either<u32, BigInt>>,
+        error_on_gap: bool,
     ) -> Result<Lite3Stream> {
         let since_seq = since_seq.map(|value| to_u64(value, "since_seq")).transpose()?;
         let max_messages = max_messages.map(|value| to_u64(value, "max_messages")).transpose()?;
         let timeout_ms = timeout_ms.map(|value| to_u64(value, "timeout_ms")).transpose()?;
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
-        let rc = unsafe {
-            plsm_lite3_stream_open(
-                self.ptr,
-                since_seq.unwrap_or(0),
-                if since_seq.is_some() { 1 } else { 0 },
-                max_messages.unwrap_or(0),
-                if max_messages.is_some() { 1 } else { 0 },
-                timeout_ms.unwrap_or(0),
-                if timeout_ms.is_some() { 1 } else { 0 },
-                &mut out,
-                &mut err,
-            )
+        let rc = if error_on_gap {
+            let options = stream_options(since_seq, max_messages, timeout_ms, true);
+            unsafe { plsm_lite3_stream_open_ex(self.ptr, &options, &mut out, &mut err) }
+        } else {
+            unsafe {
+                plsm_lite3_stream_open(
+                    self.ptr,
+                    since_seq.unwrap_or(0),
+                    if since_seq.is_some() { 1 } else { 0 },
+                    max_messages.unwrap_or(0),
+                    if max_messages.is_some() { 1 } else { 0 },
+                    timeout_ms.unwrap_or(0),
+                    if timeout_ms.is_some() { 1 } else { 0 },
+                    &mut out,
+                    &mut err,
+                )
+            }
         };
         if rc != 0 {
             return Err(take_error(err));
@@ -571,6 +609,7 @@ fn default_error_message(kind: &str) -> &'static str {
         "Permission" => "permission denied",
         "Corrupt" => "corrupt",
         "Io" => "io error",
+        "RetentionGap" => "retention gap",
         _ => "error",
     }
 }
@@ -585,7 +624,27 @@ fn error_kind_label(kind: i32) -> &'static str {
         6 => "Permission",
         7 => "Corrupt",
         8 => "Io",
+        9 => "RetentionGap",
         _ => "Internal",
+    }
+}
+
+fn stream_options(
+    since_seq: Option<u64>,
+    max_messages: Option<u64>,
+    timeout_ms: Option<u64>,
+    error_on_gap: bool,
+) -> plsm_stream_options_t {
+    plsm_stream_options_t {
+        struct_size: std::mem::size_of::<plsm_stream_options_t>() as u32,
+        gap_policy: u32::from(error_on_gap),
+        since_seq: since_seq.unwrap_or(0),
+        max_messages: max_messages.unwrap_or(0),
+        timeout_ms: timeout_ms.unwrap_or(0),
+        has_since: u32::from(since_seq.is_some()),
+        has_max: u32::from(max_messages.is_some()),
+        has_timeout: u32::from(timeout_ms.is_some()),
+        reserved: 0,
     }
 }
 

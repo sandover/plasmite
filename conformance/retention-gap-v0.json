@@ -1,0 +1,15 @@
+{
+  "conformance_version": 0,
+  "name": "retention gap policies",
+  "workdir": "work-retention-gap",
+  "steps": [
+    {
+      "op": "retention_gap",
+      "id": "retention-gap-contract",
+      "pool": "gap",
+      "input": {
+        "size_bytes": 65536
+      }
+    }
+  ]
+}

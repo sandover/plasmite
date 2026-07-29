@@ -1837,6 +1837,7 @@ fn interface_error_kind(kind: ErrorKind) -> ErrorKindWire {
         ErrorKind::Permission => ErrorKindWire::Permission,
         ErrorKind::Corrupt => ErrorKindWire::Corrupt,
         ErrorKind::Io => ErrorKindWire::Io,
+        ErrorKind::RetentionGap => ErrorKindWire::RetentionGap,
     }
 }
 
@@ -2153,6 +2154,7 @@ mod tests {
             (ErrorKind::Permission, "Permission"),
             (ErrorKind::Corrupt, "Corrupt"),
             (ErrorKind::Io, "Io"),
+            (ErrorKind::RetentionGap, "RetentionGap"),
         ];
 
         for (kind, name) in cases {

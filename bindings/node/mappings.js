@@ -15,6 +15,7 @@ const ERROR_KIND_VALUES = Object.freeze({
   Permission: 6,
   Corrupt: 7,
   Io: 8,
+  RetentionGap: 9,
 });
 
 const DURABILITY_VALUES = Object.freeze({

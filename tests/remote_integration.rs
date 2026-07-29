@@ -6,8 +6,8 @@
 //! Invariants: Server processes are cleaned up on drop.
 
 use plasmite::api::{
-    AppendOptions, Durability, ErrorKind, LocalClient, Pool, PoolApiExt, PoolOptions, PoolRef,
-    RemoteClient, TailOptions,
+    AppendOptions, Durability, ErrorKind, GapPolicy, LocalClient, Pool, PoolApiExt, PoolOptions,
+    PoolRef, RemoteClient, TailOptions,
 };
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -503,6 +503,90 @@ fn remote_tail_respects_limits_and_timeouts() -> TestResult<()> {
     })?;
     let msg = tail.next_message()?.expect("resumed message");
     assert_eq!(msg.data, json!({"n": 3}));
+    Ok(())
+}
+
+#[test]
+fn remote_json_tail_can_fail_closed_on_retention_gaps() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::try_start(temp_dir.path())?;
+    let client = server.client()?;
+    let pool_ref = PoolRef::name("tail-gap");
+
+    client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
+    let pool = client.open_pool(&pool_ref)?;
+    let first = pool.append_json_now(&json!({"kind": "first"}), &[], Durability::Fast)?;
+    for i in 0..10_000 {
+        pool.append_json_now(
+            &json!({"i": i, "padding": "x".repeat(64 * 1024)}),
+            &[],
+            Durability::Fast,
+        )?;
+        match pool.get_message(first.seq) {
+            Ok(_) => {}
+            Err(err) if err.kind() == ErrorKind::NotFound => break,
+            Err(err) => return Err(err.into()),
+        }
+        if i == 9_999 {
+            return Err("first sequence remained retained after filling pool".into());
+        }
+    }
+
+    let mut continuing = pool.tail(TailOptions {
+        since_seq: Some(first.seq),
+        max_messages: Some(1),
+        timeout: Some(Duration::from_millis(500)),
+        ..TailOptions::default()
+    })?;
+    let continued = continuing
+        .next_message()?
+        .ok_or("default remote tail did not continue")?;
+    assert!(continued.seq > first.seq);
+
+    let mut failing = pool.tail(TailOptions {
+        since_seq: Some(first.seq),
+        tags: vec!["never".to_string()],
+        timeout: Some(Duration::from_millis(500)),
+        gap_policy: GapPolicy::Error,
+        ..TailOptions::default()
+    })?;
+    let err = failing
+        .next_message()
+        .expect_err("expected remote retention gap");
+    assert_eq!(err.kind(), ErrorKind::RetentionGap);
+    assert_eq!(err.seq(), Some(first.seq));
+    assert!(failing.next_message()?.is_none());
+    Ok(())
+}
+
+#[test]
+fn remote_tail_rejects_invalid_or_unsupported_gap_policies() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::try_start(temp_dir.path())?;
+    let client = server.client()?;
+    let pool_ref = PoolRef::name("tail-gap-policy");
+    client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
+    let pool = client.open_pool(&pool_ref)?;
+
+    let err = match pool.tail_lite3(TailOptions {
+        gap_policy: GapPolicy::Error,
+        ..TailOptions::default()
+    }) {
+        Ok(_) => return Err("expected remote Lite3 gap-policy rejection".into()),
+        Err(err) => err,
+    };
+    assert_eq!(err.kind(), ErrorKind::Usage);
+
+    for path in ["tail?gap_policy=unknown", "tail_lite3?gap_policy=error"] {
+        let url = format!(
+            "{}/v0/pools/tail-gap-policy/{path}",
+            server.base_url.trim_end_matches('/')
+        );
+        match ureq::get(&url).call() {
+            Err(ureq::Error::Status(400, _)) => {}
+            other => return Err(format!("expected HTTP 400 for {path}, got {other:?}").into()),
+        }
+    }
     Ok(())
 }
 

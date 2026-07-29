@@ -45,6 +45,9 @@ It captures stable wire-level compatibility guarantees only.
 - `GET /v0/pools/{pool}/tail` -> JSONL stream (`application/jsonl`).
 - `GET /v0/pools/{pool}/tail_lite3` -> Lite3 stream (`application/x-plasmite-lite3-stream`).
 - Lite3 tail frame format: `[u64be seq][u64be timestamp_ns][u32be len][len bytes payload]` repeated.
+- Tail requests accept `gap_policy=continue|error`; omission means `continue`.
+- `/tail_lite3` rejects `gap_policy=error` with `Usage` because Lite3 streams
+  have no terminal error frame.
 
 ## Data + Error Contract
 
@@ -62,6 +65,7 @@ It captures stable wire-level compatibility guarantees only.
 - `403` forbidden by access mode
 - `404` not found
 - `409` already exists
+- `410` retention gap
 - `413` payload too large
 - `423` busy/locked
 - `500` internal/corrupt/io failures
@@ -86,6 +90,8 @@ It captures stable wire-level compatibility guarantees only.
 - Reconnect flows are at-least-once; clients should resume via `since_seq` and de-duplicate by `seq`.
 - On post-start failure, `/tail` may emit one terminal JSON error-envelope line before close.
 - On post-start failure, `/tail_lite3` closes the stream without a JSON body frame.
+- With `gap_policy=error`, `/tail` emits `RetentionGap` before any message after
+  a missing sequence; the envelope's `seq` is the first missing sequence.
 
 ### Server Limits
 

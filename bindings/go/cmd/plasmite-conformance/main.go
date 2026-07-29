@@ -105,6 +105,9 @@ func run() error {
 		"tail": func(step map[string]any, index int, stepID *string) error {
 			return runTail(client, step, index, stepID)
 		},
+		"retention_gap": func(step map[string]any, index int, stepID *string) error {
+			return runRetentionGap(client, step, index, stepID)
+		},
 		"list_pools": func(step map[string]any, index int, stepID *string) error {
 			return runListPools(step, index, stepID, workdirPath)
 		},
@@ -341,6 +344,160 @@ func runTail(client *plasmite.Client, step map[string]any, index int, stepID *st
 
 		return validateExpectError(step["expect"], nil, index, stepID)
 	})
+}
+
+func runRetentionGap(client *plasmite.Client, step map[string]any, index int, stepID *string) error {
+	base, ok := step["pool"].(string)
+	if !ok || base == "" {
+		return stepErr(index, stepID, "missing pool")
+	}
+	sizeBytes := uint64(64 * 1024)
+	if input, ok := step["input"].(map[string]any); ok {
+		if raw, ok := input["size_bytes"].(float64); ok {
+			sizeBytes = uint64(raw)
+		}
+	}
+
+	stalePool, err := client.CreatePool(plasmite.PoolRefName(base+"-stale"), sizeBytes)
+	if err != nil {
+		return stepErr(index, stepID, err.Error())
+	}
+	defer stalePool.Close()
+	first, err := stalePool.Append(map[string]any{"kind": "first"}, nil)
+	if err != nil {
+		return stepErr(index, stepID, err.Error())
+	}
+	if err := fillPoolPast(stalePool, first.Seq); err != nil {
+		return stepErr(index, stepID, err.Error())
+	}
+
+	timeout := uint64(500)
+	one := uint64(1)
+	continuing, err := stalePool.OpenStream(&first.Seq, &one, &timeout)
+	if err != nil {
+		return stepErr(index, stepID, err.Error())
+	}
+	raw, err := continuing.NextJSON()
+	continuing.Close()
+	if err != nil {
+		return stepErr(index, stepID, fmt.Sprintf("default tail failed: %v", err))
+	}
+	continued, err := api.DecodeMessage(raw)
+	if err != nil || continued.Seq <= first.Seq {
+		return stepErr(index, stepID, "default tail did not continue after gap")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	filteredOut, filteredErrs := stalePool.Tail(ctx, plasmite.TailOptions{
+		SinceSeq:   &first.Seq,
+		Tags:       []string{"never"},
+		Timeout:    50 * time.Millisecond,
+		ErrorOnGap: true,
+	})
+	select {
+	case message := <-filteredOut:
+		return stepErr(index, stepID, fmt.Sprintf("stale filtered tail delivered post-gap message: %#v", message))
+	case err := <-filteredErrs:
+		if err := requireRetentionGap(err, first.Seq); err != nil {
+			return stepErr(index, stepID, err.Error())
+		}
+	case <-ctx.Done():
+		return stepErr(index, stepID, "stale filtered tail did not fail")
+	}
+
+	establishedPool, err := client.CreatePool(plasmite.PoolRefName(base+"-established"), sizeBytes)
+	if err != nil {
+		return stepErr(index, stepID, err.Error())
+	}
+	defer establishedPool.Close()
+	seed, err := establishedPool.Append(map[string]any{"kind": "seed"}, nil)
+	if err != nil {
+		return stepErr(index, stepID, err.Error())
+	}
+	second, err := establishedPool.Append(map[string]any{"kind": "second"}, nil)
+	if err != nil {
+		return stepErr(index, stepID, err.Error())
+	}
+	establishedOut, establishedErrs := establishedPool.Tail(ctx, plasmite.TailOptions{
+		SinceSeq:   &seed.Seq,
+		Timeout:    50 * time.Millisecond,
+		Buffer:     1,
+		ErrorOnGap: true,
+	})
+	select {
+	case message := <-establishedOut:
+		if message == nil || message.Seq != seed.Seq {
+			return stepErr(index, stepID, "tail established the wrong sequence")
+		}
+	case err := <-establishedErrs:
+		return stepErr(index, stepID, fmt.Sprintf("tail failed before position was established: %v", err))
+	case <-ctx.Done():
+		return stepErr(index, stepID, "tail did not establish a position")
+	}
+
+	firstMissing, err := establishedPool.Append(map[string]any{"kind": "first-missing"}, nil)
+	if err != nil {
+		return stepErr(index, stepID, err.Error())
+	}
+	if err := fillPoolPast(establishedPool, firstMissing.Seq); err != nil {
+		return stepErr(index, stepID, err.Error())
+	}
+	select {
+	case message := <-establishedOut:
+		if message == nil || message.Seq != second.Seq {
+			return stepErr(index, stepID, fmt.Sprintf("unexpected pre-gap message: %#v", message))
+		}
+	case err := <-establishedErrs:
+		return stepErr(index, stepID, fmt.Sprintf("tail failed before its buffered message was delivered: %v", err))
+	case <-ctx.Done():
+		return stepErr(index, stepID, "tail did not deliver its buffered message")
+	}
+	select {
+	case message := <-establishedOut:
+		return stepErr(index, stepID, fmt.Sprintf("established tail delivered post-gap message: %#v", message))
+	case err := <-establishedErrs:
+		if err := requireRetentionGap(err, firstMissing.Seq); err != nil {
+			return stepErr(index, stepID, err.Error())
+		}
+	case <-ctx.Done():
+		return stepErr(index, stepID, "established tail did not report retention gap")
+	}
+	return nil
+}
+
+func fillPoolPast(pool api.Pool, seq uint64) error {
+	for index := 0; index < 10_000; index++ {
+		_, err := pool.Append(
+			map[string]any{"i": index, "padding": strings.Repeat("x", 4096)},
+			nil,
+		)
+		if err != nil {
+			return err
+		}
+		if _, err := pool.Get(seq); err != nil {
+			var plasmiteErr *plasmite.Error
+			if errors.As(err, &plasmiteErr) && plasmiteErr.Kind == plasmite.ErrorNotFound {
+				return nil
+			}
+			return err
+		}
+	}
+	return fmt.Errorf("sequence %d remained retained after filling pool", seq)
+}
+
+func requireRetentionGap(err error, expectedSeq uint64) error {
+	var plasmiteErr *plasmite.Error
+	if !errors.As(err, &plasmiteErr) {
+		return fmt.Errorf("expected retention gap, got %T: %v", err, err)
+	}
+	if plasmiteErr.Kind != plasmite.ErrorRetentionGap {
+		return fmt.Errorf("expected retention gap, got kind %d", plasmiteErr.Kind)
+	}
+	if plasmiteErr.Seq == nil || *plasmiteErr.Seq != expectedSeq {
+		return fmt.Errorf("expected gap sequence %d, got %#v", expectedSeq, plasmiteErr.Seq)
+	}
+	return nil
 }
 
 func runListPools(step map[string]any, index int, stepID *string, workdirPath string) error {

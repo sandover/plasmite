@@ -91,6 +91,7 @@ pub(crate) enum ErrorKindWire {
     Permission,
     Corrupt,
     Io,
+    RetentionGap,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -150,6 +151,12 @@ pub(crate) const fn error_policy(kind: ErrorKindWire) -> ErrorPolicy {
             cli_exit_code: 8,
             http_status: 500,
             mcp_error_kind: "Io",
+        },
+        ErrorKindWire::RetentionGap => ErrorPolicy {
+            cli_message: "retention gap",
+            cli_exit_code: 9,
+            http_status: 410,
+            mcp_error_kind: "RetentionGap",
         },
     }
 }
@@ -286,6 +293,7 @@ mod tests {
             (ErrorKindWire::Permission, "Permission"),
             (ErrorKindWire::Corrupt, "Corrupt"),
             (ErrorKindWire::Io, "Io"),
+            (ErrorKindWire::RetentionGap, "RetentionGap"),
         ];
         for (kind, name) in cases {
             assert_eq!(
@@ -324,6 +332,13 @@ mod tests {
             ),
             (ErrorKindWire::Corrupt, "corrupt data", 7, 500, "Corrupt"),
             (ErrorKindWire::Io, "i/o error", 8, 500, "Io"),
+            (
+                ErrorKindWire::RetentionGap,
+                "retention gap",
+                9,
+                410,
+                "RetentionGap",
+            ),
         ];
 
         for (kind, message, exit_code, http_status, mcp_error_kind) in cases {

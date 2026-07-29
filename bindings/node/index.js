@@ -294,11 +294,14 @@ class Pool {
    * @param {number|bigint|null} sinceSeq
    * @param {number|bigint|null} maxMessages
    * @param {number|bigint|null} timeoutMs
+   * @param {boolean} [errorOnGap]
    * @returns {Stream}
    */
-  openStream(sinceSeq, maxMessages, timeoutMs) {
+  openStream(sinceSeq, maxMessages, timeoutMs, errorOnGap = false) {
     try {
-      return new Stream(this._inner.openStream(sinceSeq, maxMessages, timeoutMs));
+      return new Stream(
+        this._inner.openStream(sinceSeq, maxMessages, timeoutMs, errorOnGap),
+      );
     } catch (err) {
       throw wrapNativeError(err);
     }
@@ -309,12 +312,18 @@ class Pool {
    * @param {number|bigint|null} sinceSeq
    * @param {number|bigint|null} maxMessages
    * @param {number|bigint|null} timeoutMs
+   * @param {boolean} [errorOnGap]
    * @returns {Lite3Stream}
    */
-  openLite3Stream(sinceSeq, maxMessages, timeoutMs) {
+  openLite3Stream(sinceSeq, maxMessages, timeoutMs, errorOnGap = false) {
     try {
       return new Lite3Stream(
-        this._inner.openLite3Stream(sinceSeq, maxMessages, timeoutMs),
+        this._inner.openLite3Stream(
+          sinceSeq,
+          maxMessages,
+          timeoutMs,
+          errorOnGap,
+        ),
       );
     } catch (err) {
       throw wrapNativeError(err);
@@ -323,11 +332,11 @@ class Pool {
 
   /**
    * Tail parsed messages with optional filtering.
-   * @param {{sinceSeq?: number|bigint, maxMessages?: number|bigint, timeoutMs?: number|bigint, tags?: string[]}} [options]
+   * @param {{sinceSeq?: number|bigint, maxMessages?: number|bigint, timeoutMs?: number|bigint, tags?: string[], errorOnGap?: boolean}} [options]
    * @returns {AsyncGenerator<Message, void, unknown>}
    */
   async *tail(options = {}) {
-    const { sinceSeq, maxMessages, timeoutMs, tags } = options;
+    const { sinceSeq, maxMessages, timeoutMs, tags, errorOnGap = false } = options;
     const requiredTags = normalizeTagFilter(tags);
     const limit = normalizeOptionalCount(maxMessages, "maxMessages");
     const pollTimeoutMs = normalizePollingTimeout(timeoutMs);
@@ -341,7 +350,12 @@ class Pool {
 
       const remaining = limit === null ? null : limit - delivered;
       const streamLimit = requiredTags.length && remaining !== null ? null : remaining;
-      const stream = this.openStream(cursor, streamLimit, pollTimeoutMs);
+      const stream = this.openStream(
+        cursor,
+        streamLimit,
+        pollTimeoutMs,
+        errorOnGap,
+      );
       let sawRawMessage = false;
       try {
         for (const message of stream) {

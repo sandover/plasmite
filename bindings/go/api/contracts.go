@@ -28,6 +28,7 @@ const (
 	ErrorPermission    ErrorKind = 6
 	ErrorCorrupt       ErrorKind = 7
 	ErrorIO            ErrorKind = 8
+	ErrorRetentionGap  ErrorKind = 9
 )
 
 type Error struct {
@@ -165,6 +166,7 @@ type TailOptions struct {
 	Tags        []string
 	Timeout     time.Duration
 	Buffer      int
+	ErrorOnGap  bool
 }
 
 type ReplayOptions struct {

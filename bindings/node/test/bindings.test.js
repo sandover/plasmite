@@ -22,6 +22,7 @@ const {
   parseMessage,
   PlasmiteNativeError,
   RemoteClient,
+  RemoteError,
   RemotePool,
 } = require("../index.js");
 
@@ -52,6 +53,21 @@ function withPool(poolName, run, sizeBytes = TEST_POOL_SIZE_BYTES) {
       pool.close();
     }
   });
+}
+
+function fillPast(pool, seq) {
+  for (let i = 0; i < 10000; i += 1) {
+    pool.append({ padding: "x".repeat(4096), i });
+    try {
+      pool.get(seq);
+    } catch (err) {
+      if (err instanceof PlasmiteNativeError && err.kind === ErrorKind.NotFound) {
+        return;
+      }
+      throw err;
+    }
+  }
+  assert.fail(`sequence ${seq} remained retained after filling the pool`);
 }
 
 async function withPoolAsync(poolName, run, sizeBytes = TEST_POOL_SIZE_BYTES) {
@@ -231,6 +247,67 @@ test("tail timeout with no messages returns done", async () => {
   });
 });
 
+test("local tails can fail closed on retention gaps", async () => {
+  await withPoolAsync(
+    "tail-gap",
+    async ({ pool }) => {
+      const first = pool.append({ kind: "first" });
+      fillPast(pool, first.seq);
+
+      const continuedIterator = pool
+        .tail({ sinceSeq: first.seq, maxMessages: 1, timeoutMs: 50 })
+        [Symbol.asyncIterator]();
+      const continued = await continuedIterator.next();
+      assert.equal(continued.done, false);
+      assert.ok(continued.value.seq > first.seq);
+      await continuedIterator.return();
+
+      await assert.rejects(
+        async () =>
+          pool
+            .tail({
+              sinceSeq: first.seq,
+              tags: ["never"],
+              timeoutMs: 50,
+              errorOnGap: true,
+            })
+            [Symbol.asyncIterator]()
+            .next(),
+        (err) => {
+          assert.ok(err instanceof PlasmiteNativeError);
+          assert.equal(err.kind, ErrorKind.RetentionGap);
+          assert.equal(err.seq, Number(first.seq));
+          return true;
+        },
+      );
+    },
+    64 * 1024,
+  );
+});
+
+test("lite3 streams can fail closed on retention gaps", () => {
+  withPool(
+    "lite3-gap",
+    ({ pool }) => {
+      const first = pool.append({ kind: "first" });
+      fillPast(pool, first.seq);
+
+      const stream = pool.openLite3Stream(first.seq, null, BigInt(50), true);
+      assert.throws(
+        () => stream.next(),
+        (err) => {
+          assert.ok(err instanceof PlasmiteNativeError);
+          assert.equal(err.kind, ErrorKind.RetentionGap);
+          assert.equal(err.seq, Number(first.seq));
+          return true;
+        },
+      );
+      stream.close();
+    },
+    64 * 1024,
+  );
+});
+
 test("closed pool/client reject operations", () => {
   withClient(({ client }) => {
     const pool = client.createPool("closed", TEST_POOL_SIZE_BYTES);
@@ -337,6 +414,7 @@ test("remote tail encodes tags as repeated tag query params", async () => {
       tags: ["keep", "prod"],
       maxMessages: 1,
       timeoutMs: 10,
+      errorOnGap: true,
     })) {
       assert.equal(message.seq, 1n);
       assert.ok(message.time instanceof Date);
@@ -349,6 +427,45 @@ test("remote tail encodes tags as repeated tag query params", async () => {
     assert.deepEqual(capturedUrl.searchParams.getAll("tag"), ["keep", "prod"]);
     assert.equal(capturedUrl.searchParams.get("max"), "1");
     assert.equal(capturedUrl.searchParams.get("timeout_ms"), "10");
+    assert.equal(capturedUrl.searchParams.get("gap_policy"), "error");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("remote tail preserves terminal retention-gap errors", async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: true,
+    status: 200,
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            '{"error":{"kind":"RetentionGap","message":"retention gap","seq":7}}\n',
+          ),
+        );
+        controller.close();
+      },
+    }),
+  });
+
+  try {
+    const client = new RemoteClient("http://127.0.0.1:9700");
+    const pool = new RemotePool(client, "demo");
+    await assert.rejects(
+      async () =>
+        pool
+          .tail({ sinceSeq: 7, errorOnGap: true })
+          [Symbol.asyncIterator]()
+          .next(),
+      (err) => {
+        assert.ok(err instanceof RemoteError);
+        assert.equal(err.kind, ErrorKind.RetentionGap);
+        assert.equal(err.seq, 7);
+        return true;
+      },
+    );
   } finally {
     global.fetch = originalFetch;
   }

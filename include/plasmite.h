@@ -54,8 +54,33 @@ typedef enum plsm_error_kind {
     PLSM_ERROR_BUSY = 5,
     PLSM_ERROR_PERMISSION = 6,
     PLSM_ERROR_CORRUPT = 7,
-    PLSM_ERROR_IO = 8
+    PLSM_ERROR_IO = 8,
+    PLSM_ERROR_RETENTION_GAP = 9
 } plsm_error_kind_t;
+
+typedef enum plsm_gap_policy {
+    PLSM_GAP_CONTINUE = 0,
+    PLSM_GAP_ERROR = 1
+} plsm_gap_policy_t;
+
+/*
+ * Options for plsm_stream_open_ex and plsm_lite3_stream_open_ex.
+ *
+ * Zero-initialize this structure, set struct_size to sizeof(plsm_stream_options_t),
+ * then set desired fields.  A newer caller may pass a larger structure to an older
+ * library; the library reads only this v1 prefix.  reserved must remain zero.
+ */
+typedef struct plsm_stream_options {
+    uint32_t struct_size;
+    uint32_t gap_policy;
+    uint64_t since_seq;
+    uint64_t max_messages;
+    uint64_t timeout_ms;
+    uint32_t has_since;
+    uint32_t has_max;
+    uint32_t has_timeout;
+    uint32_t reserved;
+} plsm_stream_options_t;
 
 typedef struct plsm_buf {
     uint8_t *data;
@@ -127,6 +152,12 @@ int plsm_stream_open(
     plsm_stream_t **out_stream,
     plsm_error_t **out_err);
 
+int plsm_stream_open_ex(
+    plsm_pool_t *pool,
+    const plsm_stream_options_t *options,
+    plsm_stream_t **out_stream,
+    plsm_error_t **out_err);
+
 int plsm_stream_next(
     plsm_stream_t *stream,
     plsm_buf_t *out_message,
@@ -140,6 +171,12 @@ int plsm_lite3_stream_open(
     uint32_t has_max,
     uint64_t timeout_ms,
     uint32_t has_timeout,
+    plsm_lite3_stream_t **out_stream,
+    plsm_error_t **out_err);
+
+int plsm_lite3_stream_open_ex(
+    plsm_pool_t *pool,
+    const plsm_stream_options_t *options,
     plsm_lite3_stream_t **out_stream,
     plsm_error_t **out_err);
 

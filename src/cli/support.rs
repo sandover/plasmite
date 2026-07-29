@@ -2171,6 +2171,7 @@ pub(crate) fn interface_error_kind(kind: ErrorKind) -> ErrorKindWire {
         ErrorKind::Permission => ErrorKindWire::Permission,
         ErrorKind::Corrupt => ErrorKindWire::Corrupt,
         ErrorKind::Io => ErrorKindWire::Io,
+        ErrorKind::RetentionGap => ErrorKindWire::RetentionGap,
     }
 }
 

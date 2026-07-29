@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Local Rust, C, Python, Node, and Go tails can opt into fail-closed retention
+  gap detection while existing callers retain best-effort continuation.
+- Remote JSON tails accept the same policy and preserve structured
+  `RetentionGap` errors, including the first missing sequence.
+- Cross-language conformance now covers stale starts, filtering, default
+  continuation, and overwrite after a tail position is established.
+
+### Documentation
+
+- The public API and cookbook now explain bounded retention, consumer recovery
+  responsibility, and the remote Lite3 limitation without implying guaranteed
+  delivery.
+
 ## [0.7.2] - 2026-07-28
 
 ### Improved

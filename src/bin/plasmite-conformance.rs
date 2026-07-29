@@ -4,8 +4,11 @@
 //! Invariants: Manifests are JSON-only; steps execute in order; fail-fast on errors.
 //! Invariants: Workdir is isolated under the manifest directory.
 
-use plasmite::api::{Error, LocalClient, PoolApiExt, PoolOptions, PoolRef, TailOptions};
-use serde_json::Value;
+use plasmite::api::{
+    Durability, Error, ErrorKind, GapPolicy, LocalClient, PoolApiExt, PoolOptions, PoolRef,
+    TailOptions,
+};
+use serde_json::{Value, json};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -71,6 +74,7 @@ fn run() -> Result<(), String> {
             "append" => run_append(&client, step, index, &step_id)?,
             "get" => run_get(&client, step, index, &step_id)?,
             "tail" => run_tail(&client, step, index, &step_id)?,
+            "retention_gap" => run_retention_gap(&client, step, index, &step_id)?,
             "list_pools" => run_list_pools(&client, step, index, &step_id)?,
             "pool_info" => run_pool_info(&client, step, index, &step_id)?,
             "delete_pool" => run_delete_pool(&client, step, index, &step_id)?,
@@ -82,6 +86,163 @@ fn run() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn run_retention_gap(
+    client: &LocalClient,
+    step: &Value,
+    index: usize,
+    step_id: &Option<String>,
+) -> Result<(), String> {
+    let base = step
+        .get("pool")
+        .and_then(Value::as_str)
+        .ok_or_else(|| step_err(index, step_id, "missing pool"))?;
+    let size_bytes = step
+        .get("input")
+        .and_then(|input| input.get("size_bytes"))
+        .and_then(Value::as_u64)
+        .unwrap_or(64 * 1024);
+
+    let stale_ref = PoolRef::name(format!("{base}-stale"));
+    client
+        .create_pool(&stale_ref, PoolOptions::new(size_bytes))
+        .map_err(|err| step_err(index, step_id, &err.to_string()))?;
+    let mut stale_pool = client
+        .open_pool(&stale_ref)
+        .map_err(|err| step_err(index, step_id, &err.to_string()))?;
+    let first = stale_pool
+        .append_json_now(&json!({"kind": "first"}), &[], Durability::Fast)
+        .map_err(|err| step_err(index, step_id, &err.to_string()))?;
+    fill_pool_past(&mut stale_pool, first.seq)
+        .map_err(|err| step_err(index, step_id, &err.to_string()))?;
+
+    let mut continuing = stale_pool.tail(TailOptions {
+        since_seq: Some(first.seq),
+        max_messages: Some(1),
+        ..TailOptions::default()
+    });
+    let continued = continuing
+        .next_message()
+        .map_err(|err| step_err(index, step_id, &err.to_string()))?
+        .ok_or_else(|| step_err(index, step_id, "default tail did not continue after gap"))?;
+    if continued.seq <= first.seq {
+        return Err(step_err(
+            index,
+            step_id,
+            "default tail did not advance past stale sequence",
+        ));
+    }
+
+    let mut filtered = stale_pool.tail(TailOptions {
+        since_seq: Some(first.seq),
+        tags: vec!["never".to_string()],
+        gap_policy: GapPolicy::Error,
+        ..TailOptions::default()
+    });
+    expect_retention_gap(
+        filtered.next_message(),
+        first.seq,
+        index,
+        step_id,
+        "stale filtered tail",
+    )?;
+    if filtered
+        .next_message()
+        .map_err(|err| step_err(index, step_id, &err.to_string()))?
+        .is_some()
+    {
+        return Err(step_err(index, step_id, "failed tail did not terminate"));
+    }
+
+    let established_ref = PoolRef::name(format!("{base}-established"));
+    client
+        .create_pool(&established_ref, PoolOptions::new(size_bytes))
+        .map_err(|err| step_err(index, step_id, &err.to_string()))?;
+    let mut established_pool = client
+        .open_pool(&established_ref)
+        .map_err(|err| step_err(index, step_id, &err.to_string()))?;
+    let seed = established_pool
+        .append_json_now(&json!({"kind": "seed"}), &[], Durability::Fast)
+        .map_err(|err| step_err(index, step_id, &err.to_string()))?;
+    let second = established_pool
+        .append_json_now(&json!({"kind": "second"}), &[], Durability::Fast)
+        .map_err(|err| step_err(index, step_id, &err.to_string()))?;
+    let mut established = established_pool.tail(TailOptions {
+        since_seq: Some(seed.seq),
+        gap_policy: GapPolicy::Error,
+        ..TailOptions::default()
+    });
+    for expected in [seed.seq, second.seq] {
+        let message = established
+            .next_message()
+            .map_err(|err| step_err(index, step_id, &err.to_string()))?
+            .ok_or_else(|| {
+                step_err(index, step_id, "tail ended before position was established")
+            })?;
+        if message.seq != expected {
+            return Err(step_err(
+                index,
+                step_id,
+                "tail established the wrong sequence",
+            ));
+        }
+    }
+    let mut established_writer = client
+        .open_pool(&established_ref)
+        .map_err(|err| step_err(index, step_id, &err.to_string()))?;
+    let first_missing = established_writer
+        .append_json_now(&json!({"kind": "first-missing"}), &[], Durability::Fast)
+        .map_err(|err| step_err(index, step_id, &err.to_string()))?
+        .seq;
+    fill_pool_past(&mut established_writer, first_missing)
+        .map_err(|err| step_err(index, step_id, &err.to_string()))?;
+    expect_retention_gap(
+        established.next_message(),
+        first_missing,
+        index,
+        step_id,
+        "established tail",
+    )
+}
+
+fn fill_pool_past(pool: &mut plasmite::api::Pool, seq: u64) -> Result<(), String> {
+    for i in 0..10_000 {
+        pool.append_json_now(
+            &json!({"i": i, "padding": "x".repeat(4096)}),
+            &[],
+            Durability::Fast,
+        )
+        .map_err(|err| err.to_string())?;
+        match pool.get_message(seq) {
+            Ok(_) => {}
+            Err(err) if err.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(err) => return Err(err.to_string()),
+        }
+    }
+    Err(format!(
+        "sequence {seq} remained retained after filling pool"
+    ))
+}
+
+fn expect_retention_gap(
+    result: Result<Option<plasmite::api::Message>, Error>,
+    expected_seq: u64,
+    index: usize,
+    step_id: &Option<String>,
+    label: &str,
+) -> Result<(), String> {
+    match result {
+        Err(err) if err.kind() == ErrorKind::RetentionGap && err.seq() == Some(expected_seq) => {
+            Ok(())
+        }
+        Err(err) => Err(step_err(index, step_id, &format!("{label} returned {err}"))),
+        Ok(message) => Err(step_err(
+            index,
+            step_id,
+            &format!("{label} delivered post-gap message: {message:?}"),
+        )),
+    }
 }
 
 fn reset_workdir(path: &Path) -> Result<(), String> {
@@ -605,6 +766,7 @@ fn error_kind_label(kind: plasmite::api::ErrorKind) -> &'static str {
         plasmite::api::ErrorKind::Permission => "Permission",
         plasmite::api::ErrorKind::Corrupt => "Corrupt",
         plasmite::api::ErrorKind::Io => "Io",
+        plasmite::api::ErrorKind::RetentionGap => "RetentionGap",
     }
 }
 

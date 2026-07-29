@@ -49,6 +49,7 @@ def main() -> None:
         "fetch": lambda step, index, step_id: run_get(client, step, index, step_id),
         "get": lambda step, index, step_id: run_get(client, step, index, step_id),
         "tail": lambda step, index, step_id: run_tail(client, step, index, step_id),
+        "retention_gap": lambda step, index, step_id: run_retention_gap(client, step, index, step_id),
         "list_pools": lambda step, index, step_id: run_list_pools(workdir_path, step, index, step_id),
         "pool_info": lambda step, index, step_id: run_pool_info(repo_root, workdir_path, step, index, step_id),
         "delete_pool": lambda step, index, step_id: run_delete_pool(workdir_path, step, index, step_id),
@@ -201,6 +202,103 @@ def run_tail(client: Client, step: dict[str, Any], index: int, step_id: str | No
                     raise step_err(index, step_id, "message mismatch")
 
     with_open_pool(client, step, index, step_id, run_for_pool)
+
+
+def run_retention_gap(
+    client: Client,
+    step: dict[str, Any],
+    index: int,
+    step_id: str | None,
+) -> None:
+    base = require_pool(step, index, step_id)
+    size_bytes = int(step.get("input", {}).get("size_bytes", 64 * 1024))
+
+    stale_pool = client.create_pool(f"{base}-stale", size_bytes)
+    try:
+        first = stale_pool.append({"kind": "first"})
+        fill_pool_past(stale_pool, first.seq)
+
+        continued = next(
+            stale_pool.tail(since_seq=first.seq, max_messages=1, timeout_ms=500),
+            None,
+        )
+        if continued is None or continued.seq <= first.seq:
+            raise step_err(index, step_id, "default tail did not continue after gap")
+
+        filtered = stale_pool.tail(
+            since_seq=first.seq,
+            tags=["never"],
+            timeout_ms=500,
+            error_on_gap=True,
+        )
+        expect_retention_gap(
+            lambda: next(filtered),
+            first.seq,
+            index,
+            step_id,
+            "stale filtered tail",
+        )
+        try:
+            next(filtered)
+        except StopIteration:
+            pass
+        else:
+            raise step_err(index, step_id, "failed tail did not terminate")
+    finally:
+        stale_pool.close()
+
+    established_pool = client.create_pool(f"{base}-established", size_bytes)
+    try:
+        seed = established_pool.append({"kind": "seed"})
+        second = established_pool.append({"kind": "second"})
+        stream = established_pool.open_stream(seed.seq, None, 500, True)
+        try:
+            for expected in (seed.seq, second.seq):
+                payload = stream.next_json()
+                if payload is None or parse_message(payload).seq != expected:
+                    raise step_err(index, step_id, "tail established the wrong sequence")
+
+            first_missing = established_pool.append({"kind": "first-missing"}).seq
+            fill_pool_past(established_pool, first_missing)
+            expect_retention_gap(
+                stream.next_json,
+                first_missing,
+                index,
+                step_id,
+                "established tail",
+            )
+        finally:
+            stream.close()
+    finally:
+        established_pool.close()
+
+
+def fill_pool_past(pool: Any, seq: int) -> None:
+    for index in range(10_000):
+        pool.append({"i": index, "padding": "x" * 4096})
+        try:
+            pool.get(seq)
+        except PlasmiteError as err:
+            if err.kind == ErrorKind.NOT_FOUND:
+                return
+            raise
+    raise RuntimeError(f"sequence {seq} remained retained after filling pool")
+
+
+def expect_retention_gap(
+    call: Callable[[], Any],
+    expected_seq: int,
+    index: int,
+    step_id: str | None,
+    label: str,
+) -> None:
+    try:
+        value = call()
+    except PlasmiteError as err:
+        if err.kind == ErrorKind.RETENTION_GAP and err.seq == expected_seq:
+            return
+        raise step_err(index, step_id, f"{label} returned {err}") from err
+    raise step_err(index, step_id, f"{label} delivered post-gap value: {value!r}")
 
 
 def run_list_pools(workdir_path: Path, step: dict[str, Any], index: int, step_id: str | None) -> None:

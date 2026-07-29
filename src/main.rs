@@ -278,6 +278,7 @@ mod tests {
             (ErrorKind::Permission, "Permission", 6),
             (ErrorKind::Corrupt, "Corrupt", 7),
             (ErrorKind::Io, "Io", 8),
+            (ErrorKind::RetentionGap, "RetentionGap", 9),
         ];
 
         for (kind, name, exit_code) in cases {

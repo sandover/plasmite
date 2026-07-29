@@ -10,7 +10,13 @@ Notes: Mirrors Rust/Go conformance runner behavior.
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
-const { Client, Durability } = require("../index.js");
+const {
+  Client,
+  Durability,
+  ErrorKind,
+  PlasmiteNativeError,
+  parseMessage,
+} = require("../index.js");
 
 async function main() {
   const args = process.argv.slice(2);
@@ -39,6 +45,8 @@ async function main() {
     fetch: (step, index, stepId) => runGet(client, step, index, stepId),
     get: (step, index, stepId) => runGet(client, step, index, stepId),
     tail: (step, index, stepId) => runTail(client, step, index, stepId),
+    retention_gap: (step, index, stepId) =>
+      runRetentionGap(client, step, index, stepId),
     list_pools: (step, index, stepId) => runListPools(step, index, stepId, workdirPath),
     pool_info: (step, index, stepId) => runPoolInfo(repoRoot, workdirPath, step, index, stepId),
     delete_pool: (step, index, stepId) => runDeletePool(step, index, stepId, workdirPath),
@@ -215,6 +223,116 @@ function runTail(client, step, index, stepId) {
       });
     }
   });
+}
+
+async function runRetentionGap(client, step, index, stepId) {
+  const base = requirePool(step, index, stepId);
+  const sizeBytes = step.input?.size_bytes ?? 64 * 1024;
+
+  const stalePool = client.createPool(`${base}-stale`, BigInt(sizeBytes));
+  try {
+    const first = stalePool.append({ kind: "first" });
+    fillPoolPast(stalePool, first.seq);
+
+    const continuing = stalePool.openStream(first.seq, 1n, 500n, false);
+    try {
+      const raw = continuing.nextJson();
+      const continued = raw && parseMessage(raw);
+      if (!continued || continued.seq <= first.seq) {
+        throw stepError(index, stepId, "default tail did not continue after gap");
+      }
+    } finally {
+      continuing.close();
+    }
+
+    const filtered = stalePool
+      .tail({
+        sinceSeq: first.seq,
+        tags: ["never"],
+        timeoutMs: 500,
+        errorOnGap: true,
+      })
+      [Symbol.asyncIterator]();
+    await expectRetentionGap(
+      () => filtered.next(),
+      first.seq,
+      index,
+      stepId,
+      "stale filtered tail",
+    );
+    const terminated = await filtered.next();
+    if (!terminated.done) {
+      throw stepError(index, stepId, "failed tail did not terminate");
+    }
+  } finally {
+    stalePool.close();
+  }
+
+  const establishedPool = client.createPool(
+    `${base}-established`,
+    BigInt(sizeBytes),
+  );
+  try {
+    const seed = establishedPool.append({ kind: "seed" });
+    const second = establishedPool.append({ kind: "second" });
+    const stream = establishedPool.openStream(seed.seq, null, 500n, true);
+    try {
+      for (const expected of [seed.seq, second.seq]) {
+        const raw = stream.nextJson();
+        if (!raw || parseMessage(raw).seq !== expected) {
+          throw stepError(index, stepId, "tail established the wrong sequence");
+        }
+      }
+      const firstMissing = establishedPool.append({ kind: "first-missing" }).seq;
+      fillPoolPast(establishedPool, firstMissing);
+      await expectRetentionGap(
+        () => Promise.resolve().then(() => stream.nextJson()),
+        firstMissing,
+        index,
+        stepId,
+        "established tail",
+      );
+    } finally {
+      stream.close();
+    }
+  } finally {
+    establishedPool.close();
+  }
+}
+
+function fillPoolPast(pool, seq) {
+  for (let index = 0; index < 10000; index += 1) {
+    pool.append({ i: index, padding: "x".repeat(4096) });
+    try {
+      pool.get(seq);
+    } catch (err) {
+      if (err instanceof PlasmiteNativeError && err.kind === ErrorKind.NotFound) {
+        return;
+      }
+      throw err;
+    }
+  }
+  throw new Error(`sequence ${seq} remained retained after filling pool`);
+}
+
+async function expectRetentionGap(call, expectedSeq, index, stepId, label) {
+  try {
+    const value = await call();
+    throw stepError(
+      index,
+      stepId,
+      `${label} delivered post-gap value: ${JSON.stringify(value)}`,
+    );
+  } catch (err) {
+    if (
+      err instanceof PlasmiteNativeError &&
+      err.kind === ErrorKind.RetentionGap &&
+      err.seq === Number(expectedSeq)
+    ) {
+      return;
+    }
+    throw err;
+  }
 }
 
 function runListPools(step, index, stepId, workdirPath) {

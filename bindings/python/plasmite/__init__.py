@@ -22,6 +22,7 @@ from ctypes import (
     c_uint64,
     c_uint8,
     c_void_p,
+    sizeof,
 )
 from datetime import datetime, timezone
 from enum import IntEnum
@@ -42,6 +43,7 @@ class ErrorKind(IntEnum):
     PERMISSION = 6
     CORRUPT = 7
     IO = 8
+    RETENTION_GAP = 9
 
 
 class Durability(IntEnum):
@@ -94,6 +96,10 @@ class UsageError(PlasmiteError):
 
 
 class InternalError(PlasmiteError):
+    pass
+
+
+class RetentionGapError(PlasmiteError):
     pass
 
 
@@ -157,6 +163,20 @@ class plsm_error_t(Structure):
         ("offset", c_uint64),
         ("has_seq", c_uint8),
         ("has_offset", c_uint8),
+    ]
+
+
+class plsm_stream_options_t(Structure):
+    _fields_ = [
+        ("struct_size", c_uint32),
+        ("gap_policy", c_uint32),
+        ("since_seq", c_uint64),
+        ("max_messages", c_uint64),
+        ("timeout_ms", c_uint64),
+        ("has_since", c_uint32),
+        ("has_max", c_uint32),
+        ("has_timeout", c_uint32),
+        ("reserved", c_uint32),
     ]
 
 
@@ -275,6 +295,13 @@ _LIB.plsm_stream_open.argtypes = [
     POINTER(POINTER(plsm_error_t)),
 ]
 _LIB.plsm_stream_open.restype = c_int
+_LIB.plsm_stream_open_ex.argtypes = [
+    POINTER(plsm_pool_t),
+    POINTER(plsm_stream_options_t),
+    POINTER(POINTER(plsm_stream_t)),
+    POINTER(POINTER(plsm_error_t)),
+]
+_LIB.plsm_stream_open_ex.restype = c_int
 
 _LIB.plsm_lite3_stream_open.argtypes = [
     POINTER(plsm_pool_t),
@@ -288,6 +315,13 @@ _LIB.plsm_lite3_stream_open.argtypes = [
     POINTER(POINTER(plsm_error_t)),
 ]
 _LIB.plsm_lite3_stream_open.restype = c_int
+_LIB.plsm_lite3_stream_open_ex.argtypes = [
+    POINTER(plsm_pool_t),
+    POINTER(plsm_stream_options_t),
+    POINTER(POINTER(plsm_lite3_stream_t)),
+    POINTER(POINTER(plsm_error_t)),
+]
+_LIB.plsm_lite3_stream_open_ex.restype = c_int
 
 _LIB.plsm_stream_next.argtypes = [
     POINTER(plsm_stream_t),
@@ -327,6 +361,7 @@ _ERROR_KIND_TO_CLASS: dict[ErrorKind, type[PlasmiteError]] = {
     ErrorKind.PERMISSION: PermissionDeniedError,
     ErrorKind.CORRUPT: CorruptError,
     ErrorKind.IO: IoError,
+    ErrorKind.RETENTION_GAP: RetentionGapError,
 }
 
 
@@ -360,6 +395,7 @@ def _default_error_message(kind: ErrorKind) -> str:
         ErrorKind.PERMISSION: "permission denied",
         ErrorKind.CORRUPT: "corrupt",
         ErrorKind.IO: "io error",
+        ErrorKind.RETENTION_GAP: "retention gap",
     }
     return mapping.get(kind, "error")
 
@@ -425,6 +461,24 @@ def _optional_non_negative_int(value: Optional[int], name: str) -> Optional[int]
     if value is None:
         return None
     return _ensure_non_negative_int(value, name)
+
+
+def _stream_options(
+    since_seq: Optional[int],
+    max_messages: Optional[int],
+    timeout_ms: Optional[int],
+    error_on_gap: bool,
+) -> plsm_stream_options_t:
+    options = plsm_stream_options_t()
+    options.struct_size = sizeof(plsm_stream_options_t)
+    options.gap_policy = 1 if error_on_gap else 0
+    options.since_seq = since_seq or 0
+    options.max_messages = max_messages or 0
+    options.timeout_ms = timeout_ms or 0
+    options.has_since = 1 if since_seq is not None else 0
+    options.has_max = 1 if max_messages is not None else 0
+    options.has_timeout = 1 if timeout_ms is not None else 0
+    return options
 
 
 class Client:
@@ -604,6 +658,7 @@ class Pool:
         since_seq: Optional[int] = None,
         max_messages: Optional[int] = None,
         timeout_ms: Optional[int] = None,
+        error_on_gap: bool = False,
     ) -> Stream:
         _require_open(self._ptr, "pool")
         since_seq = _optional_non_negative_int(since_seq, "since_seq")
@@ -611,17 +666,26 @@ class Pool:
         timeout_ms = _optional_non_negative_int(timeout_ms, "timeout_ms")
         out_stream = POINTER(plsm_stream_t)()
         out_err = POINTER(plsm_error_t)()
-        rc = _LIB.plsm_stream_open(
-            self._ptr,
-            c_uint64(since_seq or 0),
-            c_uint32(1 if since_seq is not None else 0),
-            c_uint64(max_messages or 0),
-            c_uint32(1 if max_messages is not None else 0),
-            c_uint64(timeout_ms or 0),
-            c_uint32(1 if timeout_ms is not None else 0),
-            byref(out_stream),
-            byref(out_err),
-        )
+        if error_on_gap:
+            options = _stream_options(since_seq, max_messages, timeout_ms, True)
+            rc = _LIB.plsm_stream_open_ex(
+                self._ptr,
+                byref(options),
+                byref(out_stream),
+                byref(out_err),
+            )
+        else:
+            rc = _LIB.plsm_stream_open(
+                self._ptr,
+                c_uint64(since_seq or 0),
+                c_uint32(1 if since_seq is not None else 0),
+                c_uint64(max_messages or 0),
+                c_uint32(1 if max_messages is not None else 0),
+                c_uint64(timeout_ms or 0),
+                c_uint32(1 if timeout_ms is not None else 0),
+                byref(out_stream),
+                byref(out_err),
+            )
         if rc != 0:
             raise _take_error(out_err)
         return Stream(out_stream)
@@ -631,6 +695,7 @@ class Pool:
         since_seq: Optional[int] = None,
         max_messages: Optional[int] = None,
         timeout_ms: Optional[int] = None,
+        error_on_gap: bool = False,
     ) -> Lite3Stream:
         _require_open(self._ptr, "pool")
         since_seq = _optional_non_negative_int(since_seq, "since_seq")
@@ -638,17 +703,26 @@ class Pool:
         timeout_ms = _optional_non_negative_int(timeout_ms, "timeout_ms")
         out_stream = POINTER(plsm_lite3_stream_t)()
         out_err = POINTER(plsm_error_t)()
-        rc = _LIB.plsm_lite3_stream_open(
-            self._ptr,
-            c_uint64(since_seq or 0),
-            c_uint32(1 if since_seq is not None else 0),
-            c_uint64(max_messages or 0),
-            c_uint32(1 if max_messages is not None else 0),
-            c_uint64(timeout_ms or 0),
-            c_uint32(1 if timeout_ms is not None else 0),
-            byref(out_stream),
-            byref(out_err),
-        )
+        if error_on_gap:
+            options = _stream_options(since_seq, max_messages, timeout_ms, True)
+            rc = _LIB.plsm_lite3_stream_open_ex(
+                self._ptr,
+                byref(options),
+                byref(out_stream),
+                byref(out_err),
+            )
+        else:
+            rc = _LIB.plsm_lite3_stream_open(
+                self._ptr,
+                c_uint64(since_seq or 0),
+                c_uint32(1 if since_seq is not None else 0),
+                c_uint64(max_messages or 0),
+                c_uint32(1 if max_messages is not None else 0),
+                c_uint64(timeout_ms or 0),
+                c_uint32(1 if timeout_ms is not None else 0),
+                byref(out_stream),
+                byref(out_err),
+            )
         if rc != 0:
             raise _take_error(out_err)
         return Lite3Stream(out_stream)
@@ -712,6 +786,7 @@ class Pool:
         max_messages: Optional[int] = None,
         timeout_ms: Optional[int] = None,
         tags: Optional[Iterable[str]] = None,
+        error_on_gap: bool = False,
     ) -> Generator[Message, None, None]:
         """Tail JSON messages and optionally filter by exact tags."""
         required_tags = list(tags or [])
@@ -722,6 +797,7 @@ class Pool:
             since_seq=since_seq,
             max_messages=stream_max_messages,
             timeout_ms=timeout_ms,
+            error_on_gap=error_on_gap,
         )
         try:
             delivered = 0
@@ -895,6 +971,7 @@ __all__ = [
     "IoError",
     "UsageError",
     "InternalError",
+    "RetentionGapError",
     "DEFAULT_POOL_DIR",
     "DEFAULT_POOL_SIZE",
     "DEFAULT_POOL_SIZE_BYTES",

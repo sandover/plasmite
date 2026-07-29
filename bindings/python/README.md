@@ -106,10 +106,24 @@ Use `append_json(...)` / `get_json(...)` only when you explicitly need raw wire 
 
 `Pool.tail(..., tags=[...])` uses exact tag matching and composes with other filters using AND semantics.
 
+Pools have bounded retention. A tail normally resumes at the next retained
+message if writes overtake it. Set `error_on_gap=True` when the consumer must
+distinguish that loss from an ordinary lack of matching messages:
+
+```python
+from plasmite import RetentionGapError
+
+try:
+    for item in pool.tail(since_seq=last_seq + 1, error_on_gap=True):
+        process(item)
+except RetentionGapError as err:
+    print(f"rebuild required; first missing sequence: {err.seq}")
+```
+
 ## Error behavior
 
 - Invalid local arguments raise `ValueError` / `TypeError`.
-- ABI/runtime failures raise typed subclasses of `PlasmiteError` (`NotFoundError`, `AlreadyExistsError`, `BusyError`, `PermissionDeniedError`, `CorruptError`, `IoError`, `UsageError`, `InternalError`).
+- ABI/runtime failures raise typed subclasses of `PlasmiteError` (`NotFoundError`, `AlreadyExistsError`, `BusyError`, `PermissionDeniedError`, `CorruptError`, `IoError`, `UsageError`, `InternalError`, `RetentionGapError`).
 - All `PlasmiteError` values expose `kind`, `path`, `seq`, and `offset` when present.
 
 ## Troubleshooting

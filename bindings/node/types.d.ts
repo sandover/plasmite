@@ -21,6 +21,7 @@ export const enum ErrorKind {
   Permission = 6,
   Corrupt = 7,
   Io = 8,
+  RetentionGap = 9,
 }
 export const DEFAULT_POOL_DIR: string
 export const DEFAULT_POOL_SIZE_BYTES: number
@@ -87,11 +88,13 @@ export class Pool {
     sinceSeq?: number | bigint | null,
     maxMessages?: number | bigint | null,
     timeoutMs?: number | bigint | null,
+    errorOnGap?: boolean,
   ): Stream
   openLite3Stream(
     sinceSeq?: number | bigint | null,
     maxMessages?: number | bigint | null,
     timeoutMs?: number | bigint | null,
+    errorOnGap?: boolean,
   ): Lite3Stream
   close(): void
   [Symbol.dispose](): void
@@ -124,6 +127,7 @@ export interface LocalTailOptions {
   maxMessages?: number | bigint
   timeoutMs?: number | bigint
   tags?: string[]
+  errorOnGap?: boolean
 }
 
 export function parseMessage(payload: Buffer | Message | MessageEnvelope): Message
@@ -154,6 +158,8 @@ export interface RemoteTailOptions {
   sinceSeq?: number | bigint
   maxMessages?: number | bigint
   timeoutMs?: number
+  tags?: string[]
+  errorOnGap?: boolean
 }
 
 export class RemoteError extends Error {

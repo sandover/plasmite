@@ -52,6 +52,27 @@ func newTestPool(t *testing.T, client *Client, name string) api.Pool {
 	return pool
 }
 
+func fillPast(t *testing.T, pool api.Pool, seq uint64) {
+	t.Helper()
+	for i := 0; i < 10_000; i++ {
+		if _, err := pool.Append(
+			map[string]any{"padding": strings.Repeat("x", 64*1024), "i": i},
+			nil,
+			WithDurability(DurabilityFast),
+		); err != nil {
+			t.Fatalf("fill pool: %v", err)
+		}
+		if _, err := pool.Get(seq); err != nil {
+			var plasmiteErr *Error
+			if errors.As(err, &plasmiteErr) && plasmiteErr.Kind == ErrorNotFound {
+				return
+			}
+			t.Fatalf("check retained sequence: %v", err)
+		}
+	}
+	t.Fatalf("sequence %d remained retained after filling the pool", seq)
+}
+
 func TestAppendGetLargePayload(t *testing.T) {
 	client := newTestClient(t)
 	pool := newTestPool(t, client, "big")
@@ -199,6 +220,87 @@ func TestTailFiltersByTags(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	case <-time.After(2 * time.Second):
 		t.Fatalf("tail did not yield filtered message")
+	}
+}
+
+func TestTailRetentionGapPolicy(t *testing.T) {
+	client := newTestClient(t)
+	pool := newTestPool(t, client, "tail-gap")
+	first, err := pool.Append(map[string]any{"kind": "first"}, nil)
+	if err != nil {
+		t.Fatalf("append first: %v", err)
+	}
+	fillPast(t, pool, first.Seq)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, errs := pool.Tail(ctx, TailOptions{
+		SinceSeq:    uint64Ptr(first.Seq),
+		MaxMessages: uint64Ptr(1),
+		Timeout:     50 * time.Millisecond,
+	})
+	select {
+	case message := <-out:
+		if message == nil || message.Seq <= first.Seq {
+			t.Fatalf("expected default continuation after sequence %d", first.Seq)
+		}
+	case err := <-errs:
+		t.Fatalf("unexpected default-policy error: %v", err)
+	case <-ctx.Done():
+		t.Fatalf("default tail did not continue: %v", ctx.Err())
+	}
+
+	gapOut, gapErrs := pool.Tail(ctx, TailOptions{
+		SinceSeq:   uint64Ptr(first.Seq),
+		Tags:       []string{"never"},
+		Timeout:    50 * time.Millisecond,
+		ErrorOnGap: true,
+	})
+	select {
+	case message := <-gapOut:
+		t.Fatalf("received post-gap message before error: %#v", message)
+	case err := <-gapErrs:
+		var plasmiteErr *Error
+		if !errors.As(err, &plasmiteErr) {
+			t.Fatalf("expected plasmite error, got %T: %v", err, err)
+		}
+		if plasmiteErr.Kind != ErrorRetentionGap {
+			t.Fatalf("expected retention gap, got kind %d", plasmiteErr.Kind)
+		}
+		if plasmiteErr.Seq == nil || *plasmiteErr.Seq != first.Seq {
+			t.Fatalf("expected gap sequence %d, got %#v", first.Seq, plasmiteErr.Seq)
+		}
+	case <-ctx.Done():
+		t.Fatalf("gap tail did not fail: %v", ctx.Err())
+	}
+}
+
+func TestTailLite3RetentionGapPolicy(t *testing.T) {
+	client := newTestClient(t)
+	pool := newTestPool(t, client, "lite3-gap")
+	first, err := pool.Append(map[string]any{"kind": "first"}, nil)
+	if err != nil {
+		t.Fatalf("append first: %v", err)
+	}
+	fillPast(t, pool, first.Seq)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, errs := pool.TailLite3(ctx, TailOptions{
+		SinceSeq:   uint64Ptr(first.Seq),
+		Timeout:    50 * time.Millisecond,
+		ErrorOnGap: true,
+	})
+	select {
+	case frame := <-out:
+		t.Fatalf("received post-gap frame before error: %#v", frame)
+	case err := <-errs:
+		var plasmiteErr *Error
+		if !errors.As(err, &plasmiteErr) || plasmiteErr.Kind != ErrorRetentionGap {
+			t.Fatalf("expected retention gap, got %T: %v", err, err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("Lite3 gap tail did not fail: %v", ctx.Err())
 	}
 }
 

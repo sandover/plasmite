@@ -36,6 +36,7 @@ Cross-surface compatibility smoke:
 - The canonical manifest format is described in `manifest-v0.md`.
 - Sample manifests live alongside the spec (e.g., `sample-v0.json`, `negative-v0.json`).
 - Pool admin coverage lives in `pool-admin-v0.json`.
+- Retention-gap policy coverage lives in `retention-gap-v0.json`.
 
 ## Scope
 
@@ -45,6 +46,7 @@ Initial coverage focuses on:
 - `append`
 - `get`
 - `tail`
+- `retention_gap`
 - `list_pools`
 - `pool_info`
 - `delete_pool`

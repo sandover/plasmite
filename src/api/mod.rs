@@ -20,6 +20,9 @@ pub use crate::core::pool::{
     PoolUtilization, SeqOffsetCache,
 };
 pub use client::{LocalClient, PoolRef};
-pub use message::{Lite3Tail, Message, Meta, PoolApiExt, Replay, ReplayOptions, Tail, TailOptions};
+pub(crate) use message::observe_sequence;
+pub use message::{
+    GapPolicy, Lite3Tail, Message, Meta, PoolApiExt, Replay, ReplayOptions, Tail, TailOptions,
+};
 pub use remote::{RemoteClient, RemoteLite3Frame, RemoteLite3Tail, RemotePool, RemoteTail};
 pub use validation::{ValidationIssue, ValidationReport, ValidationStatus};

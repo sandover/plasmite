@@ -51,6 +51,18 @@ Each step is a mapping with these fields:
 - `expect.error` (optional): Expected error object (see Error Expectations).
 `expect.messages` and `expect.messages_unordered` are mutually exclusive.
 
+### `retention_gap`
+
+- `pool` (required): Base name for isolated stale-start and established-position pools.
+- `input.size_bytes` (optional): Small pool size used to force deterministic
+  ring-buffer overwrites; defaults to 65536.
+- The runner must verify all of the following:
+  - a stale explicit start continues from the next retained message by default;
+  - fail-closed mode returns `RetentionGap` before a post-gap message;
+  - tag filtering does not conceal the gap;
+  - the error reports the first missing sequence and terminates the stream;
+  - a stream that first consumes retained messages also detects a later overwrite.
+
 ### `list_pools`
 
 - No `pool` field required.
@@ -92,7 +104,7 @@ Each step is a mapping with these fields:
 
 When `expect.error` is present, the operation must fail and match:
 
-- `kind` (required): `Usage|NotFound|AlreadyExists|Busy|Permission|Corrupt|Io|Internal`
+- `kind` (required): `Usage|NotFound|AlreadyExists|Busy|Permission|Corrupt|Io|Internal|RetentionGap`
 - `message_contains` (optional): substring match
 - `has_path` (optional): boolean
 - `has_seq` (optional): boolean

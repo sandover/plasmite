@@ -134,3 +134,30 @@ if err := <-errs; err != nil && !errors.Is(err, context.Canceled) {
 ```
 
 `TailOptions.Tags` applies exact tag matching and composes with other filters via AND semantics.
+
+Local tails continue from the next retained message by default when their
+cursor falls behind the ring buffer. Set `ErrorOnGap` when lost messages must
+stop processing:
+
+```go
+tail, errs := pool.Tail(ctx, plasmite.TailOptions{
+    SinceSeq:   &checkpoint,
+    ErrorOnGap: true,
+})
+for message := range tail {
+    if err := handle(message); err != nil {
+        break
+    }
+    checkpoint = message.Seq + 1
+}
+if err := <-errs; err != nil {
+    var plasmiteErr *plasmite.Error
+    if errors.As(err, &plasmiteErr) &&
+        plasmiteErr.Kind == plasmite.ErrorRetentionGap {
+        // Choose a new checkpoint or rebuild state before restarting.
+    }
+}
+```
+
+The error channel receives `ErrorRetentionGap` before the first message or
+Lite3 frame after the gap. Tag filters do not conceal the error.

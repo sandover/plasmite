@@ -15,6 +15,7 @@ MANIFESTS=(
   "negative-v0.json"
   "multiprocess-v0.json"
   "pool-admin-v0.json"
+  "retention-gap-v0.json"
 )
 
 mkdir -p "$ROOT/.scratch/go-build"

@@ -55,6 +55,7 @@ Stable v0 kinds:
 - `Corrupt`
 - `Io`
 - `Internal`
+- `RetentionGap`
 
 ## Behavioral Semantics
 
@@ -75,6 +76,36 @@ Stable v0 kinds:
 - Implementations must respect backpressure and avoid unbounded buffering.
 - Once cancellation is observed, no further messages may be delivered.
 - Reconnect behavior (for remote transports) must be explicit and must not reorder messages.
+
+Pools use bounded retention, so a stream cursor can be overtaken when writers
+wrap the ring buffer. Every tail tracks an expected sequence:
+
+- An explicit `since_seq` is inclusive and establishes that value as the first
+  expected sequence.
+- Without `since_seq`, the first available raw message establishes the
+  position. Missing history before that message is not reported as a gap.
+- Each raw message advances the expected sequence before tag or payload
+  filtering. A filter therefore cannot conceal a retention gap.
+- A raw sequence greater than the expected sequence is a retention gap. A raw
+  sequence below it is skipped as already observed.
+- The default policy continues from the next retained message. This preserves
+  the behavior of existing callers but does not guarantee complete delivery.
+- The optional fail-closed policy returns `RetentionGap` before delivering the
+  first message after a gap. The error's `seq` is the first missing sequence,
+  and the affected stream then terminates.
+
+After `RetentionGap`, the consumer decides how to recover: select a new
+checkpoint, rebuild derived state from another source, or accept the loss and
+restart. Plasmite does not acknowledge consumption or prevent overwrite.
+
+The local decoded and Lite3 SDK tails support both policies. Remote JSON tails
+support both policies through `gap_policy=continue|error`. Remote Lite3 tails
+support continuation only because their frame format has no terminal error
+representation.
+
+CLI drop notices and MCP `fell_behind` fields remain diagnostics for their
+existing cursor models. They express the same bounded-retention condition but
+do not change into SDK `RetentionGap` errors.
 
 ### Conformance
 

@@ -32,6 +32,7 @@ const parsedFromEnvelope = parseMessage({
   meta: { tags: ["tag"] },
 });
 const typedMessage: Message = got;
+const retentionGap: ErrorKind = ErrorKind.RetentionGap;
 void appended;
 void pooled;
 void appendedAlias;
@@ -39,12 +40,18 @@ void frame;
 void parsed;
 void parsedFromEnvelope;
 void typedMessage;
+void retentionGap;
 
 async function smokeRemote() {
   const remote = new RemoteClient("http://127.0.0.1:9700");
   const opened = await remote.openPool("docs");
   const msg = await opened.append({ kind: "note" }, ["note"], Durability.Fast);
-  for await (const next of opened.tail({ sinceSeq: msg.seq, maxMessages: 1 })) {
+  for await (const next of opened.tail({
+    sinceSeq: msg.seq,
+    maxMessages: 1,
+    tags: ["note"],
+    errorOnGap: true,
+  })) {
     const seq: bigint = next.seq;
     void seq;
     break;
@@ -52,10 +59,19 @@ async function smokeRemote() {
 }
 
 async function smokeReplay() {
-  for await (const message of pool.tail({ maxMessages: 1, timeoutMs: 10, tags: ["tag"] })) {
+  for await (const message of pool.tail({
+    maxMessages: 1,
+    timeoutMs: 10,
+    tags: ["tag"],
+    errorOnGap: true,
+  })) {
     void message;
     break;
   }
+  const stream = pool.openStream(1n, 1n, 10n, true);
+  stream.close();
+  const lite3Stream = pool.openLite3Stream(1n, 1n, 10n, true);
+  lite3Stream.close();
   for await (const message of pool.replay({ speed: 1, tags: ["tag"] })) {
     void message;
     break;

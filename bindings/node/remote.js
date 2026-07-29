@@ -28,8 +28,8 @@ class RemoteError extends Error {
     this.kind = mapErrorKind(error && error.kind, ERROR_KIND_VALUES.Io);
     this.hint = error && error.hint ? error.hint : undefined;
     this.path = error && error.path ? error.path : undefined;
-    this.seq = error && error.seq ? error.seq : undefined;
-    this.offset = error && error.offset ? error.offset : undefined;
+    this.seq = error && error.seq !== undefined ? error.seq : undefined;
+    this.offset = error && error.offset !== undefined ? error.offset : undefined;
   }
 }
 
@@ -210,7 +210,7 @@ class RemotePool {
 
   /**
    * Tail remote messages as an async iterable.
-   * @param {{sinceSeq?: number|bigint, maxMessages?: number|bigint, timeoutMs?: number, tags?: string[]}} [options]
+   * @param {{sinceSeq?: number|bigint, maxMessages?: number|bigint, timeoutMs?: number, tags?: string[], errorOnGap?: boolean}} [options]
    * @returns {AsyncGenerator<import("./message").Message, void, unknown>}
    */
   async *tail(options = {}) {
@@ -223,6 +223,9 @@ class RemotePool {
     }
     if (options.timeoutMs !== undefined) {
       url.searchParams.set("timeout_ms", String(options.timeoutMs));
+    }
+    if (options.errorOnGap === true) {
+      url.searchParams.set("gap_policy", "error");
     }
     if (options.tags !== undefined) {
       const tags = Array.isArray(options.tags) ? options.tags : [options.tags];
@@ -244,7 +247,11 @@ class RemotePool {
           continue;
         }
         const raw = Buffer.from(line, "utf8");
-        yield messageFromEnvelope(JSON.parse(line), raw);
+        const payload = JSON.parse(line);
+        if (payload && payload.error) {
+          throw new RemoteError(payload, response.status);
+        }
+        yield messageFromEnvelope(payload, raw);
       }
     } finally {
       controller.abort();

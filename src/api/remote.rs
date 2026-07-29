@@ -6,7 +6,7 @@
 //! Invariants: Tail streams are JSONL (messages) or framed Lite3 bytes (fast path).
 #![allow(clippy::result_large_err)]
 
-use super::{Message, Meta, PoolRef, TailOptions};
+use super::{GapPolicy, Message, Meta, PoolRef, TailOptions};
 use crate::core::error::{Error, ErrorKind};
 use crate::core::pool::{
     AppendOptions, Bounds, Durability, PoolAgeMetrics, PoolInfo, PoolMetrics, PoolOptions,
@@ -557,6 +557,9 @@ impl RemotePool {
             if let Some(timeout) = options.timeout {
                 pairs.append_pair("timeout_ms", &timeout.as_millis().to_string());
             }
+            if options.gap_policy == GapPolicy::Error {
+                pairs.append_pair("gap_policy", "error");
+            }
             for tag in &options.tags {
                 pairs.append_pair("tag", tag);
             }
@@ -572,6 +575,11 @@ impl RemotePool {
     }
 
     pub fn tail_lite3(&self, options: TailOptions) -> ApiResult<RemoteLite3Tail> {
+        if options.gap_policy == GapPolicy::Error {
+            return Err(Error::new(ErrorKind::Usage).with_message(
+                "remote Lite3 tails do not support fail-closed retention gaps because the stream has no error frame",
+            ));
+        }
         let mut url = build_url(&self.base_url, &["v0", "pools", &self.pool, "tail_lite3"])?;
         {
             let mut pairs = url.query_pairs_mut();
@@ -617,7 +625,21 @@ impl RemoteTail {
             if line.trim().is_empty() {
                 continue;
             }
-            let message: MessageWire = serde_json::from_str(&line).map_err(|err| {
+            let value: Value = serde_json::from_str(&line).map_err(|err| {
+                Error::new(ErrorKind::Internal)
+                    .with_message("invalid tail message json")
+                    .with_source(err)
+            })?;
+            if value.get("error").is_some() {
+                let envelope: ErrorEnvelope = serde_json::from_value(value).map_err(|err| {
+                    Error::new(ErrorKind::Internal)
+                        .with_message("invalid tail error json")
+                        .with_source(err)
+                })?;
+                self.reader = None;
+                return Err(error_from_remote(envelope.error));
+            }
+            let message: MessageWire = serde_json::from_value(value).map_err(|err| {
                 Error::new(ErrorKind::Internal)
                     .with_message("invalid tail message json")
                     .with_source(err)
@@ -828,6 +850,7 @@ fn parse_error_kind(kind: &str) -> ErrorKind {
         "Permission" => ErrorKind::Permission,
         "Corrupt" => ErrorKind::Corrupt,
         "Io" => ErrorKind::Io,
+        "RetentionGap" => ErrorKind::RetentionGap,
         _ => ErrorKind::Internal,
     }
 }

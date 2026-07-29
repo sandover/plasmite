@@ -44,7 +44,8 @@ use crate::interface_error_kind;
 use crate::interface_wire::{MessageWire, error_policy};
 use crate::pool_info_json::pool_info_json;
 use plasmite::api::{
-    Durability, Error, ErrorKind, LocalClient, PoolApiExt, PoolOptions, PoolRef, TailOptions, lite3,
+    Durability, Error, ErrorKind, GapPolicy, LocalClient, PoolApiExt, PoolOptions, PoolRef,
+    TailOptions, lite3,
 };
 use plasmite::mcp::{
     DispatchOutcome, JsonRpcError as McpJsonRpcError, McpDispatcher, McpHandler, McpResource,
@@ -735,6 +736,7 @@ struct TailQuery {
     since_seq: Option<u64>,
     max: Option<u64>,
     timeout_ms: Option<u64>,
+    gap_policy: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -1319,7 +1321,12 @@ async fn tail_messages(
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
     };
-    let runtime = match prepare_tail_runtime(&state, &query, raw_query.as_deref()) {
+    let runtime = match prepare_tail_runtime(
+        &state,
+        &query,
+        raw_query.as_deref(),
+        TailStreamEncoding::Jsonl,
+    ) {
         Ok(runtime) => runtime,
         Err(err) => return error_response(err),
     };
@@ -1337,13 +1344,18 @@ async fn tail_lite3(
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
     };
-    if let Err(err) = precheck_lite3_since_seq(&state, &pool_ref, query.since_seq).await {
-        return error_response(err);
-    }
-    let runtime = match prepare_tail_runtime(&state, &query, raw_query.as_deref()) {
+    let runtime = match prepare_tail_runtime(
+        &state,
+        &query,
+        raw_query.as_deref(),
+        TailStreamEncoding::Lite3,
+    ) {
         Ok(runtime) => runtime,
         Err(err) => return error_response(err),
     };
+    if let Err(err) = precheck_lite3_since_seq(&state, &pool_ref, query.since_seq).await {
+        return error_response(err);
+    }
     spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Lite3)
 }
 
@@ -1358,7 +1370,12 @@ async fn ui_events(
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
     };
-    let runtime = match prepare_tail_runtime(&state, &query, raw_query.as_deref()) {
+    let runtime = match prepare_tail_runtime(
+        &state,
+        &query,
+        raw_query.as_deref(),
+        TailStreamEncoding::Sse,
+    ) {
         Ok(runtime) => runtime,
         Err(err) => return error_response(err),
     };
@@ -1406,8 +1423,22 @@ fn prepare_tail_runtime(
     state: &Arc<AppState>,
     query: &TailQuery,
     raw_query: Option<&str>,
+    encoding: TailStreamEncoding,
 ) -> Result<TailRuntime, Error> {
-    let permit = acquire_tail_permit(state)?;
+    let gap_policy = match query.gap_policy.as_deref() {
+        None | Some("continue") => GapPolicy::Continue,
+        Some("error") => GapPolicy::Error,
+        Some(_) => {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("invalid tail gap policy")
+                .with_hint("Use gap_policy=continue or gap_policy=error."));
+        }
+    };
+    if encoding == TailStreamEncoding::Lite3 && gap_policy == GapPolicy::Error {
+        return Err(Error::new(ErrorKind::Usage).with_message(
+            "remote Lite3 tails do not support gap_policy=error because the stream has no error frame",
+        ));
+    }
     if let Some(timeout_ms) = query.timeout_ms
         && timeout_ms > state.max_tail_timeout_ms
     {
@@ -1415,12 +1446,14 @@ fn prepare_tail_runtime(
             .with_message("tail timeout exceeds server limit")
             .with_hint(format!("Use timeout_ms <= {}.", state.max_tail_timeout_ms)));
     }
+    let permit = acquire_tail_permit(state)?;
     let timeout_ms = query.timeout_ms.unwrap_or(state.max_tail_timeout_ms);
     let options = TailOptions {
         since_seq: query.since_seq,
         max_messages: query.max.map(|value| value as usize),
         tags: parse_tags_from_query(raw_query),
         timeout: Some(Duration::from_millis(timeout_ms)),
+        gap_policy,
         ..TailOptions::default()
     };
     Ok(TailRuntime { permit, options })

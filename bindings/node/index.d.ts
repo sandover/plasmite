@@ -15,7 +15,8 @@ export const enum ErrorKind {
   Busy = 5,
   Permission = 6,
   Corrupt = 7,
-  Io = 8
+  Io = 8,
+  RetentionGap = 9
 }
 export interface Lite3Frame {
   seq: bigint
@@ -34,8 +35,8 @@ export declare class Pool {
   appendLite3(payload: Buffer, durability: Durability): bigint
   getJson(seq: number | bigint): Buffer
   getLite3(seq: number | bigint): Lite3Frame
-  openStream(sinceSeq?: number | bigint | undefined | null, maxMessages?: number | bigint | undefined | null, timeoutMs?: number | bigint | undefined | null): Stream
-  openLite3Stream(sinceSeq?: number | bigint | undefined | null, maxMessages?: number | bigint | undefined | null, timeoutMs?: number | bigint | undefined | null): Lite3Stream
+  openStream(sinceSeq: number | bigint | undefined | null, maxMessages: number | bigint | undefined | null, timeoutMs: number | bigint | undefined | null, errorOnGap: boolean): Stream
+  openLite3Stream(sinceSeq: number | bigint | undefined | null, maxMessages: number | bigint | undefined | null, timeoutMs: number | bigint | undefined | null, errorOnGap: boolean): Lite3Stream
   close(): void
 }
 export declare class Stream {

@@ -263,6 +263,7 @@ fn error_message(err: &Error) -> String {
         ErrorKind::Permission => "permission denied".to_string(),
         ErrorKind::Corrupt => "corrupt data".to_string(),
         ErrorKind::Io => "i/o error".to_string(),
+        ErrorKind::RetentionGap => "retention gap".to_string(),
     }
 }
 

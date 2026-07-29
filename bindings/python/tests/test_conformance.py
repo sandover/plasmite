@@ -66,6 +66,9 @@ class ConformanceTests(unittest.TestCase):
     def test_pool_admin(self) -> None:
         self.run_manifest("pool-admin-v0.json")
 
+    def test_retention_gap(self) -> None:
+        self.run_manifest("retention-gap-v0.json")
+
 
 if __name__ == "__main__":
     unittest.main()

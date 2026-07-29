@@ -110,8 +110,8 @@ const { RemoteClient } = require("plasmite");
 | | `.getLite3(seq)` | Get lite3 frame by sequence number |
 | | `.tail(opts?)` | Async generator of typed `Message` values with optional tag filter |
 | | `.replay(opts?)` | Async generator of typed `Message` values with speed/timing controls |
-| | `.openStream(sinceSeq?, max?, timeoutMs?)` | Open a message stream |
-| | `.openLite3Stream(sinceSeq?, max?, timeoutMs?)` | Open a lite3 frame stream |
+| | `.openStream(sinceSeq?, max?, timeoutMs?, errorOnGap?)` | Open a message stream |
+| | `.openLite3Stream(sinceSeq?, max?, timeoutMs?, errorOnGap?)` | Open a lite3 frame stream |
 | | `.close()` | Close the pool |
 | | `[Symbol.dispose]()` | Alias for `.close()` (used by explicit resource-management syntax when enabled) |
 | `Stream` | `.nextJson()` | Next message as `Buffer`, or `null` at end |
@@ -128,6 +128,24 @@ const { RemoteClient } = require("plasmite");
 - `Durability.Flush` — fsync after write (crash-safe)
 
 Sequence numbers accept `number` or `bigint`.
+
+Local tails continue from the next retained message by default when their
+cursor has fallen behind the ring buffer. Set `errorOnGap: true` when losing
+messages must stop the consumer:
+
+```js
+for await (const message of pool.tail({
+  sinceSeq: checkpoint,
+  errorOnGap: true,
+})) {
+  await handle(message);
+}
+```
+
+The tail throws `PlasmiteNativeError` with
+`kind === ErrorKind.RetentionGap` before delivering a message after the gap.
+Persist the last successfully handled sequence and restart from a suitable
+checkpoint after deciding how to recover.
 
 ### Remote client
 
@@ -152,8 +170,13 @@ const options = {
   maxMessages: 100,    // stop after N messages
   timeoutMs: 5000,     // stop after N ms of inactivity
   tags: ["signup"],    // filter by exact tag match (AND across tags)
+  errorOnGap: true,    // fail before delivering a message after a retention gap
 };
 ```
+
+Remote JSON tails surface a fail-closed gap as `RemoteError` with
+`kind === ErrorKind.RetentionGap`. Remote Lite3 tails do not support this
+policy because their frame format has no terminal error representation.
 
 ### Error handling
 

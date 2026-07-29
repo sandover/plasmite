@@ -17,6 +17,7 @@ pub enum ErrorKind {
     Permission,
     Corrupt,
     Io,
+    RetentionGap,
 }
 
 #[derive(Debug)]
@@ -135,6 +136,7 @@ pub fn to_exit_code(kind: ErrorKind) -> i32 {
         ErrorKind::Permission => 6,
         ErrorKind::Corrupt => 7,
         ErrorKind::Io => 8,
+        ErrorKind::RetentionGap => 9,
     }
 }
 
@@ -153,6 +155,7 @@ mod tests {
             (ErrorKind::Permission, 6),
             (ErrorKind::Corrupt, 7),
             (ErrorKind::Io, 8),
+            (ErrorKind::RetentionGap, 9),
         ];
 
         for (kind, code) in cases {

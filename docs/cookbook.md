@@ -9,6 +9,7 @@
 - [System Log Ring Buffer](#system-log-ring-buffer)
 - [Replay & Debug](#replay--debug)
 - [Remote Pool Access](#remote-pool-access)
+- [Detect Retention Gaps](#detect-retention-gaps)
 - [MCP Agent Access](#mcp-agent-access)
 - [When Plasmite Isn't the Right Fit](#when-plasmite-isnt-the-right-fit)
 - [Next Steps](#next-steps)
@@ -431,6 +432,42 @@ plasmite follow https://server:9700/events --tail 20 --tls-skip-verify
 curl remains useful for API debugging, but native `plasmite feed` / `plasmite follow` should be the first-line operator workflow.
 
 A built-in web UI is available at `https://server:9700/ui`.
+
+---
+
+## Detect Retention Gaps
+
+A pool is a fixed-size ring buffer. If writers fill it faster than a consumer
+advances, old messages disappear. Normal SDK tails continue from the next
+retained message so existing best-effort consumers keep moving.
+
+Consumers that require a complete sequence can opt into a fail-closed check:
+
+```python
+from plasmite import RetentionGapError
+
+try:
+    for message in pool.tail(
+        since_seq=checkpoint,
+        error_on_gap=True,
+        timeout_ms=30_000,
+    ):
+        process(message)
+        checkpoint = message.seq + 1
+except RetentionGapError as error:
+    print(f"first missing sequence: {error.seq}")
+    rebuild_state_before_restarting()
+```
+
+The error occurs before the first message after the gap, including when tag
+filters would discard that message. The consumer remains responsible for
+choosing a new checkpoint or rebuilding state. This check detects loss; it
+does not add acknowledgements or prevent the ring buffer from overwriting old
+data.
+
+Local decoded and Lite3 tails support the option. Remote JSON tails support it;
+remote Lite3 tails do not because their wire format has no terminal error
+frame.
 
 ## MCP Agent Access
 
