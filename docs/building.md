@@ -10,6 +10,11 @@
 
 ## Native build model (Lite3 vendoring)
 
+Plasmite pins Lite3 to an exact upstream commit in
+`vendor/lite3.lock.json`. An integrity manifest at `vendor/lite3.sha256`
+covers the curated files compiled into Plasmite. Normal builds and integrity
+checks never access the network.
+
 `build.rs` does three things:
 
 1. Declares `cargo:rerun-if-changed` for shim and vendored Lite3 files.
@@ -28,6 +33,38 @@ Key inputs:
 - `c/lite3_shim.c`
 
 If these vendored files are missing or empty, link failures will surface as unresolved `lite3_*` symbols.
+
+Verify the snapshot metadata, complete file set, and checksums:
+
+```bash
+just verify-lite3
+```
+
+To review and adopt a new upstream revision, select a full commit SHA and run:
+
+```bash
+just update-lite3 <40-character-commit>
+```
+
+The update command reconstructs `vendor/lite3/` from a fixed allowlist and
+updates both provenance and integrity metadata. It accesses the network; normal
+builds and `just check` do not.
+
+Scheduled CI detects new commits on Lite3's `main` branch. Run the same
+networked check on demand with:
+
+```bash
+just check-lite3-upstream
+```
+
+Linux CI also compiles the vendored C sources with AddressSanitizer and
+UndefinedBehaviorSanitizer, links their runtimes into the Rust test binary, and
+runs the focused Lite3 suite. Reproduce that environment on a Linux host with
+Clang by running:
+
+```bash
+just test-lite3-sanitizers
+```
 
 ## Local validation gates
 
@@ -171,8 +208,8 @@ If you need to force a specific build run (for example, during incident recovery
 - **Source build fails with `cl.exe` errors (`__builtin_expect`, `__attribute__`, parsing errors in `lite3.h`)**
   - Prefer official install channels (`uv tool install plasmite`, `npm i -g plasmite`) over local source builds.
 - **Source build fails with Lite3 parse errors near `case` labels**
-  - Vendored Lite3 requires a C23-capable C compiler (it uses declarations immediately after labels).
-  - Install a newer compiler and retry (for example by setting `CC` explicitly), then rebuild.
+  - Verify the vendored snapshot with `just verify-lite3`.
+  - Plasmite pins a C11-compatible Lite3 revision; unexpected parse errors can indicate a modified or incomplete snapshot.
 - **`feed` fails with `failed to encode json as lite3`**
   - Use remote refs (`http://host:port/<pool>`) so encoding occurs on the remote server.
 - **Emergency fallback artifact integrity**

@@ -430,6 +430,19 @@ mod tests {
     }
 
     #[test]
+    fn round_trip_empty_object_key_and_nested_array() {
+        let value = json!({
+            "": null,
+            "nested": [{"values": [1, 2, 3]}]
+        });
+        let json = serde_json::to_string(&value).expect("serialize");
+        let buf = Lite3Buf::from_json_str(&json).expect("encode");
+        let decoded = buf.as_doc().to_json(false).expect("decode");
+        let decoded: serde_json::Value = serde_json::from_str(&decoded).expect("parse");
+        assert_eq!(decoded, value);
+    }
+
+    #[test]
     fn invalid_bytes_are_rejected() {
         let buf = [0u8; 8];
         let err = validate_bytes(&buf).expect_err("should fail");

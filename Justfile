@@ -18,6 +18,22 @@ clippy:
 test:
 	cargo test
 
+# Verify the pinned Lite3 snapshot without accessing the network.
+verify-lite3:
+	./scripts/verify-lite3.sh
+
+# Replace the curated Lite3 snapshot with an exact upstream commit.
+update-lite3 commit:
+	./scripts/update-lite3.sh "{{commit}}"
+
+# Query upstream and fail when Lite3 main has moved beyond the pin.
+check-lite3-upstream:
+	./scripts/check-lite3-upstream.sh
+
+# Run focused Lite3 tests with C AddressSanitizer and UndefinedBehaviorSanitizer instrumentation (Linux only).
+test-lite3-sanitizers:
+	./scripts/test-lite3-sanitizers.sh
+
 cookbook-smoke:
 	bash scripts/cookbook_smoke.sh
 	@echo "cookbook-smoke complete"
@@ -56,7 +72,7 @@ bindings-node-typecheck:
 bindings-test: bindings-go-test bindings-python-test bindings-node-test bindings-node-typecheck
 
 # Core, deterministic checks for every local change and pull request.
-check: fmt clippy test check-version-alignment
+check: fmt clippy test check-version-alignment verify-lite3
 
 # Cross-language and artifact checks. Requires Go, Node, Python, and uv.
 # `bindings-test` includes node pack and remote-only smoke tests.

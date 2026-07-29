@@ -9,6 +9,23 @@ on:
     - cron: "0 8 * * *"
 
 jobs:
+  lite3-upstream:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the pinned Lite3 revision
+        run: ./scripts/check-lite3-upstream.sh
+
+  lite3-sanitizers:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test the Lite3 boundary with ASan and UBSan
+        run: ./scripts/test-lite3-sanitizers.sh
+
   pr-paths:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
