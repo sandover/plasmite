@@ -107,7 +107,13 @@ elif [[ -n "$build_run_id" ]]; then
     echo "error: gh CLI is required for --build-run-id mode" >&2
     exit 2
   fi
-  gh run download "$build_run_id" --dir "$tmp_dir/raw"
+  while IFS= read -r rust_target; do
+    [[ -n "$rust_target" ]] || continue
+    artifact="dist-${rust_target}"
+    gh run download "$build_run_id" \
+      --name "$artifact" \
+      --dir "$tmp_dir/raw/$artifact"
+  done < <("$root_dir/scripts/release_channel_targets.sh" homebrew official rust_target)
   find "$tmp_dir/raw" -name "plasmite_${version}_*.tar.gz" -print0 | xargs -0 shasum -a 256 > "$tmp_dir/sha256sums.txt"
   load_sha_from_file "$tmp_dir/sha256sums.txt"
   verification_sha_file="$tmp_dir/sha256sums.txt"
