@@ -27,6 +27,10 @@ There are three top-level commands, ordered by cost and coverage:
   smoke. Run it before merging, tagging, or publishing; main and scheduled CI
   run it on Linux and macOS.
 
+The main CI gate gives Go a stable runner-local build cache that
+`actions/setup-go` restores and saves. Test scripts honor an existing
+`GOCACHE`; local runs default to repository-local scratch directories.
+
 ### Cookbook smoke checks
 
 Run:

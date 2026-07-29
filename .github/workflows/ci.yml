@@ -197,6 +197,7 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     env:
+      GOCACHE: ${{ runner.temp }}/go-build
       UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
     strategy:
       fail-fast: false
@@ -211,6 +212,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+          cache: true
           cache-dependency-path: bindings/go/go.sum
       - uses: actions/setup-node@v4
         with:

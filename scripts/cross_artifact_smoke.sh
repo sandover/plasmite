@@ -100,8 +100,8 @@ fi
 export LIBRARY_PATH="$LIB_DIR${LIBRARY_PATH:+:$LIBRARY_PATH}"
 export PLASMITE_LIB_DIR="$LIB_DIR"
 export PLASMITE_BIN="$LIB_DIR/plasmite"
-export GOCACHE="$ROOT/.scratch/go-build"
-mkdir -p "$ROOT/.scratch/go-build"
+export GOCACHE="${GOCACHE:-$ROOT/.scratch/go-build}"
+mkdir -p "$GOCACHE"
 
 expected_version="$(
   sed -n 's/^pub const POOL_FORMAT_VERSION: u32 = \([0-9][0-9]*\);/\1/p' "$ROOT/src/core/format.rs"

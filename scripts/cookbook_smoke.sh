@@ -149,10 +149,11 @@ NODE
   assert_jq_true "${node_home_out}" '.data.task == "resize"' "Node fresh HOME fixture"
   assert_jq_true "${node_home_out}" '.tags == ["cookbook"]' "Node fresh HOME fixture"
 
-  mkdir -p "${WORK_DIR}/go-cache" "${WORK_DIR}/go-tmp"
+  local go_cache="${GOCACHE:-${WORK_DIR}/go-cache}"
+  mkdir -p "${go_cache}" "${WORK_DIR}/go-tmp"
   (
     cd "${ROOT_DIR}/bindings/go" && \
-      GOCACHE="${WORK_DIR}/go-cache" \
+      GOCACHE="${go_cache}" \
       GOTMPDIR="${WORK_DIR}/go-tmp" \
       PLASMITE_LIB_DIR="${ROOT_DIR}/target/debug" \
       LD_LIBRARY_PATH="${ROOT_DIR}/target/debug:${LD_LIBRARY_PATH:-}" \

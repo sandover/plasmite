@@ -3,7 +3,7 @@
 # Key exports: N/A (script entry point).
 # Role: CI/local parity gate to prevent stale lib/bin drift across Rust/Go/Node/Python.
 # Invariants: Builds CLI + cdylib + staticlib before running any conformance runner.
-# Invariants: Uses workspace-local caches to avoid host-global state drift.
+# Invariants: Honors an explicit Go cache and otherwise uses workspace-local scratch state.
 # Notes: Keep this script deterministic and side-effect scoped to .scratch/ and target/.
 
 set -euo pipefail
@@ -18,7 +18,8 @@ MANIFESTS=(
   "retention-gap-v0.json"
 )
 
-mkdir -p "$ROOT/.scratch/go-build"
+export GOCACHE="${GOCACHE:-$ROOT/.scratch/go-build}"
+mkdir -p "$GOCACHE"
 
 if [[ "${RUNNER_OS:-}" == "macOS" || "$(uname -s)" == "Darwin" ]]; then
   export DYLD_LIBRARY_PATH="$LIB_DIR${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
@@ -28,7 +29,6 @@ fi
 export LIBRARY_PATH="$LIB_DIR${LIBRARY_PATH:+:$LIBRARY_PATH}"
 export PLASMITE_LIB_DIR="$LIB_DIR"
 export PLASMITE_BIN="$LIB_DIR/plasmite"
-export GOCACHE="$ROOT/.scratch/go-build"
 
 echo "[conformance] building artifacts"
 cargo build --bin plasmite
