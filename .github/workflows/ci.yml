@@ -18,11 +18,17 @@ jobs:
         run: ./scripts/check-lite3-upstream.sh
 
   lite3-sanitizers:
-    if: github.event_name != 'schedule'
+    needs: [pr-paths]
+    if: >-
+      always()
+      && github.event_name != 'schedule'
+      && (github.event_name != 'pull_request'
+          || needs.pr-paths.outputs.lite3 == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Test the Lite3 boundary with ASan and UBSan
         run: ./scripts/test-lite3-sanitizers.sh
 
@@ -30,6 +36,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     outputs:
+      lite3: ${{ steps.filter.outputs.lite3 }}
       packaging: ${{ steps.filter.outputs.packaging }}
       windows: ${{ steps.filter.outputs.windows }}
     steps:
@@ -38,15 +45,29 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
+            lite3:
+              - 'build.rs'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'c/**'
+              - 'vendor/lite3*'
+              - 'src/core/lite3/**'
+              - 'scripts/test-lite3-sanitizers.sh'
+              - '.github/workflows/ci.yml'
             packaging:
               - 'build.rs'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'c/**'
               - 'vendor/lite3/**'
-              - 'src/**'
               - 'bindings/**'
-              - 'scripts/**'
+              - 'release/**'
+              - 'scripts/build_release_artifacts.sh'
+              - 'scripts/normalize_sdk_layout.sh'
+              - 'scripts/package_node_natives.sh'
+              - 'scripts/package_release_sdk.sh'
+              - 'scripts/python_wheel_smoke.sh'
+              - 'scripts/node_pack_smoke.sh'
               - 'include/**'
               - '.github/workflows/**'
             windows:
@@ -55,11 +76,16 @@ jobs:
               - 'Cargo.lock'
               - 'c/**'
               - 'vendor/lite3/**'
-              - 'src/**'
-              - 'tests/**'
+              - 'src/abi.rs'
+              - 'src/core/lite3/**'
+              - 'include/**'
               - 'bindings/node/**'
               - 'bindings/python/**'
-              - 'scripts/**'
+              - 'release/**'
+              - 'scripts/build_release_artifacts.sh'
+              - 'scripts/package_node_natives.sh'
+              - 'scripts/python_wheel_smoke.sh'
+              - 'scripts/node_pack_smoke.sh'
               - '.github/workflows/**'
 
   check:
@@ -70,6 +96,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
           tool: just
@@ -94,13 +121,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+          cache-dependency-path: bindings/node/package-lock.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: bindings/python/pyproject.toml
+          cache-local-path: ${{ runner.temp }}/uv-cache
+          cache-suffix: ${{ matrix.target }}
       - run: cd bindings/node && npm ci
       - name: Build SDK artifacts for packaging smoke
         shell: bash
@@ -114,6 +149,7 @@ jobs:
       - name: Python wheel build/install smoke
         env:
           PLASMITE_SDK_DIR: ${{ github.workspace }}/target/${{ matrix.target }}/release
+          UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
         run: ./scripts/python_wheel_smoke.sh
 
   windows-smoke:
@@ -127,6 +163,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Build release binaries
         shell: pwsh
         run: |
@@ -159,6 +196,8 @@ jobs:
   full:
     if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
+    env:
+      UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
     strategy:
       fail-fast: false
       matrix:
@@ -168,6 +207,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
@@ -175,10 +215,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+          cache-dependency-path: bindings/node/package-lock.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: bindings/python/pyproject.toml
+          cache-local-path: ${{ runner.temp }}/uv-cache
+          cache-suffix: full-${{ runner.os }}
       - uses: taiki-e/install-action@v2
         with:
           tool: just

@@ -1,6 +1,6 @@
 //! Purpose: Compile vendored Lite3 C sources plus the local shim for Rust FFI.
 //! Role: Cargo build-script; configures `cc` inputs/includes and rebuild triggers.
-//! Invariants: `cargo:rerun-if-changed` covers C sources plus embedded UI assets used by the server.
+//! Invariants: `cargo:rerun-if-changed` covers the C sources used by Plasmite.
 //! Invariants: Produces a `lite3` object library linked into the Rust crate.
 //! Invariants: Builds the pinned Lite3 snapshot in C11 mode.
 //! Invariants: Uses only Cargo-provided env vars (e.g. `CARGO_MANIFEST_DIR`).
@@ -24,7 +24,12 @@ fn main() {
     println!("cargo:rerun-if-changed=vendor/lite3/src/debug.c");
     println!("cargo:rerun-if-changed=vendor/lite3/lib/yyjson/yyjson.c");
     println!("cargo:rerun-if-changed=vendor/lite3/lib/nibble_base64/base64.c");
-    println!("cargo:rerun-if-changed=ui/index.html");
+
+    if target.contains("apple-darwin") {
+        println!("cargo:rustc-cdylib-link-arg=-Wl,-install_name,@rpath/libplasmite.dylib");
+    } else if !target.contains("windows-msvc") {
+        println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,libplasmite.so");
+    }
 
     let mut build = cc::Build::new();
     build
@@ -40,7 +45,6 @@ fn main() {
         .file(manifest_dir.join("c").join("lite3_shim.c"));
 
     configure_lite3_compiler(&mut build, &target);
-
     build.compile("lite3");
 }
 

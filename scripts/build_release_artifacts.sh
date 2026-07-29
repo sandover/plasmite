@@ -2,8 +2,9 @@
 # Purpose: Build the Rust artifacts consumed by every release package on one platform.
 # Key inputs: target triple and optional --static flag.
 # Role: Shared release build entrypoint for SDK, Python, Node, and packaging smoke.
-# Invariants: Always emits plasmite/pls and a cdylib with a stable platform identity.
-# Invariants: --static additionally emits libplasmite.a for SDK tarballs.
+# Invariants: One Cargo invocation emits binaries and every declared library crate type.
+# Invariants: The cdylib has a stable platform identity.
+# Invariants: --static requires the declared staticlib output used by SDK tarballs.
 
 set -euo pipefail
 
@@ -35,18 +36,15 @@ if [[ $# -eq 2 ]]; then
   build_static=true
 fi
 
-cargo build --release --target "$target" --bins
-
-if [[ "$target" == *windows-msvc ]]; then
-  cargo rustc --release --target "$target" --lib --crate-type=cdylib
-elif [[ "$target" == *apple-darwin ]]; then
-  cargo rustc --release --target "$target" --lib --crate-type=cdylib -- \
-    -C link-arg=-Wl,-install_name,@rpath/libplasmite.dylib
-else
-  cargo rustc --release --target "$target" --lib --crate-type=cdylib -- \
-    -C link-arg=-Wl,-soname,libplasmite.so
-fi
+cargo build --release --target "$target" --bins --lib
 
 if [[ "$build_static" == true ]]; then
-  cargo rustc --release --target "$target" --lib --crate-type=staticlib
+  case "$target" in
+    *windows-msvc) static_lib="$root_dir/target/$target/release/plasmite.lib" ;;
+    *) static_lib="$root_dir/target/$target/release/libplasmite.a" ;;
+  esac
+  if [[ ! -f "$static_lib" ]]; then
+    echo "required static library was not produced: $static_lib" >&2
+    exit 1
+  fi
 fi

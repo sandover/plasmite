@@ -109,17 +109,18 @@ cross-artifact-smoke:
 	./scripts/cross_artifact_smoke.sh
 
 # Build a release-style SDK tarball from source (for C/libplasmite consumers).
-# Defaults target Linux x86_64; override for other targets/platform tags.
-sdk-from-source target="x86_64-unknown-linux-gnu" platform="linux_amd64":
+# Defaults target Linux x86_64; override for other target triples.
+sdk-from-source target="x86_64-unknown-linux-gnu":
 	version="$(awk -F '\"' '/^version = \"/ {print $2; exit}' Cargo.toml)"; \
 	if [[ -z "$version" ]]; then \
 	  echo "failed to detect version from Cargo.toml" >&2; \
 	  exit 1; \
 	fi; \
+	platform="$(./scripts/release_target_field.sh "{{target}}" sdk_platform)"; \
 	./scripts/build_release_artifacts.sh "{{target}}" --static; \
-	./scripts/package_release_sdk.sh "{{target}}" "{{platform}}" "$version"; \
-	./scripts/cross_artifact_smoke.sh "dist/plasmite_${version}_{{platform}}.tar.gz"; \
-	echo "sdk-from-source complete: dist/plasmite_${version}_{{platform}}.tar.gz"
+	./scripts/package_release_sdk.sh "{{target}}" "$version"; \
+	./scripts/cross_artifact_smoke.sh "dist/plasmite_${version}_${platform}.tar.gz"; \
+	echo "sdk-from-source complete: dist/plasmite_${version}_${platform}.tar.gz"
 
 # Ensure scratch workspace exists.
 scratch:

@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/scripts/normalize_sdk_layout.sh"
 mkdir -p "$ROOT/.scratch"
 WORKDIR="$(mktemp -d "$ROOT/.scratch/python-wheel-smoke.XXXXXX")"
-UV_CACHE_DIR="$WORKDIR/uv-cache"
+UV_CACHE_DIR="${UV_CACHE_DIR:-$WORKDIR/uv-cache}"
 HAS_RG=0
 if command -v rg >/dev/null 2>&1; then
   HAS_RG=1

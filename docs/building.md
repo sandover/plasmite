@@ -68,18 +68,26 @@ just test-lite3-sanitizers
 
 ## Local validation gates
 
-Run the same core gates used for CI hygiene:
+Use Cargo's fastest applicable command while developing. Start with a type and
+borrow check, then run the smallest test target that covers the changed
+behavior:
 
 ```bash
-cargo fmt --all
-cargo clippy --all-targets -- -D warnings
-cargo test
+cargo check
+cargo test --lib <module-or-test-name>
+cargo test --test <integration-test-name> <test-name>
 ```
 
-Use the named gates instead of CI aliases:
+Development and test profiles emit line-table debug information. This preserves
+source locations and useful backtraces without paying for full debugger variable
+metadata. A debugging session that needs full variable inspection can override
+the profile temporarily with `CARGO_PROFILE_DEV_DEBUG=2` or
+`CARGO_PROFILE_TEST_DEBUG=2`.
+
+Run the complete local gate when work is ready for handoff or push:
 
 ```bash
-just check          # core Rust + version checks; use before every push
+just check          # formatting, linting, Rust tests, version checks, Lite3 integrity
 just integration    # bindings, ABI, cookbook, and cross-artifact checks
 just release-gate   # check + integration + Python wheel smoke
 ```
@@ -155,7 +163,7 @@ pkg-config --cflags --static --libs plasmite
 You can override target/platform tags:
 
 ```bash
-just sdk-from-source aarch64-apple-darwin darwin_arm64
+just sdk-from-source aarch64-apple-darwin
 ```
 
 `release.yml` uploads build artifacts only (SDK tarballs, Python dist artifacts, npm tarball, and release metadata).

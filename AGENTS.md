@@ -46,5 +46,11 @@ When you add, rename, move, or delete a doc in `docs/` or `spec/`, update the tr
 - Before push, run and pass `just check`; before merge/release, run and pass `just release-gate`.
 - Do not add new `#[allow(clippy::...)]` without explicit justification in the commit body.
 
+# Build hygiene
+- Keep current debug artifacts during active development.
+- Ensure scratch directories are removed after successful tests.
+- Run `cargo clean` after release work or when `target/` exceeds 8 GB.
+- Preserve release evidence, active Ergo state, and all source changes during cleanup.
+
 # Guidance
 - no pip in this project -- uv only

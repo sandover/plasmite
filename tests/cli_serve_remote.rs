@@ -674,7 +674,7 @@ fn serve_tls_allows_healthz_with_trusted_cert() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
-    let _ = ureq::rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let _ = ureq::rustls::crypto::ring::default_provider().install_default();
 
     let create = cmd()
         .args([

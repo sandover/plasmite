@@ -74,7 +74,7 @@ impl ServerCertVerifier for AcceptAllServerCertVerifier {
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        ureq::rustls::crypto::aws_lc_rs::default_provider()
+        ureq::rustls::crypto::ring::default_provider()
             .signature_verification_algorithms
             .supported_schemes()
     }
@@ -215,7 +215,7 @@ impl RemoteClient {
                 .with_path(path));
         }
 
-        let _ = ureq::rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let _ = ureq::rustls::crypto::ring::default_provider().install_default();
         let mut root_store = ureq::rustls::RootCertStore::empty();
         let (added, _) = root_store.add_parsable_certificates(certs);
         if added == 0 {
@@ -233,7 +233,7 @@ impl RemoteClient {
     }
 
     pub fn with_tls_skip_verify(mut self) -> Self {
-        let _ = ureq::rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let _ = ureq::rustls::crypto::ring::default_provider().install_default();
         let tls_config = ureq::rustls::ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(AcceptAllServerCertVerifier))

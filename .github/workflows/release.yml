@@ -121,6 +121,8 @@ jobs:
   build-platform:
     needs: [release-context]
     runs-on: ${{ matrix.os }}
+    env:
+      UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
     strategy:
       fail-fast: false
       matrix:
@@ -134,6 +136,7 @@ jobs:
         with:
           toolchain: ${{ env.RELEASE_RUST_TOOLCHAIN }}
           targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
       - name: Install smoke-test tooling
         if: matrix.sdk
         shell: bash
@@ -148,9 +151,16 @@ jobs:
         with:
           python-version: "3.11"
       - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: bindings/python/pyproject.toml
+          cache-local-path: ${{ runner.temp }}/uv-cache
+          cache-suffix: release-${{ matrix.target }}
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+          cache-dependency-path: bindings/node/package-lock.json
       - run: cd bindings/node && npm ci
       - name: Build native artifacts once for this platform
         shell: bash
@@ -220,6 +230,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+          cache-dependency-path: bindings/node/package-lock.json
       - run: cd bindings/node && npm ci
       - uses: actions/download-artifact@v4
         with:

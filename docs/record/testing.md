@@ -3,20 +3,24 @@
 This repo uses Rust’s built-in test harness (`cargo test`) plus a small set of
 integration tests that exec the `plasmite` CLI binary.
 
-## Quick start
+## Local iteration
 
-Run everything (unit + integration):
+Start with a compile check, then run the smallest test target that exercises the
+changed behavior:
 
 ```bash
-cargo test
+cargo check
+cargo test --lib <module-or-test-name>
+cargo test --test <integration-test-name> <test-name>
 ```
 
 ## Validation hierarchy
 
 There are three top-level commands, ordered by cost and coverage:
 
-- `just check`: formatting, linting, Rust tests, and version alignment. Run it
-  before every push; pull requests run the same command.
+- `just check`: formatting, linting, Rust tests, version alignment, and Lite3
+  integrity. Run it when handing work off and before every push; pull requests
+  run the same command.
 - `just integration`: cookbook, ABI, conformance, cross-artifact, and language
   binding checks. It requires Go, Node, Python, and `uv`.
 - `just release-gate`: `check` + `integration` + Python wheel installation

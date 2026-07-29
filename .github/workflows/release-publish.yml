@@ -328,6 +328,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RELEASE_RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
       - name: Rehearsal mode
         if: needs.resolve-build-run.outputs.rehearsal == 'true'
         run: 'echo "publish-crates-io rehearsal: skipping cargo publish."'
