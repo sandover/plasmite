@@ -72,14 +72,24 @@ Any failed required gate blocks release progression.
 3. Update the Homebrew formula locally and push:
    - `bash scripts/update_homebrew_formula.sh <release_target> ../homebrew-tap --build-run-id <build_run_id>`
    - `cd ../homebrew-tap && git add Formula/plasmite.rb && git commit -m "plasmite: update to <version>" && git push`
-4. Rehearse publish (recommended before first live dispatch):
+4. Decide whether a rehearsal is required by inspecting the complete release
+   diff from `base_tag` through the candidate. Run a rehearsal when:
+   - `mode` is `dry-run`;
+   - release workflows, target selection, packaging, publishing, registry
+     authentication, or Homebrew alignment behavior changed; or
+   - registry credentials were added, rotated, or recovered.
+   A normal live release with unchanged release machinery proceeds directly to
+   step 5. Do not maintain a second path inventory solely for this decision.
+   When a rehearsal is required, wait for it to succeed:
    - `gh workflow run release-publish.yml -f release_tag=<release_target> -f rehearsal=true`
-5. Run live publish:
+5. In `live` mode, run live publish:
    - `gh workflow run release-publish.yml -f release_tag=<release_target> -f rehearsal=false`
 
 Dispatch policy:
 
 - Prefer `release_tag` dispatch for normal operation.
+- A dry run ends after a successful rehearsal and does not dispatch live
+  publishing.
 - Use explicit `build_run_id` only for incident recovery reruns.
 - Optional explicit provenance proof:
   - `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <build_run_id> --expect-tag <release_target>`

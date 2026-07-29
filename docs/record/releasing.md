@@ -102,7 +102,21 @@ GitHub runners are shared machines, so benchmark numbers can swing due to factor
 
 ### “Rehearsal” mode (publish without publishing)
 
-`release-publish.yml` supports a rehearsal mode that runs the same preflight/provenance/tap checks, but skips actually publishing to registries or GitHub Releases. Use it when you change release automation or when you want a safe “end-to-end confidence check” before going live.
+`release-publish.yml` supports a rehearsal mode that runs its
+preflight, provenance, artifact, and Homebrew checks without publishing to
+registries or creating a GitHub Release.
+
+Before dispatch, inspect the complete diff from the previous release tag
+through the candidate. Rehearsal is required for a requested dry run, for
+changes to release workflows or their packaging, target, publishing,
+authentication, and Homebrew behavior, and after registry credentials are
+added, rotated, or recovered. A normal live release with unchanged release
+machinery proceeds directly to live publishing because that workflow runs the
+same fail-closed checks before mutation.
+
+The release diff is the decision record. Plasmite does not maintain a second
+inventory of release-sensitive paths that could drift from the machinery it is
+meant to describe.
 
 ## Post-release delivery smoke contract
 
@@ -165,11 +179,13 @@ flowchart TD
     B --> C["release.yml build run"]
     C --> D{"Build succeeded?"}
     D -- "No" --> X
-    D -- "Yes" --> E["release-publish rehearsal (optional, recommended on workflow changes)"]
-    E -.-> F{"Rehearsal succeeded?"}
-    F -- "No" --> X
-    F -- "Yes" --> G["release-publish live (manual dispatch)"]
-    D -- "Yes" --> G
+    D -- "Yes" --> E{"Dry run, release machinery change, or credential change?"}
+    E -- "Yes" --> F["release-publish rehearsal"]
+    F --> F1{"Rehearsal succeeded?"}
+    F1 -- "No" --> X
+    F1 -- "Yes, dry-run mode" --> L["Stop with rehearsal evidence"]
+    F1 -- "Yes, live mode" --> G["release-publish live (manual dispatch)"]
+    E -- "No" --> G
     G --> H{"Preflight + tap sync/verification pass?"}
     H -- "No" --> X
     H -- "Yes" --> I["Publish crates.io + npm + PyPI"]
@@ -189,17 +205,26 @@ The skill handles mechanics, but maintainers still decide:
 ## Minimal Maintainer Checklist
 
 1. Choose version and update release notes/changelog.
-2. Ask Codex to run the `plasmite-release-manager` skill in `dry-run`.
-3. Resolve all blocker tasks created by the dry-run.
-4. Push all local commits you intend to ship, then confirm release source SHA is fully on origin.
-5. Run local benchmark comparison against the prior tag:
+2. Choose `dry-run` when the requested outcome is rehearsal evidence without
+   publication; choose `live` when the requested outcome is publication.
+3. Inspect the complete release diff. A dry run always rehearses. A live run
+   rehearses first when release machinery or credentials changed.
+4. Ask Codex to run the `plasmite-release-manager` skill in the selected mode.
+5. Resolve every blocker produced by pre-release validation.
+6. Push all local commits you intend to ship, then confirm the release source
+   SHA is fully on origin.
+7. Run the local benchmark comparison when the release contains hot-path or
+   storage changes:
    - `bash skills/plasmite-release-manager/scripts/compare_local_benchmarks.sh --base-tag <base_tag> --runs 3`
-6. Ask Codex to run the skill in `live` mode.
-7. Update and push the Homebrew formula from `../homebrew-tap` before live publish dispatch.
-8. Confirm post-release delivery verification is complete on all channels.
+8. Update and push the Homebrew formula from `../homebrew-tap` before live
+   publish dispatch.
+9. If a required rehearsal succeeded in `live` mode, continue with the live
+   dispatch. A dry run stops after rehearsal evidence.
+10. Confirm post-release delivery verification is complete on all channels.
    - Recommended: dispatch `.github/workflows/post-release-smoke.yml` with the released version and default channels.
-9. If publish fails due to credentials/policy, run publish-only rerun with the same target:
-   - `gh workflow run release-publish.yml -f release_tag=<vX.Y.Z> -f rehearsal=false`
+11. If publish fails due to credentials or policy, rerun publishing with the
+    same target after recovery:
+    - `gh workflow run release-publish.yml -f release_tag=<vX.Y.Z> -f rehearsal=false`
 
 ## Versioning Policy
 
