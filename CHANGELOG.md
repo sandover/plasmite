@@ -6,27 +6,50 @@ All notable changes to this project will be documented in this file.
 
 ## [0.8.0] - 2026-07-28
 
-### Added
+Plasmite 0.8.0 lets consumers choose whether a retention gap should stop a
+message stream. Applications that cannot safely miss data can now fail closed
+and recover deliberately, while existing consumers keep the same best-effort
+behavior.
 
-- Local Rust, C, Python, Node, and Go tails can opt into fail-closed retention
-  gap detection while existing callers retain best-effort continuation.
-- Remote JSON tails accept the same policy and preserve structured
-  `RetentionGap` errors, including the first missing sequence.
-- Cross-language conformance now covers stale starts, filtering, default
-  continuation, and overwrite after a tail position is established.
+### Consumers can detect lost messages
 
-### Documentation
+Plasmite pools have bounded capacity. When writers outpace a reader, older
+messages may be overwritten before the reader reaches them. A tail can now use
+the error gap policy to stop with a structured `RetentionGap` error instead of
+silently continuing from the oldest retained message.
 
-- The public API and cookbook now explain bounded retention, consumer recovery
-  responsibility, and the remote Lite3 limitation without implying guaranteed
-  delivery.
+The error identifies the first missing sequence. Consumers can use that
+boundary to alert an operator, rebuild state from another source, or restart
+from an explicitly chosen position.
 
-### Maintenance
+### The policy works across supported clients
+
+Fail-closed gap detection is available to local Rust, C, Python, Node, and Go
+tails. Remote JSON tails expose the same choice and preserve the structured
+error across the HTTP boundary.
+
+The default remains best-effort continuation, so existing applications retain
+their current behavior. Lite3 remote streaming remains best-effort because its
+wire format cannot carry a terminal structured error.
+
+### Retention behavior has a shared contract
+
+The public API specification and cookbook now explain bounded retention,
+consumer recovery responsibility, and the difference between best-effort and
+fail-closed tails.
+
+Cross-language conformance covers stale starting positions, filtered streams,
+overwrite after a tail position is established, and default continuation. This
+keeps the Rust implementation and every supported binding aligned.
+
+### Supply chain and releases are leaner
 
 - Vendored Lite3 source now has pinned provenance, integrity verification,
   reproducible update tooling, and sanitizer coverage.
-- Routine releases avoid redundant artifact transfers and skip rehearsal when
-  release machinery and credentials are unchanged.
+- Homebrew updates download only the release artifacts needed by the formula.
+- Publish jobs transfer one normalized copy of each package input.
+- Releases skip rehearsal when publishing machinery and credentials are
+  unchanged while retaining the same fail-closed live checks.
 
 ## [0.7.2] - 2026-07-28
 
