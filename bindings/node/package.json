@@ -1,6 +1,6 @@
 {
   "name": "plasmite",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "description": "Persistent JSON message queues for Node.js - native bindings for local and remote IPC",
   "license": "MIT",
   "main": "index.js",

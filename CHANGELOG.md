@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-28
+
 ### Added
 
 - Local Rust, C, Python, Node, and Go tails can opt into fail-closed retention
@@ -18,6 +20,13 @@ All notable changes to this project will be documented in this file.
 - The public API and cookbook now explain bounded retention, consumer recovery
   responsibility, and the remote Lite3 limitation without implying guaranteed
   delivery.
+
+### Maintenance
+
+- Vendored Lite3 source now has pinned provenance, integrity verification,
+  reproducible update tooling, and sanitizer coverage.
+- Routine releases avoid redundant artifact transfers and skip rehearsal when
+  release machinery and credentials are unchanged.
 
 ## [0.7.2] - 2026-07-28
 
