@@ -78,10 +78,11 @@ cargo test --lib <module-or-test-name>
 cargo test --test <integration-test-name> <test-name>
 ```
 
-Development and test profiles emit line-table debug information. This preserves
-source locations and useful backtraces without paying for full debugger variable
-metadata. A debugging session that needs full variable inspection can override
-the profile temporarily with `CARGO_PROFILE_DEV_DEBUG=2` or
+Development and test profiles emit line-table debug information for Plasmite
+and omit debug information from dependencies. This preserves source locations
+and useful backtraces in Plasmite without paying to generate or link dependency
+debug metadata. A debugging session that needs full variable inspection can
+override the profile temporarily with `CARGO_PROFILE_DEV_DEBUG=2` or
 `CARGO_PROFILE_TEST_DEBUG=2`.
 
 Run the complete local gate when work is ready for handoff or push:
