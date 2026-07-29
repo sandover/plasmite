@@ -190,13 +190,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p release-inputs/raw
-          gh run download "$BUILD_RUN_ID" --repo "$GITHUB_REPOSITORY" --dir release-inputs/raw
+          raw_dir="$RUNNER_TEMP/plasmite-release-inputs"
+          mkdir -p "$raw_dir"
+          gh run download "$BUILD_RUN_ID" --repo "$GITHUB_REPOSITORY" --dir "$raw_dir"
 
-          dist_count="$(find release-inputs/raw -name "plasmite_${VERSION}_*.tar.gz" | wc -l | tr -d ' ')"
-          node_count="$(find release-inputs/raw -name "plasmite-${VERSION}.tgz" | wc -l | tr -d ' ')"
-          wheel_count="$(find release-inputs/raw -name "*${VERSION}*.whl" | wc -l | tr -d ' ')"
-          sdist_count="$(find release-inputs/raw -name "plasmite-${VERSION}.tar.gz" | wc -l | tr -d ' ')"
+          dist_count="$(find "$raw_dir" -name "plasmite_${VERSION}_*.tar.gz" | wc -l | tr -d ' ')"
+          node_count="$(find "$raw_dir" -name "plasmite-${VERSION}.tgz" | wc -l | tr -d ' ')"
+          wheel_count="$(find "$raw_dir" -name "*${VERSION}*.whl" | wc -l | tr -d ' ')"
+          sdist_count="$(find "$raw_dir" -name "plasmite-${VERSION}.tar.gz" | wc -l | tr -d ' ')"
 
           if [[ "$dist_count" -lt 1 ]]; then
             echo "error: no SDK dist tarballs found for version ${VERSION}." >&2
@@ -216,10 +217,23 @@ jobs:
           fi
 
           mkdir -p release-inputs/dist release-inputs/node-dist release-inputs/py-dist
-          find release-inputs/raw -name "plasmite_${VERSION}_*.tar.gz" -exec cp {} release-inputs/dist/ \;
-          find release-inputs/raw -name "plasmite-${VERSION}.tgz" -exec cp {} release-inputs/node-dist/ \;
-          find release-inputs/raw -name "*${VERSION}*.whl" -exec cp {} release-inputs/py-dist/ \;
-          find release-inputs/raw -name "plasmite-${VERSION}.tar.gz" -exec cp {} release-inputs/py-dist/ \;
+          find "$raw_dir" -name "plasmite_${VERSION}_*.tar.gz" -exec cp {} release-inputs/dist/ \;
+          find "$raw_dir" -name "plasmite-${VERSION}.tgz" -exec cp {} release-inputs/node-dist/ \;
+          find "$raw_dir" -name "*${VERSION}*.whl" -exec cp {} release-inputs/py-dist/ \;
+          find "$raw_dir" -name "plasmite-${VERSION}.tar.gz" -exec cp {} release-inputs/py-dist/ \;
+
+          unexpected="$(
+            find release-inputs -mindepth 1 -maxdepth 1 \
+              ! -name dist \
+              ! -name node-dist \
+              ! -name py-dist \
+              -print
+          )"
+          if [[ -n "$unexpected" ]]; then
+            echo "error: release-inputs contains unexpected top-level entries:" >&2
+            echo "$unexpected" >&2
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
