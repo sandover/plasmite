@@ -13,7 +13,7 @@ a server.
 npm install plasmite
 ```
 
-Requires Node 20+. The package ships pre-built native binaries — no Rust
+Requires Node 24+. The package ships pre-built native binaries — no Rust
 toolchain or compile step needed.
 
 ## Quick start
