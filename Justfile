@@ -99,6 +99,7 @@ abi-test: abi
 # Run ABI smoke script against built artifacts.
 abi-smoke: abi
 	./scripts/abi_smoke.sh
+	./scripts/abi_adversarial.sh
 
 # Run full conformance suite.
 conformance-all:

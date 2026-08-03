@@ -20,6 +20,17 @@ Ownership rules:
     Free with plsm_error_free.  NULL means no error.
   - String fields inside plsm_error_t are owned by the error struct;
     they become invalid after plsm_error_free.
+  - Every *_free function accepts NULL. plsm_buf_free and
+    plsm_lite3_frame_free reset caller-owned output structs, so freeing the
+    same output struct again is a no-op.
+
+Caller obligations:
+  - Every non-NULL pointer and pointer/length pair must refer to valid,
+    suitably aligned storage for the complete call. Handles and error pointers
+    must come from this library and be passed to their matching free exactly
+    once. Using a handle after free, freeing a handle/error twice, passing an
+    arbitrary non-NULL address, or overstating a buffer/tag length is undefined
+    behavior in the caller and is not converted into a Plasmite error.
 
 Linking:
   - Dynamic: link against libplasmite.dylib / .so / .dll.

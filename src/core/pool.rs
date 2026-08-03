@@ -782,6 +782,18 @@ impl Pool {
     }
 
     fn append_locked(&mut self, payload: &[u8], options: AppendOptions) -> Result<u64, Error> {
+        self.append_locked_with_flush(payload, options, flush_mmap_range)
+    }
+
+    fn append_locked_with_flush<F>(
+        &mut self,
+        payload: &[u8],
+        options: AppendOptions,
+        mut flush_range: F,
+    ) -> Result<u64, Error>
+    where
+        F: FnMut(&MmapMut, usize, usize, &Path, &'static str) -> Result<(), Error>,
+    {
         let ring_offset = self.header.ring_offset as usize;
         let ring_size = self.header.ring_size as usize;
         let plan = plan::plan_append(self.header, &self.mmap, payload.len())?;
@@ -798,7 +810,7 @@ impl Pool {
 
         if options.durability == Durability::Flush {
             let frame_offset = ring_offset + plan.frame_offset;
-            flush_mmap_range(
+            flush_range(
                 &self.mmap,
                 frame_offset,
                 plan.frame_len,
@@ -807,7 +819,7 @@ impl Pool {
             )?;
             if let Some(wrap_head) = plan.wrap_offset {
                 let wrap_start = ring_offset + wrap_head;
-                flush_mmap_range(
+                flush_range(
                     &self.mmap,
                     wrap_start,
                     FRAME_HEADER_LEN,
@@ -824,7 +836,7 @@ impl Pool {
                 .ok_or_else(|| {
                     Error::new(ErrorKind::Corrupt).with_message("index slot calculation overflow")
                 })?;
-                flush_mmap_range(
+                flush_range(
                     &self.mmap,
                     index_start,
                     index_len,
@@ -832,7 +844,7 @@ impl Pool {
                     "failed to flush index slot",
                 )?;
             }
-            flush_mmap_range(
+            flush_range(
                 &self.mmap,
                 0,
                 HEADER_SIZE,
@@ -1171,7 +1183,10 @@ fn index_slot_range(index_offset: u64, index_capacity: u32, seq: u64) -> Option<
 
 #[cfg(test)]
 mod tests {
-    use super::{HEADER_SIZE, Pool, PoolHeader, PoolOptions, SeqOffsetCache, apply_append};
+    use super::{
+        AppendOptions, Durability, HEADER_SIZE, Pool, PoolHeader, PoolOptions, SeqOffsetCache,
+        apply_append,
+    };
     use crate::core::error::{Error, ErrorKind};
     use crate::core::frame::{self, FRAME_HEADER_LEN, FrameHeader, FrameState};
     use crate::core::lite3;
@@ -1182,7 +1197,7 @@ mod tests {
     use std::io::{Seek, SeekFrom, Write};
     use std::process::Command;
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn create_and_open_pool() {
@@ -1990,6 +2005,28 @@ mod tests {
                     }
                 }
             }
+            "flush-ack" => {
+                let ack_path = std::env::var("PLASMITE_TEST_ACK").expect("ack path");
+                let mut pool = Pool::open(&path).expect("open");
+                let seq = pool
+                    .append_with_options(b"flush-ack", AppendOptions::new(1, Durability::Flush))
+                    .expect("flush append");
+                fs::write(ack_path, seq.to_string()).expect("publish acknowledgement");
+                loop {
+                    thread::sleep(Duration::from_secs(1));
+                }
+            }
+            "crash-phase" => {
+                let phase = std::env::var("PLASMITE_TEST_PHASE").expect("crash phase");
+                let mut pool = Pool::open(&path).expect("open");
+                let payload = vec![9u8; 240];
+                let header = pool.header_from_mmap().expect("header");
+                let plan = plan::plan_append(header, &pool.mmap, payload.len()).expect("plan");
+                simulate_append_phase(&mut pool, &plan, payload.as_slice(), &phase)
+                    .expect("apply crash phase");
+                pool.mmap.flush().expect("flush crash phase");
+                std::process::exit(91);
+            }
             _ => panic!("unknown role"),
         }
     }
@@ -2008,7 +2045,7 @@ mod tests {
         for _ in 0..3 {
             let mut cmd = Command::new(&exe);
             cmd.arg("--exact")
-                .arg("multi_writer_child")
+                .arg("core::pool::tests::multi_writer_child")
                 .arg("--nocapture")
                 .env("PLASMITE_TEST_ROLE", "writer")
                 .env("PLASMITE_TEST_POOL", &path_str)
@@ -2019,7 +2056,7 @@ mod tests {
         let mut reader = Command::new(&exe);
         reader
             .arg("--exact")
-            .arg("multi_writer_child")
+            .arg("core::pool::tests::multi_writer_child")
             .arg("--nocapture")
             .env("PLASMITE_TEST_ROLE", "reader")
             .env("PLASMITE_TEST_POOL", &path_str)
@@ -2050,49 +2087,38 @@ mod tests {
         base.append(payload_a.as_slice()).expect("append 2");
         drop(base);
 
-        let payload_b = vec![9u8; 240];
-        let phases = [
-            CrashPhase::Wrap,
-            CrashPhase::Write,
-            CrashPhase::Commit,
-            CrashPhase::Header,
-        ];
+        let phases = ["write", "commit", "header"];
 
         for phase in phases {
-            let path = dir.path().join(format!("phase-{phase:?}.plasmite"));
+            let path = dir.path().join(format!("phase-{phase}.plasmite"));
             fs::copy(&base_path, &path).expect("copy");
-            let mut pool = Pool::open(&path).expect("open");
-            let header = pool.header_from_mmap().expect("header");
-            let plan = plan::plan_append(header, &pool.mmap, payload_b.len()).expect("plan");
-            simulate_append_phase(&mut pool, &plan, payload_b.as_slice(), phase).expect("phase");
-            drop(pool);
+            let status = Command::new(std::env::current_exe().expect("test executable"))
+                .arg("--exact")
+                .arg("core::pool::tests::multi_writer_child")
+                .arg("--nocapture")
+                .env("PLASMITE_TEST_ROLE", "crash-phase")
+                .env("PLASMITE_TEST_POOL", &path)
+                .env("PLASMITE_TEST_PHASE", phase)
+                .status()
+                .expect("run crash child");
+            assert_eq!(status.code(), Some(91));
 
             let reopened = Pool::open(&path).expect("reopen");
             let header = reopened.header_from_mmap().expect("header");
             crate::core::validate::validate_pool_state(header, &reopened.mmap).expect("validate");
+            assert_eq!(header.newest_seq, if phase == "header" { 3 } else { 2 });
         }
-    }
-
-    #[derive(Clone, Copy, Debug)]
-    enum CrashPhase {
-        Wrap,
-        Write,
-        Commit,
-        Header,
     }
 
     fn simulate_append_phase(
         pool: &mut Pool,
         plan: &plan::AppendPlan,
         payload: &[u8],
-        phase: CrashPhase,
+        phase: &str,
     ) -> Result<(), Error> {
         let ring_offset = plan.next_header.ring_offset as usize;
         if let Some(wrap_offset) = plan.wrap_offset {
             super::write_wrap(&mut pool.mmap, ring_offset, wrap_offset)?;
-            if matches!(phase, CrashPhase::Wrap) {
-                return Ok(());
-            }
         }
 
         let header = FrameHeader::new(FrameState::Writing, 0, plan.seq, 0, payload.len() as u32, 0);
@@ -2103,14 +2129,14 @@ mod tests {
             &header,
             payload,
         )?;
-        if matches!(phase, CrashPhase::Write) {
+        if phase == "write" {
             return Ok(());
         }
 
         let mut committed = header;
         committed.state = FrameState::Committed;
         super::write_frame_header(&mut pool.mmap, ring_offset, plan.frame_offset, &committed)?;
-        if matches!(phase, CrashPhase::Commit) {
+        if phase == "commit" {
             return Ok(());
         }
 
@@ -2123,10 +2149,77 @@ mod tests {
         )?;
 
         super::write_pool_header(&mut pool.mmap, &plan.next_header);
-        if matches!(phase, CrashPhase::Header) {
+        if phase == "header" {
             return Ok(());
         }
-        Ok(())
+        Err(Error::new(ErrorKind::Usage).with_message("unknown crash phase"))
+    }
+
+    #[test]
+    fn flush_acknowledgement_survives_forced_child_termination() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let ack_path = dir.path().join("ack");
+        drop(Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create"));
+
+        let mut child = Command::new(std::env::current_exe().expect("test executable"))
+            .arg("--exact")
+            .arg("core::pool::tests::multi_writer_child")
+            .arg("--nocapture")
+            .env("PLASMITE_TEST_ROLE", "flush-ack")
+            .env("PLASMITE_TEST_POOL", &path)
+            .env("PLASMITE_TEST_ACK", &ack_path)
+            .spawn()
+            .expect("spawn flush child");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let acknowledged_seq = loop {
+            match fs::read_to_string(&ack_path) {
+                Ok(raw) => break raw.parse::<u64>().expect("ack sequence"),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    assert!(Instant::now() < deadline, "flush acknowledgement timed out");
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(err) => panic!("read acknowledgement: {err}"),
+            }
+        };
+        child.kill().expect("force terminate child");
+        child.wait().expect("reap child");
+
+        let reopened = Pool::open(&path).expect("reopen");
+        assert_eq!(
+            reopened
+                .get(acknowledged_seq)
+                .expect("acknowledged frame")
+                .payload,
+            b"flush-ack"
+        );
+    }
+
+    #[test]
+    fn flush_failure_is_returned_without_false_acknowledgement() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
+
+        let err = pool
+            .append_locked_with_flush(
+                b"not-acknowledged",
+                AppendOptions::new(1, Durability::Flush),
+                |_mmap, _offset, _len, path, _message| {
+                    Err(Error::new(ErrorKind::Io)
+                        .with_message("injected flush failure")
+                        .with_path(path))
+                },
+            )
+            .expect_err("flush failure must be returned");
+        assert_eq!(err.kind(), ErrorKind::Io);
+        assert!(err.to_string().contains("injected flush failure"));
+        drop(pool);
+
+        let reopened = Pool::open(&path).expect("pool remains reopenable");
+        let header = reopened.header_from_mmap().expect("header");
+        crate::core::validate::validate_pool_state(header, &reopened.mmap).expect("valid state");
     }
 
     #[test]

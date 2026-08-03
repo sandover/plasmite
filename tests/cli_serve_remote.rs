@@ -731,6 +731,21 @@ fn serve_tls_allows_healthz_with_trusted_cert() {
     assert_eq!(body.get("ok").and_then(|value| value.as_bool()), Some(true));
 }
 
+#[cfg(unix)]
+#[test]
+fn serve_sigterm_exits_successfully_within_bound() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let mut server = ServeProcess::start(&pool_dir);
+
+    let started = Instant::now();
+    let status = server
+        .terminate_and_wait(Duration::from_secs(3))
+        .expect("server exits after SIGTERM");
+    assert!(status.success(), "unexpected server status: {status}");
+    assert!(started.elapsed() < Duration::from_secs(3));
+}
+
 // --- Shell completion tests ---
 
 #[test]

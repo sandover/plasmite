@@ -197,6 +197,23 @@ Cross-artifact compatibility smoke:
 ./scripts/cross_artifact_smoke.sh
 ```
 
+### C ABI boundary checks
+
+Run the happy-path link smoke and focused supported-misuse harness:
+
+```bash
+just abi-smoke
+```
+
+The adversarial harness checks documented safe failure and cleanup behavior,
+including null arguments and repeated cleanup of reset output structs. On Linux,
+`just test-lite3-sanitizers` also runs this harness against an AddressSanitizer
+and UndefinedBehaviorSanitizer instrumented library. It deliberately does not
+probe arbitrary invalid addresses, stale handles, incorrect nonzero lengths, or
+handle/error double-free: those violate the caller obligations in
+`include/plasmite.h` and are undefined behavior before the library can validate
+them.
+
 ## Binding tests
 
 The recommended way to run all binding tests is via the Justfile:

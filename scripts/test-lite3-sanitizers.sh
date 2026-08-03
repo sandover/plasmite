@@ -22,3 +22,7 @@ export ASAN_OPTIONS="detect_leaks=1:halt_on_error=1"
 export UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1"
 
 cargo test core::lite3::tests --lib
+
+echo "Public C ABI sanitizer harness:"
+cargo build --lib
+./scripts/abi_adversarial.sh

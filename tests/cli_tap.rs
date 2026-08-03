@@ -211,6 +211,73 @@ fn tap_forwards_exit_code_and_records_exit_lifecycle_code() {
     assert!(exit["data"].get("signal").is_none());
 }
 
+#[cfg(unix)]
+#[test]
+fn tap_forwards_sigterm_and_reaps_wrapped_child() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let child_pid_path = temp.path().join("child.pid");
+    let script = "import os,pathlib,time,sys; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(60)";
+
+    let mut tap = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "tap",
+            "signalpool",
+            "--create",
+            "--quiet",
+            "--",
+            "python3",
+            "-c",
+            script,
+            child_pid_path.to_str().unwrap(),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn tap");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let child_pid = loop {
+        match std::fs::read_to_string(&child_pid_path) {
+            Ok(raw) => break raw.parse::<i32>().expect("child pid"),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                assert!(Instant::now() < deadline, "wrapped child did not start");
+                sleep(Duration::from_millis(5));
+            }
+            Err(err) => panic!("read wrapped child pid: {err}"),
+        }
+    };
+
+    assert_eq!(unsafe { libc::kill(tap.id() as i32, libc::SIGTERM) }, 0);
+    let status = loop {
+        if let Some(status) = tap.try_wait().expect("poll tap") {
+            break status;
+        }
+        assert!(Instant::now() < deadline, "tap did not exit after SIGTERM");
+        sleep(Duration::from_millis(5));
+    };
+    assert_eq!(status.code(), Some(128 + libc::SIGTERM));
+
+    let child_deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        let rc = unsafe { libc::kill(child_pid, 0) };
+        if rc == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+            break;
+        }
+        assert!(
+            Instant::now() < child_deadline,
+            "wrapped child {child_pid} remained alive"
+        );
+        sleep(Duration::from_millis(5));
+    }
+
+    let exit = fetch_message(&pool_dir, "signalpool", 2);
+    assert_eq!(exit["data"]["kind"], "exit");
+    assert_eq!(exit["data"]["signal"], "SIGTERM");
+}
+
 #[test]
 fn tap_applies_user_tags_to_lines_and_lifecycle_tag_to_start_exit() {
     let temp = tempfile::tempdir().expect("tempdir");

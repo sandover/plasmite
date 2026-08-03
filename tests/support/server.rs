@@ -121,6 +121,29 @@ impl TestServer {
         }
         Ok(client)
     }
+
+    #[cfg(unix)]
+    pub fn terminate_and_wait(
+        &mut self,
+        timeout: Duration,
+    ) -> TestResult<std::process::ExitStatus> {
+        let rc = unsafe { libc::kill(self.child.id() as i32, libc::SIGTERM) };
+        if rc != 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(status) = self.child.try_wait()? {
+                return Ok(status);
+            }
+            if Instant::now() >= deadline {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+                return Err("server did not exit after SIGTERM".into());
+            }
+            sleep(Duration::from_millis(5));
+        }
+    }
 }
 
 impl Drop for TestServer {

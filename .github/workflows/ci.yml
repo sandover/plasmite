@@ -39,6 +39,7 @@ jobs:
       lite3: ${{ steps.filter.outputs.lite3 }}
       packaging: ${{ steps.filter.outputs.packaging }}
       windows: ${{ steps.filter.outputs.windows }}
+      boundary: ${{ steps.filter.outputs.boundary }}
     steps:
       - uses: actions/checkout@v4
       - id: filter
@@ -53,6 +54,10 @@ jobs:
               - 'vendor/lite3*'
               - 'src/core/lite3/**'
               - 'scripts/test-lite3-sanitizers.sh'
+              - 'scripts/abi_adversarial.sh'
+              - 'tests/abi_adversarial.c'
+              - 'src/abi.rs'
+              - 'include/**'
               - '.github/workflows/ci.yml'
             packaging:
               - 'build.rs'
@@ -69,6 +74,9 @@ jobs:
               - 'scripts/python_wheel_smoke.sh'
               - 'scripts/node_pack_smoke.sh'
               - 'include/**'
+              - 'src/abi.rs'
+              - 'tests/abi_adversarial.c'
+              - 'scripts/abi_adversarial.sh'
               - '.github/workflows/**'
             windows:
               - 'build.rs'
@@ -87,6 +95,26 @@ jobs:
               - 'scripts/python_wheel_smoke.sh'
               - 'scripts/node_pack_smoke.sh'
               - '.github/workflows/**'
+            boundary:
+              - 'build.rs'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'src/abi.rs'
+              - 'src/api/**'
+              - 'src/core/**'
+              - 'c/**'
+              - 'vendor/lite3/**'
+              - 'include/**'
+              - 'bindings/**'
+              - 'conformance/**'
+              - 'tests/abi_adversarial.c'
+              - 'scripts/abi_smoke.sh'
+              - 'scripts/abi_adversarial.sh'
+              - 'scripts/conformance_all.sh'
+              - 'scripts/node_pack_smoke.sh'
+              - 'scripts/node_remote_only_smoke.sh'
+              - 'Justfile'
+              - '.github/workflows/ci.yml'
 
   check:
     if: github.event_name == 'pull_request'
@@ -152,13 +180,43 @@ jobs:
           UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
         run: ./scripts/python_wheel_smoke.sh
 
+  boundary-contracts:
+    needs: [pr-paths]
+    if: github.event_name == 'pull_request' && needs.pr-paths.outputs.boundary == 'true'
+    runs-on: ubuntu-latest
+    env:
+      GOCACHE: ${{ runner.temp }}/go-build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+          cache-dependency-path: bindings/go/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: bindings/node/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v5
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - run: cd bindings/node && npm ci
+      - name: Run ABI, conformance, and binding contracts
+        run: just abi-smoke conformance-all bindings-test
+
   windows-smoke:
     needs: [pr-paths]
     if: >-
       always()
       && (github.event_name != 'pull_request'
           || needs.pr-paths.outputs.windows == 'true')
-    continue-on-error: true
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
