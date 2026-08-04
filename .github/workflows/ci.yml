@@ -245,6 +245,7 @@ jobs:
           $exe = ".\target\release\plasmite.exe"
           Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
           & $exe serve init --host pools.example.test --output-dir $dir | Out-Null
+          $currentAccount = [Security.Principal.WindowsIdentity]::GetCurrent().Name
           foreach ($name in @("plasmite-auth-token.txt", "plasmite-tls-key.pem")) {
             $path = Join-Path $dir $name
             $acl = Get-Acl -LiteralPath $path
@@ -252,10 +253,10 @@ jobs:
               throw "$name still inherits access rules"
             }
             $otherAllows = @($acl.Access | Where-Object {
-              $_.AccessControlType -eq "Allow" -and $_.IdentityReference.Value -ne $acl.Owner
+              $_.AccessControlType -eq "Allow" -and $_.IdentityReference.Value -ne $currentAccount
             })
             if ($otherAllows.Count -ne 0) {
-              throw "$name permits an account other than its owner"
+              throw "$name permits an account other than the creating account"
             }
           }
           & $exe serve --token-file (Join-Path $dir "plasmite-auth-token.txt") --tls-cert (Join-Path $dir "plasmite-tls-cert.pem") --tls-key (Join-Path $dir "plasmite-tls-key.pem") check | Out-Null
