@@ -245,24 +245,24 @@ jobs:
           $exe = ".\target\release\plasmite.exe"
           Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
           & $exe serve init --host pools.example.test --output-dir $dir | Out-Null
-          $currentAccount = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-          $allowedAccounts = @($currentAccount, "NT AUTHORITY\SYSTEM", "BUILTIN\Administrators")
+          $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $allowedSids = @($currentSid, "S-1-5-18", "S-1-5-32-544")
           foreach ($name in @("plasmite-auth-token.txt", "plasmite-tls-key.pem")) {
             $path = Join-Path $dir $name
             $acl = Get-Acl -LiteralPath $path
             if (-not $acl.AreAccessRulesProtected) {
               throw "$name still inherits access rules"
             }
-            $otherAllows = @($acl.Access | Where-Object {
-              $_.AccessControlType -eq "Allow" -and $_.IdentityReference.Value -notin $allowedAccounts
+            $allowSids = @($acl.Access | Where-Object {
+              $_.AccessControlType -eq "Allow"
+            } | ForEach-Object {
+              $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
             })
+            $otherAllows = @($allowSids | Where-Object { $_ -notin $allowedSids })
             if ($otherAllows.Count -ne 0) {
-              throw "$name permits an unrelated account"
+              throw "$name permits unrelated SID(s): $($otherAllows -join ', ')"
             }
-            $currentAllows = @($acl.Access | Where-Object {
-              $_.AccessControlType -eq "Allow" -and $_.IdentityReference.Value -eq $currentAccount
-            })
-            if ($currentAllows.Count -eq 0) {
+            if ($currentSid -notin $allowSids) {
               throw "$name does not permit the creating account"
             }
           }
