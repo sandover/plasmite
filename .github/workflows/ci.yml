@@ -268,11 +268,15 @@ jobs:
               throw "$name does not permit the creating account"
             }
           }
-          & $exe serve --token-file (Join-Path $dir "plasmite-auth-token.txt") --tls-cert (Join-Path $dir "plasmite-tls-cert.pem") --tls-key (Join-Path $dir "plasmite-tls-key.pem") check | Out-Null
+          $PSNativeCommandUseErrorActionPreference = $false
+          & $exe serve --token-file (Join-Path $dir "plasmite-auth-token.txt") --tls-cert (Join-Path $dir "plasmite-tls-cert.pem") --tls-key (Join-Path $dir "plasmite-tls-key.pem") check
+          $secureExit = $LASTEXITCODE
+          if ($secureExit -ne 0) {
+            throw "serve rejected owner-only Windows credentials with exit $secureExit"
+          }
           $unsafe = Join-Path $dir "unsafe-token.txt"
           Set-Content -LiteralPath $unsafe -Value "not-printed" -NoNewline
           icacls.exe $unsafe /inheritance:e | Out-Null
-          $PSNativeCommandUseErrorActionPreference = $false
           & $exe serve --token-file $unsafe check 2>$null | Out-Null
           $unsafeExit = $LASTEXITCODE
           $PSNativeCommandUseErrorActionPreference = $true
