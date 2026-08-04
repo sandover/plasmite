@@ -1143,6 +1143,11 @@ fn emit_remote_url_accepts_token_and_token_file_flags() {
 
     let token_file = temp.path().join("token.txt");
     std::fs::write(&token_file, "secret-token\n").expect("write token file");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&token_file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     let with_token_file = cmd()
         .args([
             "feed",

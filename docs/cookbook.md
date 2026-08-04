@@ -398,7 +398,7 @@ A machine exposes its local pools over HTTP. Clients on other machines use the s
 
 ```bash
 # Generate token + TLS artifacts and keep the printed fingerprint for out-of-band verification
-plasmite serve init --bind 0.0.0.0:9700 --output-dir ./.plasmite-serve
+plasmite serve init --bind 0.0.0.0:9700 --host pools.example.com --output-dir ./.plasmite-serve
 
 # Start secure server with generated artifacts
 plasmite serve \
@@ -529,6 +529,69 @@ requires discarding it.
 Remote MCP uses the same auth/TLS posture as `plasmite serve`:
 - if server auth is enabled, clients send the same bearer token;
 - if TLS is enabled, clients trust the same certificate/CA material.
+
+### Mac host to Windows VM: a tiny MCP bridge
+
+VMware's host-only network is useful for agent coordination: the guest can
+reach the host, but the listener does not need to be exposed to the wider
+network. Run a second Plasmite server on the Mac's host-only address; keep the
+ordinary loopback server separate.
+
+**On the Mac host:**
+
+```bash
+# Use the Mac address visible to the VM, not 0.0.0.0.
+HOST_VMNET_IP=192.168.175.1
+TOKEN_DIR="$HOME/.config/plasmite/codex-bridge"
+
+plasmite serve init --token-only --output-dir "$TOKEN_DIR"
+
+plasmite serve \
+  --bind "$HOST_VMNET_IP:9700" \
+  --allow-non-loopback \
+  --insecure-no-tls \
+  --token-file "$TOKEN_DIR/plasmite-auth-token.txt"
+```
+
+The token is still required: the private network limits where traffic can go,
+while the token limits who can use Plasmite. Plaintext is acceptable here only
+because the listener is bound to the host-only interface. Do not use this
+recipe with `0.0.0.0` or a public interface.
+
+Copy the token to the Windows user through an already trusted host/guest path.
+Store it as a user environment variable without placing the value in the Codex
+configuration:
+
+```powershell
+$token = (Get-Content .\plasmite-auth-token.txt -Raw).Trim()
+[Environment]::SetEnvironmentVariable("PLASMITE_MCP_TOKEN", $token, "User")
+Remove-Item .\plasmite-auth-token.txt
+```
+
+Start a new Windows shell, then register the HTTP MCP endpoint once:
+
+```powershell
+Invoke-RestMethod http://192.168.175.1:9700/healthz
+
+codex mcp add plasmite-host `
+  --url http://192.168.175.1:9700/mcp `
+  --bearer-token-env-var PLASMITE_MCP_TOKEN
+
+codex mcp list
+```
+
+Future Codex sessions for that Windows user inherit the MCP server. Agents can
+list, read, wait, and write pools through the normal Plasmite MCP tools; no
+per-pool setup is required.
+
+Run the host command under a service manager for persistence. To rotate access,
+replace the host token, update `PLASMITE_MCP_TOKEN` in Windows, and restart the
+server and Codex. To remove access:
+
+```powershell
+codex mcp remove plasmite-host
+[Environment]::SetEnvironmentVariable("PLASMITE_MCP_TOKEN", $null, "User")
+```
 
 ### Waiting and polling
 

@@ -25,7 +25,7 @@ use serde_json::{Map, Value, json};
 use std::collections::VecDeque;
 use std::error::Error as StdError;
 use std::io::{self, IsTerminal, Read};
-use std::net::{IpAddr, SocketAddr, UdpSocket};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1034,6 +1034,7 @@ pub(crate) fn ensure_pool_dir(dir: &Path) -> Result<(), Error> {
 }
 
 pub(crate) fn read_token_file(path: &Path) -> Result<String, Error> {
+    validate_secret_file(path, "token")?;
     let raw = std::fs::read_to_string(path).map_err(|err| {
         Error::new(ErrorKind::Usage)
             .with_message("failed to read token file")
@@ -1047,6 +1048,52 @@ pub(crate) fn read_token_file(path: &Path) -> Result<String, Error> {
             .with_path(path));
     }
     Ok(token)
+}
+
+pub(crate) fn validate_secret_file(path: &Path, kind: &str) -> Result<(), Error> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let metadata = std::fs::metadata(path).map_err(|err| {
+            Error::new(ErrorKind::Usage)
+                .with_message(format!("failed to inspect {kind} file"))
+                .with_path(path)
+                .with_source(err)
+        })?;
+        let mode = metadata.permissions().mode() & 0o777;
+        if mode & 0o077 != 0 {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message(format!(
+                    "{kind} file permissions are too broad ({mode:03o})"
+                ))
+                .with_path(path)
+                .with_hint(format!(
+                    "Restrict it to the owner with: chmod 600 {}",
+                    display_handoff_path_from_path(path)
+                )));
+        }
+    }
+    #[cfg(windows)]
+    {
+        let script = r#"$acl=Get-Acl -LiteralPath $args[0]; $owner=$acl.Owner; $bad=@($acl.Access | Where-Object { $_.AccessControlType -eq 'Allow' -and $_.IdentityReference.Value -ne $owner }); if ($acl.AreAccessRulesProtected -and $bad.Count -eq 0) { exit 0 } else { exit 3 }"#;
+        let status = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .arg(path)
+            .status()
+            .map_err(|err| {
+                Error::new(ErrorKind::Usage)
+                    .with_message(format!("failed to inspect {kind} file ACL"))
+                    .with_path(path)
+                    .with_source(err)
+            })?;
+        if !status.success() {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message(format!("{kind} file ACL permits accounts other than its owner"))
+                .with_path(path)
+                .with_hint("Regenerate it with `plasmite serve init --force`, or remove inherited access and grant only the owning account."));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn resolve_token_value(
@@ -1083,8 +1130,23 @@ pub(crate) fn reject_remote_only_flags_for_local_target(
 
 pub(crate) fn emit_serve_init_human(result: &serve_init::ServeInitResult) {
     let token_path = Path::new(&result.token_file);
-    let cert_path = Path::new(&result.tls_cert);
-    let key_path = Path::new(&result.tls_key);
+    if result.token_only {
+        let token_file = display_handoff_path_from_path(token_path);
+        println!("Private-link token initialized.");
+        println!();
+        println!("  Token: {token_file}");
+        println!();
+        println!("  Start serving over your protected private network:");
+        println!("    {}", result.server_commands[0]);
+        println!();
+        println!(
+            "  Transport is plaintext. Use this only behind a private link such as VMware host-only networking, a VPN, or an encrypted tunnel."
+        );
+        println!("  The token is in the file and is not printed here.");
+        return;
+    }
+    let cert_path = Path::new(result.tls_cert.as_deref().expect("full init certificate"));
+    let key_path = Path::new(result.tls_key.as_deref().expect("full init key"));
     let (output_dir, token_label, cert_label, key_label) =
         serve_init_artifact_labels(token_path, cert_path, key_path);
     let token_file = display_handoff_path_from_path(token_path);
@@ -1092,8 +1154,7 @@ pub(crate) fn emit_serve_init_human(result: &serve_init::ServeInitResult) {
     let tls_key = display_handoff_path_from_path(key_path);
     let bind = extract_bind_from_server_commands(&result.server_commands)
         .unwrap_or_else(|| "0.0.0.0:9700".to_string());
-    let remote_host = detect_serve_init_remote_host(&bind);
-    let remote_url_host = url_host_component(&remote_host);
+    let remote_url_host = url_host_component(&result.client_host);
     let port = bind
         .parse::<SocketAddr>()
         .map(|addr| addr.port())
@@ -1117,7 +1178,13 @@ pub(crate) fn emit_serve_init_human(result: &serve_init::ServeInitResult) {
     println!("    key     {key_label}");
     println!();
     println!("  Fingerprint (share this with clients to verify the cert):");
-    println!("    {}", result.tls_fingerprint);
+    println!(
+        "    {}",
+        result
+            .tls_fingerprint
+            .as_deref()
+            .expect("full init fingerprint")
+    );
     println!();
     println!("  Start serving your pools:");
     println!();
@@ -1144,41 +1211,13 @@ pub(crate) fn emit_serve_init_human(result: &serve_init::ServeInitResult) {
     println!();
     println!("  Or with curl:");
     println!("    TOKEN=$(cat {token_file})");
-    println!("    curl -k -H \"Authorization: Bearer $TOKEN\" \\");
+    println!("    curl --cacert {tls_cert} -H \"Authorization: Bearer $TOKEN\" \\");
     println!("      https://{remote_url_host}:{port}/v0/pools/demo/tail?timeout_ms=5000");
     println!();
     println!("  The token is in the file, not printed here. Share the token");
     println!("  and fingerprint with collaborators out-of-band (e.g. paste");
     println!("  in a DM). Clients use the fingerprint to verify the cert");
     println!("  on first connect.");
-}
-
-pub(crate) fn detect_serve_init_remote_host(bind: &str) -> String {
-    if let Ok(addr) = bind.parse::<SocketAddr>() {
-        let ip = addr.ip();
-        if !ip.is_unspecified() && !ip.is_loopback() {
-            return ip.to_string();
-        }
-    }
-    detect_primary_non_loopback_ip()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|| "YOUR-HOST".to_string())
-}
-
-pub(crate) fn detect_primary_non_loopback_ip() -> Option<IpAddr> {
-    detect_non_loopback_ip_via("0.0.0.0:0", "8.8.8.8:53")
-        .or_else(|| detect_non_loopback_ip_via("[::]:0", "[2001:4860:4860::8888]:53"))
-}
-
-pub(crate) fn detect_non_loopback_ip_via(bind_addr: &str, probe_addr: &str) -> Option<IpAddr> {
-    let socket = UdpSocket::bind(bind_addr).ok()?;
-    socket.connect(probe_addr).ok()?;
-    let ip = socket.local_addr().ok()?.ip();
-    if ip.is_loopback() || ip.is_unspecified() {
-        None
-    } else {
-        Some(ip)
-    }
 }
 
 pub(crate) fn url_host_component(host: &str) -> String {
@@ -1292,7 +1331,11 @@ pub(crate) fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<Stri
     let web_ui_url = format!("{base_url}/ui");
     let mcp_url = format!("{base_url}/mcp");
     let append_url = format!("{base_url}/v0/pools/demo/append");
-    let curl_tls_flag = if config.tls_self_signed { " -k" } else { "" };
+    let curl_tls_flag = if config.tls_self_signed {
+        " --cacert <trusted-cert>"
+    } else {
+        ""
+    };
     let scope = serve_scope(config.bind.ip());
     let auth = if config.token.is_some() {
         "bearer"
@@ -1300,7 +1343,7 @@ pub(crate) fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<Stri
         "none"
     };
     let tls = if config.tls_self_signed {
-        "self-signed"
+        "temporary self-signed"
     } else if tls_enabled {
         "on"
     } else {
@@ -1382,7 +1425,12 @@ pub(crate) fn build_serve_startup_lines(config: &serve::ServeConfig) -> Vec<Stri
     }
 
     if config.tls_self_signed {
-        lines.push("Self-signed TLS: clients should trust the cert with --tls-ca.".to_string());
+        lines.push("Temporary self-signed TLS: this identity changes on every restart; use it only for short-lived testing.".to_string());
+    } else if tls_enabled {
+        lines.push("TLS identity: persistent certificate and private key files.".to_string());
+    }
+    if !tls_enabled && !config.bind.ip().is_loopback() {
+        lines.push("WARNING: network traffic is plaintext; protection depends on your external private network or tunnel.".to_string());
     }
     if config.bind.ip().is_unspecified() {
         lines.push(String::new());
@@ -1423,7 +1471,7 @@ pub(crate) fn emit_serve_check_report(
         "none"
     };
     let tls_mode = if config.tls_self_signed {
-        "self-signed"
+        "temporary-self-signed"
     } else if tls_enabled {
         "enabled"
     } else {
@@ -1447,6 +1495,11 @@ pub(crate) fn emit_serve_check_report(
                 "mcp": format!("{base_url}/mcp"),
                 "auth": auth_mode,
                 "tls": tls_mode,
+                "reachability": serve_scope(config.bind.ip()),
+                "transport": if tls_enabled { "tls" } else { "plaintext" },
+                "authentication": if config.token.is_some() { "bearer" } else { "none" },
+                "endpoint": format!("{base_url}/mcp"),
+                "tls_identity": if config.tls_self_signed { "ephemeral" } else if tls_enabled { "persistent-files" } else { "none" },
                 "tls_fingerprint": config.tls_fingerprint,
                 "access": access_mode,
                 "cors_allowed_origins": cors_origins,
@@ -1475,7 +1528,7 @@ pub(crate) fn build_serve_check_lines(config: &serve::ServeConfig) -> Vec<String
         "none"
     };
     let tls = if config.tls_self_signed {
-        "self-signed"
+        "temporary self-signed"
     } else if tls_enabled {
         "on"
     } else {
@@ -1511,6 +1564,14 @@ pub(crate) fn build_serve_check_lines(config: &serve::ServeConfig) -> Vec<String
     ];
     if let Some(fingerprint) = config.tls_fingerprint.as_deref() {
         lines.push(format!("  Fingerprint: {fingerprint}"));
+    }
+    if config.tls_self_signed {
+        lines.push("  Identity: temporary; changes on every restart".to_string());
+    } else if tls_enabled {
+        lines.push("  Identity: persistent certificate and key files".to_string());
+    }
+    if !tls_enabled && !config.bind.ip().is_loopback() {
+        lines.push("  WARNING: plaintext network traffic depends on external private-network or tunnel protection".to_string());
     }
     lines.push(String::new());
     lines.push("Start with: pls serve".to_string());
@@ -1554,11 +1615,19 @@ pub(crate) fn serve_config_from_run_args(
             .with_message("--token cannot be combined with --token-file")
             .with_hint("Use --token for dev, or run `plasmite serve init` and use the generated --token-file for safer deployments."));
     }
+    if run.tls_self_signed && (run.tls_cert.is_some() || run.tls_key.is_some()) {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("--tls-self-signed cannot be combined with --tls-cert/--tls-key")
+            .with_hint("Use either --tls-self-signed or provide certificate paths; `plasmite serve init` can generate cert/key files."));
+    }
     let (token, token_file_used) = if let Some(path) = run.token_file {
         (Some(read_token_file(&path)?), true)
     } else {
         (run.token, false)
     };
+    if let Some(key_path) = run.tls_key.as_deref() {
+        validate_secret_file(key_path, "TLS private key")?;
+    }
     let tls_self_signed_material = if run.tls_self_signed {
         Some(serve::prepare_self_signed_tls(bind.ip())?)
     } else {

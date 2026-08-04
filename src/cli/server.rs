@@ -36,6 +36,8 @@ pub(super) fn run(
                 tls_cert: args.tls_cert,
                 tls_key: args.tls_key,
                 bind,
+                host: args.host,
+                token_only: args.token_only,
                 force: args.force,
             };
             let result = serve_init::init(config)?;
@@ -51,6 +53,7 @@ pub(super) fn run(
                                 "tls_key": result.tls_key,
                             },
                             "tls_fingerprint": result.tls_fingerprint,
+                            "token_only": result.token_only,
                             "server_commands": result.server_commands,
                             "client_commands": result.client_commands,
                             "curl_client_commands": result.curl_client_commands,

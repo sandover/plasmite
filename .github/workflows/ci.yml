@@ -85,6 +85,10 @@ jobs:
               - 'c/**'
               - 'vendor/lite3/**'
               - 'src/abi.rs'
+              - 'src/serve.rs'
+              - 'src/serve_init.rs'
+              - 'src/cli/**'
+              - 'tests/cli_serve_remote.rs'
               - 'src/core/lite3/**'
               - 'include/**'
               - 'bindings/node/**'
@@ -232,6 +236,39 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           .\target\release\plasmite.exe --version
+      - name: Verify owner-only serve credentials
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $dir = ".scratch/windows-serve-init"
+          $exe = ".\target\release\plasmite.exe"
+          Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
+          & $exe serve init --host pools.example.test --output-dir $dir | Out-Null
+          foreach ($name in @("plasmite-auth-token.txt", "plasmite-tls-key.pem")) {
+            $path = Join-Path $dir $name
+            $acl = Get-Acl -LiteralPath $path
+            if (-not $acl.AreAccessRulesProtected) {
+              throw "$name still inherits access rules"
+            }
+            $otherAllows = @($acl.Access | Where-Object {
+              $_.AccessControlType -eq "Allow" -and $_.IdentityReference.Value -ne $acl.Owner
+            })
+            if ($otherAllows.Count -ne 0) {
+              throw "$name permits an account other than its owner"
+            }
+          }
+          & $exe serve --token-file (Join-Path $dir "plasmite-auth-token.txt") --tls-cert (Join-Path $dir "plasmite-tls-cert.pem") --tls-key (Join-Path $dir "plasmite-tls-key.pem") check | Out-Null
+          $unsafe = Join-Path $dir "unsafe-token.txt"
+          Set-Content -LiteralPath $unsafe -Value "not-printed" -NoNewline
+          icacls.exe $unsafe /inheritance:e | Out-Null
+          $PSNativeCommandUseErrorActionPreference = $false
+          & $exe serve --token-file $unsafe check 2>$null | Out-Null
+          $unsafeExit = $LASTEXITCODE
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($unsafeExit -eq 0) {
+            throw "serve accepted a token with inherited Windows ACLs"
+          }
       - name: Local pool roundtrip smoke
         shell: pwsh
         run: |

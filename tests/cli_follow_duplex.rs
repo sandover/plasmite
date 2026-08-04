@@ -1563,6 +1563,11 @@ fn follow_remote_tls_ca_and_skip_verify_work() {
     let key_path = temp.path().join("key.pem");
     std::fs::write(&cert_path, cert_pem).expect("write cert");
     std::fs::write(&key_path, key_pem).expect("write key");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
 
     let server = ServeProcess::start_with_args_and_scheme(
         &pool_dir,

@@ -777,6 +777,12 @@ pub(crate) struct ServeInitArgs {
     pub(crate) bind: String,
     #[arg(
         long,
+        value_name = "DNS-OR-IP",
+        help = "Client-visible host used in certificates and printed URLs"
+    )]
+    pub(crate) host: Option<String>,
+    #[arg(
+        long,
         default_value = ".",
         value_name = "PATH",
         help = "Base output directory for generated artifacts",
@@ -807,6 +813,11 @@ pub(crate) struct ServeInitArgs {
         value_hint = ValueHint::FilePath
     )]
     pub(crate) tls_key: PathBuf,
+    #[arg(
+        long,
+        help = "Generate only a bearer token for an externally protected private link"
+    )]
+    pub(crate) token_only: bool,
     #[arg(long, help = "Overwrite existing generated artifacts")]
     pub(crate) force: bool,
 }
@@ -849,7 +860,7 @@ pub(crate) struct ServeRunArgs {
     pub(crate) tls_key: Option<PathBuf>,
     #[arg(
         long,
-        help = "Generate a self-signed TLS cert (conflicts with --tls-cert/--tls-key)",
+        help = "Generate a temporary self-signed TLS identity that changes on restart (conflicts with --tls-cert/--tls-key)",
         help_heading = "TLS"
     )]
     pub(crate) tls_self_signed: bool,

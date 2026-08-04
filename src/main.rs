@@ -236,10 +236,12 @@ mod tests {
                     "bind",
                     "force",
                     "help",
+                    "host",
                     "output-dir",
                     "tls-cert",
                     "tls-key",
                     "token-file",
+                    "token-only",
                 ],
             ),
             (
@@ -385,7 +387,7 @@ mod tests {
         let text = build_serve_startup_lines(&config).join("\n");
         assert!(text.contains("Serving pools on https://127.0.0.1:9700 (loopback only)"));
         assert!(text.contains("MCP:  https://127.0.0.1:9700/mcp"));
-        assert!(text.contains("Auth: bearer    TLS: self-signed"));
+        assert!(text.contains("Auth: bearer    TLS: temporary self-signed"));
         assert!(text.contains("--token-file <token-file> --tls-ca <tls-cert>"));
         assert!(text.contains("Fingerprint: SHA256:AA:BB"));
     }

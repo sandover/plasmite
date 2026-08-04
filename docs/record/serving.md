@@ -10,6 +10,26 @@ For the normative protocol contract, see `spec/remote/v0/SPEC.md`.
 exposes them using the same remote read/write behavior as any other pool. No special
 server mode is required for tapped pools.
 
+## Choose the network boundary
+
+Plasmite supports three practical arrangements. Choose based on who can see the
+traffic between client and server.
+
+| Arrangement | Plasmite setup | What protects the traffic |
+| --- | --- | --- |
+| Same machine | Loopback, no token, no TLS | The operating system keeps loopback traffic on the machine. |
+| Private link | Network bind, bearer token, optional `--insecure-no-tls` | An outside layer such as a host-only virtual-machine network, virtual private network, or encrypted tunnel. |
+| Untrusted network | Network bind, bearer token, TLS | Plasmite encrypts traffic and proves the server identity with its certificate. |
+
+`--insecure-no-tls` is an explicit exception, not a general remote default. A
+bearer token controls access but does not hide itself or pool data from someone
+who can observe plaintext traffic. Use this mode only when another layer keeps
+that traffic private.
+
+These arrangements do not change how clients address pools. Local clients use
+pool names; remote clients use pool URLs. `feed`, `follow`, and `/mcp` retain the
+same behavior.
+
 ## Quick local start
 
 ```bash
@@ -34,7 +54,7 @@ Generate artifacts once, then run the server with those artifacts:
 
 ```bash
 # 1) Generate token + cert + key + client command scaffolding
-plasmite serve init --bind 0.0.0.0:9700 --output-dir ./.plasmite-serve
+plasmite serve init --bind 0.0.0.0:9700 --host pools.example.com --output-dir ./.plasmite-serve
 
 # 2) Start server with generated artifacts
 plasmite serve \
@@ -50,6 +70,20 @@ plasmite serve \
 - `tls_fingerprint: SHA256:...`
 
 Use that fingerprint for out-of-band trust verification before sharing client commands.
+
+`serve init` generates every requested credential before replacement and
+serializes initializers that share an output directory. Replacement uses
+private staging files, recoverable backups, and a small transaction journal.
+An ordinary write or rename failure restores the prior complete set. If the
+process is interrupted during replacement, the next `serve init` for that
+directory restores the prior set before doing new work. This is crash recovery,
+not a claim that separate filesystem paths change in one atomic operation.
+
+Generated tokens and private keys are owner-only: mode `0600` in directories
+with mode `0700` on Unix, and a protected owner-only access-control list on
+Windows. Windows uses the built-in `icacls` tool to remove inherited access and
+grant the creating account full control; serving inspects the effective ACL
+with PowerShell and refuses secrets accessible to another account.
 
 ## Client auth + TLS flags
 

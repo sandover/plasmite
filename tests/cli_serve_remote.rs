@@ -107,6 +107,43 @@ fn serve_check_outputs_resolved_config() {
     assert!(base_url.contains("127.0.0.1:9700"));
     let mcp = check.get("mcp").and_then(|v| v.as_str()).unwrap_or("");
     assert!(mcp.ends_with("/mcp"));
+    assert_eq!(check["reachability"], "loopback only");
+    assert_eq!(check["transport"], "plaintext");
+    assert_eq!(check["authentication"], "none");
+    assert_eq!(check["tls_identity"], "none");
+}
+
+#[test]
+fn serve_check_warns_for_plaintext_network_transport() {
+    let output = cmd()
+        .args([
+            "serve",
+            "--bind",
+            "0.0.0.0:9700",
+            "--allow-non-loopback",
+            "--access",
+            "read-only",
+            "check",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = std::str::from_utf8(&output.stdout).unwrap();
+    assert!(stdout.contains("WARNING: plaintext network traffic"));
+    assert!(stdout.contains("external private-network or tunnel"));
+}
+
+#[test]
+fn serve_check_identifies_ephemeral_self_signed_tls() {
+    let output = cmd()
+        .args(["serve", "--tls-self-signed", "check", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(std::str::from_utf8(&output.stdout).unwrap());
+    assert_eq!(payload["check"]["transport"], "tls");
+    assert_eq!(payload["check"]["tls_identity"], "ephemeral");
+    assert_eq!(payload["check"]["tls"], "temporary-self-signed");
 }
 
 #[test]
@@ -126,6 +163,11 @@ fn serve_check_human_uses_readable_limits_and_fingerprint() {
     let key_path = temp.path().join("key.pem");
     std::fs::write(&cert_path, cert_pem).expect("write cert");
     std::fs::write(&key_path, key_pem).expect("write key");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
 
     let output = cmd()
         .args([
@@ -163,6 +205,11 @@ fn serve_check_json_includes_tls_fingerprint() {
     let key_path = temp.path().join("key.pem");
     std::fs::write(&cert_path, cert_pem).expect("write cert");
     std::fs::write(&key_path, key_pem).expect("write key");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
 
     let output = cmd()
         .args([
@@ -225,6 +272,8 @@ fn serve_init_writes_artifacts_and_next_commands() {
             out_dir.to_str().unwrap(),
             "--bind",
             "0.0.0.0:9700",
+            "--host",
+            "pools.example.test",
         ])
         .output()
         .expect("serve init");
@@ -286,6 +335,46 @@ fn serve_init_writes_artifacts_and_next_commands() {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     assert!(tls_fingerprint.starts_with("SHA256:"));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&out_dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::metadata(token_file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            std::fs::metadata(tls_key).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn serve_refuses_broad_token_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let token = temp.path().join("token.txt");
+    std::fs::write(&token, "not-printed\n").unwrap();
+    std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let output = cmd()
+        .args(["serve", "--token-file", token.to_str().unwrap(), "check"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let error = parse_error_json(&output.stderr);
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("permissions are too broad")
+    );
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("not-printed"));
 }
 
 #[test]
@@ -294,13 +383,27 @@ fn serve_init_requires_force_for_existing_artifacts() {
     let out_dir = temp.path().join("serve-init");
 
     let first = cmd()
-        .args(["serve", "init", "--output-dir", out_dir.to_str().unwrap()])
+        .args([
+            "serve",
+            "init",
+            "--output-dir",
+            out_dir.to_str().unwrap(),
+            "--host",
+            "pools.example.test",
+        ])
         .output()
         .expect("first serve init");
     assert!(first.status.success());
 
     let second = cmd()
-        .args(["serve", "init", "--output-dir", out_dir.to_str().unwrap()])
+        .args([
+            "serve",
+            "init",
+            "--output-dir",
+            out_dir.to_str().unwrap(),
+            "--host",
+            "pools.example.test",
+        ])
         .output()
         .expect("second serve init");
     assert!(!second.status.success());
@@ -320,6 +423,176 @@ fn serve_init_requires_force_for_existing_artifacts() {
 }
 
 #[test]
+fn concurrent_forced_initializers_serialize_without_mixed_or_scratch_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let out = temp.path().to_str().unwrap();
+    let mut first = cmd();
+    first.args([
+        "serve",
+        "init",
+        "--host",
+        "pools.example.test",
+        "--output-dir",
+        out,
+        "--force",
+    ]);
+    let mut second = cmd();
+    second.args([
+        "serve",
+        "init",
+        "--host",
+        "pools.example.test",
+        "--output-dir",
+        out,
+        "--force",
+    ]);
+    let mut first = first.spawn().unwrap();
+    let mut second = second.spawn().unwrap();
+    assert!(first.wait().unwrap().success());
+    assert!(second.wait().unwrap().success());
+    for name in [
+        "plasmite-auth-token.txt",
+        "plasmite-tls-cert.pem",
+        "plasmite-tls-key.pem",
+    ] {
+        assert!(temp.path().join(name).exists(), "{name}");
+    }
+    let leftovers: Vec<_> = std::fs::read_dir(temp.path())
+        .unwrap()
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.ends_with(".staged")
+                || name.ends_with(".backup")
+                || name.ends_with("transaction.json")
+        })
+        .collect();
+    assert!(leftovers.is_empty(), "transaction leftovers: {leftovers:?}");
+}
+
+#[test]
+fn serve_init_requires_host_for_wildcard_binds() {
+    for bind in ["0.0.0.0:9700", "[::]:9700"] {
+        let temp = tempfile::tempdir().unwrap();
+        let output = cmd()
+            .args([
+                "serve",
+                "init",
+                "--bind",
+                bind,
+                "--output-dir",
+                temp.path().to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{bind}");
+        let error = parse_error_json(&output.stderr);
+        assert!(
+            error["error"]["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("requires --host")
+        );
+    }
+}
+
+#[test]
+fn serve_init_uses_client_host_but_preserves_bind() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = cmd()
+        .args([
+            "serve",
+            "init",
+            "--bind",
+            "0.0.0.0:9443",
+            "--host",
+            "pools.example.test",
+            "--output-dir",
+            temp.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(std::str::from_utf8(&output.stdout).unwrap());
+    let server = payload["init"]["server_commands"][0].as_str().unwrap();
+    assert!(server.contains("--bind 0.0.0.0:9443"));
+    let clients = payload["init"]["client_commands"].as_array().unwrap();
+    assert!(clients.iter().all(|command| {
+        command
+            .as_str()
+            .unwrap()
+            .contains("https://pools.example.test:9443/")
+    }));
+}
+
+#[test]
+fn serve_init_concrete_ipv6_defaults_client_host() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = cmd()
+        .args([
+            "serve",
+            "init",
+            "--bind",
+            "[::1]:9443",
+            "--output-dir",
+            temp.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(std::str::from_utf8(&output.stdout).unwrap());
+    assert!(
+        payload["init"]["client_commands"][0]
+            .as_str()
+            .unwrap()
+            .contains("https://[::1]:9443/demo")
+    );
+}
+
+#[test]
+fn serve_init_token_only_writes_one_private_artifact() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = cmd()
+        .args([
+            "serve",
+            "init",
+            "--token-only",
+            "--output-dir",
+            temp.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = std::str::from_utf8(&output.stdout).unwrap();
+    let payload = parse_json(text);
+    assert_eq!(payload["init"]["token_only"], true);
+    assert!(
+        payload["init"]["artifact_paths"]["token_file"]
+            .as_str()
+            .is_some()
+    );
+    assert!(payload["init"]["artifact_paths"]["tls_cert"].is_null());
+    assert!(payload["init"]["artifact_paths"]["tls_key"].is_null());
+    assert!(
+        payload["init"]["server_commands"][0]
+            .as_str()
+            .unwrap()
+            .contains("--insecure-no-tls")
+    );
+    assert!(
+        payload["init"]["client_commands"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(!temp.path().join("plasmite-tls-cert.pem").exists());
+    assert!(!temp.path().join("plasmite-tls-key.pem").exists());
+    let token = std::fs::read_to_string(temp.path().join("plasmite-auth-token.txt")).unwrap();
+    assert!(!text.contains(token.trim()));
+}
+
+#[test]
 fn serve_init_tty_reports_created_and_overwritten() {
     let temp = tempfile::tempdir().expect("tempdir");
     let out_dir = temp.path().join("serve-init");
@@ -333,6 +606,8 @@ fn serve_init_tty_reports_created_and_overwritten() {
         out_dir.to_str().unwrap(),
         "--bind",
         "0.0.0.0:9700",
+        "--host",
+        "pools.example.test",
     ]);
     assert!(first.status.success());
     let first_text = sanitize_tty_text(&first.stdout);
@@ -351,11 +626,14 @@ fn serve_init_tty_reports_created_and_overwritten() {
         .find(|line| line.contains("pls feed https://"))
         .expect("feed line");
     assert!(feed_line.contains(":9700/demo \\"));
+    assert!(feed_line.contains("https://pools.example.test:9700/demo"));
     let follow_line = first_text
         .lines()
         .find(|line| line.contains("pls follow https://"))
         .expect("follow line");
     assert!(follow_line.contains(":9700/demo \\"));
+    assert!(!first_text.contains("curl -k"));
+    assert!(first_text.contains("curl --cacert"));
 
     let second = cmd_tty(&[
         "--color",
@@ -366,6 +644,8 @@ fn serve_init_tty_reports_created_and_overwritten() {
         out_dir.to_str().unwrap(),
         "--bind",
         "0.0.0.0:9700",
+        "--host",
+        "pools.example.test",
         "--force",
     ]);
     assert!(second.status.success());
@@ -437,6 +717,11 @@ fn serve_non_loopback_write_requires_tls_or_insecure() {
     let temp = tempfile::tempdir().expect("tempdir");
     let token_path = temp.path().join("token.txt");
     std::fs::write(&token_path, "secret").expect("write token");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&token_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
 
     let serve = cmd()
         .args([
@@ -702,6 +987,11 @@ fn serve_tls_allows_healthz_with_trusted_cert() {
     let key_path = temp.path().join("key.pem");
     std::fs::write(&cert_path, cert_pem).expect("write cert");
     std::fs::write(&key_path, key_pem).expect("write key");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
 
     let server = ServeProcess::start_with_args_and_scheme(
         &pool_dir,
