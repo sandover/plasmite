@@ -258,7 +258,9 @@ jobs:
             } | ForEach-Object {
               $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
             })
-            $otherAllows = @($allowSids | Where-Object { $_ -notin $allowedSids })
+            $otherAllows = @($allowSids | Where-Object {
+              $_ -notin $allowedSids -and $_ -notmatch '^S-1-5-5-\d+-\d+$'
+            })
             if ($otherAllows.Count -ne 0) {
               throw "$name permits unrelated SID(s): $($otherAllows -join ', ')"
             }

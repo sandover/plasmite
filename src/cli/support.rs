@@ -1075,7 +1075,7 @@ pub(crate) fn validate_secret_file(path: &Path, kind: &str) -> Result<(), Error>
     }
     #[cfg(windows)]
     {
-        let script = r#"$acl=Get-Acl -LiteralPath $args[0]; $current=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; $allowed=@($current,'S-1-5-18','S-1-5-32-544'); $allows=@($acl.Access | Where-Object { $_.AccessControlType -eq 'Allow' } | ForEach-Object { try { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { 'unresolved' } }); $bad=@($allows | Where-Object { $_ -notin $allowed }); if ($acl.AreAccessRulesProtected -and $bad.Count -eq 0 -and $current -in $allows) { exit 0 } else { exit 3 }"#;
+        let script = r#"$acl=Get-Acl -LiteralPath $args[0]; $current=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; $allowed=@($current,'S-1-5-18','S-1-5-32-544'); $allows=@($acl.Access | Where-Object { $_.AccessControlType -eq 'Allow' } | ForEach-Object { try { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { 'unresolved' } }); $bad=@($allows | Where-Object { $_ -notin $allowed -and $_ -notmatch '^S-1-5-5-\d+-\d+$' }); if ($acl.AreAccessRulesProtected -and $bad.Count -eq 0 -and $current -in $allows) { exit 0 } else { exit 3 }"#;
         let status = std::process::Command::new("powershell.exe")
             .args(["-NoProfile", "-NonInteractive", "-Command", script])
             .arg(path)
