@@ -245,13 +245,10 @@ jobs:
           $exe = ".\target\release\plasmite.exe"
           Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
           & $exe serve init --host pools.example.test --output-dir $dir | Out-Null
-          $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-          $groupText = & "$env:SystemRoot\System32\whoami.exe" /groups
-          $logonSids = @([regex]::Matches(
-            ($groupText -join "`n"),
-            'S-1-5-5-\d+-\d+'
-          ) | ForEach-Object { $_.Value })
-          $allowedSids = @($currentSid, "S-1-5-18", "S-1-5-32-544") + $logonSids
+          $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+          $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+          $currentSid = $identity.User.Value
+          $allowedSids = @($currentSid, "S-1-5-18", "S-1-5-32-544")
           foreach ($name in @("plasmite-auth-token.txt", "plasmite-tls-key.pem")) {
             $path = Join-Path $dir $name
             $acl = Get-Acl -LiteralPath $path
@@ -263,7 +260,15 @@ jobs:
             } | ForEach-Object {
               $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
             })
-            $otherAllows = @($allowSids | Where-Object { $_ -notin $allowedSids })
+            $otherAllows = @($allowSids | Where-Object {
+              if ($_ -in $allowedSids) {
+                $false
+              } elseif ($_ -match '^S-1-5-5-\d+-\d+$') {
+                -not $principal.IsInRole([Security.Principal.SecurityIdentifier]::new($_))
+              } else {
+                $true
+              }
+            })
             if ($otherAllows.Count -ne 0) {
               throw "$name permits unrelated SID(s): $($otherAllows -join ', ')"
             }
