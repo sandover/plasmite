@@ -52,6 +52,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.ctx.outputs.tag }}
+      - id: source
+        name: Resolve checked-out release source
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - id: targets
         name: Validate and render release targets
         shell: bash
@@ -70,8 +74,8 @@ jobs:
           {
             "tag": "${tag}",
             "version": "${version}",
-            "source_sha": "${GITHUB_SHA}",
-            "source_ref": "${GITHUB_REF}",
+            "source_sha": "${{ steps.source.outputs.sha }}",
+            "source_ref": "refs/tags/${tag}",
             "source_run_id": "${GITHUB_RUN_ID}",
             "source_workflow": "${GITHUB_WORKFLOW}"
           }
@@ -80,17 +84,18 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           set -euo pipefail
           ci_runs="$(gh run list \
             --repo "$GITHUB_REPOSITORY" \
             --workflow ci.yml \
-            --commit "$GITHUB_SHA" \
+            --commit "$RELEASE_SOURCE_SHA" \
             --limit 5 \
             --json headSha,status,conclusion,url)"
 
           success_url="$(
-            jq -r --arg sha "$GITHUB_SHA" '
+            jq -r --arg sha "$RELEASE_SOURCE_SHA" '
               map(select(.headSha==$sha and .status=="completed" and .conclusion=="success"))
               | first
               | .url // empty
@@ -98,9 +103,9 @@ jobs:
           )"
 
           if [[ -z "$success_url" ]]; then
-            echo "error: refusing release because ci.yml is not green for commit $GITHUB_SHA." >&2
+            echo "error: refusing release because ci.yml is not green for commit $RELEASE_SOURCE_SHA." >&2
             echo "hint: wait for CI to complete successfully on this commit, then rerun release." >&2
-            jq -r --arg sha "$GITHUB_SHA" '
+            jq -r --arg sha "$RELEASE_SOURCE_SHA" '
               map(select(.headSha==$sha))
               | if length == 0 then
                   "ci runs found: none"
