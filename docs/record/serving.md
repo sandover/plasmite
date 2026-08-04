@@ -85,8 +85,9 @@ Windows. Windows uses the built-in `icacls` tool to remove inherited access and
 grant the creating account full control; serving inspects the effective ACL
 with PowerShell and refuses access by ordinary accounts other than the creator.
 Windows `SYSTEM` and built-in Administrators remain permitted because those
-privileged identities can take ownership regardless. Windows may also retain a
-per-logon-session identity, which cannot grant access to another signed-in user.
+privileged identities can take ownership regardless. Windows may also retain
+the creator's current logon-session identity, which cannot grant access to
+another signed-in user.
 
 ## Client auth + TLS flags
 

@@ -81,17 +81,12 @@ pub fn init(config: ServeInitConfig) -> Result<ServeInitResult, Error> {
     let token_file = resolve_artifact_path(&output_dir, &config.token_file);
     let tls_cert = resolve_artifact_path(&output_dir, &config.tls_cert);
     let tls_key = resolve_artifact_path(&output_dir, &config.tls_key);
-    let client_host = if config.token_only {
-        config.host.clone().unwrap_or_else(|| {
-            if config.bind.ip().is_unspecified() {
-                "YOUR-HOST".to_string()
-            } else {
-                config.bind.ip().to_string()
-            }
-        })
-    } else {
-        resolve_client_host(config.host.as_deref(), config.bind.ip())?
-    };
+    let client_host =
+        if config.token_only && config.host.is_none() && config.bind.ip().is_unspecified() {
+            "YOUR-HOST".to_string()
+        } else {
+            resolve_client_host(config.host.as_deref(), config.bind.ip())?
+        };
     let artifact_paths = if config.token_only {
         vec![&token_file]
     } else {

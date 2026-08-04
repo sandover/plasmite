@@ -593,6 +593,30 @@ fn serve_init_token_only_writes_one_private_artifact() {
 }
 
 #[test]
+fn serve_init_token_only_rejects_invalid_client_host() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = cmd()
+        .args([
+            "serve",
+            "init",
+            "--token-only",
+            "--host",
+            "https://pools.example.test",
+            "--output-dir",
+            temp.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        std::str::from_utf8(&output.stderr)
+            .unwrap()
+            .contains("invalid client-visible host")
+    );
+    assert!(!temp.path().join("plasmite-auth-token.txt").exists());
+}
+
+#[test]
 fn serve_init_tty_reports_created_and_overwritten() {
     let temp = tempfile::tempdir().expect("tempdir");
     let out_dir = temp.path().join("serve-init");
