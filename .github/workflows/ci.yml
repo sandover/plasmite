@@ -279,6 +279,7 @@ jobs:
           if ($unsafeExit -eq 0) {
             throw "serve accepted a token with inherited Windows ACLs"
           }
+          exit 0
       - name: Local pool roundtrip smoke
         shell: pwsh
         run: |
