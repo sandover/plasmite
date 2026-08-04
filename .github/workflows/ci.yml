@@ -245,11 +245,12 @@ jobs:
           $exe = ".\target\release\plasmite.exe"
           Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
           & $exe serve init --host pools.example.test --output-dir $dir | Out-Null
-          $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-          $currentSid = $identity.User.Value
-          $logonSids = @($identity.Groups | ForEach-Object { $_.Value } | Where-Object {
-            $_ -match '^S-1-5-5-\d+-\d+$'
-          })
+          $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $groupText = & "$env:SystemRoot\System32\whoami.exe" /groups
+          $logonSids = @([regex]::Matches(
+            ($groupText -join "`n"),
+            'S-1-5-5-\d+-\d+'
+          ) | ForEach-Object { $_.Value })
           $allowedSids = @($currentSid, "S-1-5-18", "S-1-5-32-544") + $logonSids
           foreach ($name in @("plasmite-auth-token.txt", "plasmite-tls-key.pem")) {
             $path = Join-Path $dir $name
