@@ -246,6 +246,7 @@ jobs:
           Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
           & $exe serve init --host pools.example.test --output-dir $dir | Out-Null
           $currentAccount = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+          $allowedAccounts = @($currentAccount, "NT AUTHORITY\SYSTEM", "BUILTIN\Administrators")
           foreach ($name in @("plasmite-auth-token.txt", "plasmite-tls-key.pem")) {
             $path = Join-Path $dir $name
             $acl = Get-Acl -LiteralPath $path
@@ -253,10 +254,16 @@ jobs:
               throw "$name still inherits access rules"
             }
             $otherAllows = @($acl.Access | Where-Object {
-              $_.AccessControlType -eq "Allow" -and $_.IdentityReference.Value -ne $currentAccount
+              $_.AccessControlType -eq "Allow" -and $_.IdentityReference.Value -notin $allowedAccounts
             })
             if ($otherAllows.Count -ne 0) {
-              throw "$name permits an account other than the creating account"
+              throw "$name permits an unrelated account"
+            }
+            $currentAllows = @($acl.Access | Where-Object {
+              $_.AccessControlType -eq "Allow" -and $_.IdentityReference.Value -eq $currentAccount
+            })
+            if ($currentAllows.Count -eq 0) {
+              throw "$name does not permit the creating account"
             }
           }
           & $exe serve --token-file (Join-Path $dir "plasmite-auth-token.txt") --tls-cert (Join-Path $dir "plasmite-tls-cert.pem") --tls-key (Join-Path $dir "plasmite-tls-key.pem") check | Out-Null

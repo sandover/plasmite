@@ -1075,7 +1075,7 @@ pub(crate) fn validate_secret_file(path: &Path, kind: &str) -> Result<(), Error>
     }
     #[cfg(windows)]
     {
-        let script = r#"$acl=Get-Acl -LiteralPath $args[0]; $current=[Security.Principal.WindowsIdentity]::GetCurrent().Name; $bad=@($acl.Access | Where-Object { $_.AccessControlType -eq 'Allow' -and $_.IdentityReference.Value -ne $current }); if ($acl.AreAccessRulesProtected -and $bad.Count -eq 0 -and @($acl.Access | Where-Object { $_.AccessControlType -eq 'Allow' -and $_.IdentityReference.Value -eq $current }).Count -gt 0) { exit 0 } else { exit 3 }"#;
+        let script = r#"$acl=Get-Acl -LiteralPath $args[0]; $current=[Security.Principal.WindowsIdentity]::GetCurrent().Name; $allowed=@($current,'NT AUTHORITY\SYSTEM','BUILTIN\Administrators'); $bad=@($acl.Access | Where-Object { $_.AccessControlType -eq 'Allow' -and $_.IdentityReference.Value -notin $allowed }); if ($acl.AreAccessRulesProtected -and $bad.Count -eq 0 -and @($acl.Access | Where-Object { $_.AccessControlType -eq 'Allow' -and $_.IdentityReference.Value -eq $current }).Count -gt 0) { exit 0 } else { exit 3 }"#;
         let status = std::process::Command::new("powershell.exe")
             .args(["-NoProfile", "-NonInteractive", "-Command", script])
             .arg(path)
@@ -1088,7 +1088,7 @@ pub(crate) fn validate_secret_file(path: &Path, kind: &str) -> Result<(), Error>
             })?;
         if !status.success() {
             return Err(Error::new(ErrorKind::Usage)
-                .with_message(format!("{kind} file ACL permits accounts other than the current account"))
+                .with_message(format!("{kind} file ACL permits an unrelated Windows account"))
                 .with_path(path)
                 .with_hint("Regenerate it with `plasmite serve init --force`, or remove inherited access and grant only the owning account."));
         }

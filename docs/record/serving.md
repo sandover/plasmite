@@ -83,7 +83,9 @@ Generated tokens and private keys are owner-only: mode `0600` in directories
 with mode `0700` on Unix, and a protected owner-only access-control list on
 Windows. Windows uses the built-in `icacls` tool to remove inherited access and
 grant the creating account full control; serving inspects the effective ACL
-with PowerShell and refuses secrets accessible to another account.
+with PowerShell and refuses access by ordinary accounts other than the creator.
+Windows `SYSTEM` and built-in Administrators remain permitted because those
+privileged identities can take ownership regardless.
 
 ## Client auth + TLS flags
 
