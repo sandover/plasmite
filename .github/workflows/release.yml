@@ -122,7 +122,7 @@ jobs:
     needs: [release-context]
     runs-on: ${{ matrix.os }}
     env:
-      UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+      UV_CACHE_DIR: ${{ github.workspace }}/.cache/uv
     strategy:
       fail-fast: false
       matrix:
@@ -154,7 +154,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: bindings/python/pyproject.toml
-          cache-local-path: ${{ runner.temp }}/uv-cache
+          cache-local-path: ${{ github.workspace }}/.cache/uv
           cache-suffix: release-${{ matrix.target }}
       - uses: actions/setup-node@v4
         with:

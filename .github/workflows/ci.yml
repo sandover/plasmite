@@ -185,7 +185,7 @@ jobs:
     if: github.event_name == 'pull_request' && needs.pr-paths.outputs.boundary == 'true'
     runs-on: ubuntu-latest
     env:
-      GOCACHE: ${{ runner.temp }}/go-build
+      GOCACHE: ${{ github.workspace }}/.cache/go-build
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -255,8 +255,8 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     env:
-      GOCACHE: ${{ runner.temp }}/go-build
-      UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+      GOCACHE: ${{ github.workspace }}/.cache/go-build
+      UV_CACHE_DIR: ${{ github.workspace }}/.cache/uv
     strategy:
       fail-fast: false
       matrix:
@@ -284,7 +284,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: bindings/python/pyproject.toml
-          cache-local-path: ${{ runner.temp }}/uv-cache
+          cache-local-path: ${{ github.workspace }}/.cache/uv
           cache-suffix: full-${{ runner.os }}
       - uses: taiki-e/install-action@v2
         with:
