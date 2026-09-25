@@ -18,119 +18,57 @@
 
 ## CI Gate
 
-A deploy waits for the result from this exact test run. Create a fresh pool for each run so an old result cannot release a new deploy.
+A deploy script needs to wait until the test runner says "green". No polling loops, no lock files, no shared database.
 
 ```bash
-# CI setup — run once before starting the test and deploy jobs
-CI_SUITE=unit
-CI_POOL="ci-${CI_COMMIT:0:12}-${CI_RUN_ID}-${CI_SUITE}"
-pls pool create "$CI_POOL"
+# deploy.sh — blocks until this run's tests pass
+pls follow "ci-$CI_RUN_ID" --create --tail 1 --where '.data.status == "green"' --one > /dev/null && ./deploy-to-staging.sh
 
-# deploy.sh — set CI_COMMIT and CI_RUN_ID to this workflow run
-CI_SUITE=unit
-CI_POOL="ci-${CI_COMMIT:0:12}-${CI_RUN_ID}-${CI_SUITE}"
-CI_RESULT=$(pls follow "$CI_POOL" \
-  --where ".data.commit == \"$CI_COMMIT\" and .data.run_id == \"$CI_RUN_ID\" and .data.suite == \"$CI_SUITE\"" \
-  --tail 1 --timeout 30m --one --jsonl) || exit $?
-printf '%s\n' "$CI_RESULT" | jq -e '.data.status == "passed"' >/dev/null && ./deploy-to-staging.sh
-
-# test-runner.sh — set the same CI_COMMIT, CI_RUN_ID, and CI_SUITE
-CI_POOL="ci-${CI_COMMIT:0:12}-${CI_RUN_ID}-${CI_SUITE}"
-if ./run-tests.sh; then
-  CI_STATUS=passed
-else
-  CI_STATUS=failed
-fi
-pls feed "$CI_POOL" \
-  "{\"status\":\"$CI_STATUS\",\"commit\":\"$CI_COMMIT\",\"run_id\":\"$CI_RUN_ID\",\"suite\":\"$CI_SUITE\"}"
-[ "$CI_STATUS" = passed ]
+# test-runner.sh — signals when done (--create makes the pool if needed)
+./run-tests.sh && pls feed "ci-$CI_RUN_ID" --create '{"status": "green", "commit": "a1b2c3d", "suite": "unit"}'
 ```
 
-Set `CI_COMMIT` to the full commit SHA and `CI_RUN_ID` to a unique workflow run ID in all jobs. The setup step creates the pool before either job starts. The runner publishes either result and exits unsuccessfully when tests fail. The deploy job stops on a failed result for its commit, run, and suite; it times out after 30 minutes if no result arrives.
+Set `CI_RUN_ID` to the same unique value in both jobs. `--one` exits when a matching message arrives.
 
 <details>
 <summary><strong>Python · Node · Go</strong></summary>
 
-**Python — wait for this run**
+**Python — wait for green**
 
 ```python
-import time
 from plasmite import Client
 
-commit, run_id, suite = "a1b2c3d4e5f6789012345678901234567890abcd", "1842", "unit"
-deadline = time.monotonic() + 30 * 60
-with Client() as c, c.open_pool(f"ci-{commit[:12]}-{run_id}-{suite}") as pool:
-    since_seq = 0
-    while time.monotonic() < deadline:
-        remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
-        for msg in pool.tail(
-            since_seq=since_seq, max_messages=1, timeout_ms=min(remaining_ms, 1000)
-        ):
-            since_seq = msg.seq + 1
-            matches_run = (
-                msg.data.get("commit"), msg.data.get("run_id"), msg.data.get("suite")
-            ) == (commit, run_id, suite)
-            if not matches_run:
-                continue
-            if msg.data.get("status") != "passed":
-                raise SystemExit(f"{suite} failed for {commit}")
-            print(f"commit {commit} passed — deploying")
+with Client() as c, c.open_pool("ci") as pool:
+    for msg in pool.tail(timeout_ms=30000):
+        if msg.data.get("status") == "green":
+            print(f"commit {msg.data['commit']} passed — deploying")
             break
-        else:
-            continue
-        break
-    else:
-        raise TimeoutError(f"no result for {suite} at {commit}")
 ```
 
-**Python — publish the result**
+**Python — signal green**
 
 ```python
 from plasmite import Client
 
-with Client() as c, c.pool("ci-a1b2c3d4e5f6-1842-unit") as pool:
-    pool.append({
-        "status": "passed",
-        "commit": "a1b2c3d4e5f6789012345678901234567890abcd",
-        "run_id": "1842",
-        "suite": "unit",
-    })
+with Client() as c, c.pool("ci") as pool:
+    pool.append({"status": "green", "commit": "a1b2c3d", "suite": "unit"})
 ```
 
-**Node — wait for this run**
+**Node — wait for green**
 
 ```js
 const { Client } = require("plasmite");
 (async () => {
-  const commit = "a1b2c3d4e5f6789012345678901234567890abcd";
-  const runId = "1842";
-  const suite = "unit";
   const c = new Client();
   let pool;
   try {
-    pool = c.openPool(`ci-${commit.slice(0, 12)}-${runId}-${suite}`);
-    const deadline = Date.now() + 30 * 60 * 1000;
-    let sinceSeq = 0n;
-    while (Date.now() < deadline) {
-      const remainingMs = Math.max(1, deadline - Date.now());
-      let matched = false;
-      for await (const msg of pool.tail({
-        sinceSeq,
-        maxMessages: 1,
-        timeoutMs: Math.min(remainingMs, 1000),
-      })) {
-        sinceSeq = BigInt(msg.seq) + 1n;
-        const matchesRun = msg.data.commit === commit &&
-          msg.data.run_id === runId && msg.data.suite === suite;
-        if (!matchesRun) continue;
-        if (msg.data.status !== "passed") throw new Error(`${suite} failed for ${commit}`);
-        console.log(`commit ${commit} passed — deploying`);
-        matched = true;
+    pool = c.openPool("ci");
+    for await (const msg of pool.tail()) {
+      if (msg.data.status === "green") {
+        console.log(`commit ${msg.data.commit} passed — deploying`);
         break;
       }
-      if (matched) return;
     }
-    throw new Error(`no result for ${suite} at ${commit}`);
   } finally {
     if (pool) pool.close();
     c.close();
@@ -138,67 +76,25 @@ const { Client } = require("plasmite");
 })();
 ```
 
-**Go — wait for this run**
+**Go — wait for green**
 
 ```go
-package main
-
-import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"log"
-	"time"
-
-	plasmite "github.com/sandover/plasmite/bindings/go/local"
-)
-
-func main() {
-	commit, runID, suite := "a1b2c3d4e5f6789012345678901234567890abcd", "1842", "unit"
-	poolName := fmt.Sprintf("ci-%s-%s-%s", commit[:12], runID, suite)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
-	c, err := plasmite.NewDefaultClient()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer c.Close()
-	p, err := c.OpenPool(plasmite.PoolRefName(poolName))
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer p.Close()
-	firstSeq := uint64(0)
-	out, errs := p.Tail(ctx, plasmite.TailOptions{SinceSeq: &firstSeq, Timeout: time.Second})
-	passed := false
-	for msg := range out {
-		var result struct {
-			Status string
-			Commit string
-			RunID  string `json:"run_id"`
-			Suite  string
-		}
-		if err := json.Unmarshal(msg.Data, &result); err != nil {
-			log.Fatal(err)
-		}
-		if result.Commit != commit || result.RunID != runID || result.Suite != suite {
-			continue
-		}
-		if result.Status != "passed" {
-			log.Fatalf("%s failed for %s", suite, commit)
-		}
-		fmt.Printf("commit %s passed — deploying\n", commit)
-		passed = true
-		cancel()
-		break
-	}
-	if err := <-errs; err != nil && !passed {
-		log.Fatal(err)
-	}
-	if !passed {
-		log.Fatalf("no result for %s at %s", suite, commit)
-	}
+c, _ := plasmite.NewDefaultClient()
+p, _ := c.OpenPool(plasmite.PoolRefName("ci"))
+ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+out, errs := p.Tail(ctx, plasmite.TailOptions{Timeout: 30 * time.Second})
+for msg := range out {
+    var d map[string]any
+    json.Unmarshal(msg.Data, &d)
+    if d["status"] == "green" {
+        fmt.Printf("commit %s passed — deploying\n", d["commit"])
+        cancel()
+        break
+    }
 }
+if err := <-errs; err != nil && err != context.Canceled { log.Fatal(err) }
+p.Close(); c.Close()
 ```
 
 </details>
@@ -244,68 +140,47 @@ pls follow telemetry --tag alert --where '.data.service == "api"'
 pls follow telemetry --since 10m --replay 0 --jsonl > tmp/timeline.jsonl
 ```
 
-### Import a page of Stripe events
+### Import external API events
 
-Stripe's [events endpoint](https://docs.stripe.com/api/events/list) returns a paginated history. This example imports one page as JSON Lines. To import older events, pass `starting_after` with the last event ID from the previous page.
+Stripe's [events API](https://docs.stripe.com/api/events/list) returns a page. Pipe each event into a pool to inspect it later.
 
 ```bash
-# import one page into the pool
-pls pool create stripe-events
+# import one page of Stripe events
 curl -fsS -G https://api.stripe.com/v1/events \
-  -H "Authorization: Bearer $STRIPE_KEY" --data-urlencode 'limit=100' \
-  | jq -c '.data[]' \
-  | pls feed stripe-events --in jsonl
-
-# Continue from the last event in the previous page.
-curl -fsS -G https://api.stripe.com/v1/events \
-  -H "Authorization: Bearer $STRIPE_KEY" --data-urlencode 'limit=100' \
-  --data-urlencode 'starting_after=evt_last_event_id' \
-  | jq -c '.data[]' \
-  | pls feed stripe-events --in jsonl
+  -H "Authorization: Bearer $STRIPE_KEY" -d limit=100 \
+  | jq -c '.data[]' | pls feed stripe-events --create --in jsonl
 
 # filter imported completed payments
-pls follow stripe-events --where '.data.type == "payment_intent.succeeded"' \
-  --tail 100 --replay 0
+pls follow stripe-events --tail 100 --replay 0 --where '.data.type == "payment_intent.succeeded"'
 
-# export the latest 500 retained events and exit
-mkdir -p tmp
+# replay messages imported in the last 20 minutes
+pls follow stripe-events --since 20m --replay 1
+
+# export the last 500 events for offline analysis, then exit
 pls follow stripe-events --tail 500 --replay 0 --jsonl > tmp/stripe-dump.jsonl
 ```
-
-For a continuous stream, configure a Stripe webhook endpoint and have its
-handler append each delivery to Plasmite. Keep the webhook event ID in the
-message so a retry can be recognized by the consumer.
 
 ### Build progress
 
 A CI build prints to stdout, but stdout is gone when the terminal closes. Write structured progress to a pool instead and it's available to any process, anytime.
 
 ```bash
-# Set a unique ID for this build in both terminals.
-BUILD_ID=1842
-BUILD_POOL="build-$BUILD_ID"
-pls pool create "$BUILD_POOL"
-
-# Terminal 1 — start the follower before the build begins.
-pls follow "$BUILD_POOL" --tail 100
-
-# Terminal 2 — publish progress and a terminal result.
-pls feed "$BUILD_POOL" "{\"build_id\":\"$BUILD_ID\",\"step\":\"compile\",\"pct\":0}"
+pls feed build --create '{"step": "compile", "pct": 0}'
 sleep 1
-pls feed "$BUILD_POOL" "{\"build_id\":\"$BUILD_ID\",\"step\":\"compile\",\"pct\":100}"
-pls feed "$BUILD_POOL" "{\"build_id\":\"$BUILD_ID\",\"step\":\"test\",\"pct\":0}"
+pls feed build '{"step": "compile", "pct": 100}'
+pls feed build '{"step": "test", "pct": 0}'
 sleep 2
-pls feed "$BUILD_POOL" "{\"build_id\":\"$BUILD_ID\",\"step\":\"test\",\"pct\":100}"
-pls feed "$BUILD_POOL" --tag done \
-  "{\"build_id\":\"$BUILD_ID\",\"step\":\"finished\",\"ok\":true}"
+pls feed build '{"step": "test", "pct": 100}'
+pls feed build --tag done '{"step": "finished", "ok": true}'
 
-# A deploy job waits for this build's successful terminal result.
-pls follow "$BUILD_POOL" --tag done \
-  --where ".data.build_id == \"$BUILD_ID\"" --tail 1 --one --jsonl \
-  | jq -e '.data.ok == true' >/dev/null && ./deploy.sh
+# another terminal — watch the build live
+pls follow build
 
-# Replay this build's retained history later.
-pls follow "$BUILD_POOL" --tail 100 --replay 0
+# a deploy script — ship only when the completed build succeeded
+pls follow build --tag done --tail 1 --one --jsonl | jq -e '.data.ok == true' > /dev/null && ./deploy.sh
+
+# next morning — what happened overnight?
+pls follow build --since 12h --replay 0
 ```
 
 <details>
@@ -430,18 +305,14 @@ pls duplex chat --me alice --echo-self
 
 ### Remote duplex
 
-With the secure server from Remote Pool Access, duplex works over the network too. Set `SERVER_IP`, `TOKEN_FILE`, and `TLS_CERT` to the client values from that section:
+With the secure server below, duplex works over the network too:
 
 ```bash
-SERVER_IP=192.0.2.10
-TOKEN_FILE=./plasmite-auth-token.txt
-TLS_CERT=./plasmite-tls-cert.pem
-pls duplex "https://$SERVER_IP:9700/chat" \
-  --token-file "$TOKEN_FILE" --tls-ca "$TLS_CERT" \
-  --me alice --tail 10
+pls duplex https://192.0.2.10:9700/chat --me alice --tail 10 \
+  --token-file ./.plasmite-serve/plasmite-auth-token.txt --tls-ca ./.plasmite-serve/plasmite-tls-cert.pem
 ```
 
-The URL must use the IP address in the generated certificate. `--create` and `--since` are not supported for remote pools. Use `--tail` to catch up on history.
+Note: `--create` and `--since` are not supported for remote pools. Use `--tail` to catch up on history.
 
 ### Scripted duplex (non-TTY)
 
@@ -522,62 +393,49 @@ pls follow incidents --tag error --tail 100 --jsonl > tmp/errors.jsonl
 
 ## Remote Pool Access
 
-A machine exposes its pools over HTTPS. Use the same IP address for the bind address and client URL so the generated certificate identity matches.
+A machine exposes its local pools over HTTPS. Use the same reachable IP in these commands.
 
 **On the server (secure default):**
 
 ```bash
-# Replace this with the server's reachable LAN IP address.
-SERVER_IP=192.0.2.10
-plasmite serve init --bind "$SERVER_IP:9700" --output-dir ./.plasmite-serve
+# Replace 192.0.2.10 with the server's IP. Keep the printed fingerprint for verification.
+plasmite serve init --bind 192.0.2.10:9700 --output-dir ./.plasmite-serve
 plasmite pool create events
 plasmite pool create chat
 
 # Start secure server with generated artifacts
 plasmite serve \
-  --bind "$SERVER_IP:9700" \
+  --bind 192.0.2.10:9700 \
   --allow-non-loopback \
   --token-file ./.plasmite-serve/plasmite-auth-token.txt \
   --tls-cert ./.plasmite-serve/plasmite-tls-cert.pem \
   --tls-key ./.plasmite-serve/plasmite-tls-key.pem
 ```
 
-Copy the token and certificate to the client through a secure channel. Verify the printed certificate fingerprint with the client out of band. On the client, set `SERVER_IP` to the same reachable IP and set the file paths below to those copies.
-
-**On a client** (same CLI, plus auth/trust flags):
+**On a client** (copy the `.plasmite-serve` directory there first):
 
 ```bash
-SERVER_IP=192.0.2.10 # use the server's actual IP
-TOKEN_FILE=./plasmite-auth-token.txt
-TLS_CERT=./plasmite-tls-cert.pem
-plasmite feed "https://$SERVER_IP:9700/events" \
-  --token-file "$TOKEN_FILE" \
-  --tls-ca "$TLS_CERT" \
+plasmite feed https://192.0.2.10:9700/events \
+  --token-file ./.plasmite-serve/plasmite-auth-token.txt \
+  --tls-ca ./.plasmite-serve/plasmite-tls-cert.pem \
   '{"sensor": "temp", "value": 23.5}'
 
-plasmite follow "https://$SERVER_IP:9700/events" \
-  --token-file "$TOKEN_FILE" \
-  --tls-ca "$TLS_CERT" \
+plasmite follow https://192.0.2.10:9700/events \
+  --token-file ./.plasmite-serve/plasmite-auth-token.txt \
+  --tls-ca ./.plasmite-serve/plasmite-tls-cert.pem \
   --tail 20
 ```
 
-For a local development server, keep it on loopback and use plain HTTP:
+Development-only shortcut when trust bootstrapping is unavailable:
 
 ```bash
-# Terminal 1
-plasmite pool create events
-plasmite serve --bind 127.0.0.1:9700
-# Terminal 2
-plasmite follow http://127.0.0.1:9700/events --tail 20
+plasmite follow https://192.0.2.10:9700/events --tail 20 \
+  --token-file ./.plasmite-serve/plasmite-auth-token.txt --tls-skip-verify
 ```
-
-Do not use `--tls-skip-verify` for a server reachable from another machine.
 
 curl remains useful for API debugging, but native `plasmite feed` / `plasmite follow` should be the first-line operator workflow.
 
-A built-in web UI is available at `https://$SERVER_IP:9700/ui`; configure its
-browser trust separately because the self-signed certificate is intended for
-the CLI's `--tls-ca` option.
+A built-in web UI is available at `https://192.0.2.10:9700/ui`.
 
 ---
 
@@ -673,7 +531,6 @@ requires discarding it.
 ```
 
 Remote MCP uses the same auth/TLS posture as `plasmite serve`:
-- replace the example IP with the one used in `serve init`;
 - if server auth is enabled, clients send the same bearer token;
 - if TLS is enabled, clients trust the same certificate/CA material.
 
