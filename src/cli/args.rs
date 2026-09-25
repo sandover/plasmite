@@ -2,9 +2,10 @@
 //! Exports: `Cli`, command enums, and command argument structures.
 //! Role: Parse syntax only; command execution belongs to sibling CLI modules.
 
-use crate::{
-    DEFAULT_MAX_BODY_BYTES, DEFAULT_MAX_TAIL_CONCURRENCY, DEFAULT_MAX_TAIL_TIMEOUT_MS, serve,
+use crate::cli::support::{
+    DEFAULT_MAX_BODY_BYTES, DEFAULT_MAX_TAIL_CONCURRENCY, DEFAULT_MAX_TAIL_TIMEOUT_MS,
 };
+use crate::serve;
 use clap::{Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::aot::Shell;
 use std::path::PathBuf;

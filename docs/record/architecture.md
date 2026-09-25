@@ -63,8 +63,8 @@ request authorization context without changing their shared `Permission` kind.
 The `plasmite` binary uses ordinary Rust modules with one-way dependencies:
 
 ```
-main.rs → cli::args + cli::dispatch → command-family module → cli::support → API/core
-                                  ↘ cli::output + cli::result
+main.rs → cli::args + cli::dispatch → command-family modules → API/core
+                                  ↘ CLI helpers + cli::output + cli::result
 ```
 
 `main.rs` owns process concerns only: normalized argument parsing, construction
@@ -80,11 +80,13 @@ parsed variants into explicit argument structures for these command families:
 - `utility` for version, completion, and MCP stdio.
 
 `CliContext` contains only the resolved pool directory and color mode.
-`CommandResult` carries the selected exit code back to `main.rs`. Shared
-rendering, retry, ingestion, and streaming mechanics live in `cli::support`;
-machine-readable JSON rendering lives in `cli::output`. Command modules use
-explicit imports and concrete functions. There is no command framework,
-service container, or handler trait hierarchy.
+`CommandResult` carries the selected exit code back to `main.rs`. The larger
+command families use focused helper modules: `doctor_support`, `pool_support`,
+`server_support`, `feed_support`, and `stream_support`. Shared parsing, pool
+references, retry, and payload conversion live in `cli::support`. CLI
+presentation helpers live in `output_support`; JSON output lives in
+`cli::output`. Command modules import the helpers they use by name. There is
+no command framework, service container, or handler trait hierarchy.
 
 Invariant: argument modules do not execute commands, command-family modules do
 not terminate the process, and shared CLI helpers do not reimplement storage

@@ -1,16 +1,13 @@
 //! Purpose: Validate pool/ring invariants and provide debug-only assertions with snapshots.
-//! Exports: `validate_frame_header`, `debug_assert_tail_committed`.
+//! Exports: `validate_frame_header`, `scan_pool_state`, `debug_assert_tail_committed`.
 //! Exports (tests): `validate_pool_state`, `SnapshotMode`, `debug_assert_pool_state_with_snapshot`.
 //! Role: Slow-path safety checks used at boundaries and in debug builds.
 //! Invariants: Full scans are explicit; hot paths use tail-only checks.
 //! Invariants: Snapshot output is opt-in and written under `.scratch/` only.
 use crate::core::error::Error;
-#[cfg(test)]
 use crate::core::error::ErrorKind;
-#[cfg(test)]
 use crate::core::frame;
 use crate::core::frame::{FRAME_HEADER_LEN, FrameHeader, FrameState};
-#[cfg(test)]
 use crate::core::pool::PoolHeader;
 #[cfg(test)]
 use std::fs::{self, File};
@@ -37,129 +34,163 @@ pub fn validate_frame_header(header: &FrameHeader, ring_size: usize) -> Result<(
     header.validate(ring_size)
 }
 
-#[cfg(test)]
-pub fn validate_pool_state(header: PoolHeader, mmap: &[u8]) -> Result<(), Error> {
-    if header.ring_size == 0 {
-        return Err(Error::new(ErrorKind::Corrupt).with_message("ring size is zero"));
-    }
-    let ring_offset = header.ring_offset as usize;
-    let ring_size = header.ring_size as usize;
-    if ring_offset + ring_size > mmap.len() {
-        return Err(Error::new(ErrorKind::Corrupt).with_message("ring exceeds mmap bounds"));
-    }
-    let head = header.head_off as usize;
-    let tail = header.tail_off as usize;
-    let tail_next = header.tail_next_off as usize;
-    if head >= ring_size || tail >= ring_size {
-        return Err(Error::new(ErrorKind::Corrupt).with_message("head/tail out of range"));
-    }
-    if tail_next >= ring_size {
-        return Err(Error::new(ErrorKind::Corrupt).with_message("tail_next out of range"));
-    }
-    if header.oldest_seq == 0 {
-        if header.head_off != header.tail_off || header.tail_next_off != header.tail_off {
-            return Err(
-                Error::new(ErrorKind::Corrupt).with_message("empty pool head/tail mismatch")
-            );
+pub(crate) fn scan_pool_state(header: PoolHeader, mmap: &[u8]) -> Result<Option<u64>, Error> {
+    let mut last_good_seq = None;
+    let mut current_offset = None;
+    let result = (|| {
+        if header.ring_size == 0 {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("ring size is zero"));
         }
-        return Ok(());
-    }
-    if header.newest_seq < header.oldest_seq {
-        return Err(Error::new(ErrorKind::Corrupt).with_message("seq bounds inverted"));
-    }
+        let ring_offset = header.ring_offset as usize;
+        let ring_size = header.ring_size as usize;
+        if ring_offset
+            .checked_add(ring_size)
+            .is_none_or(|end| end > mmap.len())
+        {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("ring exceeds mmap bounds"));
+        }
+        let head = header.head_off as usize;
+        let tail = header.tail_off as usize;
+        let tail_next = header.tail_next_off as usize;
+        if head >= ring_size || tail >= ring_size {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("head/tail out of range"));
+        }
+        if tail_next >= ring_size {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("tail_next out of range"));
+        }
+        if header.oldest_seq == 0 {
+            if header.head_off != header.tail_off || header.tail_next_off != header.tail_off {
+                return Err(
+                    Error::new(ErrorKind::Corrupt).with_message("empty pool head/tail mismatch")
+                );
+            }
+            return Ok(None);
+        }
+        if header.newest_seq < header.oldest_seq {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("seq bounds inverted"));
+        }
 
-    let expected_tail_next = if ring_size - tail < FRAME_HEADER_LEN {
-        0usize
-    } else {
-        let tail_frame = read_frame_header(mmap, ring_offset, tail)?;
-        validate_frame_header(&tail_frame, ring_size)?;
-        match tail_frame.state {
-            FrameState::Wrap => 0usize,
-            FrameState::Committed => {
-                let frame_len =
-                    frame::frame_total_len(FRAME_HEADER_LEN, tail_frame.payload_len as usize)
-                        .ok_or_else(|| {
+        current_offset = Some(tail as u64);
+        let expected_tail_next = if ring_size - tail < FRAME_HEADER_LEN {
+            0usize
+        } else {
+            let tail_frame = read_frame_header(mmap, ring_offset, tail)?;
+            validate_frame_header(&tail_frame, ring_size)?;
+            match tail_frame.state {
+                FrameState::Wrap => 0usize,
+                FrameState::Committed => {
+                    let frame_len =
+                        frame::frame_total_len(FRAME_HEADER_LEN, tail_frame.payload_len as usize)
+                            .ok_or_else(|| {
                             Error::new(ErrorKind::Corrupt).with_message("frame length overflow")
                         })?;
-                let mut next_off = tail + frame_len;
-                if next_off == ring_size {
-                    next_off = 0;
+                    let mut next_off = tail + frame_len;
+                    if next_off == ring_size {
+                        next_off = 0;
+                    }
+                    next_off
                 }
-                next_off
+                _ => {
+                    return Err(
+                        Error::new(ErrorKind::Corrupt).with_message("unexpected frame state")
+                    );
+                }
             }
-            _ => {
-                return Err(Error::new(ErrorKind::Corrupt).with_message("unexpected frame state"));
+        };
+        if tail_next != expected_tail_next {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("tail_next mismatch"));
+        }
+
+        let mut offset = tail;
+        let mut expected_seq = header.oldest_seq;
+        let max_frames = ring_size / FRAME_HEADER_LEN + 1;
+        let mut steps = 0usize;
+
+        loop {
+            current_offset = Some(offset as u64);
+            if steps > max_frames {
+                return Err(
+                    Error::new(ErrorKind::Corrupt).with_message("scan exceeded ring capacity")
+                );
             }
-        }
-    };
-    if tail_next != expected_tail_next {
-        return Err(Error::new(ErrorKind::Corrupt).with_message("tail_next mismatch"));
-    }
-
-    let mut offset = tail;
-    let mut expected_seq = header.oldest_seq;
-    let max_frames = ring_size / FRAME_HEADER_LEN + 1;
-    let mut steps = 0usize;
-
-    loop {
-        if steps > max_frames {
-            return Err(Error::new(ErrorKind::Corrupt).with_message("scan exceeded ring capacity"));
-        }
-        if ring_size - offset < FRAME_HEADER_LEN {
-            offset = 0;
-            steps += 1;
-            continue;
-        }
-        let frame = read_frame_header(mmap, ring_offset, offset)?;
-        validate_frame_header(&frame, ring_size)?;
-        match frame.state {
-            FrameState::Wrap => {
+            if ring_size - offset < FRAME_HEADER_LEN {
                 offset = 0;
                 steps += 1;
                 continue;
             }
-            FrameState::Committed => {}
-            _ => {
-                return Err(Error::new(ErrorKind::Corrupt).with_message("unexpected frame state"));
+            let frame = read_frame_header(mmap, ring_offset, offset)?;
+            validate_frame_header(&frame, ring_size)?;
+            match frame.state {
+                FrameState::Wrap => {
+                    offset = 0;
+                    steps += 1;
+                    continue;
+                }
+                FrameState::Committed => {}
+                _ => {
+                    return Err(
+                        Error::new(ErrorKind::Corrupt).with_message("unexpected frame state")
+                    );
+                }
             }
-        }
 
-        if frame.seq != expected_seq {
-            return Err(Error::new(ErrorKind::Corrupt).with_message("seq mismatch"));
-        }
-
-        let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, frame.payload_len as usize)
-            .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("frame length overflow"))?;
-        if offset + frame_len > ring_size {
-            return Err(Error::new(ErrorKind::Corrupt).with_message("frame exceeds ring"));
-        }
-
-        let payload_start = ring_offset + offset + FRAME_HEADER_LEN;
-        let payload_end = payload_start + frame.payload_len as usize;
-        let marker_start = payload_end;
-        let marker_end = marker_start + frame::FRAME_COMMIT_MARKER_LEN;
-        if &mmap[marker_start..marker_end] != frame::FRAME_COMMIT_MARKER.as_slice() {
-            return Err(Error::new(ErrorKind::Corrupt).with_message("missing frame commit marker"));
-        }
-
-        let mut next_off = offset + frame_len;
-        if next_off == ring_size {
-            next_off = 0;
-        }
-
-        if expected_seq == header.newest_seq {
-            if next_off != head {
-                return Err(Error::new(ErrorKind::Corrupt).with_message("head offset mismatch"));
+            if frame.seq != expected_seq {
+                return Err(Error::new(ErrorKind::Corrupt).with_message("seq mismatch"));
             }
-            break;
+
+            let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, frame.payload_len as usize)
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::Corrupt).with_message("frame length overflow")
+                })?;
+            if offset + frame_len > ring_size {
+                return Err(Error::new(ErrorKind::Corrupt).with_message("frame exceeds ring"));
+            }
+
+            let payload_start = ring_offset + offset + FRAME_HEADER_LEN;
+            let payload_end = payload_start + frame.payload_len as usize;
+            let marker_start = payload_end;
+            let marker_end = marker_start + frame::FRAME_COMMIT_MARKER_LEN;
+            if &mmap[marker_start..marker_end] != frame::FRAME_COMMIT_MARKER.as_slice() {
+                return Err(
+                    Error::new(ErrorKind::Corrupt).with_message("missing frame commit marker")
+                );
+            }
+            last_good_seq = Some(frame.seq);
+
+            let mut next_off = offset + frame_len;
+            if next_off == ring_size {
+                next_off = 0;
+            }
+
+            if expected_seq == header.newest_seq {
+                if next_off != head {
+                    return Err(Error::new(ErrorKind::Corrupt).with_message("head offset mismatch"));
+                }
+                break;
+            }
+
+            expected_seq += 1;
+            offset = next_off;
+            steps += 1;
         }
 
-        expected_seq += 1;
-        offset = next_off;
-        steps += 1;
-    }
+        Ok(last_good_seq)
+    })();
+    result.map_err(|error| {
+        let error = match last_good_seq {
+            Some(seq) => error.with_seq(seq),
+            None => error,
+        };
+        match current_offset {
+            Some(offset) => error.with_offset(offset),
+            None => error,
+        }
+    })
+}
 
-    Ok(())
+#[cfg(test)]
+pub fn validate_pool_state(header: PoolHeader, mmap: &[u8]) -> Result<(), Error> {
+    scan_pool_state(header, mmap).map(|_| ())
 }
 
 #[cfg(test)]

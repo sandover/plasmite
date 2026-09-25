@@ -4,7 +4,7 @@
 //! Invariants: Reports are additive-only in v0; no heavy payloads are embedded.
 //! Invariants: Snapshot paths are optional and only provided on request.
 
-use crate::core::frame::{self, FRAME_HEADER_LEN, FrameHeader, FrameState};
+use crate::core::frame::{FRAME_HEADER_LEN, FrameHeader, FrameState};
 use crate::core::pool::PoolHeader;
 use std::path::{Path, PathBuf};
 
@@ -96,195 +96,25 @@ pub(crate) fn validate_pool_state_report(
     mmap: &[u8],
     path: &Path,
 ) -> ValidationReport {
-    let ring_offset = header.ring_offset as usize;
-    let ring_size = header.ring_size as usize;
-
-    if ring_size == 0 {
-        return ValidationReport::corrupt(
+    match crate::core::validate::scan_pool_state(header, mmap) {
+        Ok(last_good_seq) => {
+            let mut report = ValidationReport::ok(path.to_path_buf()).set_last_good(last_good_seq);
+            for warning in spot_check_index_warnings(header, mmap) {
+                report.remediation_hints.push(format!("warning: {warning}"));
+            }
+            report
+        }
+        Err(err) => ValidationReport::corrupt(
             path.to_path_buf(),
-            issue("corrupt", "ring size is zero", None, None),
-            None,
-        );
+            issue(
+                "corrupt",
+                err.message().unwrap_or("pool state is invalid"),
+                err.seq(),
+                err.offset(),
+            ),
+            err.seq(),
+        ),
     }
-    if ring_offset + ring_size > mmap.len() {
-        return ValidationReport::corrupt(
-            path.to_path_buf(),
-            issue("corrupt", "ring exceeds mmap bounds", None, None),
-            None,
-        );
-    }
-    let head = header.head_off as usize;
-    let tail = header.tail_off as usize;
-    if head >= ring_size || tail >= ring_size {
-        return ValidationReport::corrupt(
-            path.to_path_buf(),
-            issue("corrupt", "head/tail out of range", None, None),
-            None,
-        );
-    }
-    if header.oldest_seq == 0 {
-        if header.head_off != header.tail_off {
-            return ValidationReport::corrupt(
-                path.to_path_buf(),
-                issue("corrupt", "empty pool head/tail mismatch", None, None),
-                None,
-            );
-        }
-        return ValidationReport::ok(path.to_path_buf());
-    }
-    if header.newest_seq < header.oldest_seq {
-        return ValidationReport::corrupt(
-            path.to_path_buf(),
-            issue("corrupt", "seq bounds inverted", None, None),
-            None,
-        );
-    }
-
-    let mut offset = tail;
-    let mut expected_seq = header.oldest_seq;
-    let max_frames = ring_size / FRAME_HEADER_LEN + 1;
-    let mut steps = 0usize;
-    let mut last_good_seq = None;
-
-    loop {
-        if steps > max_frames {
-            return ValidationReport::corrupt(
-                path.to_path_buf(),
-                issue(
-                    "corrupt",
-                    "scan exceeded ring capacity",
-                    last_good_seq,
-                    None,
-                ),
-                last_good_seq,
-            );
-        }
-        if ring_size - offset < FRAME_HEADER_LEN {
-            offset = 0;
-            steps += 1;
-            continue;
-        }
-        let frame = match read_frame_header(mmap, ring_offset, offset) {
-            Ok(frame) => frame,
-            Err(err) => {
-                return ValidationReport::corrupt(
-                    path.to_path_buf(),
-                    issue(
-                        "corrupt",
-                        &format!("frame header decode failed: {err}"),
-                        last_good_seq,
-                        Some(offset as u64),
-                    ),
-                    last_good_seq,
-                );
-            }
-        };
-        if let Err(err) = frame.validate(ring_size) {
-            return ValidationReport::corrupt(
-                path.to_path_buf(),
-                issue(
-                    "corrupt",
-                    &format!("frame header invalid: {err}"),
-                    last_good_seq,
-                    Some(offset as u64),
-                ),
-                last_good_seq,
-            );
-        }
-        match frame.state {
-            FrameState::Wrap => {
-                offset = 0;
-                steps += 1;
-                continue;
-            }
-            FrameState::Committed => {}
-            _ => {
-                return ValidationReport::corrupt(
-                    path.to_path_buf(),
-                    issue(
-                        "corrupt",
-                        "unexpected frame state",
-                        last_good_seq,
-                        Some(offset as u64),
-                    ),
-                    last_good_seq,
-                );
-            }
-        }
-
-        if frame.seq != expected_seq {
-            return ValidationReport::corrupt(
-                path.to_path_buf(),
-                issue(
-                    "corrupt",
-                    "seq mismatch",
-                    last_good_seq,
-                    Some(offset as u64),
-                ),
-                last_good_seq,
-            );
-        }
-
-        let frame_len = match frame::frame_total_len(FRAME_HEADER_LEN, frame.payload_len as usize) {
-            Some(len) => len,
-            None => {
-                return ValidationReport::corrupt(
-                    path.to_path_buf(),
-                    issue(
-                        "corrupt",
-                        "frame length overflow",
-                        last_good_seq,
-                        Some(offset as u64),
-                    ),
-                    last_good_seq,
-                );
-            }
-        };
-        if offset + frame_len > ring_size {
-            return ValidationReport::corrupt(
-                path.to_path_buf(),
-                issue(
-                    "corrupt",
-                    "frame exceeds ring",
-                    last_good_seq,
-                    Some(offset as u64),
-                ),
-                last_good_seq,
-            );
-        }
-        let mut next_off = offset + frame_len;
-        if next_off == ring_size {
-            next_off = 0;
-        }
-
-        last_good_seq = Some(frame.seq);
-
-        if expected_seq == header.newest_seq {
-            if next_off != head {
-                return ValidationReport::corrupt(
-                    path.to_path_buf(),
-                    issue(
-                        "corrupt",
-                        "head offset mismatch",
-                        last_good_seq,
-                        Some(offset as u64),
-                    ),
-                    last_good_seq,
-                );
-            }
-            break;
-        }
-
-        expected_seq += 1;
-        offset = next_off;
-        steps += 1;
-    }
-
-    let mut report = ValidationReport::ok(path.to_path_buf()).set_last_good(last_good_seq);
-    for warning in spot_check_index_warnings(header, mmap) {
-        report.remediation_hints.push(format!("warning: {warning}"));
-    }
-    report
 }
 
 fn issue(code: &str, message: &str, seq: Option<u64>, offset: Option<u64>) -> ValidationIssue {
@@ -342,6 +172,10 @@ fn spot_check_index_warnings(header: PoolHeader, mmap: &[u8]) -> Vec<String> {
             ));
             continue;
         }
+        if ring_size - (offset as usize) < FRAME_HEADER_LEN {
+            warnings.push(format!("index slot {slot} seq {seq} is stale or invalid"));
+            continue;
+        }
         let frame = read_frame_header(mmap, ring_offset, offset as usize);
         match frame {
             Ok(frame) if frame.state == FrameState::Committed && frame.seq == seq => {}
@@ -355,6 +189,7 @@ fn spot_check_index_warnings(header: PoolHeader, mmap: &[u8]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{ValidationStatus, validate_pool_state_report};
+    use crate::core::frame::FRAME_HEADER_LEN;
     use crate::core::pool::{Pool, PoolOptions};
 
     #[test]
@@ -386,5 +221,64 @@ mod tests {
         assert_eq!(report.issues.len(), 1);
         assert_eq!(report.last_good_seq, None);
         assert_eq!(report.path, path);
+    }
+
+    #[test]
+    fn validation_report_rejects_missing_commit_marker() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("missing-marker.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
+        let payload = b"hello";
+        pool.append(payload).expect("append");
+        let header = pool.header_from_mmap().expect("header");
+        let mut bytes = pool.mmap().to_vec();
+        let marker = header.ring_offset as usize + FRAME_HEADER_LEN + payload.len();
+        bytes[marker] = 0;
+
+        let report = validate_pool_state_report(header, &bytes, &path);
+        assert_eq!(report.status, ValidationStatus::Corrupt);
+        assert!(report.issues[0].message.contains("commit marker"));
+    }
+
+    #[test]
+    fn validation_report_rejects_wrong_tail_next_offset() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("wrong-tail-next.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
+        pool.append(b"hello").expect("append");
+        let mut header = pool.header_from_mmap().expect("header");
+        assert_ne!(header.tail_next_off, 0);
+        header.tail_next_off = 0;
+
+        let report = validate_pool_state_report(header, pool.mmap(), &path);
+        assert_eq!(report.status, ValidationStatus::Corrupt);
+        assert!(report.issues[0].message.contains("tail_next mismatch"));
+    }
+
+    #[test]
+    fn validation_report_warns_for_invalid_index_entries() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("bad-index.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(1024 * 1024).with_index_capacity(1))
+            .expect("create");
+        pool.append(b"hello").expect("append");
+        let header = pool.header_from_mmap().expect("header");
+        let mut bytes = pool.mmap().to_vec();
+        let slot_offset = header.index_offset as usize + 8;
+
+        bytes[slot_offset..slot_offset + 8].copy_from_slice(&header.ring_size.to_le_bytes());
+        let outside = validate_pool_state_report(header, &bytes, &path);
+        assert_eq!(outside.status, ValidationStatus::Ok);
+        assert!(outside.remediation_hints[0].contains("points outside ring"));
+
+        bytes[slot_offset..slot_offset + 8].copy_from_slice(&8u64.to_le_bytes());
+        let stale = validate_pool_state_report(header, &bytes, &path);
+        assert_eq!(stale.status, ValidationStatus::Ok);
+        assert!(stale.remediation_hints[0].contains("stale or invalid"));
+
+        bytes[slot_offset..slot_offset + 8].copy_from_slice(&(header.ring_size - 1).to_le_bytes());
+        let near_end = validate_pool_state_report(header, &bytes, &path);
+        assert_eq!(near_end.status, ValidationStatus::Ok);
+        assert!(near_end.remediation_hints[0].contains("stale or invalid"));
     }
 }

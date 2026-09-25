@@ -3,12 +3,13 @@
 //! Role: Keep diagnostic orchestration separate from storage validation.
 
 use super::context::CliContext;
-use super::output::emit_json;
-use super::result::CommandResult;
-use crate::{
-    doctor_report, emit_doctor_human, emit_doctor_human_summary, list_pool_paths, report_json,
-    resolve_poolref,
+use super::doctor_support::{
+    doctor_report, emit_doctor_human, emit_doctor_human_summary, report_json,
 };
+use super::output::emit_json;
+use super::pool_support::list_pool_paths;
+use super::result::CommandResult;
+use super::support::resolve_poolref;
 use plasmite::api::{Error, ErrorKind, LocalClient, PoolRef, ValidationStatus, to_exit_code};
 use serde_json::json;
 

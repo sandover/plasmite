@@ -13,10 +13,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::api::{
     Durability, Error, ErrorKind, LocalClient, PoolApiExt, PoolInfo, PoolOptions, PoolRef,
 };
-use crate::interface_wire::{
-    BoundsWire, ErrorKindWire, MessageWire, PoolAgeWire, PoolInfoWire, PoolMetricsWire,
-    PoolUtilizationWire, error_policy,
-};
+use crate::interface_wire::{ErrorKindWire, MessageWire, error_policy};
+use crate::since::{parse_rfc3339_ns, parse_since_ns as parse_shared_since_ns};
 
 const JSON_RPC_VERSION: &str = "2.0";
 const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
@@ -1495,36 +1493,8 @@ fn pool_name_from_path(path: &Path) -> String {
 }
 
 fn pool_info_json_value(pool_ref: &str, info: &PoolInfo) -> Value {
-    let wire = PoolInfoWire {
-        name: Some(pool_ref.to_string()),
-        path: info.path.display().to_string(),
-        file_size: info.file_size,
-        index_offset: info.index_offset,
-        index_capacity: info.index_capacity,
-        index_size_bytes: info.index_size_bytes,
-        ring_offset: info.ring_offset,
-        ring_size: info.ring_size,
-        bounds: BoundsWire {
-            oldest: info.bounds.oldest_seq,
-            newest: info.bounds.newest_seq,
-        },
-        metrics: info.metrics.as_ref().map(|metrics| PoolMetricsWire {
-            message_count: metrics.message_count,
-            seq_span: metrics.seq_span,
-            utilization: PoolUtilizationWire {
-                used_bytes: metrics.utilization.used_bytes,
-                free_bytes: metrics.utilization.free_bytes,
-                used_percent: (metrics.utilization.used_percent_hundredths as f64) / 100.0,
-            },
-            age: PoolAgeWire {
-                oldest_time: metrics.age.oldest_time.clone(),
-                newest_time: metrics.age.newest_time.clone(),
-                oldest_age_ms: metrics.age.oldest_age_ms,
-                newest_age_ms: metrics.age.newest_age_ms,
-            },
-        }),
-    };
-    serde_json::to_value(wire).expect("pool-info wire data is serializable")
+    serde_json::to_value(crate::interface_wire::pool_info_wire!(pool_ref, info))
+        .expect("pool-info wire data is serializable")
 }
 
 fn message_json_value(message: &crate::api::Message) -> Value {
@@ -1689,38 +1659,9 @@ fn message_has_tags(message_tags: &[String], required_tags: &[String]) -> bool {
 }
 
 fn parse_since_ns(input: &str, now_ns: u64) -> Result<u64, String> {
-    if let Some(duration_ns) = parse_relative_since_ns(input) {
-        return Ok(now_ns.saturating_sub(duration_ns));
-    }
-    parse_rfc3339_ns(input).map_err(|_| {
+    parse_shared_since_ns(input, now_ns).map_err(|_| {
         "since must be RFC 3339 (2026-02-02T23:45:00Z) or relative like 5m".to_string()
     })
-}
-
-fn parse_relative_since_ns(input: &str) -> Option<u64> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let (digits, unit) = trimmed.split_at(trimmed.len().saturating_sub(1));
-    if digits.is_empty() || !digits.chars().all(|ch| ch.is_ascii_digit()) {
-        return None;
-    }
-    let value: u64 = digits.parse().ok()?;
-    let seconds = match unit {
-        "s" | "S" => value,
-        "m" | "M" => value.saturating_mul(60),
-        "h" | "H" => value.saturating_mul(60 * 60),
-        "d" | "D" => value.saturating_mul(60 * 60 * 24),
-        _ => return None,
-    };
-    Some(seconds.saturating_mul(1_000_000_000))
-}
-
-fn parse_rfc3339_ns(value: &str) -> Result<u64, time::error::Parse> {
-    let timestamp =
-        time::OffsetDateTime::parse(value.trim(), &time::format_description::well_known::Rfc3339)?;
-    Ok(timestamp.unix_timestamp_nanos().max(0) as u64)
 }
 
 fn now_unix_ns() -> u64 {

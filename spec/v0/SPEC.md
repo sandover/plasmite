@@ -75,6 +75,11 @@ It keeps only script-level guarantees; signatures, walkthroughs, and examples li
 - Incompatible on-disk changes must bump format version.
 - Older binaries must refuse newer incompatible formats with actionable guidance.
 
+### Time Filters
+
+- `follow --since` accepts RFC 3339 timestamps and relative values such as `5m`.
+- Timestamps before the Unix epoch use zero as their comparison time.
+
 ### Platforms
 
 - The frozen v0.0.1 baseline supports macOS and Linux.

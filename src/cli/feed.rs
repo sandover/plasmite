@@ -3,17 +3,21 @@
 //! Role: Adapt local and remote targets to the existing shared ingestion path.
 
 use super::context::CliContext;
-use super::output::emit_json;
-use super::result::CommandResult;
-use crate::{
-    DEFAULT_POOL_SIZE, ErrorPolicyCli, FeedExactCreateHint, FeedIngestContext, InputMode,
-    PoolTarget, RemoteFeedIngestContext, add_missing_pool_create_hint, add_missing_pool_hint,
-    add_missing_seq_hint, emit_feed_receipt, ensure_pool_dir, feed_exact_create_command_hint,
-    feed_receipt_from_message, feed_receipt_json, ingest_from_stdin, ingest_from_stdin_remote,
-    message_from_frame, missing_feed_data_error, now_ns, open_feed_reader, parse_durability,
-    parse_inline_json, parse_retry_config, parse_size, reject_remote_only_flags_for_local_target,
-    resolve_pool_target, resolve_poolref, resolve_token_value, retry_with_config,
+use super::feed_support::{
+    FeedIngestContext, RemoteFeedIngestContext, ingest_from_stdin, ingest_from_stdin_remote,
+    missing_feed_data_error, open_feed_reader, parse_inline_json,
 };
+use super::output::emit_json;
+use super::output_support::emit_feed_receipt;
+use super::result::CommandResult;
+use super::support::{
+    DEFAULT_POOL_SIZE, FeedExactCreateHint, add_missing_pool_create_hint, add_missing_pool_hint,
+    add_missing_seq_hint, ensure_pool_dir, feed_exact_create_command_hint,
+    feed_receipt_from_message, feed_receipt_json, message_from_frame, now_ns, parse_durability,
+    parse_retry_config, parse_size, reject_remote_only_flags_for_local_target, resolve_pool_target,
+    resolve_poolref, resolve_token_value, retry_with_config,
+};
+use crate::{ErrorPolicyCli, InputMode, PoolTarget};
 use plasmite::api::{
     AppendOptions, Error, ErrorKind, Pool, PoolOptions, PoolRef, RemoteClient, lite3,
 };

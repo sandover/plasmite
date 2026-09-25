@@ -65,6 +65,6 @@ mod tests {
             obj.get("message").and_then(|v| v.as_str()),
             Some("dropped 3 messages")
         );
-        assert!(obj.get("details").and_then(|v| v.as_object()).is_some());
+        assert_eq!(obj["details"]["dropped_count"], Value::from(3));
     }
 }

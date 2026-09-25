@@ -3,17 +3,24 @@
 //! Role: Keep shared streaming configuration, filtering, and cancellation together.
 
 use super::context::CliContext;
+use super::feed_support::{
+    FeedIngestContext, RemoteFeedIngestContext, ingest_from_stdin, ingest_from_stdin_remote,
+    missing_feed_data_error,
+};
+use super::output_support::emit_follow_timeout_human;
 use super::result::CommandResult;
-use crate::jq_filter::compile_filters;
-use crate::{
-    DEFAULT_POOL_SIZE, ErrorPolicyCli, FeedIngestContext, FollowConfig, FollowFormat, InputMode,
-    PoolTarget, RemoteFeedIngestContext, add_missing_pool_create_hint, duplex_requires_me_when_tty,
-    emit_follow_timeout_human, ensure_pool_dir, follow_exact_create_command_hint, follow_pool,
-    follow_remote, follow_should_stop, ingest_from_stdin, ingest_from_stdin_remote,
-    missing_feed_data_error, now_ns, parse_duplex_tty_line, parse_duration, parse_since,
+use super::stream_support::{
+    FollowConfig, duplex_requires_me_when_tty, follow_pool, follow_remote, follow_should_stop,
+    parse_duplex_tty_line,
+};
+use super::support::{
+    DEFAULT_POOL_SIZE, add_missing_pool_create_hint, ensure_pool_dir,
+    follow_exact_create_command_hint, now_ns, parse_duration, parse_since,
     reject_remote_only_flags_for_local_target, resolve_pool_target, resolve_token_value,
     retry_with_config,
 };
+use crate::jq_filter::compile_filters;
+use crate::{ErrorPolicyCli, FollowFormat, InputMode, PoolTarget};
 use plasmite::api::{
     AppendOptions, Durability, Error, ErrorKind, Pool, PoolOptions, PoolRef, RemoteClient, lite3,
 };

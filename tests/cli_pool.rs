@@ -1016,6 +1016,66 @@ fn doctor_reports_corrupt_and_exit_code() {
 }
 
 #[test]
+fn doctor_detects_wrong_tail_next_offset() {
+    use std::io::{Seek, SeekFrom, Write};
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().expect("pool dir"),
+            "pool",
+            "create",
+            "doctorpool",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+    let feed = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().expect("pool dir"),
+            "feed",
+            "doctorpool",
+            "{}",
+        ])
+        .output()
+        .expect("feed");
+    assert!(feed.status.success());
+
+    let pool_path = pool_dir.join("doctorpool.plasmite");
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(pool_path)
+        .expect("open pool");
+    file.seek(SeekFrom::Start(80)).expect("seek tail_next_off");
+    file.write_all(&0u64.to_le_bytes())
+        .expect("damage tail_next_off");
+    file.flush().expect("flush");
+
+    let doctor = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().expect("pool dir"),
+            "doctor",
+            "doctorpool",
+            "--json",
+        ])
+        .output()
+        .expect("doctor");
+    assert_eq!(doctor.status.code(), Some(7));
+    let output = parse_json(std::str::from_utf8(&doctor.stdout).expect("utf8"));
+    assert_eq!(output["reports"][0]["status"], "corrupt");
+    assert!(
+        output["reports"][0]["issues"][0]["message"]
+            .as_str()
+            .expect("issue")
+            .contains("tail_next mismatch")
+    );
+}
+
+#[test]
 fn doctor_all_reports_mixed_ok_and_corrupt() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");

@@ -6,12 +6,18 @@
 pub(crate) mod args;
 mod context;
 mod doctor;
+pub(crate) mod doctor_support;
 mod feed;
+pub(crate) mod feed_support;
 pub(super) mod output;
+pub(crate) mod output_support;
 mod pool;
+pub(crate) mod pool_support;
 mod result;
 mod server;
+pub(crate) mod server_support;
 mod stream;
+pub(crate) mod stream_support;
 pub(crate) mod support;
 mod tap;
 mod utility;

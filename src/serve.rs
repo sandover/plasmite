@@ -2291,32 +2291,6 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::Usage);
     }
 
-    #[test]
-    fn cors_layer_builds_for_valid_origins() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let config = ServeConfig {
-            bind: "127.0.0.1:0".parse().expect("bind"),
-            pool_dir: temp.path().to_path_buf(),
-            token: None,
-            cors_allowed_origins: vec!["https://demo.wratify.ai".to_string()],
-            access_mode: AccessMode::ReadOnly,
-            allow_non_loopback: false,
-            insecure_no_tls: false,
-            token_file_used: false,
-            tls_cert: None,
-            tls_key: None,
-            tls_self_signed: false,
-            tls_self_signed_material: None,
-            tls_fingerprint: None,
-            max_body_bytes: 1024 * 1024,
-            max_tail_timeout_ms: 30_000,
-            max_concurrent_tails: 64,
-        };
-        let origins = normalize_cors_origins(&config.cors_allowed_origins).expect("origins");
-        let layer = build_cors_layer(&origins).expect("cors layer");
-        assert!(layer.is_some());
-    }
-
     #[tokio::test]
     async fn cors_preflight_includes_allow_origin_header() {
         use axum::http::header;

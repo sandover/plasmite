@@ -20,6 +20,7 @@ mod pool_info_json;
 mod pool_paths;
 mod serve;
 mod serve_init;
+mod since;
 
 use cli::args::{
     AccessModeCli, Cli, ColorMode, ErrorPolicyCli, FollowFormat, InputMode, PoolCommand,
@@ -113,16 +114,23 @@ where
         .collect()
 }
 
-pub(crate) use cli::support::*;
+use cli::output_support::{clap_error_hint, clap_error_summary, emit_error, interface_error_kind};
+use cli::support::{add_corrupt_hint, add_internal_hint, add_io_hint};
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Cli, Error, ErrorKind, PoolTarget, RetryConfig, build_serve_startup_lines,
-        duplex_requires_me_when_tty, error_json, error_policy, error_text, format_bytes,
-        format_relative_time, format_seq_range, format_timestamp_human, interface_error_kind,
-        matches_required_tags, parse_duplex_tty_line, parse_duration, parse_size, read_token_file,
-        render_table, resolve_pool_target, retry_with_config, short_display_path,
+    use super::{Cli, Error, ErrorKind, PoolTarget, error_policy, interface_error_kind};
+    use crate::cli::output_support::{error_json, error_text, render_table, short_display_path};
+    use crate::cli::output_support::{
+        format_bytes, format_relative_time, format_seq_range, format_timestamp_human,
+    };
+    use crate::cli::server_support::build_serve_startup_lines;
+    use crate::cli::stream_support::{
+        duplex_requires_me_when_tty, matches_required_tags, parse_duplex_tty_line,
+    };
+    use crate::cli::support::{
+        RetryConfig, parse_duration, parse_size, read_token_file, resolve_pool_target,
+        retry_with_config,
     };
     use clap::CommandFactory;
     use serde_json::json;

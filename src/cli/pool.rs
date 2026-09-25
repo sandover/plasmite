@@ -4,13 +4,17 @@
 
 use super::context::CliContext;
 use super::output::emit_json;
-use super::result::CommandResult;
-use crate::pool_info_json::pool_info_json;
-use crate::{
-    DEFAULT_POOL_SIZE, PoolCommand, add_missing_pool_hint, display_pool_dir_for_humans,
-    emit_pool_create_table, emit_pool_info_pretty, emit_pool_list_table, emit_table,
-    ensure_pool_dir, error_json, list_pools, parse_size, resolve_poolref, short_display_path,
+use super::output_support::display_pool_dir_for_humans;
+use super::output_support::{emit_table, error_json, short_display_path};
+use super::pool_support::{
+    emit_pool_create_table, emit_pool_info_pretty, emit_pool_list_table, list_pools,
 };
+use super::result::CommandResult;
+use super::support::{
+    DEFAULT_POOL_SIZE, add_missing_pool_hint, ensure_pool_dir, parse_size, resolve_poolref,
+};
+use crate::PoolCommand;
+use crate::pool_info_json::pool_info_json;
 use plasmite::api::{Error, ErrorKind, LocalClient, PoolOptions, PoolRef, to_exit_code};
 use serde_json::json;
 use std::io::{self, IsTerminal};

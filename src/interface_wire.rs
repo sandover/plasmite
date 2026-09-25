@@ -58,6 +58,47 @@ pub(crate) struct PoolInfoWire {
     pub(crate) metrics: Option<PoolMetricsWire>,
 }
 
+macro_rules! pool_info_wire {
+    ($pool_ref:expr, $info:expr) => {{
+        let pool_ref = $pool_ref;
+        let info = $info;
+        $crate::interface_wire::PoolInfoWire {
+            name: Some(pool_ref.to_string()),
+            path: info.path.display().to_string(),
+            file_size: info.file_size,
+            index_offset: info.index_offset,
+            index_capacity: info.index_capacity,
+            index_size_bytes: info.index_size_bytes,
+            ring_offset: info.ring_offset,
+            ring_size: info.ring_size,
+            bounds: $crate::interface_wire::BoundsWire {
+                oldest: info.bounds.oldest_seq,
+                newest: info.bounds.newest_seq,
+            },
+            metrics: info
+                .metrics
+                .as_ref()
+                .map(|metrics| $crate::interface_wire::PoolMetricsWire {
+                    message_count: metrics.message_count,
+                    seq_span: metrics.seq_span,
+                    utilization: $crate::interface_wire::PoolUtilizationWire {
+                        used_bytes: metrics.utilization.used_bytes,
+                        free_bytes: metrics.utilization.free_bytes,
+                        used_percent: (metrics.utilization.used_percent_hundredths as f64) / 100.0,
+                    },
+                    age: $crate::interface_wire::PoolAgeWire {
+                        oldest_time: metrics.age.oldest_time.clone(),
+                        newest_time: metrics.age.newest_time.clone(),
+                        oldest_age_ms: metrics.age.oldest_age_ms,
+                        newest_age_ms: metrics.age.newest_age_ms,
+                    },
+                }),
+        }
+    }};
+}
+
+pub(crate) use pool_info_wire;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct PoolMetricsWire {
     pub(crate) message_count: u64,
