@@ -85,16 +85,7 @@ pub struct SelfSignedTlsMaterial {
 }
 
 pub fn prepare_self_signed_tls(bind_ip: IpAddr) -> Result<SelfSignedTlsMaterial, Error> {
-    let mut params = CertificateParams::new(vec!["localhost".to_string()]);
-    params
-        .subject_alt_names
-        .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
-    params
-        .subject_alt_names
-        .push(SanType::IpAddress(IpAddr::V6(Ipv6Addr::LOCALHOST)));
-    if !bind_ip.is_unspecified() {
-        params.subject_alt_names.push(SanType::IpAddress(bind_ip));
-    }
+    let params = self_signed_cert_params(bind_ip);
     let cert = Certificate::from_params(params).map_err(|err| {
         Error::new(ErrorKind::Internal)
             .with_message("failed to generate self-signed certificate")
@@ -112,6 +103,25 @@ pub fn prepare_self_signed_tls(bind_ip: IpAddr) -> Result<SelfSignedTlsMaterial,
         key_der,
         fingerprint,
     })
+}
+
+pub(crate) fn self_signed_cert_params(identity_ip: IpAddr) -> CertificateParams {
+    let mut params = CertificateParams::new(vec!["localhost".to_string()]);
+    params
+        .subject_alt_names
+        .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+    params
+        .subject_alt_names
+        .push(SanType::IpAddress(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+    if !identity_ip.is_unspecified()
+        && identity_ip != IpAddr::V4(Ipv4Addr::LOCALHOST)
+        && identity_ip != IpAddr::V6(Ipv6Addr::LOCALHOST)
+    {
+        params
+            .subject_alt_names
+            .push(SanType::IpAddress(identity_ip));
+    }
+    params
 }
 
 pub fn tls_fingerprint_from_cert_path(cert_path: &Path) -> Result<String, Error> {

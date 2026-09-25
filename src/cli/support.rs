@@ -12,6 +12,7 @@ use plasmite::api::Error;
 use plasmite::api::ErrorKind;
 use plasmite::api::FrameRef;
 use plasmite::api::Lite3DocRef;
+use plasmite::api::RemoteClient;
 use plasmite::api::lite3;
 use serde_json::Value;
 use serde_json::json;
@@ -412,6 +413,28 @@ pub(crate) fn resolve_token_value(
         return read_token_file(&path).map(Some);
     }
     Ok(token)
+}
+
+pub(crate) fn remote_client(
+    base_url: String,
+    token: Option<String>,
+    token_file: Option<PathBuf>,
+    tls_ca: Option<PathBuf>,
+    tls_skip_verify: bool,
+) -> Result<RemoteClient, Error> {
+    let token_value = resolve_token_value(token, token_file)?;
+    let mut client = RemoteClient::new(base_url)?;
+    if let Some(token_value) = token_value {
+        client = client.with_token(token_value);
+    }
+    if let Some(path) = tls_ca {
+        client = client.with_tls_ca_file(path)?;
+    }
+    if tls_skip_verify {
+        eprintln!("warning: --tls-skip-verify disables TLS certificate verification (unsafe)");
+        client = client.with_tls_skip_verify();
+    }
+    Ok(client)
 }
 
 pub(crate) fn reject_remote_only_flags_for_local_target(

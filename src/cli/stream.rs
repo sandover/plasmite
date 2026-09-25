@@ -16,15 +16,15 @@ use super::stream_support::{
 use super::support::{
     DEFAULT_POOL_SIZE, add_missing_pool_create_hint, ensure_pool_dir,
     follow_exact_create_command_hint, now_ns, parse_duration, parse_since,
-    reject_remote_only_flags_for_local_target, resolve_pool_target, resolve_token_value,
+    reject_remote_only_flags_for_local_target, remote_client, resolve_pool_target,
     retry_with_config,
 };
 use crate::jq_filter::compile_filters;
 use crate::{ErrorPolicyCli, FollowFormat, InputMode, PoolTarget};
 use plasmite::api::{
-    AppendOptions, Durability, Error, ErrorKind, Pool, PoolOptions, PoolRef, RemoteClient, lite3,
+    AppendOptions, Durability, Error, ErrorKind, Pool, PoolOptions, PoolRef, lite3,
 };
-use std::io::{self, IsTerminal};
+use std::io::{self, BufRead, IsTerminal};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -60,6 +60,10 @@ pub(super) struct DuplexArgs {
     pub(super) format: Option<FollowFormat>,
     pub(super) since: Option<String>,
     pub(super) echo_self: bool,
+    pub(super) token: Option<String>,
+    pub(super) token_file: Option<PathBuf>,
+    pub(super) tls_ca: Option<PathBuf>,
+    pub(super) tls_skip_verify: bool,
 }
 
 pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandResult, Error> {
@@ -178,20 +182,13 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
                         "Create remote pools with server-side tooling, then rerun follow.",
                     ));
             }
-            let token_value = resolve_token_value(args.token, args.token_file)?;
-            let mut client = RemoteClient::new(base_url)?;
-            if let Some(token_value) = token_value {
-                client = client.with_token(token_value);
-            }
-            if let Some(path) = args.tls_ca {
-                client = client.with_tls_ca_file(path)?;
-            }
-            if args.tls_skip_verify {
-                eprintln!(
-                    "warning: --tls-skip-verify disables TLS certificate verification (unsafe)"
-                );
-                client = client.with_tls_skip_verify();
-            }
+            let client = remote_client(
+                base_url,
+                args.token,
+                args.token_file,
+                args.tls_ca,
+                args.tls_skip_verify,
+            )?;
             let outcome = follow_remote(&client, &pool, &cfg)?;
             if outcome.exit_code == 124 {
                 if let Some(timeout_input) = timeout_input {
@@ -277,6 +274,13 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
     let target = resolve_pool_target(&args.pool, context.pool_dir())?;
     match target {
         PoolTarget::LocalPath(path) => {
+            reject_remote_only_flags_for_local_target(
+                "duplex",
+                args.token.as_deref(),
+                args.token_file.as_deref(),
+                args.tls_ca.as_deref(),
+                args.tls_skip_verify,
+            )?;
             let follow_pool_handle = match Pool::open(&path) {
                 Ok(pool_handle) => pool_handle,
                 Err(err) if args.create && err.kind() == ErrorKind::NotFound => {
@@ -318,50 +322,25 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
             let color_mode = context.color_mode();
             let _ = std::thread::spawn(move || {
                 if stdin_is_terminal {
-                    let mut reader = std::io::BufReader::new(io::stdin());
-                    loop {
-                        if follow_should_stop(Some(&stop_for_send)) {
-                            break;
-                        }
-                        let mut line = String::new();
-                        let n = match std::io::BufRead::read_line(&mut reader, &mut line) {
-                            Ok(n) => n,
-                            Err(err) => {
-                                let err = Error::new(ErrorKind::Io)
-                                    .with_message("failed to read line from stdin")
-                                    .with_source(err);
-                                let _ = send_tx.send((DuplexSide::Send, Err(err)));
-                                return;
-                            }
-                        };
-                        if n == 0 || follow_should_stop(Some(&stop_for_send)) {
-                            break;
-                        }
-                        let Some(value) = parse_duplex_tty_line(
-                            me_for_send.as_ref().expect("me required"),
-                            &line,
-                        ) else {
-                            continue;
-                        };
-                        let payload = match lite3::encode_message(&Vec::<String>::new(), &value) {
-                            Ok(payload) => payload,
-                            Err(err) => {
-                                let _ = send_tx.send((DuplexSide::Send, Err(err)));
-                                return;
-                            }
-                        };
-                        if let Err(err) = retry_with_config(None, || {
-                            let timestamp_ns = now_ns()?;
-                            let options = AppendOptions::new(timestamp_ns, Durability::Fast);
-                            send_pool
-                                .append_with_options(payload.as_slice(), options)
-                                .map(|_| ())
-                        }) {
-                            let _ = send_tx.send((DuplexSide::Send, Err(err)));
-                            return;
-                        }
-                    }
-                    let _ = send_tx.send((DuplexSide::Send, Ok(CommandResult::ok())));
+                    let outcome = send_tty_lines(
+                        me_for_send.as_deref().expect("me required"),
+                        &stop_for_send,
+                        |value| {
+                            let payload = match lite3::encode_message(&Vec::<String>::new(), &value)
+                            {
+                                Ok(payload) => payload,
+                                Err(err) => return Err(err),
+                            };
+                            retry_with_config(None, || {
+                                let timestamp_ns = now_ns()?;
+                                let options = AppendOptions::new(timestamp_ns, Durability::Fast);
+                                send_pool
+                                    .append_with_options(payload.as_slice(), options)
+                                    .map(|_| ())
+                            })
+                        },
+                    );
+                    let _ = send_tx.send((DuplexSide::Send, outcome));
                 } else {
                     let pool_path_label = path.display().to_string();
                     let outcome = ingest_from_stdin(
@@ -402,7 +381,13 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                         "Use --tail N for remote refs, or run --since against a local pool path.",
                     ));
             }
-            let client = RemoteClient::new(base_url)?;
+            let client = remote_client(
+                base_url,
+                args.token,
+                args.token_file,
+                args.tls_ca,
+                args.tls_skip_verify,
+            )?;
             let remote_pool = client.open_pool(&PoolRef::name(name.clone()))?;
             let follow_tx = event_tx.clone();
             let follow_cfg = cfg.clone();
@@ -423,38 +408,16 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
             let color_mode = context.color_mode();
             let _ = std::thread::spawn(move || {
                 if stdin_is_terminal {
-                    let mut reader = std::io::BufReader::new(io::stdin());
-                    loop {
-                        if follow_should_stop(Some(&stop_for_send)) {
-                            break;
-                        }
-                        let mut line = String::new();
-                        let n = match std::io::BufRead::read_line(&mut reader, &mut line) {
-                            Ok(n) => n,
-                            Err(err) => {
-                                let err = Error::new(ErrorKind::Io)
-                                    .with_message("failed to read line from stdin")
-                                    .with_source(err);
-                                let _ = send_tx.send((DuplexSide::Send, Err(err)));
-                                return;
-                            }
-                        };
-                        if n == 0 || follow_should_stop(Some(&stop_for_send)) {
-                            break;
-                        }
-                        let Some(value) = parse_duplex_tty_line(
-                            me_for_send.as_ref().expect("me required"),
-                            &line,
-                        ) else {
-                            continue;
-                        };
-                        if let Err(err) = remote_pool.append_json_now(&value, &[], Durability::Fast)
-                        {
-                            let _ = send_tx.send((DuplexSide::Send, Err(err)));
-                            return;
-                        }
-                    }
-                    let _ = send_tx.send((DuplexSide::Send, Ok(CommandResult::ok())));
+                    let outcome = send_tty_lines(
+                        me_for_send.as_deref().expect("me required"),
+                        &stop_for_send,
+                        |value| {
+                            remote_pool
+                                .append_json_now(&value, &[], Durability::Fast)
+                                .map(|_| ())
+                        },
+                    );
+                    let _ = send_tx.send((DuplexSide::Send, outcome));
                 } else {
                     let pool_path_label = format!("{}/{}", client.base_url(), name);
                     let outcome = ingest_from_stdin_remote(
@@ -486,6 +449,32 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
         }
         Err(_) => Ok(CommandResult::ok()),
     }
+}
+
+fn send_tty_lines(
+    me: &str,
+    stop: &Arc<AtomicBool>,
+    mut append: impl FnMut(serde_json::Value) -> Result<(), Error>,
+) -> Result<CommandResult, Error> {
+    let mut reader = io::BufReader::new(io::stdin());
+    loop {
+        if follow_should_stop(Some(stop)) {
+            break;
+        }
+        let mut line = String::new();
+        let n = reader.read_line(&mut line).map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_message("failed to read line from stdin")
+                .with_source(err)
+        })?;
+        if n == 0 || follow_should_stop(Some(stop)) {
+            break;
+        }
+        if let Some(value) = parse_duplex_tty_line(me, &line) {
+            append(value)?;
+        }
+    }
+    Ok(CommandResult::ok())
 }
 
 fn ingest_outcome(

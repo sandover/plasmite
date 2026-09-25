@@ -33,19 +33,23 @@ Non-loopback + write access requires both `--token-file` and TLS (unless `--inse
 Generate artifacts once, then run the server with those artifacts:
 
 ```bash
+# Replace this documentation IP with the server's reachable interface address.
+SERVER_IP=192.0.2.10
+
 # 1) Generate token + cert + key + client command scaffolding
-plasmite serve init --bind 0.0.0.0:9700 --output-dir ./.plasmite-serve
+plasmite serve init --bind "$SERVER_IP:9700" --output-dir ./.plasmite-serve
+plasmite pool create events
 
 # 2) Start server with generated artifacts
 plasmite serve \
-  --bind 0.0.0.0:9700 \
+  --bind "$SERVER_IP:9700" \
   --allow-non-loopback \
   --token-file ./.plasmite-serve/plasmite-auth-token.txt \
   --tls-cert ./.plasmite-serve/plasmite-tls-cert.pem \
   --tls-key ./.plasmite-serve/plasmite-tls-key.pem
 ```
 
-`serve init`, `serve check`, and secure startup banners display:
+Use that same IP in client URLs. `serve init`, `serve check`, and secure startup banners display:
 
 - `tls_fingerprint: SHA256:...`
 
@@ -56,14 +60,16 @@ Use that fingerprint for out-of-band trust verification before sharing client co
 Prefer native client commands over raw curl:
 
 ```bash
+SERVER_IP=192.0.2.10 # use the same address as above
+
 # Feed with bearer token file + trusted cert
-plasmite feed https://server:9700/events \
+plasmite feed "https://$SERVER_IP:9700/events" \
   --token-file ./.plasmite-serve/plasmite-auth-token.txt \
   --tls-ca ./.plasmite-serve/plasmite-tls-cert.pem \
   '{"sensor":"temp","value":23.5}'
 
 # Follow with same trust/auth material
-plasmite follow https://server:9700/events \
+plasmite follow "https://$SERVER_IP:9700/events" \
   --token-file ./.plasmite-serve/plasmite-auth-token.txt \
   --tls-ca ./.plasmite-serve/plasmite-tls-cert.pem \
   --tail 20
@@ -72,7 +78,9 @@ plasmite follow https://server:9700/events \
 `--tls-skip-verify` exists for development-only scenarios where full trust bootstrapping is not available yet:
 
 ```bash
-plasmite follow https://server:9700/events --tail 20 --tls-skip-verify
+SERVER_IP=192.0.2.10 # use the same address as above
+plasmite follow "https://$SERVER_IP:9700/events" --tail 20 \
+  --token-file ./.plasmite-serve/plasmite-auth-token.txt --tls-skip-verify
 ```
 
 Treat `--tls-skip-verify` as unsafe and temporary.

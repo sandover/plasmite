@@ -532,7 +532,7 @@ Notes:
 - Remote refs do not support `--create` or `--since` (use `--tail` for remote)."#,
         after_help = r#"INPUT AND EXIT
   - Terminal input requires --me and sends one chat message per non-empty line
-  - Piped input is a JSON stream; remote refs expose no auth/TLS options
+  - Piped input is a JSON stream; remote refs accept the same auth/TLS flags as follow
   - Exits 124 on timeout"#
     )]
     Duplex {
@@ -573,6 +573,34 @@ Notes:
         since: Option<String>,
         #[arg(long, help = "Also emit your own messages in the receive stream")]
         echo_self: bool,
+        #[arg(
+            long,
+            help = "Bearer token for remote refs only (dev-only; prefer --token-file)",
+            help_heading = "Remote auth/TLS"
+        )]
+        token: Option<String>,
+        #[arg(
+            long,
+            value_name = "PATH",
+            help = "Read bearer token from file for remote refs only",
+            value_hint = ValueHint::FilePath,
+            help_heading = "Remote auth/TLS"
+        )]
+        token_file: Option<PathBuf>,
+        #[arg(
+            long = "tls-ca",
+            value_name = "PATH",
+            help = "Trust this PEM CA/certificate for remote refs only",
+            value_hint = ValueHint::FilePath,
+            help_heading = "Remote auth/TLS"
+        )]
+        tls_ca: Option<PathBuf>,
+        #[arg(
+            long = "tls-skip-verify",
+            help = "Disable TLS verification for remote refs only (unsafe; dev-only)",
+            help_heading = "Remote auth/TLS"
+        )]
+        tls_skip_verify: bool,
     },
     #[command(
         arg_required_else_help = true,
@@ -772,8 +800,8 @@ NOTES
 pub(crate) struct ServeInitArgs {
     #[arg(
         long,
-        default_value = "0.0.0.0:9700",
-        help = "Bind address used in printed next commands"
+        default_value = "127.0.0.1:9700",
+        help = "Concrete server IP and port used for TLS and printed client commands"
     )]
     pub(crate) bind: String,
     #[arg(

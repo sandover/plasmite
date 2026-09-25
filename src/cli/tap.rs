@@ -14,6 +14,8 @@ use std::io::{self, IsTerminal, Read};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+const TAP_EVENT_QUEUE_CAPACITY: usize = 64;
+
 pub(super) struct TapArgs {
     pub(super) pool: String,
     pub(super) create: bool,
@@ -100,7 +102,7 @@ pub(super) fn run(args: TapArgs, context: &CliContext) -> Result<CommandResult, 
     }
 
     let start_time = Instant::now();
-    let (event_tx, event_rx) = mpsc::channel();
+    let (event_tx, event_rx) = mpsc::sync_channel(TAP_EVENT_QUEUE_CAPACITY);
     let stdout_reader = tap_spawn_reader(
         child_stdout,
         TapStream::Stdout,
@@ -111,10 +113,17 @@ pub(super) fn run(args: TapArgs, context: &CliContext) -> Result<CommandResult, 
 
     let mut reader_error: Option<Error> = None;
     let mut child_status = None;
+    let mut event_channel_closed = false;
     let mut line_count: u64 = 0;
 
-    while child_status.is_none() {
-        match event_rx.recv_timeout(Duration::from_millis(25)) {
+    while child_status.is_none() || !event_channel_closed {
+        let event = if event_channel_closed {
+            std::thread::sleep(Duration::from_millis(25));
+            Err(mpsc::RecvTimeoutError::Timeout)
+        } else {
+            event_rx.recv_timeout(Duration::from_millis(25))
+        };
+        match event {
             Ok(TapEvent::Line { stream, raw_line }) => {
                 line_count = line_count.saturating_add(1);
                 if let Err(err) = tap_append_message(
@@ -127,6 +136,7 @@ pub(super) fn run(args: TapArgs, context: &CliContext) -> Result<CommandResult, 
                         "line": trim_tap_line_endings(&raw_line),
                     }),
                 ) {
+                    drop(event_rx);
                     tap_terminate_child(&mut child);
                     return Err(err);
                 }
@@ -137,13 +147,15 @@ pub(super) fn run(args: TapArgs, context: &CliContext) -> Result<CommandResult, 
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => event_channel_closed = true,
         }
-        child_status = child.try_wait().map_err(|err| {
-            Error::new(ErrorKind::Io)
-                .with_message("failed waiting for wrapped command")
-                .with_source(err)
-        })?;
+        if child_status.is_none() {
+            child_status = child.try_wait().map_err(|err| {
+                Error::new(ErrorKind::Io)
+                    .with_message("failed waiting for wrapped command")
+                    .with_source(err)
+            })?;
+        }
     }
 
     let child_status = child_status.expect("status set once loop exits");
@@ -156,28 +168,6 @@ pub(super) fn run(args: TapArgs, context: &CliContext) -> Result<CommandResult, 
             Some(Error::new(ErrorKind::Internal).with_message("tap stderr reader panicked"));
     }
 
-    while let Ok(event) = event_rx.try_recv() {
-        match event {
-            TapEvent::Line { stream, raw_line } => {
-                line_count = line_count.saturating_add(1);
-                tap_append_message(
-                    &mut pool_handle,
-                    durability,
-                    &args.tags,
-                    &json!({
-                        "kind": "line",
-                        "stream": stream.as_str(),
-                        "line": trim_tap_line_endings(&raw_line),
-                    }),
-                )?;
-            }
-            TapEvent::ReaderError(err) => {
-                if reader_error.is_none() {
-                    reader_error = Some(err);
-                }
-            }
-        }
-    }
     if let Some(err) = reader_error {
         return Err(err);
     }
@@ -271,7 +261,7 @@ fn tap_spawn_reader<R>(
     reader: R,
     stream: TapStream,
     passthrough: bool,
-    tx: mpsc::Sender<TapEvent>,
+    tx: mpsc::SyncSender<TapEvent>,
 ) -> std::thread::JoinHandle<()>
 where
     R: Read + Send + 'static,

@@ -163,6 +163,10 @@ mod tests {
                     "since",
                     "tail",
                     "timeout",
+                    "tls-ca",
+                    "tls-skip-verify",
+                    "token",
+                    "token-file",
                 ],
             ),
             (

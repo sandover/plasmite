@@ -118,7 +118,7 @@ fn short_help_exposes_material_command_constraints() {
             &["duplex", "-h"],
             &[
                 "Terminal input requires --me",
-                "remote refs expose no auth/TLS",
+                "remote refs accept the same auth/TLS flags as follow",
                 "Exits 124",
             ],
         ),

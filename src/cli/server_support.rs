@@ -10,9 +10,7 @@ use plasmite::api::ErrorKind;
 use serde_json::json;
 use std::io;
 use std::io::IsTerminal;
-use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::net::UdpSocket;
 use std::path::Path;
 
 use super::output_support::display_handoff_path_from_path;
@@ -29,14 +27,9 @@ pub(crate) fn emit_serve_init_human(result: &serve_init::ServeInitResult) {
     let token_file = display_handoff_path_from_path(token_path);
     let tls_cert = display_handoff_path_from_path(cert_path);
     let tls_key = display_handoff_path_from_path(key_path);
-    let bind = extract_bind_from_server_commands(&result.server_commands)
-        .unwrap_or_else(|| "0.0.0.0:9700".to_string());
-    let remote_host = detect_serve_init_remote_host(&bind);
-    let remote_url_host = url_host_component(&remote_host);
-    let port = bind
-        .parse::<SocketAddr>()
-        .map(|addr| addr.port())
-        .unwrap_or(9700);
+    let bind = result.bind;
+    let client_host = url_host_component(&bind.ip().to_string());
+    let port = bind.port();
     let (headline, files_heading) = if result.overwrote_existing {
         ("Secure serving re-initialized.", "Files overwritten:")
     } else {
@@ -44,7 +37,15 @@ pub(crate) fn emit_serve_init_human(result: &serve_init::ServeInitResult) {
     };
 
     println!("{headline}");
-    println!("Clients on your network can now read and write your pools over HTTPS.");
+    if !bind.ip().is_loopback() {
+        println!(
+            "Clients on your network can read and write your pools over HTTPS after you start the server."
+        );
+    } else {
+        println!(
+            "These artifacts support local HTTPS. For network access, re-run init with --bind set to your host IP."
+        );
+    }
     println!();
     if let Some(output_dir) = output_dir {
         println!("  Output directory: {output_dir}");
@@ -62,62 +63,40 @@ pub(crate) fn emit_serve_init_human(result: &serve_init::ServeInitResult) {
     println!();
     println!("    pls serve \\");
     println!("      --bind {bind} \\");
-    println!("      --allow-non-loopback \\");
+    if !bind.ip().is_loopback() {
+        println!("      --allow-non-loopback \\");
+    }
     println!("      --token-file {token_file} \\");
     println!("      --tls-cert {tls_cert} \\");
     println!("      --tls-key {tls_key}");
     println!();
-    println!("  From another machine, read and write pools by URL:");
+    if !bind.ip().is_loopback() {
+        println!("  From another machine, read and write pools by URL:");
+    } else {
+        println!("  On this machine, read and write pools by URL:");
+    }
     println!();
-    println!("    pls feed https://{remote_url_host}:{port}/demo \\");
+    println!("    pls feed https://{client_host}:{port}/demo \\");
     println!("      --token-file {token_file} \\");
     println!("      --tls-ca {tls_cert} \\");
     println!("      '{{\"hello\":\"world\"}}'");
     println!();
-    println!("    pls follow https://{remote_url_host}:{port}/demo \\");
+    println!("    pls follow https://{client_host}:{port}/demo \\");
     println!("      --token-file {token_file} \\");
     println!("      --tls-ca {tls_cert} --tail 10");
     println!();
     println!("  MCP endpoint for agent clients:");
-    println!("    https://{remote_url_host}:{port}/mcp");
+    println!("    https://{client_host}:{port}/mcp");
     println!();
     println!("  Or with curl:");
     println!("    TOKEN=$(cat {token_file})");
     println!("    curl -k -H \"Authorization: Bearer $TOKEN\" \\");
-    println!("      https://{remote_url_host}:{port}/v0/pools/demo/tail?timeout_ms=5000");
+    println!("      https://{client_host}:{port}/v0/pools/demo/tail?timeout_ms=5000");
     println!();
     println!("  The token is in the file, not printed here. Share the token");
     println!("  and fingerprint with collaborators out-of-band (e.g. paste");
     println!("  in a DM). Clients use the fingerprint to verify the cert");
     println!("  on first connect.");
-}
-
-pub(crate) fn detect_serve_init_remote_host(bind: &str) -> String {
-    if let Ok(addr) = bind.parse::<SocketAddr>() {
-        let ip = addr.ip();
-        if !ip.is_unspecified() && !ip.is_loopback() {
-            return ip.to_string();
-        }
-    }
-    detect_primary_non_loopback_ip()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|| "YOUR-HOST".to_string())
-}
-
-pub(crate) fn detect_primary_non_loopback_ip() -> Option<IpAddr> {
-    detect_non_loopback_ip_via("0.0.0.0:0", "8.8.8.8:53")
-        .or_else(|| detect_non_loopback_ip_via("[::]:0", "[2001:4860:4860::8888]:53"))
-}
-
-pub(crate) fn detect_non_loopback_ip_via(bind_addr: &str, probe_addr: &str) -> Option<IpAddr> {
-    let socket = UdpSocket::bind(bind_addr).ok()?;
-    socket.connect(probe_addr).ok()?;
-    let ip = socket.local_addr().ok()?.ip();
-    if ip.is_loopback() || ip.is_unspecified() {
-        None
-    } else {
-        Some(ip)
-    }
 }
 
 pub(crate) fn url_host_component(host: &str) -> String {
@@ -160,15 +139,6 @@ pub(crate) fn display_artifact_name(path: &Path) -> String {
         .and_then(|name| name.to_str())
         .map(|name| name.to_string())
         .unwrap_or_else(|| display_handoff_path_from_path(path))
-}
-
-pub(crate) fn extract_bind_from_server_commands(commands: &[String]) -> Option<String> {
-    let command = commands.first()?;
-    let tokens = command.split_whitespace().collect::<Vec<_>>();
-    tokens
-        .windows(2)
-        .find(|window| window[0] == "--bind")
-        .map(|window| window[1].to_string())
 }
 
 pub(crate) fn emit_serve_startup_guidance(config: &serve::ServeConfig) {

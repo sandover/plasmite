@@ -224,7 +224,7 @@ fn serve_init_writes_artifacts_and_next_commands() {
             "--output-dir",
             out_dir.to_str().unwrap(),
             "--bind",
-            "0.0.0.0:9700",
+            "192.0.2.10:9700",
         ])
         .output()
         .expect("serve init");
@@ -265,9 +265,8 @@ fn serve_init_writes_artifacts_and_next_commands() {
         .and_then(|v| v.as_array())
         .expect("server_commands");
     assert!(server_commands.iter().any(|v| {
-        v.as_str()
-            .unwrap_or("")
-            .contains("plasmite serve --bind 0.0.0.0:9700 --allow-non-loopback")
+        let command = v.as_str().unwrap_or("");
+        command.contains("plasmite serve --bind 192.0.2.10:9700 --allow-non-loopback")
     }));
     let client_commands = payload
         .get("init")
@@ -286,6 +285,90 @@ fn serve_init_writes_artifacts_and_next_commands() {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     assert!(tls_fingerprint.starts_with("SHA256:"));
+}
+
+#[test]
+fn serve_init_rejects_wildcard_without_creating_artifacts() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let out_dir = temp.path().join("serve-init");
+    let output = cmd()
+        .args([
+            "serve",
+            "init",
+            "--output-dir",
+            out_dir.to_str().unwrap(),
+            "--bind",
+            "0.0.0.0:9700",
+        ])
+        .output()
+        .expect("serve init");
+    assert_eq!(output.status.code(), Some(2));
+    let err = parse_error_json(&output.stderr);
+    assert_eq!(err["error"]["kind"], "Usage");
+    assert!(
+        err["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("concrete bind IP")
+    );
+    assert!(!out_dir.exists());
+}
+
+#[test]
+fn serve_init_client_url_matches_generated_certificate() {
+    use rustls::client::WebPkiServerVerifier;
+    use rustls::client::danger::ServerCertVerifier;
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let out_dir = temp.path().join("serve-init");
+    let output = cmd()
+        .args([
+            "serve",
+            "init",
+            "--output-dir",
+            out_dir.to_str().unwrap(),
+            "--bind",
+            "192.0.2.10:9700",
+        ])
+        .output()
+        .expect("serve init");
+    assert!(output.status.success());
+    let payload = parse_json(std::str::from_utf8(&output.stdout).expect("utf8"));
+    let init = payload.get("init").expect("init");
+    let client_commands = init
+        .get("client_commands")
+        .and_then(|v| v.as_array())
+        .expect("client commands");
+    assert!(client_commands.iter().all(|command| {
+        command
+            .as_str()
+            .unwrap_or("")
+            .contains("https://192.0.2.10:9700/demo")
+    }));
+
+    let cert_path = init
+        .get("artifact_paths")
+        .and_then(|v| v.get("tls_cert"))
+        .and_then(|v| v.as_str())
+        .expect("certificate path");
+    let cert_bytes = std::fs::read(cert_path).expect("certificate");
+    let cert = CertificateDer::pem_slice_iter(&cert_bytes)
+        .next()
+        .expect("PEM certificate")
+        .expect("DER certificate");
+    let mut roots = rustls::RootCertStore::empty();
+    roots
+        .add(cert.clone())
+        .expect("trust generated certificate");
+    let verifier = WebPkiServerVerifier::builder(roots.into())
+        .build()
+        .expect("server verifier");
+    let server_name = ServerName::try_from("192.0.2.10").expect("server name");
+    verifier
+        .verify_server_cert(&cert, &[], &server_name, &[], UnixTime::now())
+        .expect("advertised IP is in certificate");
 }
 
 #[test]
@@ -332,7 +415,7 @@ fn serve_init_tty_reports_created_and_overwritten() {
         "--output-dir",
         out_dir.to_str().unwrap(),
         "--bind",
-        "0.0.0.0:9700",
+        "192.0.2.10:9700",
     ]);
     assert!(first.status.success());
     let first_text = sanitize_tty_text(&first.stdout);
@@ -340,7 +423,7 @@ fn serve_init_tty_reports_created_and_overwritten() {
     assert!(first_text.contains("Output directory:"));
     assert!(first_text.contains("Files created:"));
     assert!(first_text.contains("    pls serve \\"));
-    assert!(first_text.contains("      --bind 0.0.0.0:9700 \\"));
+    assert!(first_text.contains("      --bind 192.0.2.10:9700 \\"));
     assert!(first_text.contains("      --allow-non-loopback \\"));
     assert!(first_text.contains("      --token-file "));
     assert!(first_text.contains("      --tls-cert "));
@@ -365,7 +448,7 @@ fn serve_init_tty_reports_created_and_overwritten() {
         "--output-dir",
         out_dir.to_str().unwrap(),
         "--bind",
-        "0.0.0.0:9700",
+        "192.0.2.10:9700",
         "--force",
     ]);
     assert!(second.status.success());

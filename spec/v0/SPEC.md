@@ -105,7 +105,9 @@ Current remote shorthand constraints (documented, non-frozen):
 - URL refs are explicit remote opt-in in core commands that accept pool refs.
 - `tap` currently accepts local pool refs only; URL refs are rejected with an actionable usage hint.
 - `duplex` remote refs reject `--create` and `--since`; use `--tail` for remote history.
+- `duplex` accepts the same remote token and TLS flags as `feed` and `follow`.
 - `follow` remote refs reject `--since` and `--replay`; use `--tail` for remote history.
+- `serve init` defaults to loopback and requires a concrete bind IP. It rejects wildcard binds because the generated certificate and client URLs use that IP as the server identity.
 
 ## References
 

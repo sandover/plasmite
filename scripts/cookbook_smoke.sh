@@ -203,23 +203,58 @@ produce_out="${WORK_DIR}/produce_consume.jsonl"
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" follow work --tail 1 --one --jsonl >"${produce_out}"
 assert_contains "${produce_out}" '"task":"resize"' "Produce & Consume"
 
-# CI Gate
+# CI Gate: create a run-specific pool, start the waiter, then publish its result.
 ci_out="${WORK_DIR}/ci_gate_follow.jsonl"
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" pool create ci >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed ci '{"status":"green","commit":"a1b2c3","suite":"unit"}' >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow ci --where '.data.status == "green"' --tail 1 --one --jsonl >"${ci_out}"
-assert_contains "${ci_out}" '"status":"green"' "CI Gate"
+ci_commit="a1b2c3d4e5f6"
+ci_run_id="smoke-1"
+ci_suite="unit"
+ci_pool="ci-${ci_commit:0:12}-${ci_run_id}-${ci_suite}"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" pool create "${ci_pool}" >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow "${ci_pool}" \
+  --where ".data.commit == \"${ci_commit}\" and .data.run_id == \"${ci_run_id}\" and .data.suite == \"${ci_suite}\"" \
+  --tail 1 --timeout 5s --one --jsonl >"${ci_out}" &
+ci_follow_pid=$!
+sleep 0.05
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed "${ci_pool}" \
+  "{\"status\":\"passed\",\"commit\":\"${ci_commit}\",\"run_id\":\"${ci_run_id}\",\"suite\":\"${ci_suite}\"}" >/dev/null
+wait "${ci_follow_pid}"
+assert_contains "${ci_out}" '"status":"passed"' "CI Gate"
+assert_jq_true "${ci_out}" '.data.status == "passed"' "CI Gate"
+ci_failed_pool="ci-${ci_commit:0:12}-smoke-failed-${ci_suite}"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" pool create "${ci_failed_pool}" >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed "${ci_failed_pool}" \
+  "{\"status\":\"failed\",\"commit\":\"${ci_commit}\",\"run_id\":\"smoke-failed\",\"suite\":\"${ci_suite}\"}" >/dev/null
+ci_failed_out="${WORK_DIR}/ci_gate_failed.jsonl"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow "${ci_failed_pool}" \
+  --where ".data.commit == \"${ci_commit}\" and .data.run_id == \"smoke-failed\" and .data.suite == \"${ci_suite}\"" \
+  --tail 1 --timeout 5s --one --jsonl >"${ci_failed_out}"
+if jq -e '.data.status == "passed"' "${ci_failed_out}" >/dev/null; then
+  fail "CI Gate: a failed run passed the deploy gate"
+fi
 
 # Live Build Progress
 build_out="${WORK_DIR}/live_build_follow.jsonl"
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" pool create build >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build '{"step":"compile","pct":0}' >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build '{"step":"compile","pct":100}' >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build '{"step":"test","pct":0}' >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build '{"step":"test","pct":100}' >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build '{"step":"finished","ok":true}' --tag done >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow build --tag done --tail 1 --one --jsonl >"${build_out}"
+build_id="smoke-1"
+build_pool="build-${build_id}"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" pool create "${build_pool}" >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow "${build_pool}" --tag done \
+  --where ".data.build_id == \"${build_id}\"" --tail 1 --timeout 5s --one --jsonl >"${build_out}" &
+build_follow_pid=$!
+sleep 0.05
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed "${build_pool}" \
+  "{\"build_id\":\"${build_id}\",\"step\":\"compile\",\"pct\":0}" >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed "${build_pool}" \
+  "{\"build_id\":\"${build_id}\",\"step\":\"compile\",\"pct\":100}" >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed "${build_pool}" \
+  "{\"build_id\":\"${build_id}\",\"step\":\"test\",\"pct\":0}" >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed "${build_pool}" \
+  "{\"build_id\":\"${build_id}\",\"step\":\"test\",\"pct\":100}" >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed "${build_pool}" --tag done \
+  "{\"build_id\":\"${build_id}\",\"step\":\"finished\",\"ok\":true}" >/dev/null
+wait "${build_follow_pid}"
 assert_contains "${build_out}" '"ok":true' "Live Build Progress"
+assert_contains "${build_out}" '"build_id":"smoke-1"' "Live Build Progress"
+assert_jq_true "${build_out}" '.data.ok == true' "Live Build Progress"
 
 # Multi-Writer Event Bus
 multi_out="${WORK_DIR}/multi_writer_follow.jsonl"
@@ -241,21 +276,33 @@ assert_line_count_at_least "${replay_out}" 2 "Replay & Debug"
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" follow incidents --where '.data.level == "error"' --tail 1 --one --jsonl >"${replay_filter_out}"
 assert_contains "${replay_filter_out}" '"level":"error"' "Replay & Debug"
 assert_file_non_empty "${replay_filter_out}" "Replay & Debug"
+snapshot_out="${WORK_DIR}/replay_snapshot.jsonl"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow incidents --tail 2 --replay 0 --jsonl >"${snapshot_out}"
+assert_line_count_at_least "${snapshot_out}" 2 "Replay & Debug finite export"
 
 # Remote Pool Access
 remote_port="$(pick_port)"
 if [[ -z "${remote_port}" ]]; then
   fail "could not allocate a free localhost port"
 fi
-remote_url="http://127.0.0.1:${remote_port}"
+remote_url="https://localhost:${remote_port}"
+serve_dir="${WORK_DIR}/serve"
+token_file="${serve_dir}/plasmite-auth-token.txt"
+tls_cert="${serve_dir}/plasmite-tls-cert.pem"
+tls_key="${serve_dir}/plasmite-tls-key.pem"
 remote_follow_out="${WORK_DIR}/remote_follow.jsonl"
 
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" pool create remote-events >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" serve --bind "127.0.0.1:${remote_port}" >"${WORK_DIR}/remote-serve.log" 2>&1 &
+"${PLASMITE_BIN}" serve init --bind "127.0.0.1:${remote_port}" \
+  --output-dir "${serve_dir}" >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" serve \
+  --bind "127.0.0.1:${remote_port}" \
+  --token-file "${token_file}" --tls-cert "${tls_cert}" --tls-key "${tls_key}" \
+  >"${WORK_DIR}/remote-serve.log" 2>&1 &
 SERVE_PID=$!
 
 for _ in $(seq 1 60); do
-  if curl -fsS "${remote_url}/healthz" >/dev/null; then
+  if curl --cacert "${tls_cert}" -fsS "${remote_url}/healthz" >/dev/null; then
     remote_ready=true
     break
   fi
@@ -270,8 +317,11 @@ if ! kill -0 "${SERVE_PID}" 2>/dev/null; then
   fail "remote server exited before readiness checks completed"
 fi
 
-"${PLASMITE_BIN}" feed "${remote_url}/remote-events" '{"sensor":"temp","value":23.5}' >/dev/null
-"${PLASMITE_BIN}" follow "${remote_url}/remote-events" --tail 1 --one --jsonl >"${remote_follow_out}"
+"${PLASMITE_BIN}" feed "${remote_url}/remote-events" \
+  --token-file "${token_file}" --tls-ca "${tls_cert}" \
+  '{"sensor":"temp","value":23.5}' >/dev/null
+"${PLASMITE_BIN}" follow "${remote_url}/remote-events" --tail 1 --one --jsonl \
+  --token-file "${token_file}" --tls-ca "${tls_cert}" >"${remote_follow_out}"
 assert_contains "${remote_follow_out}" '"sensor":"temp"' "Remote Pool Access"
 
 SERVE_PID=""

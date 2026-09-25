@@ -124,6 +124,10 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             format,
             since,
             echo_self,
+            token,
+            token_file,
+            tls_ca,
+            tls_skip_verify,
         } => stream::duplex(
             stream::DuplexArgs {
                 pool,
@@ -135,6 +139,10 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
                 format,
                 since,
                 echo_self,
+                token,
+                token_file,
+                tls_ca,
+                tls_skip_verify,
             },
             &context,
         ),

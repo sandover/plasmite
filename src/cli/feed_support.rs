@@ -178,24 +178,78 @@ pub(crate) struct RemoteFeedIngestContext<'a> {
     pub(crate) errors: ErrorPolicyCli,
 }
 
-pub(crate) fn ingest_from_stdin<R: Read>(
+struct IngestPresentation<'a> {
+    pool_ref: &'a str,
+    pool_path_label: &'a str,
+    color_mode: ColorMode,
+    input: InputMode,
+    errors: ErrorPolicyCli,
+}
+
+fn ingest_with_append<R, F>(
     reader: R,
-    ctx: FeedIngestContext<'_>,
+    presentation: IngestPresentation<'_>,
     emit_receipt: bool,
-) -> Result<IngestOutcome, Error> {
+    mut append: F,
+) -> Result<IngestOutcome, Error>
+where
+    R: Read,
+    F: FnMut(Value, bool) -> Result<Option<Value>, Error>,
+{
     let ingest_config = IngestConfig {
-        mode: input_mode_to_ingest(ctx.input),
-        errors: error_policy_to_ingest(ctx.errors),
+        mode: input_mode_to_ingest(presentation.input),
+        errors: error_policy_to_ingest(presentation.errors),
         sniff_bytes: DEFAULT_SNIFF_BYTES,
         sniff_lines: DEFAULT_SNIFF_LINES,
         max_record_bytes: DEFAULT_MAX_RECORD_BYTES,
         max_snippet_bytes: DEFAULT_MAX_SNIPPET_BYTES,
     };
-
     let outcome = ingest(
         reader,
         ingest_config,
         |data| {
+            let receipt = append(data, emit_receipt)?;
+            if let Some(receipt) = receipt {
+                emit_feed_receipt(receipt, presentation.color_mode);
+            }
+            Ok(())
+        },
+        |failure| {
+            ingest_failure_notice(
+                &failure,
+                presentation.pool_ref,
+                presentation.pool_path_label,
+                presentation.color_mode,
+            )
+        },
+    )?;
+    if presentation.errors == ErrorPolicyCli::Skip && outcome.failed > 0 {
+        ingest_summary_notice(
+            &outcome,
+            presentation.pool_ref,
+            presentation.pool_path_label,
+            presentation.color_mode,
+        );
+    }
+    Ok(outcome)
+}
+
+pub(crate) fn ingest_from_stdin<R: Read>(
+    reader: R,
+    ctx: FeedIngestContext<'_>,
+    emit_receipt: bool,
+) -> Result<IngestOutcome, Error> {
+    ingest_with_append(
+        reader,
+        IngestPresentation {
+            pool_ref: ctx.pool_ref,
+            pool_path_label: ctx.pool_path_label,
+            color_mode: ctx.color_mode,
+            input: ctx.input,
+            errors: ctx.errors,
+        },
+        emit_receipt,
+        |data, emit_receipt| {
             let payload = lite3::encode_message(ctx.tags, &data)?;
             let (seq, timestamp_ns) = retry_with_config(ctx.retry_config, || {
                 let timestamp_ns = now_ns()?;
@@ -205,24 +259,11 @@ pub(crate) fn ingest_from_stdin<R: Read>(
                     .append_with_options(payload.as_slice(), options)?;
                 Ok((seq, timestamp_ns))
             })?;
-            if emit_receipt {
-                emit_feed_receipt(
-                    feed_receipt_json(seq, timestamp_ns, ctx.tags)?,
-                    ctx.color_mode,
-                );
-            }
-            Ok(())
+            emit_receipt
+                .then(|| feed_receipt_json(seq, timestamp_ns, ctx.tags))
+                .transpose()
         },
-        |failure| {
-            ingest_failure_notice(&failure, ctx.pool_ref, ctx.pool_path_label, ctx.color_mode)
-        },
-    )?;
-
-    if ctx.errors == ErrorPolicyCli::Skip && outcome.failed > 0 {
-        ingest_summary_notice(&outcome, ctx.pool_ref, ctx.pool_path_label, ctx.color_mode);
-    }
-
-    Ok(outcome)
+    )
 }
 
 pub(crate) fn ingest_from_stdin_remote<R: Read>(
@@ -230,36 +271,22 @@ pub(crate) fn ingest_from_stdin_remote<R: Read>(
     ctx: RemoteFeedIngestContext<'_>,
     emit_receipt: bool,
 ) -> Result<IngestOutcome, Error> {
-    let ingest_config = IngestConfig {
-        mode: input_mode_to_ingest(ctx.input),
-        errors: error_policy_to_ingest(ctx.errors),
-        sniff_bytes: DEFAULT_SNIFF_BYTES,
-        sniff_lines: DEFAULT_SNIFF_LINES,
-        max_record_bytes: DEFAULT_MAX_RECORD_BYTES,
-        max_snippet_bytes: DEFAULT_MAX_SNIPPET_BYTES,
-    };
-
-    let outcome = ingest(
+    ingest_with_append(
         reader,
-        ingest_config,
-        |data| {
+        IngestPresentation {
+            pool_ref: ctx.pool_ref,
+            pool_path_label: ctx.pool_path_label,
+            color_mode: ctx.color_mode,
+            input: ctx.input,
+            errors: ctx.errors,
+        },
+        emit_receipt,
+        |data, emit_receipt| {
             let message = retry_with_config(ctx.retry_config, || {
                 ctx.remote_pool
                     .append_json_now(&data, ctx.tags, ctx.durability)
             })?;
-            if emit_receipt {
-                emit_feed_receipt(feed_receipt_from_message(&message), ctx.color_mode);
-            }
-            Ok(())
+            Ok(emit_receipt.then(|| feed_receipt_from_message(&message)))
         },
-        |failure| {
-            ingest_failure_notice(&failure, ctx.pool_ref, ctx.pool_path_label, ctx.color_mode)
-        },
-    )?;
-
-    if ctx.errors == ErrorPolicyCli::Skip && outcome.failed > 0 {
-        ingest_summary_notice(&outcome, ctx.pool_ref, ctx.pool_path_label, ctx.color_mode);
-    }
-
-    Ok(outcome)
+    )
 }

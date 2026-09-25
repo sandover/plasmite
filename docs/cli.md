@@ -28,8 +28,7 @@ pool; do not append remote API paths.
 | `duplex` | yes | yes |
 | `doctor` | yes | no |
 
-Remote `feed` and `follow` expose authentication and TLS options. Remote
-`duplex` does not currently expose those options. See each command's help for
+Remote `feed`, `follow`, and `duplex` expose authentication and TLS options. See each command's help for
 the exact remote feature limits and the [serving guide](record/serving.md) for
 server setup.
 

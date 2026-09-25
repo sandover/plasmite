@@ -2079,6 +2079,93 @@ fn duplex_remote_happy_path_sends_and_reads() {
 }
 
 #[test]
+fn duplex_remote_uses_token_and_trusted_certificate() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let create = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "pool",
+            "create",
+            "chat",
+        ])
+        .output()
+        .expect("create");
+    assert!(create.status.success());
+
+    let mut params = CertificateParams::new(vec!["localhost".to_string()]);
+    params
+        .subject_alt_names
+        .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+    let cert = Certificate::from_params(params).expect("cert");
+    let cert_path = temp.path().join("cert.pem");
+    let key_path = temp.path().join("key.pem");
+    let token_path = temp.path().join("token.txt");
+    std::fs::write(&cert_path, cert.serialize_pem().expect("cert pem")).expect("write cert");
+    std::fs::write(&key_path, cert.serialize_private_key_pem()).expect("write key");
+    std::fs::write(&token_path, "duplex-secret\n").expect("write token");
+
+    let server = ServeProcess::start_with_args_and_scheme(
+        &pool_dir,
+        &[
+            "--token-file",
+            token_path.to_str().unwrap(),
+            "--tls-cert",
+            cert_path.to_str().unwrap(),
+            "--tls-key",
+            key_path.to_str().unwrap(),
+        ],
+        "https",
+    );
+    let pool_url = format!("{}/chat", server.base_url);
+    let mut duplex = cmd()
+        .args([
+            "duplex",
+            &pool_url,
+            "--token-file",
+            token_path.to_str().unwrap(),
+            "--tls-ca",
+            cert_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("duplex");
+    duplex
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(b"{\"from\":\"alice\",\"msg\":\"secure\"}\n")
+        .expect("write stdin");
+    let output = duplex.wait_with_output().expect("duplex output");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let follow = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "follow",
+            "chat",
+            "--tail",
+            "1",
+            "--replay",
+            "0",
+            "--jsonl",
+        ])
+        .output()
+        .expect("follow");
+    assert!(follow.status.success());
+    let lines = parse_json_lines(&follow.stdout);
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["data"]["msg"], "secure");
+}
+
+#[test]
 fn follow_replay_emits_messages_in_order() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");

@@ -5,14 +5,16 @@
 //! Invariants: Existing files are never overwritten unless `force` is set.
 
 use std::collections::HashSet;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 
 use getrandom::fill as fill_random;
-use rcgen::{Certificate, CertificateParams, SanType};
+use rcgen::Certificate;
 use sha2::{Digest, Sha256};
 
 use plasmite::api::{Error, ErrorKind};
+
+use crate::serve;
 
 #[derive(Debug)]
 pub struct ServeInitConfig {
@@ -26,6 +28,7 @@ pub struct ServeInitConfig {
 
 #[derive(Debug)]
 pub struct ServeInitResult {
+    pub bind: SocketAddr,
     pub token_file: String,
     pub tls_cert: String,
     pub tls_key: String,
@@ -37,12 +40,16 @@ pub struct ServeInitResult {
 }
 
 pub fn init(config: ServeInitConfig) -> Result<ServeInitResult, Error> {
+    if config.bind.ip().is_unspecified() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("serve init requires a concrete bind IP")
+            .with_hint("Use --bind with the server IP that clients will connect to, such as 192.0.2.10:9700."));
+    }
     let output_dir = absolutize(&config.output_dir)?;
     let token_file = resolve_artifact_path(&output_dir, &config.token_file);
     let tls_cert = resolve_artifact_path(&output_dir, &config.tls_cert);
     let tls_key = resolve_artifact_path(&output_dir, &config.tls_key);
     ensure_distinct_paths(&[&token_file, &tls_cert, &tls_key])?;
-
     let existing_count = [&token_file, &tls_cert, &tls_key]
         .iter()
         .filter(|path| path.exists())
@@ -97,8 +104,13 @@ pub fn init(config: ServeInitConfig) -> Result<ServeInitResult, Error> {
     let key_display = tls_key.display().to_string();
     let tls_fingerprint = format_cert_fingerprint(&cert_der);
     let bind = config.bind.to_string();
+    let allow_non_loopback = if config.bind.ip().is_loopback() {
+        ""
+    } else {
+        " --allow-non-loopback"
+    };
     let serve_cmd = format!(
-        "plasmite serve --bind {bind} --allow-non-loopback --token-file {} --tls-cert {} --tls-key {}",
+        "plasmite serve --bind {bind}{allow_non_loopback} --token-file {} --tls-cert {} --tls-key {}",
         quote_for_shell(&token_display),
         quote_for_shell(&cert_display),
         quote_for_shell(&key_display),
@@ -133,6 +145,7 @@ pub fn init(config: ServeInitConfig) -> Result<ServeInitResult, Error> {
     );
 
     Ok(ServeInitResult {
+        bind: config.bind,
         token_file: token_display,
         tls_cert: cert_display,
         tls_key: key_display,
@@ -201,17 +214,8 @@ fn nibble_hex(nibble: u8) -> char {
     }
 }
 
-fn generate_self_signed_pem(bind_ip: IpAddr) -> Result<(String, String, Vec<u8>), Error> {
-    let mut params = CertificateParams::new(vec!["localhost".to_string()]);
-    params
-        .subject_alt_names
-        .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
-    params
-        .subject_alt_names
-        .push(SanType::IpAddress(IpAddr::V6(Ipv6Addr::LOCALHOST)));
-    if !bind_ip.is_unspecified() {
-        params.subject_alt_names.push(SanType::IpAddress(bind_ip));
-    }
+fn generate_self_signed_pem(client_ip: IpAddr) -> Result<(String, String, Vec<u8>), Error> {
+    let params = serve::self_signed_cert_params(client_ip);
     let cert = Certificate::from_params(params).map_err(|err| {
         Error::new(ErrorKind::Internal)
             .with_message("failed to generate self-signed certificate")
@@ -270,5 +274,32 @@ fn display_host(ip: IpAddr) -> String {
             };
             format!("[{shown}]")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rcgen::SanType;
+    use std::net::Ipv4Addr;
+
+    #[test]
+    fn certificate_identity_includes_nonstandard_loopback_but_not_wildcard() {
+        let loopback: IpAddr = "127.0.0.2".parse().unwrap();
+        let params = serve::self_signed_cert_params(loopback);
+        assert!(
+            params
+                .subject_alt_names
+                .iter()
+                .any(|san| matches!(san, SanType::IpAddress(ip) if *ip == loopback))
+        );
+
+        let params = serve::self_signed_cert_params(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        assert!(
+            !params
+                .subject_alt_names
+                .iter()
+                .any(|san| { matches!(san, SanType::IpAddress(ip) if ip.is_unspecified()) })
+        );
     }
 }

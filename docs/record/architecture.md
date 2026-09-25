@@ -143,6 +143,14 @@ Tail path:
 
 Invariant: Correctness of the tail path must not depend on notify delivery. Notify is a latency optimization; a tail that never receives a notification must still eventually return all committed messages. Removing notify must not cause failures in non-timing tests.
 
+The CLI's interactive `follow` loop and the public API's `Tail` and `Replay`
+share `Pool` and `Cursor`, but have different contracts. CLI follow filters
+before counting `--tail` matches, resets its timeout after output, and reports
+dropped messages. API tails use sequence checkpoints, an absolute timeout, and
+an optional retention-gap error. Keep those policies at their interface
+boundaries; sharing a loop would make either interface inherit the other's
+behavior. Extract a rule only when both interfaces require the same result.
+
 ## Transport architecture
 
 Plasmite is transport-agnostic at the core.
@@ -175,6 +183,8 @@ cancellation.
 1. Parse tap arguments and resolve a local pool ref.
 2. Spawn child process with inherited stdin and piped stdout/stderr.
 3. Run one reader thread per stream (`stdout`, `stderr`) and frame each line as a JSON message.
+   Readers use a bounded event queue so a slow pool append backpressures the
+   child pipes instead of accumulating pending lines without limit.
 4. Emit lifecycle messages (`start`, then `exit`) around captured output.
 5. Append all messages via the shared local append path; tap does not introduce a parallel storage path.
 6. On Unix, forward SIGINT/SIGTERM received by tap to the child, then drain buffered output before emitting the exit lifecycle message.

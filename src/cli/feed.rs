@@ -14,13 +14,11 @@ use super::support::{
     DEFAULT_POOL_SIZE, FeedExactCreateHint, add_missing_pool_create_hint, add_missing_pool_hint,
     add_missing_seq_hint, ensure_pool_dir, feed_exact_create_command_hint,
     feed_receipt_from_message, feed_receipt_json, message_from_frame, now_ns, parse_durability,
-    parse_retry_config, parse_size, reject_remote_only_flags_for_local_target, resolve_pool_target,
-    resolve_poolref, resolve_token_value, retry_with_config,
+    parse_retry_config, parse_size, reject_remote_only_flags_for_local_target, remote_client,
+    resolve_pool_target, resolve_poolref, retry_with_config,
 };
 use crate::{ErrorPolicyCli, InputMode, PoolTarget};
-use plasmite::api::{
-    AppendOptions, Error, ErrorKind, Pool, PoolOptions, PoolRef, RemoteClient, lite3,
-};
+use plasmite::api::{AppendOptions, Error, ErrorKind, Pool, PoolOptions, PoolRef, lite3};
 use std::io::{self, IsTerminal};
 use std::path::PathBuf;
 
@@ -180,20 +178,13 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                     .with_message("remote feed does not support --create")
                     .with_hint("Create remote pools with server-side tooling, not feed."));
             }
-            let token_value = resolve_token_value(args.token, args.token_file)?;
-            let mut client = RemoteClient::new(base_url)?;
-            if let Some(token_value) = token_value {
-                client = client.with_token(token_value);
-            }
-            if let Some(path) = args.tls_ca {
-                client = client.with_tls_ca_file(path)?;
-            }
-            if args.tls_skip_verify {
-                eprintln!(
-                    "warning: --tls-skip-verify disables TLS certificate verification (unsafe)"
-                );
-                client = client.with_tls_skip_verify();
-            }
+            let client = remote_client(
+                base_url,
+                args.token,
+                args.token_file,
+                args.tls_ca,
+                args.tls_skip_verify,
+            )?;
             let remote_pool = client
                 .open_pool(&PoolRef::name(name.clone()))
                 .map_err(|err| add_missing_pool_hint(err, &args.pool, &args.pool))?;

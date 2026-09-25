@@ -383,6 +383,41 @@ fn tap_multiline_capture_preserves_line_order() {
 }
 
 #[test]
+fn tap_drains_bounded_queue_after_child_exits() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    const LINES_PER_STREAM: u64 = 1024;
+    let command = format!(
+        "import sys; [print('out', i) for i in range({LINES_PER_STREAM})]; [print('err', i, file=sys.stderr) for i in range({LINES_PER_STREAM})]"
+    );
+
+    let tap = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "tap",
+            "backpressure",
+            "--create",
+            "--quiet",
+            "--",
+            "python3",
+            "-c",
+            command.as_str(),
+        ])
+        .output()
+        .expect("tap");
+    assert!(
+        tap.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&tap.stderr)
+    );
+
+    let exit = fetch_message(&pool_dir, "backpressure", 2 + 2 * LINES_PER_STREAM);
+    assert_eq!(exit["data"]["kind"], "exit");
+    assert_eq!(exit["data"]["code"], 0);
+}
+
+#[test]
 fn tap_captures_unterminated_final_line() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
