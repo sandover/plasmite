@@ -124,3 +124,4 @@
 {"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-26T18:16:44.826293Z","text":"Visible Current User Root import made Chrome, Edge, and Windows TLS trust only the exact CA:false leaf."}
 {"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-26T18:16:44.898298Z","text":"Fresh clients rejected renewed and child certificates; after exact HKCU cleanup all rejected the original again."}
 {"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-26T18:16:44.9687Z","text":"Import-Certificate and both product removal paths failed in VM; setup stays disabled, standard user untested."}
+{"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-26T23:54:23.831416Z","text":"Exact Mac test leaf d57884f6 is absent from login keychain; pending removal process has exited."}
