@@ -143,18 +143,23 @@ approval and installs that certificate. The native saved connection does
 not depend on browser trust.
 
 On macOS, Plasmite adds the verified leaf to the current user's login
-keychain for SSL. A focused Chrome and Safari check accepted that certificate
-and rejected a renewed certificate and a child certificate signed with the
-leaf's key. The effect on other macOS TLS clients has not been established.
-Removing trust by the full SHA-256 certificate fingerprint works after the
-server goes offline or changes its certificate.
+keychain for SSL. An earlier platform check found that Chrome and Safari
+accepted the exact certificate and rejected a renewed certificate and a child
+certificate signed with the leaf's key. In the current integration, Chrome
+accepted the exact leaf and a same-key renewal left native access intact while
+browser trust became false. The effect on other macOS TLS clients has not been
+established.
 
-Windows browser trust installation is disabled pending browser and trust-scope
-checks on a signed-in desktop. Use an HTTPS certificate that Chrome and Edge
-already trust. The prepared adapter targets the current user's Root store,
-which also serves Windows-native TLS clients. `access untrust SHA256` can remove
-an exact test-owned certificate from that store. Native pinned access remains
-available.
+`access untrust` selects the exact certificate by its full SHA-256 fingerprint
+even after the server goes offline or changes its certificate. macOS may ask
+the user to authorize removal from the login keychain.
+
+Windows browser trust installation is disabled pending a working product
+approval and removal flow and a standard-user check. Use an HTTPS certificate
+that Chrome and Edge already trust. The prepared adapter targets the current
+user's Root store, which also serves Windows-native TLS clients. Native pinned
+access remains available.
+
 Older Plasmite-generated server certificates renew once on startup to add an
 explicit `CA:false` constraint while keeping their public key. Native access
 keys keep working, but browsers must approve the new exact certificate.
@@ -164,14 +169,16 @@ key use without `keyCertSign`, server-authentication extended use, and a DNS or
 IP Subject Alternative Name. A certificate already trusted by the browser
 needs no Plasmite trust setup.
 
-The configured VM now has a signed-in desktop. A disposable certificate reached
-the Windows import wizard's final review for the current user's Root store.
-The final trust action was not approved, so the wizard was canceled and the
-certificate was not installed. `Import-Certificate` still refused to run from
-the interactive command helper with “UI is not allowed in this operation.” The
-VM has no enabled standard-user account. Chrome, Edge, Windows-native TLS,
-restart behavior, and whether a Root entry could trust a certificate signed by
-the leaf remain untested.
+The configured VM has a signed-in desktop. A disposable `CA:false` leaf was
+installed with Windows' visible confirmation into the current user's Root
+store. Chrome, Edge, and Windows-native TLS accepted the exact leaf and
+rejected both a renewed leaf and a child signed with its key. This store is not
+browser-only. `Import-Certificate` from the command helper failed with “UI is
+not allowed in this operation,” while both `X509Store.Remove` and `certutil
+-user -delstore` failed with `ERROR_NOT_SUPPORTED`. The VM has no enabled
+standard-user account. Keep product setup disabled until its own approval and
+exact removal flow work on a signed-in desktop and standard-user behavior is
+checked.
 
 ## Connect an MCP harness
 

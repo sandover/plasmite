@@ -8,7 +8,7 @@
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path as AxumPath, Query, RawQuery, State};
 use axum::http::Request;
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
@@ -364,7 +364,7 @@ async fn remote_browser_guard(request: Request<Body>, next: Next) -> Response {
     let cookie_write = !matches!(*request.method(), Method::GET | Method::HEAD)
         && cookie_token(request.headers()).is_some()
         && !request.headers().contains_key(header::AUTHORIZATION);
-    if (browser_login || cookie_write) && !same_origin(request.headers(), "https") {
+    if (browser_login || cookie_write) && !same_origin(request.headers(), request.uri(), "https") {
         return error_response_with_status(
             Error::new(ErrorKind::Permission).with_message("untrusted browser request origin"),
             StatusCode::FORBIDDEN,
@@ -373,19 +373,26 @@ async fn remote_browser_guard(request: Request<Body>, next: Next) -> Response {
     next.run(request).await
 }
 
-fn same_origin(headers: &HeaderMap, scheme: &str) -> bool {
-    let Some(host) = headers
-        .get(header::HOST)
-        .and_then(|value| value.to_str().ok())
-    else {
+fn same_origin(headers: &HeaderMap, uri: &Uri, scheme: &str) -> bool {
+    let mut hosts = headers.get_all(header::HOST).iter();
+    let host = hosts.next().and_then(|value| value.to_str().ok());
+    if hosts.next().is_some() {
+        return false;
+    }
+    let authority = uri.authority().map(|value| value.as_str());
+    let host = match (host, authority) {
+        (Some(host), Some(authority)) if host.eq_ignore_ascii_case(authority) => host,
+        (Some(host), None) => host,
+        (None, Some(authority)) => authority,
+        _ => return false,
+    };
+    let mut origins = headers.get_all(header::ORIGIN).iter();
+    let Some(origin) = origins.next().and_then(|value| value.to_str().ok()) else {
         return false;
     };
-    let Some(origin) = headers
-        .get(header::ORIGIN)
-        .and_then(|value| value.to_str().ok())
-    else {
+    if origins.next().is_some() {
         return false;
-    };
+    }
     let expected = Url::parse(&format!("{scheme}://{host}/"));
     let actual = Url::parse(origin);
     expected.as_ref().is_ok_and(|expected| {
@@ -914,6 +921,7 @@ async fn mcp_get() -> Response {
 
 async fn mcp_post(
     State(state): State<Arc<AppState>>,
+    uri: Uri,
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
@@ -942,7 +950,11 @@ async fn mcp_post(
         return error_response_with_status(err, StatusCode::FORBIDDEN);
     }
     if headers.contains_key(header::ORIGIN)
-        && !same_origin(&headers, if state.local_admin { "http" } else { "https" })
+        && !same_origin(
+            &headers,
+            &uri,
+            if state.local_admin { "http" } else { "https" },
+        )
     {
         return error_response_with_status(
             Error::new(ErrorKind::Permission)
@@ -1999,12 +2011,12 @@ mod tests {
     use super::{
         AccessStore, AppState, BrowserSessions, Error, ErrorKind, LocalClient, McpHandler,
         ServeConfig, ServeMcpHandler, StorageExecutor, ToolCallRequest, error_response, healthz,
-        list_pools, mcp_post, normalize_tags, parse_tags_from_query, validate_config,
+        list_pools, mcp_post, normalize_tags, parse_tags_from_query, same_origin, validate_config,
         validate_mcp_origin_header, validate_mcp_protocol_version,
     };
     use axum::Json;
     use axum::extract::State;
-    use axum::http::{HeaderMap, HeaderValue, header};
+    use axum::http::{HeaderMap, HeaderValue, Uri, header};
     use plasmite::api::PoolApiExt;
     use serde_json::json;
     use std::sync::Arc;
@@ -2020,6 +2032,46 @@ mod tests {
             max_tail_timeout_ms: 30_000,
             max_concurrent_tails: 1,
         }
+    }
+
+    #[test]
+    fn browser_origin_accepts_http2_authority_and_rejects_conflicts() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://localhost:9743"),
+        );
+        let uri: Uri = "https://localhost:9743/v0/browser/session".parse().unwrap();
+        assert!(same_origin(&headers, &uri, "https"));
+
+        headers.insert(header::HOST, HeaderValue::from_static("localhost:9743"));
+        assert!(same_origin(&headers, &uri, "https"));
+        assert!(same_origin(
+            &headers,
+            &"/v0/browser/session".parse().unwrap(),
+            "https"
+        ));
+        headers.insert(header::HOST, HeaderValue::from_static("evil.example"));
+        assert!(!same_origin(&headers, &uri, "https"));
+        headers.insert(header::HOST, HeaderValue::from_static("localhost:9743"));
+        headers.append(header::HOST, HeaderValue::from_static("localhost:9743"));
+        assert!(!same_origin(&headers, &uri, "https"));
+        headers.remove(header::HOST);
+        headers.append(
+            header::ORIGIN,
+            HeaderValue::from_static("https://localhost:9743"),
+        );
+        assert!(!same_origin(&headers, &uri, "https"));
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://evil.example"),
+        );
+        assert!(!same_origin(&headers, &uri, "https"));
+        assert!(!same_origin(
+            &headers,
+            &"/v0/browser/session".parse().unwrap(),
+            "https"
+        ));
     }
 
     #[test]
@@ -2219,9 +2271,14 @@ mod tests {
         tokio::time::timeout(std::time::Duration::from_millis(100), async {
             assert_eq!(healthz().await.status(), axum::http::StatusCode::OK);
             assert_eq!(
-                mcp_post(State(state.clone()), headers.clone(), Json(payload.clone()))
-                    .await
-                    .status(),
+                mcp_post(
+                    State(state.clone()),
+                    "/mcp".parse().unwrap(),
+                    headers.clone(),
+                    Json(payload.clone()),
+                )
+                .await
+                .status(),
                 axum::http::StatusCode::OK
             );
         })
@@ -2229,9 +2286,14 @@ mod tests {
         .unwrap();
         let _mcp_permit = state.mcp_semaphore.clone().try_acquire_owned().unwrap();
         assert_eq!(
-            mcp_post(State(state), headers, Json(payload))
-                .await
-                .status(),
+            mcp_post(
+                State(state),
+                "/mcp".parse().unwrap(),
+                headers,
+                Json(payload)
+            )
+            .await
+            .status(),
             axum::http::StatusCode::LOCKED
         );
         release_tx.send(()).unwrap();

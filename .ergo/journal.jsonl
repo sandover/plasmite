@@ -115,3 +115,12 @@
 {"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-26T16:09:58.40112Z","text":"Claude local MCP tool rejected seq 2 with invalid access key; native status showed accepted=false."}
 {"version":1,"task_id":"65MU7N","kind":"result","at":"2026-09-26T16:09:58.470373Z","text":"Real Claude and native checks confirmed key revocation; disposable grants and saved credentials were removed."}
 {"version":1,"task_id":"2AOW5U","kind":"result","at":"2026-09-26T16:09:58.539664Z","text":"Rebuilt local UI shows readable visited links in Chrome and Safari; no browser key write was authorized."}
+{"version":1,"task_id":"NJ5JQ3","kind":"result","at":"2026-09-26T18:02:08.95113Z","text":"Chrome login, append/read, restart cookie, logout, and revocation passed after HTTP/2 and composer fixes."}
+{"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-26T18:02:09.023873Z","text":"Mac exact-leaf install and same-key renewal passed; exact removal awaits user SecurityAgent approval."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-26T18:02:09.101446Z","text":"Owner-supplied HTTPS leaf passed curl health and MCP discovery, and Chrome accepted the original address."}
+{"version":1,"task_id":"65MU7N","kind":"result","at":"2026-09-26T18:02:09.169673Z","text":"Live Chrome exposed HTTP/2 and composer bugs; fixes and real HTTP/2 TLS regression pass."}
+{"version":1,"task_id":"NJ5JQ3","kind":"result","at":"2026-09-26T18:02:12.457006Z","text":"Safari check awaits user opening localhost; automatic review blocked an unrelated private window."}
+{"version":1,"task_id":"2AOW5U","kind":"result","at":"2026-09-26T18:02:17.973853Z","text":"Local Access page rendered in Chrome; Create key click awaits action-time approval for a disposable key."}
+{"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-26T18:16:44.826293Z","text":"Visible Current User Root import made Chrome, Edge, and Windows TLS trust only the exact CA:false leaf."}
+{"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-26T18:16:44.898298Z","text":"Fresh clients rejected renewed and child certificates; after exact HKCU cleanup all rejected the original again."}
+{"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-26T18:16:44.9687Z","text":"Import-Certificate and both product removal paths failed in VM; setup stays disabled, standard user untested."}

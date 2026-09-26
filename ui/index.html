@@ -761,7 +761,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
             try {
               var response = await fetch('/v0/pools/' + encodeURIComponent(poolName) + '/append', {
                 method: 'POST', headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ data: input.value })
+                body: JSON.stringify({ data: { text: input.value } })
               });
               if (response.status === 401) { renderLogin('Session ended. Enter the key again.'); return; }
               if (!response.ok) throw new Error('Append failed (' + response.status + ').');

@@ -1,8 +1,8 @@
 //! Browser sessions use the same access record and pool operations as native clients.
 
 use rustls::RootCertStore;
-use rustls::pki_types::CertificateDer;
 use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, ServerName};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -10,6 +10,90 @@ use std::sync::Arc;
 #[path = "support/server.rs"]
 mod server;
 use server::TestServer;
+
+#[tokio::test]
+async fn browser_writes_accept_http2_authority() -> Result<(), Box<dyn std::error::Error>> {
+    use axum::body::Body;
+    use hyper::Request;
+    use hyper::client::conn::http2;
+    use hyper::header::{CONTENT_TYPE, COOKIE, HOST, ORIGIN, SET_COOKIE};
+    use hyper_util::rt::{TokioExecutor, TokioIo};
+    use tokio_rustls::TlsConnector;
+
+    let temp = tempfile::tempdir()?;
+    let server = TestServer::try_start(temp.path())?;
+    let identity: Value = serde_json::from_slice(&std::fs::read(
+        temp.path().join(".plasmite-serve/identity.json"),
+    )?)?;
+    let cert_file = identity["cert_file"]
+        .as_str()
+        .ok_or("missing certificate")?;
+    let cert = CertificateDer::pem_file_iter(temp.path().join(".plasmite-serve").join(cert_file))?
+        .next()
+        .ok_or("missing certificate PEM")??;
+    let mut roots = RootCertStore::empty();
+    roots.add(cert)?;
+    let mut tls = rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    tls.alpn_protocols = vec![b"h2".to_vec()];
+
+    let origin = &server.remote_url;
+    let port = url::Url::parse(origin)?.port().ok_or("missing port")?;
+    let stream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await?;
+    let stream = TlsConnector::from(Arc::new(tls))
+        .connect(ServerName::try_from("localhost")?, stream)
+        .await?;
+    let (mut sender, connection) =
+        http2::handshake(TokioExecutor::new(), TokioIo::new(stream)).await?;
+    tokio::spawn(connection);
+
+    let login = Request::builder()
+        .method("POST")
+        .uri(format!("{origin}/v0/browser/session"))
+        .header(ORIGIN, origin.as_str())
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({"access_key": server.access_key()}).to_string(),
+        ))?;
+    let response = sender.send_request(login).await?;
+    assert_eq!(response.status(), 200);
+    let cookie = response
+        .headers()
+        .get(SET_COOKIE)
+        .ok_or("missing session cookie")?
+        .to_str()?
+        .split(';')
+        .next()
+        .ok_or("missing session cookie value")?
+        .to_owned();
+
+    let create = Request::builder()
+        .method("POST")
+        .uri(format!("{origin}/v0/pools"))
+        .header(ORIGIN, origin.as_str())
+        .header(COOKIE, &cookie)
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"pool":"http2-browser"}"#))?;
+    assert!(sender.send_request(create).await?.status().is_success());
+
+    let conflicting_host = Request::builder()
+        .method("POST")
+        .uri(format!("{origin}/v0/pools/http2-browser/append"))
+        .header(ORIGIN, origin.as_str())
+        .header(HOST, "evil.example")
+        .header(COOKIE, &cookie)
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"data":{"text":"forged"}}"#))?;
+    assert!(
+        !sender
+            .send_request(conflicting_host)
+            .await?
+            .status()
+            .is_success()
+    );
+    Ok(())
+}
 
 #[test]
 fn browser_session_obeys_origin_logout_and_key_revocation() -> Result<(), Box<dyn std::error::Error>>
