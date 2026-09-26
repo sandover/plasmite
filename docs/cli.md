@@ -31,8 +31,11 @@ is for credential-free use on the server machine.
 For native remote access, create a key with `access invite`, then connect with
 `access connect SERVER_URL`. The client saves the connection for the current OS
 user; remote `feed`, `follow`, and `duplex` use saved credentials selected by
-destination. Use `access status SERVER_URL` to check the connection. See the
-[serving guide](record/serving.md) for setup and retired access paths.
+destination. Use `access status SERVER_URL` to check the connection and
+`access disconnect SERVER_URL` to forget it locally, even while the server is
+offline. Disconnect does not revoke the server key. See the
+[serving guide](record/serving.md) for setup, recovery, and retired access
+paths.
 
 ## Input
 

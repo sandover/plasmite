@@ -39,6 +39,16 @@ It captures stable wire-level compatibility guarantees only.
   administration listener and returns `200 { "access_key": "..." }`.
   The fingerprint must match the owner state for that listener. The route is
   local-only; remote HTTPS callers cannot create keys.
+- `GET /v0/access/keys` is local-only. It requires the current server fingerprint
+  in `x-plasmite-server-fingerprint` and returns `{ "keys": [...] }`. Each entry
+  has a stable opaque `id`, `name`, `revoked`, `created_at` (Unix seconds, or
+  `null` for older records), and `last_used_at` (Unix seconds observed since
+  this server started, or `null`). It never returns secrets or
+  secret verifiers.
+- `POST /v0/access/revoke` is local-only. It accepts
+  `{ "id": "...", "server_fingerprint": "..." }` and returns
+  `{ "id": "...", "revoked": true }`. Repeating it for a revoked key succeeds;
+  an unknown ID returns `404`.
 - An access key has the form `pk1.<spki-fingerprint>.<secret>`. The
   fingerprint is the 64-character lowercase hexadecimal SHA-256 digest of
   the certificate's DER Subject Public Key Info (SPKI); the secret is 32
@@ -101,6 +111,10 @@ It captures stable wire-level compatibility guarantees only.
 - Native HTTPS pool requests send `Authorization: Bearer <secret>` after the
   client verifies the server identity bound into the access key.
 - Missing or invalid access secrets return `401`.
+- Revocation persists before success is reported. New operations with the key
+  fail, and its active tails close without emitting data still queued inside
+  Plasmite. Bytes already handed to the transport may arrive. A write admitted
+  before revocation may finish; a later write cannot start.
 - Access-mode violations return `403`.
 
 ### Pool Naming Rules

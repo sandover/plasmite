@@ -165,6 +165,13 @@ pub fn status(destination: &str) -> ApiResult<ConnectionStatus> {
     }
 }
 
+/// Remove this OS user's saved connection for a server without contacting it.
+/// This forgets the local credential; it does not revoke the key on the server.
+pub fn disconnect(destination: &str) -> ApiResult<()> {
+    let destination = secure_destination(destination)?;
+    access_store::remove(destination.as_str())
+}
+
 pub(super) fn secure_destination(value: &str) -> ApiResult<Url> {
     let mut url = Url::parse(value).map_err(|error| {
         Error::new(ErrorKind::Usage)

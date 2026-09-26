@@ -12,6 +12,8 @@ use crate::core::lite3::{Lite3DocRef, sys, validate_bytes};
 use crate::core::notify::{NotifyError, PoolSemaphore, WaitOutcome, open_for_path};
 use crate::core::pool::{AppendOptions, Durability, Pool};
 use serde_json::Value;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -36,6 +38,8 @@ pub struct TailOptions {
     pub timeout: Option<Duration>,
     pub notify: bool,
     pub gap_policy: GapPolicy,
+    /// Stop a blocking tail when its caller withdraws access.
+    pub cancel: Option<Arc<AtomicBool>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -55,6 +59,7 @@ impl TailOptions {
             timeout: None,
             notify: true,
             gap_policy: GapPolicy::Continue,
+            cancel: None,
         }
     }
 }
@@ -205,6 +210,14 @@ impl<'a> Tail<'a> {
         }
 
         loop {
+            if self
+                .options
+                .cancel
+                .as_ref()
+                .is_some_and(|cancel| cancel.load(Ordering::Acquire))
+            {
+                return Ok(None);
+            }
             if let Some(deadline) = self.deadline {
                 if Instant::now() >= deadline {
                     return Ok(None);
@@ -292,6 +305,14 @@ impl<'a> Lite3Tail<'a> {
         }
 
         loop {
+            if self
+                .options
+                .cancel
+                .as_ref()
+                .is_some_and(|cancel| cancel.load(Ordering::Acquire))
+            {
+                return Ok(None);
+            }
             if let Some(deadline) = self.deadline {
                 if Instant::now() >= deadline {
                     return Ok(None);

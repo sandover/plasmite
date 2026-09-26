@@ -8,6 +8,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::api::{
@@ -625,6 +627,7 @@ impl<H: McpHandler> McpDispatcher<H> {
 #[derive(Clone, Debug)]
 pub struct PlasmiteMcpHandler {
     client: LocalClient,
+    cancel: Option<Arc<AtomicBool>>,
 }
 
 impl PlasmiteMcpHandler {
@@ -633,7 +636,15 @@ impl PlasmiteMcpHandler {
     }
 
     pub fn with_client(client: LocalClient) -> Self {
-        Self { client }
+        Self {
+            client,
+            cancel: None,
+        }
+    }
+
+    pub fn with_cancel(mut self, cancel: Option<Arc<AtomicBool>>) -> Self {
+        self.cancel = cancel;
+        self
     }
 
     fn tool_pool_list(&self, args: &Map<String, Value>) -> ToolCallResult {
@@ -993,6 +1004,13 @@ impl PlasmiteMcpHandler {
         let mut fell_behind = false;
 
         loop {
+            if self
+                .cancel
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Acquire))
+            {
+                return ToolCallResult::execution_error_text("access key was revoked");
+            }
             let info = match opened.info() {
                 Ok(info) => info,
                 Err(err) => return api_error_tool_result("plasmite_wait", err),
@@ -1023,7 +1041,11 @@ impl PlasmiteMcpHandler {
 
             let remaining = deadline - now;
             if let Some(handle) = &mut notify {
-                let wait_for = remaining.min(Duration::from_millis(250));
+                let wait_for = remaining.min(if self.cancel.is_some() {
+                    WAIT_POLL_INTERVAL
+                } else {
+                    Duration::from_millis(250)
+                });
                 if handle.wait(wait_for) == crate::api::notify::NotifyWait::Unavailable {
                     notify = None;
                 }

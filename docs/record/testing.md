@@ -88,6 +88,7 @@ cargo test --test cli_feed_fetch
 cargo test --test cli_follow_duplex
 cargo test --test secure_serving
 cargo test --test secure_sharing
+cargo test --test access_lifecycle
 cargo test --test cli_tap
 cargo test --test cli_help_output
 ```
@@ -102,6 +103,7 @@ The targets are divided by behavior:
   duplex send/receive, and cancellation.
 - `secure_serving`: server validation, limits, TLS, response headers, and MCP stdio.
 - `secure_sharing`: invitation, pinned connection, access, and identity checks.
+- `access_lifecycle`: key listing, active stream revocation, and persistence.
 - `cli_tap`: child lifecycle, stream capture and passthrough, tags, signals,
   and exit propagation.
 - `cli_help_output`: command discovery, completions, adaptive color and JSON,

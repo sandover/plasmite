@@ -58,6 +58,27 @@ Check a saved connection with:
 plasmite access status https://pools.example.net:9743
 ```
 
+If a saved connection is lost, run `access connect` again and enter the same
+key. Plasmite verifies the server again before replacing any saved credential;
+a failed verification or save leaves the existing connection in place. This
+recovery does not repeat a pool operation. If the server address changed, use
+the new address explicitly; the same key works only when it matches the pinned
+public key and the server still accepts it. Credentials never follow an address
+change on their own.
+
+To forget a local credential, even when the server is offline, run:
+
+```console
+plasmite access disconnect https://pools.example.net:9743
+```
+
+This removes the connection from the current OS user's saved store. It does not
+revoke the key at the server; the owner must run `access revoke KEY_ID` to end
+that key's server access. Protect backups of the server's `.plasmite-serve`
+directory. Restoring an older copy can restore keys that were revoked after
+the backup. A client that loses its only key copy must ask the owner to issue a
+replacement and revoke the old key if it should no longer work.
+
 After connecting, use the HTTPS pool URL with supported remote commands:
 
 ```console
@@ -67,6 +88,16 @@ plasmite feed https://pools.example.net:9743/events '{"kind":"ready"}'
 
 Remote operations require HTTPS and a saved access key. Do not put the access
 key in a URL or command argument.
+
+List access keys with `plasmite --dir ./shared access keys`. The list shows
+names, opaque IDs, creation times, revocation state, and when this server last
+saw each key.
+Use `plasmite --dir ./shared access revoke ID` to revoke one. Revocation takes
+effect before the command reports success. Existing streams close, and the
+other keys keep working. The server retains revocations across restarts.
+If an invitation response is lost, list the keys, revoke the new entry, and
+create another invitation. Review keys after restoring server state from a
+backup.
 
 ## Removed access paths
 

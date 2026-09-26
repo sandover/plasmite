@@ -663,7 +663,7 @@ pub(crate) enum AccessSubcommand {
     },
     #[command(
         about = "Connect this machine to a shared pool server",
-        long_about = "Verify the server URL and access key, then save the connection for future remote pool commands. The key is read from a hidden prompt or stdin."
+        long_about = "Verify the server URL and access key, then save the connection for future remote pool commands. The key is read from a hidden prompt or stdin. Reconnect with the same key to recover a lost local connection."
     )]
     Connect {
         #[arg(value_name = "URL", help = "HTTPS address printed by the server")]
@@ -676,6 +676,21 @@ pub(crate) enum AccessSubcommand {
     Status {
         #[arg(value_name = "URL", help = "HTTPS address printed by the server")]
         url: String,
+    },
+    #[command(
+        about = "Forget this machine's saved connection",
+        long_about = "Remove this machine's saved access key for a server. This does not revoke the key on the server and works while the server is offline."
+    )]
+    Disconnect {
+        #[arg(value_name = "URL", help = "HTTPS address of the saved connection")]
+        url: String,
+    },
+    #[command(about = "List access keys on the server machine")]
+    Keys,
+    #[command(about = "Revoke an access key on the server machine")]
+    Revoke {
+        #[arg(value_name = "ID", help = "Key ID shown by `access keys`")]
+        id: String,
     },
 }
 

@@ -32,7 +32,80 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
             emit_status(&status);
             Ok(CommandResult::ok())
         }
+        AccessSubcommand::Disconnect { url } => {
+            plasmite::api::access::disconnect(&url)?;
+            emit_disconnected(&url);
+            Ok(CommandResult::ok())
+        }
+        AccessSubcommand::Keys => {
+            let keys = crate::secure_serve::keys(context.pool_dir())?;
+            emit_keys(&keys);
+            Ok(CommandResult::ok())
+        }
+        AccessSubcommand::Revoke { id } => {
+            crate::secure_serve::revoke(context.pool_dir(), &id)?;
+            if io::stdout().is_terminal() {
+                println!("Revoked access key {id}.");
+            } else {
+                println!("{}", json!({ "id": id, "revoked": true }));
+            }
+            Ok(CommandResult::ok())
+        }
     }
+}
+
+fn emit_disconnected(destination: &str) {
+    if io::stdout().is_terminal() {
+        println!("Removed saved credentials for {destination}.");
+        println!("The server key remains valid until its owner revokes it.");
+    } else {
+        println!(
+            "{}",
+            json!({ "destination": destination, "credentials_saved": false })
+        );
+    }
+}
+
+fn emit_keys(keys: &serde_json::Value) {
+    if !io::stdout().is_terminal() {
+        println!("{keys}");
+        return;
+    }
+
+    let rows = keys["keys"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+    if rows.is_empty() {
+        println!("No access keys.");
+        return;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    println!("ID  NAME  STATE  CREATED  LAST USED");
+    for row in rows {
+        let id = row["id"].as_str().unwrap_or("?");
+        let name = row["name"].as_str().unwrap_or("?");
+        let state = if row["revoked"].as_bool().unwrap_or(false) {
+            "revoked"
+        } else {
+            "active"
+        };
+        let created = row["created_at"].as_u64().map_or_else(
+            || "unknown".to_string(),
+            |timestamp| relative_time(now, timestamp),
+        );
+        let last_used = row["last_used_at"].as_u64().map_or_else(
+            || "never".to_string(),
+            |timestamp| relative_time(now, timestamp),
+        );
+        println!("{id}  {name}  {state}  {created}  {last_used}");
+    }
+}
+
+fn relative_time(now: u64, timestamp: u64) -> String {
+    super::output_support::format_relative_time(Some(
+        now.saturating_sub(timestamp).saturating_mul(1000),
+    ))
 }
 
 fn emit_status(status: &plasmite::api::access::ConnectionStatus) {

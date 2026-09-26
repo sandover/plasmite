@@ -61,6 +61,12 @@ fn every_public_command_has_usable_help() {
         (&["access", "invite", "--help"], "plasmite access invite"),
         (&["access", "connect", "--help"], "plasmite access connect"),
         (&["access", "status", "--help"], "plasmite access status"),
+        (
+            &["access", "disconnect", "--help"],
+            "plasmite access disconnect",
+        ),
+        (&["access", "keys", "--help"], "plasmite access keys"),
+        (&["access", "revoke", "--help"], "plasmite access revoke"),
         (&["mcp", "--help"], "plasmite mcp"),
         (&["fetch", "--help"], "plasmite fetch"),
         (&["follow", "--help"], "plasmite follow"),

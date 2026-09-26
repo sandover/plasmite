@@ -61,6 +61,16 @@ fn native_key_connects_and_reuses_server_identity()
     let status = access::connect(&url, key)?;
     assert!(status.credentials_saved);
     assert_eq!(status.accepted, Some(true));
+    let saved_client = RemoteClient::new(&url)?;
+    let original_key_snapshot = RemoteClient::with_access_key(&url, key)?;
+    access::connect(&url, key)?;
+    let saved_connections: Value =
+        serde_json::from_slice(&std::fs::read(client_home.join("connections.json"))?)?;
+    let saved_before_reconnect = std::fs::read(client_home.join("connections.json"))?;
+    assert_eq!(
+        saved_connections["connections"].as_object().unwrap().len(),
+        1
+    );
     let secret = key.rsplit('.').next().ok_or("missing secret")?;
     let wrong_pin = format!("pk1.{}.{}", "0".repeat(64), secret);
     assert!(access::connect(&url, &wrong_pin).is_err());
@@ -69,13 +79,101 @@ fn native_key_connects_and_reuses_server_identity()
     let unauthorised = RemoteClient::with_access_key(&url, &bad_secret)?;
     assert!(unauthorised.list_pools().is_err());
     assert_eq!(access::status(&url)?.accepted, Some(true));
-    let client = RemoteClient::new(&url)?;
-    let pool_ref = PoolRef::name("shared");
-    client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
-    let pool = client.open_pool(&pool_ref)?;
-    let message = pool.append_json_now(&json!({"message":"hello"}), &[], Durability::Fast)?;
+
+    let replacement_invite = std::process::Command::new(env!("CARGO_BIN_EXE_plasmite"))
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "access",
+            "invite",
+            "--name",
+            "replacement",
+        ])
+        .output()?;
+    assert!(
+        replacement_invite.status.success(),
+        "{}",
+        String::from_utf8_lossy(&replacement_invite.stderr)
+    );
+    let replacement_reply: Value = serde_json::from_slice(&replacement_invite.stdout)?;
+    let replacement_key = replacement_reply["access_key"]
+        .as_str()
+        .ok_or("missing replacement access key")?;
+    let lock_path = client_home.join("connections.lock");
+    std::fs::remove_file(&lock_path)?;
+    std::fs::create_dir(&lock_path)?;
+    let failed_save = access::connect(&url, replacement_key);
+    std::fs::remove_dir(&lock_path)?;
+    assert!(failed_save.is_err());
     assert_eq!(
-        pool.get_message(message.seq)?.data,
+        std::fs::read(client_home.join("connections.json"))?,
+        saved_before_reconnect,
+        "failed credential storage must preserve the previous connection"
+    );
+    assert_eq!(access::status(&url)?.accepted, Some(true));
+    access::connect(&url, replacement_key)?;
+    assert_ne!(
+        std::fs::read(client_home.join("connections.json"))?,
+        saved_before_reconnect,
+        "successful connection should replace the saved credential"
+    );
+
+    let replacement_snapshot = RemoteClient::with_access_key(&url, replacement_key)?;
+    let access_keys = std::process::Command::new(env!("CARGO_BIN_EXE_plasmite"))
+        .args(["--dir", pool_dir.to_str().unwrap(), "access", "keys"])
+        .output()?;
+    assert!(
+        access_keys.status.success(),
+        "{}",
+        String::from_utf8_lossy(&access_keys.stderr)
+    );
+    let listed: Value = serde_json::from_slice(&access_keys.stdout)?;
+    let original_id = listed["keys"]
+        .as_array()
+        .and_then(|keys| {
+            keys.iter()
+                .find(|entry| entry["name"] == "laptop")
+                .and_then(|entry| entry["id"].as_str())
+        })
+        .ok_or("access keys omitted original key")?;
+    let revoke = std::process::Command::new(env!("CARGO_BIN_EXE_plasmite"))
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "access",
+            "revoke",
+            original_id,
+        ])
+        .output()?;
+    assert!(
+        revoke.status.success(),
+        "{}",
+        String::from_utf8_lossy(&revoke.stderr)
+    );
+    let revoke_reply: Value = serde_json::from_slice(&revoke.stdout)?;
+    assert_eq!(revoke_reply["id"], original_id);
+    assert_eq!(revoke_reply["revoked"], true);
+    assert!(original_key_snapshot.list_pools().is_err());
+    assert!(
+        saved_client.list_pools().is_ok(),
+        "an existing saved client must use the replacement key"
+    );
+    assert!(replacement_snapshot.list_pools().is_ok());
+
+    let pool_ref = PoolRef::name("shared");
+    saved_client
+        .create_pool(&pool_ref, PoolOptions::new(1024 * 1024))
+        .map_err(|error| format!("create shared pool: {error:?}"))?;
+    let pool = saved_client
+        .open_pool(&pool_ref)
+        .map_err(|error| format!("open shared pool: {error:?}"))?;
+    let message = pool
+        .append_json_now(&json!({"message":"hello"}), &[], Durability::Fast)
+        .map_err(|error| format!("append shared message: {error:?}"))?;
+    assert_eq!(
+        pool.get_message(message.seq)
+            .map_err(|error| format!("read shared message: {error:?}"))?
+            .data,
         json!({"message":"hello"})
     );
 
@@ -86,15 +184,53 @@ fn native_key_connects_and_reuses_server_identity()
     assert_eq!(access::status(&other.base_url)?.accepted, Some(true));
     assert_eq!(access::status(&url)?.accepted, Some(true));
 
-    drop(server);
-    let restarted = TestServer::start_with_args_and_scheme(&pool_dir, &[], "https");
-    access::connect(&restarted.base_url, key)?;
-    let saved = RemoteClient::new(&restarted.base_url)?;
-    assert_eq!(
-        saved.open_pool(&pool_ref)?.get_message(message.seq)?.data,
-        json!({"message":"hello"})
+    let independent_client = RemoteClient::with_access_key(&url, replacement_key)?;
+    access::disconnect(&url)?;
+    assert!(independent_client.list_pools().is_ok());
+    assert!(
+        saved_client.list_pools().is_err(),
+        "an existing saved client must observe disconnect"
     );
-    saved.delete_pool(&pool_ref)?;
+    assert!(!access::status(&url)?.credentials_saved);
+    assert_eq!(access::status(&other.base_url)?.accepted, Some(true));
+    access::connect(&url, replacement_key)?;
+    assert!(saved_client.list_pools().is_ok());
+
+    drop(server);
+    access::disconnect(&url)?;
+    let cli_disconnect = std::process::Command::new(env!("CARGO_BIN_EXE_plasmite"))
+        .args(["access", "disconnect", &url])
+        .env("PLASMITE_ACCESS_HOME", &client_home)
+        .output()?;
+    assert!(
+        cli_disconnect.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cli_disconnect.stderr)
+    );
+    let disconnect_reply: Value = serde_json::from_slice(&cli_disconnect.stdout)?;
+    assert_eq!(disconnect_reply["credentials_saved"], false);
+    assert!(!access::status(&url)?.credentials_saved);
+    assert_eq!(access::status(&other.base_url)?.accepted, Some(true));
+
+    let restarted = TestServer::start_with_args_and_scheme(&pool_dir, &[], "https");
+    assert!(!access::status(&restarted.base_url)?.credentials_saved);
+    assert!(
+        RemoteClient::new(&restarted.base_url)?
+            .list_pools()
+            .is_err()
+    );
+    access::connect(&restarted.base_url, replacement_key)?;
+    let saved = RemoteClient::new(&restarted.base_url)?;
+    let restored_pool = saved
+        .open_pool(&pool_ref)
+        .map_err(|error| format!("reopen pool after server restart: {error:?}"))?;
+    let restored_message = restored_pool
+        .get_message(message.seq)
+        .map_err(|error| format!("read message after server restart: {error:?}"))?;
+    assert_eq!(restored_message.data, json!({"message":"hello"}));
+    saved
+        .delete_pool(&pool_ref)
+        .map_err(|error| format!("delete pool after server restart: {error:?}"))?;
 
     let wrong_host_dir = temp.path().join("wrong-host");
     let wrong_host_cert = temp.path().join("wrong-host-cert.pem");

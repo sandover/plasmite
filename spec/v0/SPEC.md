@@ -60,6 +60,11 @@ YMSGO2 adds native access-key sharing. It keeps the existing spec paths and
 - `plasmite access status SERVER_URL` reports whether a connection is saved,
   whether the server is reachable, and whether it accepts the saved access
   secret. It never prints credentials.
+- `plasmite access disconnect SERVER_URL` removes this OS user's saved
+  credentials without contacting the server. It works while the server is
+  unavailable and does not revoke the server key.
+- `plasmite access keys` lists server-side key names, IDs, revocation state,
+  and approximate recent use; `plasmite access revoke KEY_ID` revokes one key.
 - An access key has the form `pk1.<spki-fingerprint>.<secret>`. The
   fingerprint is the 64-character lowercase hexadecimal SHA-256 digest of the
   certificate's DER Subject Public Key Info (SPKI); the secret is 32 random
@@ -68,6 +73,12 @@ YMSGO2 adds native access-key sharing. It keeps the existing spec paths and
 - Saved connections are selected by destination. Multiple destinations can
   coexist and CLI pool operations use their saved credentials when addressing
   a remote server.
+- Repeating `access connect` with the same key is safe. A new key replaces the
+  saved credential only after the server accepts it and local storage
+  succeeds. A failed connection or save preserves the previous credential.
+- A changed address never inherits credentials automatically. Explicit
+  reconnection can reuse a key only if the new address presents the same
+  pinned public key and accepts that key's secret.
 - Local HTTP listens on loopback, defaults to port `9700`, and permits
   credential-free local pool operations. HTTPS defaults to port `9743` and
   requires authentication for remote pool operations. Both ports can be

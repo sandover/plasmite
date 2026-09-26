@@ -76,13 +76,13 @@ parsed variants into explicit argument structures for these command families:
 - `feed` and `fetch` for ingestion and exact lookup;
 - `stream` for follow and duplex;
 - `tap` for child-process capture;
-- `server` for serve configuration, initialization, and presentation;
+- `server` and `access` for serving and connection commands;
 - `utility` for version, completion, and MCP stdio.
 
 `CliContext` contains only the resolved pool directory and color mode.
 `CommandResult` carries the selected exit code back to `main.rs`. The larger
 command families use focused helper modules: `doctor_support`, `pool_support`,
-`server_support`, `feed_support`, and `stream_support`. Shared parsing, pool
+`feed_support`, and `stream_support`. Shared parsing, pool
 references, retry, and payload conversion live in `cli::support`. CLI
 presentation helpers live in `output_support`; JSON output lives in
 `cli::output`. Command modules import the helpers they use by name. There is
@@ -91,6 +91,13 @@ no command framework, service container, or handler trait hierarchy.
 Invariant: argument modules do not execute commands, command-family modules do
 not terminate the process, and shared CLI helpers do not reimplement storage
 semantics owned by the API and core layers.
+
+Server access records live beside the pool directory in protected
+`.plasmite-serve` state. Authorization and revocation share one lock, so a
+successful revocation bars later requests. Remote tails hold a revocation flag
+for their key and stop when it changes. Native saved connections live under
+the current OS user; disconnect removes one destination without contacting
+the server.
 
 ## Data model and on-disk layout
 

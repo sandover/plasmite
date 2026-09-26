@@ -38,7 +38,7 @@ use tower_service::Service;
 use tracing_subscriber::EnvFilter;
 use url::{Host, Url};
 
-use crate::access_store::AccessStore;
+use crate::access_store::{AccessGrant, AccessStore};
 use crate::interface_error_kind;
 use crate::interface_wire::{MessageWire, error_policy};
 use crate::pool_info_json::pool_info_json;
@@ -48,8 +48,8 @@ use plasmite::api::{
 };
 use plasmite::mcp::{
     DispatchOutcome, JsonRpcError as McpJsonRpcError, McpDispatcher, McpHandler, McpResource,
-    McpTool, PlasmiteMcpHandler, ResourceReadRequest, ResourceReadResult, ToolCallRequest,
-    ToolCallResult,
+    McpTool, McpToolAccess, PlasmiteMcpHandler, ResourceReadRequest, ResourceReadResult,
+    ToolCallRequest, ToolCallResult,
 };
 
 const UI_INDEX_HTML: &str = include_str!("../ui/index.html");
@@ -99,6 +99,30 @@ impl StorageExecutor {
                 .with_message("server storage task failed")
                 .with_source(err)
         })?
+    }
+
+    async fn run_authorized<T, F>(
+        &self,
+        grant: Option<AccessGrant>,
+        operation: F,
+    ) -> Result<T, Error>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, Error> + Send + 'static,
+    {
+        self.run(move || {
+            check_grant(grant.as_ref())?;
+            operation()
+        })
+        .await
+    }
+}
+
+fn check_grant(grant: Option<&AccessGrant>) -> Result<(), Error> {
+    if grant.is_some_and(AccessGrant::is_revoked) {
+        Err(Error::new(ErrorKind::Permission).with_message("access key was revoked"))
+    } else {
+        Ok(())
     }
 }
 
@@ -225,6 +249,8 @@ async fn prepare_server_with_access(
     let mut app = Router::new()
         .route("/healthz", get(healthz))
         .route("/v0/access/invite", post(access_invite))
+        .route("/v0/access/keys", get(access_keys))
+        .route("/v0/access/revoke", post(access_revoke))
         .route("/v0/access/check", get(access_check))
         .route("/mcp", post(mcp_post).get(mcp_get))
         .route("/ui", get(ui_index))
@@ -511,9 +537,9 @@ async fn shutdown_signal() {
     ctrl_c.await;
 }
 
-fn authorize(headers: &HeaderMap, state: &AppState) -> Result<(), Error> {
+fn authorize(headers: &HeaderMap, state: &AppState) -> Result<Option<AccessGrant>, Error> {
     if state.local_admin {
-        return Ok(());
+        return Ok(None);
     }
     if let Some(access) = &state.secure_access {
         let Some(value) = headers.get(axum::http::header::AUTHORIZATION) else {
@@ -523,10 +549,10 @@ fn authorize(headers: &HeaderMap, state: &AppState) -> Result<(), Error> {
             .to_str()
             .ok()
             .and_then(|value| value.strip_prefix("Bearer "));
-        if !secret.is_some_and(|secret| access.accepts_secret(secret)) {
-            return Err(Error::new(ErrorKind::Permission).with_message("invalid access key"));
-        }
-        return Ok(());
+        return secret
+            .and_then(|secret| access.authorize_secret(secret))
+            .map(Some)
+            .ok_or_else(|| Error::new(ErrorKind::Permission).with_message("invalid access key"));
     }
     Err(Error::new(ErrorKind::Permission).with_message("secure access is unavailable"))
 }
@@ -541,31 +567,71 @@ async fn access_invite(
     State(state): State<Arc<AppState>>,
     Json(request): Json<InviteRequest>,
 ) -> Response {
-    if !state.local_admin {
-        return error_response(
-            Error::new(ErrorKind::Permission).with_message("access administration is local only"),
-        );
-    }
-    let Some(access) = &state.secure_access else {
-        return error_response(
-            Error::new(ErrorKind::Usage).with_message("secure sharing is not active"),
-        );
+    let access = match local_access(&state, &request.server_fingerprint) {
+        Ok(access) => access,
+        Err(err) => return error_response(err),
     };
-    if request.server_fingerprint != access.fingerprint() {
-        return error_response(
-            Error::new(ErrorKind::Permission)
-                .with_message("local server does not own the selected pool directory"),
-        );
-    }
     match access.issue(&request.name) {
         Ok(access_key) => json_response(json!({"access_key": access_key})),
         Err(err) => error_response(err),
     }
 }
 
+fn local_access<'a>(state: &'a AppState, fingerprint: &str) -> Result<&'a AccessStore, Error> {
+    if !state.local_admin {
+        return Err(
+            Error::new(ErrorKind::Permission).with_message("access administration is local only")
+        );
+    }
+    let access = state
+        .secure_access
+        .as_deref()
+        .ok_or_else(|| Error::new(ErrorKind::Usage).with_message("secure sharing is not active"))?;
+    if fingerprint != access.fingerprint() {
+        return Err(Error::new(ErrorKind::Permission)
+            .with_message("local server does not own the selected pool directory"));
+    }
+    Ok(access)
+}
+
+async fn access_keys(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    let fingerprint = headers
+        .get("x-plasmite-server-fingerprint")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let access = match local_access(&state, fingerprint) {
+        Ok(access) => access,
+        Err(err) => return error_response(err),
+    };
+    match access.list() {
+        Ok(keys) => json_response(json!({"keys": keys})),
+        Err(err) => error_response(err),
+    }
+}
+
+#[derive(Deserialize)]
+struct RevokeRequest {
+    id: String,
+    server_fingerprint: String,
+}
+
+async fn access_revoke(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<RevokeRequest>,
+) -> Response {
+    let access = match local_access(&state, &request.server_fingerprint) {
+        Ok(access) => access,
+        Err(err) => return error_response(err),
+    };
+    match access.revoke(&request.id) {
+        Ok(()) => json_response(json!({"revoked": true, "id": request.id})),
+        Err(err) => error_response(err),
+    }
+}
+
 async fn access_check(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     match authorize(&headers, &state) {
-        Ok(()) => json_response(json!({"accepted": true})),
+        Ok(_) => json_response(json!({"accepted": true})),
         Err(err) => error_response(err),
     }
 }
@@ -631,9 +697,10 @@ async fn mcp_post(
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
-    if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
+    let grant = match authorize(&headers, &state) {
+        Ok(grant) => grant,
+        Err(err) => return error_response(err),
+    };
     if let Err(err) = validate_mcp_protocol_version(&headers) {
         return error_response_with_status(err, StatusCode::BAD_REQUEST);
     }
@@ -649,7 +716,8 @@ async fn mcp_post(
         let handler = ServeMcpHandler::new(
             dispatch_state.client.clone(),
             dispatch_state.tail_semaphore.clone(),
-        );
+        )
+        .with_grant(grant);
         let mut dispatcher = McpDispatcher::new(handler);
         dispatcher.dispatch_value(payload)
     })
@@ -686,6 +754,7 @@ async fn mcp_post(
 struct ServeMcpHandler {
     inner: PlasmiteMcpHandler,
     wait_semaphore: Arc<Semaphore>,
+    grant: Option<AccessGrant>,
 }
 
 impl ServeMcpHandler {
@@ -693,7 +762,20 @@ impl ServeMcpHandler {
         Self {
             inner: PlasmiteMcpHandler::with_client(client),
             wait_semaphore,
+            grant: None,
         }
+    }
+
+    fn with_grant(mut self, grant: Option<AccessGrant>) -> Self {
+        self.inner = self
+            .inner
+            .with_cancel(grant.as_ref().map(AccessGrant::cancellation_flag));
+        self.grant = grant;
+        self
+    }
+
+    fn revoked(&self) -> bool {
+        self.grant.as_ref().is_some_and(AccessGrant::is_revoked)
     }
 }
 
@@ -703,6 +785,9 @@ impl McpHandler for ServeMcpHandler {
     }
 
     fn call_tool(&mut self, request: ToolCallRequest) -> Result<ToolCallResult, McpJsonRpcError> {
+        if self.revoked() {
+            return Ok(mcp_revoked_tool_result());
+        }
         let _wait_permit = if request.name == "plasmite_wait" {
             match self.wait_semaphore.clone().try_acquire_owned() {
                 Ok(permit) => Some(permit),
@@ -711,7 +796,17 @@ impl McpHandler for ServeMcpHandler {
         } else {
             None
         };
-        self.inner.call_tool(request)
+        let is_write = self
+            .inner
+            .list_tools()?
+            .iter()
+            .any(|tool| tool.name == request.name && tool.access == McpToolAccess::Write);
+        let result = self.inner.call_tool(request);
+        if !is_write && self.revoked() {
+            Ok(mcp_revoked_tool_result())
+        } else {
+            result
+        }
     }
 
     fn list_resources(&mut self) -> Result<Vec<McpResource>, McpJsonRpcError> {
@@ -722,8 +817,23 @@ impl McpHandler for ServeMcpHandler {
         &mut self,
         request: ResourceReadRequest,
     ) -> Result<ResourceReadResult, McpJsonRpcError> {
-        self.inner.read_resource(request)
+        if self.revoked() {
+            return Err(McpJsonRpcError::invalid_request("access key was revoked"));
+        }
+        let result = self.inner.read_resource(request);
+        if self.revoked() {
+            Err(McpJsonRpcError::invalid_request("access key was revoked"))
+        } else {
+            result
+        }
     }
+}
+
+fn mcp_revoked_tool_result() -> ToolCallResult {
+    ToolCallResult::execution_error_with_structured(
+        "access key was revoked",
+        Some(json!({"error_kind": "Permission"})),
+    )
 }
 
 fn mcp_wait_busy_tool_result() -> ToolCallResult {
@@ -832,9 +942,10 @@ async fn create_pool(
     headers: HeaderMap,
     Json(payload): Json<CreatePoolRequest>,
 ) -> Response {
-    if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
+    let grant = match authorize(&headers, &state) {
+        Ok(grant) => grant,
+        Err(err) => return error_response(err),
+    };
     let pool_ref = match pool_ref_from_request(&payload.pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
@@ -843,7 +954,9 @@ async fn create_pool(
     let client = state.client.clone();
     let result = state
         .storage_executor
-        .run(move || client.create_pool(&pool_ref, PoolOptions::new(size_bytes)))
+        .run_authorized(grant, move || {
+            client.create_pool(&pool_ref, PoolOptions::new(size_bytes))
+        })
         .await;
     match result {
         Ok(info) => json_response(json!({ "pool": pool_info_json(&payload.pool, &info) })),
@@ -856,9 +969,10 @@ async fn open_pool(
     headers: HeaderMap,
     Json(payload): Json<PoolRequest>,
 ) -> Response {
-    if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
+    let grant = match authorize(&headers, &state) {
+        Ok(grant) => grant,
+        Err(err) => return error_response(err),
+    };
     let pool_ref = match pool_ref_from_request(&payload.pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
@@ -866,7 +980,7 @@ async fn open_pool(
     let client = state.client.clone();
     match state
         .storage_executor
-        .run(move || client.pool_info(&pool_ref))
+        .run_authorized(grant, move || client.pool_info(&pool_ref))
         .await
     {
         Ok(info) => json_response(json!({ "pool": pool_info_json(&payload.pool, &info) })),
@@ -879,9 +993,10 @@ async fn pool_info(
     headers: HeaderMap,
     AxumPath(pool): AxumPath<String>,
 ) -> Response {
-    if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
+    let grant = match authorize(&headers, &state) {
+        Ok(grant) => grant,
+        Err(err) => return error_response(err),
+    };
     let pool_ref = match pool_ref_from_request(&pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
@@ -889,7 +1004,7 @@ async fn pool_info(
     let client = state.client.clone();
     match state
         .storage_executor
-        .run(move || client.pool_info(&pool_ref))
+        .run_authorized(grant, move || client.pool_info(&pool_ref))
         .await
     {
         Ok(info) => json_response(json!({ "pool": pool_info_json(&pool, &info) })),
@@ -898,13 +1013,14 @@ async fn pool_info(
 }
 
 async fn list_pools(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
-    if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
+    let grant = match authorize(&headers, &state) {
+        Ok(grant) => grant,
+        Err(err) => return error_response(err),
+    };
     let client = state.client.clone();
     match state
         .storage_executor
-        .run(move || client.list_pools())
+        .run_authorized(grant, move || client.list_pools())
         .await
     {
         Ok(pools) => {
@@ -930,9 +1046,10 @@ async fn delete_pool(
     headers: HeaderMap,
     AxumPath(pool): AxumPath<String>,
 ) -> Response {
-    if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
+    let grant = match authorize(&headers, &state) {
+        Ok(grant) => grant,
+        Err(err) => return error_response(err),
+    };
     let pool_ref = match pool_ref_from_request(&pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
@@ -940,7 +1057,7 @@ async fn delete_pool(
     let client = state.client.clone();
     match state
         .storage_executor
-        .run(move || client.delete_pool(&pool_ref))
+        .run_authorized(grant, move || client.delete_pool(&pool_ref))
         .await
     {
         Ok(()) => json_response(json!({ "ok": true })),
@@ -954,9 +1071,10 @@ async fn append_message(
     AxumPath(pool): AxumPath<String>,
     Json(payload): Json<AppendRequest>,
 ) -> Response {
-    if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
+    let grant = match authorize(&headers, &state) {
+        Ok(grant) => grant,
+        Err(err) => return error_response(err),
+    };
     let pool_ref = match pool_ref_from_request(&pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
@@ -968,7 +1086,7 @@ async fn append_message(
     let client = state.client.clone();
     let result = state
         .storage_executor
-        .run(move || {
+        .run_authorized(grant, move || {
             client
                 .open_pool(&pool_ref)
                 .and_then(|mut pool| pool.append_json_now(&data, &tags, durability))
@@ -987,9 +1105,10 @@ async fn append_lite3(
     Query(query): Query<AppendLite3Query>,
     payload: Bytes,
 ) -> Response {
-    if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
+    let grant = match authorize(&headers, &state) {
+        Ok(grant) => grant,
+        Err(err) => return error_response(err),
+    };
     if let Some(content_type) = headers
         .get("content-type")
         .and_then(|value| value.to_str().ok())
@@ -1014,7 +1133,7 @@ async fn append_lite3(
     let client = state.client.clone();
     let result = state
         .storage_executor
-        .run(move || {
+        .run_authorized(grant, move || {
             client.open_pool(&pool_ref).and_then(|mut pool| {
                 let seq = pool.append_lite3_now(&payload, durability)?;
                 pool.get_message(seq)
@@ -1032,9 +1151,10 @@ async fn get_message(
     headers: HeaderMap,
     AxumPath((pool, seq)): AxumPath<(String, u64)>,
 ) -> Response {
-    if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
+    let grant = match authorize(&headers, &state) {
+        Ok(grant) => grant,
+        Err(err) => return error_response(err),
+    };
     let pool_ref = match pool_ref_from_request(&pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
@@ -1042,7 +1162,7 @@ async fn get_message(
     let client = state.client.clone();
     let result = state
         .storage_executor
-        .run(move || {
+        .run_authorized(grant, move || {
             client
                 .open_pool(&pool_ref)
                 .and_then(|pool| pool.get_message(seq))
@@ -1060,9 +1180,10 @@ async fn get_lite3(
     headers: HeaderMap,
     AxumPath((pool, seq)): AxumPath<(String, u64)>,
 ) -> Response {
-    if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
+    let grant = match authorize(&headers, &state) {
+        Ok(grant) => grant,
+        Err(err) => return error_response(err),
+    };
     let pool_ref = match pool_ref_from_request(&pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
@@ -1070,7 +1191,7 @@ async fn get_lite3(
     let client = state.client.clone();
     let result = state
         .storage_executor
-        .run(move || {
+        .run_authorized(grant, move || {
             client.open_pool(&pool_ref).and_then(|pool| {
                 let frame = pool.get_lite3(seq)?;
                 let payload = frame.payload.to_vec();
@@ -1107,8 +1228,8 @@ async fn tail_messages(
     Query(query): Query<TailQuery>,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-    let pool_ref = match tail_pool_ref_from_request(&state, &headers, &pool) {
-        Ok(pool_ref) => pool_ref,
+    let (pool_ref, grant) = match tail_pool_ref_from_request(&state, &headers, &pool) {
+        Ok(value) => value,
         Err(err) => return error_response(err),
     };
     let runtime = match prepare_tail_runtime(
@@ -1120,7 +1241,7 @@ async fn tail_messages(
         Ok(runtime) => runtime,
         Err(err) => return error_response(err),
     };
-    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Jsonl)
+    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Jsonl, grant)
 }
 
 async fn tail_lite3(
@@ -1130,8 +1251,8 @@ async fn tail_lite3(
     Query(query): Query<TailQuery>,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-    let pool_ref = match tail_pool_ref_from_request(&state, &headers, &pool) {
-        Ok(pool_ref) => pool_ref,
+    let (pool_ref, grant) = match tail_pool_ref_from_request(&state, &headers, &pool) {
+        Ok(value) => value,
         Err(err) => return error_response(err),
     };
     let runtime = match prepare_tail_runtime(
@@ -1146,7 +1267,7 @@ async fn tail_lite3(
     if let Err(err) = precheck_lite3_since_seq(&state, &pool_ref, query.since_seq).await {
         return error_response(err);
     }
-    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Lite3)
+    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Lite3, grant)
 }
 
 async fn ui_events(
@@ -1156,8 +1277,8 @@ async fn ui_events(
     Query(query): Query<TailQuery>,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-    let pool_ref = match tail_pool_ref_from_request(&state, &headers, &pool) {
-        Ok(pool_ref) => pool_ref,
+    let (pool_ref, grant) = match tail_pool_ref_from_request(&state, &headers, &pool) {
+        Ok(value) => value,
         Err(err) => return error_response(err),
     };
     let runtime = match prepare_tail_runtime(
@@ -1169,16 +1290,16 @@ async fn ui_events(
         Ok(runtime) => runtime,
         Err(err) => return error_response(err),
     };
-    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Sse)
+    spawn_tail_stream_response(&state, pool_ref, runtime, TailStreamEncoding::Sse, grant)
 }
 
 fn tail_pool_ref_from_request(
     state: &Arc<AppState>,
     headers: &HeaderMap,
     pool: &str,
-) -> Result<PoolRef, Error> {
-    authorize(headers, state)?;
-    pool_ref_from_request(pool)
+) -> Result<(PoolRef, Option<AccessGrant>), Error> {
+    let grant = authorize(headers, state)?;
+    Ok((pool_ref_from_request(pool)?, grant))
 }
 
 async fn precheck_lite3_since_seq(
@@ -1267,27 +1388,40 @@ fn spawn_tail_stream_response(
     pool_ref: PoolRef,
     runtime: TailRuntime,
     encoding: TailStreamEncoding,
+    grant: Option<AccessGrant>,
 ) -> Response {
     let client = state.client.clone();
-    let TailRuntime { permit, options } = runtime;
+    let TailRuntime {
+        permit,
+        mut options,
+    } = runtime;
+    options.cancel = grant.as_ref().map(AccessGrant::cancellation_flag);
     let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
+    let producer_grant = grant.clone();
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        let result = client
-            .open_pool(&pool_ref)
-            .and_then(|pool| stream_tail_bytes(&pool, options, encoding, tx.clone()));
-        if let Err(err) = result {
-            let _ = tx.blocking_send(Err(err));
+        if producer_grant.as_ref().is_some_and(AccessGrant::is_revoked) {
+            return;
+        }
+        let result = client.open_pool(&pool_ref).and_then(|pool| {
+            stream_tail_bytes(&pool, options, encoding, tx.clone(), producer_grant.clone())
+        });
+        if let Err(err) = result
+            && !producer_grant.as_ref().is_some_and(AccessGrant::is_revoked)
+        {
+            let _ = send_tail_result(&tx, Err(err), producer_grant.as_ref());
         }
     });
 
-    let stream = ReceiverStream::new(rx).map(move |result| match result {
-        Ok(bytes) => Ok(bytes),
-        Err(err) => match encode_tail_terminal_error(&err, encoding) {
-            Some(bytes) => Ok(bytes),
-            None => Err(std::io::Error::other(error_json_string(&err))),
-        },
-    });
+    let stream = ReceiverStream::new(rx)
+        .take_while(move |_| !grant.as_ref().is_some_and(AccessGrant::is_revoked))
+        .map(move |result| match result {
+            Ok(bytes) => Ok(bytes),
+            Err(err) => match encode_tail_terminal_error(&err, encoding) {
+                Some(bytes) => Ok(bytes),
+                None => Err(std::io::Error::other(error_json_string(&err))),
+            },
+        });
     let mut response = Response::new(Body::from_stream(stream));
     apply_tail_response_headers(&mut response, encoding);
     response
@@ -1301,17 +1435,21 @@ fn stream_tail_bytes(
     options: TailOptions,
     encoding: TailStreamEncoding,
     tx: mpsc::Sender<Result<Bytes, Error>>,
+    grant: Option<AccessGrant>,
 ) -> Result<(), Error> {
     match encoding {
         TailStreamEncoding::Jsonl | TailStreamEncoding::Sse => {
             let mut tail = pool.tail(options);
             while let Some(message) = tail.next_message()? {
+                if grant.as_ref().is_some_and(AccessGrant::is_revoked) {
+                    break;
+                }
                 let encoded = match encoding {
                     TailStreamEncoding::Jsonl => encode_jsonl_message(&message)?,
                     TailStreamEncoding::Sse => encode_sse_message(&message)?,
                     TailStreamEncoding::Lite3 => unreachable!("handled in separate branch"),
                 };
-                if tx.blocking_send(Ok(encoded)).is_err() {
+                if !send_tail_result(&tx, Ok(encoded), grant.as_ref()) {
                     break;
                 }
             }
@@ -1319,15 +1457,38 @@ fn stream_tail_bytes(
         TailStreamEncoding::Lite3 => {
             let mut tail = pool.tail_lite3(options);
             while let Some(frame) = tail.next_frame()? {
+                if grant.as_ref().is_some_and(AccessGrant::is_revoked) {
+                    break;
+                }
                 lite3::validate_bytes(frame.payload)?;
                 let encoded = encode_lite3_stream_frame(&frame)?;
-                if tx.blocking_send(Ok(encoded)).is_err() {
+                if !send_tail_result(&tx, Ok(encoded), grant.as_ref()) {
                     break;
                 }
             }
         }
     }
     Ok(())
+}
+
+fn send_tail_result(
+    tx: &mpsc::Sender<Result<Bytes, Error>>,
+    mut result: Result<Bytes, Error>,
+    grant: Option<&AccessGrant>,
+) -> bool {
+    loop {
+        if grant.is_some_and(AccessGrant::is_revoked) {
+            return false;
+        }
+        match tx.try_send(result) {
+            Ok(()) => return true,
+            Err(mpsc::error::TrySendError::Closed(_)) => return false,
+            Err(mpsc::error::TrySendError::Full(remaining)) => {
+                result = remaining;
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
 }
 
 fn encode_message_payload(message: &plasmite::api::Message) -> Result<Vec<u8>, Error> {
@@ -1513,13 +1674,15 @@ fn error_body(err: &Error) -> ErrorBody {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppState, Error, ErrorKind, LocalClient, McpHandler, ServeConfig, ServeMcpHandler,
-        StorageExecutor, ToolCallRequest, error_response, healthz, list_pools, mcp_post,
-        normalize_tags, parse_tags_from_query, validate_config, validate_mcp_origin_header,
+        AccessStore, AppState, Error, ErrorKind, LocalClient, McpHandler, ServeConfig,
+        ServeMcpHandler, StorageExecutor, ToolCallRequest, error_response, healthz, list_pools,
+        mcp_post, normalize_tags, parse_tags_from_query, validate_config,
+        validate_mcp_origin_header,
     };
     use axum::Json;
     use axum::extract::State;
     use axum::http::{HeaderMap, HeaderValue, header};
+    use plasmite::api::PoolApiExt;
     use serde_json::json;
     use std::sync::Arc;
     use tokio::sync::Semaphore;
@@ -1595,6 +1758,68 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::Busy);
         release_tx.send(()).unwrap();
         active.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn admitted_storage_work_may_finish_after_revocation_but_new_work_fails() {
+        let temp = tempfile::tempdir().unwrap();
+        let access = AccessStore::open(temp.path(), None, None, None).unwrap();
+        let key = access.issue("writer").unwrap();
+        let grant = access
+            .authorize_secret(key.rsplit('.').next().unwrap())
+            .unwrap();
+        let id = serde_json::to_value(access.list().unwrap()).unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let client = LocalClient::new().with_pool_dir(temp.path());
+        let pool_ref = plasmite::api::PoolRef::name("events");
+        client
+            .create_pool(&pool_ref, plasmite::api::PoolOptions::new(1024 * 1024))
+            .unwrap();
+        let executor = StorageExecutor::new(1);
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let admitted = {
+            let executor = executor.clone();
+            let grant = grant.clone();
+            let client = client.clone();
+            let pool_ref = pool_ref.clone();
+            tokio::spawn(async move {
+                executor
+                    .run_authorized(Some(grant), move || {
+                        started_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                        let mut pool = client.open_pool(&pool_ref)?;
+                        pool.append_json_now(
+                            &json!({"admitted": true}),
+                            &[],
+                            plasmite::api::Durability::Fast,
+                        )
+                        .map(|message| message.seq)
+                    })
+                    .await
+            })
+        };
+        started_rx.await.unwrap();
+        access.revoke(&id).unwrap();
+        assert!(grant.is_revoked());
+        release_tx.send(()).unwrap();
+        let seq = admitted.await.unwrap().unwrap();
+        assert_eq!(
+            client
+                .open_pool(&pool_ref)
+                .unwrap()
+                .get_message(seq)
+                .unwrap()
+                .data,
+            json!({"admitted": true})
+        );
+        let rejected = executor
+            .run_authorized(Some(grant), || Ok(8))
+            .await
+            .unwrap_err();
+        assert_eq!(rejected.kind(), ErrorKind::Permission);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1686,6 +1911,64 @@ mod tests {
         assert_eq!(
             result.structured_content.unwrap()["error_kind"],
             json!("Busy")
+        );
+    }
+
+    #[test]
+    fn revocation_wakes_an_idle_mcp_wait() {
+        let temp = tempfile::tempdir().unwrap();
+        let access = AccessStore::open(temp.path(), None, None, None).unwrap();
+        let key = access.issue("reader").unwrap();
+        let grant = access
+            .authorize_secret(key.rsplit('.').next().unwrap())
+            .unwrap();
+        let id = serde_json::to_value(access.list().unwrap()).unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let client = LocalClient::new().with_pool_dir(temp.path());
+        client
+            .create_pool(
+                &plasmite::api::PoolRef::name("events"),
+                plasmite::api::PoolOptions::new(1024 * 1024),
+            )
+            .unwrap();
+        let wait_semaphore = Arc::new(Semaphore::new(1));
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let thread_semaphore = wait_semaphore.clone();
+        std::thread::spawn(move || {
+            let mut handler =
+                ServeMcpHandler::new(client, thread_semaphore).with_grant(Some(grant));
+            let result = handler.call_tool(ToolCallRequest {
+                name: "plasmite_wait".into(),
+                arguments: json!({"pool":"events","after_seq":0,"timeout_ms":60_000})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            });
+            result_tx.send(result).unwrap();
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while wait_semaphore.available_permits() != 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "MCP wait was not admitted"
+            );
+            std::thread::yield_now();
+        }
+        assert!(matches!(
+            result_rx.recv_timeout(std::time::Duration::from_millis(100)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+        access.revoke(&id).unwrap();
+        let result = result_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("revocation should wake the idle wait")
+            .unwrap();
+        assert!(result.is_error);
+        assert_eq!(
+            result.structured_content.unwrap()["error_kind"],
+            "Permission"
         );
     }
 

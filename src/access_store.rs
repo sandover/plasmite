@@ -11,7 +11,9 @@ use sha2::{Digest, Sha256};
 use std::fs::{File, OpenOptions};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 use url::{Host, Url};
 
 pub(crate) struct AccessStore {
@@ -19,7 +21,7 @@ pub(crate) struct AccessStore {
     cert_path: PathBuf,
     key_path: PathBuf,
     _lock: File,
-    records: Mutex<Vec<AccessRecord>>,
+    records: Mutex<AccessState>,
     fingerprint: String,
 }
 
@@ -28,6 +30,42 @@ struct AccessRecord {
     name: String,
     verifier: String,
     revoked: bool,
+    #[serde(default)]
+    created_at: Option<u64>,
+}
+
+struct AccessState {
+    records: Vec<AccessRecord>,
+    runtime: Vec<AccessRuntime>,
+}
+
+struct AccessRuntime {
+    revoked: Arc<AtomicBool>,
+    last_used_at: Option<u64>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct AccessGrant {
+    revoked: Arc<AtomicBool>,
+}
+
+impl AccessGrant {
+    pub(crate) fn is_revoked(&self) -> bool {
+        self.revoked.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn cancellation_flag(&self) -> Arc<AtomicBool> {
+        self.revoked.clone()
+    }
+}
+
+#[derive(Serialize)]
+pub(crate) struct AccessKeySummary {
+    id: String,
+    name: String,
+    revoked: bool,
+    created_at: Option<u64>,
+    last_used_at: Option<u64>,
 }
 
 #[derive(Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -201,12 +239,19 @@ impl AccessStore {
         } else {
             Vec::new()
         };
+        let runtime = records
+            .iter()
+            .map(|record| AccessRuntime {
+                revoked: Arc::new(AtomicBool::new(record.revoked)),
+                last_used_at: None,
+            })
+            .collect();
         Ok(Self {
             dir,
             cert_path,
             key_path,
             _lock: lock,
-            records: Mutex::new(records),
+            records: Mutex::new(AccessState { records, runtime }),
             fingerprint,
         })
     }
@@ -260,31 +305,116 @@ impl AccessStore {
         let mut records = self.records.lock().map_err(|_| {
             Error::new(ErrorKind::Internal).with_message("access key state is unavailable")
         })?;
-        records.push(AccessRecord {
+        records.records.push(AccessRecord {
             name: name.to_owned(),
             verifier,
             revoked: false,
+            created_at: unix_seconds(),
         });
-        if let Err(err) = write_atomic_json(&self.dir.join("keys.json"), &*records) {
+        if let Err(err) = write_atomic_json(&self.dir.join("keys.json"), &records.records) {
             // A failed directory sync may follow a successful rename. Match the
             // durable file so an undisclosed key never has different live state.
-            *records = read_json(&self.dir.join("keys.json")).unwrap_or_default();
+            records.records = read_json(&self.dir.join("keys.json")).unwrap_or_default();
+            records.sync_runtime();
             return Err(err);
         }
+        records.runtime.push(AccessRuntime {
+            revoked: Arc::new(AtomicBool::new(false)),
+            last_used_at: None,
+        });
         Ok(key)
     }
 
-    pub(crate) fn accepts_secret(&self, secret: &str) -> bool {
+    pub(crate) fn authorize_secret(&self, secret: &str) -> Option<AccessGrant> {
         if secret.len() != 64 || !secret.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return false;
+            return None;
         }
         let verifier = hex(&Sha256::digest(hex_decode(secret).unwrap_or_default()));
-        self.records.lock().is_ok_and(|records| {
-            records.iter().any(|record| {
-                !record.revoked && constant_time_eq(record.verifier.as_bytes(), verifier.as_bytes())
-            })
+        let mut state = self.records.lock().ok()?;
+        let index = state
+            .records
+            .iter()
+            .position(|record| constant_time_eq(record.verifier.as_bytes(), verifier.as_bytes()))?;
+        if state.records[index].revoked {
+            return None;
+        }
+        state.runtime[index].last_used_at = unix_seconds();
+        Some(AccessGrant {
+            revoked: state.runtime[index].revoked.clone(),
         })
     }
+
+    pub(crate) fn list(&self) -> Result<Vec<AccessKeySummary>, Error> {
+        let state = self.records.lock().map_err(|_| {
+            Error::new(ErrorKind::Internal).with_message("access key state is unavailable")
+        })?;
+        Ok(state
+            .records
+            .iter()
+            .zip(&state.runtime)
+            .map(|(record, runtime)| AccessKeySummary {
+                id: key_id(&record.verifier),
+                name: record.name.clone(),
+                revoked: record.revoked,
+                created_at: record.created_at,
+                last_used_at: runtime.last_used_at,
+            })
+            .collect())
+    }
+
+    pub(crate) fn revoke(&self, id: &str) -> Result<(), Error> {
+        let mut state = self.records.lock().map_err(|_| {
+            Error::new(ErrorKind::Internal).with_message("access key state is unavailable")
+        })?;
+        let index = state
+            .records
+            .iter()
+            .position(|record| key_id(&record.verifier) == id)
+            .ok_or_else(|| Error::new(ErrorKind::NotFound).with_message("access key not found"))?;
+        if state.records[index].revoked {
+            return Ok(());
+        }
+        let mut updated = state.records.clone();
+        updated[index].revoked = true;
+        if let Err(err) = write_atomic_json(&self.dir.join("keys.json"), &updated) {
+            state.records = read_json(&self.dir.join("keys.json")).unwrap_or_default();
+            state.sync_runtime();
+            return Err(err);
+        }
+        state.records = updated;
+        state.runtime[index].revoked.store(true, Ordering::Release);
+        Ok(())
+    }
+}
+
+impl AccessState {
+    fn sync_runtime(&mut self) {
+        for runtime in self.runtime.iter().skip(self.records.len()) {
+            runtime.revoked.store(true, Ordering::Release);
+        }
+        self.runtime.truncate(self.records.len());
+        for (index, record) in self.records.iter().enumerate() {
+            if let Some(runtime) = self.runtime.get(index) {
+                runtime.revoked.store(record.revoked, Ordering::Release);
+            } else {
+                self.runtime.push(AccessRuntime {
+                    revoked: Arc::new(AtomicBool::new(record.revoked)),
+                    last_used_at: None,
+                });
+            }
+        }
+    }
+}
+
+fn key_id(verifier: &str) -> String {
+    hex(&Sha256::digest(verifier.as_bytes()))
+}
+
+fn unix_seconds() -> Option<u64> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|time| time.as_secs())
 }
 
 fn state_file(dir: &Path, name: &str) -> Result<PathBuf, Error> {
@@ -613,19 +743,19 @@ mod tests {
             .expect("first owner");
         let key = first.issue("laptop").expect("key");
         let secret = key.rsplit('.').next().expect("secret");
-        assert!(first.accepts_secret(secret));
+        assert!(first.authorize_secret(secret).is_some());
         let second = AccessStore::open(temp.path(), Some("https://127.0.0.1"), None, None);
         assert_eq!(second.err().expect("lock failure").kind(), ErrorKind::Busy);
         drop(first);
         let restarted =
             AccessStore::open(temp.path(), Some("https://127.0.0.1"), None, None).expect("restart");
-        assert!(restarted.accepts_secret(secret));
+        assert!(restarted.authorize_secret(secret).is_some());
         let fingerprint = restarted.fingerprint().to_owned();
         drop(restarted);
         let moved = AccessStore::open(temp.path(), Some("https://127.0.0.2"), None, None)
             .expect("same-key certificate renewal");
         assert_eq!(moved.fingerprint(), fingerprint);
-        assert!(moved.accepts_secret(secret));
+        assert!(moved.authorize_secret(secret).is_some());
     }
 
     #[test]

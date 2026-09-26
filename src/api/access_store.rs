@@ -67,6 +67,32 @@ pub(super) fn save(destination: &str, key: &AccessKey) -> Result<(), Error> {
     result
 }
 
+pub(super) fn remove(destination: &str) -> Result<(), Error> {
+    let paths = StorePaths::new()?;
+    if !paths.dir.exists() {
+        return Ok(());
+    }
+    paths.prepare_dir()?;
+    let lock = paths.open_lock()?;
+    FileExt::lock_exclusive(&lock)
+        .map_err(|error| store_io_error("failed to lock saved connections", error))?;
+    let result = (|| {
+        let Some(mut file) = paths.read_file()? else {
+            return Ok(());
+        };
+        if file.version != STORE_VERSION {
+            return Err(Error::new(ErrorKind::Corrupt)
+                .with_message("saved connection file has an unsupported version"));
+        }
+        if file.connections.remove(destination).is_some() {
+            paths.write_file(&file)?;
+        }
+        Ok(())
+    })();
+    let _ = FileExt::unlock(&lock);
+    result
+}
+
 fn encode_record(destination: &str, key: &AccessKey) -> Result<String, Error> {
     let payload = store_payload(destination, key);
     let protected = protect(&payload)?;

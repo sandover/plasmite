@@ -30,8 +30,14 @@ pub struct RemoteClient {
 
 struct RemoteClientInner {
     base_url: Url,
-    access_secret: Option<String>,
+    credentials: CredentialSource,
     agent: ureq::Agent,
+}
+
+enum CredentialSource {
+    Saved,
+    Explicit(super::access::AccessKey),
+    None,
 }
 
 #[derive(Clone)]
@@ -124,15 +130,13 @@ struct AppendRequest<'a> {
 impl RemoteClient {
     pub fn new(base_url: impl Into<String>) -> ApiResult<Self> {
         let base_url = normalize_base_url(base_url.into())?;
-        if let Some(key) = super::access::load_saved_key(base_url.as_str())? {
-            if base_url.scheme() != "https" {
-                return Err(Error::new(ErrorKind::Corrupt)
-                    .with_message("saved native connections must use HTTPS"));
-            }
-            Ok(Self::from_access_key(base_url, key))
-        } else {
-            Ok(Self::without_credentials(base_url))
+        if super::access::load_saved_key(base_url.as_str())?.is_some()
+            && base_url.scheme() != "https"
+        {
+            return Err(Error::new(ErrorKind::Corrupt)
+                .with_message("saved native connections must use HTTPS"));
         }
+        Ok(Self::using_saved_connections(base_url))
     }
 
     /// Create an in-memory native client from an access key without saving it.
@@ -147,11 +151,12 @@ impl RemoteClient {
     }
 
     pub(super) fn from_access_key(base_url: Url, key: super::access::AccessKey) -> Self {
+        let fingerprint = *key.spki_fingerprint();
         Self {
             inner: Arc::new(RemoteClientInner {
                 base_url,
-                access_secret: Some(key.secret_hex()),
-                agent: super::access::access_agent(Some(*key.spki_fingerprint())),
+                credentials: CredentialSource::Explicit(key),
+                agent: super::access::access_agent(Some(fingerprint)),
             }),
         }
     }
@@ -160,17 +165,17 @@ impl RemoteClient {
         Self {
             inner: Arc::new(RemoteClientInner {
                 base_url,
-                access_secret: None,
+                credentials: CredentialSource::None,
                 agent: super::access::access_agent(None),
             }),
         }
     }
 
-    fn without_credentials(base_url: Url) -> Self {
+    fn using_saved_connections(base_url: Url) -> Self {
         Self {
             inner: Arc::new(RemoteClientInner {
                 base_url,
-                access_secret: None,
+                credentials: CredentialSource::Saved,
                 agent: ureq::AgentBuilder::new().redirects(0).build(),
             }),
         }
@@ -184,7 +189,7 @@ impl RemoteClient {
 
         let url = build_url(&self.inner.base_url, &["v0", "access", "check"])?;
         let result = self
-            .request("GET", &url)
+            .request("GET", &url)?
             .set("Accept", "application/json")
             .call();
         match result {
@@ -291,7 +296,7 @@ impl RemoteClient {
         T: Serialize,
         R: DeserializeOwned,
     {
-        let request = self.request(method, url).set("Accept", "application/json");
+        let request = self.request(method, url)?.set("Accept", "application/json");
         let response = if method == "GET" {
             request.call()
         } else {
@@ -314,20 +319,40 @@ impl RemoteClient {
         }
     }
 
-    fn request(&self, method: &str, url: &Url) -> ureq::Request {
-        let mut request = self.inner.agent.request(method, url.as_str());
+    fn request(&self, method: &str, url: &Url) -> ApiResult<ureq::Request> {
+        let saved_key = if matches!(&self.inner.credentials, CredentialSource::Saved) {
+            super::access::load_saved_key(self.inner.base_url.as_str())?
+        } else {
+            None
+        };
+        let key = match &self.inner.credentials {
+            CredentialSource::Saved => saved_key.as_ref(),
+            CredentialSource::Explicit(key) => Some(key),
+            CredentialSource::None => None,
+        };
+        if key.is_some() && self.inner.base_url.scheme() != "https" {
+            return Err(Error::new(ErrorKind::Corrupt)
+                .with_message("saved native connections must use HTTPS"));
+        }
+        let pinned_agent = if matches!(&self.inner.credentials, CredentialSource::Saved) {
+            key.map(|key| super::access::access_agent(Some(*key.spki_fingerprint())))
+        } else {
+            None
+        };
+        let agent = pinned_agent.as_ref().unwrap_or(&self.inner.agent);
+        let mut request = agent.request(method, url.as_str());
         if url.scheme() == "https"
             && url.origin() == self.inner.base_url.origin()
-            && let Some(secret) = &self.inner.access_secret
+            && let Some(key) = key
         {
-            request = request.set("Authorization", &format!("Bearer {secret}"));
+            request = request.set("Authorization", &format!("Bearer {}", key.secret_hex()));
         }
-        request
+        Ok(request)
     }
 
     fn request_stream(&self, url: &Url) -> ApiResult<ureq::Response> {
         let response = self
-            .request("GET", url)
+            .request("GET", url)?
             .set("Accept", "application/json")
             .call();
         match response {
@@ -341,7 +366,7 @@ impl RemoteClient {
 
     fn request_stream_lite3(&self, url: &Url) -> ApiResult<ureq::Response> {
         let response = self
-            .request("GET", url)
+            .request("GET", url)?
             .set("Accept", "application/x-plasmite-lite3-stream")
             .call();
         match response {
@@ -419,7 +444,7 @@ impl RemotePool {
         }
         let response = self
             .client
-            .request("POST", &url)
+            .request("POST", &url)?
             .set("Accept", "application/json")
             .set("Content-Type", "application/x-plasmite-lite3")
             .send_bytes(payload);
@@ -472,7 +497,7 @@ impl RemotePool {
         )?;
         let response = self
             .client
-            .request("GET", &url)
+            .request("GET", &url)?
             .set("Accept", "application/x-plasmite-lite3")
             .call();
         match response {
