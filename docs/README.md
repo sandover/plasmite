@@ -16,6 +16,8 @@ Plasmite documentation is intentionally split into:
 
 - CLI and help system audit: `docs/proposals/cli-help-system.md`
 - MCP server proposal: `docs/proposals/mcp-server.md`
+- Secure sharing proposal: [serve-mcp-native.md](proposals/serve-mcp-native.md) — read when designing access keys, native connections, or MCP authorization.
+- Earlier serve access proposal: [serve-access-mvp.md](proposals/serve-access-mvp.md) — read for the preceding invitation-based design.
 
 ## Normative specs
 

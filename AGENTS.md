@@ -14,6 +14,8 @@ docs/
 │   Design audits and proposals
 ├── proposals/cli-help-system.md               — CLI/help audit and reform model; read before redesigning command discovery
 ├── proposals/mcp-server.md                    — MCP design history; read when revisiting the MCP surface
+├── proposals/serve-mcp-native.md              — Secure sharing; read when designing access keys, native connections, or MCP authorization
+├── proposals/serve-access-mvp.md              — Earlier access proposal; read when tracing the preceding invitation design
 │
 │   Docs of record
 ├── record/README.md                           — Docs of record index; start here for stable policies and runbooks
