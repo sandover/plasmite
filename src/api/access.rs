@@ -5,6 +5,7 @@
 mod access_store;
 #[path = "access_tls.rs"]
 mod access_tls;
+pub(super) use access_tls::verified_leaf as verified_browser_leaf;
 
 use crate::api::RemoteClient;
 use crate::core::error::{Error, ErrorKind};

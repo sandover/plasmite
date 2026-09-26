@@ -3,7 +3,10 @@
 use fs2::FileExt;
 use getrandom::fill;
 use plasmite::api::{Error, ErrorKind, access::spki_fingerprint};
-use rcgen::{Certificate, CertificateParams, IsCa, KeyPair, SanType};
+use rcgen::{
+    Certificate, CertificateParams, CustomExtension, ExtendedKeyUsagePurpose, IsCa, KeyPair,
+    KeyUsagePurpose, SanType,
+};
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::pem::PemObject;
 use serde::{Deserialize, Serialize};
@@ -23,6 +26,7 @@ pub(crate) struct AccessStore {
     _lock: File,
     records: Mutex<AccessState>,
     fingerprint: String,
+    shared_address: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -74,6 +78,8 @@ struct Identity {
     key_file: String,
     front_cert_file: Option<String>,
     generated: bool,
+    #[serde(default)]
+    browser_leaf_v1: bool,
     shared_address: Option<String>,
 }
 
@@ -106,6 +112,7 @@ impl AccessStore {
             key_file: String::new(),
             front_cert_file: None,
             generated: owner_cert.is_none(),
+            browser_leaf_v1: false,
             shared_address: None,
         });
         if previous.is_some() {
@@ -151,6 +158,7 @@ impl AccessStore {
                 identity.key_file = write_generation(&dir, "key", &key_bytes)?;
             }
             identity.generated = false;
+            identity.browser_leaf_v1 = false;
         } else if previous.is_none() {
             let cert =
                 Certificate::from_params(certificate_params(shared_address)?).map_err(|err| {
@@ -167,10 +175,12 @@ impl AccessStore {
             identity.key_file =
                 write_generation(&dir, "key", cert.serialize_private_key_pem().as_bytes())?;
             identity.generated = true;
+            identity.browser_leaf_v1 = true;
         } else if identity.generated
-            && shared_address.is_some_and(|address| {
-                address_host(Some(address)) != address_host(identity.shared_address.as_deref())
-            })
+            && (!identity.browser_leaf_v1
+                || shared_address.is_some_and(|address| {
+                    address_host(Some(address)) != address_host(identity.shared_address.as_deref())
+                }))
         {
             let key_pem =
                 std::fs::read_to_string(state_file(&dir, &identity.key_file)?).map_err(|err| {
@@ -195,6 +205,7 @@ impl AccessStore {
                     .with_source(err)
             })?;
             identity.cert_file = write_generation(&dir, "cert", pem.as_bytes())?;
+            identity.browser_leaf_v1 = true;
         }
         if let Some(front_bytes) = front_material {
             let unchanged = identity.front_cert_file.as_deref().is_some_and(|name| {
@@ -253,6 +264,7 @@ impl AccessStore {
             _lock: lock,
             records: Mutex::new(AccessState { records, runtime }),
             fingerprint,
+            shared_address: identity.shared_address,
         })
     }
 
@@ -264,6 +276,12 @@ impl AccessStore {
     }
     pub(crate) fn fingerprint(&self) -> &str {
         &self.fingerprint
+    }
+    pub(crate) fn shared_address(&self) -> Option<&str> {
+        self.shared_address.as_deref()
+    }
+    pub(crate) fn state_dir(&self) -> &Path {
+        &self.dir
     }
     pub(crate) fn write_local_bind(&self, bind: std::net::SocketAddr) -> Result<(), Error> {
         write_atomic_json(&self.dir.join("local.json"), &bind.to_string())
@@ -342,6 +360,38 @@ impl AccessStore {
         Some(AccessGrant {
             revoked: state.runtime[index].revoked.clone(),
         })
+    }
+
+    pub(crate) fn authorize_id(&self, id: &str) -> Option<AccessGrant> {
+        let mut state = self.records.lock().ok()?;
+        let index = state
+            .records
+            .iter()
+            .position(|record| key_id(&record.verifier) == id)?;
+        if state.records[index].revoked {
+            return None;
+        }
+        state.runtime[index].last_used_at = unix_seconds();
+        Some(AccessGrant {
+            revoked: state.runtime[index].revoked.clone(),
+        })
+    }
+
+    pub(crate) fn authorize_key(&self, key: &str) -> Option<(String, AccessGrant)> {
+        let mut parts = key.split('.');
+        if parts.next()? != "pk1" || parts.next()? != self.fingerprint {
+            return None;
+        }
+        let secret = parts.next()?;
+        if parts.next().is_some()
+            || secret.len() != 64
+            || !secret.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return None;
+        }
+        let verifier = hex(&Sha256::digest(hex_decode(secret)?));
+        let id = key_id(&verifier);
+        self.authorize_id(&id).map(|grant| (id, grant))
     }
 
     pub(crate) fn list(&self) -> Result<Vec<AccessKeySummary>, Error> {
@@ -477,6 +527,15 @@ fn sync_dir(_path: &Path) -> Result<(), Error> {
 fn certificate_params(shared_address: Option<&str>) -> Result<CertificateParams, Error> {
     let mut params = CertificateParams::new(vec!["localhost".to_string()]);
     params.is_ca = IsCa::NoCa;
+    params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+    // rcgen's NoCa omits Basic Constraints. An explicit critical cA:false
+    // extension lets browser trust setup reject any certificate with issuer
+    // authority before it reaches an operating-system trust store.
+    let mut basic_constraints =
+        CustomExtension::from_oid_content(&[2, 5, 29, 19], vec![0x30, 0x00]);
+    basic_constraints.set_criticality(true);
+    params.custom_extensions.push(basic_constraints);
     params.subject_alt_names.push(SanType::IpAddress(IpAddr::V4(
         std::net::Ipv4Addr::LOCALHOST,
     )));
@@ -569,7 +628,7 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     diff == 0
 }
 
-fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Error> {
+pub(crate) fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Error> {
     let bytes = std::fs::read(path).map_err(|err| {
         Error::new(ErrorKind::Io)
             .with_message("failed to read server state")
@@ -584,7 +643,10 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Error> {
     })
 }
 
-fn write_atomic_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> Result<(), Error> {
+pub(crate) fn write_atomic_json<T: Serialize + ?Sized>(
+    path: &Path,
+    value: &T,
+) -> Result<(), Error> {
     let bytes = serde_json::to_vec(value).map_err(|err| {
         Error::new(ErrorKind::Internal)
             .with_message("failed to encode server state")
@@ -706,7 +768,7 @@ fn create_private_dir(path: &Path) -> Result<(), Error> {
     })
 }
 
-fn ensure_private(path: &Path) -> Result<(), Error> {
+pub(crate) fn ensure_private(path: &Path) -> Result<(), Error> {
     let metadata = std::fs::symlink_metadata(path).map_err(|err| {
         Error::new(ErrorKind::Io)
             .with_message("failed to inspect server state permissions")
@@ -732,9 +794,42 @@ fn ensure_private(path: &Path) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::AccessStore;
+    use super::{AccessStore, certificate_params};
     use plasmite::api::ErrorKind;
     use rcgen::{Certificate, CertificateParams};
+
+    #[test]
+    fn generated_certificate_marks_ca_false_explicitly() {
+        let params = certificate_params(Some("https://localhost:9743/")).expect("params");
+        let cert = Certificate::from_params(params).expect("certificate");
+        let der = cert.serialize_der().expect("DER");
+        let extension = [
+            0x06, 0x03, 0x55, 0x1d, 0x13, // Basic Constraints
+            0x01, 0x01, 0xff, // critical
+            0x04, 0x02, 0x30, 0x00, // cA:false (DER default omitted)
+        ];
+        assert!(der.windows(extension.len()).any(|part| part == extension));
+    }
+
+    #[test]
+    fn older_generated_identity_renews_with_same_public_key() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let first = AccessStore::open(temp.path(), Some("https://localhost:9743"), None, None)
+            .expect("first identity");
+        let fingerprint = first.fingerprint().to_owned();
+        let old_cert = std::fs::read(first.cert_path()).expect("certificate");
+        drop(first);
+
+        let identity_path = temp.path().join(".plasmite-serve/identity.json");
+        let mut identity: serde_json::Value = super::read_json(&identity_path).expect("identity");
+        identity.as_object_mut().unwrap().remove("browser_leaf_v1");
+        super::write_atomic_json(&identity_path, &identity).expect("old identity");
+
+        let upgraded = AccessStore::open(temp.path(), Some("https://localhost:9743"), None, None)
+            .expect("upgraded identity");
+        assert_eq!(upgraded.fingerprint(), fingerprint);
+        assert_ne!(std::fs::read(upgraded.cert_path()).unwrap(), old_cert);
+    }
 
     #[test]
     fn key_survives_restart_and_second_owner_is_refused() {

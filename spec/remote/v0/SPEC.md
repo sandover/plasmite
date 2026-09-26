@@ -62,6 +62,26 @@ It captures stable wire-level compatibility guarantees only.
   Local HTTP remains on loopback and permits credential-free local pool use.
   The default local and secure ports are `9700` and `9743`, respectively;
   both may be configured.
+
+### Browser Session
+
+- The remote HTTPS page accepts a complete `pk1` access key through
+  `POST /v0/browser/session` with JSON `{ "access_key": "..." }`. The key appears
+  only in the request body. A successful reply sets an opaque `plasmite_session`
+  cookie with `Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/v0`, and a 30-day
+  maximum age. The server stores only a hash of the session token, the key ID,
+  and the expiry in its private serving state. Sessions survive server restart.
+- `GET /v0/browser/session` reports whether the cookie remains valid.
+  `DELETE /v0/browser/session` removes that session and clears the cookie.
+  Logout does not revoke the access key. A session expires after 30 days or
+  immediately when its access key is revoked. Every pool operation checks the
+  live revocation state. Browser cookies authorize pool operations but not MCP
+  or local access administration.
+- Browser login, logout, and cookie-authenticated writes require an `Origin`
+  matching the remote HTTPS `Host`. The remote listener never serves `/access`.
+  Local access administration accepts only loopback `Host` values and rejects
+  mismatched `Origin` values. The pages load no third-party scripts and render
+  pool data as text.
 - A native client checks the destination hostname, certificate validity, TLS
   proof of possession, and the certificate's Subject Public Key Info (SPKI)
   fingerprint against the key before it sends the secret. A redirect must not
@@ -144,9 +164,8 @@ It captures stable wire-level compatibility guarantees only.
 Routes outside the stable endpoint set above are not part of the remote v0 compatibility surface.
 Examples: `/healthz`, `/ui`, `/v0/ui/...`, `/mcp`.
 
-`/mcp` is experimental and not covered by the v0 stability contract. Its
-current transport and security behavior is documented in
-`docs/record/serving.md`.
+`/mcp` is outside the v0 stability contract. Its versioned message, transport,
+and authorization contract is in `spec/mcp/2025-11-25/SPEC.md`.
 
 ## References
 

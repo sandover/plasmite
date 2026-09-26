@@ -5,6 +5,7 @@
 //! Invariants: Internal modules remain private and are not directly exposed.
 
 pub mod access;
+pub mod browser_trust;
 mod client;
 mod message;
 pub mod notify;

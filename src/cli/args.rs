@@ -257,22 +257,35 @@ CONSTRAINTS
         run: ServeRunArgs,
     },
     #[command(
-        about = "Serve MCP tools and resources on stdio",
-        long_about = r#"Start an experimental MCP server on stdio.
+        about = "Serve local or remote MCP tools and resources on stdio",
+        long_about = r#"Start an MCP process on stdio.
 
-Reads newline-delimited JSON-RPC requests from stdin and writes newline-delimited JSON-RPC responses to stdout.
-The process exits when stdin closes."#,
+With no options, the process exposes local pools. Use `--remote` to connect to a
+Plasmite server through this machine's saved native connection. Credentials stay
+in Plasmite's access store and are reloaded before each remote request.
+
+The process reads newline-delimited JSON-RPC requests from stdin and writes
+responses to stdout. It exits when stdin closes."#,
         after_help = r#"EXAMPLES
   $ plasmite mcp
-  $ plasmite mcp --dir /path/to/pools"#
+  $ plasmite mcp --dir /path/to/pools
+  $ plasmite mcp --remote https://pools.example.com:8443"#
     )]
     Mcp {
         #[arg(
             long,
+            conflicts_with = "remote",
             help = "Pool directory for named pools (default: ~/.plasmite/pools)",
             value_hint = ValueHint::DirPath
         )]
         dir: Option<PathBuf>,
+        #[arg(
+            long,
+            value_name = "SERVER_URL",
+            conflicts_with = "dir",
+            help = "Use a saved HTTPS connection to a Plasmite server"
+        )]
+        remote: Option<String>,
     },
     #[command(
         arg_required_else_help = true,
@@ -684,6 +697,17 @@ pub(crate) enum AccessSubcommand {
     Disconnect {
         #[arg(value_name = "URL", help = "HTTPS address of the saved connection")]
         url: String,
+    },
+    #[command(
+        about = "Remove one exact browser-trusted certificate",
+        long_about = "Remove the certificate identified by its SHA-256 fingerprint from this OS user's trust store. This works after the server renews its certificate or goes offline. Native credentials remain saved."
+    )]
+    Untrust {
+        #[arg(
+            value_name = "SHA256",
+            help = "Certificate fingerprint shown by access status"
+        )]
+        fingerprint: String,
     },
     #[command(about = "List access keys on the server machine")]
     Keys,

@@ -1,10 +1,11 @@
 # Serving and Remote Access
 
-This guide covers native access to pools on another machine. Browser login and
-direct remote Model Context Protocol (MCP) authorization are later work.
+This guide covers access to pools on another machine through native clients,
+browsers, and Model Context Protocol (MCP) harnesses.
 
-For the wire-level contract, see `spec/remote/v0/SPEC.md`. The design
-proposal remains available at `docs/proposals/serve-mcp-native.md`.
+For wire contracts, see `spec/remote/v0/SPEC.md` and
+`spec/mcp/2025-11-25/SPEC.md`. The design proposal remains available at
+`docs/proposals/serve-mcp-native.md`.
 
 ## Start the server
 
@@ -27,6 +28,44 @@ public key through the access key. You can supply a TLS certificate and key
 with `--tls-cert` and `--tls-key`. Use `--front-cert` when a TLS proxy presents
 a different certificate to clients; the access key then pins that front key.
 Configure the proxy to verify the backend HTTPS certificate.
+
+### Deploy with an existing trusted certificate
+
+Use a DNS name that reaches the server. Obtain a certificate whose Subject
+Alternative Name covers that name from a certificate issuer trusted by the
+recipient's browser and MCP harness. Keep the private key on the server. Open
+TCP port 9743 to recipients and start Plasmite with that exact public address:
+
+```console
+plasmite --dir ./shared serve \
+  --shared-address https://pools.example.net:9743 \
+  --tls-cert /secure/path/fullchain.pem \
+  --tls-key /secure/path/privkey.pem
+```
+
+Visit `https://pools.example.net:9743` from a recipient machine and check that
+the browser accepts the certificate before giving anyone an access key. Check
+that `https://pools.example.net:9743/.well-known/oauth-protected-resource/mcp`
+is reachable from the same machine. A shell check is:
+
+```console
+curl --fail --show-error https://pools.example.net:9743/healthz
+curl --fail --show-error https://pools.example.net:9743/.well-known/oauth-protected-resource/mcp
+```
+
+Both commands must validate the certificate without a bypass flag. The local
+Access page remains on
+`http://127.0.0.1:9700/access` on the server machine; do not expose that port.
+
+Renew the certificate before it expires and restart the server so it reads the
+new files. A renewal that keeps the same public key preserves native access
+keys; a changed public key needs new keys and fresh native connections. Browser
+trust setup for a Plasmite-generated certificate uses the exact certificate,
+so it needs another approval after renewal. Direct MCP authorization binds to
+the public HTTPS address; changing that address needs fresh authorization.
+Back up the `.plasmite-serve` directory with the pools and protect the backup:
+it contains key and session state. Restoring old state can restore revoked
+access.
 
 ## Invite a client
 
@@ -89,6 +128,80 @@ plasmite feed https://pools.example.net:9743/events '{"kind":"ready"}'
 Remote operations require HTTPS and a saved access key. Do not put the access
 key in a URL or command argument.
 
+## Open the pools in a browser
+
+Open the shared HTTPS address in a browser that trusts its certificate. Enter
+the access key on the page. The browser keeps a private session cookie, so a
+later visit does not need the key again. Sign out on that browser to end its
+session. Revoking the access key ends every browser session linked to it.
+
+The local page at `http://127.0.0.1:9700/access` lists keys and offers Invite
+and Revoke. It works only on the server machine. The remote page cannot
+administer keys. Browser trust setup for a Plasmite-generated certificate is
+an optional step for an installed client; it requires operating-system
+approval and installs that certificate. The native saved connection does
+not depend on browser trust.
+
+On macOS, Plasmite adds the verified leaf to the current user's login
+keychain for SSL. A focused Chrome and Safari check accepted that certificate
+and rejected a renewed certificate and a child certificate signed with the
+leaf's key. The effect on other macOS TLS clients has not been established.
+Removing trust by the full SHA-256 certificate fingerprint works after the
+server goes offline or changes its certificate.
+
+Windows browser trust installation is disabled pending a signed-in desktop
+check. Use an HTTPS certificate that Chrome and Edge already trust. The
+prepared adapter targets the current user's Root store, which also serves
+Windows-native TLS clients. `access untrust SHA256` can remove an exact
+test-owned certificate from that store. Native pinned access remains available.
+Older Plasmite-generated server certificates renew once on startup to add an
+explicit `CA:false` constraint while keeping their public key. Native access
+keys keep working, but browsers must approve the new exact certificate.
+Owner-supplied certificates do not change on startup; browser trust setup
+requires a leaf with critical Basic Constraints `CA:false`, digital-signature
+key use without `keyCertSign`, server-authentication extended use, and a DNS or
+IP Subject Alternative Name. A certificate already trusted by the browser
+needs no Plasmite trust setup.
+
+The Windows adapter still needs a signed-in desktop check with Chrome, Edge, and
+a Windows-native TLS client. In the configured VM, the headless
+`Import-Certificate` probe refused to run with “UI is not allowed in this
+operation.” The VM had no signed-in desktop, so that probe did not establish
+browser behavior, standard-user approval, restart needs, or whether the Root
+entry could trust a certificate signed by the leaf. The probe left no test
+certificate in the current-user Root store.
+
+## Connect an MCP harness
+
+For a recipient who installed Plasmite, save the native connection first.
+Then use `plasmite mcp --remote https://pools.example.net:9743` as a local MCP
+server. It reads that OS user's saved connection at tool-call time. The
+harness configuration contains the address and command, not the access key.
+Disconnecting the saved connection makes later local MCP calls fail until the
+recipient connects again.
+
+For a recipient without Plasmite, use a certificate already trusted by both
+the harness and browser. Add `https://pools.example.net:9743/mcp` as a remote
+HTTP MCP server. For the installed versions of these harnesses, the setup
+commands are:
+
+```console
+claude mcp add --transport http pools https://pools.example.net:9743/mcp
+codex mcp add pools --url https://pools.example.net:9743/mcp \
+  --oauth-client-registration dcr \
+  --oauth-resource https://pools.example.net:9743/mcp
+codex mcp login pools --oauth-client-registration dcr
+```
+
+The harness opens the server's authorization page. Check its HTTPS address,
+requested pool address, and callback, then enter the access key. Plasmite
+issues renewable credentials to that harness. Revoking one harness token ends
+that authorization for new calls; a wait already admitted may finish within
+its 60-second cap. Revoking the access key ends every linked authorization
+and active wait.
+A changed public address needs new authorization. The MCP message and OAuth
+contracts are in `spec/mcp/2025-11-25/SPEC.md`.
+
 List access keys with `plasmite --dir ./shared access keys`. The list shows
 names, opaque IDs, creation times, revocation state, and when this server last
 saw each key.
@@ -107,6 +220,3 @@ This major version removes the prior public paths: `serve init` and
 verification-bypass options; and the old read-only, write-only, and
 cross-origin access modes. It provides no compatibility aliases or migration
 path. Local pool use remains credential-free.
-
-Browser-based remote access and direct MCP authorization are not part of this
-native-sharing release.

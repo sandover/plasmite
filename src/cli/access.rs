@@ -6,6 +6,7 @@ use super::context::CliContext;
 use super::result::CommandResult;
 use crate::AccessSubcommand;
 use plasmite::api::Error;
+use plasmite::api::browser_trust::{self, BrowserTrustStatus};
 use serde_json::json;
 use std::io::{self, IsTerminal};
 
@@ -24,17 +25,57 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
         AccessSubcommand::Connect { url } => {
             let key = read_access_key()?;
             let status = plasmite::api::access::connect(&url, &key)?;
-            emit_status(&status);
+            let commands = setup_commands(&status.destination);
+            let browser = browser_status(&status.destination);
+            emit_status(
+                &status,
+                browser.as_ref().and_then(|result| result.as_ref().ok()),
+                browser.as_ref().and_then(|result| result.as_ref().err()),
+                Some(&commands),
+            );
+            if cfg!(target_os = "macos")
+                && io::stdin().is_terminal()
+                && io::stdout().is_terminal()
+                && let Some(Ok(trust)) = browser
+                && !trust.installed
+            {
+                offer_browser_trust(&trust);
+            }
             Ok(CommandResult::ok())
         }
         AccessSubcommand::Status { url } => {
             let status = plasmite::api::access::status(&url)?;
-            emit_status(&status);
+            let browser = status
+                .credentials_saved
+                .then(|| browser_status(&status.destination))
+                .flatten();
+            emit_status(
+                &status,
+                browser.as_ref().and_then(|result| result.as_ref().ok()),
+                browser.as_ref().and_then(|result| result.as_ref().err()),
+                None,
+            );
             Ok(CommandResult::ok())
         }
         AccessSubcommand::Disconnect { url } => {
             plasmite::api::access::disconnect(&url)?;
             emit_disconnected(&url);
+            Ok(CommandResult::ok())
+        }
+        AccessSubcommand::Untrust { fingerprint } => {
+            browser_trust::remove(&fingerprint)?;
+            if io::stdout().is_terminal() {
+                println!(
+                    "Removed browser trust for certificate {}.",
+                    fingerprint.to_ascii_lowercase()
+                );
+                println!("Saved native credentials remain available.");
+            } else {
+                println!(
+                    "{}",
+                    json!({ "certificate_sha256": fingerprint.to_ascii_lowercase(), "browser_trust_installed": false })
+                );
+            }
             Ok(CommandResult::ok())
         }
         AccessSubcommand::Keys => {
@@ -51,6 +92,18 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
             }
             Ok(CommandResult::ok())
         }
+    }
+}
+
+fn browser_status(destination: &str) -> Option<Result<BrowserTrustStatus, Error>> {
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        Some(browser_trust::status(destination))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = destination;
+        None
     }
 }
 
@@ -108,14 +161,31 @@ fn relative_time(now: u64, timestamp: u64) -> String {
     ))
 }
 
-fn emit_status(status: &plasmite::api::access::ConnectionStatus) {
+fn emit_status(
+    status: &plasmite::api::access::ConnectionStatus,
+    browser: Option<&BrowserTrustStatus>,
+    browser_error: Option<&Error>,
+    setup: Option<&[String; 2]>,
+) {
     if io::stdout().is_terminal() {
         println!("Server: {}", status.destination);
         println!("Credentials saved: {}", yes_no(status.credentials_saved));
         println!("Reachable: {}", optional_yes_no(status.reachable));
         println!("Access accepted: {}", optional_yes_no(status.accepted));
+        if let Some(browser) = browser {
+            println!("Browser trust installed: {}", yes_no(browser.installed));
+            println!("Certificate SHA-256: {}", browser.certificate_sha256);
+            println!("Certificate expires: {}", format_expiry(browser.expires_at));
+        } else if let Some(error) = browser_error {
+            println!("Browser trust: unavailable ({error})");
+        }
         if let Some(problem) = &status.problem {
             println!("What to do: {problem}");
+        }
+        if let Some(commands) = setup {
+            println!("\nAdd Plasmite to your MCP client:");
+            println!("Claude Code: {}", commands[0]);
+            println!("Codex CLI:  {}", commands[1]);
         }
     } else {
         println!(
@@ -126,8 +196,95 @@ fn emit_status(status: &plasmite::api::access::ConnectionStatus) {
                 "reachable": status.reachable,
                 "accepted": status.accepted,
                 "problem": status.problem,
+                "browser_trust": browser.map(|trust| json!({
+                    "installed": trust.installed,
+                    "certificate_sha256": trust.certificate_sha256,
+                    "expires_at": trust.expires_at,
+                    "names": trust.names,
+                })),
+                "browser_trust_problem": browser_error.map(ToString::to_string),
+                "mcp_setup_commands": setup,
             })
         );
+    }
+}
+
+fn offer_browser_trust(trust: &BrowserTrustStatus) {
+    println!("\nBrowser certificate trust for {}", trust.destination);
+    println!("Named addresses: {}", trust.names.join(", "));
+    println!("Certificate SHA-256: {}", trust.certificate_sha256);
+    println!("Certificate expires: {}", format_expiry(trust.expires_at));
+    #[cfg(target_os = "macos")]
+    println!(
+        "Scope: current user's login keychain for SSL; Chrome, Safari, and other macOS TLS apps may use this trust."
+    );
+    #[cfg(target_os = "windows")]
+    println!(
+        "Scope: current user's Windows Root store. Chrome, Edge, and other Windows TLS clients may use this trust; signed-certificate behavior still needs validation."
+    );
+    #[cfg(target_os = "windows")]
+    println!("Direct MCP harnesses need an independently trusted HTTPS certificate chain.");
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        return;
+    }
+
+    eprint!("Trust this certificate for browser access? [y/N] ");
+    use std::io::Write;
+    if io::stderr().flush().is_err() {
+        return;
+    }
+    let mut answer = String::new();
+    if io::stdin().read_line(&mut answer).is_err() || !answer.trim().eq_ignore_ascii_case("y") {
+        return;
+    }
+    match browser_trust::install(&trust.destination, &trust.certificate_sha256) {
+        Ok(_) => {
+            println!(
+                "Browser trust installed. To remove it later: plasmite access untrust {}",
+                trust.certificate_sha256
+            );
+            if let Err(error) = browser_trust::open(&trust.destination) {
+                eprintln!("Could not open {}: {error}", trust.destination);
+            }
+        }
+        Err(error) => {
+            eprintln!("Browser trust setup failed: {error}. Native access remains saved.")
+        }
+    }
+}
+
+fn format_expiry(timestamp: i64) -> String {
+    time::OffsetDateTime::from_unix_timestamp(timestamp)
+        .ok()
+        .and_then(|value| {
+            value
+                .format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .unwrap_or_else(|| timestamp.to_string())
+}
+
+fn setup_commands(destination: &str) -> [String; 2] {
+    let executable = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.into_os_string().into_string().ok())
+        .unwrap_or_else(|| "plasmite".to_string());
+    let executable = shell_quote(&executable);
+    let destination = shell_quote(destination);
+    [
+        format!(
+            "claude mcp add --scope user --transport stdio plasmite -- {executable} mcp --remote {destination}"
+        ),
+        format!("codex mcp add plasmite -- {executable} mcp --remote {destination}"),
+    ]
+}
+
+fn shell_quote(value: &str) -> String {
+    if cfg!(windows) {
+        format!("\"{value}\"")
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
     }
 }
 

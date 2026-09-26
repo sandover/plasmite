@@ -32,6 +32,7 @@ name = "plasmite"
 path = "src/main.rs"
 
 [dependencies]
+base64 = "0.22"
 sha2 = "0.10"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
@@ -48,7 +49,7 @@ axum = "0.7"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
 tokio-stream = "0.1"
 bytes = "1"
-ureq = "2"
+ureq = { version = "2", features = ["json"] }
 url = "2"
 signal-hook = "0.3"
 rcgen = "0.12"
@@ -62,6 +63,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tower-http = { version = "0.5", features = ["trace", "cors"] }
 bstr = "1"
 getrandom = "0.3"
+oauth-as = { version = "0.10.0", default-features = false, features = ["resource-metadata"] }
 
 [features]
 default = []

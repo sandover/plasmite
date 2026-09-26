@@ -56,10 +56,23 @@ YMSGO2 adds native access-key sharing. It keeps the existing spec paths and
   access key and displays it only after the server commits it.
 - `plasmite access connect SERVER_URL` prompts for the access key without
   echoing it, verifies the server, and saves the connection for the current OS
-  user.
+  user. In an interactive macOS terminal, it then offers browser
+  trust for the verified server certificate. It shows the address, all DNS and
+  IP subject alternative names, the certificate's SHA-256 fingerprint, expiry,
+  and the OS trust-store scope before asking. Declining or failing this step
+  leaves the native connection usable. Scripts never wait for this prompt.
 - `plasmite access status SERVER_URL` reports whether a connection is saved,
   whether the server is reachable, and whether it accepts the saved access
-  secret. It never prints credentials.
+  secret. On macOS and Windows, it also reports browser trust for the current
+  verified certificate and its expiry when that certificate can be reached.
+  Windows reports the current certificate's Root-store presence, but browser
+  trust installation is disabled pending signed-in platform validation. Status
+  never prints credentials.
+- `plasmite access untrust SHA256` removes one exact certificate from the
+  current user's OS trust store by its 64-character SHA-256 fingerprint. It
+  works after certificate renewal or server loss and leaves native credentials
+  intact. A replacement certificate needs a new browser trust approval even
+  when it keeps the same public key.
 - `plasmite access disconnect SERVER_URL` removes this OS user's saved
   credentials without contacting the server. It works while the server is
   unavailable and does not revoke the server key.
@@ -148,6 +161,7 @@ The following are implemented but not frozen in v0.0.1 and may evolve within v0:
 - `plasmite duplex`
 - `plasmite tap`
 - `plasmite mcp`
+- `plasmite mcp --remote SERVER_URL` uses a saved native HTTPS connection for a local stdio MCP process. MCP methods and messages follow the separately versioned [MCP contract](../mcp/2025-11-25/SPEC.md).
 - `plasmite completion`
 - `plasmite doctor`
 - Remote shorthand refs in CLI commands

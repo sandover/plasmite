@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use url::{Host, Url};
 
 type ApiResult<T> = Result<T, Error>;
@@ -32,6 +32,7 @@ struct RemoteClientInner {
     base_url: Url,
     credentials: CredentialSource,
     agent: ureq::Agent,
+    saved_agent: Mutex<Option<([u8; 32], ureq::Agent)>>,
 }
 
 enum CredentialSource {
@@ -157,6 +158,7 @@ impl RemoteClient {
                 base_url,
                 credentials: CredentialSource::Explicit(key),
                 agent: super::access::access_agent(Some(fingerprint)),
+                saved_agent: Mutex::new(None),
             }),
         }
     }
@@ -167,6 +169,7 @@ impl RemoteClient {
                 base_url,
                 credentials: CredentialSource::None,
                 agent: super::access::access_agent(None),
+                saved_agent: Mutex::new(None),
             }),
         }
     }
@@ -177,6 +180,7 @@ impl RemoteClient {
                 base_url,
                 credentials: CredentialSource::Saved,
                 agent: ureq::AgentBuilder::new().redirects(0).build(),
+                saved_agent: Mutex::new(None),
             }),
         }
     }
@@ -334,12 +338,27 @@ impl RemoteClient {
             return Err(Error::new(ErrorKind::Corrupt)
                 .with_message("saved native connections must use HTTPS"));
         }
-        let pinned_agent = if matches!(&self.inner.credentials, CredentialSource::Saved) {
-            key.map(|key| super::access::access_agent(Some(*key.spki_fingerprint())))
+        let agent = if matches!(&self.inner.credentials, CredentialSource::Saved) {
+            if let Some(key) = key {
+                let fingerprint = *key.spki_fingerprint();
+                let mut saved = self.inner.saved_agent.lock().map_err(|_| {
+                    Error::new(ErrorKind::Internal)
+                        .with_message("saved connection transport is unavailable")
+                })?;
+                if saved.as_ref().is_none_or(|(pin, _)| *pin != fingerprint) {
+                    *saved = Some((fingerprint, super::access::access_agent(Some(fingerprint))));
+                }
+                saved
+                    .as_ref()
+                    .expect("saved agent was just created")
+                    .1
+                    .clone()
+            } else {
+                self.inner.agent.clone()
+            }
         } else {
-            None
+            self.inner.agent.clone()
         };
-        let agent = pinned_agent.as_ref().unwrap_or(&self.inner.agent);
         let mut request = agent.request(method, url.as_str());
         if url.scheme() == "https"
             && url.origin() == self.inner.base_url.origin()
@@ -991,7 +1010,8 @@ mod tests {
 
     #[test]
     fn remote_client_rejects_path_pool_ref() {
-        let client = RemoteClient::new("http://localhost:8080").expect("client");
+        let client =
+            RemoteClient::for_access_probe(url::Url::parse("http://localhost:8080").expect("url"));
         let pool_ref = PoolRef::path("/tmp/evil.plasmite");
         let err = client
             .create_pool(&pool_ref, PoolOptions::new(1024))

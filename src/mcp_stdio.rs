@@ -9,15 +9,26 @@ use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
 
 use plasmite::api::{Error, ErrorKind};
-use plasmite::mcp::{DispatchOutcome, McpDispatcher, PlasmiteMcpHandler, parse_jsonrpc_line};
+use plasmite::mcp::{
+    DispatchOutcome, McpDispatcher, McpHandler, PlasmiteMcpHandler, parse_jsonrpc_line,
+};
 use serde_json::{Map, Value, json};
 
 pub(super) fn serve(pool_dir: PathBuf) -> Result<(), Error> {
+    serve_handler(PlasmiteMcpHandler::new(pool_dir))
+}
+
+pub(super) fn serve_remote(base_url: String) -> Result<(), Error> {
+    let handler = PlasmiteMcpHandler::with_remote_url(&base_url).map_err(|err| *err)?;
+    serve_handler(handler)
+}
+
+fn serve_handler<H: McpHandler>(handler: H) -> Result<(), Error> {
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut reader = BufReader::new(stdin.lock());
     let mut writer = BufWriter::new(stdout.lock());
-    let mut dispatcher = McpDispatcher::new(PlasmiteMcpHandler::new(pool_dir));
+    let mut dispatcher = McpDispatcher::new(handler);
     let mut line = String::new();
 
     loop {

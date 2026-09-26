@@ -10,6 +10,7 @@ docs/
 ├── building.md                                — Build system + vendoring; read when touching build/release tooling
 ├── cli.md                                     — CLI operating model; read when resolving pool refs, input/output modes, or exits
 ├── cookbook.md                                — Task-oriented examples; read when you want copy/paste CLI workflows
+├── performance/transport-comparison.md        — Measured transport throughput; read when comparing native API and MCP paths
 │
 │   Design audits and proposals
 ├── proposals/cli-help-system.md               — CLI/help audit and reform model; read before redesigning command discovery
@@ -33,7 +34,8 @@ spec/
 ├── README.md                                   — Spec index; start here for contract navigation
 ├── v0/SPEC.md                                  — Command-line interface (CLI) contract; read before changing CLI behavior
 ├── api/v0/SPEC.md                               — Public API contract; read before changing the API surface
-└── remote/v0/SPEC.md                            — Remote protocol contract; read before changing HTTP endpoints/semantics
+├── remote/v0/SPEC.md                            — Remote protocol contract; read before changing HTTP endpoints/semantics
+└── mcp/2025-11-25/SPEC.md                       — MCP contract; read before changing local or direct MCP behavior
 ```
 
 ## Maintaining the Docs Map

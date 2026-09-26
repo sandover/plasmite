@@ -37,6 +37,14 @@ offline. Disconnect does not revoke the server key. See the
 [serving guide](record/serving.md) for setup, recovery, and retired access
 paths.
 
+After `access connect`, Plasmite prints setup commands for Claude Code and
+Codex CLI. Each command starts `plasmite mcp --remote SERVER_URL` over stdio.
+The MCP process reads the saved connection before each remote request, so a
+later disconnect, replacement, or server-side revocation takes effect on the
+next tool call. Local and remote MCP follow the 2025-11-25 handshake and share
+the same tools and resources. See the [MCP contract](../spec/mcp/2025-11-25/SPEC.md)
+for the message and HTTP details.
+
 ## Input
 
 - `feed` accepts one inline JSON value, a file with `--file`, `--file -` for
@@ -48,7 +56,8 @@ paths.
 - `duplex` reads line-oriented chat from a terminal (requiring `--me`) and a
   JSON stream from non-terminal stdin.
 - `mcp` reads newline-delimited JSON-RPC from stdin until EOF and writes
-  JSON-RPC to stdout.
+  JSON-RPC to stdout. Use `mcp --dir` for local pools or
+  `mcp --remote SERVER_URL` for a saved native HTTPS connection.
 
 ## Output
 

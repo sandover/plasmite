@@ -11,6 +11,7 @@ Plasmite documentation is intentionally split into:
 - Specs index: `spec/README.md`
 - CLI operating model: `docs/cli.md`
 - Task-oriented CLI recipes: `docs/cookbook.md`
+- Measured transport performance: `docs/performance/transport-comparison.md`
 
 ## Design audits and proposals
 
@@ -24,6 +25,7 @@ Plasmite documentation is intentionally split into:
 - v0 CLI + message contract: `spec/v0/SPEC.md`
 - v0 public API contract: `spec/api/v0/SPEC.md`
 - v0 remote protocol: `spec/remote/v0/SPEC.md`
+- MCP 2025-11-25 contract: `spec/mcp/2025-11-25/SPEC.md`
 
 ## Keystone docs of record
 

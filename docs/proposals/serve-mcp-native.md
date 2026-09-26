@@ -2,6 +2,11 @@
 
 Status: proposal
 
+Implementation note: the tested MCP wire contract uses 2025-11-25. The
+installed Claude Code and Codex CLI harnesses still start with `initialize`,
+so the implementation uses that single handshake profile. The 2026-07-28
+profile below records the original design baseline.
+
 ## The core model
 
 An **owner** runs a server for a directory of pools they own and shares access by giving someone its address and an **access key**. The **address** tells a client where to connect. The key permits reading, appending, creating, and deleting pools throughout the directory, including pools created later.

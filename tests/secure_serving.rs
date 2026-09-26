@@ -136,7 +136,7 @@ fn serve_exits_successfully_after_sigterm() -> Result<(), Box<dyn std::error::Er
 }
 
 #[test]
-fn mcp_stdio_supports_initialize_ping_and_pool_tools() {
+fn mcp_stdio_uses_the_2025_handshake_and_shared_pool_tools() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
     let mut child = cli()
@@ -150,7 +150,14 @@ fn mcp_stdio_supports_initialize_ping_and_pool_tools() {
 
     send_mcp(
         &mut stdin,
-        &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+        &json!({
+            "jsonrpc":"2.0","id":1,"method":"initialize",
+            "params":{
+                "protocolVersion":"2025-11-25",
+                "capabilities":{},
+                "clientInfo":{"name":"test","version":"1"}
+            }
+        }),
     );
     let initialized = read_mcp(&mut stdout);
     assert_eq!(initialized["id"], json!(1));
@@ -158,18 +165,39 @@ fn mcp_stdio_supports_initialize_ping_and_pool_tools() {
         initialized["result"]["protocolVersion"],
         json!("2025-11-25")
     );
+    assert_eq!(
+        initialized["result"]["capabilities"]["tools"]["listChanged"],
+        json!(false)
+    );
+    assert_eq!(
+        initialized["result"]["capabilities"]["resources"]["subscribe"],
+        json!(false)
+    );
 
     send_mcp(
         &mut stdin,
-        &json!({"jsonrpc":"2.0","id":2,"method":"ping","params":{}}),
+        &json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
     );
-    assert_eq!(read_mcp(&mut stdout)["result"], json!({}));
+
+    send_mcp(
+        &mut stdin,
+        &json!({
+            "jsonrpc":"2.0","id":2,"method":"tools/list","params":{}
+        }),
+    );
+    assert_eq!(
+        read_mcp(&mut stdout)["result"]["tools"][0]["name"],
+        json!("plasmite_pool_list")
+    );
 
     send_mcp(
         &mut stdin,
         &json!({
             "jsonrpc":"2.0","id":3,"method":"tools/call",
-            "params":{"name":"plasmite_pool_create","arguments":{"name":"demo"}}
+            "params":{
+                "name":"plasmite_pool_create",
+                "arguments":{"name":"demo"}
+            }
         }),
     );
     let created = read_mcp(&mut stdout);

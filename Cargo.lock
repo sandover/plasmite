@@ -957,6 +957,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "oauth-as"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61bd12d21c250e00b557f937b14faa403be8dd94b61b7045e0823798c5db8c04"
+dependencies = [
+ "base64",
+ "getrandom 0.3.4",
+ "serde",
+ "sha2",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1001,6 +1013,7 @@ name = "plasmite"
 version = "0.8.0"
 dependencies = [
  "axum",
+ "base64",
  "bstr",
  "bytes",
  "cc",
@@ -1015,6 +1028,7 @@ dependencies = [
  "jaq-std",
  "libc",
  "memmap2",
+ "oauth-as",
  "rcgen",
  "rustls",
  "serde",
@@ -1635,6 +1649,8 @@ dependencies = [
  "once_cell",
  "rustls",
  "rustls-pki-types",
+ "serde",
+ "serde_json",
  "url",
  "webpki-roots 0.26.11",
 ]

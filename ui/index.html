@@ -552,7 +552,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           : 400;
 
         const state = {
-          token: params.get("token") || "",
+          local: false,
           n: N,
           p: null,
           poolInfo: null,
@@ -561,16 +561,56 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           nextSeq: null,
           stopped: false,
           reconnectTimer: null,
-          authRequired: false,
         };
 
         /* ---- Utility functions ---- */
 
-        function authHeaders() {
-          if (!state.token) {
-            return {};
-          }
-          return { Authorization: `Bearer ${state.token}` };
+        function renderLogin(message) {
+          state.stopped = true;
+          app.classList.remove('app--follow');
+          app.textContent = '';
+          var card = document.createElement('section');
+          card.className = 'card';
+          card.innerHTML = '<header class="header"><div class="title">PLASMITE</div></header>' +
+            '<div class="body"><p>Enter the access key for this server.</p>' +
+            '<form data-login><input type="password" autocomplete="off" aria-label="Access key" required /> ' +
+            '<button type="submit">Connect</button></form><p class="error" data-login-error></p></div>';
+          app.appendChild(card);
+          card.querySelector('[data-login-error]').textContent = message || '';
+          card.querySelector('[data-login]').addEventListener('submit', async function (event) {
+            event.preventDefault();
+            var input = card.querySelector('input');
+            var key = input.value.trim();
+            input.value = '';
+            try {
+              var response = await fetch('/v0/browser/session', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ access_key: key })
+              });
+              key = '';
+              if (!response.ok) throw new Error('Access key was not accepted.');
+              state.stopped = false;
+              bootPool();
+            } catch (err) { card.querySelector('[data-login-error]').textContent = String(err.message || err); }
+          });
+        }
+
+        async function logout() {
+          state.stopped = true;
+          await fetch('/v0/browser/session', { method: 'DELETE' });
+          state.messages = [];
+          renderLogin('Signed out.');
+        }
+
+        function navHtml() {
+          return state.local
+            ? '<a href="/access">Access</a>'
+            : '<button type="button" data-logout>Log out</button>';
+        }
+
+        function wireNav() {
+          var button = document.querySelector('[data-logout]');
+          if (button) button.addEventListener('click', logout);
         }
 
         function setLiveStatus(status) {
@@ -660,7 +700,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
                   ? (bounds.newest - bounds.oldest + 1) : "-";
               var newestAge = age.newest_time ? formatRelativeTime(age.newest_time) : "-";
               var pct = util.used_percent != null ? util.used_percent.toFixed(1) + "%" : "-";
-              return '<a class="row" href="/ui/pools/' + encodeURIComponent(pool.name) + '">' +
+              return '<a class="row" href="/ui/pools/' + escapeAttr(encodeURIComponent(pool.name)) + '">' +
                 '<span class="stack"><strong>' + escapeHtml(pool.name) + '</strong>' +
                 '<span class="muted">' + escapeHtml(count) + ' msgs \u00b7 ' + escapeHtml(newestAge) + '</span></span>' +
                 '<span class="stack muted" style="text-align:right">' +
@@ -669,18 +709,11 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
             })
             .join("");
 
-          var toolbarHtml = state.authRequired
-            ? '<div class="toolbar">' +
-                '<input data-token-input type="password" placeholder="Bearer token" value="' + escapeAttr(state.token) + '" />' +
-                '<button type="button" data-reload>Apply</button>' +
-              '</div>'
-            : '';
-
           app.innerHTML =
             '<section class="card">' +
               '<header class="header">' +
                 '<div class="title">PLASMITE UI</div>' +
-                toolbarHtml +
+                '<div class="toolbar">' + navHtml() + '</div>' +
               '</header>' +
               '<div class="body">' +
                 '<p class="muted">Pool browser. Click a pool to open its follow view.</p>' +
@@ -691,19 +724,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
               '</div>' +
             '</section>';
 
-          var tokenInput = document.querySelector("[data-token-input]");
-          if (tokenInput) {
-            tokenInput.addEventListener("change", function () {
-              state.token = tokenInput.value.trim();
-            });
-          }
-          var reloadBtn = document.querySelector("[data-reload]");
-          if (reloadBtn) {
-            reloadBtn.addEventListener("click", function () {
-              state.token = (tokenInput ? tokenInput.value.trim() : "") || "";
-              loadPoolList();
-            });
-          }
+          wireNav();
         }
 
         /* ---- Pool follow view ---- */
@@ -711,15 +732,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         function renderPoolView(error) {
           app.classList.add("app--follow");
 
-          var toolbarHtml = state.authRequired
-            ? '<div class="toolbar">' +
-                '<input data-token-input type="password" placeholder="Bearer token" value="' + escapeAttr(state.token) + '" />' +
-                '<button type="button" data-apply-token>Apply</button>' +
-              '</div>'
-            : '';
-          var headerHtml = toolbarHtml
-            ? '<header class="header header--compact">' + toolbarHtml + '</header>'
-            : '';
+          var headerHtml = '<header class="header header--compact"><a href="/ui">Pools</a> ' + navHtml() + '</header>';
 
           app.innerHTML =
             '<section class="card">' +
@@ -727,19 +740,29 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
               '<div class="info-panel" data-info></div>' +
               (error ? '<div class="body"><p class="error">' + escapeHtml(error) + '</p></div>' : "") +
               '<section class="stream" data-stream></section>' +
+              '<form class="body" data-append><input aria-label="Message" placeholder="Message" required /> ' +
+              '<button type="submit">Append</button><span class="error" data-append-error></span></form>' +
             '</section>';
 
           updateIndicators();
           setLiveStatus(state.liveStatus);
 
-          var tokenInput = document.querySelector("[data-token-input]");
-          var applyBtn = document.querySelector("[data-apply-token]");
-          if (applyBtn) {
-            applyBtn.addEventListener("click", function () {
-              state.token = (tokenInput ? tokenInput.value.trim() : "") || "";
-              restartStream();
-            });
-          }
+          wireNav();
+          document.querySelector('[data-append]').addEventListener('submit', async function (event) {
+            event.preventDefault();
+            var input = event.currentTarget.querySelector('input');
+            var error = event.currentTarget.querySelector('[data-append-error]');
+            error.textContent = '';
+            try {
+              var response = await fetch('/v0/pools/' + encodeURIComponent(poolName) + '/append', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ data: input.value })
+              });
+              if (response.status === 401) { renderLogin('Session ended. Enter the key again.'); return; }
+              if (!response.ok) throw new Error('Append failed (' + response.status + ').');
+              input.value = '';
+            } catch (err) { error.textContent = String(err.message || err); }
+          });
         }
 
         /* ---- Message rendering ---- */
@@ -1159,14 +1182,12 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           renderPoolList([], null);
           try {
             var response = await fetch("/v0/ui/pools", {
-              headers: authHeaders(),
+              cache: 'no-store',
             });
             if (response.status === 401) {
-              state.authRequired = true;
-              renderPoolList([], "Authentication required — enter a bearer token.");
+              renderLogin('Session ended. Enter the key again.');
               return;
             }
-            state.authRequired = false;
             if (!response.ok) {
               var text = await response.text();
               throw new Error("pool list failed (" + response.status + "): " + text);
@@ -1180,14 +1201,12 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
 
         async function loadPoolInfo() {
           var response = await fetch("/v0/ui/pools/" + encodeURIComponent(poolName) + "/info", {
-            headers: authHeaders(),
+            cache: 'no-store',
           });
           if (response.status === 401) {
-            state.authRequired = true;
-            renderPoolView("Authentication required — enter a bearer token.");
+            renderLogin('Session ended. Enter the key again.');
             throw new Error("Authentication required");
           }
-          state.authRequired = false;
           if (!response.ok) {
             var text = await response.text();
             throw new Error("pool info failed (" + response.status + "): " + text);
@@ -1311,8 +1330,12 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
 
             try {
               var response = await fetch(url, {
-                headers: authHeaders(),
+                cache: 'no-store',
               });
+              if (response.status === 401) {
+                renderLogin('Session ended. Enter the key again.');
+                return;
+              }
               if (!response.ok) {
                 var text = await response.text();
                 throw new Error("stream failed (" + response.status + "): " + text);
@@ -1411,6 +1434,20 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
 
         async function boot() {
           startTimeUpdater();
+          if (params.has('token')) {
+            params.delete('token');
+            history.replaceState(null, '', window.location.pathname + (params.size ? '?' + params.toString() : ''));
+          }
+          try {
+            var session = await fetch('/v0/browser/session', { cache: 'no-store' });
+            if (!session.ok) { renderLogin(''); return; }
+            var identity = await session.json();
+            state.local = Boolean(identity.local);
+          } catch (err) { renderLogin('Could not reach the server.'); return; }
+          bootPool();
+        }
+
+        async function bootPool() {
           if (!onPoolPage) {
             await loadPoolList();
             return;
@@ -1419,6 +1456,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           try {
             await loadPoolInfo();
           } catch (err) {
+            if (state.stopped) return;
             renderPoolView(String(err.message || err));
             return;
           }

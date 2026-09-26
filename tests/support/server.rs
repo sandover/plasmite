@@ -35,10 +35,43 @@ impl TestServer {
         Self::try_start_with_options(pool_dir, &[], "https")
     }
 
+    pub fn try_start_oauth(pool_dir: &Path) -> TestResult<Self> {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+        let port = listener.local_addr()?.port();
+        drop(listener);
+        Self::try_start_oauth_at(pool_dir, port)
+    }
+
+    pub fn try_start_oauth_at(pool_dir: &Path, port: u16) -> TestResult<Self> {
+        Self::try_start_with_addresses(
+            pool_dir,
+            &[],
+            "https",
+            &format!("127.0.0.1:{port}"),
+            &format!("https://localhost:{port}"),
+        )
+    }
+
     fn try_start_with_options(
         pool_dir: &Path,
         extra_args: &[&str],
         scheme: &str,
+    ) -> TestResult<Self> {
+        Self::try_start_with_addresses(
+            pool_dir,
+            extra_args,
+            scheme,
+            "127.0.0.1:0",
+            "https://localhost:9743",
+        )
+    }
+
+    fn try_start_with_addresses(
+        pool_dir: &Path,
+        extra_args: &[&str],
+        scheme: &str,
+        remote_bind: &str,
+        shared_address: &str,
     ) -> TestResult<Self> {
         let ready_dir = tempfile::tempdir()?;
         let ready_path = ready_dir.path().join("address");
@@ -50,9 +83,9 @@ impl TestServer {
             .arg("--bind")
             .arg("127.0.0.1:0")
             .arg("--remote-bind")
-            .arg("127.0.0.1:0")
+            .arg(remote_bind)
             .arg("--shared-address")
-            .arg("https://localhost:9743")
+            .arg(shared_address)
             .args(extra_args)
             .env("PLASMITE_SERVE_READY_FILE", &ready_path)
             .stdout(Stdio::null())

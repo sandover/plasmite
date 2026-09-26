@@ -59,3 +59,42 @@
 {"version":1,"task_id":"S7SF3P","kind":"done","at":"2026-09-26T04:48:11.365726Z","text":"Implemented offline disconnect, saved-client credential refresh, safe replacement and recovery, with focused secure-sharing checks."}
 {"version":1,"task_id":"2TJPV7","kind":"created","at":"2026-09-26T05:43:31.17853Z"}
 {"version":1,"task_id":"2TJPV7","kind":"open","at":"2026-09-26T05:43:41.007884Z","text":"Review is scoped and linked after browser and MCP delivery, before final validation."}
+{"version":1,"task_id":"GGTLAL","kind":"result","at":"2026-09-26T07:10:45.505623Z","text":"Shared MCP dispatcher, saved-key reload, disconnect/replacement, and revocation checks passed."}
+{"version":1,"task_id":"GGTLAL","kind":"result","at":"2026-09-26T07:10:45.593971Z","text":"Codex CLI 0.158.0-alpha.2 launched local stdio MCP, fed and read; native fetch confirmed the sequence."}
+{"version":1,"task_id":"GGTLAL","kind":"done","at":"2026-09-26T07:10:45.676569Z","text":"Saved native MCP works; protocol, revocation, and Codex feed/read checks passed."}
+{"version":1,"task_id":"P4GBEV","kind":"result","at":"2026-09-26T07:10:45.764309Z","text":"OAuth tests cover PKCE, callback/resource binding, CSRF, replay, refresh, restart, and revocation."}
+{"version":1,"task_id":"P4GBEV","kind":"result","at":"2026-09-26T07:10:45.849465Z","text":"Codex CLI OAuth login and HTTPS MCP feed/read passed; native fetch confirmed sequence 9019."}
+{"version":1,"task_id":"P4GBEV","kind":"done","at":"2026-09-26T07:10:45.930976Z","text":"OAuth-protected HTTPS MCP and Codex tool calls passed."}
+{"version":1,"task_id":"PUMRV7","kind":"result","at":"2026-09-26T07:10:46.017115Z","text":"Two sessions, ten runs per condition; each lane verified 100 appends and 100 exact reads per run."}
+{"version":1,"task_id":"PUMRV7","kind":"result","at":"2026-09-26T07:10:46.104925Z","text":"512B and 4KiB local MCP: 45-51% of native; direct HTTPS MCP: 71-78%, warm macOS loopback."}
+{"version":1,"task_id":"PUMRV7","kind":"done","at":"2026-09-26T07:10:46.188184Z","text":"Published benchmark harness, raw sessions, latency, variation, and workload limits."}
+{"version":1,"task_id":"O3DMKM","kind":"result","at":"2026-09-26T07:11:04.643066Z","text":"Printed Claude Code and Codex setup commands contain no key; Codex local stdio feed/read passed."}
+{"version":1,"task_id":"O3DMKM","kind":"block","at":"2026-09-26T07:11:04.728887Z","text":"Claude Code has no signed-in model account here; restart and tool read/write remain unverified."}
+{"version":1,"task_id":"2AOW5U","kind":"result","at":"2026-09-26T07:11:04.81585Z","text":"Local access page and API support invite, list/activity, revoke, and settings; forged Host/Origin tests pass."}
+{"version":1,"task_id":"2AOW5U","kind":"block","at":"2026-09-26T07:11:04.899606Z","text":"Page click flow in a real browser is unverified; API and HTML route checks pass."}
+{"version":1,"task_id":"NJ5JQ3","kind":"result","at":"2026-09-26T07:11:04.986278Z","text":"Session tests pass for login, cookie reuse after restart, logout, Origin rejection, and key revocation."}
+{"version":1,"task_id":"NJ5JQ3","kind":"block","at":"2026-09-26T07:11:05.071265Z","text":"Real Chrome/Safari page login and pool read/write remain unverified."}
+{"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-26T07:11:05.157883Z","text":"Mac exact-leaf trust adapter, status, removal, and renewal code exists; restricted certificate parsing tests pass."}
+{"version":1,"task_id":"N7ANEU","kind":"block","at":"2026-09-26T07:11:05.242186Z","text":"Chrome/Safari OS approval, renewal, and removal need an interactive macOS desktop check."}
+{"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-26T07:11:05.328756Z","text":"Windows Root trust import was tested headlessly; OS blocked confirmation and issuer-wide effects remain unknown."}
+{"version":1,"task_id":"65GOQL","kind":"block","at":"2026-09-26T07:11:05.411876Z","text":"Windows install stays disabled until signed-in Chrome/Edge and TLS issuer-scope checks pass."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-26T07:11:05.501049Z","text":"Codex CLI OAuth login and direct HTTPS MCP feed/read passed; native fetch confirmed the message."}
+{"version":1,"task_id":"SGHDDQ","kind":"block","at":"2026-09-26T07:11:05.584858Z","text":"Claude Code model login is unavailable; its read/write, restart, and renewal remain unverified."}
+{"version":1,"task_id":"2AOW5U","kind":"result","at":"2026-09-26T07:12:45.397518Z","text":"Chrome showed local settings and the test key changing from Active to Revoked after CLI action."}
+{"version":1,"task_id":"2TJPV7","kind":"result","at":"2026-09-26T07:13:10.764991Z","text":"Assets: pool data, access keys, grants, cookies. Attackers can reach remote HTTPS and forge local web requests."}
+{"version":1,"task_id":"2TJPV7","kind":"result","at":"2026-09-26T07:13:10.849997Z","text":"Native TLS checks name, expiry, and SPKI pin before key use; redirects cannot carry keys to another origin."}
+{"version":1,"task_id":"2TJPV7","kind":"result","at":"2026-09-26T07:13:10.932445Z","text":"Shared key records gate native, browser, and MCP calls. Revocation persists, rejects new work, and wakes waits."}
+{"version":1,"task_id":"2TJPV7","kind":"result","at":"2026-09-26T07:13:11.015347Z","text":"Local admin checks Host and Origin; remote listener has no admin routes. Forged local requests fail."}
+{"version":1,"task_id":"2TJPV7","kind":"result","at":"2026-09-26T07:13:11.097387Z","text":"Browser sessions use hashed key-linked records and Secure HttpOnly SameSite cookies; revoked keys fail each call."}
+{"version":1,"task_id":"2TJPV7","kind":"result","at":"2026-09-26T07:13:11.181778Z","text":"OAuth binds PKCE code to client, callback, issuer, and MCP resource; CSRF, replay, rotation, restart checks pass."}
+{"version":1,"task_id":"2TJPV7","kind":"result","at":"2026-09-26T07:13:11.26599Z","text":"MCP checks each POST and tool admission. Secrets stay out of URLs, discovery, normal output, and raw benchmarks."}
+{"version":1,"task_id":"2TJPV7","kind":"result","at":"2026-09-26T07:13:11.350041Z","text":"Residual: restoring an old server-state backup can restore revoked keys; guard backups and re-revoke after restore."}
+{"version":1,"task_id":"2TJPV7","kind":"result","at":"2026-09-26T07:13:11.432586Z","text":"Residual: admitted work may finish after revoke; docs bound idle waits to 60 seconds and new work fails."}
+{"version":1,"task_id":"2TJPV7","kind":"result","at":"2026-09-26T07:13:11.514954Z","text":"Windows Root trust stays disabled until issuer scope and signed-in browser behavior are proved."}
+{"version":1,"task_id":"2TJPV7","kind":"result","at":"2026-09-26T07:13:11.605293Z","text":"Sol-high independent review found no release-blocking code flaw or simpler shared-authority design."}
+{"version":1,"task_id":"2TJPV7","kind":"done","at":"2026-09-26T07:13:15.115759Z","text":"Reviewed implemented trust boundaries and recorded residual risks and unvalidated platform paths."}
+{"version":1,"task_id":"65MU7N","kind":"result","at":"2026-09-26T07:13:37.43103Z","text":"Combined integration test uses one key across native, browser, local MCP, direct MCP; revoke rejects all four."}
+{"version":1,"task_id":"65MU7N","kind":"result","at":"2026-09-26T07:13:37.515074Z","text":"A second key stays valid; public inventory has no live static-token or TLS-bypass options."}
+{"version":1,"task_id":"65MU7N","kind":"result","at":"2026-09-26T07:13:37.597906Z","text":"Final just check passes with loopback permission; Sol-high review found no blocking code flaw."}
+{"version":1,"task_id":"65MU7N","kind":"result","at":"2026-09-26T07:13:37.680986Z","text":"Benchmark gives 512B and 4KiB ratios; docs label unsupported Windows trust and unverified browser paths."}
+{"version":1,"task_id":"65MU7N","kind":"block","at":"2026-09-26T07:13:37.763527Z","text":"Interactive browser, Mac/Windows trust, and Claude Code acceptance checks remain open."}

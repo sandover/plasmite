@@ -144,9 +144,13 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
         ),
         Command::Serve { run } => server::run(run, &context),
         Command::Access { command } => access::run(command, &context),
-        Command::Mcp { dir } => {
-            utility::run(utility::UtilityCommand::Mcp { pool_dir: dir }, &context)
-        }
+        Command::Mcp { dir, remote } => utility::run(
+            utility::UtilityCommand::Mcp {
+                pool_dir: dir,
+                remote,
+            },
+            &context,
+        ),
         Command::Completion { shell } => {
             utility::run(utility::UtilityCommand::Completion { shell }, &context)
         }

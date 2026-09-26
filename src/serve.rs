@@ -8,7 +8,7 @@
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path as AxumPath, Query, RawQuery, State};
 use axum::http::Request;
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
@@ -39,21 +39,27 @@ use tracing_subscriber::EnvFilter;
 use url::{Host, Url};
 
 use crate::access_store::{AccessGrant, AccessStore};
+#[path = "browser_session.rs"]
+mod browser_session;
 use crate::interface_error_kind;
 use crate::interface_wire::{MessageWire, error_policy};
 use crate::pool_info_json::pool_info_json;
+use browser_session::{BrowserSessions, COOKIE_NAME, LIFETIME};
+#[path = "oauth.rs"]
+mod oauth;
+use oauth::OauthService;
 use plasmite::api::{
     Durability, Error, ErrorKind, GapPolicy, LocalClient, PoolApiExt, PoolOptions, PoolRef,
     TailOptions, lite3,
 };
 use plasmite::mcp::{
-    DispatchOutcome, JsonRpcError as McpJsonRpcError, McpDispatcher, McpHandler, McpResource,
-    McpTool, McpToolAccess, PlasmiteMcpHandler, ResourceReadRequest, ResourceReadResult,
-    ToolCallRequest, ToolCallResult,
+    DispatchOutcome, JsonRpcError as McpJsonRpcError, MCP_PROTOCOL_VERSION, McpDispatcher,
+    McpHandler, McpResource, McpTool, McpToolAccess, PlasmiteMcpHandler, ResourceReadRequest,
+    ResourceReadResult, ToolCallRequest, ToolCallResult,
 };
 
 const UI_INDEX_HTML: &str = include_str!("../ui/index.html");
-const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
+const UI_ACCESS_HTML: &str = include_str!("../ui/access.html");
 const READY_FILE_ENV: &str = "PLASMITE_SERVE_READY_FILE";
 
 #[derive(Clone, Debug)]
@@ -130,9 +136,12 @@ fn check_grant(grant: Option<&AccessGrant>) -> Result<(), Error> {
 struct AppState {
     client: LocalClient,
     secure_access: Option<Arc<AccessStore>>,
+    oauth: Option<Arc<OauthService>>,
+    browser_sessions: Arc<BrowserSessions>,
     local_admin: bool,
     max_tail_timeout_ms: u64,
     tail_semaphore: Arc<Semaphore>,
+    mcp_semaphore: Arc<Semaphore>,
     storage_executor: StorageExecutor,
 }
 
@@ -235,26 +244,52 @@ async fn prepare_server_with_access(
 
     let tls_config = build_tls_config(config).await?;
 
+    let oauth = if local_admin {
+        None
+    } else {
+        secure_access
+            .as_ref()
+            .map(|access| OauthService::open(access.clone()))
+            .transpose()?
+            .flatten()
+    };
+    let browser_sessions = Arc::new(BrowserSessions::new(if local_admin {
+        None
+    } else {
+        secure_access.clone()
+    })?);
     let state = Arc::new(AppState {
         client: LocalClient::new().with_pool_dir(config.pool_dir.clone()),
         secure_access,
+        oauth: oauth.clone(),
+        browser_sessions,
         local_admin,
         max_tail_timeout_ms: config.max_tail_timeout_ms,
         tail_semaphore: Arc::new(Semaphore::new(config.max_concurrent_tails)),
+        mcp_semaphore: Arc::new(Semaphore::new(config.max_concurrent_tails)),
         // Reuse the existing server concurrency budget instead of adding another
         // public tuning flag. Storage operations are shorter lived than tails.
         storage_executor: StorageExecutor::new(config.max_concurrent_tails),
     });
 
     let mut app = Router::new()
+        .route("/", get(ui_index))
         .route("/healthz", get(healthz))
         .route("/v0/access/invite", post(access_invite))
         .route("/v0/access/keys", get(access_keys))
         .route("/v0/access/revoke", post(access_revoke))
         .route("/v0/access/check", get(access_check))
+        .route("/v0/access/status", get(access_status))
+        .route(
+            "/v0/browser/session",
+            get(browser_session_status)
+                .post(browser_login)
+                .delete(browser_logout),
+        )
         .route("/mcp", post(mcp_post).get(mcp_get))
         .route("/ui", get(ui_index))
         .route("/ui/pools/:pool", get(ui_pool))
+        .route("/access", get(ui_access))
         .route("/v0/pools", post(create_pool).get(list_pools))
         .route("/v0/pools/open", post(open_pool))
         .route("/v0/pools/:pool/info", get(pool_info))
@@ -272,8 +307,14 @@ async fn prepare_server_with_access(
         .layer(DefaultBodyLimit::max(max_body_bytes))
         .layer(TraceLayer::new_for_http());
 
+    if let Some(oauth) = oauth {
+        app = app.merge(oauth.router());
+    }
+
     if local_admin {
         app = app.layer(middleware::from_fn(local_request_guard));
+    } else {
+        app = app.layer(middleware::from_fn(remote_browser_guard));
     }
 
     Ok(PreparedServer { app, tls_config })
@@ -315,6 +356,59 @@ async fn local_request_guard(request: Request<Body>, next: Next) -> Response {
         );
     }
     next.run(request).await
+}
+
+async fn remote_browser_guard(request: Request<Body>, next: Next) -> Response {
+    let browser_login =
+        request.uri().path() == "/v0/browser/session" && request.method() != Method::GET;
+    let cookie_write = !matches!(*request.method(), Method::GET | Method::HEAD)
+        && cookie_token(request.headers()).is_some()
+        && !request.headers().contains_key(header::AUTHORIZATION);
+    if (browser_login || cookie_write) && !same_origin(request.headers(), "https") {
+        return error_response_with_status(
+            Error::new(ErrorKind::Permission).with_message("untrusted browser request origin"),
+            StatusCode::FORBIDDEN,
+        );
+    }
+    next.run(request).await
+}
+
+fn same_origin(headers: &HeaderMap, scheme: &str) -> bool {
+    let Some(host) = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+    let Some(origin) = headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+    let expected = Url::parse(&format!("{scheme}://{host}/"));
+    let actual = Url::parse(origin);
+    expected.as_ref().is_ok_and(|expected| {
+        actual.as_ref().is_ok_and(|actual| {
+            expected.username().is_empty()
+                && expected.password().is_none()
+                && actual.username().is_empty()
+                && actual.password().is_none()
+                && expected.origin() == actual.origin()
+        })
+    })
+}
+
+fn cookie_token(headers: &HeaderMap) -> Option<&str> {
+    headers.get_all(header::COOKIE).iter().find_map(|header| {
+        header.to_str().ok()?.split(';').find_map(|part| {
+            let (name, value) = part.trim().split_once('=')?;
+            (name == COOKIE_NAME
+                && value.len() == 64
+                && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .then_some(value)
+        })
+    })
 }
 
 fn validate_config(config: &ServeConfig) -> Result<(), Error> {
@@ -460,7 +554,7 @@ async fn serve_tls(
 ) -> Result<(), Error> {
     let acceptor = TlsAcceptor::from(tls_config);
     let builder = AutoBuilder::new(TokioExecutor::new());
-    let mut make_service = app.into_make_service();
+    let mut make_service = app.into_make_service_with_connect_info::<SocketAddr>();
     let mut tasks = JoinSet::new();
 
     tokio::pin!(shutdown);
@@ -538,6 +632,24 @@ async fn shutdown_signal() {
 }
 
 fn authorize(headers: &HeaderMap, state: &AppState) -> Result<Option<AccessGrant>, Error> {
+    if state.local_admin {
+        return Ok(None);
+    }
+    if let Some(token) = cookie_token(headers)
+        && !headers.contains_key(header::AUTHORIZATION)
+    {
+        return state
+            .browser_sessions
+            .grant(token)
+            .map(Some)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::Permission).with_message("browser session ended")
+            });
+    }
+    authorize_bearer(headers, state)
+}
+
+fn authorize_bearer(headers: &HeaderMap, state: &AppState) -> Result<Option<AccessGrant>, Error> {
     if state.local_admin {
         return Ok(None);
     }
@@ -630,10 +742,118 @@ async fn access_revoke(
 }
 
 async fn access_check(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
-    match authorize(&headers, &state) {
+    match authorize_bearer(&headers, &state) {
         Ok(_) => json_response(json!({"accepted": true})),
         Err(err) => error_response(err),
     }
+}
+
+async fn access_status(State(state): State<Arc<AppState>>) -> Response {
+    if !state.local_admin {
+        return error_response(
+            Error::new(ErrorKind::Permission).with_message("access administration is local only"),
+        );
+    }
+    let Some(access) = &state.secure_access else {
+        return json_response(json!({
+            "ready": false,
+            "next_action": "Start secure serving with --shared-address to invite others."
+        }));
+    };
+    json_response(json!({
+        "ready": access.shared_address().is_some(),
+        "server_fingerprint": access.fingerprint(),
+        "shared_address": access.shared_address(),
+        "next_action": if access.shared_address().is_none() {
+            Some("Restart with --shared-address to tell recipients where to connect.")
+        } else {
+            None
+        }
+    }))
+}
+
+#[derive(Deserialize)]
+struct BrowserLoginRequest {
+    access_key: String,
+}
+
+async fn browser_login(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<BrowserLoginRequest>,
+) -> Response {
+    if state.local_admin {
+        return error_response(
+            Error::new(ErrorKind::Permission)
+                .with_message("browser key login is available on the HTTPS listener"),
+        );
+    }
+    let Some(access) = &state.secure_access else {
+        return error_response(
+            Error::new(ErrorKind::Permission).with_message("secure access is unavailable"),
+        );
+    };
+    let Some((key_id, _)) = access.authorize_key(&request.access_key) else {
+        return error_response(
+            Error::new(ErrorKind::Permission).with_message("invalid access key"),
+        );
+    };
+    let token = match state.browser_sessions.create(&key_id) {
+        Ok(token) => token,
+        Err(err) => return error_response(err),
+    };
+    let mut response = json_response(json!({"authenticated": true}));
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&format!(
+            "{COOKIE_NAME}={token}; Path=/v0; Max-Age={}; Secure; HttpOnly; SameSite=Strict",
+            LIFETIME.as_secs()
+        ))
+        .expect("session cookie is ASCII"),
+    );
+    response
+}
+
+async fn browser_session_status(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    if state.local_admin {
+        return json_response(json!({"authenticated": true, "local": true}));
+    }
+    match cookie_token(&headers).and_then(|token| state.browser_sessions.grant(token)) {
+        Some(_) => {
+            let mut response = json_response(json!({"authenticated": true, "local": false}));
+            response
+                .headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            response
+        }
+        None => {
+            error_response(Error::new(ErrorKind::Permission).with_message("browser session ended"))
+        }
+    }
+}
+
+async fn browser_logout(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if let Some(token) = cookie_token(&headers) {
+        if let Err(err) = state.browser_sessions.remove(token) {
+            return error_response(err);
+        }
+    }
+    let mut response = json_response(json!({"authenticated": false}));
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_static(
+            "plasmite_session=; Path=/v0; Max-Age=0; Secure; HttpOnly; SameSite=Strict",
+        ),
+    );
+    response
 }
 
 #[derive(Debug, Deserialize)]
@@ -697,22 +917,61 @@ async fn mcp_post(
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Response {
-    let grant = match authorize(&headers, &state) {
-        Ok(grant) => grant,
-        Err(err) => return error_response(err),
+    let grant = if state.local_admin {
+        None
+    } else if let Some(oauth) = &state.oauth {
+        let bearer = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "));
+        match bearer.and_then(|token| oauth.grant(token)) {
+            Some(grant) => Some(grant),
+            None => return oauth.challenge(),
+        }
+    } else {
+        return error_response_with_status(
+            Error::new(ErrorKind::Permission)
+                .with_message("direct MCP requires a configured shared HTTPS address"),
+            StatusCode::SERVICE_UNAVAILABLE,
+        );
     };
-    if let Err(err) = validate_mcp_protocol_version(&headers) {
-        return error_response_with_status(err, StatusCode::BAD_REQUEST);
+    if let Err(response) = validate_mcp_protocol_version(&headers, &payload) {
+        return response;
     }
     if let Err(err) = validate_mcp_origin_header(&headers) {
         return error_response_with_status(err, StatusCode::FORBIDDEN);
     }
+    if headers.contains_key(header::ORIGIN)
+        && !same_origin(&headers, if state.local_admin { "http" } else { "https" })
+    {
+        return error_response_with_status(
+            Error::new(ErrorKind::Permission)
+                .with_message("forbidden: MCP Origin does not match Host"),
+            StatusCode::FORBIDDEN,
+        );
+    }
     if is_jsonrpc_response_payload(&payload) {
-        return accepted_response();
+        return mcp_request_error(
+            &payload,
+            StatusCode::BAD_REQUEST,
+            -32600,
+            "JSON-RPC responses are not accepted",
+        );
     }
 
+    let permit = match state.mcp_semaphore.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return error_response(
+                Error::new(ErrorKind::Busy)
+                    .with_message("too many concurrent MCP requests")
+                    .with_hint("Retry after an in-flight MCP request completes."),
+            );
+        }
+    };
     let dispatch_state = state.clone();
     let dispatch = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
         let handler = ServeMcpHandler::new(
             dispatch_state.client.clone(),
             dispatch_state.tail_semaphore.clone(),
@@ -736,6 +995,11 @@ async fn mcp_post(
     match outcome {
         DispatchOutcome::NoResponse => accepted_response(),
         DispatchOutcome::Response(response) => {
+            let status = match response.error.as_ref().map(|error| error.code) {
+                Some(-32601) => StatusCode::NOT_FOUND,
+                Some(-32022..=-32020) => StatusCode::BAD_REQUEST,
+                _ => StatusCode::OK,
+            };
             let payload = match serde_json::to_value(response) {
                 Ok(value) => value,
                 Err(err) => {
@@ -746,7 +1010,9 @@ async fn mcp_post(
                     );
                 }
             };
-            json_response(payload)
+            let mut reply = json_response(payload);
+            *reply.status_mut() = status;
+            reply
         }
     }
 }
@@ -810,7 +1076,15 @@ impl McpHandler for ServeMcpHandler {
     }
 
     fn list_resources(&mut self) -> Result<Vec<McpResource>, McpJsonRpcError> {
-        self.inner.list_resources()
+        if self.revoked() {
+            return Err(McpJsonRpcError::invalid_request("access key was revoked"));
+        }
+        let result = self.inner.list_resources();
+        if self.revoked() {
+            Err(McpJsonRpcError::invalid_request("access key was revoked"))
+        } else {
+            result
+        }
     }
 
     fn read_resource(
@@ -847,21 +1121,47 @@ fn mcp_wait_busy_tool_result() -> ToolCallResult {
     )
 }
 
-fn validate_mcp_protocol_version(headers: &HeaderMap) -> Result<(), Error> {
-    let Some(protocol) = headers.get("MCP-Protocol-Version") else {
+fn validate_mcp_protocol_version(headers: &HeaderMap, payload: &Value) -> Result<(), Response> {
+    let method = payload.get("method").and_then(Value::as_str);
+    let header_version = single_mcp_header(headers, "MCP-Protocol-Version")
+        .map_err(|_| mcp_header_mismatch(payload, "invalid MCP-Protocol-Version header"))?;
+    if header_version == Some(MCP_PROTOCOL_VERSION)
+        || (header_version.is_none()
+            && matches!(method, Some("initialize" | "notifications/initialized")))
+    {
         return Ok(());
-    };
-    let value = protocol.to_str().map_err(|_| {
-        Error::new(ErrorKind::Usage)
-            .with_message("invalid MCP-Protocol-Version header")
-            .with_hint(format!("Use MCP-Protocol-Version: {MCP_PROTOCOL_VERSION}."))
-    })?;
-    if value != MCP_PROTOCOL_VERSION {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("unsupported MCP-Protocol-Version")
-            .with_hint(format!("Use MCP-Protocol-Version: {MCP_PROTOCOL_VERSION}.")));
     }
-    Ok(())
+    Err(mcp_request_error(
+        payload,
+        StatusCode::BAD_REQUEST,
+        -32600,
+        "unsupported or missing MCP-Protocol-Version",
+    ))
+}
+
+fn single_mcp_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<Option<&'a str>, ()> {
+    let mut values = headers.get_all(name).iter();
+    let first = values
+        .next()
+        .map(|value| value.to_str().map_err(|_| ()))
+        .transpose()?;
+    if values.next().is_some() {
+        return Err(());
+    }
+    Ok(first)
+}
+
+fn mcp_header_mismatch(payload: &Value, message: &str) -> Response {
+    mcp_request_error(payload, StatusCode::BAD_REQUEST, -32020, message)
+}
+
+fn mcp_request_error(payload: &Value, status: StatusCode, code: i64, message: &str) -> Response {
+    let id = payload.get("id").cloned().unwrap_or(Value::Null);
+    (
+        status,
+        Json(json!({"jsonrpc":"2.0", "id":id, "error":{"code":code,"message":message}})),
+    )
+        .into_response()
 }
 
 fn validate_mcp_origin_header(headers: &HeaderMap) -> Result<(), Error> {
@@ -918,6 +1218,15 @@ async fn ui_index() -> Response {
 
 async fn ui_pool(AxumPath(_pool): AxumPath<String>) -> Response {
     html_response(UI_INDEX_HTML)
+}
+
+async fn ui_access(State(state): State<Arc<AppState>>) -> Response {
+    if !state.local_admin {
+        let mut response = Response::new(Body::empty());
+        *response.status_mut() = StatusCode::NOT_FOUND;
+        return response;
+    }
+    html_response(UI_ACCESS_HTML)
 }
 
 #[derive(Debug, Serialize)]
@@ -1616,6 +1925,20 @@ fn html_response(body: &str) -> Response {
         .headers_mut()
         .insert("plasmite-version", HeaderValue::from_static("0"));
     response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response.headers_mut().insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    response.headers_mut().insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+    ));
+    response.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    response
 }
 
 fn encode_lite3_stream_frame(frame: &plasmite::api::FrameRef<'_>) -> Result<Bytes, Error> {
@@ -1674,10 +1997,10 @@ fn error_body(err: &Error) -> ErrorBody {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccessStore, AppState, Error, ErrorKind, LocalClient, McpHandler, ServeConfig,
-        ServeMcpHandler, StorageExecutor, ToolCallRequest, error_response, healthz, list_pools,
-        mcp_post, normalize_tags, parse_tags_from_query, validate_config,
-        validate_mcp_origin_header,
+        AccessStore, AppState, BrowserSessions, Error, ErrorKind, LocalClient, McpHandler,
+        ServeConfig, ServeMcpHandler, StorageExecutor, ToolCallRequest, error_response, healthz,
+        list_pools, mcp_post, normalize_tags, parse_tags_from_query, validate_config,
+        validate_mcp_origin_header, validate_mcp_protocol_version,
     };
     use axum::Json;
     use axum::extract::State;
@@ -1734,6 +2057,36 @@ mod tests {
             HeaderValue::from_static("https://example.com"),
         );
         validate_mcp_origin_header(&headers).unwrap();
+    }
+
+    #[test]
+    fn mcp_http_requires_the_negotiated_version_after_initialize() {
+        let payload = json!({"jsonrpc":"2.0","id":1,"method":"tools/list"});
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "MCP-Protocol-Version",
+            HeaderValue::from_static("2025-11-25"),
+        );
+        validate_mcp_protocol_version(&headers, &payload).unwrap();
+        headers.remove("MCP-Protocol-Version");
+        assert_eq!(
+            validate_mcp_protocol_version(&headers, &payload)
+                .unwrap_err()
+                .status(),
+            axum::http::StatusCode::BAD_REQUEST
+        );
+        let initialize = json!({"jsonrpc":"2.0","id":2,"method":"initialize"});
+        validate_mcp_protocol_version(&headers, &initialize).unwrap();
+        headers.insert(
+            "MCP-Protocol-Version",
+            HeaderValue::from_static("not-supported"),
+        );
+        assert_eq!(
+            validate_mcp_protocol_version(&headers, &initialize)
+                .unwrap_err()
+                .status(),
+            axum::http::StatusCode::BAD_REQUEST
+        );
     }
 
     #[tokio::test]
@@ -1828,9 +2181,12 @@ mod tests {
         let state = Arc::new(AppState {
             client: LocalClient::new().with_pool_dir(temp.path()),
             secure_access: None,
+            oauth: None,
+            browser_sessions: Arc::new(BrowserSessions::new(None).unwrap()),
             local_admin: true,
             max_tail_timeout_ms: 30_000,
             tail_semaphore: Arc::new(Semaphore::new(1)),
+            mcp_semaphore: Arc::new(Semaphore::new(1)),
             storage_executor: StorageExecutor::new(1),
         });
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
@@ -1855,10 +2211,15 @@ mod tests {
             axum::http::StatusCode::LOCKED
         );
         let payload = json!({"jsonrpc":"2.0", "id":1, "method":"initialize", "params":{"protocolVersion":super::MCP_PROTOCOL_VERSION,"capabilities":{},"clientInfo":{"name":"test","version":"1"}}});
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "MCP-Protocol-Version",
+            HeaderValue::from_static(super::MCP_PROTOCOL_VERSION),
+        );
         tokio::time::timeout(std::time::Duration::from_millis(100), async {
             assert_eq!(healthz().await.status(), axum::http::StatusCode::OK);
             assert_eq!(
-                mcp_post(State(state), HeaderMap::new(), Json(payload))
+                mcp_post(State(state.clone()), headers.clone(), Json(payload.clone()))
                     .await
                     .status(),
                 axum::http::StatusCode::OK
@@ -1866,6 +2227,13 @@ mod tests {
         })
         .await
         .unwrap();
+        let _mcp_permit = state.mcp_semaphore.clone().try_acquire_owned().unwrap();
+        assert_eq!(
+            mcp_post(State(state), headers, Json(payload))
+                .await
+                .status(),
+            axum::http::StatusCode::LOCKED
+        );
         release_tx.send(()).unwrap();
         active.await.unwrap().unwrap();
     }
@@ -1876,9 +2244,12 @@ mod tests {
         let mut state = AppState {
             client: LocalClient::new().with_pool_dir(temp.path()),
             secure_access: None,
+            oauth: None,
+            browser_sessions: Arc::new(BrowserSessions::new(None).unwrap()),
             local_admin: false,
             max_tail_timeout_ms: 30_000,
             tail_semaphore: Arc::new(Semaphore::new(1)),
+            mcp_semaphore: Arc::new(Semaphore::new(1)),
             storage_executor: StorageExecutor::new(1),
         };
         assert_eq!(

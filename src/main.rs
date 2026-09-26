@@ -154,6 +154,7 @@ mod tests {
             ("plasmite access keys", vec!["help"]),
             ("plasmite access revoke", vec!["help"]),
             ("plasmite access status", vec!["help"]),
+            ("plasmite access untrust", vec!["help"]),
             ("plasmite completion", vec!["help"]),
             ("plasmite doctor", vec!["all", "help", "json"]),
             (
@@ -206,7 +207,7 @@ mod tests {
                 ],
             ),
             ("plasmite help", vec![]),
-            ("plasmite mcp", vec!["dir", "help"]),
+            ("plasmite mcp", vec!["dir", "help", "remote"]),
             ("plasmite pool", vec!["help"]),
             (
                 "plasmite pool create",

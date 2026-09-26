@@ -16,8 +16,13 @@ use std::path::PathBuf;
 
 pub(super) enum UtilityCommand {
     Version,
-    Completion { shell: Shell },
-    Mcp { pool_dir: Option<PathBuf> },
+    Completion {
+        shell: Shell,
+    },
+    Mcp {
+        pool_dir: Option<PathBuf>,
+        remote: Option<String>,
+    },
 }
 
 pub(super) fn run(command: UtilityCommand, context: &CliContext) -> Result<CommandResult, Error> {
@@ -41,9 +46,13 @@ pub(super) fn run(command: UtilityCommand, context: &CliContext) -> Result<Comma
             clap_complete::aot::generate(shell, &mut command, "plasmite", &mut io::stdout());
             Ok(CommandResult::ok())
         }
-        UtilityCommand::Mcp { pool_dir } => {
-            let pool_dir = pool_dir.unwrap_or_else(|| context.pool_dir().to_path_buf());
-            mcp_stdio::serve(pool_dir)?;
+        UtilityCommand::Mcp { pool_dir, remote } => {
+            if let Some(remote) = remote {
+                mcp_stdio::serve_remote(remote)?;
+            } else {
+                let pool_dir = pool_dir.unwrap_or_else(|| context.pool_dir().to_path_buf());
+                mcp_stdio::serve(pool_dir)?;
+            }
             Ok(CommandResult::ok())
         }
     }

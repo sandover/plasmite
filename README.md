@@ -25,8 +25,9 @@ So, there's **Plasmite**.
 Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed channels called "pools", which are ring buffers. There's no daemon or broker for local IPC, no fancy config, and it's fast (~60k 1KB msgs/sec writes, ~3M msgs/sec reads on a laptop). Readers mmap the pool file and walk frames in place, and payloads use [Lite3](https://github.com/fastserial/lite3), a zero-copy JSON binary encoding.
 
 For IPC across machines, `pls serve` exposes local pools over HTTPS. Native
-clients connect with an access key. Browser sign-in and direct remote MCP
-authorization are later work; the local stdio `mcp` command remains available.
+clients and browsers connect with an access key. A local MCP process can use a
+saved native connection; a remote MCP harness can authorize in the browser.
+See the [serving guide](docs/record/serving.md) for setup and trust requirements.
 
 #### Local IPC
 
