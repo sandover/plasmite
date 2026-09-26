@@ -15,7 +15,9 @@ It is intentionally signature-free: language-level method/function signatures li
 - Existing field/operation meanings must not be removed or redefined.
 - New fields must be optional with defaults that preserve old behavior.
 - New operations are allowed if existing semantics remain stable.
-- Any breaking change requires a new major API version.
+- Any breaking change requires a new major API version. The secure-sharing
+  release is a breaking major-version change with no migration path and
+  removes superseded secure connection options.
 
 ## Stable Surface
 
@@ -23,14 +25,33 @@ It is intentionally signature-free: language-level method/function signatures li
 
 - `name("chat")`: resolves within the configured pool directory.
 - `path("/abs/path/to/pool.plasmite")`: direct local path.
-- `uri("tcp://host:port/pool/chat")`: accepted for forward compatibility.
-- Local v0 clients reject URI refs with `Usage` (remote pool refs are not yet supported through local clients).
+- `uri("https://host:port/<pool>")`: remote pool URL using the existing CLI
+  shorthand form. A connected client uses the saved credentials for that
+  destination.
 
 ### Client + Pool Capabilities
 
 - Clients expose pool lifecycle operations: create, open, info, list, delete.
 - Pool handles expose message operations: append, get, tail.
 - `list_pools` is scoped to the configured local pool directory.
+- Clients expose native `connect(server_url, access_key)` and
+  `status(server_url)` operations. `connect` verifies the HTTPS server before
+  saving the connection for the current OS user; `status` reports whether
+  credentials are saved, the destination is reachable, and the server accepts
+  the saved secret without exposing credentials.
+- Several saved connections may coexist. Create a `RemoteClient` for each
+  destination; it loads that destination's saved credentials. A pool URI used
+  with the client must name the same origin. Remote shorthand URLs keep the
+  form `https://host:port/<pool>`.
+- An access key has the form `pk1.<spki-fingerprint>.<secret>`. The
+  fingerprint is the 64-character lowercase hexadecimal SHA-256 digest of
+  the certificate's DER Subject Public Key Info (SPKI); the secret is 32
+  random bytes encoded as 64 lowercase hexadecimal characters. The
+  destination address is separate from the key.
+- Before sending the secret, a client verifies the destination hostname,
+  certificate validity, TLS proof of possession, and the public-key
+  fingerprint embedded in the key. It never forwards saved credentials to a
+  different destination after a redirect.
 
 ## Data + Error Contract
 

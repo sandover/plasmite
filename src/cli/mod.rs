@@ -3,6 +3,7 @@
 //! Role: Route parsed commands to cohesive command-family modules.
 //! Invariants: Command modules depend on explicit context and output helpers.
 
+mod access;
 pub(crate) mod args;
 mod context;
 mod doctor;
@@ -15,7 +16,6 @@ mod pool;
 pub(crate) mod pool_support;
 mod result;
 mod server;
-pub(crate) mod server_support;
 mod stream;
 pub(crate) mod stream_support;
 pub(crate) mod support;
@@ -47,10 +47,6 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             retry_delay,
             input,
             errors,
-            token,
-            token_file,
-            tls_ca,
-            tls_skip_verify,
         } => feed::run(
             feed::FeedArgs {
                 pool,
@@ -64,10 +60,6 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
                 retry_delay,
                 input,
                 errors,
-                token,
-                token_file,
-                tls_ca,
-                tls_skip_verify,
             },
             &context,
         ),
@@ -87,10 +79,6 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             quiet_drops,
             no_notify,
             replay,
-            token,
-            token_file,
-            tls_ca,
-            tls_skip_verify,
         } => stream::follow(
             stream::FollowArgs {
                 pool,
@@ -107,10 +95,6 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
                 quiet_drops,
                 no_notify,
                 replay,
-                token,
-                token_file,
-                tls_ca,
-                tls_skip_verify,
             },
             &context,
         ),
@@ -124,10 +108,6 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             format,
             since,
             echo_self,
-            token,
-            token_file,
-            tls_ca,
-            tls_skip_verify,
         } => stream::duplex(
             stream::DuplexArgs {
                 pool,
@@ -139,10 +119,6 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
                 format,
                 since,
                 echo_self,
-                token,
-                token_file,
-                tls_ca,
-                tls_skip_verify,
             },
             &context,
         ),
@@ -166,7 +142,8 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             },
             &context,
         ),
-        Command::Serve { subcommand, run } => server::run(subcommand, run, &context),
+        Command::Serve { run } => server::run(run, &context),
+        Command::Access { command } => access::run(command, &context),
         Command::Mcp { dir } => {
             utility::run(utility::UtilityCommand::Mcp { pool_dir: dir }, &context)
         }

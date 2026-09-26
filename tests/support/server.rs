@@ -1,4 +1,5 @@
 use plasmite::api::RemoteClient;
+use serde_json::Value;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -10,7 +11,9 @@ type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 pub struct TestServer {
     child: Child,
     pub base_url: String,
-    token: Option<String>,
+    pub remote_url: String,
+    pub local_url: String,
+    access_key: String,
     _ready_dir: tempfile::TempDir,
 }
 
@@ -20,43 +23,22 @@ impl TestServer {
     }
 
     pub fn start_with_args(pool_dir: &Path, extra_args: &[&str]) -> Self {
-        Self::start_with_args_and_scheme(pool_dir, extra_args, "http")
+        Self::start_with_args_and_scheme(pool_dir, extra_args, "https")
     }
 
     pub fn start_with_args_and_scheme(pool_dir: &Path, extra_args: &[&str], scheme: &str) -> Self {
-        Self::try_start_with_options(pool_dir, extra_args, scheme, None)
+        Self::try_start_with_options(pool_dir, extra_args, scheme)
             .unwrap_or_else(|err| panic!("server ready: {err}"))
     }
 
     pub fn try_start(pool_dir: &Path) -> TestResult<Self> {
-        Self::try_start_with_options(pool_dir, &[], "http", None)
-    }
-
-    pub fn try_start_with_token(pool_dir: &Path, token: Option<&str>) -> TestResult<Self> {
-        let mut args = Vec::new();
-        if let Some(token) = token {
-            args.extend(["--token", token]);
-        }
-        Self::try_start_with_options(pool_dir, &args, "http", token)
-    }
-
-    pub fn try_start_with_access(pool_dir: &Path, access: &str) -> TestResult<Self> {
-        Self::try_start_with_options(pool_dir, &["--access", access], "http", None)
-    }
-
-    pub fn try_start_with_cors(pool_dir: &Path, origins: &[&str]) -> TestResult<Self> {
-        let mut args = Vec::with_capacity(origins.len() * 2);
-        for origin in origins {
-            args.extend(["--cors-origin", *origin]);
-        }
-        Self::try_start_with_options(pool_dir, &args, "http", None)
+        Self::try_start_with_options(pool_dir, &[], "https")
     }
 
     fn try_start_with_options(
         pool_dir: &Path,
         extra_args: &[&str],
         scheme: &str,
-        token: Option<&str>,
     ) -> TestResult<Self> {
         let ready_dir = tempfile::tempdir()?;
         let ready_path = ready_dir.path().join("address");
@@ -67,6 +49,10 @@ impl TestServer {
             .arg("serve")
             .arg("--bind")
             .arg("127.0.0.1:0")
+            .arg("--remote-bind")
+            .arg("127.0.0.1:0")
+            .arg("--shared-address")
+            .arg("https://localhost:9743")
             .args(extra_args)
             .env("PLASMITE_SERVE_READY_FILE", &ready_path)
             .stdout(Stdio::null())
@@ -85,11 +71,40 @@ impl TestServer {
             }
             match std::fs::read_to_string(&ready_path) {
                 Ok(address) => {
-                    let address = address.trim().parse::<std::net::SocketAddr>()?;
+                    let remote = address.trim().parse::<std::net::SocketAddr>()?;
+                    let local_path = pool_dir.join(".plasmite-serve/local.json");
+                    let local: String = serde_json::from_slice(&std::fs::read(local_path)?)?;
+                    let local = local.parse::<std::net::SocketAddr>()?;
+                    let remote_url = format!("https://localhost:{}", remote.port());
+                    let local_url = format!("http://{local}");
+                    let base_url = if scheme == "https" {
+                        remote_url.clone()
+                    } else {
+                        local_url.clone()
+                    };
+                    let invite = Command::new(env!("CARGO_BIN_EXE_plasmite"))
+                        .arg("--dir")
+                        .arg(pool_dir)
+                        .args(["access", "invite", "--name", "integration-test"])
+                        .output()?;
+                    if !invite.status.success() {
+                        return Err(format!(
+                            "access invite failed: {}",
+                            display_diagnostics(&String::from_utf8_lossy(&invite.stderr))
+                        )
+                        .into());
+                    }
+                    let invite: Value = serde_json::from_slice(&invite.stdout)?;
+                    let access_key = invite["access_key"]
+                        .as_str()
+                        .ok_or("access invite omitted access_key")?
+                        .to_owned();
                     return Ok(Self {
                         child,
-                        base_url: format!("{scheme}://{address}"),
-                        token: token.map(str::to_string),
+                        base_url,
+                        remote_url,
+                        local_url,
+                        access_key,
                         _ready_dir: ready_dir,
                     });
                 }
@@ -111,15 +126,14 @@ impl TestServer {
     }
 
     pub fn client(&self) -> TestResult<RemoteClient> {
-        Ok(RemoteClient::new(self.base_url.clone())?)
+        Ok(RemoteClient::with_access_key(
+            self.remote_url.clone(),
+            &self.access_key,
+        )?)
     }
 
-    pub fn client_with_token(&self) -> TestResult<RemoteClient> {
-        let mut client = RemoteClient::new(self.base_url.clone())?;
-        if let Some(token) = &self.token {
-            client = client.with_token(token.clone());
-        }
-        Ok(client)
+    pub fn access_key(&self) -> &str {
+        &self.access_key
     }
 
     #[cfg(unix)]

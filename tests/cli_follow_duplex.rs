@@ -3,6 +3,23 @@
 pub mod support;
 use support::cli::*;
 
+fn connect_to_server(server: &ServeProcess, home: &std::path::Path) {
+    let mut connect = cmd()
+        .args(["access", "connect", &server.remote_url])
+        .env("PLASMITE_ACCESS_HOME", home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("connect");
+    writeln!(
+        connect.stdin.take().expect("stdin"),
+        "{}",
+        server.access_key()
+    )
+    .expect("key");
+    assert!(connect.wait().expect("connect status").success());
+}
+
 #[test]
 fn duplex_with_no_args_prints_help() {
     let output = cmd().args(["duplex"]).output().expect("duplex");
@@ -1521,104 +1538,6 @@ fn follow_remote_url_rejects_create_flag() {
 }
 
 #[test]
-fn follow_remote_tls_ca_and_skip_verify_work() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let feed = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "{\"x\":1}",
-        ])
-        .output()
-        .expect("feed");
-    assert!(feed.status.success());
-
-    let mut params = CertificateParams::new(vec!["localhost".to_string()]);
-    params
-        .subject_alt_names
-        .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
-    params
-        .subject_alt_names
-        .push(SanType::IpAddress(IpAddr::V6(Ipv6Addr::LOCALHOST)));
-    let cert = Certificate::from_params(params).expect("cert");
-    let cert_pem = cert.serialize_pem().expect("cert pem");
-    let key_pem = cert.serialize_private_key_pem();
-    let cert_path = temp.path().join("cert.pem");
-    let key_path = temp.path().join("key.pem");
-    std::fs::write(&cert_path, cert_pem).expect("write cert");
-    std::fs::write(&key_path, key_pem).expect("write key");
-
-    let server = ServeProcess::start_with_args_and_scheme(
-        &pool_dir,
-        &[
-            "--tls-cert",
-            cert_path.to_str().unwrap(),
-            "--tls-key",
-            key_path.to_str().unwrap(),
-        ],
-        "https",
-    );
-    let pool_url = format!("{}/demo", server.base_url);
-
-    let trusted = cmd()
-        .args([
-            "follow",
-            &pool_url,
-            "--tail",
-            "1",
-            "--one",
-            "--jsonl",
-            "--timeout",
-            "2s",
-            "--tls-ca",
-            cert_path.to_str().unwrap(),
-        ])
-        .output()
-        .expect("follow");
-    assert!(
-        trusted.status.success(),
-        "stderr={}",
-        String::from_utf8_lossy(&trusted.stderr)
-    );
-
-    let skipped = cmd()
-        .args([
-            "follow",
-            &pool_url,
-            "--tail",
-            "1",
-            "--one",
-            "--jsonl",
-            "--timeout",
-            "2s",
-            "--tls-skip-verify",
-        ])
-        .output()
-        .expect("follow");
-    assert!(
-        skipped.status.success(),
-        "stderr={}",
-        String::from_utf8_lossy(&skipped.stderr)
-    );
-}
-
-#[test]
 fn follow_remote_url_happy_path_reads_recent_messages() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
@@ -1659,6 +1578,8 @@ fn follow_remote_url_happy_path_reads_recent_messages() {
     assert!(second.status.success());
 
     let server = ServeProcess::start(&pool_dir);
+    let access_home = temp.path().join("access-home");
+    connect_to_server(&server, &access_home);
     let pool_url = format!("{}/demo", server.base_url);
     let follower = cmd()
         .args([
@@ -1671,6 +1592,7 @@ fn follow_remote_url_happy_path_reads_recent_messages() {
             "--timeout",
             "2s",
         ])
+        .env("PLASMITE_ACCESS_HOME", &access_home)
         .output()
         .expect("follow");
     assert!(
@@ -1717,11 +1639,14 @@ fn follow_remote_url_supports_tag_filter() {
     }
 
     let server = ServeProcess::start(&pool_dir);
+    let access_home = temp.path().join("access-home");
+    connect_to_server(&server, &access_home);
     let pool_url = format!("{}/demo", server.base_url);
     let mut follower = cmd()
         .args([
             "follow", &pool_url, "--tail", "10", "--jsonl", "--tag", "keep",
         ])
+        .env("PLASMITE_ACCESS_HOME", &access_home)
         .stdout(Stdio::piped())
         .spawn()
         .expect("follow");
@@ -1827,9 +1752,12 @@ fn follow_remote_url_timeout_returns_124() {
     assert!(create.status.success());
 
     let server = ServeProcess::start(&pool_dir);
+    let access_home = temp.path().join("access-home");
+    connect_to_server(&server, &access_home);
     let pool_url = format!("{}/demo", server.base_url);
     let follower = cmd()
         .args(["follow", &pool_url, "--jsonl", "--timeout", "150ms"])
+        .env("PLASMITE_ACCESS_HOME", &access_home)
         .output()
         .expect("follow");
     assert_eq!(follower.status.code(), Some(124));
@@ -2031,11 +1959,14 @@ fn duplex_remote_happy_path_sends_and_reads() {
     assert!(seed_out.status.success());
 
     let server = ServeProcess::start(&pool_dir);
+    let access_home = temp.path().join("access-home");
+    connect_to_server(&server, &access_home);
     let pool_url = format!("{}/chat", server.base_url);
     let mut duplex = cmd()
         .args([
             "duplex", &pool_url, "--me", "alice", "--tail", "1", "--jsonl",
         ])
+        .env("PLASMITE_ACCESS_HOME", &access_home)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -2065,6 +1996,7 @@ fn duplex_remote_happy_path_sends_and_reads() {
             "--timeout",
             "200ms",
         ])
+        .env("PLASMITE_ACCESS_HOME", &access_home)
         .output()
         .expect("follow");
     assert!(
@@ -2076,93 +2008,6 @@ fn duplex_remote_happy_path_sends_and_reads() {
     assert_eq!(follow_lines.len(), 2);
     assert_eq!(follow_lines[0].get("data").unwrap()["from"], "bob");
     assert_eq!(follow_lines[1].get("data").unwrap()["from"], "alice");
-}
-
-#[test]
-fn duplex_remote_uses_token_and_trusted_certificate() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "chat",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let mut params = CertificateParams::new(vec!["localhost".to_string()]);
-    params
-        .subject_alt_names
-        .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
-    let cert = Certificate::from_params(params).expect("cert");
-    let cert_path = temp.path().join("cert.pem");
-    let key_path = temp.path().join("key.pem");
-    let token_path = temp.path().join("token.txt");
-    std::fs::write(&cert_path, cert.serialize_pem().expect("cert pem")).expect("write cert");
-    std::fs::write(&key_path, cert.serialize_private_key_pem()).expect("write key");
-    std::fs::write(&token_path, "duplex-secret\n").expect("write token");
-
-    let server = ServeProcess::start_with_args_and_scheme(
-        &pool_dir,
-        &[
-            "--token-file",
-            token_path.to_str().unwrap(),
-            "--tls-cert",
-            cert_path.to_str().unwrap(),
-            "--tls-key",
-            key_path.to_str().unwrap(),
-        ],
-        "https",
-    );
-    let pool_url = format!("{}/chat", server.base_url);
-    let mut duplex = cmd()
-        .args([
-            "duplex",
-            &pool_url,
-            "--token-file",
-            token_path.to_str().unwrap(),
-            "--tls-ca",
-            cert_path.to_str().unwrap(),
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("duplex");
-    duplex
-        .stdin
-        .take()
-        .expect("stdin")
-        .write_all(b"{\"from\":\"alice\",\"msg\":\"secure\"}\n")
-        .expect("write stdin");
-    let output = duplex.wait_with_output().expect("duplex output");
-    assert!(
-        output.status.success(),
-        "stderr={}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let follow = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "chat",
-            "--tail",
-            "1",
-            "--replay",
-            "0",
-            "--jsonl",
-        ])
-        .output()
-        .expect("follow");
-    assert!(follow.status.success());
-    let lines = parse_json_lines(&follow.stdout);
-    assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0]["data"]["msg"], "secure");
 }
 
 #[test]

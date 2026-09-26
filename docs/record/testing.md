@@ -86,7 +86,8 @@ and MCP helpers under `tests/support/`. Run every command-family target:
 cargo test --test cli_pool
 cargo test --test cli_feed_fetch
 cargo test --test cli_follow_duplex
-cargo test --test cli_serve_remote
+cargo test --test secure_serving
+cargo test --test secure_sharing
 cargo test --test cli_tap
 cargo test --test cli_help_output
 ```
@@ -99,8 +100,8 @@ The targets are divided by behavior:
   receipts, and exact lookup.
 - `cli_follow_duplex`: local and remote streaming, filters, replay, timeouts,
   duplex send/receive, and cancellation.
-- `cli_serve_remote`: serve initialization and validation, server limits, TLS,
-  response headers, and MCP stdio.
+- `secure_serving`: server validation, limits, TLS, response headers, and MCP stdio.
+- `secure_sharing`: invitation, pinned connection, access, and identity checks.
 - `cli_tap`: child lifecycle, stream capture and passthrough, tags, signals,
   and exit propagation.
 - `cli_help_output`: command discovery, completions, adaptive color and JSON,

@@ -5,7 +5,6 @@
 use crate::cli::support::{
     DEFAULT_MAX_BODY_BYTES, DEFAULT_MAX_TAIL_CONCURRENCY, DEFAULT_MAX_TAIL_TIMEOUT_MS,
 };
-use crate::serve;
 use clap::{Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::aot::Shell;
 use std::path::PathBuf;
@@ -231,72 +230,29 @@ NOTES
             help = "File/stdin error policy: stop|skip"
         )]
         errors: ErrorPolicyCli,
-        #[arg(
-            long,
-            help = "Bearer token for remote refs only (dev-only; prefer --token-file)",
-            help_heading = "Remote auth/TLS"
-        )]
-        token: Option<String>,
-        #[arg(
-            long,
-            value_name = "PATH",
-            help = "Read bearer token from file for remote refs only",
-            value_hint = ValueHint::FilePath,
-            help_heading = "Remote auth/TLS"
-        )]
-        token_file: Option<PathBuf>,
-        #[arg(
-            long = "tls-ca",
-            value_name = "PATH",
-            help = "Trust this PEM CA/certificate for remote refs only",
-            value_hint = ValueHint::FilePath,
-            help_heading = "Remote auth/TLS"
-        )]
-        tls_ca: Option<PathBuf>,
-        #[arg(
-            long = "tls-skip-verify",
-            help = "Disable TLS verification for remote refs only (unsafe; dev-only)",
-            help_heading = "Remote auth/TLS"
-        )]
-        tls_skip_verify: bool,
     },
     #[command(
-        about = "Serve pools over HTTP (loopback default in v0)",
-        long_about = r#"Serve pools over HTTP (loopback default in v0).
+        about = "Share pools securely with named access keys",
+        long_about = r#"Serve pools locally and share them over HTTPS with named access keys.
 
-Implements the remote protocol spec under spec/remote/v0/SPEC.md."#,
+Run `plasmite access invite --name <name>` in another terminal to create a key."#,
         after_help = r#"EXAMPLES
-  $ plasmite serve                                              # loopback, no auth
-  $ plasmite serve init                                         # bootstrap TLS + token
-  $ plasmite serve check                                        # validate config
+  $ plasmite --dir ./pools serve
+  $ plasmite --dir ./pools access invite --name laptop
 
 CONSTRAINTS
   - Request body, tail timeout, and tail concurrency limits must be positive
-  - `init` has its own artifact options; put serve options before `check`"#,
+  - The local admin listener stays on loopback; remote clients use HTTPS"#,
         after_long_help = r#"EXAMPLES
-  $ plasmite serve
-  $ plasmite serve --bind 127.0.0.1:9701 --token devtoken
-  $ plasmite serve --token-file /path/to/token
-  $ plasmite serve --tls-self-signed
-  $ plasmite serve check
-  $ plasmite serve init --output-dir ./.plasmite-serve
+  $ plasmite --dir ./pools serve
+  $ plasmite --dir ./pools serve --shared-address https://pools.example.com:8443
 
-NOTES
-  - `plasmite serve` prints a startup "next commands" block on interactive terminals
-  - Use `plasmite serve check` to validate config and inspect resolved endpoints without binding sockets
-  - Use `plasmite serve init` to scaffold token + TLS artifacts for safer non-loopback setup
-  - Loopback is the default; non-loopback binds require --allow-non-loopback
-  - Use Authorization: Bearer <token> when --token or --token-file is set
-  - Prefer --token-file for non-loopback deployments; --token is dev-only
-  - Use --access to restrict read/write operations
-  - Non-loopback writes require TLS + --token-file (or --insecure-no-tls for demos)
-  - --tls-self-signed is for demos; clients must trust the generated cert
-  - Use repeatable --cors-origin to allow browser clients from specific origins
-  - Safety limits: --max-body-bytes, --max-tail-timeout-ms, --max-tail-concurrency"#
+  # On the server, create a named key. On the client, enter it at the hidden prompt.
+  $ plasmite --dir ./pools access invite --name laptop
+  $ plasmite access connect https://pools.example.com:8443
+  $ plasmite access status https://pools.example.com:8443"#
     )]
     Serve {
-        #[command(subcommand)]
-        subcommand: Option<ServeSubcommand>,
         #[command(flatten)]
         run: ServeRunArgs,
     },
@@ -317,6 +273,18 @@ The process exits when stdin closes."#,
             value_hint = ValueHint::DirPath
         )]
         dir: Option<PathBuf>,
+    },
+    #[command(
+        arg_required_else_help = true,
+        about = "Manage secure access to a shared pool directory",
+        long_about = r#"Create access keys and connect to a shared pool server.
+
+Create a key with `invite` on the server machine. Use `connect` and `status` on a client machine.
+`connect` asks for the key without displaying it."#
+    )]
+    Access {
+        #[command(subcommand)]
+        command: AccessSubcommand,
     },
     #[command(
         arg_required_else_help = true,
@@ -347,7 +315,7 @@ Use `--replay N` with `--tail` or `--since` to replay with timing."#,
   $ plasmite follow foo --format jsonl | jq '.data'               # pipe to jq
 
 LOCAL AND REMOTE
-  Remote refs support --tail, filters, --one, --timeout, output, and auth/TLS.
+  Remote refs support --tail, filters, --one, --timeout, and output.
   They reject --create, --since, --replay, --no-notify, and --quiet-drops."#,
         after_long_help = r#"EXAMPLES
   # Follow for new messages
@@ -443,34 +411,6 @@ NOTES
             help = "Replay local history at finite SPEED >= 0; requires --tail or --since"
         )]
         replay: Option<f64>,
-        #[arg(
-            long,
-            help = "Bearer token for remote refs only (dev-only; prefer --token-file)",
-            help_heading = "Remote auth/TLS"
-        )]
-        token: Option<String>,
-        #[arg(
-            long,
-            value_name = "PATH",
-            help = "Read bearer token from file for remote refs only",
-            value_hint = ValueHint::FilePath,
-            help_heading = "Remote auth/TLS"
-        )]
-        token_file: Option<PathBuf>,
-        #[arg(
-            long = "tls-ca",
-            value_name = "PATH",
-            help = "Trust this PEM CA/certificate for remote refs only",
-            value_hint = ValueHint::FilePath,
-            help_heading = "Remote auth/TLS"
-        )]
-        tls_ca: Option<PathBuf>,
-        #[arg(
-            long = "tls-skip-verify",
-            help = "Disable TLS verification for remote refs only (unsafe; dev-only)",
-            help_heading = "Remote auth/TLS"
-        )]
-        tls_skip_verify: bool,
     },
     #[command(
         arg_required_else_help = true,
@@ -532,7 +472,7 @@ Notes:
 - Remote refs do not support `--create` or `--since` (use `--tail` for remote)."#,
         after_help = r#"INPUT AND EXIT
   - Terminal input requires --me and sends one chat message per non-empty line
-  - Piped input is a JSON stream; remote refs accept the same auth/TLS flags as follow
+  - Piped input is a JSON stream; connect before using a remote ref
   - Exits 124 on timeout"#
     )]
     Duplex {
@@ -573,34 +513,6 @@ Notes:
         since: Option<String>,
         #[arg(long, help = "Also emit your own messages in the receive stream")]
         echo_self: bool,
-        #[arg(
-            long,
-            help = "Bearer token for remote refs only (dev-only; prefer --token-file)",
-            help_heading = "Remote auth/TLS"
-        )]
-        token: Option<String>,
-        #[arg(
-            long,
-            value_name = "PATH",
-            help = "Read bearer token from file for remote refs only",
-            value_hint = ValueHint::FilePath,
-            help_heading = "Remote auth/TLS"
-        )]
-        token_file: Option<PathBuf>,
-        #[arg(
-            long = "tls-ca",
-            value_name = "PATH",
-            help = "Trust this PEM CA/certificate for remote refs only",
-            value_hint = ValueHint::FilePath,
-            help_heading = "Remote auth/TLS"
-        )]
-        tls_ca: Option<PathBuf>,
-        #[arg(
-            long = "tls-skip-verify",
-            help = "Disable TLS verification for remote refs only (unsafe; dev-only)",
-            help_heading = "Remote auth/TLS"
-        )]
-        tls_skip_verify: bool,
     },
     #[command(
         arg_required_else_help = true,
@@ -654,23 +566,6 @@ to enable tab completion."#,
         #[arg(help = "Shell to generate completions for")]
         shell: Shell,
     },
-}
-
-#[derive(Copy, Clone, Debug, ValueEnum)]
-pub(crate) enum AccessModeCli {
-    ReadOnly,
-    WriteOnly,
-    ReadWrite,
-}
-
-impl From<AccessModeCli> for serve::AccessMode {
-    fn from(value: AccessModeCli) -> Self {
-        match value {
-            AccessModeCli::ReadOnly => serve::AccessMode::ReadOnly,
-            AccessModeCli::WriteOnly => serve::AccessMode::WriteOnly,
-            AccessModeCli::ReadWrite => serve::AccessMode::ReadWrite,
-        }
-    }
 }
 
 #[derive(Subcommand)]
@@ -760,84 +655,28 @@ NOTES
 }
 
 #[derive(Subcommand)]
-pub(crate) enum ServeSubcommand {
-    #[command(
-        about = "Bootstrap secure serve token/TLS artifacts",
-        long_about = r#"Generate token + TLS artifacts and print copy/paste next commands for secure serve startup."#,
-        after_help = r#"EXAMPLES
-  $ plasmite serve init
-  $ plasmite serve init --output-dir ./.plasmite-serve
-  $ plasmite serve init --output-dir ./.plasmite-serve --force
-
-NOTES
-  - Writes token/cert/key files without printing secret token values
-  - Token, certificate, and key output paths must be distinct
-  - Refuses to overwrite existing artifacts unless --force is set
-  - Output is human-readable on a terminal and JSON when piped"#
-    )]
-    Init(ServeInitArgs),
-    #[command(
-        about = "Validate serve config and print effective endpoints without starting",
-        long_about = r#"Validate serve config and print effective endpoints without starting a server."#,
-        after_help = r#"EXAMPLES
-  $ plasmite serve check
-  $ plasmite serve --bind 0.0.0.0:9700 --allow-non-loopback --access read-only check
-  $ plasmite serve --token-file ~/.plasmite/token --tls-self-signed check
-
-NOTES
-  - Serve configuration options belong before `check`; only --json follows it
-  - Exits non-zero when config is invalid
-  - Does not bind sockets or start background tasks
-  - Human-readable output is the default; use --json for machine output"#
-    )]
-    Check {
-        #[arg(long, help = "Emit JSON instead of human-readable output")]
-        json: bool,
+pub(crate) enum AccessSubcommand {
+    #[command(about = "Create a named access key on the server machine")]
+    Invite {
+        #[arg(long, value_name = "NAME", help = "Name to identify this client")]
+        name: String,
     },
-}
-
-#[derive(Args)]
-pub(crate) struct ServeInitArgs {
-    #[arg(
-        long,
-        default_value = "127.0.0.1:9700",
-        help = "Concrete server IP and port used for TLS and printed client commands"
+    #[command(
+        about = "Connect this machine to a shared pool server",
+        long_about = "Verify the server URL and access key, then save the connection for future remote pool commands. The key is read from a hidden prompt or stdin."
     )]
-    pub(crate) bind: String,
-    #[arg(
-        long,
-        default_value = ".",
-        value_name = "PATH",
-        help = "Base output directory for generated artifacts",
-        value_hint = ValueHint::DirPath
+    Connect {
+        #[arg(value_name = "URL", help = "HTTPS address printed by the server")]
+        url: String,
+    },
+    #[command(
+        about = "Show this machine's connection to a shared pool server",
+        long_about = "Check whether the server is reachable and whether this machine's saved access key still works."
     )]
-    pub(crate) output_dir: PathBuf,
-    #[arg(
-        long,
-        default_value = "plasmite-auth-token.txt",
-        value_name = "PATH",
-        help = "Token output path (relative to --output-dir unless absolute)",
-        value_hint = ValueHint::FilePath
-    )]
-    pub(crate) token_file: PathBuf,
-    #[arg(
-        long = "tls-cert",
-        default_value = "plasmite-tls-cert.pem",
-        value_name = "PATH",
-        help = "TLS certificate output path (relative to --output-dir unless absolute)",
-        value_hint = ValueHint::FilePath
-    )]
-    pub(crate) tls_cert: PathBuf,
-    #[arg(
-        long = "tls-key",
-        default_value = "plasmite-tls-key.pem",
-        value_name = "PATH",
-        help = "TLS private key output path (relative to --output-dir unless absolute)",
-        value_hint = ValueHint::FilePath
-    )]
-    pub(crate) tls_key: PathBuf,
-    #[arg(long, help = "Overwrite existing generated artifacts")]
-    pub(crate) force: bool,
+    Status {
+        #[arg(value_name = "URL", help = "HTTPS address printed by the server")]
+        url: String,
+    },
 }
 
 #[derive(Args)]
@@ -850,50 +689,31 @@ pub(crate) struct ServeRunArgs {
     )]
     pub(crate) bind: String,
     #[arg(
-        long,
-        value_enum,
-        default_value = "read-write",
-        help = "Access mode: read-only|write-only|read-write",
+        long = "remote-bind",
+        default_value = "0.0.0.0:9743",
+        help = "HTTPS bind address for remote clients",
         help_heading = "Connection"
     )]
-    pub(crate) access: AccessModeCli,
+    pub(crate) remote_bind: String,
     #[arg(
-        long = "cors-origin",
-        value_name = "ORIGIN",
-        help = "Allow browser requests from this origin (repeatable, explicit list)",
+        long = "shared-address",
+        value_name = "URL",
+        help = "Public HTTPS URL clients use to connect, including any proxy port",
         help_heading = "Connection"
     )]
-    pub(crate) cors_origin: Vec<String>,
+    pub(crate) shared_address: Option<String>,
     #[arg(
-        long,
-        help = "Bearer token for auth (dev-only; prefer --token-file)",
-        help_heading = "Authentication"
-    )]
-    pub(crate) token: Option<String>,
-    #[arg(long, value_name = "PATH", help = "Read bearer token from file", value_hint = ValueHint::FilePath, help_heading = "Authentication")]
-    pub(crate) token_file: Option<PathBuf>,
-    #[arg(long, value_name = "PATH", help = "TLS certificate path (PEM; requires --tls-key)", value_hint = ValueHint::FilePath, help_heading = "TLS")]
-    pub(crate) tls_cert: Option<PathBuf>,
-    #[arg(long, value_name = "PATH", help = "TLS key path (PEM; requires --tls-cert)", value_hint = ValueHint::FilePath, help_heading = "TLS")]
-    pub(crate) tls_key: Option<PathBuf>,
-    #[arg(
-        long,
-        help = "Generate a self-signed TLS cert (conflicts with --tls-cert/--tls-key)",
+        long = "front-cert",
+        value_name = "PATH",
+        help = "Certificate used by an HTTPS-terminating proxy (sets the expected remote identity)",
+        value_hint = ValueHint::FilePath,
         help_heading = "TLS"
     )]
-    pub(crate) tls_self_signed: bool,
-    #[arg(
-        long,
-        help = "Allow non-loopback binds (unsafe without TLS + token)",
-        help_heading = "Safety"
-    )]
-    pub(crate) allow_non_loopback: bool,
-    #[arg(
-        long,
-        help = "Allow non-loopback writes without TLS (unsafe)",
-        help_heading = "Safety"
-    )]
-    pub(crate) insecure_no_tls: bool,
+    pub(crate) front_cert: Option<PathBuf>,
+    #[arg(long, value_name = "PATH", help = "Backend TLS certificate path (PEM; requires --tls-key)", value_hint = ValueHint::FilePath, help_heading = "TLS")]
+    pub(crate) tls_cert: Option<PathBuf>,
+    #[arg(long, value_name = "PATH", help = "Backend TLS key path (PEM; requires --tls-cert)", value_hint = ValueHint::FilePath, help_heading = "TLS")]
+    pub(crate) tls_key: Option<PathBuf>,
     #[arg(
         long,
         default_value_t = DEFAULT_MAX_BODY_BYTES,

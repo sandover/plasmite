@@ -15,9 +15,8 @@ use super::stream_support::{
 };
 use super::support::{
     DEFAULT_POOL_SIZE, add_missing_pool_create_hint, ensure_pool_dir,
-    follow_exact_create_command_hint, now_ns, parse_duration, parse_since,
-    reject_remote_only_flags_for_local_target, remote_client, resolve_pool_target,
-    retry_with_config,
+    follow_exact_create_command_hint, now_ns, parse_duration, parse_since, remote_client,
+    resolve_pool_target, retry_with_config,
 };
 use crate::jq_filter::compile_filters;
 use crate::{ErrorPolicyCli, FollowFormat, InputMode, PoolTarget};
@@ -25,7 +24,6 @@ use plasmite::api::{
     AppendOptions, Durability, Error, ErrorKind, Pool, PoolOptions, PoolRef, lite3,
 };
 use std::io::{self, BufRead, IsTerminal};
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 
@@ -44,10 +42,6 @@ pub(super) struct FollowArgs {
     pub(super) quiet_drops: bool,
     pub(super) no_notify: bool,
     pub(super) replay: Option<f64>,
-    pub(super) token: Option<String>,
-    pub(super) token_file: Option<PathBuf>,
-    pub(super) tls_ca: Option<PathBuf>,
-    pub(super) tls_skip_verify: bool,
 }
 
 pub(super) struct DuplexArgs {
@@ -60,10 +54,6 @@ pub(super) struct DuplexArgs {
     pub(super) format: Option<FollowFormat>,
     pub(super) since: Option<String>,
     pub(super) echo_self: bool,
-    pub(super) token: Option<String>,
-    pub(super) token_file: Option<PathBuf>,
-    pub(super) tls_ca: Option<PathBuf>,
-    pub(super) tls_skip_verify: bool,
 }
 
 pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandResult, Error> {
@@ -121,13 +111,6 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
     let target = resolve_pool_target(&args.pool, context.pool_dir())?;
     match target {
         PoolTarget::LocalPath(path) => {
-            reject_remote_only_flags_for_local_target(
-                "follow",
-                args.token.as_deref(),
-                args.token_file.as_deref(),
-                args.tls_ca.as_deref(),
-                args.tls_skip_verify,
-            )?;
             if let Some(speed) = args.replay {
                 if speed < 0.0 {
                     return Err(Error::new(ErrorKind::Usage)
@@ -182,13 +165,7 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
                         "Create remote pools with server-side tooling, then rerun follow.",
                     ));
             }
-            let client = remote_client(
-                base_url,
-                args.token,
-                args.token_file,
-                args.tls_ca,
-                args.tls_skip_verify,
-            )?;
+            let client = remote_client(base_url)?;
             let outcome = follow_remote(&client, &pool, &cfg)?;
             if outcome.exit_code == 124 {
                 if let Some(timeout_input) = timeout_input {
@@ -274,13 +251,6 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
     let target = resolve_pool_target(&args.pool, context.pool_dir())?;
     match target {
         PoolTarget::LocalPath(path) => {
-            reject_remote_only_flags_for_local_target(
-                "duplex",
-                args.token.as_deref(),
-                args.token_file.as_deref(),
-                args.tls_ca.as_deref(),
-                args.tls_skip_verify,
-            )?;
             let follow_pool_handle = match Pool::open(&path) {
                 Ok(pool_handle) => pool_handle,
                 Err(err) if args.create && err.kind() == ErrorKind::NotFound => {
@@ -381,13 +351,7 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                         "Use --tail N for remote refs, or run --since against a local pool path.",
                     ));
             }
-            let client = remote_client(
-                base_url,
-                args.token,
-                args.token_file,
-                args.tls_ca,
-                args.tls_skip_verify,
-            )?;
+            let client = remote_client(base_url)?;
             let remote_pool = client.open_pool(&PoolRef::name(name.clone()))?;
             let follow_tx = event_tx.clone();
             let follow_cfg = cfg.clone();

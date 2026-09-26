@@ -1,229 +1,81 @@
 # Serving and Remote Access
 
-This guide covers deploying `plasmite serve` for remote pool access.
+This guide covers native access to pools on another machine. Browser login and
+direct remote Model Context Protocol (MCP) authorization are later work.
 
-For the normative protocol contract, see `spec/remote/v0/SPEC.md`.
+For the wire-level contract, see `spec/remote/v0/SPEC.md`. The design
+proposal remains available at `docs/proposals/serve-mcp-native.md`.
 
-## Tap + serving
+## Start the server
 
-`plasmite tap` writes messages to local pools. Once those pools exist, `plasmite serve`
-exposes them using the same remote read/write behavior as any other pool. No special
-server mode is required for tapped pools.
+Start the server for a pool directory and give it the HTTPS origin clients will
+use:
 
-## Quick local start
-
-```bash
-plasmite serve                                # loopback, no auth, no TLS
+```console
+plasmite --dir ./shared serve --shared-address https://pools.example.net:9743
 ```
 
-## Bind and network access
+The local HTTP listener binds to `127.0.0.1:9700` and permits credential-free
+local pool operations. The remote HTTPS listener binds to `0.0.0.0:9743`.
+Both ports can be configured. The shared address is a full HTTPS origin and
+must match an address clients can reach.
+Secure serving currently runs on macOS and Linux. The Windows client can
+connect, but Windows serving waits for protected server-state permissions.
 
-By default, `plasmite serve` binds to `127.0.0.1:9700` (loopback only).
+Plasmite retains the TLS identity used for native connections. Clients pin its
+public key through the access key. You can supply a TLS certificate and key
+with `--tls-cert` and `--tls-key`. Use `--front-cert` when a TLS proxy presents
+a different certificate to clients; the access key then pins that front key.
+Configure the proxy to verify the backend HTTPS certificate.
 
-To listen on all interfaces, use `--bind` with `--allow-non-loopback`:
+## Invite a client
 
-```bash
-plasmite serve --bind 0.0.0.0:9700 --allow-non-loopback
+In another terminal on the server machine, create an access key:
+
+```console
+plasmite --dir ./shared access invite --name Alex
 ```
 
-Non-loopback + write access requires both `--token-file` and TLS (unless `--insecure-no-tls` is explicitly used for demos).
+The server must be running for this command. Send the recipient the
+HTTPS origin and access key separately. Keep the key private.
 
-## Secure remote bootstrap (recommended)
+## Connect from another machine
 
-Generate artifacts once, then run the server with those artifacts:
+On the recipient's machine, connect to the shared origin:
 
-```bash
-# Replace this documentation IP with the server's reachable interface address.
-SERVER_IP=192.0.2.10
-
-# 1) Generate token + cert + key + client command scaffolding
-plasmite serve init --bind "$SERVER_IP:9700" --output-dir ./.plasmite-serve
-plasmite pool create events
-
-# 2) Start server with generated artifacts
-plasmite serve \
-  --bind "$SERVER_IP:9700" \
-  --allow-non-loopback \
-  --token-file ./.plasmite-serve/plasmite-auth-token.txt \
-  --tls-cert ./.plasmite-serve/plasmite-tls-cert.pem \
-  --tls-key ./.plasmite-serve/plasmite-tls-key.pem
+```console
+plasmite access connect https://pools.example.net:9743
 ```
 
-Use that same IP in client URLs. `serve init`, `serve check`, and secure startup banners display:
+The CLI prompts for the key without echoing it. It verifies the server
+certificate against the key before sending the access secret, then saves the
+connection for the current OS user. CLI and API pool operations select saved
+credentials by destination.
 
-- `tls_fingerprint: SHA256:...`
+Check a saved connection with:
 
-Use that fingerprint for out-of-band trust verification before sharing client commands.
-
-## Client auth + TLS flags
-
-Prefer native client commands over raw curl:
-
-```bash
-SERVER_IP=192.0.2.10 # use the same address as above
-
-# Feed with bearer token file + trusted cert
-plasmite feed "https://$SERVER_IP:9700/events" \
-  --token-file ./.plasmite-serve/plasmite-auth-token.txt \
-  --tls-ca ./.plasmite-serve/plasmite-tls-cert.pem \
-  '{"sensor":"temp","value":23.5}'
-
-# Follow with same trust/auth material
-plasmite follow "https://$SERVER_IP:9700/events" \
-  --token-file ./.plasmite-serve/plasmite-auth-token.txt \
-  --tls-ca ./.plasmite-serve/plasmite-tls-cert.pem \
-  --tail 20
+```console
+plasmite access status https://pools.example.net:9743
 ```
 
-`--tls-skip-verify` exists for development-only scenarios where full trust bootstrapping is not available yet:
+After connecting, use the HTTPS pool URL with supported remote commands:
 
-```bash
-SERVER_IP=192.0.2.10 # use the same address as above
-plasmite follow "https://$SERVER_IP:9700/events" --tail 20 \
-  --token-file ./.plasmite-serve/plasmite-auth-token.txt --tls-skip-verify
+```console
+plasmite follow https://pools.example.net:9743/events
+plasmite feed https://pools.example.net:9743/events '{"kind":"ready"}'
 ```
 
-Treat `--tls-skip-verify` as unsafe and temporary.
+Remote operations require HTTPS and a saved access key. Do not put the access
+key in a URL or command argument.
 
-curl remains useful for API debugging, but should be secondary for operator workflows.
+## Removed access paths
 
-## TLS modes
+This major version removes the prior public paths: `serve init` and
+`serve check`; server `--token` and `--token-file`; client `--token`,
+`--token-file`, `--tls-ca`, and `--tls-skip-verify`; remote plaintext and TLS
+verification-bypass options; and the old read-only, write-only, and
+cross-origin access modes. It provides no compatibility aliases or migration
+path. Local pool use remains credential-free.
 
-Three options, from easiest to most controlled:
-
-```bash
-# Self-signed (development / demos)
-plasmite serve --tls-self-signed --allow-non-loopback --token-file ./plasmite-auth-token.txt
-
-# Generated cert/key (via serve init)
-plasmite serve init
-plasmite serve --tls-cert plasmite-tls-cert.pem --tls-key plasmite-tls-key.pem
-
-# Bring your own cert
-plasmite serve --tls-cert /etc/letsencrypt/live/pool.example.com/fullchain.pem \
-               --tls-key /etc/letsencrypt/live/pool.example.com/privkey.pem
-```
-
-## Access modes
-
-Control read/write permissions with `--access`:
-
-```bash
-plasmite serve --access read-only   # safe for public-facing or browser demos
-plasmite serve --access write-only  # ingest-only endpoint
-plasmite serve --access read-write  # default
-```
-
-## CORS (browser access)
-
-If a web page is served from a different origin than `plasmite serve`, the browser
-blocks cross-origin requests unless the server explicitly allows the page origin.
-
-Use repeatable `--cors-origin` flags with exact origins:
-
-```bash
-plasmite serve --access read-only \
-  --cors-origin https://demo.example.com \
-  --cors-origin https://staging.example.com
-```
-
-Rules:
-
-- Exact origins only (`scheme://host[:port]`). Wildcards are rejected.
-- If the page is HTTPS, the serve endpoint must also be HTTPS.
-- Prefer a backend relay if you need secret credentials in the browser.
-
-## Browser UI endpoints
-
-`plasmite serve` includes a built-in UI at `/ui`. Key API endpoints for browser integrations:
-
-- `GET /v0/ui/pools` — list pools
-- `GET /v0/ui/pools/<pool>/events` — SSE stream for one pool
-
-## MCP endpoint (`/mcp`, experimental)
-
-`plasmite serve` also exposes an experimental MCP endpoint at `/mcp`.
-
-Transport profile in v1:
-- `POST /mcp` accepts exactly one JSON-RPC message.
-- JSON-RPC requests return one JSON-RPC response with `Content-Type: application/json`.
-- Accepted JSON-RPC notifications/responses return `202 Accepted` with no body.
-- `GET /mcp` returns `405 Method Not Allowed`.
-
-Protocol and header notes:
-- `MCP-Protocol-Version` is optional in v1.
-- If `MCP-Protocol-Version` is present, supported value is `2025-11-25`; invalid/unsupported values return `400`.
-- If `Origin` is present and syntactically invalid, request is rejected with `403`.
-
-Security and policy posture:
-- `/mcp` uses the same bearer auth and TLS expectations as `/v0/*`.
-- `--access` mode restrictions apply to MCP operations.
-- Tool discovery is access-aware: read-only servers list only read tools,
-  write-only servers list only write tools, and read-write servers list both.
-  Authorization is still enforced when each tool executes.
-- MCP tool definitions publish standard behavior annotations. Pool listing,
-  metadata, fetch, read, and bounded wait operations are read-only and
-  idempotent; feed and create operations are mutating; pool deletion is
-  destructive. Clients may use these hints when deciding whether a tool call
-  needs approval.
-- Tool definitions include JSON output schemas for both successful structured
-  results and structured tool errors. Initialization instructions explain the
-  pool/message model, bounded retention, safe first action, ordinary read/wait
-  behavior, advanced cursor usage, and feed retry safety.
-- Sequence numbers are automatic metadata. Ordinary MCP list, feed, read, and
-  wait workflows do not require callers to provide or manage them. Exact fetch
-  and resumable delivery expose sequence numbers as advanced controls.
-- Creating an existing pool returns `AlreadyExists` without changing it; MCP
-  guidance directs callers to use the preserved pool as-is.
-- MCP tag filters require all specified tags. jq `where` filtering is not
-  advertised because it is not implemented on the MCP surface.
-- MCP pool resources describe capacity and recent-message behavior without
-  exposing transient sequence bounds. Reading a pool resource returns up to the
-  latest 20 retained messages.
-- `plasmite_wait` waits up to `timeout_ms` (default 10 seconds, maximum 60
-  seconds). Without `after_seq`, it snapshots the pool's current end and waits
-  only for later messages, like a live tail. With `after_seq`, it first catches
-  up from that cursor. It returns the same ascending message batch and cursor
-  metadata as `plasmite_read`, plus `timed_out` so idle agents do not need
-  shell-based sleeps.
-- Read and wait results set `next_after_seq` to the highest sequence examined,
-  even when filters return no messages. `last_returned_seq` identifies the
-  last match. `oldest_available_seq`, `newest_available_seq`, and
-  `fell_behind` expose retention bounds and cursor gaps.
-- MCP waits share the `--max-tail-concurrency` budget with HTTP tail streams.
-  Calls beyond that limit return a structured `Busy` tool error.
-- v1 is intentionally minimal: no MCP resource subscriptions and no SSE mode for MCP POST responses.
-
-## Server limits
-
-Configurable via flags:
-
-| Flag | Default | Purpose |
-|---|---|---|
-| `--max-body-bytes` | 1 MB | Maximum request body size |
-| `--max-tail-timeout-ms` | 30 s | Maximum HTTP tail-stream timeout |
-| `--max-tail-concurrency` | 64 | Maximum concurrent tail streams and MCP waits |
-
-MCP waits have their own fixed maximum of 60 seconds; they share the concurrency
-budget but not `--max-tail-timeout-ms`.
-
-The server also uses `--max-tail-concurrency` as the admission limit for
-ordinary pool operations such as create, list, append, and get. These
-synchronous filesystem and memory-map operations run outside Tokio's async
-runtime workers. When all admitted operations are active, another ordinary
-storage request fails immediately with the stable `Busy` response (HTTP 423)
-and can be retried after an in-flight operation completes. The server does not
-build an unbounded storage queue.
-
-Long-lived HTTP tail streams and MCP waits use their existing specialized
-budget. Health checks and MCP request routing remain responsive while ordinary
-storage work is active or saturated.
-
-## Reverse proxy
-
-When fronting `plasmite serve` with nginx, Caddy, or similar:
-
-- Proxy HTTP and SSE traffic.
-- Forward `Authorization` headers.
-- Set appropriate timeouts for long-lived tail streams.
-- Let the proxy handle TLS termination and use loopback HTTP between proxy and serve when both are on the same host.
+Browser-based remote access and direct MCP authorization are not part of this
+native-sharing release.

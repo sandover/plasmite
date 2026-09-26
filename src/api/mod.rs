@@ -4,6 +4,7 @@
 //! Invariants: This module is the only public path to storage primitives.
 //! Invariants: Internal modules remain private and are not directly exposed.
 
+pub mod access;
 mod client;
 mod message;
 pub mod notify;

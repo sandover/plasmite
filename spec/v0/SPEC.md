@@ -14,7 +14,9 @@ It keeps only script-level guarantees; signatures, walkthroughs, and examples li
 - Within v0, compatibility is additive-only.
 - Existing commands, machine-readable flags, and field meanings must not be removed or redefined.
 - New commands/flags/fields may be added when existing behavior remains stable.
-- Any breaking change requires a new major version and a migration path.
+- Any breaking change requires a new major version. The secure-sharing release
+  is a breaking major-version change with no migration path and removes
+  superseded secure connection commands and options.
 
 ## Stable Surface
 
@@ -39,6 +41,47 @@ It keeps only script-level guarantees; signatures, walkthroughs, and examples li
 - `version` emits human text to a TTY and JSON when piped.
 - Streaming reads provide stable JSON Lines via `--format jsonl` or `--jsonl`.
 - `feed` append receipts include `seq`, `time`, and `meta` (not echoed `data`).
+
+### Secure Sharing
+
+YMSGO2 adds native access-key sharing. It keeps the existing spec paths and
+`/v0` HTTP route prefix. Local pool use remains credential-free.
+
+- `plasmite --dir DIR serve` starts the server for the selected pool directory.
+  `--bind` and `--remote-bind` set listener addresses; `--shared-address`
+  names the client-facing HTTPS origin. `--tls-cert` and `--tls-key` supply a
+  server certificate; `--front-cert` identifies a TLS proxy's public
+  certificate for access-key pinning.
+- `plasmite --dir DIR access invite --name NAME` creates a directory-wide
+  access key and displays it only after the server commits it.
+- `plasmite access connect SERVER_URL` prompts for the access key without
+  echoing it, verifies the server, and saves the connection for the current OS
+  user.
+- `plasmite access status SERVER_URL` reports whether a connection is saved,
+  whether the server is reachable, and whether it accepts the saved access
+  secret. It never prints credentials.
+- An access key has the form `pk1.<spki-fingerprint>.<secret>`. The
+  fingerprint is the 64-character lowercase hexadecimal SHA-256 digest of the
+  certificate's DER Subject Public Key Info (SPKI); the secret is 32 random
+  bytes encoded as 64 lowercase hexadecimal characters. The address is
+  supplied separately.
+- Saved connections are selected by destination. Multiple destinations can
+  coexist and CLI pool operations use their saved credentials when addressing
+  a remote server.
+- Local HTTP listens on loopback, defaults to port `9700`, and permits
+  credential-free local pool operations. HTTPS defaults to port `9743` and
+  requires authentication for remote pool operations. Both ports can be
+  configured. Secure serving requires macOS or Linux until Windows server
+  state can enforce private access; Windows remains a native client target.
+- `access connect` verifies the destination hostname, certificate validity,
+  TLS proof of possession, and the certificate public-key fingerprint from
+  the access key before sending the access secret. Redirects must not forward
+  credentials to another destination.
+- Superseded secure access commands, options, and configuration have no
+  compatibility aliases and are rejected.
+- Connection and status errors identify the destination and failed step and
+  provide an actionable next step. Machine-readable errors have stable kinds;
+  background commands do not wait for interactive repair.
 
 ## Data + Error Contract
 
@@ -93,7 +136,6 @@ The following are implemented but not frozen in v0.0.1 and may evolve within v0:
 
 - `plasmite duplex`
 - `plasmite tap`
-- `plasmite serve`, including `serve init` and `serve check`
 - `plasmite mcp`
 - `plasmite completion`
 - `plasmite doctor`
@@ -105,9 +147,7 @@ Current remote shorthand constraints (documented, non-frozen):
 - URL refs are explicit remote opt-in in core commands that accept pool refs.
 - `tap` currently accepts local pool refs only; URL refs are rejected with an actionable usage hint.
 - `duplex` remote refs reject `--create` and `--since`; use `--tail` for remote history.
-- `duplex` accepts the same remote token and TLS flags as `feed` and `follow`.
 - `follow` remote refs reject `--since` and `--replay`; use `--tail` for remote history.
-- `serve init` defaults to loopback and requires a concrete bind IP. It rejects wildcard binds because the generated certificate and client URLs use that IP as the server identity.
 
 ## References
 

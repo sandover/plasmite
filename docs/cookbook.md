@@ -305,11 +305,10 @@ pls duplex chat --me alice --echo-self
 
 ### Remote duplex
 
-With the secure server below, duplex works over the network too:
+After `access connect` below, duplex works over the network too:
 
 ```bash
-pls duplex https://192.0.2.10:9700/chat --me alice --tail 10 \
-  --token-file ./.plasmite-serve/plasmite-auth-token.txt --tls-ca ./.plasmite-serve/plasmite-tls-cert.pem
+pls duplex https://192.0.2.10:9743/chat --me alice --tail 10
 ```
 
 Note: `--create` and `--since` are not supported for remote pools. Use `--tail` to catch up on history.
@@ -393,49 +392,32 @@ pls follow incidents --tag error --tail 100 --jsonl > tmp/errors.jsonl
 
 ## Remote Pool Access
 
-A machine exposes its local pools over HTTPS. Use the same reachable IP in these commands.
+A machine exposes its local pools over HTTPS.
 
 **On the server (secure default):**
 
 ```bash
-# Replace 192.0.2.10 with the server's IP. Keep the printed fingerprint for verification.
-plasmite serve init --bind 192.0.2.10:9700 --output-dir ./.plasmite-serve
 plasmite pool create events
 plasmite pool create chat
-
-# Start secure server with generated artifacts
-plasmite serve \
-  --bind 192.0.2.10:9700 \
-  --allow-non-loopback \
-  --token-file ./.plasmite-serve/plasmite-auth-token.txt \
-  --tls-cert ./.plasmite-serve/plasmite-tls-cert.pem \
-  --tls-key ./.plasmite-serve/plasmite-tls-key.pem
+plasmite serve --shared-address https://192.0.2.10:9743
 ```
 
-**On a client** (copy the `.plasmite-serve` directory there first):
+**On the server, in another terminal:**
 
 ```bash
-plasmite feed https://192.0.2.10:9700/events \
-  --token-file ./.plasmite-serve/plasmite-auth-token.txt \
-  --tls-ca ./.plasmite-serve/plasmite-tls-cert.pem \
-  '{"sensor": "temp", "value": 23.5}'
-
-plasmite follow https://192.0.2.10:9700/events \
-  --token-file ./.plasmite-serve/plasmite-auth-token.txt \
-  --tls-ca ./.plasmite-serve/plasmite-tls-cert.pem \
-  --tail 20
+plasmite access invite --name laptop
 ```
 
-Development-only shortcut when trust bootstrapping is unavailable:
+**On the client:**
 
 ```bash
-plasmite follow https://192.0.2.10:9700/events --tail 20 \
-  --token-file ./.plasmite-serve/plasmite-auth-token.txt --tls-skip-verify
+plasmite access connect https://192.0.2.10:9743
+plasmite feed https://192.0.2.10:9743/events '{"sensor": "temp", "value": 23.5}'
+
+plasmite follow https://192.0.2.10:9743/events --tail 20
 ```
 
-curl remains useful for API debugging, but native `plasmite feed` / `plasmite follow` should be the first-line operator workflow.
-
-A built-in web UI is available at `https://192.0.2.10:9700/ui`.
+The local web UI is available at `http://127.0.0.1:9700/ui` on the server.
 
 ---
 
@@ -519,20 +501,8 @@ requires discarding it.
 
 ### Remote MCP server (`/mcp`)
 
-```json
-{
-  "mcpServers": {
-    "plasmite-remote": {
-      "type": "streamable-http",
-      "url": "https://192.0.2.10:9700/mcp"
-    }
-  }
-}
-```
-
-Remote MCP uses the same auth/TLS posture as `plasmite serve`:
-- if server auth is enabled, clients send the same bearer token;
-- if TLS is enabled, clients trust the same certificate/CA material.
+Remote MCP currently requires a named access key as a bearer secret and a
+trusted HTTPS connection. Browser and MCP authorization are planned separately.
 
 ### Waiting and polling
 
@@ -602,21 +572,7 @@ For CI status, a simple split works well:
 - CI pipeline writes with CLI/API (`plasmite feed` or HTTP `/v0/pools/.../messages`).
 - Agents read with MCP (`plasmite_read`, `count: 1`, optional `after_seq` polling).
 
-### Browser page served separately (CORS)
-
-If a browser app is hosted on another origin (for example `https://demo.wratify.ai`), configure `pls serve` with an explicit allowlist:
-
-```bash
-pls serve \
-  --bind 0.0.0.0:9700 \
-  --allow-non-loopback \
-  --access read-only \
-  --cors-origin https://demo.wratify.ai
-```
-
-Then the page can:
-- List pools with `GET /v0/ui/pools`
-- Stream one pool with `GET /v0/ui/pools/<pool>/events`
+Browser access across origins needs a separate authorization flow. The native access key works with the CLI and API client.
 
 ## Cookbook Golden Checks
 

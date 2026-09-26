@@ -17,15 +17,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Read};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use ureq::rustls::client::danger::{
-    HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
-};
-use ureq::rustls::pki_types::pem::PemObject;
-use ureq::rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use ureq::rustls::{DigitallySignedStruct, Error as TlsError, SignatureScheme};
-use url::Url;
+use url::{Host, Url};
 
 type ApiResult<T> = Result<T, Error>;
 
@@ -36,48 +30,8 @@ pub struct RemoteClient {
 
 struct RemoteClientInner {
     base_url: Url,
-    token: Option<String>,
+    access_secret: Option<String>,
     agent: ureq::Agent,
-}
-
-#[derive(Debug)]
-struct AcceptAllServerCertVerifier;
-
-impl ServerCertVerifier for AcceptAllServerCertVerifier {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> Result<ServerCertVerified, TlsError> {
-        Ok(ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, TlsError> {
-        Ok(HandshakeSignatureValid::assertion())
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, TlsError> {
-        Ok(HandshakeSignatureValid::assertion())
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        ureq::rustls::crypto::ring::default_provider()
-            .signature_verification_algorithms
-            .supported_schemes()
-    }
 }
 
 #[derive(Clone)]
@@ -170,81 +124,81 @@ struct AppendRequest<'a> {
 impl RemoteClient {
     pub fn new(base_url: impl Into<String>) -> ApiResult<Self> {
         let base_url = normalize_base_url(base_url.into())?;
-        let agent = ureq::AgentBuilder::new().build();
-        Ok(Self {
-            inner: Arc::new(RemoteClientInner {
-                base_url,
-                token: None,
-                agent,
-            }),
-        })
-    }
-
-    pub fn with_token(mut self, token: impl Into<String>) -> Self {
-        if let Some(inner) = Arc::get_mut(&mut self.inner) {
-            inner.token = Some(token.into());
+        if let Some(key) = super::access::load_saved_key(base_url.as_str())? {
+            if base_url.scheme() != "https" {
+                return Err(Error::new(ErrorKind::Corrupt)
+                    .with_message("saved native connections must use HTTPS"));
+            }
+            Ok(Self::from_access_key(base_url, key))
         } else {
-            self.inner = Arc::new(RemoteClientInner {
-                base_url: self.inner.base_url.clone(),
-                token: Some(token.into()),
-                agent: self.inner.agent.clone(),
-            });
+            Ok(Self::without_credentials(base_url))
         }
-        self
     }
 
-    pub fn with_tls_ca_file(mut self, path: impl AsRef<Path>) -> ApiResult<Self> {
-        let path = path.as_ref();
-        let cert_bytes = std::fs::read(path).map_err(|err| {
-            Error::new(ErrorKind::Usage)
-                .with_message("failed to read TLS CA/certificate file")
-                .with_path(path)
-                .with_source(err)
-        })?;
-        let certs = CertificateDer::pem_slice_iter(&cert_bytes)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| {
-                Error::new(ErrorKind::Usage)
-                    .with_message("failed to parse TLS CA/certificate file")
-                    .with_path(path)
-                    .with_source(err)
-            })?;
-        if certs.is_empty() {
-            return Err(Error::new(ErrorKind::Usage)
-                .with_message("TLS CA/certificate file contains no certificates")
-                .with_path(path));
-        }
-
-        let _ = ureq::rustls::crypto::ring::default_provider().install_default();
-        let mut root_store = ureq::rustls::RootCertStore::empty();
-        let (added, _) = root_store.add_parsable_certificates(certs);
-        if added == 0 {
-            return Err(Error::new(ErrorKind::Usage)
-                .with_message("TLS CA/certificate file contains no parsable certificates")
-                .with_path(path));
-        }
-
-        let tls_config = ureq::rustls::ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
-        let agent = ureq::builder().tls_config(Arc::new(tls_config)).build();
-        self = self.with_agent(agent);
-        Ok(self)
-    }
-
-    pub fn with_tls_skip_verify(mut self) -> Self {
-        let _ = ureq::rustls::crypto::ring::default_provider().install_default();
-        let tls_config = ureq::rustls::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(AcceptAllServerCertVerifier))
-            .with_no_client_auth();
-        let agent = ureq::builder().tls_config(Arc::new(tls_config)).build();
-        self = self.with_agent(agent);
-        self
+    /// Create an in-memory native client from an access key without saving it.
+    pub fn with_access_key(base_url: impl Into<String>, access_key: &str) -> ApiResult<Self> {
+        let base_url = super::access::secure_destination(&base_url.into())?;
+        let key = super::access::AccessKey::parse(access_key)?;
+        Ok(Self::from_access_key(base_url, key))
     }
 
     pub fn base_url(&self) -> &Url {
         &self.inner.base_url
+    }
+
+    pub(super) fn from_access_key(base_url: Url, key: super::access::AccessKey) -> Self {
+        Self {
+            inner: Arc::new(RemoteClientInner {
+                base_url,
+                access_secret: Some(key.secret_hex()),
+                agent: super::access::access_agent(Some(*key.spki_fingerprint())),
+            }),
+        }
+    }
+
+    pub(super) fn for_access_probe(base_url: Url) -> Self {
+        Self {
+            inner: Arc::new(RemoteClientInner {
+                base_url,
+                access_secret: None,
+                agent: super::access::access_agent(None),
+            }),
+        }
+    }
+
+    fn without_credentials(base_url: Url) -> Self {
+        Self {
+            inner: Arc::new(RemoteClientInner {
+                base_url,
+                access_secret: None,
+                agent: ureq::AgentBuilder::new().redirects(0).build(),
+            }),
+        }
+    }
+
+    pub(super) fn check_access(&self) -> ApiResult<bool> {
+        #[derive(Deserialize)]
+        struct AccessCheckResponse {
+            accepted: bool,
+        }
+
+        let url = build_url(&self.inner.base_url, &["v0", "access", "check"])?;
+        let result = self
+            .request("GET", &url)
+            .set("Accept", "application/json")
+            .call();
+        match result {
+            Ok(response) => Ok(read_json_response::<AccessCheckResponse>(response)?.accepted),
+            Err(ureq::Error::Status(401, _response)) => Ok(false),
+            Err(ureq::Error::Status(300..=399, _response)) => Err(Error::new(ErrorKind::Io)
+                .with_message(format!("server redirected the access check at {url}"))
+                .with_hint("Use the final HTTPS server URL; Plasmite does not forward credentials across redirects.")),
+            Err(ureq::Error::Status(code, response)) => Err(parse_error_response(code, response)),
+            Err(ureq::Error::Transport(error)) => Err(Error::new(ErrorKind::Io)
+                .with_message(format!("failed to reach or verify {url}"))
+                .with_hint("Check network access, the certificate name and validity, and the key's SPKI fingerprint.")
+                .with_source(error)),
+        }
     }
 
     pub fn create_pool(&self, pool_ref: &PoolRef, options: PoolOptions) -> ApiResult<PoolInfo> {
@@ -321,6 +275,11 @@ impl RemoteClient {
                 .with_message("remote pool refs must use pool names, not filesystem paths")),
             PoolRef::Uri(uri) => {
                 let resolved = parse_pool_uri(uri)?;
+                if resolved.base_url.origin() != self.inner.base_url.origin() {
+                    return Err(Error::new(ErrorKind::Usage)
+                        .with_message("pool URL names a different server")
+                        .with_hint("Create a RemoteClient for that server's URL."));
+                }
                 ensure_pool_name(&resolved.pool)?;
                 Ok(resolved)
             }
@@ -357,8 +316,11 @@ impl RemoteClient {
 
     fn request(&self, method: &str, url: &Url) -> ureq::Request {
         let mut request = self.inner.agent.request(method, url.as_str());
-        if let Some(token) = &self.inner.token {
-            request = request.set("Authorization", &format!("Bearer {token}"));
+        if url.scheme() == "https"
+            && url.origin() == self.inner.base_url.origin()
+            && let Some(secret) = &self.inner.access_secret
+        {
+            request = request.set("Authorization", &format!("Bearer {secret}"));
         }
         request
     }
@@ -389,19 +351,6 @@ impl RemoteClient {
                 .with_message("request failed")
                 .with_source(err)),
         }
-    }
-
-    fn with_agent(mut self, agent: ureq::Agent) -> Self {
-        if let Some(inner) = Arc::get_mut(&mut self.inner) {
-            inner.agent = agent;
-        } else {
-            self.inner = Arc::new(RemoteClientInner {
-                base_url: self.inner.base_url.clone(),
-                token: self.inner.token.clone(),
-                agent,
-            });
-        }
-        self
     }
 }
 
@@ -694,6 +643,19 @@ fn normalize_base_url(raw: String) -> ApiResult<Url> {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("remote base url must use http or https scheme"));
     }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("remote base url must not contain credentials"));
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("remote base url must not contain a query or fragment"));
+    }
+    if scheme == "http" && !is_loopback_url(&url) {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("remote HTTP is allowed only for the local machine")
+            .with_hint("Use HTTPS for a server on another machine."));
+    }
     if url.path() != "/" && !url.path().is_empty() {
         return Err(
             Error::new(ErrorKind::Usage).with_message("remote base url must not include a path")
@@ -731,6 +693,24 @@ fn parse_pool_uri(uri: &str) -> ApiResult<ResolvedPool> {
             Error::new(ErrorKind::Usage).with_message("pool uri must use http or https scheme")
         );
     }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(
+            Error::new(ErrorKind::Usage).with_message("pool uri must not contain credentials")
+        );
+    }
+    if url.fragment().is_some() {
+        return Err(
+            Error::new(ErrorKind::Usage).with_message("pool uri must not contain a fragment")
+        );
+    }
+    if url.query().is_some() {
+        return Err(Error::new(ErrorKind::Usage).with_message("pool uri must not contain a query"));
+    }
+    if scheme == "http" && !is_loopback_url(&url) {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("remote HTTP is allowed only for the local machine")
+            .with_hint("Use HTTPS for a server on another machine."));
+    }
     let pool = extract_pool_from_url(&url)?;
     url.set_path("/");
     url.set_query(None);
@@ -739,6 +719,15 @@ fn parse_pool_uri(uri: &str) -> ApiResult<ResolvedPool> {
         base_url: url,
         pool,
     })
+}
+
+fn is_loopback_url(url: &Url) -> bool {
+    match url.host() {
+        Some(Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(Host::Ipv4(address)) => address.is_loopback(),
+        Some(Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    }
 }
 
 fn extract_pool_from_url(url: &Url) -> ApiResult<String> {

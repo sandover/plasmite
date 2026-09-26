@@ -968,6 +968,22 @@ fn emit_remote_url_happy_path_appends_message() {
     assert!(create.status.success());
 
     let server = ServeProcess::start(&pool_dir);
+    let access_home = temp.path().join("access-home");
+    let mut connect = cmd()
+        .args(["access", "connect", &server.remote_url])
+        .env("PLASMITE_ACCESS_HOME", &access_home)
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("connect");
+    use std::io::Write;
+    writeln!(
+        connect.stdin.take().expect("stdin"),
+        "{}",
+        server.access_key()
+    )
+    .expect("key");
+    let connect = connect.wait_with_output().expect("connect output");
+    assert!(connect.status.success());
     let pool_url = format!("{}/demo", server.base_url);
     let emit_out = cmd()
         .args([
@@ -979,6 +995,7 @@ fn emit_remote_url_happy_path_appends_message() {
             "--tag",
             "ping",
         ])
+        .env("PLASMITE_ACCESS_HOME", &access_home)
         .output()
         .expect("feed");
     assert!(emit_out.status.success());
@@ -1080,147 +1097,6 @@ fn emit_remote_create_rejected() {
     assert!(message.contains("does not support --create"));
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
     assert!(hint.contains("server-side"));
-}
-
-#[test]
-fn emit_remote_url_auth_errors_propagate() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let server = ServeProcess::start_with_args(&pool_dir, &["--token", "secret-token"]);
-    let pool_url = format!("{}/demo", server.base_url);
-    let output = cmd()
-        .args(["feed", &pool_url, "{\"x\":1}"])
-        .output()
-        .expect("feed");
-    assert!(!output.status.success());
-    let err = parse_error_json(&output.stderr);
-    assert_eq!(
-        err.get("error")
-            .and_then(|v| v.get("kind"))
-            .and_then(|v| v.as_str()),
-        Some("Permission")
-    );
-}
-
-#[test]
-fn emit_remote_url_accepts_token_and_token_file_flags() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let server = ServeProcess::start_with_args(&pool_dir, &["--token", "secret-token"]);
-    let pool_url = format!("{}/demo", server.base_url);
-
-    let with_token = cmd()
-        .args(["feed", &pool_url, "{\"x\":1}", "--token", "secret-token"])
-        .output()
-        .expect("feed");
-    assert!(with_token.status.success());
-
-    let token_file = temp.path().join("token.txt");
-    std::fs::write(&token_file, "secret-token\n").expect("write token file");
-    let with_token_file = cmd()
-        .args([
-            "feed",
-            &pool_url,
-            "{\"x\":2}",
-            "--token-file",
-            token_file.to_str().unwrap(),
-        ])
-        .output()
-        .expect("feed");
-    assert!(with_token_file.status.success());
-}
-
-#[test]
-fn emit_and_follow_local_reject_remote_auth_tls_flags() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-    let cert_path = temp.path().join("dev-cert.pem");
-    std::fs::write(&cert_path, "not-a-real-cert\n").expect("write cert");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let feed = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "{\"x\":1}",
-            "--token",
-            "devtoken",
-        ])
-        .output()
-        .expect("feed");
-    assert_eq!(feed.status.code(), Some(2));
-    let feed_err = parse_error_json(&feed.stderr);
-    assert_eq!(
-        feed_err
-            .get("error")
-            .and_then(|v| v.get("kind"))
-            .and_then(|v| v.as_str()),
-        Some("Usage")
-    );
-
-    let follow = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "demo",
-            "--tail",
-            "0",
-            "--timeout",
-            "100ms",
-            "--tls-ca",
-            cert_path.to_str().unwrap(),
-        ])
-        .output()
-        .expect("follow");
-    assert_eq!(follow.status.code(), Some(2));
-    let follow_err = parse_error_json(&follow.stderr);
-    assert_eq!(
-        follow_err
-            .get("error")
-            .and_then(|v| v.get("kind"))
-            .and_then(|v| v.as_str()),
-        Some("Usage")
-    );
 }
 
 #[test]

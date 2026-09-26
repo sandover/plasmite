@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, error::ErrorKind as ClapErrorKind};
 
+mod access_store;
 mod cli;
 mod color_json;
 mod ingest;
@@ -18,13 +19,13 @@ mod jq_filter;
 mod mcp_stdio;
 mod pool_info_json;
 mod pool_paths;
+mod secure_serve;
 mod serve;
-mod serve_init;
 mod since;
 
 use cli::args::{
-    AccessModeCli, Cli, ColorMode, ErrorPolicyCli, FollowFormat, InputMode, PoolCommand,
-    ServeRunArgs, ServeSubcommand,
+    AccessSubcommand, Cli, ColorMode, ErrorPolicyCli, FollowFormat, InputMode, PoolCommand,
+    ServeRunArgs,
 };
 use cli::{CliContext, CommandResult as RunOutcome};
 use interface_wire::error_policy;
@@ -124,20 +125,17 @@ mod tests {
     use crate::cli::output_support::{
         format_bytes, format_relative_time, format_seq_range, format_timestamp_human,
     };
-    use crate::cli::server_support::build_serve_startup_lines;
     use crate::cli::stream_support::{
         duplex_requires_me_when_tty, matches_required_tags, parse_duplex_tty_line,
     };
     use crate::cli::support::{
-        RetryConfig, parse_duration, parse_size, read_token_file, resolve_pool_target,
-        retry_with_config,
+        RetryConfig, parse_duration, parse_size, resolve_pool_target, retry_with_config,
     };
     use clap::CommandFactory;
     use serde_json::json;
     use std::io::Cursor;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
-    use tempfile::NamedTempFile;
 
     #[test]
     fn cli_command_inventory() {
@@ -149,6 +147,10 @@ mod tests {
 
         let expected = vec![
             ("plasmite", vec!["color", "dir", "help", "version"]),
+            ("plasmite access", vec!["help"]),
+            ("plasmite access connect", vec!["help"]),
+            ("plasmite access invite", vec!["help", "name"]),
+            ("plasmite access status", vec!["help"]),
             ("plasmite completion", vec!["help"]),
             ("plasmite doctor", vec!["all", "help", "json"]),
             (
@@ -163,10 +165,6 @@ mod tests {
                     "since",
                     "tail",
                     "timeout",
-                    "tls-ca",
-                    "tls-skip-verify",
-                    "token",
-                    "token-file",
                 ],
             ),
             (
@@ -182,10 +180,6 @@ mod tests {
                     "retry",
                     "retry-delay",
                     "tag",
-                    "tls-ca",
-                    "tls-skip-verify",
-                    "token",
-                    "token-file",
                 ],
             ),
             ("plasmite fetch", vec!["help"]),
@@ -205,10 +199,6 @@ mod tests {
                     "tag",
                     "tail",
                     "timeout",
-                    "tls-ca",
-                    "tls-skip-verify",
-                    "token",
-                    "token-file",
                     "where",
                 ],
             ),
@@ -225,33 +215,16 @@ mod tests {
             (
                 "plasmite serve",
                 vec![
-                    "access",
-                    "allow-non-loopback",
                     "bind",
-                    "cors-origin",
+                    "front-cert",
                     "help",
-                    "insecure-no-tls",
                     "max-body-bytes",
                     "max-tail-concurrency",
                     "max-tail-timeout-ms",
+                    "remote-bind",
+                    "shared-address",
                     "tls-cert",
                     "tls-key",
-                    "tls-self-signed",
-                    "token",
-                    "token-file",
-                ],
-            ),
-            ("plasmite serve check", vec!["help", "json"]),
-            (
-                "plasmite serve init",
-                vec![
-                    "bind",
-                    "force",
-                    "help",
-                    "output-dir",
-                    "tls-cert",
-                    "tls-key",
-                    "token-file",
                 ],
             ),
             (
@@ -366,53 +339,6 @@ mod tests {
         assert_eq!(parse_size("4g").unwrap(), 4 * 1024 * 1024 * 1024);
     }
 
-    fn test_serve_config() -> super::serve::ServeConfig {
-        super::serve::ServeConfig {
-            bind: "127.0.0.1:9700".parse().expect("bind"),
-            pool_dir: PathBuf::from("/tmp/pools"),
-            token: None,
-            cors_allowed_origins: Vec::new(),
-            access_mode: super::serve::AccessMode::ReadWrite,
-            allow_non_loopback: false,
-            insecure_no_tls: false,
-            token_file_used: false,
-            tls_cert: None,
-            tls_key: None,
-            tls_self_signed: false,
-            tls_self_signed_material: None,
-            tls_fingerprint: None,
-            max_body_bytes: 1024 * 1024,
-            max_tail_timeout_ms: 30_000,
-            max_concurrent_tails: 64,
-        }
-    }
-
-    #[test]
-    fn serve_startup_banner_secure_mode_includes_clients_section() {
-        let mut config = test_serve_config();
-        config.token = Some("secret".to_string());
-        config.token_file_used = true;
-        config.tls_self_signed = true;
-        config.tls_fingerprint = Some("SHA256:AA:BB".to_string());
-        let text = build_serve_startup_lines(&config).join("\n");
-        assert!(text.contains("Serving pools on https://127.0.0.1:9700 (loopback only)"));
-        assert!(text.contains("MCP:  https://127.0.0.1:9700/mcp"));
-        assert!(text.contains("Auth: bearer    TLS: self-signed"));
-        assert!(text.contains("--token-file <token-file> --tls-ca <tls-cert>"));
-        assert!(text.contains("Fingerprint: SHA256:AA:BB"));
-    }
-
-    #[test]
-    fn serve_startup_banner_local_mode_stays_compact() {
-        let config = test_serve_config();
-        let text = build_serve_startup_lines(&config).join("\n");
-        assert!(text.contains("Serving pools on http://127.0.0.1:9700 (loopback only)"));
-        assert!(text.contains("MCP:  http://127.0.0.1:9700/mcp"));
-        assert!(text.contains("Auth: none    TLS: off    Access: read-write    CORS: same-origin"));
-        assert!(text.contains("Try it:"));
-        assert!(text.contains("Press Ctrl-C to stop."));
-    }
-
     #[test]
     fn format_bytes_boundaries() {
         assert_eq!(format_bytes(0), "0");
@@ -517,22 +443,6 @@ mod tests {
     fn required_tags_returns_false_on_missing_meta_tags() {
         let message = json!({"data": {"x": 1}});
         assert!(!matches_required_tags(&["error".to_string()], &message));
-    }
-
-    #[test]
-    fn token_file_trims_and_reads() {
-        let mut file = NamedTempFile::new().expect("tempfile");
-        std::io::Write::write_all(&mut file, b"  secret-token \n").expect("write");
-        let token = read_token_file(file.path()).expect("token");
-        assert_eq!(token, "secret-token");
-    }
-
-    #[test]
-    fn token_file_rejects_empty() {
-        let mut file = NamedTempFile::new().expect("tempfile");
-        std::io::Write::write_all(&mut file, b" \n").expect("write");
-        let err = read_token_file(file.path()).expect_err("err");
-        assert_eq!(err.kind(), ErrorKind::Usage);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! Purpose: End-to-end tests for the remote HTTP/JSON server/client.
+//! Purpose: End-to-end tests for authenticated remote HTTPS server/client behavior.
 //! Exports: None (integration test module).
 //! Role: Validate remote append/get/tail and error propagation across TCP.
 //! Invariants: Uses loopback-only server with temp pool directory.
@@ -6,8 +6,8 @@
 //! Invariants: Server processes are cleaned up on drop.
 
 use plasmite::api::{
-    AppendOptions, Durability, ErrorKind, GapPolicy, LocalClient, Pool, PoolApiExt, PoolOptions,
-    PoolRef, RemoteClient, TailOptions,
+    AppendOptions, Durability, ErrorKind, GapPolicy, Pool, PoolOptions, PoolRef, RemoteClient,
+    TailOptions, access,
 };
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -317,19 +317,27 @@ fn remote_errors_propagate_kind() -> TestResult<()> {
 }
 
 #[test]
-fn remote_auth_requires_valid_token() -> TestResult<()> {
+fn remote_auth_requires_a_valid_named_access_key() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::try_start_with_token(temp_dir.path(), Some("secret"))?;
+    let server = TestServer::try_start(temp_dir.path())?;
 
-    let missing = server.client()?;
-    let err = missing.list_pools().expect_err("missing token");
+    let missing = access::status(&server.remote_url)?;
+    assert!(!missing.credentials_saved);
+    assert_eq!(missing.reachable, Some(true));
+    assert_eq!(missing.accepted, None);
+
+    let key_fields: Vec<_> = server.access_key().split('.').collect();
+    let wrong_secret = if key_fields[2] == "0".repeat(64) {
+        "1".repeat(64)
+    } else {
+        "0".repeat(64)
+    };
+    let invalid_key = format!("{}.{}.{}", key_fields[0], key_fields[1], wrong_secret);
+    let invalid = RemoteClient::with_access_key(server.remote_url.clone(), &invalid_key)?;
+    let err = invalid.list_pools().expect_err("invalid access key");
     assert_eq!(err.kind(), ErrorKind::Permission);
 
-    let invalid = RemoteClient::new(server.base_url.clone())?.with_token("bad");
-    let err = invalid.list_pools().expect_err("invalid token");
-    assert_eq!(err.kind(), ErrorKind::Permission);
-
-    let client = server.client_with_token()?;
+    let client = server.client()?;
     client.create_pool(&PoolRef::name("alpha"), PoolOptions::new(1024 * 1024))?;
     let pools = client.list_pools()?;
     assert!(pools.iter().any(|pool| {
@@ -342,49 +350,11 @@ fn remote_auth_requires_valid_token() -> TestResult<()> {
 }
 
 #[test]
-fn remote_auth_rejects_malformed_bearer_headers() -> TestResult<()> {
-    let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::try_start_with_token(temp_dir.path(), Some("secret"))?;
-    let list_url = format!("{}/v0/pools", server.base_url);
-
-    let malformed = ["", "Token secret"];
-
-    for token in malformed {
-        match ureq::get(&list_url).set("Authorization", token).call() {
-            Ok(_) => return Err("expected auth to fail".into()),
-            Err(ureq::Error::Status(code, resp)) => {
-                assert_eq!(code, 401);
-                let body = resp.into_string()?;
-                let value: Value = serde_json::from_str(&body)?;
-                assert_eq!(value["error"]["kind"], "Permission");
-            }
-            Err(err) => return Err(err.into()),
-        }
-    }
-
-    match ureq::get(&list_url)
-        .set("Authorization", "Bearer secret, Bearer evil")
-        .call()
-    {
-        Ok(_) => return Err("expected auth to fail".into()),
-        Err(ureq::Error::Status(code, resp)) => {
-            assert_eq!(code, 401);
-            let body = resp.into_string()?;
-            let value: Value = serde_json::from_str(&body)?;
-            assert_eq!(value["error"]["kind"], "Permission");
-        }
-        Err(err) => return Err(err.into()),
-    }
-
-    Ok(())
-}
-
-#[test]
 fn remote_rejects_path_pool_names() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::try_start(temp_dir.path())?;
 
-    let create_url = format!("{}/v0/pools", server.base_url);
+    let create_url = format!("{}/v0/pools", server.local_url);
     let create_body = r#"{"pool":"/tmp/evil","size_bytes":1024}"#;
     match ureq::post(&create_url)
         .set("Content-Type", "application/json")
@@ -400,7 +370,7 @@ fn remote_rejects_path_pool_names() -> TestResult<()> {
         Err(err) => return Err(err.into()),
     }
 
-    let open_url = format!("{}/v0/pools/open", server.base_url);
+    let open_url = format!("{}/v0/pools/open", server.local_url);
     let open_body = r#"{"pool":"/tmp/evil"}"#;
     match ureq::post(&open_url)
         .set("Content-Type", "application/json")
@@ -580,7 +550,7 @@ fn remote_tail_rejects_invalid_or_unsupported_gap_policies() -> TestResult<()> {
     for path in ["tail?gap_policy=unknown", "tail_lite3?gap_policy=error"] {
         let url = format!(
             "{}/v0/pools/tail-gap-policy/{path}",
-            server.base_url.trim_end_matches('/')
+            server.local_url.trim_end_matches('/')
         );
         match ureq::get(&url).call() {
             Err(ureq::Error::Status(400, _)) => {}
@@ -663,7 +633,7 @@ fn remote_ui_routes_serve_single_page_html() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::try_start(temp_dir.path())?;
 
-    let ui = ureq::get(&format!("{}/ui", server.base_url))
+    let ui = ureq::get(&format!("{}/ui", server.local_url))
         .call()
         .expect("ui route");
     assert_eq!(ui.status(), 200);
@@ -675,7 +645,7 @@ fn remote_ui_routes_serve_single_page_html() -> TestResult<()> {
     let body = ui.into_string()?;
     assert!(body.contains("Plasmite UI"));
 
-    let pool_view = ureq::get(&format!("{}/ui/pools/demo", server.base_url))
+    let pool_view = ureq::get(&format!("{}/ui/pools/demo", server.local_url))
         .call()
         .expect("pool ui route");
     assert_eq!(pool_view.status(), 200);
@@ -689,10 +659,10 @@ fn remote_ui_routes_serve_single_page_html() -> TestResult<()> {
 }
 
 #[test]
-fn remote_ui_events_stream_sends_sse_and_requires_auth() -> TestResult<()> {
+fn local_ui_events_stream_sends_sse() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
-    let server = TestServer::try_start_with_token(temp_dir.path(), Some("secret"))?;
-    let client = server.client_with_token()?;
+    let server = TestServer::try_start(temp_dir.path())?;
+    let client = server.client()?;
     let pool_ref = PoolRef::name("ui-events");
 
     client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
@@ -700,222 +670,17 @@ fn remote_ui_events_stream_sends_sse_and_requires_auth() -> TestResult<()> {
     let created =
         pool.append_json_now(&json!({"kind": "ui", "ok": true}), &[], Durability::Fast)?;
 
-    match ureq::get(&format!(
-        "{}/v0/ui/pools/ui-events/events?since_seq={}&max=1",
-        server.base_url, created.seq
-    ))
-    .call()
-    {
-        Ok(_) => return Err("expected unauthorized SSE request to fail".into()),
-        Err(ureq::Error::Status(code, _)) => assert_eq!(code, 401),
-        Err(err) => return Err(err.into()),
-    }
-
     let response = ureq::get(&format!(
         "{}/v0/ui/pools/ui-events/events?since_seq={}&max=1",
-        server.base_url, created.seq
+        server.local_url, created.seq
     ))
-    .set("Authorization", "Bearer secret")
     .call()
-    .expect("authorized sse request");
+    .expect("local sse request");
     assert_eq!(response.status(), 200);
     assert_eq!(response.header("content-type"), Some("text/event-stream"));
     let body = response.into_string()?;
     assert!(body.contains("event: message"));
     assert!(body.contains("\"seq\":1"));
-    Ok(())
-}
-
-#[test]
-fn remote_ui_routes_emit_cors_headers_for_allowed_origin() -> TestResult<()> {
-    let temp_dir = tempfile::tempdir()?;
-    let origin = "https://demo.wratify.ai";
-    let server = TestServer::try_start_with_cors(temp_dir.path(), &[origin])?;
-    let client = server.client()?;
-    let pool_ref = PoolRef::name("cors-allowed");
-
-    client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
-    let pool = client.open_pool(&pool_ref)?;
-    let created =
-        pool.append_json_now(&json!({"kind": "cors", "ok": true}), &[], Durability::Fast)?;
-
-    let pools_resp = ureq::get(&format!("{}/v0/ui/pools", server.base_url))
-        .set("Origin", origin)
-        .call()
-        .expect("pools request");
-    assert_eq!(pools_resp.status(), 200);
-    assert_eq!(
-        pools_resp.header("access-control-allow-origin"),
-        Some(origin)
-    );
-
-    let preflight_resp = ureq::request(
-        "OPTIONS",
-        &format!("{}/v0/ui/pools/cors-allowed/events", server.base_url),
-    )
-    .set("Origin", origin)
-    .set("Access-Control-Request-Method", "GET")
-    .call()
-    .expect("preflight request");
-    assert!(matches!(preflight_resp.status(), 200 | 204));
-    assert_eq!(
-        preflight_resp.header("access-control-allow-origin"),
-        Some(origin)
-    );
-
-    let events_resp = ureq::get(&format!(
-        "{}/v0/ui/pools/cors-allowed/events?since_seq={}&max=1",
-        server.base_url, created.seq
-    ))
-    .set("Origin", origin)
-    .call()
-    .expect("events request");
-    assert_eq!(events_resp.status(), 200);
-    assert_eq!(
-        events_resp.header("access-control-allow-origin"),
-        Some(origin)
-    );
-    let body = events_resp.into_string()?;
-    assert!(body.contains("event: message"));
-    Ok(())
-}
-
-#[test]
-fn remote_ui_routes_reject_disallowed_preflight_origin() -> TestResult<()> {
-    let temp_dir = tempfile::tempdir()?;
-    let allowed_origin = "https://demo.wratify.ai";
-    let disallowed_origin = "https://evil.example";
-    let server = TestServer::try_start_with_cors(temp_dir.path(), &[allowed_origin])?;
-
-    let pools_resp = ureq::get(&format!("{}/v0/ui/pools", server.base_url))
-        .set("Origin", disallowed_origin)
-        .call()
-        .expect("pools request");
-    assert_eq!(pools_resp.status(), 200);
-    assert_ne!(
-        pools_resp.header("access-control-allow-origin"),
-        Some(disallowed_origin)
-    );
-
-    let preflight = ureq::request(
-        "OPTIONS",
-        &format!("{}/v0/ui/pools/demo/events", server.base_url),
-    )
-    .set("Origin", disallowed_origin)
-    .set("Access-Control-Request-Method", "GET")
-    .call();
-
-    match preflight {
-        Ok(resp) => {
-            assert!(matches!(resp.status(), 200 | 204));
-            assert_ne!(
-                resp.header("access-control-allow-origin"),
-                Some(disallowed_origin)
-            );
-        }
-        Err(ureq::Error::Status(code, resp)) => {
-            assert_eq!(code, 403);
-            assert_ne!(
-                resp.header("access-control-allow-origin"),
-                Some(disallowed_origin)
-            );
-        }
-        Err(err) => return Err(err.into()),
-    }
-    Ok(())
-}
-
-#[test]
-fn remote_ui_routes_reject_wildcard_and_other_disallowed_origins() -> TestResult<()> {
-    let temp_dir = tempfile::tempdir()?;
-    let allowed_origin = "https://demo.wratify.ai";
-    let test_origins = ["*", "https://evil.example"];
-    let server = TestServer::try_start_with_cors(temp_dir.path(), &[allowed_origin])?;
-
-    for origin in test_origins {
-        let pools_resp = ureq::get(&format!("{}/v0/ui/pools", server.base_url))
-            .set("Origin", origin)
-            .call()
-            .expect("pools request");
-        assert_eq!(pools_resp.status(), 200);
-        assert_ne!(
-            pools_resp.header("access-control-allow-origin"),
-            Some(origin)
-        );
-
-        let preflight = ureq::request(
-            "OPTIONS",
-            &format!("{}/v0/ui/pools/demo/events", server.base_url),
-        )
-        .set("Origin", origin)
-        .set("Access-Control-Request-Method", "GET")
-        .call();
-        match preflight {
-            Ok(resp) => {
-                assert!(matches!(resp.status(), 200 | 204));
-                assert_ne!(resp.header("access-control-allow-origin"), Some(origin));
-            }
-            Err(ureq::Error::Status(code, resp)) => {
-                assert_eq!(code, 403);
-                assert_ne!(resp.header("access-control-allow-origin"), Some(origin));
-            }
-            Err(err) => return Err(err.into()),
-        }
-    }
-
-    Ok(())
-}
-
-#[test]
-fn remote_read_only_allows_reads_but_rejects_writes() -> TestResult<()> {
-    let temp_dir = tempfile::tempdir()?;
-    let pool_dir = temp_dir.path();
-    let local = LocalClient::new().with_pool_dir(pool_dir);
-    let pool_ref = PoolRef::name("ro-demo");
-    local.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
-    let mut pool = local.open_pool(&pool_ref)?;
-    let created = pool.append_json_now(&json!({"n": 1}), &[], Durability::Fast)?;
-
-    let server = TestServer::try_start_with_access(pool_dir, "read-only")?;
-    let client = server.client()?;
-    let remote_pool = client.open_pool(&pool_ref)?;
-    let fetched = remote_pool.get_message(created.seq)?;
-    assert_eq!(fetched.seq, created.seq);
-
-    let err = remote_pool
-        .append_json_now(&json!({"n": 2}), &[], Durability::Fast)
-        .expect_err("append should be forbidden");
-    assert_eq!(err.kind(), ErrorKind::Permission);
-    Ok(())
-}
-
-#[test]
-fn remote_write_only_allows_append_but_rejects_reads() -> TestResult<()> {
-    let temp_dir = tempfile::tempdir()?;
-    let pool_dir = temp_dir.path();
-    let local = LocalClient::new().with_pool_dir(pool_dir);
-    let pool_ref = PoolRef::name("wo-demo");
-    local.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
-
-    let server = TestServer::try_start_with_access(pool_dir, "write-only")?;
-    let append_url = format!("{}/v0/pools/wo-demo/append", server.base_url);
-    let append_body = r#"{"data":{"n":1},"tags":[],"durability":"fast"}"#;
-    let append = ureq::post(&append_url)
-        .set("Content-Type", "application/json")
-        .send_string(append_body)
-        .expect("append");
-    assert_eq!(append.status(), 200);
-
-    let get_url = format!("{}/v0/pools/wo-demo/messages/1", server.base_url);
-    match ureq::get(&get_url).call() {
-        Ok(_) => return Err("expected get to be forbidden".into()),
-        Err(ureq::Error::Status(code, resp)) => {
-            assert_eq!(code, 403);
-            let body: Value = serde_json::from_str(&resp.into_string()?)?;
-            assert_eq!(body["error"]["kind"], "Permission");
-        }
-        Err(err) => return Err(err.into()),
-    }
     Ok(())
 }
 
@@ -932,7 +697,7 @@ fn remote_mcp_http_profile_request_notification_and_get() -> TestResult<()> {
     let server = TestServer::try_start(temp_dir.path())?;
 
     let initialize = mcp_post(
-        &server.base_url,
+        &server.local_url,
         &json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -952,7 +717,7 @@ fn remote_mcp_http_profile_request_notification_and_get() -> TestResult<()> {
     assert_eq!(init_json["id"], json!(1));
 
     let notification = mcp_post(
-        &server.base_url,
+        &server.local_url,
         &json!({
             "jsonrpc": "2.0",
             "method": "notifications/initialized",
@@ -964,7 +729,7 @@ fn remote_mcp_http_profile_request_notification_and_get() -> TestResult<()> {
     assert_eq!(notification.into_string()?, "");
 
     let response_payload = mcp_post(
-        &server.base_url,
+        &server.local_url,
         &json!({
             "jsonrpc": "2.0",
             "id": 42,
@@ -975,7 +740,7 @@ fn remote_mcp_http_profile_request_notification_and_get() -> TestResult<()> {
     assert_eq!(response_payload.status(), 202);
     assert_eq!(response_payload.into_string()?, "");
 
-    match ureq::get(&format!("{}/mcp", server.base_url)).call() {
+    match ureq::get(&format!("{}/mcp", server.local_url)).call() {
         Ok(_) => return Err("expected GET /mcp to be rejected".into()),
         Err(ureq::Error::Status(code, _)) => assert_eq!(code, 405),
         Err(err) => return Err(err.into()),
@@ -990,7 +755,7 @@ fn remote_mcp_tool_flow_via_http_post() -> TestResult<()> {
     let server = TestServer::try_start(temp_dir.path())?;
 
     let tools_list = mcp_post(
-        &server.base_url,
+        &server.local_url,
         &json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -1010,7 +775,7 @@ fn remote_mcp_tool_flow_via_http_post() -> TestResult<()> {
     assert!(names.contains(&"plasmite_pool_delete"));
 
     let create = mcp_post(
-        &server.base_url,
+        &server.local_url,
         &json!({
             "jsonrpc": "2.0",
             "id": 2,
@@ -1029,7 +794,7 @@ fn remote_mcp_tool_flow_via_http_post() -> TestResult<()> {
     );
 
     let feed_one = mcp_post(
-        &server.base_url,
+        &server.local_url,
         &json!({
             "jsonrpc": "2.0",
             "id": 3,
@@ -1047,7 +812,7 @@ fn remote_mcp_tool_flow_via_http_post() -> TestResult<()> {
         .expect("first seq");
 
     let feed_two = mcp_post(
-        &server.base_url,
+        &server.local_url,
         &json!({
             "jsonrpc": "2.0",
             "id": 4,
@@ -1065,7 +830,7 @@ fn remote_mcp_tool_flow_via_http_post() -> TestResult<()> {
         .expect("second seq");
 
     let read = mcp_post(
-        &server.base_url,
+        &server.local_url,
         &json!({
             "jsonrpc": "2.0",
             "id": 5,
@@ -1089,7 +854,7 @@ fn remote_mcp_tool_flow_via_http_post() -> TestResult<()> {
     );
 
     let fetch = mcp_post(
-        &server.base_url,
+        &server.local_url,
         &json!({
             "jsonrpc": "2.0",
             "id": 6,
@@ -1108,7 +873,7 @@ fn remote_mcp_tool_flow_via_http_post() -> TestResult<()> {
     );
 
     let delete = mcp_post(
-        &server.base_url,
+        &server.local_url,
         &json!({
             "jsonrpc": "2.0",
             "id": 7,
@@ -1137,7 +902,7 @@ fn remote_mcp_protocol_version_header_validation() -> TestResult<()> {
         "params": {}
     });
 
-    match ureq::post(&format!("{}/mcp", server.base_url))
+    match ureq::post(&format!("{}/mcp", server.local_url))
         .set("Content-Type", "application/json")
         .set("MCP-Protocol-Version", "not-supported")
         .send_string(&payload.to_string())
@@ -1147,14 +912,14 @@ fn remote_mcp_protocol_version_header_validation() -> TestResult<()> {
         Err(err) => return Err(err.into()),
     }
 
-    let supported = ureq::post(&format!("{}/mcp", server.base_url))
+    let supported = ureq::post(&format!("{}/mcp", server.local_url))
         .set("Content-Type", "application/json")
         .set("MCP-Protocol-Version", "2025-11-25")
         .send_string(&payload.to_string())
         .expect("supported protocol");
     assert_eq!(supported.status(), 200);
 
-    let absent = mcp_post(&server.base_url, &payload).expect("missing protocol version allowed");
+    let absent = mcp_post(&server.local_url, &payload).expect("missing protocol version allowed");
     assert_eq!(absent.status(), 200);
     Ok(())
 }
@@ -1170,7 +935,7 @@ fn remote_mcp_origin_header_validation() -> TestResult<()> {
         "params": {}
     });
 
-    match ureq::post(&format!("{}/mcp", server.base_url))
+    match ureq::post(&format!("{}/mcp", server.local_url))
         .set("Content-Type", "application/json")
         .set("Origin", "not a valid origin")
         .send_string(&payload.to_string())
@@ -1180,85 +945,11 @@ fn remote_mcp_origin_header_validation() -> TestResult<()> {
         Err(err) => return Err(err.into()),
     }
 
-    let valid = ureq::post(&format!("{}/mcp", server.base_url))
+    let valid = ureq::post(&format!("{}/mcp", server.local_url))
         .set("Content-Type", "application/json")
-        .set("Origin", "https://demo.wratify.ai")
+        .set("Origin", &server.local_url)
         .send_string(&payload.to_string())
         .expect("valid Origin");
     assert_eq!(valid.status(), 200);
-    Ok(())
-}
-
-#[test]
-fn remote_mcp_access_mode_restricts_tools() -> TestResult<()> {
-    let temp_dir = tempfile::tempdir()?;
-    let pool_dir = temp_dir.path();
-    let local = LocalClient::new().with_pool_dir(pool_dir);
-    local.create_pool(&PoolRef::name("mcp-access"), PoolOptions::new(1024 * 1024))?;
-
-    let write_only = TestServer::try_start_with_access(pool_dir, "write-only")?;
-    let read_result = mcp_post(
-        &write_only.base_url,
-        &json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": "plasmite_pool_list",
-                "arguments": {}
-            }
-        }),
-    )
-    .expect("write-only read tool");
-    let read_json: Value = serde_json::from_str(&read_result.into_string()?)?;
-    assert_eq!(read_json["result"]["isError"], json!(true));
-    assert_eq!(
-        read_json["result"]["structuredContent"]["error_kind"],
-        json!("Permission")
-    );
-
-    let write_result = mcp_post(
-        &write_only.base_url,
-        &json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {
-                "name": "plasmite_feed",
-                "arguments": {
-                    "pool": "mcp-access",
-                    "data": {"ok": true}
-                }
-            }
-        }),
-    )
-    .expect("write tool");
-    let write_json: Value = serde_json::from_str(&write_result.into_string()?)?;
-    assert_ne!(write_json["result"]["isError"], json!(true));
-
-    drop(write_only);
-    let read_only = TestServer::try_start_with_access(pool_dir, "read-only")?;
-    let denied_write = mcp_post(
-        &read_only.base_url,
-        &json!({
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "tools/call",
-            "params": {
-                "name": "plasmite_feed",
-                "arguments": {
-                    "pool": "mcp-access",
-                    "data": {"ok": true}
-                }
-            }
-        }),
-    )
-    .expect("read-only write tool");
-    let denied_json: Value = serde_json::from_str(&denied_write.into_string()?)?;
-    assert_eq!(denied_json["result"]["isError"], json!(true));
-    assert_eq!(
-        denied_json["result"]["structuredContent"]["error_kind"],
-        json!("Permission")
-    );
     Ok(())
 }

@@ -27,6 +27,7 @@ fn top_level_help_orients_and_routes_readers() {
     for command in [
         "feed",
         "serve",
+        "access",
         "mcp",
         "fetch",
         "follow",
@@ -56,8 +57,10 @@ fn every_public_command_has_usable_help() {
         (&["pool", "list", "--help"], "plasmite pool list"),
         (&["feed", "--help"], "plasmite feed"),
         (&["serve", "--help"], "plasmite serve"),
-        (&["serve", "init", "--help"], "plasmite serve init"),
-        (&["serve", "check", "--help"], "plasmite serve check"),
+        (&["access", "--help"], "plasmite access <COMMAND>"),
+        (&["access", "invite", "--help"], "plasmite access invite"),
+        (&["access", "connect", "--help"], "plasmite access connect"),
+        (&["access", "status", "--help"], "plasmite access status"),
         (&["mcp", "--help"], "plasmite mcp"),
         (&["fetch", "--help"], "plasmite fetch"),
         (&["follow", "--help"], "plasmite follow"),
@@ -94,7 +97,6 @@ fn short_help_exposes_material_command_constraints() {
                 "requires --retry > 0",
                 "Choose one input source",
                 "exits 1",
-                "remote refs only",
             ],
         ),
         (
@@ -118,7 +120,7 @@ fn short_help_exposes_material_command_constraints() {
             &["duplex", "-h"],
             &[
                 "Terminal input requires --me",
-                "remote refs accept the same auth/TLS flags as follow",
+                "connect before using a remote ref",
                 "Exits 124",
             ],
         ),
@@ -131,16 +133,8 @@ fn short_help_exposes_material_command_constraints() {
             &[
                 "requires --tls-key",
                 "must be positive",
-                "put serve options before `check`",
+                "remote clients use HTTPS",
             ],
-        ),
-        (
-            &["serve", "init", "-h"],
-            &["paths must be distinct", "JSON when piped"],
-        ),
-        (
-            &["serve", "check", "-h"],
-            &["options belong before `check`", "Exits non-zero"],
         ),
     ];
 
@@ -474,7 +468,7 @@ fn clap_errors_are_concise_in_json() {
 
 #[test]
 fn misuse_feedback_matrix_is_actionable_across_command_families() {
-    let cases: [(&[&str], &str, &str); 5] = [
+    let cases: [(&[&str], &str, &str); 4] = [
         (
             &["feed", "demo", "{\"x\":1}", "--retry-delay", "1s"],
             "--retry-delay requires --retry",
@@ -484,11 +478,6 @@ fn misuse_feedback_matrix_is_actionable_across_command_families() {
             &["doctor", "demo", "--all"],
             "--all cannot be combined",
             "Use --all by itself",
-        ),
-        (
-            &["serve", "--bind", "nope", "check"],
-            "invalid bind address",
-            "host:port",
         ),
         (&["completion", "nope"], "invalid value", "plasmite --help"),
         (

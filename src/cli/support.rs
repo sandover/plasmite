@@ -384,74 +384,8 @@ pub(crate) fn ensure_pool_dir(dir: &Path) -> Result<(), Error> {
         .map_err(|err| Error::new(ErrorKind::Io).with_path(dir).with_source(err))
 }
 
-pub(crate) fn read_token_file(path: &Path) -> Result<String, Error> {
-    let raw = std::fs::read_to_string(path).map_err(|err| {
-        Error::new(ErrorKind::Usage)
-            .with_message("failed to read token file")
-            .with_path(path)
-            .with_source(err)
-    })?;
-    let token = raw.trim().to_string();
-    if token.is_empty() {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("token file is empty")
-            .with_path(path));
-    }
-    Ok(token)
-}
-
-pub(crate) fn resolve_token_value(
-    token: Option<String>,
-    token_file: Option<PathBuf>,
-) -> Result<Option<String>, Error> {
-    if token.is_some() && token_file.is_some() {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("--token cannot be combined with --token-file")
-            .with_hint("Use --token-file for safer handling, or pass --token for local/dev use."));
-    }
-    if let Some(path) = token_file {
-        return read_token_file(&path).map(Some);
-    }
-    Ok(token)
-}
-
-pub(crate) fn remote_client(
-    base_url: String,
-    token: Option<String>,
-    token_file: Option<PathBuf>,
-    tls_ca: Option<PathBuf>,
-    tls_skip_verify: bool,
-) -> Result<RemoteClient, Error> {
-    let token_value = resolve_token_value(token, token_file)?;
-    let mut client = RemoteClient::new(base_url)?;
-    if let Some(token_value) = token_value {
-        client = client.with_token(token_value);
-    }
-    if let Some(path) = tls_ca {
-        client = client.with_tls_ca_file(path)?;
-    }
-    if tls_skip_verify {
-        eprintln!("warning: --tls-skip-verify disables TLS certificate verification (unsafe)");
-        client = client.with_tls_skip_verify();
-    }
-    Ok(client)
-}
-
-pub(crate) fn reject_remote_only_flags_for_local_target(
-    command: &str,
-    token: Option<&str>,
-    token_file: Option<&Path>,
-    tls_ca: Option<&Path>,
-    tls_skip_verify: bool,
-) -> Result<(), Error> {
-    if token.is_none() && token_file.is_none() && tls_ca.is_none() && !tls_skip_verify {
-        return Ok(());
-    }
-    Err(Error::new(ErrorKind::Usage)
-        .with_message(format!(
-            "{command} remote auth/TLS flags require a remote http(s) pool ref"
-        ))
-        .with_hint("Use --token/--token-file/--tls-ca/--tls-skip-verify only with http(s)://host:port/<pool> refs."))
+pub(crate) fn remote_client(base_url: String) -> Result<RemoteClient, Error> {
+    RemoteClient::new(base_url)
 }
 
 pub(crate) fn parse_size(input: &str) -> Result<u64, Error> {

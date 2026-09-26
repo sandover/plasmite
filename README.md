@@ -24,7 +24,9 @@ So, there's **Plasmite**.
 
 Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed channels called "pools", which are ring buffers. There's no daemon or broker for local IPC, no fancy config, and it's fast (~60k 1KB msgs/sec writes, ~3M msgs/sec reads on a laptop). Readers mmap the pool file and walk frames in place, and payloads use [Lite3](https://github.com/fastserial/lite3), a zero-copy JSON binary encoding.
 
-For IPC across machines, `pls serve` exposes local pools securely, runs an MCP server, and serves a minimal web UI too.
+For IPC across machines, `pls serve` exposes local pools over HTTPS. Native
+clients connect with an access key. Browser sign-in and direct remote MCP
+authorization are later work; the local stdio `mcp` command remains available.
 
 #### Local IPC
 
@@ -39,7 +41,7 @@ For IPC across machines, `pls serve` exposes local pools securely, runs an MCP s
       <code>pls pool create channel</code>
       <br/><br/>
       <b>Alice sends a message</b><br/>
-      <code>pls feed channel</code><br/>
+      <code>pls --dir ./pools feed channel</code><br/>
       <code>'{"from": "A", "msg": "hello world"}'</code>
     </td>
     <td valign="bottom">
@@ -63,9 +65,11 @@ For IPC across machines, `pls serve` exposes local pools securely, runs an MCP s
   </tr>
   <tr>
     <td valign="top">
-      <b>Alice runs pool server</b><br/>
-      <code>pls serve init</code><br/>
-      <code>pls serve</code>
+      <b>Alice starts the server and invites Carol</b><br/>
+      <code>pls --dir ./pools serve --shared-address https://alice.example.test:9743</code><br/>
+      <code>pls --dir ./pools access invite --name Carol</code>
+      <br/><br/>
+      Alice sends Carol the HTTPS address and access key privately.
       <br/><br/><br/>
       <b>Alice sends</b><br/>
       <code>pls feed channel</code><br/>
@@ -80,9 +84,9 @@ For IPC across machines, `pls serve` exposes local pools securely, runs an MCP s
       <code>{ "data": {"from": "A", "msg": "hi all"}, ... }</code>
     </td>
     <td valign="bottom">
-      <b>Carol watches remotely</b><br/>
-      <code>pls follow 
-  http://alice:9700/channel</code>
+      <b>Carol connects and watches</b><br/>
+      <code>pls access connect https://alice.example.test:9743</code><br/>
+      <code>pls follow https://alice.example.test:9743/channel</code>
       <br/><br/><br/><br/>
       <b>Carol sees it</b><br/>
       <code>{ "data": {"from": "A", "msg": "hi all"}, ... }</code>
@@ -182,9 +186,10 @@ Windows builds (`x86_64-pc-windows-msvc`) are available via npm and PyPI. See th
 
 | | |
 |---|---|
-| `serve` | HTTP server |
-| `serve init` | Create serving configuration and credentials |
-| `serve check` | Validate serving configuration |
+| `serve` | Serve local pools over loopback HTTP and remote HTTPS |
+| `access invite` | Create an access key for another client |
+| `access connect` | Verify a server and save its access key |
+| `access status` | Check a saved server connection |
 
 **Agent and CLI support**
 

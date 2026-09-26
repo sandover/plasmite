@@ -14,13 +14,12 @@ use super::support::{
     DEFAULT_POOL_SIZE, FeedExactCreateHint, add_missing_pool_create_hint, add_missing_pool_hint,
     add_missing_seq_hint, ensure_pool_dir, feed_exact_create_command_hint,
     feed_receipt_from_message, feed_receipt_json, message_from_frame, now_ns, parse_durability,
-    parse_retry_config, parse_size, reject_remote_only_flags_for_local_target, remote_client,
-    resolve_pool_target, resolve_poolref, retry_with_config,
+    parse_retry_config, parse_size, remote_client, resolve_pool_target, resolve_poolref,
+    retry_with_config,
 };
 use crate::{ErrorPolicyCli, InputMode, PoolTarget};
 use plasmite::api::{AppendOptions, Error, ErrorKind, Pool, PoolOptions, PoolRef, lite3};
 use std::io::{self, IsTerminal};
-use std::path::PathBuf;
 
 pub(super) struct FeedArgs {
     pub(super) pool: String,
@@ -34,10 +33,6 @@ pub(super) struct FeedArgs {
     pub(super) retry_delay: Option<String>,
     pub(super) input: InputMode,
     pub(super) errors: ErrorPolicyCli,
-    pub(super) token: Option<String>,
-    pub(super) token_file: Option<PathBuf>,
-    pub(super) tls_ca: Option<PathBuf>,
-    pub(super) tls_skip_verify: bool,
 }
 
 pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult, Error> {
@@ -81,13 +76,6 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
 
     match target {
         PoolTarget::LocalPath(path) => {
-            reject_remote_only_flags_for_local_target(
-                "feed",
-                args.token.as_deref(),
-                args.token_file.as_deref(),
-                args.tls_ca.as_deref(),
-                args.tls_skip_verify,
-            )?;
             let mut pool_handle = match Pool::open(&path) {
                 Ok(pool) => pool,
                 Err(err) if args.create && err.kind() == ErrorKind::NotFound => {
@@ -178,13 +166,7 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                     .with_message("remote feed does not support --create")
                     .with_hint("Create remote pools with server-side tooling, not feed."));
             }
-            let client = remote_client(
-                base_url,
-                args.token,
-                args.token_file,
-                args.tls_ca,
-                args.tls_skip_verify,
-            )?;
+            let client = remote_client(base_url)?;
             let remote_pool = client
                 .open_pool(&PoolRef::name(name.clone()))
                 .map_err(|err| add_missing_pool_hint(err, &args.pool, &args.pool))?;

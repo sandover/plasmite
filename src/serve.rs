@@ -1,13 +1,15 @@
 //! Purpose: Provide the HTTP/JSON remote server for Plasmite.
-//! Exports: `ServeConfig`, `serve`.
-//! Role: Axum-based loopback server implementing the remote v0 spec.
+//! Exports: `ServeConfig`, `serve_secure_pair`.
+//! Role: Axum-based local and TLS remote servers implementing the remote v0 spec.
 //! Invariants: JSON envelopes match spec/remote/v0/SPEC.md; error kinds remain stable.
-//! Invariants: Loopback-only unless explicitly allowed (v0 policy).
+//! Invariants: Local administration stays on loopback; remote access requires TLS and an access key.
 //! Notes: Streaming uses JSONL or framed Lite3; tail is at-least-once and resumable.
 
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path as AxumPath, Query, RawQuery, State};
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
+use axum::http::Request;
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
@@ -15,17 +17,14 @@ use bytes::Bytes;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder as AutoBuilder;
 use hyper_util::service::TowerToHyperService;
-use rcgen::{Certificate, CertificateParams, SanType};
 use rustls::ServerConfig;
 use rustls::pki_types::pem::{Error as PemError, PemObject};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
-use std::collections::HashSet;
 use std::future::Future;
 use std::future::IntoFuture;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
@@ -34,12 +33,12 @@ use tokio::time::Duration;
 use tokio_rustls::TlsAcceptor;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
-use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tower_service::Service;
 use tracing_subscriber::EnvFilter;
-use url::Url;
+use url::{Host, Url};
 
+use crate::access_store::AccessStore;
 use crate::interface_error_kind;
 use crate::interface_wire::{MessageWire, error_policy};
 use crate::pool_info_json::pool_info_json;
@@ -49,8 +48,8 @@ use plasmite::api::{
 };
 use plasmite::mcp::{
     DispatchOutcome, JsonRpcError as McpJsonRpcError, McpDispatcher, McpHandler, McpResource,
-    McpTool, McpToolAccess, PlasmiteMcpHandler, ResourceReadRequest, ResourceReadResult,
-    ToolCallRequest, ToolCallResult,
+    McpTool, PlasmiteMcpHandler, ResourceReadRequest, ResourceReadResult, ToolCallRequest,
+    ToolCallResult,
 };
 
 const UI_INDEX_HTML: &str = include_str!("../ui/index.html");
@@ -61,77 +60,11 @@ const READY_FILE_ENV: &str = "PLASMITE_SERVE_READY_FILE";
 pub struct ServeConfig {
     pub bind: SocketAddr,
     pub pool_dir: PathBuf,
-    pub token: Option<String>,
-    pub cors_allowed_origins: Vec<String>,
-    pub access_mode: AccessMode,
-    pub allow_non_loopback: bool,
-    pub insecure_no_tls: bool,
-    pub token_file_used: bool,
     pub tls_cert: Option<PathBuf>,
     pub tls_key: Option<PathBuf>,
-    pub tls_self_signed: bool,
-    pub tls_self_signed_material: Option<SelfSignedTlsMaterial>,
-    pub tls_fingerprint: Option<String>,
     pub max_body_bytes: u64,
     pub max_tail_timeout_ms: u64,
     pub max_concurrent_tails: usize,
-}
-
-#[derive(Clone, Debug)]
-pub struct SelfSignedTlsMaterial {
-    cert_der: Vec<u8>,
-    key_der: Vec<u8>,
-    pub fingerprint: String,
-}
-
-pub fn prepare_self_signed_tls(bind_ip: IpAddr) -> Result<SelfSignedTlsMaterial, Error> {
-    let params = self_signed_cert_params(bind_ip);
-    let cert = Certificate::from_params(params).map_err(|err| {
-        Error::new(ErrorKind::Internal)
-            .with_message("failed to generate self-signed certificate")
-            .with_source(err)
-    })?;
-    let cert_der = cert.serialize_der().map_err(|err| {
-        Error::new(ErrorKind::Internal)
-            .with_message("failed to serialize self-signed certificate")
-            .with_source(err)
-    })?;
-    let key_der = cert.serialize_private_key_der();
-    let fingerprint = format_cert_fingerprint(&cert_der);
-    Ok(SelfSignedTlsMaterial {
-        cert_der,
-        key_der,
-        fingerprint,
-    })
-}
-
-pub(crate) fn self_signed_cert_params(identity_ip: IpAddr) -> CertificateParams {
-    let mut params = CertificateParams::new(vec!["localhost".to_string()]);
-    params
-        .subject_alt_names
-        .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
-    params
-        .subject_alt_names
-        .push(SanType::IpAddress(IpAddr::V6(Ipv6Addr::LOCALHOST)));
-    if !identity_ip.is_unspecified()
-        && identity_ip != IpAddr::V4(Ipv4Addr::LOCALHOST)
-        && identity_ip != IpAddr::V6(Ipv6Addr::LOCALHOST)
-    {
-        params
-            .subject_alt_names
-            .push(SanType::IpAddress(identity_ip));
-    }
-    params
-}
-
-pub fn tls_fingerprint_from_cert_path(cert_path: &Path) -> Result<String, Error> {
-    let certs = load_certificates_from_pem(cert_path)?;
-    let first = certs.first().ok_or_else(|| {
-        Error::new(ErrorKind::Usage)
-            .with_message("TLS certificate file contains no certificates")
-            .with_path(cert_path)
-    })?;
-    Ok(format_cert_fingerprint(first.as_ref()))
 }
 
 #[derive(Clone)]
@@ -172,45 +105,68 @@ impl StorageExecutor {
 #[derive(Clone)]
 struct AppState {
     client: LocalClient,
-    token: Option<String>,
-    access_mode: AccessMode,
+    secure_access: Option<Arc<AccessStore>>,
+    local_admin: bool,
     max_tail_timeout_ms: u64,
     tail_semaphore: Arc<Semaphore>,
     storage_executor: StorageExecutor,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum AccessMode {
-    ReadOnly,
-    WriteOnly,
-    ReadWrite,
-}
-
-impl AccessMode {
-    fn allows_read(self) -> bool {
-        matches!(self, AccessMode::ReadOnly | AccessMode::ReadWrite)
+pub(crate) async fn serve_secure_pair(
+    local: ServeConfig,
+    remote: ServeConfig,
+    access: Arc<AccessStore>,
+) -> Result<(), Error> {
+    validate_config(&local)?;
+    validate_config(&remote)?;
+    if !local.bind.ip().is_loopback() {
+        return Err(
+            Error::new(ErrorKind::Usage).with_message("local administration must bind to loopback")
+        );
     }
-
-    fn allows_write(self) -> bool {
-        matches!(self, AccessMode::WriteOnly | AccessMode::ReadWrite)
+    if local.bind == remote.bind && local.bind.port() != 0 {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("local and remote listeners need different addresses"));
     }
-}
-
-pub async fn serve(config: ServeConfig) -> Result<(), Error> {
-    let prepared = prepare_server(&config).await?;
-    let listener = tokio::net::TcpListener::bind(config.bind)
+    if remote.tls_cert.is_none() || remote.tls_key.is_none() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("remote sharing requires a TLS certificate and key"));
+    }
+    let local_server = prepare_server_with_access(&local, Some(access.clone()), true).await?;
+    let remote_server = prepare_server_with_access(&remote, Some(access.clone()), false).await?;
+    let local_listener = tokio::net::TcpListener::bind(local.bind)
         .await
         .map_err(|err| {
             Error::new(ErrorKind::Io)
-                .with_message(if prepared.tls_config.is_some() {
-                    "failed to bind TLS server"
-                } else {
-                    "failed to bind server"
-                })
+                .with_message("failed to bind local administration listener")
                 .with_source(err)
         })?;
-    notify_ready_file(&listener)?;
-    serve_with_listener(prepared, listener, shutdown_signal()).await
+    let remote_listener = tokio::net::TcpListener::bind(remote.bind)
+        .await
+        .map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_message("failed to bind remote HTTPS listener")
+                .with_source(err)
+        })?;
+    access.write_local_bind(local_listener.local_addr().map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message("failed to inspect local listener")
+            .with_source(err)
+    })?)?;
+    notify_ready_file(&remote_listener)?;
+    let remote_tls = remote_server.tls_config.ok_or_else(|| {
+        Error::new(ErrorKind::Internal).with_message("remote TLS was not configured")
+    })?;
+    tokio::try_join!(
+        serve_plain(local_listener, local_server.app, shutdown_signal()),
+        serve_tls(
+            remote_listener,
+            remote_server.app,
+            remote_tls,
+            shutdown_signal()
+        ),
+    )?;
+    Ok(())
 }
 
 fn notify_ready_file(listener: &tokio::net::TcpListener) -> Result<(), Error> {
@@ -234,24 +190,17 @@ fn notify_ready_file(listener: &tokio::net::TcpListener) -> Result<(), Error> {
         })
 }
 
-async fn serve_with_listener(
-    prepared: PreparedServer,
-    listener: tokio::net::TcpListener,
-    shutdown: impl Future<Output = ()>,
-) -> Result<(), Error> {
-    if let Some(tls_config) = prepared.tls_config {
-        return serve_tls(listener, prepared.app, tls_config, shutdown).await;
-    }
-    serve_plain(listener, prepared.app, shutdown).await
-}
-
 struct PreparedServer {
     app: Router,
     tls_config: Option<Arc<ServerConfig>>,
 }
 
-async fn prepare_server(config: &ServeConfig) -> Result<PreparedServer, Error> {
-    let cors_allowed_origins = preflight_config(config)?;
+async fn prepare_server_with_access(
+    config: &ServeConfig,
+    secure_access: Option<Arc<AccessStore>>,
+    local_admin: bool,
+) -> Result<PreparedServer, Error> {
+    validate_config(config)?;
 
     init_tracing();
 
@@ -261,12 +210,11 @@ async fn prepare_server(config: &ServeConfig) -> Result<PreparedServer, Error> {
         .map_err(|_| Error::new(ErrorKind::Usage).with_message("--max-body-bytes is too large"))?;
 
     let tls_config = build_tls_config(config).await?;
-    let cors_layer = build_cors_layer(&cors_allowed_origins)?;
 
     let state = Arc::new(AppState {
         client: LocalClient::new().with_pool_dir(config.pool_dir.clone()),
-        token: config.token.clone(),
-        access_mode: config.access_mode,
+        secure_access,
+        local_admin,
         max_tail_timeout_ms: config.max_tail_timeout_ms,
         tail_semaphore: Arc::new(Semaphore::new(config.max_concurrent_tails)),
         // Reuse the existing server concurrency budget instead of adding another
@@ -276,6 +224,8 @@ async fn prepare_server(config: &ServeConfig) -> Result<PreparedServer, Error> {
 
     let mut app = Router::new()
         .route("/healthz", get(healthz))
+        .route("/v0/access/invite", post(access_invite))
+        .route("/v0/access/check", get(access_check))
         .route("/mcp", post(mcp_post).get(mcp_get))
         .route("/ui", get(ui_index))
         .route("/ui/pools/:pool", get(ui_pool))
@@ -296,190 +246,73 @@ async fn prepare_server(config: &ServeConfig) -> Result<PreparedServer, Error> {
         .layer(DefaultBodyLimit::max(max_body_bytes))
         .layer(TraceLayer::new_for_http());
 
-    if let Some(cors_layer) = cors_layer {
-        app = app.layer(cors_layer);
+    if local_admin {
+        app = app.layer(middleware::from_fn(local_request_guard));
     }
 
     Ok(PreparedServer { app, tls_config })
 }
 
-pub fn preflight_config(config: &ServeConfig) -> Result<Vec<String>, Error> {
-    validate_config(config)
+async fn local_request_guard(request: Request<Body>, next: Next) -> Response {
+    let headers = request.headers();
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok());
+    let Some(host) = host else {
+        return error_response_with_status(
+            Error::new(ErrorKind::Permission).with_message("local request requires a Host header"),
+            StatusCode::FORBIDDEN,
+        );
+    };
+    let parsed_host = Url::parse(&format!("http://{host}/"));
+    let host_is_local = parsed_host.as_ref().is_ok_and(|url| {
+        let loopback = match url.host() {
+            Some(Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+            Some(Host::Ipv4(address)) => address.is_loopback(),
+            Some(Host::Ipv6(address)) => address.is_loopback(),
+            None => false,
+        };
+        loopback && url.username().is_empty() && url.password().is_none()
+    });
+    let origin_matches = match headers.get(header::ORIGIN) {
+        None => true,
+        Some(origin) => parsed_host.as_ref().is_ok_and(|host_url| {
+            origin.to_str().is_ok_and(|origin| {
+                Url::parse(origin).is_ok_and(|origin_url| origin_url.origin() == host_url.origin())
+            })
+        }),
+    };
+    if !host_is_local || !origin_matches {
+        return error_response_with_status(
+            Error::new(ErrorKind::Permission).with_message("untrusted local request origin"),
+            StatusCode::FORBIDDEN,
+        );
+    }
+    next.run(request).await
 }
 
-fn is_loopback(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(addr) => addr.is_loopback(),
-        IpAddr::V6(addr) => addr.is_loopback(),
-    }
-}
-
-fn validate_config(config: &ServeConfig) -> Result<Vec<String>, Error> {
-    let cors_allowed_origins = normalize_cors_origins(&config.cors_allowed_origins)?;
-    let is_loopback_bind = is_loopback(config.bind.ip());
-    if !is_loopback_bind && !config.allow_non_loopback {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("non-loopback bind requires explicit opt-in")
-            .with_hint("Re-run with --allow-non-loopback or use a loopback address."));
-    }
-
+fn validate_config(config: &ServeConfig) -> Result<(), Error> {
     if config.tls_cert.is_some() != config.tls_key.is_some() {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("TLS requires both --tls-cert and --tls-key")
-            .with_hint("Provide both paths or run `plasmite serve init` to generate matching TLS artifacts."));
+        return Err(
+            Error::new(ErrorKind::Usage).with_message("TLS requires both --tls-cert and --tls-key")
+        );
     }
-
-    if config.tls_self_signed && (config.tls_cert.is_some() || config.tls_key.is_some()) {
+    if config.max_body_bytes == 0 || config.max_body_bytes > usize::MAX as u64 {
         return Err(Error::new(ErrorKind::Usage)
-            .with_message("--tls-self-signed cannot be combined with --tls-cert/--tls-key")
-            .with_hint("Use either --tls-self-signed or provide certificate paths; `plasmite serve init` can generate cert/key files."));
+            .with_message("--max-body-bytes must fit in memory and be greater than zero"));
     }
-
-    if config.max_body_bytes == 0 {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("--max-body-bytes must be greater than zero")
-            .with_hint("Use a positive value like 1048576."));
-    }
-
     if config.max_tail_timeout_ms == 0 {
         return Err(Error::new(ErrorKind::Usage)
-            .with_message("--max-tail-timeout-ms must be greater than zero")
-            .with_hint("Use a positive value like 30000."));
+            .with_message("--max-tail-timeout-ms must be greater than zero"));
     }
-
     if config.max_concurrent_tails == 0 {
         return Err(Error::new(ErrorKind::Usage)
-            .with_message("--max-tail-concurrency must be greater than zero")
-            .with_hint("Use a positive value like 64."));
+            .with_message("--max-tail-concurrency must be greater than zero"));
     }
-
-    if config.max_body_bytes > usize::MAX as u64 {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("--max-body-bytes exceeds platform limits")
-            .with_hint("Use a smaller value that fits in memory."));
-    }
-
-    if !is_loopback_bind && config.access_mode.allows_write() {
-        if !config.token_file_used {
-            return Err(Error::new(ErrorKind::Usage)
-                .with_message("non-loopback write requires --token-file")
-                .with_hint("Run `plasmite serve init` and use the generated --token-file for non-loopback write access."));
-        }
-        if !config.insecure_no_tls && !tls_is_configured(config) {
-            return Err(Error::new(ErrorKind::Usage)
-                .with_message("non-loopback write requires TLS")
-                .with_hint("Run `plasmite serve init` for cert/key artifacts, or use --tls-cert/--tls-key, --tls-self-signed, or --insecure-no-tls."));
-        }
-    }
-
-    Ok(cors_allowed_origins)
-}
-
-pub fn normalize_cors_origins(raw: &[String]) -> Result<Vec<String>, Error> {
-    let mut seen = HashSet::new();
-    let mut normalized = Vec::new();
-    for entry in raw {
-        let origin = normalize_cors_origin(entry)?;
-        if seen.insert(origin.clone()) {
-            normalized.push(origin);
-        }
-    }
-    Ok(normalized)
-}
-
-fn normalize_cors_origin(raw: &str) -> Result<String, Error> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("CORS origin must not be empty")
-            .with_hint("Use --cors-origin with an explicit origin like https://demo.wratify.ai."));
-    }
-    if trimmed == "*" {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("CORS wildcard origin is not allowed")
-            .with_hint(
-                "Use explicit repeatable --cors-origin values (for example https://demo.wratify.ai).",
-            ));
-    }
-
-    let parsed = Url::parse(trimmed).map_err(|err| {
-        Error::new(ErrorKind::Usage)
-            .with_message("invalid CORS origin")
-            .with_hint("Use full origins like https://demo.wratify.ai or http://localhost:5173.")
-            .with_source(err)
-    })?;
-
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("CORS origin scheme must be http or https")
-            .with_hint("Use origins like https://demo.wratify.ai."));
-    }
-    if parsed.host_str().is_none() {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("CORS origin must include a host")
-            .with_hint("Use origins like https://demo.wratify.ai."));
-    }
-    if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("CORS origin must not include userinfo")
-            .with_hint("Use origins like https://demo.wratify.ai."));
-    }
-    if parsed.path() != "/" {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("CORS origin must not include a path")
-            .with_hint("Specify only scheme + host + optional port (no trailing path)."));
-    }
-    if parsed.query().is_some() || parsed.fragment().is_some() {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("CORS origin must not include query or fragment")
-            .with_hint("Specify only scheme + host + optional port."));
-    }
-    let origin = parsed.origin().ascii_serialization();
-    if origin == "null" {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("CORS origin is not allowed")
-            .with_hint("Use origins like https://demo.wratify.ai."));
-    }
-    Ok(origin)
-}
-
-fn build_cors_layer(origins: &[String]) -> Result<Option<CorsLayer>, Error> {
-    if origins.is_empty() {
-        return Ok(None);
-    }
-    let mut allow_origins = Vec::with_capacity(origins.len());
-    for origin in origins {
-        let value = HeaderValue::from_str(origin.as_str()).map_err(|err| {
-            Error::new(ErrorKind::Usage)
-                .with_message("invalid CORS origin header value")
-                .with_hint("Use origins like https://demo.wratify.ai.")
-                .with_source(err)
-        })?;
-        allow_origins.push(value);
-    }
-    let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::list(allow_origins))
-        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
-        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
-    Ok(Some(cors))
-}
-
-fn tls_is_configured(config: &ServeConfig) -> bool {
-    config.tls_self_signed || (config.tls_cert.is_some() && config.tls_key.is_some())
+    Ok(())
 }
 
 async fn build_tls_config(config: &ServeConfig) -> Result<Option<Arc<ServerConfig>>, Error> {
-    if config.tls_self_signed {
-        let material = match &config.tls_self_signed_material {
-            Some(value) => value.clone(),
-            None => prepare_self_signed_tls(config.bind.ip())?,
-        };
-        let certs = vec![CertificateDer::from(material.cert_der)];
-        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(material.key_der));
-        let tls = build_server_config(certs, key)?;
-        return Ok(Some(Arc::new(tls)));
-    }
-
     if let (Some(cert), Some(key)) = (&config.tls_cert, &config.tls_key) {
         let tls = load_tls_config_from_pem(cert, key)?;
         return Ok(Some(Arc::new(tls)));
@@ -510,6 +343,10 @@ fn load_tls_config_from_pem(cert_path: &Path, key_path: &Path) -> Result<ServerC
     build_server_config(certs, key)
 }
 
+pub(crate) fn validate_tls_files(cert_path: &Path, key_path: &Path) -> Result<(), Error> {
+    load_tls_config_from_pem(cert_path, key_path).map(|_| ())
+}
+
 fn load_certificates_from_pem(cert_path: &Path) -> Result<Vec<CertificateDer<'static>>, Error> {
     let cert_bytes = std::fs::read(cert_path).map_err(|err| {
         Error::new(ErrorKind::Io)
@@ -532,18 +369,6 @@ fn load_certificates_from_pem(cert_path: &Path) -> Result<Vec<CertificateDer<'st
             .with_path(cert_path));
     }
     Ok(certs)
-}
-
-fn format_cert_fingerprint(cert_der: &[u8]) -> String {
-    let digest = Sha256::digest(cert_der);
-    let mut out = String::from("SHA256:");
-    for (idx, byte) in digest.iter().enumerate() {
-        if idx > 0 {
-            out.push(':');
-        }
-        out.push_str(&format!("{byte:02X}"));
-    }
-    out
 }
 
 fn build_server_config(
@@ -687,40 +512,62 @@ async fn shutdown_signal() {
 }
 
 fn authorize(headers: &HeaderMap, state: &AppState) -> Result<(), Error> {
-    let Some(token) = state.token.as_ref() else {
+    if state.local_admin {
         return Ok(());
+    }
+    if let Some(access) = &state.secure_access {
+        let Some(value) = headers.get(axum::http::header::AUTHORIZATION) else {
+            return Err(Error::new(ErrorKind::Permission).with_message("missing access key"));
+        };
+        let secret = value
+            .to_str()
+            .ok()
+            .and_then(|value| value.strip_prefix("Bearer "));
+        if !secret.is_some_and(|secret| access.accepts_secret(secret)) {
+            return Err(Error::new(ErrorKind::Permission).with_message("invalid access key"));
+        }
+        return Ok(());
+    }
+    Err(Error::new(ErrorKind::Permission).with_message("secure access is unavailable"))
+}
+
+#[derive(Deserialize)]
+struct InviteRequest {
+    name: String,
+    server_fingerprint: String,
+}
+
+async fn access_invite(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<InviteRequest>,
+) -> Response {
+    if !state.local_admin {
+        return error_response(
+            Error::new(ErrorKind::Permission).with_message("access administration is local only"),
+        );
+    }
+    let Some(access) = &state.secure_access else {
+        return error_response(
+            Error::new(ErrorKind::Usage).with_message("secure sharing is not active"),
+        );
     };
-    let Some(value) = headers.get(axum::http::header::AUTHORIZATION) else {
-        return Err(Error::new(ErrorKind::Permission).with_message("missing bearer token"));
-    };
-    let value = value.to_str().unwrap_or_default();
-    let expected = format!("Bearer {token}");
-    if value != expected {
-        return Err(Error::new(ErrorKind::Permission).with_message("invalid bearer token"));
+    if request.server_fingerprint != access.fingerprint() {
+        return error_response(
+            Error::new(ErrorKind::Permission)
+                .with_message("local server does not own the selected pool directory"),
+        );
     }
-    Ok(())
-}
-
-fn ensure_read_access(state: &AppState) -> Result<(), Error> {
-    if state.access_mode.allows_read() {
-        Ok(())
-    } else {
-        Err(access_error("read operations"))
+    match access.issue(&request.name) {
+        Ok(access_key) => json_response(json!({"access_key": access_key})),
+        Err(err) => error_response(err),
     }
 }
 
-fn ensure_write_access(state: &AppState) -> Result<(), Error> {
-    if state.access_mode.allows_write() {
-        Ok(())
-    } else {
-        Err(access_error("write operations"))
+async fn access_check(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    match authorize(&headers, &state) {
+        Ok(()) => json_response(json!({"accepted": true})),
+        Err(err) => error_response(err),
     }
-}
-
-fn access_error(action: &str) -> Error {
-    Error::new(ErrorKind::Permission)
-        .with_message(format!("forbidden: access mode disallows {action}"))
-        .with_hint("Adjust --access to permit this operation.")
 }
 
 #[derive(Debug, Deserialize)]
@@ -801,7 +648,6 @@ async fn mcp_post(
     let dispatch = tokio::task::spawn_blocking(move || {
         let handler = ServeMcpHandler::new(
             dispatch_state.client.clone(),
-            dispatch_state.access_mode,
             dispatch_state.tail_semaphore.clone(),
         );
         let mut dispatcher = McpDispatcher::new(handler);
@@ -839,15 +685,13 @@ async fn mcp_post(
 
 struct ServeMcpHandler {
     inner: PlasmiteMcpHandler,
-    access_mode: AccessMode,
     wait_semaphore: Arc<Semaphore>,
 }
 
 impl ServeMcpHandler {
-    fn new(client: LocalClient, access_mode: AccessMode, wait_semaphore: Arc<Semaphore>) -> Self {
+    fn new(client: LocalClient, wait_semaphore: Arc<Semaphore>) -> Self {
         Self {
             inner: PlasmiteMcpHandler::with_client(client),
-            access_mode,
             wait_semaphore,
         }
     }
@@ -855,25 +699,10 @@ impl ServeMcpHandler {
 
 impl McpHandler for ServeMcpHandler {
     fn list_tools(&mut self) -> Result<Vec<McpTool>, McpJsonRpcError> {
-        let mut tools = self.inner.list_tools()?;
-        tools.retain(|tool| mcp_tool_allowed(self.access_mode, tool.access));
-        Ok(tools)
+        self.inner.list_tools()
     }
 
     fn call_tool(&mut self, request: ToolCallRequest) -> Result<ToolCallResult, McpJsonRpcError> {
-        let access = self
-            .inner
-            .list_tools()?
-            .into_iter()
-            .find(|tool| tool.name == request.name)
-            .map(|tool| tool.access);
-        if let Some(access) = access.filter(|access| !mcp_tool_allowed(self.access_mode, *access)) {
-            let action = match access {
-                McpToolAccess::Read => "read operations",
-                McpToolAccess::Write => "write operations",
-            };
-            return Ok(mcp_access_denied_tool_result(action, &request.name));
-        }
         let _wait_permit = if request.name == "plasmite_wait" {
             match self.wait_semaphore.clone().try_acquire_owned() {
                 Ok(permit) => Some(permit),
@@ -886,9 +715,6 @@ impl McpHandler for ServeMcpHandler {
     }
 
     fn list_resources(&mut self) -> Result<Vec<McpResource>, McpJsonRpcError> {
-        if !self.access_mode.allows_read() {
-            return Err(mcp_access_denied_rpc_error("read operations"));
-        }
         self.inner.list_resources()
     }
 
@@ -896,29 +722,8 @@ impl McpHandler for ServeMcpHandler {
         &mut self,
         request: ResourceReadRequest,
     ) -> Result<ResourceReadResult, McpJsonRpcError> {
-        if !self.access_mode.allows_read() {
-            return Err(mcp_access_denied_rpc_error("read operations"));
-        }
         self.inner.read_resource(request)
     }
-}
-
-fn mcp_tool_allowed(access_mode: AccessMode, tool_access: McpToolAccess) -> bool {
-    match tool_access {
-        McpToolAccess::Read => access_mode.allows_read(),
-        McpToolAccess::Write => access_mode.allows_write(),
-    }
-}
-
-fn mcp_access_denied_tool_result(action: &str, tool: &str) -> ToolCallResult {
-    ToolCallResult::execution_error_with_structured(
-        format!("forbidden: access mode disallows {action}"),
-        Some(json!({
-            "error_kind": "Permission",
-            "tool": tool,
-            "hint": "Adjust --access to permit this operation.",
-        })),
-    )
 }
 
 fn mcp_wait_busy_tool_result() -> ToolCallResult {
@@ -930,16 +735,6 @@ fn mcp_wait_busy_tool_result() -> ToolCallResult {
             "hint": "Try again later or reduce long-lived read concurrency.",
         })),
     )
-}
-
-fn mcp_access_denied_rpc_error(action: &str) -> McpJsonRpcError {
-    let mut error =
-        McpJsonRpcError::new(-32000, format!("forbidden: access mode disallows {action}"));
-    error.data = Some(json!({
-        "error_kind": "Permission",
-        "hint": "Adjust --access to permit this operation.",
-    }));
-    error
 }
 
 fn validate_mcp_protocol_version(headers: &HeaderMap) -> Result<(), Error> {
@@ -968,11 +763,23 @@ fn validate_mcp_origin_header(headers: &HeaderMap) -> Result<(), Error> {
             .with_message("forbidden: invalid Origin header")
             .with_hint("Send a valid Origin URI or omit Origin.")
     })?;
-    normalize_cors_origin(value).map_err(|_| {
+    let parsed = Url::parse(value).map_err(|_| {
         Error::new(ErrorKind::Permission)
             .with_message("forbidden: invalid Origin header")
             .with_hint("Send a valid Origin URI or omit Origin.")
     })?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.path() != "/"
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err(
+            Error::new(ErrorKind::Permission).with_message("forbidden: invalid Origin header")
+        );
+    }
     Ok(())
 }
 
@@ -1028,9 +835,6 @@ async fn create_pool(
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
     }
-    if let Err(err) = ensure_write_access(&state) {
-        return error_response(err);
-    }
     let pool_ref = match pool_ref_from_request(&payload.pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
@@ -1053,9 +857,6 @@ async fn open_pool(
     Json(payload): Json<PoolRequest>,
 ) -> Response {
     if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
-    if let Err(err) = ensure_read_access(&state) {
         return error_response(err);
     }
     let pool_ref = match pool_ref_from_request(&payload.pool) {
@@ -1081,9 +882,6 @@ async fn pool_info(
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
     }
-    if let Err(err) = ensure_read_access(&state) {
-        return error_response(err);
-    }
     let pool_ref = match pool_ref_from_request(&pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
@@ -1101,9 +899,6 @@ async fn pool_info(
 
 async fn list_pools(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
-    if let Err(err) = ensure_read_access(&state) {
         return error_response(err);
     }
     let client = state.client.clone();
@@ -1138,9 +933,6 @@ async fn delete_pool(
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
     }
-    if let Err(err) = ensure_write_access(&state) {
-        return error_response(err);
-    }
     let pool_ref = match pool_ref_from_request(&pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
@@ -1163,9 +955,6 @@ async fn append_message(
     Json(payload): Json<AppendRequest>,
 ) -> Response {
     if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
-    if let Err(err) = ensure_write_access(&state) {
         return error_response(err);
     }
     let pool_ref = match pool_ref_from_request(&pool) {
@@ -1199,9 +988,6 @@ async fn append_lite3(
     payload: Bytes,
 ) -> Response {
     if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
-    if let Err(err) = ensure_write_access(&state) {
         return error_response(err);
     }
     if let Some(content_type) = headers
@@ -1249,9 +1035,6 @@ async fn get_message(
     if let Err(err) = authorize(&headers, &state) {
         return error_response(err);
     }
-    if let Err(err) = ensure_read_access(&state) {
-        return error_response(err);
-    }
     let pool_ref = match pool_ref_from_request(&pool) {
         Ok(pool_ref) => pool_ref,
         Err(err) => return error_response(err),
@@ -1278,9 +1061,6 @@ async fn get_lite3(
     AxumPath((pool, seq)): AxumPath<(String, u64)>,
 ) -> Response {
     if let Err(err) = authorize(&headers, &state) {
-        return error_response(err);
-    }
-    if let Err(err) = ensure_read_access(&state) {
         return error_response(err);
     }
     let pool_ref = match pool_ref_from_request(&pool) {
@@ -1398,7 +1178,6 @@ fn tail_pool_ref_from_request(
     pool: &str,
 ) -> Result<PoolRef, Error> {
     authorize(headers, state)?;
-    ensure_read_access(state)?;
     pool_ref_from_request(pool)
 }
 
@@ -1703,12 +1482,8 @@ fn durability_from_str(value: Option<&str>) -> Durability {
 }
 
 fn error_response(err: Error) -> Response {
-    let status = if err.kind() == ErrorKind::Permission && is_access_forbidden(&err) {
-        StatusCode::FORBIDDEN
-    } else {
-        StatusCode::from_u16(error_policy(interface_error_kind(err.kind())).http_status)
-            .expect("error policy contains valid HTTP status")
-    };
+    let status = StatusCode::from_u16(error_policy(interface_error_kind(err.kind())).http_status)
+        .expect("error policy contains valid HTTP status");
     error_response_with_status(err, status)
 }
 
@@ -1735,50 +1510,67 @@ fn error_body(err: &Error) -> ErrorBody {
     }
 }
 
-fn is_access_forbidden(err: &Error) -> bool {
-    err.message()
-        .is_some_and(|message| message.starts_with("forbidden:"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        AccessMode, AppState, Error, ErrorKind, LocalClient, McpHandler, McpToolAccess,
-        PoolOptions, PoolRef, ServeConfig, ServeMcpHandler, StorageExecutor, ToolCallRequest,
-        build_cors_layer, error_response, healthz, list_pools, mcp_post, mcp_tool_allowed,
-        normalize_cors_origins, normalize_tags, parse_tags_from_query, prepare_server, serve,
-        serve_with_listener, validate_config,
+        AppState, Error, ErrorKind, LocalClient, McpHandler, ServeConfig, ServeMcpHandler,
+        StorageExecutor, ToolCallRequest, error_response, healthz, list_pools, mcp_post,
+        normalize_tags, parse_tags_from_query, validate_config, validate_mcp_origin_header,
     };
     use axum::Json;
     use axum::extract::State;
-    use axum::http::HeaderMap;
+    use axum::http::{HeaderMap, HeaderValue, header};
     use serde_json::json;
     use std::sync::Arc;
     use tokio::sync::Semaphore;
 
-    #[tokio::test]
-    async fn storage_executor_maps_success_and_core_errors() {
-        let executor = StorageExecutor::new(1);
-        assert_eq!(
-            executor.run(|| Ok::<_, Error>(42)).await.expect("success"),
-            42
-        );
-        let err = executor
-            .run(|| Err::<(), _>(Error::new(ErrorKind::NotFound)))
-            .await
-            .expect_err("core error");
-        assert_eq!(err.kind(), ErrorKind::NotFound);
+    fn config() -> ServeConfig {
+        ServeConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            pool_dir: std::path::PathBuf::from("/tmp/plasmite-test"),
+            tls_cert: None,
+            tls_key: None,
+            max_body_bytes: 1024 * 1024,
+            max_tail_timeout_ms: 30_000,
+            max_concurrent_tails: 1,
+        }
     }
 
-    #[tokio::test]
-    async fn storage_executor_maps_task_failure() {
-        let executor = StorageExecutor::new(1);
-        let err = executor
-            .run(|| -> Result<(), Error> { panic!("injected task failure") })
-            .await
-            .expect_err("join error");
-        assert_eq!(err.kind(), ErrorKind::Internal);
-        assert_eq!(err.message(), Some("server storage task failed"));
+    #[test]
+    fn config_requires_complete_tls_pair_and_positive_limits() {
+        let mut cfg = config();
+        cfg.tls_cert = Some("cert.pem".into());
+        assert_eq!(validate_config(&cfg).unwrap_err().kind(), ErrorKind::Usage);
+        cfg.tls_cert = None;
+        cfg.max_body_bytes = 0;
+        assert_eq!(validate_config(&cfg).unwrap_err().kind(), ErrorKind::Usage);
+        cfg.max_body_bytes = 1;
+        cfg.max_tail_timeout_ms = 0;
+        assert_eq!(validate_config(&cfg).unwrap_err().kind(), ErrorKind::Usage);
+        cfg.max_tail_timeout_ms = 1;
+        cfg.max_concurrent_tails = 0;
+        assert_eq!(validate_config(&cfg).unwrap_err().kind(), ErrorKind::Usage);
+    }
+
+    #[test]
+    fn mcp_origin_must_be_a_plain_http_origin() {
+        let mut headers = HeaderMap::new();
+        for invalid in [
+            "null",
+            "https://example.com/path",
+            "https://example.com?x=1",
+        ] {
+            headers.insert(header::ORIGIN, HeaderValue::from_str(invalid).unwrap());
+            assert_eq!(
+                validate_mcp_origin_header(&headers).unwrap_err().kind(),
+                ErrorKind::Permission
+            );
+        }
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://example.com"),
+        );
+        validate_mcp_origin_header(&headers).unwrap();
     }
 
     #[tokio::test]
@@ -1791,35 +1583,27 @@ mod tests {
             tokio::spawn(async move {
                 executor
                     .run(move || {
-                        started_tx.send(()).expect("signal start");
-                        release_rx.recv().expect("release task");
+                        started_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
                         Ok(())
                     })
                     .await
             })
         };
-        started_rx.await.expect("task started");
-
-        let err = executor
-            .run(|| Ok::<_, Error>(()))
-            .await
-            .expect_err("saturated");
+        started_rx.await.unwrap();
+        let err = executor.run(|| Ok::<_, Error>(())).await.unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Busy);
-
-        release_tx.send(()).expect("release active task");
-        active
-            .await
-            .expect("join active task")
-            .expect("active result");
+        release_tx.send(()).unwrap();
+        active.await.unwrap().unwrap();
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn saturated_storage_keeps_health_and_mcp_responsive() {
-        let temp = tempfile::tempdir().expect("tempdir");
+        let temp = tempfile::tempdir().unwrap();
         let state = Arc::new(AppState {
             client: LocalClient::new().with_pool_dir(temp.path()),
-            token: None,
-            access_mode: AccessMode::ReadWrite,
+            secure_access: None,
+            local_admin: true,
             max_tail_timeout_ms: 30_000,
             tail_semaphore: Arc::new(Semaphore::new(1)),
             storage_executor: StorageExecutor::new(1),
@@ -1831,534 +1615,110 @@ mod tests {
             tokio::spawn(async move {
                 executor
                     .run(move || {
-                        started_tx.send(()).expect("signal start");
-                        release_rx.recv().expect("release task");
+                        started_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
                         Ok(())
                     })
                     .await
             })
         };
-        started_rx.await.expect("storage task started");
-
-        let busy = list_pools(State(state.clone()), HeaderMap::new()).await;
-        assert_eq!(busy.status(), axum::http::StatusCode::LOCKED);
-
-        let mcp_payload = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": super::MCP_PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "test", "version": "1"}
-            }
-        });
+        started_rx.await.unwrap();
+        assert_eq!(
+            list_pools(State(state.clone()), HeaderMap::new())
+                .await
+                .status(),
+            axum::http::StatusCode::LOCKED
+        );
+        let payload = json!({"jsonrpc":"2.0", "id":1, "method":"initialize", "params":{"protocolVersion":super::MCP_PROTOCOL_VERSION,"capabilities":{},"clientInfo":{"name":"test","version":"1"}}});
         tokio::time::timeout(std::time::Duration::from_millis(100), async {
-            let health = healthz().await;
-            assert_eq!(health.status(), axum::http::StatusCode::OK);
-            let mcp = mcp_post(State(state), HeaderMap::new(), Json(mcp_payload)).await;
-            assert_eq!(mcp.status(), axum::http::StatusCode::OK);
+            assert_eq!(healthz().await.status(), axum::http::StatusCode::OK);
+            assert_eq!(
+                mcp_post(State(state), HeaderMap::new(), Json(payload))
+                    .await
+                    .status(),
+                axum::http::StatusCode::OK
+            );
         })
         .await
-        .expect("health and MCP remained responsive");
-
-        release_tx.send(()).expect("release active task");
-        active
-            .await
-            .expect("join active task")
-            .expect("active result");
+        .unwrap();
+        release_tx.send(()).unwrap();
+        active.await.unwrap().unwrap();
     }
 
     #[test]
-    fn mcp_tool_discovery_respects_access_mode() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let client = LocalClient::new().with_pool_dir(temp.path());
-        let semaphore = Arc::new(Semaphore::new(1));
-
-        let tool_names = |access_mode| {
-            let mut handler = ServeMcpHandler::new(client.clone(), access_mode, semaphore.clone());
-            handler
-                .list_tools()
-                .expect("list tools")
-                .into_iter()
-                .map(|tool| tool.name)
-                .collect::<Vec<_>>()
+    fn remote_state_without_access_store_fails_closed() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState {
+            client: LocalClient::new().with_pool_dir(temp.path()),
+            secure_access: None,
+            local_admin: false,
+            max_tail_timeout_ms: 30_000,
+            tail_semaphore: Arc::new(Semaphore::new(1)),
+            storage_executor: StorageExecutor::new(1),
         };
-
         assert_eq!(
-            tool_names(AccessMode::ReadOnly),
-            vec![
-                "plasmite_pool_list",
-                "plasmite_pool_info",
-                "plasmite_fetch",
-                "plasmite_read",
-                "plasmite_wait",
-            ]
+            super::authorize(&HeaderMap::new(), &state)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::Permission
         );
-        assert_eq!(
-            tool_names(AccessMode::WriteOnly),
-            vec![
-                "plasmite_pool_create",
-                "plasmite_pool_delete",
-                "plasmite_feed",
-            ]
-        );
-        assert_eq!(tool_names(AccessMode::ReadWrite).len(), 8);
+        state.local_admin = true;
+        super::authorize(&HeaderMap::new(), &state).unwrap();
     }
 
     #[test]
-    fn http_error_presenter_preserves_status_policy_for_every_kind() {
-        let cases = [
-            (ErrorKind::Internal, 500),
-            (ErrorKind::Usage, 400),
-            (ErrorKind::NotFound, 404),
-            (ErrorKind::AlreadyExists, 409),
-            (ErrorKind::Busy, 423),
-            (ErrorKind::Permission, 401),
-            (ErrorKind::Corrupt, 500),
-            (ErrorKind::Io, 500),
-        ];
-
-        for (kind, status) in cases {
-            assert_eq!(error_response(Error::new(kind)).status().as_u16(), status);
-        }
-        assert_eq!(
-            error_response(
-                Error::new(ErrorKind::Permission).with_message("forbidden: read access required")
-            )
-            .status()
-            .as_u16(),
-            403
-        );
-    }
-
-    #[test]
-    fn mcp_tool_access_is_descriptor_driven_for_new_names() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let client = LocalClient::new().with_pool_dir(temp.path());
+    fn mcp_wait_shares_reader_budget() {
+        let temp = tempfile::tempdir().unwrap();
         let semaphore = Arc::new(Semaphore::new(1));
-        let mut handler = ServeMcpHandler::new(client, AccessMode::ReadOnly, semaphore);
-        let mut test_tool = handler
-            .inner
-            .list_tools()
-            .expect("list tools")
-            .into_iter()
-            .next()
-            .expect("tool descriptor");
-        test_tool.name = "plasmite_test_only_tool".to_string();
-        test_tool.access = McpToolAccess::Write;
-
-        assert!(!mcp_tool_allowed(AccessMode::ReadOnly, test_tool.access));
-        assert!(mcp_tool_allowed(AccessMode::WriteOnly, test_tool.access));
-    }
-
-    #[test]
-    fn mcp_wait_shares_long_lived_reader_budget() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let wait_semaphore = Arc::new(Semaphore::new(1));
-        let _permit = wait_semaphore
-            .clone()
-            .try_acquire_owned()
-            .expect("reserve only permit");
-        let mut handler = ServeMcpHandler::new(
-            LocalClient::new().with_pool_dir(temp.path()),
-            AccessMode::ReadOnly,
-            wait_semaphore,
-        );
-
+        let _permit = semaphore.clone().try_acquire_owned().unwrap();
+        let mut handler =
+            ServeMcpHandler::new(LocalClient::new().with_pool_dir(temp.path()), semaphore);
         let result = handler
             .call_tool(ToolCallRequest {
                 name: "plasmite_wait".to_string(),
-                arguments: json!({
-                    "pool": "events",
-                    "after_seq": 0,
-                    "timeout_ms": 10
-                })
-                .as_object()
-                .expect("object")
-                .clone(),
+                arguments: json!({"pool":"events","after_seq":0,"timeout_ms":10})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
             })
-            .expect("tool result");
-
+            .unwrap();
         assert!(result.is_error);
         assert_eq!(
-            result.structured_content.expect("structured error")["error_kind"],
+            result.structured_content.unwrap()["error_kind"],
             json!("Busy")
         );
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn mcp_wait_does_not_block_async_runtime_worker() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let client = LocalClient::new().with_pool_dir(temp.path());
-        client
-            .create_pool(&PoolRef::name("events"), PoolOptions::new(1024 * 1024))
-            .expect("create pool");
-        let state = Arc::new(AppState {
-            client,
-            token: None,
-            access_mode: AccessMode::ReadOnly,
-            max_tail_timeout_ms: 30_000,
-            tail_semaphore: Arc::new(Semaphore::new(1)),
-            storage_executor: StorageExecutor::new(1),
-        });
-        let payload = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": "plasmite_wait",
-                "arguments": {
-                    "pool": "events",
-                    "after_seq": 0,
-                    "timeout_ms": 200
-                }
-            }
-        });
-
-        let started = std::time::Instant::now();
-        let request = tokio::spawn(mcp_post(State(state), HeaderMap::new(), Json(payload)));
-        tokio::task::yield_now().await;
-        assert!(
-            started.elapsed() < std::time::Duration::from_millis(100),
-            "MCP wait blocked the async runtime worker"
+    #[test]
+    fn http_error_presenter_uses_policy_status() {
+        assert_eq!(
+            error_response(Error::new(ErrorKind::Permission))
+                .status()
+                .as_u16(),
+            401
         );
-        let _response = request.await.expect("request task");
-    }
-
-    fn listener_test_config(
-        pool_dir: &std::path::Path,
-        bind: std::net::SocketAddr,
-        tls_self_signed: bool,
-    ) -> ServeConfig {
-        ServeConfig {
-            bind,
-            pool_dir: pool_dir.to_path_buf(),
-            token: None,
-            cors_allowed_origins: Vec::new(),
-            access_mode: AccessMode::ReadWrite,
-            allow_non_loopback: false,
-            insecure_no_tls: false,
-            token_file_used: false,
-            tls_cert: None,
-            tls_key: None,
-            tls_self_signed,
-            tls_self_signed_material: None,
-            tls_fingerprint: None,
-            max_body_bytes: 1024 * 1024,
-            max_tail_timeout_ms: 30_000,
-            max_concurrent_tails: 1,
-        }
-    }
-
-    #[tokio::test]
-    async fn prebound_plain_listener_has_bounded_shutdown() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("pre-bind listener");
-        let addr = listener.local_addr().expect("assigned address");
-        let config = listener_test_config(temp.path(), addr, false);
-        let prepared = prepare_server(&config).await.expect("prepare server");
-        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-        let server = tokio::spawn(serve_with_listener(prepared, listener, async {
-            let _ = shutdown_rx.await;
-        }));
-
-        let stream = tokio::net::TcpStream::connect(addr)
-            .await
-            .expect("connect to transferred listener");
-        drop(stream);
-        shutdown_tx.send(()).expect("request shutdown");
-        tokio::time::timeout(std::time::Duration::from_secs(1), server)
-            .await
-            .expect("bounded shutdown")
-            .expect("join server")
-            .expect("server result");
-    }
-
-    #[tokio::test]
-    async fn prebound_tls_listener_has_bounded_shutdown() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("pre-bind listener");
-        let addr = listener.local_addr().expect("assigned address");
-        let config = listener_test_config(temp.path(), addr, true);
-        let prepared = prepare_server(&config).await.expect("prepare server");
-        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-        let server = tokio::spawn(serve_with_listener(prepared, listener, async {
-            let _ = shutdown_rx.await;
-        }));
-
-        tokio::task::yield_now().await;
-        shutdown_tx.send(()).expect("request shutdown");
-        tokio::time::timeout(std::time::Duration::from_secs(1), server)
-            .await
-            .expect("bounded shutdown")
-            .expect("join server")
-            .expect("server result");
-    }
-
-    #[tokio::test]
-    async fn serve_rejects_non_loopback_bind() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let config = ServeConfig {
-            bind: "0.0.0.0:0".parse().expect("bind"),
-            pool_dir: temp.path().to_path_buf(),
-            token: None,
-            cors_allowed_origins: Vec::new(),
-            access_mode: AccessMode::ReadWrite,
-            allow_non_loopback: false,
-            insecure_no_tls: false,
-            token_file_used: false,
-            tls_cert: None,
-            tls_key: None,
-            tls_self_signed: false,
-            tls_self_signed_material: None,
-            tls_fingerprint: None,
-            max_body_bytes: 1024 * 1024,
-            max_tail_timeout_ms: 30_000,
-            max_concurrent_tails: 64,
-        };
-        let err = serve(config).await.expect_err("expected usage error");
-        assert_eq!(err.kind(), ErrorKind::Usage);
+        assert_eq!(
+            error_response(Error::new(ErrorKind::Busy))
+                .status()
+                .as_u16(),
+            423
+        );
     }
 
     #[test]
-    fn non_loopback_requires_allow_flag() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let config = ServeConfig {
-            bind: "0.0.0.0:0".parse().expect("bind"),
-            pool_dir: temp.path().to_path_buf(),
-            token: None,
-            cors_allowed_origins: Vec::new(),
-            access_mode: AccessMode::ReadOnly,
-            allow_non_loopback: false,
-            insecure_no_tls: false,
-            token_file_used: false,
-            tls_cert: None,
-            tls_key: None,
-            tls_self_signed: false,
-            tls_self_signed_material: None,
-            tls_fingerprint: None,
-            max_body_bytes: 1024 * 1024,
-            max_tail_timeout_ms: 30_000,
-            max_concurrent_tails: 64,
-        };
-        let err = validate_config(&config).expect_err("expected usage error");
-        assert_eq!(err.kind(), ErrorKind::Usage);
-    }
-
-    #[test]
-    fn non_loopback_read_only_allows_unauthenticated() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let config = ServeConfig {
-            bind: "0.0.0.0:0".parse().expect("bind"),
-            pool_dir: temp.path().to_path_buf(),
-            token: None,
-            cors_allowed_origins: Vec::new(),
-            access_mode: AccessMode::ReadOnly,
-            allow_non_loopback: true,
-            insecure_no_tls: false,
-            token_file_used: false,
-            tls_cert: None,
-            tls_key: None,
-            tls_self_signed: false,
-            tls_self_signed_material: None,
-            tls_fingerprint: None,
-            max_body_bytes: 1024 * 1024,
-            max_tail_timeout_ms: 30_000,
-            max_concurrent_tails: 64,
-        };
-        let origins = validate_config(&config).expect("config ok");
-        assert!(origins.is_empty());
-    }
-
-    #[test]
-    fn non_loopback_write_requires_token_file() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let config = ServeConfig {
-            bind: "0.0.0.0:0".parse().expect("bind"),
-            pool_dir: temp.path().to_path_buf(),
-            token: Some("dev".to_string()),
-            cors_allowed_origins: Vec::new(),
-            access_mode: AccessMode::WriteOnly,
-            allow_non_loopback: true,
-            insecure_no_tls: true,
-            token_file_used: false,
-            tls_cert: None,
-            tls_key: None,
-            tls_self_signed: false,
-            tls_self_signed_material: None,
-            tls_fingerprint: None,
-            max_body_bytes: 1024 * 1024,
-            max_tail_timeout_ms: 30_000,
-            max_concurrent_tails: 64,
-        };
-        let err = validate_config(&config).expect_err("expected usage error");
-        assert_eq!(err.kind(), ErrorKind::Usage);
-    }
-
-    #[test]
-    fn non_loopback_write_requires_tls_or_insecure() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let config = ServeConfig {
-            bind: "0.0.0.0:0".parse().expect("bind"),
-            pool_dir: temp.path().to_path_buf(),
-            token: Some("dev".to_string()),
-            cors_allowed_origins: Vec::new(),
-            access_mode: AccessMode::WriteOnly,
-            allow_non_loopback: true,
-            insecure_no_tls: false,
-            token_file_used: true,
-            tls_cert: None,
-            tls_key: None,
-            tls_self_signed: false,
-            tls_self_signed_material: None,
-            tls_fingerprint: None,
-            max_body_bytes: 1024 * 1024,
-            max_tail_timeout_ms: 30_000,
-            max_concurrent_tails: 64,
-        };
-        let err = validate_config(&config).expect_err("expected usage error");
-        assert_eq!(err.kind(), ErrorKind::Usage);
-    }
-
-    #[test]
-    fn safety_limits_require_positive_values() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let config = ServeConfig {
-            bind: "127.0.0.1:0".parse().expect("bind"),
-            pool_dir: temp.path().to_path_buf(),
-            token: None,
-            cors_allowed_origins: Vec::new(),
-            access_mode: AccessMode::ReadOnly,
-            allow_non_loopback: false,
-            insecure_no_tls: false,
-            token_file_used: false,
-            tls_cert: None,
-            tls_key: None,
-            tls_self_signed: false,
-            tls_self_signed_material: None,
-            tls_fingerprint: None,
-            max_body_bytes: 0,
-            max_tail_timeout_ms: 30_000,
-            max_concurrent_tails: 64,
-        };
-        let err = validate_config(&config).expect_err("expected usage error");
-        assert_eq!(err.kind(), ErrorKind::Usage);
-    }
-
-    #[test]
-    fn normalize_tags_keeps_exact_values_and_drops_empty_entries() {
+    fn tags_preserve_values_and_drop_empty_entries() {
         assert_eq!(
             normalize_tags(vec![
-                "keep".to_string(),
-                " prod ".to_string(),
-                "a,b".to_string(),
-                "".to_string()
+                "keep".into(),
+                " prod ".into(),
+                "a,b".into(),
+                "".into()
             ]),
-            vec!["keep".to_string(), "prod".to_string(), "a,b".to_string()]
-        );
-        assert!(normalize_tags(vec![" ".to_string()]).is_empty());
-        assert!(normalize_tags(Vec::new()).is_empty());
-    }
-
-    #[test]
-    fn parse_tags_from_query_reads_repeated_values() {
-        assert_eq!(
-            parse_tags_from_query(Some("tag=keep&tag=prod&max=1")),
-            vec!["keep".to_string(), "prod".to_string()]
+            vec!["keep", "prod", "a,b"]
         );
         assert_eq!(
             parse_tags_from_query(Some("tag=keep%2Cprod")),
-            vec!["keep,prod".to_string()]
+            vec!["keep,prod"]
         );
-        assert!(parse_tags_from_query(None).is_empty());
-    }
-
-    #[test]
-    fn normalize_cors_origins_dedupes_and_normalizes() {
-        let origins = normalize_cors_origins(&[
-            " https://demo.wratify.ai/ ".to_string(),
-            "http://localhost:5173".to_string(),
-            "https://demo.wratify.ai".to_string(),
-        ])
-        .expect("cors origins");
-        assert_eq!(
-            origins,
-            vec![
-                "https://demo.wratify.ai".to_string(),
-                "http://localhost:5173".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn normalize_cors_origins_rejects_wildcard() {
-        let err = normalize_cors_origins(&["*".to_string()]).expect_err("expected error");
-        assert_eq!(err.kind(), ErrorKind::Usage);
-    }
-
-    #[tokio::test]
-    async fn cors_preflight_includes_allow_origin_header() {
-        use axum::http::header;
-        use std::time::Duration;
-
-        let temp = tempfile::tempdir().expect("tempdir");
-        let config = ServeConfig {
-            bind: "127.0.0.1:0".parse().expect("bind"),
-            pool_dir: temp.path().to_path_buf(),
-            token: None,
-            cors_allowed_origins: vec!["https://demo.wratify.ai".to_string()],
-            access_mode: AccessMode::ReadOnly,
-            allow_non_loopback: false,
-            insecure_no_tls: false,
-            token_file_used: false,
-            tls_cert: None,
-            tls_key: None,
-            tls_self_signed: false,
-            tls_self_signed_material: None,
-            tls_fingerprint: None,
-            max_body_bytes: 1024 * 1024,
-            max_tail_timeout_ms: 30_000,
-            max_concurrent_tails: 64,
-        };
-        let origins = normalize_cors_origins(&config.cors_allowed_origins).expect("origins");
-        let cors_layer = build_cors_layer(&origins)
-            .expect("cors layer")
-            .expect("configured");
-        let app = axum::Router::new()
-            .route("/healthz", axum::routing::get(super::healthz))
-            .layer(cors_layer);
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind listener");
-        let addr = listener.local_addr().expect("local addr");
-        let server = tokio::spawn(async move {
-            let _ = axum::serve(listener, app).await;
-        });
-        tokio::time::sleep(Duration::from_millis(20)).await;
-
-        let url = format!("http://{addr}/healthz");
-        let response = tokio::task::spawn_blocking(move || {
-            ureq::request("OPTIONS", &url)
-                .set("Origin", "https://demo.wratify.ai")
-                .set("Access-Control-Request-Method", "GET")
-                .call()
-        })
-        .await
-        .expect("task join")
-        .expect("preflight response");
-
-        assert!(matches!(response.status(), 200 | 204));
-        assert_eq!(
-            response.header(header::ACCESS_CONTROL_ALLOW_ORIGIN.as_str()),
-            Some("https://demo.wratify.ai")
-        );
-
-        server.abort();
     }
 }

@@ -14,9 +14,9 @@ Local commands accept a pool name such as `events` or an explicit
 plasmite --dir ./pools follow events
 ```
 
-Commands with remote support accept
-`http://host:port/pool` or `https://host:port/pool`. This shorthand names a
-pool; do not append remote API paths.
+Commands with remote support accept `https://host:port/pool`. This shorthand
+names a pool; do not append remote API paths. The loopback-only HTTP listener
+is for credential-free use on the server machine.
 
 | Command | Local name/path | Remote URL |
 | --- | --- | --- |
@@ -28,9 +28,11 @@ pool; do not append remote API paths.
 | `duplex` | yes | yes |
 | `doctor` | yes | no |
 
-Remote `feed`, `follow`, and `duplex` expose authentication and TLS options. See each command's help for
-the exact remote feature limits and the [serving guide](record/serving.md) for
-server setup.
+For native remote access, create a key with `access invite`, then connect with
+`access connect SERVER_URL`. The client saves the connection for the current OS
+user; remote `feed`, `follow`, and `duplex` use saved credentials selected by
+destination. Use `access status SERVER_URL` to check the connection. See the
+[serving guide](record/serving.md) for setup and retired access paths.
 
 ## Input
 
@@ -49,9 +51,9 @@ server setup.
 
 Use human output for inspection and machine output for scripts:
 
-- Pool management, `doctor`, and `serve check` expose `--json`.
+- Pool management and `doctor` expose `--json`.
 - `fetch` always emits a JSON message envelope.
-- `feed` receipts, `version`, and `serve init` adapt to stdout: human text on
+- `feed` receipts and `version` adapt to stdout: human text on
   a terminal and JSON when piped.
 - `follow` and `duplex` use readable terminal output by default. Select JSON
   Lines with `--format jsonl` or `--jsonl`.

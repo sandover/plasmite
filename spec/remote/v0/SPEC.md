@@ -33,6 +33,30 @@ It captures stable wire-level compatibility guarantees only.
 - `GET /v0/pools` -> success body `{ "pools": [...] }`.
 - `DELETE /v0/pools/{pool}` -> success body `{ "ok": true }`.
 
+### Native Access
+
+- `POST /v0/access/invite` accepts `{ "name": "...", "server_fingerprint": "..." }` on the local
+  administration listener and returns `200 { "access_key": "..." }`.
+  The fingerprint must match the owner state for that listener. The route is
+  local-only; remote HTTPS callers cannot create keys.
+- An access key has the form `pk1.<spki-fingerprint>.<secret>`. The
+  fingerprint is the 64-character lowercase hexadecimal SHA-256 digest of
+  the certificate's DER Subject Public Key Info (SPKI); the secret is 32
+  random bytes encoded as 64 lowercase hexadecimal characters. The server
+  stores a SHA-256 verifier of the secret, not the access key or secret
+  itself.
+- `GET /v0/access/check` requires a valid access secret in
+  `Authorization: Bearer <secret>` and returns
+  `200 { "accepted": true }`.
+- Remote pool operations require HTTPS and the same Bearer authorization.
+  Local HTTP remains on loopback and permits credential-free local pool use.
+  The default local and secure ports are `9700` and `9743`, respectively;
+  both may be configured.
+- A native client checks the destination hostname, certificate validity, TLS
+  proof of possession, and the certificate's Subject Public Key Info (SPKI)
+  fingerprint against the key before it sends the secret. A redirect must not
+  forward the secret to a different destination.
+
 ### Message Write/Read
 
 - `POST /v0/pools/{pool}/append` -> success body `{ "message": ... }`.
@@ -74,8 +98,9 @@ It captures stable wire-level compatibility guarantees only.
 
 ### Authentication + Access
 
-- When auth is enabled, clients send `Authorization: Bearer <token>`.
-- Auth failures return `401`.
+- Native HTTPS pool requests send `Authorization: Bearer <secret>` after the
+  client verifies the server identity bound into the access key.
+- Missing or invalid access secrets return `401`.
 - Access-mode violations return `403`.
 
 ### Pool Naming Rules
