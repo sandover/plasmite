@@ -57,3 +57,5 @@
 {"version":1,"task_id":"EKDH4J","kind":"done","at":"2026-09-26T03:53:37.608444Z","text":"Removed static tokens, client TLS bypass flags, remote plaintext and obsolete serve paths; updated help, specs, recipes, and regression coverage. just check passed."}
 {"version":1,"task_id":"MFVUXE","kind":"done","at":"2026-09-26T04:48:08.425807Z","text":"Implemented durable key listing and revocation, cutoff for new operations and active streams, and verified two-key behavior across restart."}
 {"version":1,"task_id":"S7SF3P","kind":"done","at":"2026-09-26T04:48:11.365726Z","text":"Implemented offline disconnect, saved-client credential refresh, safe replacement and recovery, with focused secure-sharing checks."}
+{"version":1,"task_id":"2TJPV7","kind":"created","at":"2026-09-26T05:43:31.17853Z"}
+{"version":1,"task_id":"2TJPV7","kind":"open","at":"2026-09-26T05:43:41.007884Z","text":"Review is scoped and linked after browser and MCP delivery, before final validation."}
