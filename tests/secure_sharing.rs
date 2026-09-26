@@ -2,6 +2,9 @@
 
 use plasmite::api::{Durability, PoolOptions, PoolRef, RemoteClient, access};
 use serde_json::{Value, json};
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::sync::Arc;
 
 #[allow(dead_code)] // This test uses only part of the shared server fixture.
 #[path = "support/server.rs"]
@@ -9,7 +12,8 @@ mod server;
 use server::TestServer;
 
 #[test]
-fn native_key_connects_and_reuses_server_identity() -> Result<(), Box<dyn std::error::Error>> {
+fn native_key_connects_and_reuses_server_identity()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let temp = tempfile::tempdir()?;
     let pool_dir = temp.path().join("pools");
     let client_home = temp.path().join("client");
@@ -132,5 +136,50 @@ fn native_key_connects_and_reuses_server_identity() -> Result<(), Box<dyn std::e
         "https",
     );
     assert!(access::connect(&expired.base_url, expired.access_key()).is_err());
+
+    let target = TcpListener::bind("127.0.0.1:0")?;
+    target.set_nonblocking(true)?;
+    let redirect = TcpListener::bind("127.0.0.1:0")?;
+    let redirect_url = format!("https://localhost:{}", redirect.local_addr()?.port());
+    let cert =
+        rcgen::Certificate::from_params(rcgen::CertificateParams::new(vec!["localhost".into()]))?;
+    let fingerprint = access::spki_fingerprint(&cert.serialize_der()?)?;
+    let key = format!("pk1.{fingerprint}.{}", "1".repeat(64));
+    let tls = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![rustls::pki_types::CertificateDer::from(
+                cert.serialize_der()?,
+            )],
+            rustls::pki_types::PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(
+                cert.serialize_private_key_der(),
+            )),
+        )?;
+    let location = format!(
+        "http://127.0.0.1:{}/v0/access/check",
+        target.local_addr()?.port()
+    );
+    let response = format!(
+        "HTTP/1.1 307 Temporary Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+    let responder = std::thread::spawn(
+        move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            let (socket, _) = redirect.accept()?;
+            socket.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
+            let mut stream =
+                rustls::StreamOwned::new(rustls::ServerConnection::new(Arc::new(tls))?, socket);
+            let mut request_start = [0u8; 1];
+            stream.read_exact(&mut request_start)?;
+            stream.write_all(response.as_bytes())?;
+            stream.flush()?;
+            Ok(())
+        },
+    );
+    assert!(access::connect(&redirect_url, &key).is_err());
+    responder.join().expect("redirect responder")?;
+    assert!(
+        target.accept().is_err(),
+        "redirect target received the access secret"
+    );
     Ok(())
 }
