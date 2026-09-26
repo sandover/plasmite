@@ -329,6 +329,17 @@ impl RemoteClient {
         } else {
             None
         };
+        if matches!(&self.inner.credentials, CredentialSource::Saved)
+            && self.inner.base_url.scheme() == "https"
+            && saved_key.is_none()
+        {
+            return Err(Error::new(ErrorKind::Permission)
+                .with_message(format!("no saved connection to {}", self.inner.base_url))
+                .with_hint(format!(
+                    "Run `plasmite access connect {}` with a current access key.",
+                    self.inner.base_url
+                )));
+        }
         let key = match &self.inner.credentials {
             CredentialSource::Saved => saved_key.as_ref(),
             CredentialSource::Explicit(key) => Some(key),

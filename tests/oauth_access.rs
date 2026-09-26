@@ -409,6 +409,12 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
     access::disconnect(&issuer)?;
     let disconnected = local_mcp_read(&mut mcp_input, &mut mcp_output, 32)?;
     assert!(disconnected["result"]["isError"] == true);
+    assert!(
+        disconnected["result"]["structuredContent"]["hint"]
+            .as_str()
+            .is_some_and(|hint| hint.contains("plasmite access connect")),
+        "disconnected MCP should tell the user how to reconnect: {disconnected}"
+    );
     let replacement = Command::new(env!("CARGO_BIN_EXE_plasmite"))
         .args([
             "--dir",

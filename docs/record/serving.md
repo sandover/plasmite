@@ -149,11 +149,12 @@ leaf's key. The effect on other macOS TLS clients has not been established.
 Removing trust by the full SHA-256 certificate fingerprint works after the
 server goes offline or changes its certificate.
 
-Windows browser trust installation is disabled pending a signed-in desktop
-check. Use an HTTPS certificate that Chrome and Edge already trust. The
-prepared adapter targets the current user's Root store, which also serves
-Windows-native TLS clients. `access untrust SHA256` can remove an exact
-test-owned certificate from that store. Native pinned access remains available.
+Windows browser trust installation is disabled pending browser and trust-scope
+checks on a signed-in desktop. Use an HTTPS certificate that Chrome and Edge
+already trust. The prepared adapter targets the current user's Root store,
+which also serves Windows-native TLS clients. `access untrust SHA256` can remove
+an exact test-owned certificate from that store. Native pinned access remains
+available.
 Older Plasmite-generated server certificates renew once on startup to add an
 explicit `CA:false` constraint while keeping their public key. Native access
 keys keep working, but browsers must approve the new exact certificate.
@@ -163,13 +164,14 @@ key use without `keyCertSign`, server-authentication extended use, and a DNS or
 IP Subject Alternative Name. A certificate already trusted by the browser
 needs no Plasmite trust setup.
 
-The Windows adapter still needs a signed-in desktop check with Chrome, Edge, and
-a Windows-native TLS client. In the configured VM, the headless
-`Import-Certificate` probe refused to run with “UI is not allowed in this
-operation.” The VM had no signed-in desktop, so that probe did not establish
-browser behavior, standard-user approval, restart needs, or whether the Root
-entry could trust a certificate signed by the leaf. The probe left no test
-certificate in the current-user Root store.
+The configured VM now has a signed-in desktop. A disposable certificate reached
+the Windows import wizard's final review for the current user's Root store.
+The final trust action was not approved, so the wizard was canceled and the
+certificate was not installed. `Import-Certificate` still refused to run from
+the interactive command helper with “UI is not allowed in this operation.” The
+VM has no enabled standard-user account. Chrome, Edge, Windows-native TLS,
+restart behavior, and whether a Root entry could trust a certificate signed by
+the leaf remain untested.
 
 ## Connect an MCP harness
 

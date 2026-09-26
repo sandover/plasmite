@@ -98,3 +98,20 @@
 {"version":1,"task_id":"65MU7N","kind":"result","at":"2026-09-26T07:13:37.597906Z","text":"Final just check passes with loopback permission; Sol-high review found no blocking code flaw."}
 {"version":1,"task_id":"65MU7N","kind":"result","at":"2026-09-26T07:13:37.680986Z","text":"Benchmark gives 512B and 4KiB ratios; docs label unsupported Windows trust and unverified browser paths."}
 {"version":1,"task_id":"65MU7N","kind":"block","at":"2026-09-26T07:13:37.763527Z","text":"Interactive browser, Mac/Windows trust, and Claude Code acceptance checks remain open."}
+{"version":1,"task_id":"O3DMKM","kind":"result","at":"2026-09-26T15:18:46.073718Z","text":"Claude Code 2.1.280 local MCP fed/read seq 1, then a fresh process fetched it through the saved key."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-26T15:18:46.141986Z","text":"Claude Code 2.1.280 OAuth login and direct HTTPS MCP fed/read seq 2; a fresh process fetched it."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-26T15:18:46.207566Z","text":"Native saved connection with the same key followed seq 2 and returned the Claude direct message."}
+{"version":1,"task_id":"O3DMKM","kind":"result","at":"2026-09-26T16:03:00.862205Z","text":"Claude local MCP gave an access connect hint after disconnect, then read seq 2 after reconnect."}
+{"version":1,"task_id":"O3DMKM","kind":"done","at":"2026-09-26T16:03:00.932579Z","text":"Claude and Codex local MCP setup, feed/read, restart, disconnect, and recovery checks passed."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-26T16:03:01.012846Z","text":"Claude renewed its expired 900-second token without browser approval; one grant remained and new expiry persisted."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-26T16:03:01.083413Z","text":"Claude direct MCP fetched after server restart using its saved grant; native access with the same key read seq 2."}
+{"version":1,"task_id":"2AOW5U","kind":"result","at":"2026-09-26T16:03:01.154914Z","text":"Chrome 153 and Safari 26.6.2 loaded local access and pool pages; rebuilt UI fixed visited-link contrast."}
+{"version":1,"task_id":"NJ5JQ3","kind":"result","at":"2026-09-26T16:03:01.223239Z","text":"Chrome and Safari rejected the untrusted disposable HTTPS leaf; remote page flow awaits approved trust."}
+{"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-26T16:03:01.294542Z","text":"Mac trust remains uninstalled pending action-time approval; native saved access is still accepted."}
+{"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-26T16:03:01.360604Z","text":"Signed-in Windows wizard reached Current User Root final review; canceled before import without approval."}
+{"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-26T16:03:01.460899Z","text":"Root has zero matching test entries; VM lacks an enabled standard-user account, so issuer scope remains untested."}
+{"version":1,"task_id":"65MU7N","kind":"result","at":"2026-09-26T16:03:01.533187Z","text":"Claude local/direct feed-read, restart, natural OAuth renewal, and native same-key read passed."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-26T16:09:58.329315Z","text":"After owner revocation, Claude direct MCP reported Needs authentication; no tool was exposed."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-26T16:09:58.40112Z","text":"Claude local MCP tool rejected seq 2 with invalid access key; native status showed accepted=false."}
+{"version":1,"task_id":"65MU7N","kind":"result","at":"2026-09-26T16:09:58.470373Z","text":"Real Claude and native checks confirmed key revocation; disposable grants and saved credentials were removed."}
+{"version":1,"task_id":"2AOW5U","kind":"result","at":"2026-09-26T16:09:58.539664Z","text":"Rebuilt local UI shows readable visited links in Chrome and Safari; no browser key write was authorized."}
