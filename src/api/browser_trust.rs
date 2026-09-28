@@ -350,13 +350,25 @@ mod platform {
 
     pub(super) fn install(der: &[u8]) -> ApiResult<()> {
         let file = TempCertificate::new(der)?;
-        let output = Command::new("security")
-            .arg("add-trusted-cert")
-            .args(["-r", "trustRoot", "-p", "ssl", "-k"])
-            .arg(login_keychain()?)
-            .arg(&file.path)
-            .output()
-            .map_err(|err| io_error("install browser trust", err))?;
+        let add = |result| {
+            Command::new("security")
+                .arg("add-trusted-cert")
+                .args(["-r", result, "-p", "ssl", "-k"])
+                .arg(login_keychain()?)
+                .arg(&file.path)
+                .output()
+                .map_err(|err| io_error("install browser trust", err))
+        };
+        let mut output = add("trustRoot")?;
+        // trustRoot rejects a leaf signed by another issuer. Retry only when
+        // macOS reports an invalid trust setting.
+        if !output.status.success()
+            && String::from_utf8_lossy(&output.stderr).contains("SecTrustSettingsSetTrustSettings:")
+            && String::from_utf8_lossy(&output.stderr)
+                .contains("One or more parameters passed to a function were not valid")
+        {
+            output = add("trustAsRoot")?;
+        }
         if output.status.success() {
             Ok(())
         } else {

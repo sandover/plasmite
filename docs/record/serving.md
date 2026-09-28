@@ -147,8 +147,9 @@ keychain for SSL. An earlier platform check found that Chrome and Safari
 accepted the exact certificate and rejected a renewed certificate and a child
 certificate signed with the leaf's key. In the current integration, Chrome
 accepted the exact leaf and a same-key renewal left native access intact while
-browser trust became false. The effect on other macOS TLS clients has not been
-established.
+browser trust became false. A CA-signed, restricted localhost leaf also worked
+when installed as a trusted root for SSL; macOS rejected a child signed by that
+leaf. The effect on other macOS TLS clients has not been established.
 
 `access untrust` selects the exact certificate by its full SHA-256 fingerprint
 even after the server goes offline or changes its certificate. macOS may ask
