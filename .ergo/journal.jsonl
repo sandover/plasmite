@@ -125,3 +125,5 @@
 {"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-26T18:16:44.898298Z","text":"Fresh clients rejected renewed and child certificates; after exact HKCU cleanup all rejected the original again."}
 {"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-26T18:16:44.9687Z","text":"Import-Certificate and both product removal paths failed in VM; setup stays disabled, standard user untested."}
 {"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-26T23:54:23.831416Z","text":"Exact Mac test leaf d57884f6 is absent from login keychain; pending removal process has exited."}
+{"version":1,"task_id":"2AOW5U","kind":"result","at":"2026-09-28T18:11:13.776517Z","text":"Chrome page created and revoked Mac-QA-UI; native write/read passed, then revoked write failed. Headless check remains."}
+{"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-28T18:11:17.118616Z","text":"Mac accepted CA-signed leaf, rejected child. Product install/removal await OS prompt; F6DA30F8 remains trusted."}
