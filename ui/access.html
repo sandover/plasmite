@@ -1,3 +1,10 @@
+<!--
+Purpose: Let the server owner share a pool server: create access keys, hand them over, and revoke them.
+Role: Local-only page for /v0/access/status, keys, invite, and revoke.
+Invariants: A new key appears once, beside the address it works with, and leaves the page on Done.
+Invariants: Invites need a shared address; without one the page shows how to set it instead.
+Invariants: Key names and other server data enter the DOM as text.
+-->
 <!doctype html>
 <html lang="en">
   <head>
@@ -5,164 +12,389 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Plasmite access</title>
     <style>
-      :root { color-scheme: dark; font: 15px/1.45 "Menlo", "Consolas", "DejaVu Sans Mono", monospace; background: #15191f; color: #e9edf1; }
-      body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 30% -20%, #263543, transparent 55%), #15191f; }
-      main { max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
-      a { color: #83c5d7; }
-      .topbar { display: flex; align-items: center; gap: 22px; padding: 10px 18px; border-bottom: 1px solid #394657; background: #1a2028; font: 15px/1.45 "Menlo", "Consolas", "DejaVu Sans Mono", monospace; }
-      .topbar .brand { color: #e9edf1; font-size: 14px; letter-spacing: .11em; text-decoration: none; }
-      .topbar nav { display: flex; gap: 16px; }
-      .topbar nav a { color: #9aa9b8; text-decoration: none; }
-      .topbar .actions { margin-left: auto; font-size: 12px; }
-      .topbar .actions a { text-decoration: none; }
-      .topbar .actions a[aria-current="page"] { color: #e9edf1; }
-      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
-      section { background: #1f232b; border: 1px solid #394657; border-radius: 10px; margin: 1rem 0; padding: 1rem; }
-      h1, h2 { margin: 0 0 .7rem; }
-      h1 { font-size: 1.5rem; } h2 { font-size: 1.1rem; }
-      p { margin: .5rem 0; } .muted { color: #a5acbb; }
-      input, button, textarea { font: inherit; background: #252b36; color: inherit; border: 1px solid #526076; border-radius: 5px; padding: .4rem .6rem; }
-      button { cursor: pointer; } button:disabled { opacity: .5; cursor: default; }
-      input { max-width: 100%; }
-      textarea { width: 100%; height: 5rem; resize: vertical; }
-      .row { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; padding: .65rem 0; border-top: 1px solid #343c4b; }
-      .row > span { flex: 1; min-width: 12rem; }
-      code { overflow-wrap: anywhere; }
-      .error { color: #ef9999; }
+      :root {
+        color-scheme: dark;
+        --bg: #15191f;
+        --panel: #1d242d;
+        --panel-raised: #27313e;
+        --line: #394657;
+        --text: #e9edf1;
+        --muted: #9aa9b8;
+        --accent: #83c5d7;
+        --ok: #74d7b2;
+        --warn: #e8bc72;
+        --error: #f08383;
+      }
+      * { box-sizing: border-box; }
+      [hidden] { display: none !important; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: radial-gradient(circle at 30% -20%, #263543, transparent 55%), var(--bg);
+        color: var(--text);
+        font: 15px/1.45 "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+      }
+      a { color: var(--accent); }
+      button, input { font: inherit; }
+      button { cursor: pointer; }
+      .topbar {
+        display: flex; align-items: baseline; gap: 22px;
+        padding: 10px 18px; border-bottom: 1px solid var(--line); background: #1a2028;
+      }
+      .brand { color: var(--text); font-size: 14px; letter-spacing: .11em; text-decoration: none; }
+      .topbar nav { display: flex; align-items: baseline; gap: 16px; }
+      .topbar nav a { text-decoration: none; color: var(--muted); }
+      .topbar nav a[aria-current="page"] { color: var(--text); }
+
+      main { max-width: 44rem; margin: 0 auto; padding: 28px 18px 48px; }
+      h1 { margin: 0 0 18px; font-size: 20px; font-weight: 600; }
+      h2 { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+      p { margin: 0 0 8px; }
+      .muted { color: var(--muted); }
+      .small { font-size: 12px; }
+      section { margin: 0 0 28px; }
+      .panel { padding: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+
+      .button {
+        padding: 6px 12px; border: 1px solid #526076; border-radius: 6px;
+        background: var(--panel-raised); color: var(--text); white-space: nowrap;
+      }
+      .button:hover, .button:focus-visible { border-color: var(--accent); outline: none; }
+      .button:disabled { opacity: .5; cursor: default; }
+      .button.quiet { background: none; border-color: transparent; color: var(--muted); }
+      .button.quiet:hover, .button.quiet:focus-visible { color: var(--text); border-color: var(--line); }
+      .button.danger { border-color: #825151; color: var(--error); }
+
+      /* A value to hand over: shown in full, selectable, with a copy button beside it. */
+      .value { display: flex; gap: 10px; align-items: center; }
+      .value code {
+        flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;
+        background: #141a21; overflow-wrap: anywhere; user-select: all;
+      }
+      .value + .value { margin-top: 8px; }
+      /* Copy sits inside the value's box, quiet until pointed at. */
+      .value { position: relative; }
+      .value code { padding-right: 38px; }
+      .copy {
+        position: absolute; top: 5px; right: 5px; display: grid; place-items: center; width: 26px; height: 26px;
+        padding: 0; border: 0; border-radius: 5px; background: none; color: var(--muted); opacity: .7;
+      }
+      .copy:hover, .copy:focus-visible { opacity: 1; color: var(--text); background: var(--panel-raised); outline: none; }
+      .copy.done { color: var(--ok); opacity: 1; }
+      .copy svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+      .dir { color: var(--text); overflow-wrap: anywhere; font-weight: 400; }
+      .field-label { display: block; margin: 12px 0 4px; color: var(--muted); font-size: 12px; }
+
+      form { display: flex; gap: 10px; }
+      form input {
+        flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid #526076; border-radius: 6px;
+        background: #141a21; color: var(--text);
+      }
+      form input:focus-visible { border-color: var(--accent); outline: none; }
+
+      .handoff { border-color: var(--ok); }
+      .handoff h2 { display: flex; gap: 10px; align-items: baseline; }
+      .handoff h2 .tag { color: var(--warn); font-size: 12px; font-weight: 400; }
+      /* Each way to connect: its name, then the value to copy and one line on using it. */
+      .methods { display: grid; grid-template-columns: 6.5em 1fr; gap: 14px 0; margin-top: 8px; }
+      .methods b { padding-top: 8px; font-weight: 400; color: var(--muted); }
+      .methods p { margin: 6px 0 0; }
+      .context { margin: 0 0 28px; color: var(--muted); }
+      .context code { color: var(--text); overflow-wrap: anywhere; }
+      .handoff .done { margin-top: 14px; display: flex; justify-content: flex-end; }
+
+      table { width: 100%; border-collapse: collapse; }
+      th { text-align: left; color: var(--muted); font-size: 12px; font-weight: 400; padding: 0 8px 6px 0; }
+      td { padding: 8px 8px 8px 0; border-top: 1px solid #2c3643; vertical-align: middle; }
+      td.when { color: var(--muted); font-size: 13px; white-space: nowrap; }
+      td.act { text-align: right; white-space: nowrap; }
+      .empty { color: var(--muted); }
+      footer { padding-top: 14px; border-top: 1px solid #2c3643; }
+      footer code { overflow-wrap: anywhere; color: var(--text); }
+      .choices { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 14px; }
+      .choices label {
+        display: flex; gap: 8px; align-items: baseline; padding: 6px 10px; border: 1px solid var(--line);
+        border-radius: 6px; cursor: pointer;
+      }
+      .choices label:has(input:checked) { border-color: var(--accent); background: #1f2c36; }
+      .choices input { accent-color: var(--accent); }
+      .choices small { color: var(--muted); }
+      .notice { min-height: 1.2em; margin-top: 8px; font-size: 13px; color: var(--error); }
     </style>
   </head>
   <body>
     <header class="topbar">
       <a class="brand" href="/ui/map">PLASMITE</a>
-      <nav aria-label="Views"><a href="/ui/map">Map</a><a href="/ui">Pools</a></nav>
-      <span class="actions"><a href="/access" aria-current="page">Access</a></span>
+      <nav aria-label="Views">
+        <a href="/ui">Pools</a>
+        <a href="/ui/map">Map</a>
+        <a href="/access" aria-current="page">Access</a>
+      </nav>
     </header>
     <main>
-    <h1 class="sr-only">Access</h1>
-    <section>
-      <h2>Server</h2>
-      <div id="settings" class="muted">Loading server settings…</div>
-    </section>
-    <section>
-      <h2>Invite</h2>
-      <p>Give the access key to someone through a private channel. It appears here only once.</p>
-      <form id="invite-form">
-        <label for="name">Name</label>
-        <input id="name" name="name" maxlength="128" required autocomplete="off" placeholder="Person or device">
-        <button type="submit">Create key</button>
-      </form>
-      <div id="new-key" hidden><p>New access key</p><textarea readonly aria-label="New access key"></textarea></div>
-    </section>
-    <section>
-      <h2>Keys</h2>
-      <div id="keys" class="muted">Loading keys…</div>
-    </section>
-    <p id="notice" role="status"></p>
+      <h1>Access</h1>
+
+      <section id="setup" hidden>
+        <div class="panel">
+          <h2>Only this machine can reach the pools in <code class="dir"></code></h2>
+          <p class="muted">To share them with a VM or another machine, pick the address it will use to reach this one:</p>
+          <div class="choices" id="choices" role="radiogroup" aria-label="Address"></div>
+          <p class="muted">Then stop the <code>plasmite serve</code> running now (Ctrl-C in its terminal) and start it again with:</p>
+          <div class="value"><code id="setup-command"></code><button class="copy" type="button" data-copy="setup-command" aria-label="Copy" title="Copy"></button></div>
+          <p class="muted small" style="margin-top: 10px">The other machine must be able to reach port 9743 here. When the server is back, reload this page to create a key for it.</p>
+        </div>
+      </section>
+
+      <div id="shared" hidden>
+        <p class="context">Sharing the pools in <code class="dir"></code> at <code id="address"></code></p>
+
+        <section id="invite">
+          <h2>Invite</h2>
+          <form id="invite-form" novalidate>
+            <input id="name" name="name" maxlength="128" required autocomplete="off" aria-label="Name" placeholder="Name, like Alex's laptop">
+            <button class="button" type="submit">Create key</button>
+          </form>
+          <p class="muted small" style="margin-top: 8px">A key can read, write, create, and delete every pool in this directory. Make one per person or device, so you can revoke one without the others.</p>
+          <p class="notice" id="invite-notice" role="status"></p>
+        </section>
+
+        <section id="handoff" hidden>
+          <div class="panel handoff">
+            <h2>Key for <span id="handoff-name"></span> <span class="tag">shown once</span></h2>
+            <div class="value"><code id="handoff-key"></code><button class="copy" type="button" data-copy="handoff-key" aria-label="Copy" title="Copy"></button></div>
+            <p class="muted small" style="margin-top: 8px">Send it privately. Whoever has it can use these pools until you revoke it.</p>
+            <h2 style="margin-top: 18px">On the other machine, connect one way</h2>
+            <div class="methods">
+              <b>Terminal</b>
+              <div><div class="value"><code id="method-terminal"></code><button class="copy" type="button" data-copy="method-terminal" aria-label="Copy" title="Copy"></button></div>
+                <p class="muted small">Paste the key when asked. This can also set up the browser.</p></div>
+              <b>Browser</b>
+              <div><div class="value"><code id="method-browser"></code><button class="copy" type="button" data-copy="method-browser" aria-label="Copy" title="Copy"></button></div>
+                <p class="muted small">Open it and enter the key. If the browser warns about the certificate, connect in a terminal first.</p></div>
+              <b>Agent</b>
+              <div><div class="value"><code id="method-agent"></code><button class="copy" type="button" data-copy="method-agent" aria-label="Copy" title="Copy"></button></div>
+                <p class="muted small">Add it as a remote MCP server. It asks for the key.</p></div>
+            </div>
+            <div class="done"><button class="button" type="button" id="done">Done</button></div>
+          </div>
+        </section>
+
+        <section>
+          <h2>Keys</h2>
+          <div id="keys"><p class="empty">Loading…</p></div>
+          <p class="notice" id="keys-notice" role="status"></p>
+        </section>
+      </div>
+
+      <footer id="details" class="muted small" hidden>
+        <p>To use a different address, stop the server and start it again with a new <code>--shared-address</code>. Each machine then runs <code>plasmite access connect</code> again with the new address.</p>
+        <p>To use your own certificate, add <code>--tls-cert</code> and <code>--tls-key</code>. If its private key is new, create new keys.</p>
+      </footer>
+
+      <p class="notice" id="notice" role="alert"></p>
     </main>
     <script>
       (() => {
-        const settings = document.getElementById('settings');
-        const keys = document.getElementById('keys');
-        const notice = document.getElementById('notice');
-        const form = document.getElementById('invite-form');
+        "use strict";
+        const $ = (id) => document.getElementById(id);
         let fingerprint = null;
-
-        function line(parent, label, value) {
-          const p = document.createElement('p');
-          const strong = document.createElement('strong');
-          strong.textContent = label + ': ';
-          p.append(strong, document.createTextNode(value));
-          parent.append(p);
-        }
+        let address = null;
 
         async function request(url, options = {}) {
-          const response = await fetch(url, { cache: 'no-store', ...options });
-          const body = await response.json();
-          if (!response.ok) throw new Error(body.error?.message || `Request failed (${response.status})`);
+          const response = await fetch(url, { cache: "no-store", ...options });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error((body.error && body.error.message) || "Request failed (" + response.status + ")");
           return body;
         }
 
-        async function loadStatus() {
-          const status = await request('/v0/access/status');
-          settings.textContent = '';
-          fingerprint = status.server_fingerprint || null;
-          line(settings, 'Local page', window.location.origin);
-          if (status.shared_address) line(settings, 'Shared address', status.shared_address);
-          if (fingerprint) line(settings, 'Server fingerprint', fingerprint);
-          if (status.next_action) line(settings, 'Next step', status.next_action);
-          if (!fingerprint) form.querySelector('button').disabled = true;
-          const help = document.createElement('p');
-          help.className = 'muted';
-          help.textContent = 'Change the address or certificate in the serve command or configuration, then restart the server.';
-          settings.append(help);
+        function post(url, body) {
+          return request(url, { method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ...body, server_fingerprint: fingerprint }) });
         }
 
-        function date(seconds) {
-          return seconds == null ? 'Not recorded' : new Date(seconds * 1000).toLocaleString();
+        // "just now", "3 min ago", "5 h ago", then a date; "never" when unrecorded.
+        function when(seconds) {
+          if (seconds == null) return "never";
+          const elapsed = Date.now() / 1000 - seconds;
+          if (elapsed < 60) return "just now";
+          if (elapsed < 3600) return Math.floor(elapsed / 60) + " min ago";
+          if (elapsed < 86400) return Math.floor(elapsed / 3600) + " h ago";
+          return new Date(seconds * 1000).toLocaleDateString([], { month: "short", day: "numeric" });
+        }
+
+        function quoted(path) {
+          return /[\s'"$]/.test(path) ? "'" + path.replace(/'/g, "'\\''") + "'" : path;
+        }
+
+        function cell(row, text, className) {
+          const td = document.createElement("td");
+          if (className) td.className = className;
+          td.textContent = text;
+          row.append(td);
+          return td;
+        }
+
+        function button(label, className, onClick) {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "button " + className;
+          b.textContent = label;
+          b.addEventListener("click", onClick);
+          return b;
+        }
+
+        // Revoke asks once, in the row, before it acts.
+        function revokeCell(td, key) {
+          td.replaceChildren(button("Revoke", "", () => {
+            td.replaceChildren(
+              button("Revoke", "danger", async (event) => {
+                event.target.disabled = true;
+                try {
+                  await post("/v0/access/revoke", { id: key.id });
+                  $("keys-notice").textContent = "";
+                  await loadKeys();
+                } catch (error) {
+                  $("keys-notice").textContent = error.message;
+                  revokeCell(td, key);
+                }
+              }),
+              button("Cancel", "quiet", () => revokeCell(td, key)));
+          }));
         }
 
         async function loadKeys() {
-          if (!fingerprint) return;
-          const body = await request('/v0/access/keys', {
-            headers: { 'x-plasmite-server-fingerprint': fingerprint }
-          });
-          keys.textContent = '';
-          if (!body.keys.length) { keys.textContent = 'No keys yet.'; return; }
-          for (const key of body.keys) {
-            const row = document.createElement('div');
-            row.className = 'row';
-            const summary = document.createElement('span');
-            const name = document.createElement('strong');
-            name.textContent = key.name;
-            const detail = document.createElement('small');
-            detail.textContent = ` · ${key.revoked ? 'Revoked' : 'Active'} · Created ${date(key.created_at)} · Last used ${date(key.last_used_at)} · ${key.id.slice(0, 12)}`;
-            summary.append(name, detail);
-            row.append(summary);
-            if (!key.revoked) {
-              const revoke = document.createElement('button');
-              revoke.textContent = 'Revoke';
-              revoke.addEventListener('click', async () => {
-                revoke.disabled = true;
-                try {
-                  await request('/v0/access/revoke', {
-                    method: 'POST', headers: { 'content-type': 'application/json' },
-                    body: JSON.stringify({ id: key.id, server_fingerprint: fingerprint })
-                  });
-                  notice.textContent = `${key.name} revoked.`;
-                  await loadKeys();
-                } catch (error) { notice.textContent = error.message; revoke.disabled = false; }
-              });
-              row.append(revoke);
+          const body = await request("/v0/access/keys", { headers: { "x-plasmite-server-fingerprint": fingerprint } });
+          const active = body.keys.filter((key) => !key.revoked).sort((a, b) => b.created_at - a.created_at);
+          const holder = $("keys");
+          holder.replaceChildren();
+          if (!active.length) {
+            const empty = document.createElement("p");
+            empty.className = "empty";
+            empty.textContent = "No keys yet.";
+            holder.append(empty);
+          } else {
+            const table = document.createElement("table");
+            table.innerHTML = "<thead><tr><th>Name</th><th>Last used</th><th>Created</th><th></th></tr></thead>";
+            const rows = document.createElement("tbody");
+            for (const key of active) {
+              const row = document.createElement("tr");
+              cell(row, key.name);
+              cell(row, when(key.last_used_at), "when");
+              cell(row, when(key.created_at), "when");
+              revokeCell(cell(row, "", "act"), key);
+              rows.append(row);
             }
-            keys.append(row);
+            table.append(rows);
+            holder.append(table);
           }
         }
 
-        form.addEventListener('submit', async (event) => {
-          event.preventDefault();
-          const name = form.elements.name.value.trim();
-          if (!name || !fingerprint) return;
-          const button = form.querySelector('button');
-          button.disabled = true;
-          try {
-            const body = await request('/v0/access/invite', {
-              method: 'POST', headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ name, server_fingerprint: fingerprint })
-            });
-            const newKey = document.getElementById('new-key');
-            newKey.hidden = false;
-            newKey.querySelector('textarea').value = body.access_key;
-            form.reset();
-            notice.textContent = 'Key created. Copy it now; the server will not show it again.';
-            await loadKeys();
-          } catch (error) { notice.textContent = error.message; }
-          finally { button.disabled = false; }
+        function showHandoff(name, key) {
+          $("handoff-name").textContent = name;
+          $("handoff-key").textContent = key;
+          $("method-terminal").textContent = "plasmite access connect " + address;
+          $("method-browser").textContent = address;
+          $("method-agent").textContent = address.replace(/\/$/, "") + "/mcp";
+          $("invite").hidden = true;
+          $("handoff").hidden = false;
+          $("handoff").querySelector("[data-copy='handoff-key']").focus();
+        }
+
+        // Done takes the key off the page; it cannot be shown again.
+        $("done").addEventListener("click", () => {
+          $("handoff-key").textContent = "";
+          $("handoff").hidden = true;
+          $("invite").hidden = false;
+          $("name").focus();
         });
 
-        loadStatus().then(loadKeys).catch(error => {
-          notice.className = 'error';
-          notice.textContent = error.message;
+        $("invite-form").addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const form = event.target;
+          const name = form.elements.name.value.trim();
+          if (!name) {
+            $("invite-notice").textContent = "Name it first, so you can tell keys apart when you revoke one.";
+            form.elements.name.focus();
+            return;
+          }
+          const submit = form.querySelector("button");
+          submit.disabled = true;
+          try {
+            const body = await post("/v0/access/invite", { name });
+            form.reset();
+            $("invite-notice").textContent = "";
+            showHandoff(name, body.access_key);
+            await loadKeys();
+          } catch (error) {
+            $("invite-notice").textContent = error.message;
+          } finally {
+            submit.disabled = false;
+          }
         });
+
+        const copyIcon = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg>';
+        const doneIcon = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>';
+        for (const copy of document.querySelectorAll("[data-copy]")) copy.innerHTML = copyIcon;
+
+        document.addEventListener("click", async (event) => {
+          const copy = event.target.closest("[data-copy]");
+          if (!copy) return;
+          try {
+            await navigator.clipboard.writeText($(copy.dataset.copy).textContent);
+            copy.innerHTML = doneIcon;
+            copy.classList.add("done");
+            setTimeout(() => { copy.innerHTML = copyIcon; copy.classList.remove("done"); }, 1200);
+          } catch (_) {
+            // Without clipboard access, select the value so the copy shortcut takes it.
+            const range = document.createRange();
+            range.selectNodeContents($(copy.dataset.copy));
+            getSelection().removeAllRanges();
+            getSelection().addRange(range);
+          }
+        });
+
+        const kinds = { local: "local network", vm: "VM network", vpn: "VPN", public: "public", name: "this machine's name" };
+
+        // Offers this machine's addresses; the command follows the choice.
+        function showSetup(status) {
+          const hosts = (status.addresses || []).length ? status.addresses : [{ host: "your-hostname", kind: "name" }];
+          const command = (host) => "plasmite --dir " + quoted(status.pool_dir || "./shared") +
+            " serve --shared-address https://" + host + ":9743";
+          const choices = $("choices");
+          choices.replaceChildren(...hosts.map((candidate, i) => {
+            const label = document.createElement("label");
+            const input = document.createElement("input");
+            input.type = "radio";
+            input.name = "host";
+            input.checked = i === 0;
+            input.addEventListener("change", () => { $("setup-command").textContent = command(candidate.host); });
+            const host = document.createElement("span");
+            host.textContent = candidate.host;
+            const kind = document.createElement("small");
+            kind.textContent = kinds[candidate.kind] || candidate.kind;
+            label.append(input, host, kind);
+            return label;
+          }));
+          $("setup-command").textContent = command(hosts[0].host);
+          $("setup").hidden = false;
+        }
+
+        async function boot() {
+          const status = await request("/v0/access/status");
+          fingerprint = status.server_fingerprint || null;
+          for (const dir of document.querySelectorAll(".dir")) dir.textContent = status.pool_dir || "";
+          address = status.shared_address || null;
+          if (!status.ready || !fingerprint || !address) {
+            showSetup(status);
+            return;
+          }
+          $("details").hidden = false;
+          $("address").textContent = address;
+          $("shared").hidden = false;
+          await loadKeys();
+        }
+
+        boot().catch((error) => { $("notice").textContent = error.message; });
       })();
     </script>
   </body>

@@ -45,6 +45,8 @@ use url::{Host, Url};
 use crate::access_store::{AccessGrant, AccessStore};
 #[path = "activity.rs"]
 mod activity;
+#[path = "share_addresses.rs"]
+mod share_addresses;
 use activity::{ActivityRegistry, RequestActivity};
 #[path = "browser_session.rs"]
 mod browser_session;
@@ -850,14 +852,22 @@ async fn access_status(State(state): State<Arc<AppState>>) -> Response {
             Error::new(ErrorKind::Permission).with_message("access administration is local only"),
         );
     }
+    // The pool directory and this machine's addresses let the page show the
+    // exact command to start sharing.
+    let pool_dir = state.client.pool_dir().display().to_string();
+    let addresses = share_addresses::candidates();
     let Some(access) = &state.secure_access else {
         return json_response(json!({
             "ready": false,
+            "pool_dir": pool_dir,
+            "addresses": addresses,
             "next_action": "Start secure serving with --shared-address to invite others."
         }));
     };
     json_response(json!({
         "ready": access.shared_address().is_some(),
+        "pool_dir": pool_dir,
+        "addresses": addresses,
         "server_fingerprint": access.fingerprint(),
         "shared_address": access.shared_address(),
         "next_action": if access.shared_address().is_none() {

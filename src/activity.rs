@@ -320,7 +320,7 @@ fn parse_lsof(output: &[u8], pools: &[(String, PathBuf)], server_pid: u32) -> Ve
         .collect()
 }
 
-fn hostname() -> Option<String> {
+pub(super) fn hostname() -> Option<String> {
     #[cfg(unix)]
     {
         let mut name = [0_u8; 256];

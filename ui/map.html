@@ -58,11 +58,11 @@ Invariants: Message data enters the DOM as text.
       button { font: inherit; cursor: pointer; }
       .shell { min-height: 100vh; display: flex; flex-direction: column; }
       .topbar {
-        display: flex; align-items: center; gap: 22px;
+        display: flex; align-items: baseline; gap: 22px;
         padding: 10px 18px; border-bottom: 1px solid var(--line); background: #1a2028;
       }
       .brand { color: var(--text); font-size: 14px; letter-spacing: .11em; text-decoration: none; }
-      .topbar nav { display: flex; gap: 16px; }
+      .topbar nav { display: flex; align-items: baseline; gap: 16px; }
       .topbar nav a { text-decoration: none; color: var(--muted); }
       .topbar nav a[aria-current="page"] { color: var(--text); }
       .topbar .status { margin-left: auto; color: var(--muted); font-size: 12px; }
@@ -187,8 +187,10 @@ Invariants: Message data enters the DOM as text.
       <header class="topbar">
         <a class="brand" href="/ui/map">PLASMITE</a>
         <nav aria-label="Views">
-          <a href="/ui/map" aria-current="page">Map</a>
           <a href="/ui">Pools</a>
+          <a href="/ui/map" aria-current="page">Map</a>
+          <!-- Access shows only on the server machine; the page unhides it for a local session. -->
+          <a href="/access" id="nav-access" hidden>Access</a>
         </nav>
         <span class="status" id="status">Connecting…</span>
         <span class="actions" id="actions"></span>
@@ -1277,12 +1279,8 @@ Invariants: Message data enters the DOM as text.
             if (!session.ok) { location.assign("/ui"); return; }
             const identity = await session.json();
             const actions = $("actions");
-            if (identity.local) {
-              const access = document.createElement("a");
-              access.href = "/access";
-              access.textContent = "Access";
-              actions.append(access);
-            } else {
+            $("nav-access").hidden = !identity.local;
+            if (!identity.local) {
               const logout = document.createElement("button");
               logout.type = "button";
               logout.textContent = "Log out";
