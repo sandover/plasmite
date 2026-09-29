@@ -9,7 +9,7 @@ Invariants: Each pool is a spiral track whose length is its message buffer,
   sits level outside the spiral, joined to that message by a thin line. Each
   stored message is drawn at its real offset and size. A full pool is a fully
   lit track.
-Invariants: Pools pack in name order, each at the highest spot where it fits. Layout changes only when the
+Invariants: Pools pack as circles in name order, each at the highest free candidate. Layout changes only when the
   pool set or the window width changes. A track's shape comes from its pool's
   size, so data never moves it.
   Tracks never shrink while the page is open. The message card floats over the map and
@@ -87,11 +87,11 @@ Invariants: Message data enters the DOM as text.
 
       .pool {
         position: absolute; display: grid; place-items: center;
-        padding: 0; border: 0; background: none; color: var(--text); animation: appear var(--ease);
+        padding: 0; border: 0; background: none; color: var(--text); pointer-events: none; animation: appear var(--ease);
       }
       .pool > * { grid-area: 1 / 1; }
-      /* The button, which is never redrawn, takes every press, so a redraw mid-click cannot drop it. */
-      .pool svg, .pool .ring { pointer-events: none; }
+      /* The stable disc takes presses even when circles' rectangular boxes overlap. */
+      .pool .hit { width: var(--hit-diameter); height: var(--hit-diameter); border-radius: 50%; pointer-events: auto; }
       .pool .label { display: flex; flex-direction: column; align-items: center; gap: 1px; pointer-events: none; }
       @keyframes appear { from { opacity: 0; transform: scale(.94); } }
       .pool svg { display: block; overflow: visible; }
@@ -207,6 +207,7 @@ Invariants: Message data enters the DOM as text.
         const machinePad = { top: 36, side: 14, bottom: 14 };
         const directoryPad = { top: 40, side: 18, bottom: 16 };
         const gutter = 10;
+        const indexClearance = 24;
         const maxMessages = 200;
         const retryMs = 1200;
         const state = { pools: [], topology: null, layout: null,
@@ -564,7 +565,7 @@ Invariants: Message data enters the DOM as text.
           button.type = "button";
           button.className = "pool";
           button.dataset.name = name;
-          button.innerHTML = '<span class="ring"></span><span class="label"><span class="name"></span><span class="meta"></span></span>';
+          button.innerHTML = '<span class="ring"></span><span class="label"><span class="name"></span><span class="meta"></span></span><span class="hit"></span>';
           button.querySelector(".name").textContent = name;
           // A click from the keyboard has no position (detail 0) and always counts.
           button.addEventListener("click", (event) => {
@@ -604,6 +605,7 @@ Invariants: Message data enters the DOM as text.
         function updateCard(pool) {
           const button = cards.get(pool.name);
           if (!button) return;
+          button.style.setProperty("--hit-diameter", 2 * (pool.track.outer + stroke) + "px");
           drawRing(pool);
           button.querySelector(".label").style.maxWidth = 2 * (pool.shape.inner - stroke) - 6 + "px";
           const used = usedFraction(pool);
@@ -630,49 +632,69 @@ Invariants: Message data enters the DOM as text.
 
         // Layout.
 
-        // Skyline packing: takes boxes in order and puts each at the highest spot
-        // where it fits within maxWidth, leftmost on a tie, so small boxes tuck in
-        // beside big ones. Order reads roughly left to right, top to bottom.
-        // The skyline is the top edge of what is placed so far, as spans left to right.
+        // Try the directory sides, circle edges, and gaps between pairs of
+        // circles. At each x, take the first free height above any circles there.
+        // Their boxes may overlap; only the circular hit areas take presses.
         function pack(boxes, maxWidth) {
-          let skyline = [{ x: 0, width: maxWidth, y: 0 }];
+          const placed = [];
           let width = 0, height = 0;
-          const heightOver = (x, w) => Math.max(...skyline.filter((span) => span.x < x + w && span.x + span.width > x).map((span) => span.y));
-          const placed = boxes.map((box) => {
-            const w = Math.min(box.width, maxWidth);
+          const widestRadius = Math.max(0, ...boxes.map((box) => box.radius + indexClearance + gutter / 2));
+          for (const box of boxes) {
+            const radius = box.radius + indexClearance + gutter / 2;
+            const left = box.width / 2, right = maxWidth - left, top = box.height / 2;
             let best = null;
-            for (const span of skyline) {
-              if (span.x + w > maxWidth) break;
-              const y = heightOver(span.x, w);
-              if (!best || y < best.y) best = { x: span.x, y };
+            const candidates = new Set([left, right]);
+            // Only the growing edge needs new anchors. Every placed circle
+            // still blocks a candidate, so this cannot create overlaps.
+            const edge = placed.filter((other) => other.cy + other.radius >= height - 2 * widestRadius);
+            for (const other of edge) {
+              const distance = radius + other.radius;
+              for (const x of [other.cx - distance, other.cx + distance]) {
+                if (x >= left && x <= right) candidates.add(x);
+              }
             }
-            const at = { ...box, x: best.x, y: best.y };
-            const top = best.y + box.height + gutter;
-            const right = best.x + w + gutter;
-            skyline = skyline.flatMap((span) => {
-              const pieces = [];
-              if (span.x < best.x) pieces.push({ x: span.x, width: Math.min(span.width, best.x - span.x), y: span.y });
-              if (span.x + span.width > right) pieces.push({ x: Math.max(span.x, right), width: span.x + span.width - Math.max(span.x, right), y: span.y });
-              return pieces;
-            }).concat([{ x: best.x, width: Math.min(right, maxWidth) - best.x, y: top }])
-              .sort((a, b) => a.x - b.x)
-              .reduce((spans, span) => {
-                const last = spans[spans.length - 1];
-                if (last && last.y === span.y && last.x + last.width === span.x) last.width += span.width;
-                else spans.push(span);
-                return spans;
-              }, []);
+            // Pair gaps at the growing edge add diagonal nesting.
+            for (let i = 0; i < edge.length; i++) for (let j = i + 1; j < edge.length; j++) {
+              const a = edge[i], b = edge[j];
+              const ar = radius + a.radius, br = radius + b.radius;
+              const dx = b.cx - a.cx, dy = b.cy - a.cy;
+              const distance = Math.hypot(dx, dy);
+              if (distance >= ar + br || distance <= Math.abs(ar - br)) continue;
+              const along = (ar * ar - br * br + distance * distance) / (2 * distance);
+              const across = Math.sqrt(Math.max(0, ar * ar - along * along));
+              for (const x of [a.cx + (along * dx - across * dy) / distance,
+                a.cx + (along * dx + across * dy) / distance]) {
+                if (x >= left && x <= right) candidates.add(x);
+              }
+            }
+            for (const x of candidates) {
+              const blocked = [];
+              for (const other of placed) {
+                const distance = radius + other.radius;
+                const dx = x - other.cx;
+                if (Math.abs(dx) >= distance) continue;
+                const dy = Math.sqrt(distance * distance - dx * dx);
+                blocked.push([other.cy - dy, other.cy + dy]);
+              }
+              blocked.sort((a, b) => a[0] - b[0]);
+              let y = top;
+              for (const [start, end] of blocked) if (start < y && y < end) y = end;
+              if (!best || y < best.y - 0.01 || (Math.abs(y - best.y) < 0.01 && x < best.x)) best = { x, y };
+            }
+            const at = { ...box, x: best.x - left, y: best.y - top, cx: best.x, cy: best.y, radius };
+            placed.push(at);
             width = Math.max(width, at.x + box.width);
             height = Math.max(height, at.y + box.height);
-            return at;
-          });
+          }
           return { boxes: placed, width, height };
         }
 
         // Pure: where the machine, the directory, and each pool go, for this width.
         function computeLayout(pools, availableWidth) {
-          const maxWidth = Math.max(emptySize.width, availableWidth - 2 * machinePad.side - 2 * directoryPad.side);
-          const rows = pack(pools.map((pool) => ({ name: pool.name, ...nodeSize(pool) })), maxWidth);
+          const nodes = pools.map((pool) => ({ name: pool.name, radius: pool.track.outer + stroke, ...nodeSize(pool) }));
+          const maxWidth = Math.max(emptySize.width, availableWidth - 2 * machinePad.side - 2 * directoryPad.side,
+            ...nodes.map((node) => node.width));
+          const rows = pack(nodes, maxWidth);
           const content = { width: Math.max(rows.width, emptySize.width), height: Math.max(rows.height, emptySize.height) };
           const directory = { x: machinePad.side, y: machinePad.top,
             width: content.width + 2 * directoryPad.side, height: content.height + directoryPad.top + directoryPad.bottom };

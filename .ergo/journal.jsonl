@@ -133,6 +133,10 @@
 {"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-29T15:55:24.389658Z","text":"Product installed CA-signed leaf; Chrome login and write passed. Exact untrust cleared keychain and SSL trust."}
 {"version":1,"task_id":"2AOW5U","kind":"result","at":"2026-09-29T15:55:28.693115Z","text":"Chrome page matched serve flags; local key activity and revoke passed. Forged admin tests pass."}
 {"version":1,"task_id":"C74MWK","kind":"created","at":"2026-09-29T16:58:33.973829Z"}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-29T17:18:42.282404Z","text":"Claude direct HTTPS MCP OAuth, feed and fetch passed; native fetch matched qa seq 1."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-29T17:18:45.896653Z","text":"Browser approval unverified: in-app field held 10/133 key chars; fresh URLs were blocked in both browser controls."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-29T17:18:49.369599Z","text":"Disposable key revoked; Claude OAuth and MCP config removed; exact Mac leaf trust removed; TLS rejects it again."}
+{"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-29T17:18:58.404342Z","text":"Mac trusted exact CA:false leaf for SSL; after removal curl rejected it and keychain had no test leaf."}
 {"version":1,"task_id":"YAHAYR","kind":"created","at":"2026-09-29T17:20:27.010498Z"}
 {"version":1,"task_id":"CB5TPU","kind":"created","at":"2026-09-29T17:20:27.032839Z"}
 {"version":1,"task_id":"YAHAYR","kind":"open","at":"2026-09-29T17:20:31.380051Z"}
@@ -142,3 +146,6 @@
 {"version":1,"task_id":"ZCF356","kind":"done","at":"2026-09-29T18:07:32.175464Z","text":"Cursor now starts at the ring tail before resolving since_seq. Wrapped Tail and Replay regression passed; local UI stream delivered #91 through #200 without a false gap. just check passed."}
 {"version":1,"task_id":"YAHAYR","kind":"done","at":"2026-09-29T18:07:32.246042Z","text":"Added one shared pool-list watcher with cached ring layouts and server-sent snapshots. Integration test verified initial state, create, append, delete, and two idle seconds; just check passed."}
 {"version":1,"task_id":"CB5TPU","kind":"done","at":"2026-09-29T18:07:32.32092Z","text":"Map reads pool snapshots from the stream, closes it while hidden, and reconnects after a drop. Browser check verified feed, create, delete, and server restart; just check passed."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-29T18:47:09.410412Z","text":"Correction: browser tooling redacted the password field. Its 10-character display did not show a truncated key."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-29T18:47:09.476804Z","text":"In-app browser reached Claude callback; Claude direct MCP fed/fetched qa seq 1 and native fetch matched."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-29T18:47:09.548083Z","text":"OAuth callback CSP fix committed as 42039b2; key, Claude config, certificate trust, and test server removed."}
