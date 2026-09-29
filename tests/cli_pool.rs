@@ -4,6 +4,65 @@ pub mod support;
 use support::cli::*;
 
 #[test]
+fn small_pool_wrap_keeps_reported_oldest_readable() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let directory = pool_dir.to_str().expect("pool directory");
+    let create = cmd()
+        .args([
+            "--dir", directory, "pool", "create", "--size", "64K", "wrapped",
+        ])
+        .output()
+        .expect("create");
+    assert!(
+        create.status.success(),
+        "{}",
+        String::from_utf8_lossy(&create.stderr)
+    );
+
+    let mut feed = cmd()
+        .args(["--dir", directory, "feed", "wrapped"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("feed");
+    {
+        let stdin = feed.stdin.as_mut().expect("feed stdin");
+        for i in 1..=450 {
+            writeln!(stdin, "{{\"message\":\"tick {i}\",\"level\":\"info\"}}")
+                .expect("write message");
+        }
+    }
+    let output = feed.wait_with_output().expect("feed output");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let info = cmd()
+        .args(["--dir", directory, "pool", "info", "wrapped", "--json"])
+        .output()
+        .expect("pool info");
+    assert!(info.status.success());
+    let info = parse_json(std::str::from_utf8(&info.stdout).expect("info utf8"));
+    let oldest = info["bounds"]["oldest"].as_u64().expect("oldest bound");
+    assert!(oldest > 1, "the pool should have overwritten old messages");
+    let fetched = fetch_message(&pool_dir, "wrapped", oldest);
+    assert_eq!(fetched["seq"].as_u64(), Some(oldest));
+
+    let doctor = cmd()
+        .args(["--dir", directory, "doctor", "wrapped", "--json"])
+        .output()
+        .expect("doctor");
+    assert!(
+        doctor.status.success(),
+        "{}",
+        String::from_utf8_lossy(&doctor.stderr)
+    );
+}
+
+#[test]
 fn pool_create_with_no_args_prints_help() {
     let output = cmd()
         .args(["pool", "create"])

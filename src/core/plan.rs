@@ -102,6 +102,22 @@ pub fn plan_append(
         tail = new_tail;
         oldest_seq = new_oldest;
         tail_next_off = 0;
+        // Dropping the last frame before a wrap can leave the tail on a wrap
+        // marker or the short padding at the end of the ring. Neither is a
+        // message, so move to the next committed frame before publishing it.
+        while oldest_seq != 0 && tail != head {
+            let Some((step, new_tail, new_oldest)) =
+                plan_drop_step(storage, ring_offset, ring_size, head, tail, oldest_seq)?
+            else {
+                break;
+            };
+            if matches!(step.kind, DropKind::Frame { .. }) {
+                break;
+            }
+            drops.push(step);
+            tail = new_tail;
+            oldest_seq = new_oldest;
+        }
         if tail == head {
             oldest_seq = 0;
             tail_next_off = tail;

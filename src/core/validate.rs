@@ -71,32 +71,25 @@ pub(crate) fn scan_pool_state(header: PoolHeader, mmap: &[u8]) -> Result<Option<
         }
 
         current_offset = Some(tail as u64);
-        let expected_tail_next = if ring_size - tail < FRAME_HEADER_LEN {
-            0usize
-        } else {
-            let tail_frame = read_frame_header(mmap, ring_offset, tail)?;
-            validate_frame_header(&tail_frame, ring_size)?;
-            match tail_frame.state {
-                FrameState::Wrap => 0usize,
-                FrameState::Committed => {
-                    let frame_len =
-                        frame::frame_total_len(FRAME_HEADER_LEN, tail_frame.payload_len as usize)
-                            .ok_or_else(|| {
-                            Error::new(ErrorKind::Corrupt).with_message("frame length overflow")
-                        })?;
-                    let mut next_off = tail + frame_len;
-                    if next_off == ring_size {
-                        next_off = 0;
-                    }
-                    next_off
-                }
-                _ => {
-                    return Err(
-                        Error::new(ErrorKind::Corrupt).with_message("unexpected frame state")
-                    );
-                }
-            }
-        };
+        if ring_size - tail < FRAME_HEADER_LEN {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("tail points at ring padding"));
+        }
+        let tail_frame = read_frame_header(mmap, ring_offset, tail)?;
+        validate_frame_header(&tail_frame, ring_size)?;
+        if tail_frame.state != FrameState::Committed {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("tail frame is not committed"));
+        }
+        if tail_frame.seq != header.oldest_seq {
+            return Err(Error::new(ErrorKind::Corrupt).with_message("tail seq mismatch"));
+        }
+        let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, tail_frame.payload_len as usize)
+            .ok_or_else(|| {
+            Error::new(ErrorKind::Corrupt).with_message("frame length overflow")
+        })?;
+        let mut expected_tail_next = tail + frame_len;
+        if expected_tail_next == ring_size {
+            expected_tail_next = 0;
+        }
         if tail_next != expected_tail_next {
             return Err(Error::new(ErrorKind::Corrupt).with_message("tail_next mismatch"));
         }

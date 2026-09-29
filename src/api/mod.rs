@@ -21,6 +21,7 @@ pub use crate::core::pool::{
     AppendOptions, Bounds, Durability, Pool, PoolAgeMetrics, PoolInfo, PoolMetrics, PoolOptions,
     PoolUtilization, SeqOffsetCache,
 };
+pub use crate::core::ring_layout::{FrameSpan, RingLayout};
 pub use client::{LocalClient, PoolRef};
 pub(crate) use message::observe_sequence;
 pub use message::{

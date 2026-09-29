@@ -256,6 +256,35 @@ mod tests {
     }
 
     #[test]
+    fn validation_report_rejects_tail_on_wrap_marker() {
+        use crate::core::frame::{self, FRAME_HEADER_LEN};
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("tail-on-wrap.plasmite");
+        let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, 5).expect("frame len");
+        let ring_size = frame_len * 3 + FRAME_HEADER_LEN;
+        let mut pool = Pool::create(
+            &path,
+            PoolOptions::new(4096 + ring_size as u64).with_index_capacity(0),
+        )
+        .expect("create");
+        for _ in 0..4 {
+            pool.append(b"hello").expect("append");
+        }
+
+        let mut header = pool.header_from_mmap().expect("header");
+        header.tail_off = (frame_len * 3) as u64;
+        header.tail_next_off = 0;
+        let report = validate_pool_state_report(header, pool.mmap(), &path);
+        assert_eq!(report.status, ValidationStatus::Corrupt);
+        assert!(
+            report.issues[0]
+                .message
+                .contains("tail frame is not committed")
+        );
+    }
+
+    #[test]
     fn validation_report_warns_for_invalid_index_entries() {
         let temp = tempfile::tempdir().expect("tempdir");
         let path = temp.path().join("bad-index.plasmite");
