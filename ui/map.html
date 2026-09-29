@@ -110,9 +110,9 @@ Invariants: Message data enters the DOM as text.
       .pool .pointer { fill: var(--spot); filter: drop-shadow(0 0 3px #ffd16680); }
       .pool .head { fill: none; stroke: var(--head); }
       .pool .index { fill: var(--text); font-family: var(--numbers); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
-      .pool .name, .pool .meta { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-      .pool .name { font-size: 13px; line-height: 1.2; }
-      .pool .meta { color: var(--muted); font-family: var(--numbers); font-size: 11px; }
+      .pool .name, .pool .meta { max-width: 100%; }
+      .pool .name { font-size: 13px; line-height: 1.2; text-align: center; overflow-wrap: anywhere; }
+      .pool .meta { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-family: var(--numbers); font-size: 11px; }
       .pool:hover .track, .pool:focus-visible .track { stroke: #1b2631; }
       .pool:focus-visible { outline: none; }
       .pool:focus-visible .name { text-decoration: underline; }
