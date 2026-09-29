@@ -155,9 +155,8 @@ Invariants: Message data enters the DOM as text.
         background: #1a2028; border: solid #526578; border-width: 1px 0 0 1px; transform: rotate(45deg);
         transition: left var(--ease);
       }
-      .message-head, .message { display: grid; grid-template-columns: 46px minmax(0, 1fr) 52px; gap: 8px; align-items: baseline; }
+      .message-head, .message { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 8px; align-items: baseline; }
       .message-head { padding: 6px 12px 5px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10px; }
-      .message-head span:last-child { text-align: right; }
       .messages { overflow: auto; flex: 1; min-height: 0; padding: 4px 6px; }
       .messages:empty::before { content: "–"; display: block; padding: 8px 6px; color: var(--muted); font-size: 12px; }
       .message { padding: 3px 6px; border-radius: 5px; font-size: 11px; line-height: 1.35; }
@@ -166,7 +165,6 @@ Invariants: Message data enters the DOM as text.
       .message .kind[data-tone="warn"] { color: var(--warn); }
       .message .kind[data-tone="error"] { color: var(--error); }
       .message .text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-      .message time { text-align: right; color: var(--muted); font-size: 10px; }
       .more {
         display: block; padding: 8px 14px; border-top: 1px solid var(--line); border-radius: 0 0 12px 12px;
         font-size: 11px; text-decoration: none;
@@ -210,7 +208,7 @@ Invariants: Message data enters the DOM as text.
               </div>
               <div class="empty" id="empty" hidden>No pools</div>
               <section class="peek" id="peek" aria-label="Messages" hidden>
-                <div class="message-head"><span>Type</span><span>Message</span><span>Time</span></div>
+                <div class="message-head"><span>Type</span><span>Message</span></div>
                 <div class="messages" id="messages" aria-live="polite"></div>
                 <a class="more" id="open" href="/ui">Recent messages →</a>
               </section>
@@ -1156,9 +1154,8 @@ Invariants: Message data enters the DOM as text.
           state.nextSeq = message.seq + 1;
           const row = document.createElement("div");
           row.className = "message";
-          const when = message.time ? new Date(message.time) : null;
           row.dataset.seq = message.seq;
-          row.dataset.detail = "#" + message.seq + (when ? " · " + when.toLocaleString() : "");
+          row.dataset.detail = "#" + message.seq;
           const kind = kindOf(message);
           const badge = document.createElement("span");
           badge.className = "kind";
@@ -1171,9 +1168,7 @@ Invariants: Message data enters the DOM as text.
           const text = document.createElement("span");
           text.className = "text";
           text.textContent = summaryText(message.data);
-          const time = document.createElement("time");
-          time.textContent = when ? when.toLocaleTimeString([], { hour12: false }) : "";
-          row.append(badge, text, time);
+          row.append(badge, text);
           const nearBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 40;
           messages.append(row);
           while (messages.children.length > maxMessages) {
