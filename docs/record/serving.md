@@ -139,15 +139,15 @@ On the server machine, open `http://127.0.0.1:9700/ui` to browse pools or
 The HTML files in `ui/` need a running server; opening them as `file://`
 pages cannot reach the pool API.
 
-The map draws each pool as a ring. The ring's circumference is the pool's
-message buffer, with byte 0 at 12 o'clock. Each stored message is a segment
-at its real position and size, so the arc turns as the writer moves around
-the buffer and overwrites the oldest messages. A full pool is a closed ring.
-The tick and number outside the ring mark the end of the newest message and
-the message count. A ring grows only as far as it needs to show its messages
-apart. Pools that hold more than 4,096 messages draw one solid arc instead.
-Click a ring to follow its newest messages; hover a message to find it on the
-ring. The link at the bottom of that card opens the full pool page.
+The map draws each pool's message buffer as a spiral. Byte 0 starts at 12
+o'clock on the outside. Each stored message takes its real share of the track;
+new messages wrap to the outside when they reach the end. Older messages are
+dimmer, and the newest is near white. The number beside the newest message,
+such as `#505`, is its sequence number. Larger buffers get more turns, up to
+the map's width limit. When a pool has more than 4,096 messages, the map draws
+its used space as a continuous track instead of individual segments.
+Click a pool to follow its newest messages; hover a message to find it on the
+spiral. The link at the bottom of that card opens the full pool page.
 
 The local page at `http://127.0.0.1:9700/access` lists keys and offers Invite
 and Revoke. It works only on the server machine. The remote page cannot

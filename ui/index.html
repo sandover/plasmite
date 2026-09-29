@@ -653,12 +653,13 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           return months[date.getMonth()] + " " + date.getDate() + " " + pad2(date.getHours()) + ":" + pad2(date.getMinutes());
         }
 
+        // Binary units, as the CLI's --size uses them; the map formats sizes the same way.
         function formatHumanBytes(bytes) {
-          if (bytes == null || bytes === 0) return "0 B";
-          if (bytes < 1024) return bytes + " B";
-          if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-          if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-          return (bytes / (1024 * 1024 * 1024)).toFixed(1) + " GB";
+          if (bytes == null || !isFinite(bytes)) return "-";
+          var units = ["B", "KB", "MB", "GB", "TB"];
+          var value = bytes, unit = 0;
+          while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+          return (unit ? Number(value.toFixed(1)) : value) + " " + units[unit];
         }
 
         function isIsoTimestamp(value) {
@@ -709,7 +710,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
                 '<span class="stack"><strong>' + escapeHtml(pool.name) + '</strong>' +
                 '<span class="muted">' + escapeHtml(count) + ' msgs \u00b7 ' + escapeHtml(newestAge) + '</span></span>' +
                 '<span class="stack muted" style="text-align:right">' +
-                '<span>' + escapeHtml(formatHumanBytes(pool.ring_size)) + '</span>' +
+                '<span>' + escapeHtml(formatHumanBytes(pool.file_size)) + '</span>' +
                 '<span>' + escapeHtml(pct) + ' used</span></span></a>';
             })
             .join("");
@@ -1244,16 +1245,15 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
             : (bounds.oldest != null && bounds.newest != null)
               ? (bounds.newest - bounds.oldest + 1) : "-";
 
+          // Size is the pool file, as the CLI reports it. Storage is the message
+          // space inside it, as used and free, like `plasmite pool info`.
           var rows = [{ key: "Pool", value: info.name || poolName }];
-
-          var storageText = formatHumanBytes(info.ring_size) + " ring capacity";
+          rows.push({ key: "Size", value: formatHumanBytes(info.file_size) });
           if (util.used_bytes != null) {
             var pct = util.used_percent != null ? util.used_percent.toFixed(2) + "%" : "-";
-            storageText =
-              formatHumanBytes(util.used_bytes) + " of " + formatHumanBytes(info.ring_size) +
-              " used (" + pct + ", " + formatHumanBytes(util.free_bytes) + " free)";
+            rows.push({ key: "Storage", value: formatHumanBytes(util.used_bytes) + " used, " +
+              formatHumanBytes(util.free_bytes) + " free (" + pct + ")" });
           }
-          rows.push({ key: "Storage", value: storageText });
 
           rows.push({
             key: "Messages",

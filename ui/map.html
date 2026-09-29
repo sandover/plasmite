@@ -1,13 +1,18 @@
 <!--
 Purpose: Live map of the pools in one served directory.
 Role: Browser client for the pool change stream and each pool's event stream.
-Invariants: Each pool is a ring whose circumference is its message buffer,
-  with byte 0 at 12 o'clock. Each stored message is drawn at its real offset
-  and size, so the arc turns as the writer moves around the ring. A full ring
-  is a closed arc.
-Invariants: Pools sit in rows, in name order. Layout changes only when the
-  pool set, a ring's size step, or the window width changes. Rings never
-  shrink while the page is open. The message card floats over the map and
+Invariants: Each pool is a spiral track whose length is its message buffer,
+  with byte 0 at 12 o'clock on the outside. It takes one turn, or more when one
+  circle is too short to show each message apart. The track ends at 12 o'clock
+  on its innermost turn, and a vertical leg joins it back to the start, where
+  writing wraps. Turns sit evenly, close together. The newest message's index
+  sits level outside the spiral, joined to that message by a thin line. Each
+  stored message is drawn at its real offset and size. A full pool is a fully
+  lit track.
+Invariants: Pools pack in name order, each at the highest spot where it fits. Layout changes only when the
+  pool set or the window width changes. A track's shape comes from its pool's
+  size, so data never moves it.
+  Tracks never shrink while the page is open. The message card floats over the map and
   never moves pools.
 Invariants: Message data enters the DOM as text.
 -->
@@ -85,21 +90,23 @@ Invariants: Message data enters the DOM as text.
         padding: 0; border: 0; background: none; color: var(--text); animation: appear var(--ease);
       }
       .pool > * { grid-area: 1 / 1; }
+      /* The button, which is never redrawn, takes every press, so a redraw mid-click cannot drop it. */
+      .pool svg, .pool .ring { pointer-events: none; }
       .pool .label { display: flex; flex-direction: column; align-items: center; gap: 1px; pointer-events: none; }
       @keyframes appear { from { opacity: 0; transform: scale(.94); } }
       .pool svg { display: block; overflow: visible; }
       .pool .track { fill: none; stroke: #16202a; }
+      .pool .leg { stroke: #3a4a5a; stroke-width: 1.5; }
+      .pool .leader { stroke: var(--head); stroke-width: 1; opacity: .75; }
       .pool .arc { fill: none; stroke: var(--accent); }
-      .pool .fresh { fill: none; stroke: var(--ok); animation: fresh 1.6s ease-out forwards; }
       .pool .spot { fill: none; stroke: var(--spot); }
       .pool .pointer { fill: var(--spot); filter: drop-shadow(0 0 3px #ffd16680); }
-      @keyframes fresh { to { opacity: 0; } }
       .pool .head { fill: none; stroke: var(--head); }
-      .pool .count { fill: var(--text); font-family: var(--numbers); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+      .pool .index { fill: var(--text); font-family: var(--numbers); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
       .pool .name, .pool .meta { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
       .pool .name { font-size: 13px; line-height: 1.2; }
       .pool .meta { color: var(--muted); font-family: var(--numbers); font-size: 11px; }
-      .pool:hover .track, .pool:focus-visible .track { stroke: #2b3947; }
+      .pool:hover .track, .pool:focus-visible .track { stroke: #1b2631; }
       .pool:focus-visible { outline: none; }
       .pool:focus-visible .name { text-decoration: underline; }
       .pool[aria-expanded="true"] .name { color: var(--ok); }
@@ -140,7 +147,6 @@ Invariants: Message data enters the DOM as text.
       @media (prefers-reduced-motion: reduce) {
         .map, .machine, .directory, .pool, .peek { transition: none; }
         .pool, .peek { animation: none; }
-        .pool .fresh { animation: none; opacity: 0; }
       }
     </style>
   </head>
@@ -182,21 +188,28 @@ Invariants: Message data enters the DOM as text.
         const scroll = $("map-scroll");
         const messages = $("messages");
         const cards = new Map();
-        const radii = new Map();
+        const shapes = new Map();
         const stroke = 7;
-        const maxRadius = 110;
+        const compactPitch = 10;
+        const maxOuter = 240;
+        const maxInner = 56;
+        // Ring bytes of the smallest possible message, {}, as stored: frame header,
+        // encoded payload, and commit marker.
+        const minFrameBytes = 480;
+        const standardBytes = 1048576;
+        const bigScale = 1.5;
         const radiusStep = 8;
-        const minSegment = 2.5;
-        const ageBands = 6;
-        const countRoom = { x: 28, y: 26 };
+        const minSegment = 1;
+        const ageBands = 10;
+        const indexRoom = { x: 40, y: 26 };
         const peekWidth = 360;
         const emptySize = { width: 240, height: 70 };
         const machinePad = { top: 36, side: 14, bottom: 14 };
         const directoryPad = { top: 40, side: 18, bottom: 16 };
-        const gutter = 20;
+        const gutter = 10;
         const maxMessages = 200;
         const retryMs = 1200;
-        const state = { pools: [], topology: null, layout: null, newest: new Map(),
+        const state = { pools: [], topology: null, layout: null,
           selected: null, spotSeq: null, nextSeq: null, stopReader: null, stopList: null, requested: null };
         let resizeTimer = null;
 
@@ -234,7 +247,7 @@ Invariants: Message data enters the DOM as text.
           return Number.isFinite(count) ? count : 0;
         }
 
-        // Ring size.
+        // Track shape.
 
         const measure = document.createElement("canvas").getContext("2d");
         function textWidth(text, px, family) {
@@ -252,31 +265,120 @@ Invariants: Message data enters the DOM as text.
           return Math.hypot(width / 2, 11) + stroke / 2 + 3;
         }
 
-        // Radius that makes the smallest stored message minSegment px long, or 0
-        // when no ring up to maxRadius could, since growing then would not help.
-        function dataRadius(pool) {
-          const sizes = (frames(pool) || []).map(([, bytes]) => bytes);
-          const needed = sizes.length ? pool.ring_size * minSegment / (2 * Math.PI * Math.min(...sizes)) : 0;
-          return needed > maxRadius ? 0 : needed;
+        // The largest outer radius that fits the map's width, and no more than maxOuter.
+        function outerCap() {
+          const width = scroll.clientWidth - 32 - 2 * (machinePad.side + directoryPad.side + indexRoom.x);
+          return Math.max(0, Math.min(maxOuter, width / 2 - stroke));
         }
 
-        // A ring is as small as its label allows and grows, in steps, only as its
-        // messages need, up to maxRadius. The arc is to scale at any size. While the
-        // page is open a ring never shrinks, so a pool whose smallest message comes
-        // and goes, or a snapshot without a frame list, does not reflow the map.
-        function ringRadius(pool) {
-          const step = (value) => Math.ceil(value / radiusStep) * radiusStep;
-          const fit = Math.max(step(labelRadius(pool)), Math.min(maxRadius, step(dataRadius(pool))));
-          return Math.max(radii.get(pool.name) || 0, fit);
+        // Whole turns that give a message of minFrameBytes minSegment px in a ring of
+        // ringBytes. A spiral from inner + compactPitch * t down to inner is about
+        // pi * t * (2 * inner + compactPitch * t) long.
+        function turnsFor(inner, ringBytes) {
+          const needed = ringBytes * minSegment / minFrameBytes;
+          if (needed <= 2 * Math.PI * inner) return 1;
+          const a = Math.PI * compactPitch, b = 2 * Math.PI * inner;
+          return Math.max(2, Math.ceil((-b + Math.sqrt(b * b + 4 * a * needed)) / (2 * a)));
         }
 
-        // Leaves room around the ring for the count beside its newest message.
+        // Every pool shares one center, sized for the longest label on the map up to
+        // maxInner; longer names are cut short. So a pool's size depends only on its
+        // capacity, and pools compare at a glance.
+        function sharedInner(pools) {
+          const widest = Math.max(0, ...pools.map(labelRadius));
+          return Math.min(maxInner, Math.ceil(widest / radiusStep) * radiusStep);
+        }
+
+        // A track's shape comes from the pool's size, never its contents, so a pool
+        // keeps its shape as messages come and go, and bigger pools look bigger.
+        // Every track is a spiral from 12 o'clock on the outside, with as many turns
+        // as it takes for the smallest possible message to get minSegment px. A
+        // pool bigger than the standard 1 MB grows to at most 1.5 times the standard
+        // pool's radius; past that, messages can be narrower than a pixel. The map's
+        // width caps it too.
+        function trackShape(pool, inner) {
+          const standardRing = standardBytes * pool.ring_size / pool.file_size;
+          const standardOuter = inner + compactPitch * turnsFor(inner, standardRing);
+          const largest = Math.min(standardOuter * bigScale, outerCap());
+          const most = Math.max(1, Math.floor((largest - inner) / compactPitch));
+          const turns = Math.min(turnsFor(inner, pool.ring_size), most);
+          const prior = shapes.get(pool.name);
+          return { inner, turns: Math.max(turns, prior ? prior.turns : 1) };
+        }
+
+        // Leaves room around the track for the index beside its newest message.
         function nodeSize(pool) {
-          const d = 2 * (pool.r + stroke);
-          return { width: d + 2 * countRoom.x, height: d + 2 * countRoom.y };
+          const d = 2 * (pool.track.outer + stroke);
+          return { width: d + 2 * indexRoom.x, height: d + 2 * indexRoom.y };
         }
 
-        // Ring geometry, in pixels along the circle from 12 o'clock.
+        // The track as points about 2 px apart, from 12 o'clock clockwise, with the
+        // distance along the track to each point. Turn k steps inward by drops[k],
+        // and the track ends at 12 o'clock on its innermost turn, so the leg back to
+        // the start is vertical.
+        // Sampling a long spiral is the costly step, and its shape rarely changes, so
+        // each inner radius and set of pitches is sampled once.
+        const sampled = new Map();
+        function sampleTrack(inner, drops) {
+          const key = inner + ":" + drops.join(",");
+          if (!sampled.has(key)) {
+            if (sampled.size > 64) sampled.clear();
+            sampled.set(key, sampleFresh(inner, drops));
+          }
+          return sampled.get(key);
+        }
+
+        function sampleFresh(inner, drops) {
+          const startRadius = drops.map((_, k) => inner + drops.slice(k).reduce((sum, step) => sum + step, 0));
+          const outer = startRadius[0];
+          const c = outer + stroke;
+          const sweep = 2 * Math.PI * drops.length;
+          const count = Math.max(96, Math.ceil(sweep * outer / 2));
+          const points = [];
+          const lengths = [];
+          let total = 0;
+          for (let i = 0; i <= count; i++) {
+            const theta = sweep * i / count;
+            const turn = Math.min(drops.length - 1, Math.floor(theta / (2 * Math.PI)));
+            const r = startRadius[turn] - drops[turn] * (theta / (2 * Math.PI) - turn);
+            const point = { x: c + r * Math.sin(theta), y: c - r * Math.cos(theta), r, theta };
+            if (i) total += Math.hypot(point.x - points[i - 1].x, point.y - points[i - 1].y);
+            points.push(point);
+            lengths.push(total);
+          }
+          const d = "M" + points.map((p) => p.x.toFixed(1) + " " + p.y.toFixed(1)).join("L");
+          return { c, outer, inner, drops, points, lengths, total, d };
+        }
+
+        // Where the newest message ends, in ring bytes; the head when there is no list.
+        function newestEnd(pool) {
+          const list = frames(pool);
+          const newest = list && list.length ? list[list.length - 1] : null;
+          return newest ? newest[0] + newest[1] : (pool.ring ? pool.ring.head : 0);
+        }
+
+        // Every turn sits compactPitch inside the one before it.
+        function layTrack(pool) {
+          const { inner, turns } = pool.shape;
+          return sampleTrack(inner, Array(turns).fill(compactPitch));
+        }
+
+        // The point at a distance along the track, with its radius and angle.
+        function pointAt(track, distance) {
+          const { points, lengths } = track;
+          const target = Math.min(Math.max(distance, 0), track.total);
+          let low = 0, high = lengths.length - 1;
+          while (high - low > 1) {
+            const mid = (low + high) >> 1;
+            if (lengths[mid] < target) low = mid; else high = mid;
+          }
+          const span = lengths[high] - lengths[low] || 1;
+          const f = (target - lengths[low]) / span;
+          const [a, b] = [points[low], points[high]];
+          return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, r: a.r + (b.r - a.r) * f, theta: a.theta + (b.theta - a.theta) * f };
+        }
+
+        // Track geometry, in pixels along the track from 12 o'clock.
 
         // Stored frames as [offset, bytes] pairs, oldest first, or null when the
         // server sent no list (too many frames, or a writer kept changing the ring).
@@ -284,11 +386,12 @@ Invariants: Message data enters the DOM as text.
           return pool.ring && Array.isArray(pool.ring.frames) ? pool.ring.frames : null;
         }
 
-        // The drawn part of one frame. Frames long enough to draw apart (1.5 px and
-        // up) end a little early, leaving a gap before the next; shorter ones join.
+        // The drawn part of one frame. Frames of 3 px and up end a little early,
+        // leaving a gap before the next. Shorter ones touch, and alternating shades
+        // keep them apart.
         function drawn(offset, bytes, scale) {
           const length = bytes * scale;
-          const gap = length >= 1.5 ? Math.min(1, length * 0.3) : 0;
+          const gap = length >= 3 ? Math.min(1, length * 0.3) : 0;
           return { start: offset * scale, end: offset * scale + Math.max(0.5, length - gap) };
         }
 
@@ -304,25 +407,31 @@ Invariants: Message data enters the DOM as text.
 
         // Stored messages grouped by age, oldest group first, plus the newest
         // message on its own. With a frame list, each message keeps its own
-        // interval. Without one, the stored bytes from tail to head split evenly,
+        // interval, and every other message (by sequence number, so it keeps its
+        // shade as older ones are overwritten) is marked alt for a dimmer shade.
+        // Without a frame list, the stored bytes from tail to head split evenly,
         // and the newest message is the last 2 px.
         function ageGroups(pool, scale) {
           const list = frames(pool);
           if (list) {
             const pieces = list.map(([offset, bytes]) => drawn(offset, bytes, scale));
             const head = pieces.pop();
-            const bands = Array.from({ length: ageBands }, () => []);
-            pieces.forEach((piece, i) => bands[Math.floor(i * ageBands / pieces.length)].push(piece));
-            return { bands, head: head ? [head] : [], pieces: head ? pieces.concat([head]) : [] };
+            const bands = [];
+            for (let age = 0; age < ageBands; age++) for (const alt of [false, true]) bands.push({ age, alt, intervals: [] });
+            pieces.forEach((piece, i) => {
+              const age = Math.floor(i * ageBands / pieces.length);
+              bands[age * 2 + (pool.ring.first + i) % 2].intervals.push(piece);
+            });
+            return { bands, head: head ? [head] : [] };
           }
           const ring = pool.ring;
-          if (!ring || !messageCount(pool)) return { bands: [], head: [], pieces: [] };
+          if (!ring || !messageCount(pool)) return { bands: [], head: [] };
           const size = pool.ring_size;
           const used = (ring.head - ring.tail + size) % size || size;
-          const bands = Array.from({ length: ageBands }, (_, k) =>
-            byteIntervals(ring.tail + used * k / ageBands, ring.tail + used * (k + 1) / ageBands, size, scale));
+          const bands = Array.from({ length: ageBands }, (_, age) => ({ age, alt: false,
+            intervals: byteIntervals(ring.tail + used * age / ageBands, ring.tail + used * (age + 1) / ageBands, size, scale) }));
           const end = ring.tail + used;
-          return { bands, head: byteIntervals(end - Math.min(used, 2 / scale), end, size, scale), pieces: [] };
+          return { bands, head: byteIntervals(end - Math.min(used, 2 / scale), end, size, scale) };
         }
 
         // Where one stored message sits, matched by sequence number against the
@@ -353,60 +462,85 @@ Invariants: Message data enters the DOM as text.
           return out;
         }
 
-        // Everything the ring draws, as numbers. Messages brighten with age order,
+        // Everything the track draws, as numbers. Messages brighten with age order,
         // oldest dimmest, and the newest is near white, so the write position and
         // direction read at a glance. Newly arrived messages glow for a moment. A
-        // hovered message turns yellow, with a pointer just outside the ring. The
-        // count sits past the newest message, stepping outward if the pointer is near.
-        function ringGeometry(pool, freshCount, spotSeq) {
-          const r = pool.r;
-          const c = r + stroke;
-          const circumference = 2 * Math.PI * r;
-          const scale = circumference / pool.ring_size;
+        // hovered message turns yellow, with a pointer just outside the track. The
+        // newest message's index (#505) sits beside it: outside a ring, or in the
+        // gap outside its turn on a spiral, moving to the gap inside if the pointer
+        // is near. An empty pool has no index.
+        function trackGeometry(pool, spotSeq) {
+          const track = pool.track;
+          const scale = track.total / pool.ring_size;
           const groups = ageGroups(pool, scale);
           const list = frames(pool);
           const newest = list && list.length ? list[list.length - 1] : null;
-          const end = (newest ? newest[0] + newest[1] : (pool.ring ? pool.ring.head : 0)) * scale;
+          const end = pointAt(track, newestEnd(pool) * scale);
           const spot = segmentOf(pool, spotSeq, scale);
-          const spotAngle = spot ? (spot.start + spot.end) / 2 / r - Math.PI / 2 : null;
-          const tip = r + stroke / 2 + 3;
-          const base = tip + 7;
-          const countAngle = end / r - Math.PI / 2;
-          const turn = spot ? Math.abs(Math.atan2(Math.sin(countAngle - spotAngle), Math.cos(countAngle - spotAngle))) : Infinity;
-          const around = (d, angle, side = 0) => [c + d * Math.cos(angle) - side * Math.sin(angle), c + d * Math.sin(angle) + side * Math.cos(angle)];
+          const spotAt = spot ? pointAt(track, (spot.start + spot.end) / 2) : null;
+          // A point at a radius and angle from the center, nudged sideways along the track.
+          const polar = (r, theta, side = 0) => [track.c + r * Math.sin(theta) + side * Math.cos(theta),
+            track.c - r * Math.cos(theta) + side * Math.sin(theta)];
+          // The pointer sits at the rim and points in along the hovered message's
+          // angle; the gaps between turns are too narrow to hold it.
+          const rim = track.outer + stroke / 2 + 3;
+          // The index sits outside the spiral, level, at the newest message's angle.
+          // A thin line runs out to it from the newest message. It steps past the
+          // pointer when the two meet.
+          const near = spotAt && Math.abs(Math.atan2(Math.sin(end.theta - spotAt.theta), Math.cos(end.theta - spotAt.theta))) * rim < 24;
+          const indexRadius = near ? rim + 14 : rim + 3;
+          const newestSeq = list ? (list.length ? pool.ring.first + list.length - 1 : null) : pool.bounds && pool.bounds.newest;
+          const start = track.points[0], last = track.points[track.points.length - 1];
           return {
-            c, r, circumference,
-            bands: groups.bands.map((intervals, k) => ({ intervals, opacity: 0.3 + 0.6 * (k + 1) / ageBands })),
+            track,
+            bands: groups.bands.map((band) => ({ intervals: band.intervals,
+              opacity: (0.3 + 0.6 * (band.age + 1) / ageBands) * (band.alt ? 0.72 : 1) })),
             head: groups.head,
-            fresh: groups.pieces.slice(groups.pieces.length - Math.min(freshCount, groups.pieces.length)),
             spot,
-            pointer: spot ? [around(tip, spotAngle), around(base, spotAngle, -4), around(base, spotAngle, 4)] : null,
-            count: { at: around(turn * base < 18 ? base + 5 : r + stroke / 2 + 6, countAngle), angle: countAngle,
-              text: shortCount(messageCount(pool)) },
+            pointer: spotAt ? [polar(rim, spotAt.theta), polar(rim + 7, spotAt.theta, -4), polar(rim + 7, spotAt.theta, 4)] : null,
+            // From the inner edge of the innermost turn to the outer edge of the
+            // outermost, so the seam spans the whole band and ends flush with it.
+            leg: [[last.x, last.y + stroke / 2], [start.x, start.y - stroke / 2]],
+            index: newestSeq == null ? null : { at: polar(indexRadius, end.theta), theta: end.theta, text: "#" + shortCount(newestSeq),
+              leader: [polar(end.r + stroke / 2, end.theta), polar(indexRadius - 2, end.theta)] },
           };
         }
 
-        // SVG markup from ring geometry. Every value is a number, except the count
-        // text, which is digits and a unit letter.
-        function ringMarkup(g) {
-          const circle = (className, intervals, opacity = 1) => '<circle class="' + className + '" cx="' + g.c + '" cy="' + g.c +
-            '" r="' + g.r + '" stroke-width="' + stroke + '" transform="rotate(-90 ' + g.c + ' ' + g.c + ')"' +
-            (intervals ? ' stroke-dasharray="' + dashes(intervals, g.circumference) + '"' : "") +
+        // SVG markup from track geometry. Every value is a number, except the index
+        // text, which is "#", digits, and a unit letter.
+        // The track's path is written once, and each layer draws it again by
+        // reference with its own dashes, so a long spiral does not repeat its points
+        // for every layer. Dash patterns and stroke styles pass through to the shape.
+        function trackMarkup(g, id) {
+          const t = g.track;
+          const path = (className, intervals, opacity = 1) => '<use href="#' + id + '" class="' + className + '"' +
+            ' stroke-width="' + stroke + '"' +
+            (intervals ? ' stroke-dasharray="' + dashes(intervals, t.total) + '"' : "") +
             (opacity < 1 ? ' opacity="' + opacity.toFixed(2) + '"' : "") + '/>';
-          const some = (className, intervals) => intervals.length ? circle(className, intervals) : "";
-          const [x, y] = g.count.at;
-          const cos = Math.cos(g.count.angle), sin = Math.sin(g.count.angle);
-          const anchor = cos > 0.3 ? "start" : cos < -0.3 ? "end" : "middle";
-          const baseline = sin > 0.3 ? "hanging" : sin < -0.3 ? "auto" : "central";
-          return '<svg width="' + 2 * g.c + '" height="' + 2 * g.c + '" aria-hidden="true">' +
-            circle("track", null) +
-            g.bands.map((band) => band.intervals.length ? circle("arc", band.intervals, band.opacity) : "").join("") +
+          const some = (className, intervals) => intervals.length ? path(className, intervals) : "";
+          const fmt = ([x, y]) => x.toFixed(1) + "," + y.toFixed(1);
+          // Level text, anchored away from the spiral, at the end of its leader line.
+          const label = (index) => {
+            const [x, y] = index.at;
+            const [[x1, y1], [x2, y2]] = index.leader;
+            const leader = '<line class="leader" x1="' + x1.toFixed(1) + '" y1="' + y1.toFixed(1) + '" x2="' + x2.toFixed(1) + '" y2="' + y2.toFixed(1) + '"/>';
+            const sin = Math.sin(index.theta), cos = -Math.cos(index.theta);
+            const anchor = sin > 0.3 ? "start" : sin < -0.3 ? "end" : "middle";
+            const baseline = cos > 0.3 ? "hanging" : cos < -0.3 ? "auto" : "central";
+            return leader + '<text class="index" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" text-anchor="' + anchor +
+              '" dominant-baseline="' + baseline + '">' + index.text + '</text>';
+          };
+          return '<svg width="' + 2 * t.c + '" height="' + 2 * t.c + '" aria-hidden="true">' +
+            '<defs><path id="' + id + '" d="' + t.d + '" pathLength="' + t.total.toFixed(2) + '"/></defs>' +
+            path("track", null) +
+            g.bands.map((band) => band.intervals.length ? path("arc", band.intervals, band.opacity) : "").join("") +
             some("head", g.head) +
-            some("fresh", g.fresh) +
-            (g.spot ? circle("spot", [g.spot]) : "") +
-            (g.pointer ? '<polygon class="pointer" points="' + g.pointer.map(([px, py]) => px.toFixed(1) + "," + py.toFixed(1)).join(" ") + '"/>' : "") +
-            '<text class="count" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" text-anchor="' + anchor +
-            '" dominant-baseline="' + baseline + '">' + g.count.text + '</text></svg>';
+            // Drawn over the messages, so the seam at 12 o'clock reads as one straight line.
+            '<line class="leg" x1="' + g.leg[0][0].toFixed(1) + '" y1="' + g.leg[0][1].toFixed(1) +
+              '" x2="' + g.leg[1][0].toFixed(1) + '" y2="' + g.leg[1][1].toFixed(1) + '"/>' +
+            (g.spot ? path("spot", [g.spot]) : "") +
+            (g.pointer ? '<polygon class="pointer" points="' + g.pointer.map(fmt).join(" ") + '"/>' : "") +
+            (g.index ? label(g.index) : "") + '</svg>';
         }
 
         // Pools.
@@ -429,43 +563,62 @@ Invariants: Message data enters the DOM as text.
           const button = document.createElement("button");
           button.type = "button";
           button.className = "pool";
+          button.dataset.name = name;
           button.innerHTML = '<span class="ring"></span><span class="label"><span class="name"></span><span class="meta"></span></span>';
           button.querySelector(".name").textContent = name;
-          button.addEventListener("click", () => state.selected === name ? closePeek() : openPeek(name));
+          // A click from the keyboard has no position (detail 0) and always counts.
+          button.addEventListener("click", (event) => {
+            if (event.detail && !onTrack(name, event)) { if (state.selected) closePeek(); return; }
+            if (state.selected === name) closePeek(); else openPeek(name);
+          });
           return button;
+        }
+
+        // Whether a pointer event lands within the pool's spiral, not just its box,
+        // which also holds room for the index.
+        function onTrack(name, event) {
+          const pool = state.pools.find((candidate) => candidate.name === name);
+          const button = cards.get(name);
+          if (!pool || !button) return false;
+          const box = button.getBoundingClientRect();
+          const dx = event.clientX - (box.left + box.width / 2), dy = event.clientY - (box.top + box.height / 2);
+          return Math.hypot(dx, dy) <= pool.track.outer + stroke;
         }
 
         // The one way a ring is drawn, from the pool, its new-message count, and the
         // hover. Unchanged markup is left alone: replacing the element under a press
         // would stop the browser from sending its click.
         const drawnMarkup = new Map();
-        function drawRing(pool, fresh) {
+        const trackIds = new Map();
+        function drawRing(pool) {
           const button = cards.get(pool.name);
           if (!button) return;
           const spotSeq = pool.name === state.selected ? state.spotSeq : null;
-          const markup = ringMarkup(ringGeometry(pool, fresh, spotSeq));
+          if (!trackIds.has(pool.name)) trackIds.set(pool.name, "track-" + trackIds.size);
+          const markup = trackMarkup(trackGeometry(pool, spotSeq), trackIds.get(pool.name));
           if (drawnMarkup.get(pool.name) === markup) return;
           drawnMarkup.set(pool.name, markup);
           button.querySelector(".ring").innerHTML = markup;
         }
 
-        function updateCard(pool, fresh) {
+        function updateCard(pool) {
           const button = cards.get(pool.name);
           if (!button) return;
-          drawRing(pool, fresh);
-          button.querySelector(".label").style.maxWidth = 2 * (pool.r - stroke) - 6 + "px";
+          drawRing(pool);
+          button.querySelector(".label").style.maxWidth = 2 * (pool.shape.inner - stroke) - 6 + "px";
           const used = usedFraction(pool);
           const count = messageCount(pool);
           // Label with the size the pool was created at; usage is a share of its message buffer.
           button.querySelector(".meta").textContent = size(pool.file_size) + " · " + percentLabel(used);
-          button.title = count.toLocaleString() + (count === 1 ? " message · " : " messages · ") + (used * 100).toFixed(1) +
-            "% of a " + size(pool.ring_size) + " buffer";
-          button.setAttribute("aria-label", pool.name + ", " + button.title);
+          const utilization = (pool.metrics && pool.metrics.utilization) || {};
+          button.title = pool.name + " · " + count.toLocaleString() + (count === 1 ? " message · " : " messages · ") +
+            size(utilization.used_bytes) + " used, " + size(utilization.free_bytes) + " free";
+          button.setAttribute("aria-label", button.title);
           button.setAttribute("aria-expanded", String(pool.name === state.selected));
         }
 
-        function updateCards(freshBy = new Map()) {
-          for (const pool of state.pools) updateCard(pool, freshBy.get(pool.name) || 0);
+        function updateCards() {
+          for (const pool of state.pools) updateCard(pool);
           const pool = currentPool();
           if (pool) updateMore(pool);
         }
@@ -477,24 +630,49 @@ Invariants: Message data enters the DOM as text.
 
         // Layout.
 
-        // Packs boxes into rows that wrap at maxWidth, in the given order.
-        function flow(boxes, maxWidth) {
-          let x = 0, y = 0, rowHeight = 0, width = 0;
+        // Skyline packing: takes boxes in order and puts each at the highest spot
+        // where it fits within maxWidth, leftmost on a tie, so small boxes tuck in
+        // beside big ones. Order reads roughly left to right, top to bottom.
+        // The skyline is the top edge of what is placed so far, as spans left to right.
+        function pack(boxes, maxWidth) {
+          let skyline = [{ x: 0, width: maxWidth, y: 0 }];
+          let width = 0, height = 0;
+          const heightOver = (x, w) => Math.max(...skyline.filter((span) => span.x < x + w && span.x + span.width > x).map((span) => span.y));
           const placed = boxes.map((box) => {
-            if (x > 0 && x + box.width > maxWidth) { x = 0; y += rowHeight + gutter; rowHeight = 0; }
-            const at = { ...box, x, y };
-            x += box.width + gutter;
-            rowHeight = Math.max(rowHeight, box.height);
+            const w = Math.min(box.width, maxWidth);
+            let best = null;
+            for (const span of skyline) {
+              if (span.x + w > maxWidth) break;
+              const y = heightOver(span.x, w);
+              if (!best || y < best.y) best = { x: span.x, y };
+            }
+            const at = { ...box, x: best.x, y: best.y };
+            const top = best.y + box.height + gutter;
+            const right = best.x + w + gutter;
+            skyline = skyline.flatMap((span) => {
+              const pieces = [];
+              if (span.x < best.x) pieces.push({ x: span.x, width: Math.min(span.width, best.x - span.x), y: span.y });
+              if (span.x + span.width > right) pieces.push({ x: Math.max(span.x, right), width: span.x + span.width - Math.max(span.x, right), y: span.y });
+              return pieces;
+            }).concat([{ x: best.x, width: Math.min(right, maxWidth) - best.x, y: top }])
+              .sort((a, b) => a.x - b.x)
+              .reduce((spans, span) => {
+                const last = spans[spans.length - 1];
+                if (last && last.y === span.y && last.x + last.width === span.x) last.width += span.width;
+                else spans.push(span);
+                return spans;
+              }, []);
             width = Math.max(width, at.x + box.width);
+            height = Math.max(height, at.y + box.height);
             return at;
           });
-          return { boxes: placed, width, height: y + rowHeight };
+          return { boxes: placed, width, height };
         }
 
         // Pure: where the machine, the directory, and each pool go, for this width.
         function computeLayout(pools, availableWidth) {
           const maxWidth = Math.max(emptySize.width, availableWidth - 2 * machinePad.side - 2 * directoryPad.side);
-          const rows = flow(pools.map((pool) => ({ name: pool.name, ...nodeSize(pool) })), maxWidth);
+          const rows = pack(pools.map((pool) => ({ name: pool.name, ...nodeSize(pool) })), maxWidth);
           const content = { width: Math.max(rows.width, emptySize.width), height: Math.max(rows.height, emptySize.height) };
           const directory = { x: machinePad.side, y: machinePad.top,
             width: content.width + 2 * directoryPad.side, height: content.height + directoryPad.top + directoryPad.bottom };
@@ -542,7 +720,7 @@ Invariants: Message data enters the DOM as text.
         }
 
         function topology() {
-          return JSON.stringify(state.pools.map((pool) => [pool.name, pool.r]));
+          return JSON.stringify(state.pools.map((pool) => [pool.name, pool.shape, pool.track.outer]));
         }
 
         // Floats the card under the open pool, pointing at its ring, kept inside the directory's sides.
@@ -573,21 +751,18 @@ Invariants: Message data enters the DOM as text.
         // the last snapshot, then lays out and draws.
         function showPools(payload) {
           const pools = (Array.isArray(payload.pools) ? payload.pools : []).slice().sort((a, b) => a.name.localeCompare(b.name));
+          const inner = sharedInner(pools);
           const names = new Set(pools.map((pool) => pool.name));
-          for (const name of radii.keys()) if (!names.has(name)) { radii.delete(name); state.newest.delete(name); }
-          const freshBy = new Map();
+          for (const name of shapes.keys()) if (!names.has(name)) shapes.delete(name);
           for (const pool of pools) {
-            pool.r = ringRadius(pool);
-            radii.set(pool.name, pool.r);
-            const newest = pool.bounds && pool.bounds.newest;
-            const previous = state.newest.get(pool.name);
-            freshBy.set(pool.name, previous == null || newest == null ? 0 : Math.max(0, newest - previous));
-            state.newest.set(pool.name, newest);
+            pool.shape = trackShape(pool, inner);
+            pool.track = layTrack(pool);
+            shapes.set(pool.name, pool.shape);
           }
           state.pools = pools;
           if (state.selected && !currentPool()) closePeek();
           if (topology() !== state.topology) relayout();
-          updateCards(freshBy);
+          updateCards();
           setStatus(pools.length + (pools.length === 1 ? " pool" : " pools"));
           $("map-error").textContent = "";
           if (state.requested) {
@@ -642,10 +817,11 @@ Invariants: Message data enters the DOM as text.
                   buffer = parsed.rest;
                   for (const event of parsed.events) {
                     if (event.name === "error") throw new Error((event.data.error && event.data.error.message) || "Stream error");
-                    onEvent(event);
+                    // A bug in the page's own handling is logged, not treated as a dropped stream.
+                    try { onEvent(event); } catch (error) { console.error(error); }
                   }
                 }
-              } catch (_) { /* Reconnect below. */ }
+              } catch (_) { /* The stream dropped or was stopped; reconnect below unless stopped. */ }
               if (stopped) return;
               onDrop();
               await new Promise((resolve) => setTimeout(resolve, retryMs));
@@ -787,7 +963,7 @@ Invariants: Message data enters the DOM as text.
           if (state.spotSeq === seq) return;
           state.spotSeq = seq;
           const pool = currentPool();
-          if (pool) drawRing(pool, 0);
+          if (pool) drawRing(pool);
         }
 
         // Marks the row under the pointer: its slice on the ring, and after a short
@@ -837,7 +1013,8 @@ Invariants: Message data enters the DOM as text.
 
         // Clicking anywhere outside the card closes it. A pool's own click handler toggles it.
         document.addEventListener("pointerdown", (event) => {
-          if (state.selected && !$("peek").contains(event.target) && !event.target.closest(".pool")) closePeek();
+          const pool = event.target.closest(".pool");
+          if (state.selected && !$("peek").contains(event.target) && !(pool && onTrack(pool.dataset.name, event))) closePeek();
         });
         document.addEventListener("keydown", (event) => {
           if (event.key === "Escape" && state.selected) closePeek();
