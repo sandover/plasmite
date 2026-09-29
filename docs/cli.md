@@ -28,6 +28,7 @@ is for credential-free use on the server machine.
 | `duplex` | yes | yes |
 | `doctor` | yes | no |
 
+An access key grants access to every pool in the server’s pool directory.
 For native remote access, create a key with `access invite`, then connect with
 `access connect SERVER_URL`. The client saves the connection for the current OS
 user; remote `feed`, `follow`, and `duplex` use saved credentials selected by

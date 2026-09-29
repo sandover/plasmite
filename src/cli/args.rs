@@ -292,6 +292,7 @@ responses to stdout. It exits when stdin closes."#,
         about = "Manage secure access to a shared pool directory",
         long_about = r#"Create access keys and connect to a shared pool server.
 
+An access key grants access to every pool in the server’s pool directory.
 Create a key with `invite` on the server machine. Use `connect` and `status` on a client machine.
 `connect` asks for the key without displaying it."#
     )]
