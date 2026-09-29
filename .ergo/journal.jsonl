@@ -127,3 +127,8 @@
 {"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-26T23:54:23.831416Z","text":"Exact Mac test leaf d57884f6 is absent from login keychain; pending removal process has exited."}
 {"version":1,"task_id":"2AOW5U","kind":"result","at":"2026-09-28T18:11:13.776517Z","text":"Chrome page created and revoked Mac-QA-UI; native write/read passed, then revoked write failed. Headless check remains."}
 {"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-28T18:11:17.118616Z","text":"Mac accepted CA-signed leaf, rejected child. Product install/removal await OS prompt; F6DA30F8 remains trusted."}
+{"version":1,"task_id":"2AOW5U","kind":"done","at":"2026-09-29T15:55:24.338128Z","text":"Local page created and revoked a key; native use was denied after revoke. Settings and admin guards passed."}
+{"version":1,"task_id":"NJ5JQ3","kind":"result","at":"2026-09-29T15:55:24.35728Z","text":"Chrome HTTPS login, append/read, reload, logout, reconnect, and key-revocation cutoff passed on localhost."}
+{"version":1,"task_id":"NJ5JQ3","kind":"done","at":"2026-09-29T15:55:24.371818Z","text":"Browser session lifecycle passed in Chrome; cookie, origin, and hostile-content tests pass in just check."}
+{"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-29T15:55:24.389658Z","text":"Product installed CA-signed leaf; Chrome login and write passed. Exact untrust cleared keychain and SSL trust."}
+{"version":1,"task_id":"2AOW5U","kind":"result","at":"2026-09-29T15:55:28.693115Z","text":"Chrome page matched serve flags; local key activity and revoke passed. Forged admin tests pass."}
