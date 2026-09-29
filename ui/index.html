@@ -551,6 +551,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           n: N,
           p: null,
           poolInfo: null,
+          infoError: false,
           liveStatus: "reconnecting",
           messages: [],
           nextSeq: null,
@@ -688,7 +689,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
 
         /* ---- Pool list ---- */
 
-        function renderPoolList(pools, error) {
+        function renderPoolList(pools, error, loading) {
           app.classList.remove("app--follow");
           var listRows = pools
             .slice()
@@ -717,7 +718,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
               '<div class="body">' +
                 (error ? '<p class="error">' + escapeHtml(error) + '</p>' : "") +
                 '<div class="rows">' +
-                  (listRows || '<div class="muted">No pools found.</div>') +
+                  (listRows || '<div class="muted">' + (loading ? 'Loading pools…' : 'No pools found.') + '</div>') +
                 '</div>' +
               '</div>' +
             '</section>';
@@ -1171,10 +1172,10 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
 
         /* ---- Data fetching ---- */
 
-        // The first load shows an empty list while it waits; later refreshes keep
-        // the current list on screen until the new one arrives.
+        // The first load shows a loading state; later refreshes keep the current
+        // list on screen until the new one arrives.
         async function loadPoolList(refresh) {
-          if (!refresh) renderPoolList([], null);
+          if (!refresh) renderPoolList([], null, true);
           try {
             var response = await fetch("/v0/ui/pools", {
               cache: 'no-store',
@@ -1208,10 +1209,11 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           }
           var body = await response.json();
           state.poolInfo = body && body.pool ? body.pool : null;
+          state.infoError = false;
           state.p = state.poolInfo ? state.poolInfo.ring_size : null;
           var newest = state.poolInfo && state.poolInfo.bounds ? state.poolInfo.bounds.newest : null;
           var oldest = state.poolInfo && state.poolInfo.bounds ? state.poolInfo.bounds.oldest : null;
-          if (Number.isFinite(newest)) {
+          if (state.nextSeq == null && Number.isFinite(newest)) {
             var floor = Number.isFinite(oldest) ? oldest : 1;
             state.nextSeq = Math.max(floor, newest - state.n + 1);
           }
@@ -1259,6 +1261,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
               max: state.n,
             },
           });
+          if (state.infoError) rows.push({ key: "Metadata", value: "Unavailable · last values shown", error: true });
 
           if (age.oldest_time) {
             rows.push({
@@ -1310,6 +1313,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
               val.appendChild(streamNote);
             } else {
               val.textContent = rowData.value;
+              if (rowData.error) val.classList.add("error");
             }
             row.appendChild(val);
             el.appendChild(row);
@@ -1464,6 +1468,18 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
             return;
           }
           streamEventsLoop();
+          refreshPoolInfo();
+        }
+
+        async function refreshPoolInfo() {
+          await wait(3000);
+          while (!state.stopped) {
+            if (!document.hidden) {
+              try { await loadPoolInfo(); }
+              catch (_) { state.infoError = true; renderPoolInfo(); }
+            }
+            await wait(3000);
+          }
         }
 
         boot();
