@@ -149,3 +149,30 @@
 {"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-29T18:47:09.410412Z","text":"Correction: browser tooling redacted the password field. Its 10-character display did not show a truncated key."}
 {"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-29T18:47:09.476804Z","text":"In-app browser reached Claude callback; Claude direct MCP fed/fetched qa seq 1 and native fetch matched."}
 {"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-29T18:47:09.548083Z","text":"OAuth callback CSP fix committed as 42039b2; key, Claude config, certificate trust, and test server removed."}
+{"version":1,"task_id":"NKDGGX","kind":"created","at":"2026-09-29T21:10:03.865332Z"}
+{"version":1,"task_id":"2JA2AZ","kind":"created","at":"2026-09-29T21:10:03.865345Z"}
+{"version":1,"task_id":"HMXU3I","kind":"created","at":"2026-09-29T21:10:03.865348Z"}
+{"version":1,"task_id":"DXEVRN","kind":"created","at":"2026-09-29T21:10:03.86535Z"}
+{"version":1,"task_id":"N7ANEU","kind":"open","at":"2026-09-29T21:10:40.337759Z","text":"Refreshed remaining Safari product check; reuse recorded Mac approval, renewal, and removal results."}
+{"version":1,"task_id":"65GOQL","kind":"open","at":"2026-09-29T21:10:40.40185Z","text":"Refreshed Windows product trust repair and standard-user validation; removed the completed Mac work dependency."}
+{"version":1,"task_id":"SGHDDQ","kind":"open","at":"2026-09-29T21:10:40.464376Z","text":"Refreshed remaining harness evidence; Claude login and callback blockers are resolved."}
+{"version":1,"task_id":"65MU7N","kind":"open","at":"2026-09-29T21:10:40.528828Z","text":"Owner added Windows serving and client parity to feature completion; final validation waits for NKDGGX."}
+{"version":1,"task_id":"2TJPV7","kind":"result","at":"2026-09-29T21:12:26.47497Z","text":"Baseline review remains complete; 65MU7N owns review of added Windows serving and browser-trust changes."}
+{"version":1,"task_id":"2JA2AZ","kind":"open","at":"2026-09-29T21:12:39.822864Z"}
+{"version":1,"task_id":"HMXU3I","kind":"open","at":"2026-09-29T21:12:39.892336Z"}
+{"version":1,"task_id":"DXEVRN","kind":"open","at":"2026-09-29T21:12:39.958934Z"}
+{"version":1,"task_id":"SGHDDQ","kind":"claim","at":"2026-09-29T21:14:13.853208Z","agent":"sol@harness"}
+{"version":1,"task_id":"2JA2AZ","kind":"claim","at":"2026-09-29T21:14:23.408737Z","agent":"codex@windows-state"}
+{"version":1,"task_id":"N7ANEU","kind":"claim","at":"2026-09-29T21:14:43.717917Z","agent":"luna@mac-browser"}
+{"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-29T21:14:52.070443Z","agent":"luna@mac-browser","text":"Prior install/removal and Chrome write are recorded; spike confirms Safari scope only. Waiting for coordinated fixture."}
+{"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-29T21:16:45.773728Z","agent":"luna@mac-browser","text":"Safari blocked: SecurityAgent needs operator credentials; fixture remains untrusted. No warning bypass."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-29T21:19:24.779253Z","agent":"sol@harness","text":"Focused oauth_access integration passed: 2 tests, including isolated direct-client grant revocation."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-29T21:19:24.807845Z","agent":"sol@harness","text":"Address-change test rejected old resource token, then native same-key reconnect and fresh direct OAuth passed."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-29T21:19:30.336768Z","agent":"sol@harness","text":"Mac SecurityAgent blocked exact-leaf trust; canceled without credentials. Codex browser acceptance remains open."}
+{"version":1,"task_id":"65GOQL","kind":"claim","at":"2026-09-29T21:20:43.720617Z","agent":"luna@windows-browser"}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-29T21:23:13.858539Z","agent":"sol@harness","text":"Owner-supplied test leaf passed verified HTTPS health and MCP discovery at localhost:56577."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-29T21:23:17.183208Z","agent":"sol@harness","text":"Codex CLI 0.159.0 registered over HTTPS with process-scoped leaf trust; browser callback remains open."}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-29T21:27:20.859328Z","agent":"sol@harness","text":"New-address test also started local MCP at the updated destination and listed pools through the saved key."}
+{"version":1,"task_id":"2JA2AZ","kind":"result","at":"2026-09-29T21:33:09.552691Z","agent":"codex@windows-state","text":"Windows state code now checks effective SID, protected ACLs, filesystem support, and path safety before secrets."}
+{"version":1,"task_id":"2JA2AZ","kind":"result","at":"2026-09-29T21:33:09.61839Z","agent":"codex@windows-state","text":"macOS clippy, four server-state tests, native sharing, and stream/revocation tests pass; Windows proof remains."}
+{"version":1,"task_id":"DXEVRN","kind":"result","at":"2026-09-29T21:37:05.15271Z","text":"Windows CI now covers private state and secure-sharing release tests; packaged CLI serving gates are in progress."}
