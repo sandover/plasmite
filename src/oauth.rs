@@ -453,9 +453,7 @@ async fn authorize_page(
     );
     response.headers_mut().insert(
         header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(
-            "default-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
-        ),
+        HeaderValue::from_static("default-src 'none'; base-uri 'none'; frame-ancestors 'none'"),
     );
     response
         .headers_mut()

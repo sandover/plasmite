@@ -96,6 +96,12 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
         Err(ureq::Error::Status(400, _))
     ));
     let canceled_page = agent.get(authorization.as_str()).call()?;
+    assert!(
+        !canceled_page
+            .header("content-security-policy")
+            .unwrap_or_default()
+            .contains("form-action")
+    );
     let canceled_cookie = canceled_page
         .header("set-cookie")
         .ok_or("missing cancellation cookie")?
