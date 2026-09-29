@@ -134,6 +134,20 @@ Open the shared HTTPS address in a browser that trusts its certificate. Enter
 the access key on the page. The browser keeps a private session cookie, so a
 later visit does not need the key again. Sign out on that browser to end its
 session. Revoking the access key ends every browser session linked to it.
+On the server machine, open `http://127.0.0.1:9700/ui` to browse pools or
+`http://127.0.0.1:9700/ui/map` to see the pools in the served directory.
+The HTML files in `ui/` need a running server; opening them as `file://`
+pages cannot reach the pool API.
+
+The map draws each pool as a ring. The ring's circumference is the pool's
+message buffer, with byte 0 at 12 o'clock. Each stored message is a segment
+at its real position and size, so the arc turns as the writer moves around
+the buffer and overwrites the oldest messages. A full pool is a closed ring.
+The tick and number outside the ring mark the end of the newest message and
+the message count. A ring grows only as far as it needs to show its messages
+apart. Pools that hold more than 4,096 messages draw one solid arc instead.
+Click a ring to follow its newest messages; hover a message to find it on the
+ring. The link at the bottom of that card opens the full pool page.
 
 The local page at `http://127.0.0.1:9700/access` lists keys and offers Invite
 and Revoke. It works only on the server machine. The remote page cannot

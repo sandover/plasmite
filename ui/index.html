@@ -718,7 +718,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
             '<section class="card">' +
               '<header class="header">' +
                 '<div class="title">PLASMITE UI</div>' +
-                '<div class="toolbar">' + navHtml() + '</div>' +
+                '<div class="toolbar"><a href="/ui/map">Map</a> ' + navHtml() + '</div>' +
               '</header>' +
               '<div class="body">' +
                 '<p class="muted">Pool browser. Click a pool to open its follow view.</p>' +
@@ -737,7 +737,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         function renderPoolView(error) {
           app.classList.add("app--follow");
 
-          var headerHtml = '<header class="header header--compact"><a href="/ui">Pools</a> ' + navHtml() + '</header>';
+          var headerHtml = '<header class="header header--compact"><a href="/ui/map">Map</a> <a href="/ui">Pools</a> ' + navHtml() + '</header>';
 
           app.innerHTML =
             '<section class="card">' +
@@ -1183,8 +1183,10 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
 
         /* ---- Data fetching ---- */
 
-        async function loadPoolList() {
-          renderPoolList([], null);
+        // The first load shows an empty list while it waits; later refreshes keep
+        // the current list on screen until the new one arrives.
+        async function loadPoolList(refresh) {
+          if (!refresh) renderPoolList([], null);
           try {
             var response = await fetch("/v0/ui/pools", {
               cache: 'no-store',
@@ -1439,6 +1441,13 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
 
         async function boot() {
           startTimeUpdater();
+          if (window.location.protocol === 'file:') {
+            app.innerHTML = '<section class="card"><header class="header"><div class="title">PLASMITE</div></header>' +
+              '<div class="body"><p>This is the UI source file. Open the page through a running Plasmite server.</p>' +
+              '<p>Start one with <code>plasmite --dir ./shared serve</code>, then open ' +
+              '<code>http://127.0.0.1:9700/ui</code>.</p></div></section>';
+            return;
+          }
           if (params.has('token')) {
             params.delete('token');
             history.replaceState(null, '', window.location.pathname + (params.size ? '?' + params.toString() : ''));
@@ -1455,6 +1464,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         async function bootPool() {
           if (!onPoolPage) {
             await loadPoolList();
+            setInterval(function () { loadPoolList(true); }, 2000);
             return;
           }
           renderPoolView(null);

@@ -10,6 +10,7 @@ use plasmite::api::{
     TailOptions, access,
 };
 use serde_json::{Value, json};
+use std::io::{BufRead, BufReader};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread::sleep;
@@ -644,6 +645,27 @@ fn remote_ui_routes_serve_single_page_html() -> TestResult<()> {
     );
     let body = ui.into_string()?;
     assert!(body.contains("Plasmite UI"));
+    assert!(body.contains("href=\"/ui/map\""));
+
+    let map = ureq::get(&format!("{}/ui/map", server.local_url))
+        .call()
+        .expect("map route");
+    assert_eq!(map.status(), 200);
+    assert!(
+        map.header("content-security-policy")
+            .unwrap_or_default()
+            .contains("font-src 'self'")
+    );
+    assert!(map.into_string()?.contains("Plasmite Map"));
+
+    let font = ureq::get(&format!("{}/ui/assets/inconsolata.woff2", server.local_url))
+        .call()
+        .expect("font asset");
+    assert_eq!(font.status(), 200);
+    assert_eq!(font.header("content-type"), Some("font/woff2"));
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut font.into_reader(), &mut bytes)?;
+    assert!(bytes.starts_with(b"wOF2"));
 
     let pool_view = ureq::get(&format!("{}/ui/pools/demo", server.local_url))
         .call()
@@ -655,6 +677,128 @@ fn remote_ui_routes_serve_single_page_html() -> TestResult<()> {
             .unwrap_or_default()
             .starts_with("text/html")
     );
+    Ok(())
+}
+
+#[test]
+fn local_ui_pool_list_reports_ring_layout() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::try_start(temp_dir.path())?;
+    let client = server.client()?;
+    let pool_ref = PoolRef::name("ring");
+
+    client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
+    client.create_pool(&PoolRef::name("empty"), PoolOptions::new(1024 * 1024))?;
+    let pool = client.open_pool(&pool_ref)?;
+    pool.append_json_now(&json!({"body": "short"}), &[], Durability::Fast)?;
+    pool.append_json_now(&json!({"body": "x".repeat(2000)}), &[], Durability::Fast)?;
+
+    let body: Value = ureq::get(&format!("{}/v0/ui/pools", server.local_url))
+        .call()
+        .expect("ui pool list")
+        .into_json()?;
+    let pools = body["pools"].as_array().expect("pools array");
+    let find = |name: &str| pools.iter().find(|pool| pool["name"] == name).expect(name);
+
+    let ring = &find("ring")["ring"];
+    let frames: Vec<(u64, u64)> = ring["frames"]
+        .as_array()
+        .expect("frames array")
+        .iter()
+        .map(|frame| {
+            let at = |i: usize| frame[i].as_u64().expect("frame number");
+            (at(0), at(1))
+        })
+        .collect();
+    assert_eq!(frames.len(), 2);
+    assert_eq!(frames[0].0, ring["tail"].as_u64().expect("tail"));
+    assert_eq!(frames[1].0, frames[0].0 + frames[0].1);
+    assert_eq!(
+        frames[1].0 + frames[1].1,
+        ring["head"].as_u64().expect("head")
+    );
+    assert!(frames[1].1 > frames[0].1 + 1900);
+    assert_eq!(
+        frames[0].1 + frames[1].1,
+        find("ring")["metrics"]["utilization"]["used_bytes"]
+            .as_u64()
+            .expect("used bytes")
+    );
+    assert_eq!(find("empty")["ring"]["frames"], json!([]));
+    Ok(())
+}
+
+fn read_pool_event(reader: &mut impl BufRead) -> TestResult<Value> {
+    let mut event = String::new();
+    let mut data = String::new();
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line)? == 0 {
+            return Err("pool stream closed before an event".into());
+        }
+        if line == "\n" || line == "\r\n" {
+            if event.is_empty() {
+                continue;
+            }
+            assert_eq!(event, "pools");
+            return Ok(serde_json::from_str(&data)?);
+        }
+        if let Some(value) = line.strip_prefix("event: ") {
+            event = value.trim_end().to_string();
+        } else if let Some(value) = line.strip_prefix("data: ") {
+            data.push_str(value.trim_end());
+        }
+    }
+}
+
+#[test]
+fn local_ui_pool_stream_sends_changes_and_stays_quiet() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::try_start(temp_dir.path())?;
+    let client = server.client()?;
+    let response = ureq::get(&format!("{}/v0/ui/pools/stream", server.local_url))
+        .timeout(Duration::from_secs(5))
+        .call()?;
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.header("content-type"), Some("text/event-stream"));
+    let mut reader = BufReader::new(response.into_reader());
+    let first = read_pool_event(&mut reader)?;
+    let get: Value = ureq::get(&format!("{}/v0/ui/pools", server.local_url))
+        .call()?
+        .into_json()?;
+    assert_eq!(first, get);
+
+    let pool_ref = PoolRef::name("changing");
+    client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
+    let created_at = Instant::now();
+    let created = read_pool_event(&mut reader)?;
+    assert!(created_at.elapsed() < Duration::from_millis(500));
+    assert_eq!(created["pools"][0]["name"], "changing");
+
+    let pool = client.open_pool(&pool_ref)?;
+    let message = pool.append_json_now(&json!({"n": 1}), &[], Durability::Fast)?;
+    let appended_at = Instant::now();
+    let appended = read_pool_event(&mut reader)?;
+    assert!(appended_at.elapsed() < Duration::from_millis(500));
+    assert_eq!(appended["pools"][0]["bounds"]["newest"], message.seq);
+
+    client.delete_pool(&pool_ref)?;
+    let deleted_at = Instant::now();
+    let deleted = read_pool_event(&mut reader)?;
+    assert!(deleted_at.elapsed() < Duration::from_millis(500));
+    assert_eq!(deleted["pools"], json!([]));
+
+    // A second reader thread lets this assertion time the idle interval from
+    // the last event, instead of from when the HTTP request began.
+    let (tx, rx) = mpsc::channel();
+    let idle_reader = std::thread::spawn(move || {
+        let _ = tx.send(read_pool_event(&mut reader).is_ok());
+    });
+    assert!(matches!(
+        rx.recv_timeout(Duration::from_secs(2)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    idle_reader.join().expect("idle reader thread");
     Ok(())
 }
 
@@ -681,6 +825,40 @@ fn local_ui_events_stream_sends_sse() -> TestResult<()> {
     let body = response.into_string()?;
     assert!(body.contains("event: message"));
     assert!(body.contains("\"seq\":1"));
+    Ok(())
+}
+
+#[test]
+fn local_ui_tail_reads_reported_oldest_after_small_pool_wrap() -> TestResult<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let server = TestServer::try_start(temp_dir.path())?;
+    let client = server.client()?;
+    let pool_ref = PoolRef::name("wrapped");
+    client.create_pool(&pool_ref, PoolOptions::new(64 * 1024))?;
+    let pool = client.open_pool(&pool_ref)?;
+    for i in 1..=450 {
+        pool.append_json_now(
+            &json!({"message": format!("tick {i}"), "level": "info"}),
+            &[],
+            Durability::Fast,
+        )?;
+    }
+    let oldest = pool.info()?.bounds.oldest_seq.expect("oldest");
+    assert!(oldest > 1, "the pool must wrap and overwrite messages");
+
+    let response = ureq::get(&format!(
+        "{}/v0/ui/pools/wrapped/events?gap_policy=error&since_seq={oldest}&max=1",
+        server.local_url
+    ))
+    .call()?;
+    let body = response.into_string()?;
+    assert!(body.contains("event: message"), "{body}");
+    let data = body
+        .lines()
+        .find_map(|line| line.strip_prefix("data: "))
+        .expect("message data");
+    let message: Value = serde_json::from_str(data)?;
+    assert_eq!(message["seq"], oldest);
     Ok(())
 }
 

@@ -1,0 +1,875 @@
+<!--
+Purpose: Live map of the pools in one served directory.
+Role: Browser client for the pool list, its change stream, and pool events.
+Invariants: Each pool is a ring whose circumference is its message buffer,
+  with byte 0 at 12 o'clock. Each stored message is drawn at its real offset
+  and size, so the arc turns as the writer moves around the ring. A full ring
+  is a closed arc.
+Invariants: Pools sit in rows, in name order. Layout changes only when the
+  pool set, a ring's size step, or the window width changes. The message
+  card floats over the map and never moves pools.
+Invariants: Message data enters the DOM as text. The page shows no process
+  links without process presence data.
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plasmite Map</title>
+    <style>
+      @font-face {
+        font-family: "Inconsolata";
+        src: url("/ui/assets/inconsolata.woff2") format("woff2");
+        font-weight: 200 900;
+        font-display: swap;
+      }
+      :root {
+        color-scheme: dark;
+        --bg: #15191f;
+        --panel-raised: #27313e;
+        --line: #394657;
+        --text: #e9edf1;
+        --muted: #9aa9b8;
+        --accent: #83c5d7;
+        --ok: #74d7b2;
+        --warn: #e8bc72;
+        --error: #f08383;
+        --spot: #ffd166;
+        --head: #e6f6fa;
+        --numbers: "Inconsolata", "Menlo", "Consolas", monospace;
+        --ease: .35s ease;
+      }
+      * { box-sizing: border-box; }
+      [hidden] { display: none !important; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: radial-gradient(circle at 30% -20%, #263543, transparent 55%), var(--bg);
+        color: var(--text);
+        font: 15px/1.45 "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+      }
+      a { color: var(--accent); }
+      button { font: inherit; cursor: pointer; }
+      .shell { min-height: 100vh; display: flex; flex-direction: column; }
+      .topbar {
+        display: flex; align-items: center; gap: 22px;
+        padding: 10px 18px; border-bottom: 1px solid var(--line); background: #1a2028;
+      }
+      .brand { font-size: 14px; letter-spacing: .11em; }
+      .topbar nav { display: flex; gap: 16px; }
+      .topbar nav a { text-decoration: none; color: var(--muted); }
+      .topbar nav a[aria-current="page"] { color: var(--text); }
+      .topbar .status { margin-left: auto; color: var(--muted); font-size: 12px; }
+      .map-scroll { flex: 1; overflow: auto; padding: 16px; }
+      .map { position: relative; margin: 0 auto; }
+      .map, .machine, .directory, .pool, .peek { transition: left var(--ease), top var(--ease), width var(--ease), height var(--ease); }
+      .machine, .directory { position: absolute; }
+      .machine { border: 1px solid #6d8592; background: #1c2832e8; border-radius: 18px; }
+      .directory { border: 1px solid #547382; background: #22313b; border-radius: 13px; }
+      .group-label { position: absolute; top: 10px; left: 16px; right: 16px; display: flex; gap: 10px; align-items: baseline; font-size: 12px; }
+      .group-label strong { font-weight: 600; }
+      .machine > .group-label { color: var(--muted); }
+      .path {
+        display: flex; min-width: 0; padding: 1px 4px; margin: -1px -4px; border: 0; border-radius: 5px;
+        background: none; color: var(--text); font-size: 12px; white-space: nowrap;
+      }
+      .path .parent { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+      .path strong { flex: none; }
+      .path:hover, .path:focus-visible { background: var(--panel-raised); outline: none; }
+      .copied { color: var(--ok); font-size: 11px; }
+      .empty { position: absolute; display: grid; place-items: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; }
+
+      .pool {
+        position: absolute; display: grid; place-items: center;
+        padding: 0; border: 0; background: none; color: var(--text); animation: appear var(--ease);
+      }
+      .pool > * { grid-area: 1 / 1; }
+      .pool .label { display: flex; flex-direction: column; align-items: center; gap: 1px; pointer-events: none; }
+      @keyframes appear { from { opacity: 0; transform: scale(.94); } }
+      .pool svg { display: block; overflow: visible; }
+      .pool .track { fill: none; stroke: #16202a; }
+      .pool .arc { fill: none; stroke: var(--accent); }
+      .pool .fresh { fill: none; stroke: var(--ok); animation: fresh 1.6s ease-out forwards; }
+      .pool .spot { fill: none; stroke: var(--spot); }
+      .pool .pointer { fill: var(--spot); filter: drop-shadow(0 0 3px #ffd16680); }
+      @keyframes fresh { to { opacity: 0; } }
+      .pool .head { fill: none; stroke: var(--head); }
+      .pool .count { fill: var(--text); font-family: var(--numbers); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+      .pool .name, .pool .meta { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+      .pool .name { font-size: 13px; line-height: 1.2; }
+      .pool .meta { color: var(--muted); font-family: var(--numbers); font-size: 11px; }
+      .pool:hover .track, .pool:focus-visible .track { stroke: #2b3947; }
+      .pool:focus-visible { outline: none; }
+      .pool:focus-visible .name { text-decoration: underline; }
+      .pool[aria-expanded="true"] .name { color: var(--ok); }
+
+      .peek {
+        position: absolute; z-index: 3; width: 360px; display: flex; flex-direction: column; animation: appear var(--ease);
+        background: #1a2028; border: 1px solid #526578; border-radius: 12px; box-shadow: 0 10px 30px #0b0f1499;
+      }
+      .peek::before {
+        content: ""; position: absolute; top: -7px; left: calc(var(--pointer, 50%) - 7px); width: 12px; height: 12px;
+        background: #1a2028; border: solid #526578; border-width: 1px 0 0 1px; transform: rotate(45deg);
+        transition: left var(--ease);
+      }
+      .peek-head { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+      .peek-head strong { display: block; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .messages { overflow: auto; flex: 1; min-height: 0; padding: 4px 6px; }
+      .messages:empty::before { content: "–"; display: block; padding: 8px 6px; color: var(--muted); font-size: 12px; }
+      .message { display: flex; gap: 8px; align-items: baseline; padding: 4px 6px; border-radius: 5px; font-size: 12px; }
+      .message:hover { background: #222b35; }
+      .message .kind { flex: none; color: var(--accent); font-size: 10px; }
+      .message .kind[data-tone="warn"] { color: var(--warn); }
+      .message .kind[data-tone="error"] { color: var(--error); }
+      .message .text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+      .message time { flex: none; color: var(--muted); font-size: 10px; }
+      .more {
+        display: block; padding: 8px 14px; border-top: 1px solid var(--line); border-radius: 0 0 12px 12px;
+        font-size: 12px; text-decoration: none;
+      }
+      .more:hover, .more:focus-visible { background: var(--panel-raised); outline: none; }
+      .tip {
+        position: fixed; z-index: 10; max-width: min(460px, calc(100vw - 24px)); padding: 8px 10px; pointer-events: none;
+        background: #0f1419; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px #0009;
+        font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere;
+      }
+      .tip small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+      .error { color: var(--error); padding: 0 24px; }
+      .error:empty { display: none; }
+
+      @media (prefers-reduced-motion: reduce) {
+        .map, .machine, .directory, .pool, .peek { transition: none; }
+        .pool, .peek { animation: none; }
+        .pool .fresh { animation: none; opacity: 0; }
+      }
+      @media (max-width: 600px) {
+        .topbar { gap: 13px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <span class="brand">PLASMITE</span>
+        <nav aria-label="Views">
+          <a href="/ui/map" aria-current="page">Map</a>
+          <a href="/ui">Pools</a>
+        </nav>
+        <span class="status" id="status">Connecting…</span>
+      </header>
+      <div class="map-scroll" id="map-scroll">
+        <div class="map" id="map">
+          <section class="machine" id="machine">
+            <div class="group-label"><strong id="machine-name"></strong></div>
+            <section class="directory" id="directory">
+              <div class="group-label">
+                <button type="button" class="path" id="path" aria-label="Copy directory path"><span class="parent"></span><strong></strong></button>
+                <span class="copied" id="copied" hidden>copied</span>
+              </div>
+              <div class="empty" id="empty" hidden>No pools</div>
+              <section class="peek" id="peek" aria-label="Messages" hidden>
+                <header class="peek-head">
+                  <strong id="peek-name"></strong>
+                </header>
+                <div class="messages" id="messages" aria-live="polite"></div>
+                <a class="more" id="open" href="/ui"></a>
+              </section>
+            </section>
+          </section>
+        </div>
+      </div>
+      <p class="error" id="map-error" role="alert"></p>
+      <div class="tip" id="tip" role="tooltip" hidden></div>
+    </main>
+    <script>
+      (() => {
+        "use strict";
+        const $ = (id) => document.getElementById(id);
+        const scroll = $("map-scroll");
+        const messages = $("messages");
+        const state = { pools: [], topology: null, newest: new Map(),
+          selected: null, spotSeq: null, boxes: new Map(), directoryWidth: 0, nextSeq: null, abort: null, generation: 0,
+          listAbort: null, listGeneration: 0 };
+        const cards = new Map();
+        const stroke = 7;
+        const maxRadius = 110;
+        const radiusStep = 8;
+        const minSegment = 2.5;
+        const ageBands = 6;
+        const countRoom = { x: 28, y: 26 };
+        const peekWidth = 340;
+        const emptySize = { width: 240, height: 70 };
+        const machinePad = { top: 36, side: 14, bottom: 14 };
+        const directoryPad = { top: 40, side: 18, bottom: 16 };
+        const gutter = 20;
+        const maxMessages = 200;
+        let resizeTimer = null;
+
+        // Pure helpers.
+
+        function size(bytes) {
+          if (!Number.isFinite(bytes)) return "–";
+          const units = ["B", "KB", "MB", "GB", "TB"];
+          let value = bytes, unit = 0;
+          while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+          return (unit ? Number(value.toFixed(1)) : value) + " " + units[unit];
+        }
+
+        const measure = document.createElement("canvas").getContext("2d");
+        function textWidth(text, px, family = getComputedStyle(document.body).fontFamily) {
+          measure.font = px + "px " + family;
+          return measure.measureText(text).width;
+        }
+
+        // Smallest ring whose inside fits the two label lines. Each line sits about
+        // 9 px from the center, where the circle is narrower than its diameter. The
+        // size line is measured at its widest ("100%"), so the percent never resizes it.
+        function labelRadius(pool) {
+          const width = Math.max(textWidth(pool.name, 13), textWidth(size(pool.file_size) + " · 100%", 11,
+            getComputedStyle(document.documentElement).getPropertyValue("--numbers"))) + 10;
+          return Math.hypot(width / 2, 11) + stroke / 2 + 3;
+        }
+
+        // A ring is as small as its label allows. It grows, in steps, only until its
+        // smallest message is wide enough to see. When no ring up to maxRadius could
+        // show every message apart, growing would not help, so it stays small. The
+        // arc is to scale at any size.
+        function radius(pool) {
+          const sizes = (frames(pool) || []).map(([, bytes]) => bytes);
+          const needed = sizes.length ? pool.ring_size * minSegment / (2 * Math.PI * Math.min(...sizes)) : 0;
+          const data = needed > maxRadius ? 0 : needed;
+          return Math.ceil(Math.max(labelRadius(pool), data) / radiusStep) * radiusStep;
+        }
+
+        // Leaves room around the ring for the count beside its newest message.
+        function nodeSize(pool) {
+          const d = 2 * (radius(pool) + stroke);
+          return { width: d + 2 * countRoom.x, height: d + 2 * countRoom.y };
+        }
+
+        function shortCount(count) {
+          if (count < 10000) return String(count);
+          if (count < 1000000) return (count / 1000).toFixed(count < 100000 ? 1 : 0) + "k";
+          return (count / 1000000).toFixed(1) + "M";
+        }
+
+        // Rounds so a nearly empty pool never reads as 0% and a nearly full one never reads as 100%.
+        function percentLabel(fraction) {
+          const percent = fraction * 100;
+          if (percent > 0 && percent < 1) return "<1%";
+          if (percent > 99 && percent < 100) return ">99%";
+          return Math.round(percent) + "%";
+        }
+
+        function usedFraction(pool) {
+          const used = pool.metrics && pool.metrics.utilization && pool.metrics.utilization.used_percent;
+          return Number.isFinite(used) ? Math.min(1, Math.max(0, used / 100)) : 0;
+        }
+
+        function messageCount(pool) {
+          const count = pool.metrics && pool.metrics.message_count;
+          return Number.isFinite(count) ? count : 0;
+        }
+
+        // Stored frames as [offset, bytes] pairs, oldest first, or null when the
+        // server sent no list (too many frames, or the ring changed mid-read).
+        function frames(pool) {
+          return pool.ring && Array.isArray(pool.ring.frames) ? pool.ring.frames : null;
+        }
+
+        // The drawn part of one frame, in pixels from 12 o'clock. Frames long enough
+        // to draw apart (1.5 px and up) end a little early, leaving a gap before the
+        // next one; shorter frames join their neighbors.
+        function drawn(offset, bytes, scale) {
+          const length = bytes * scale;
+          const gap = length >= 1.5 ? Math.min(1, length * 0.3) : 0;
+          return { start: offset * scale, end: offset * scale + Math.max(0.5, length - gap) };
+        }
+
+        // Dash pattern that paints the given intervals on a circle whose dash
+        // offset 0 is 12 o'clock. Touching intervals merge into one dash.
+        function dashes(intervals, circumference) {
+          const sorted = intervals.slice().sort((a, b) => a.start - b.start);
+          const merged = [];
+          for (const interval of sorted) {
+            const last = merged[merged.length - 1];
+            if (last && interval.start - last.end < 0.01) last.end = Math.max(last.end, interval.end);
+            else merged.push({ ...interval });
+          }
+          if (!merged.length) return "0 " + circumference;
+          let out = "0 " + merged[0].start.toFixed(2);
+          merged.forEach((interval, i) => {
+            const next = i + 1 < merged.length ? merged[i + 1].start : circumference;
+            out += " " + (interval.end - interval.start).toFixed(2) + " " + Math.max(0, next - interval.end).toFixed(2);
+          });
+          return out;
+        }
+
+        // Pixel intervals for ring bytes [from, to), which may run past the end of
+        // the ring and continue from byte 0.
+        function byteIntervals(from, to, size, scale) {
+          const start = ((from % size) + size) % size;
+          const end = start + (to - from);
+          return end <= size
+            ? [{ start: start * scale, end: end * scale }]
+            : [{ start: start * scale, end: size * scale }, { start: 0, end: (end - size) * scale }];
+        }
+
+        // Stored messages grouped by age, oldest group first, plus the newest
+        // message on its own. With a frame list, each message keeps its own
+        // interval. Without one, the stored bytes from tail to head split evenly,
+        // and the newest message is the last 2 px.
+        function ageGroups(pool, scale) {
+          const list = frames(pool);
+          if (list) {
+            const pieces = list.map(([offset, bytes]) => drawn(offset, bytes, scale));
+            const head = pieces.pop();
+            const bands = Array.from({ length: ageBands }, () => []);
+            pieces.forEach((piece, i) => bands[Math.floor(i * ageBands / pieces.length)].push(piece));
+            return { bands, head: head ? [head] : [] };
+          }
+          const ring = pool.ring;
+          if (!ring || !messageCount(pool)) return { bands: [], head: [] };
+          const size = pool.ring_size;
+          const used = (ring.head - ring.tail + size) % size || size;
+          const bands = Array.from({ length: ageBands }, (_, k) =>
+            byteIntervals(ring.tail + used * k / ageBands, ring.tail + used * (k + 1) / ageBands, size, scale));
+          const end = ring.tail + used;
+          return { bands, head: byteIntervals(end - Math.min(used, 2 / scale), end, size, scale) };
+        }
+
+        // Where one stored message sits on the ring. Null when it is gone or the
+        // pool has no frame list.
+        function segmentOf(pool, seq, scale) {
+          const list = frames(pool);
+          const index = seq - (pool.bounds && pool.bounds.oldest);
+          if (!list || !Number.isInteger(index) || index < 0 || index >= list.length) return null;
+          return drawn(list[index][0], list[index][1], scale);
+        }
+
+        // Places text just outside the ring at an angle, anchored away from the ring.
+        function outside(c, distance, angle, text) {
+          const x = c + distance * Math.cos(angle);
+          const y = c + distance * Math.sin(angle);
+          const anchor = Math.cos(angle) > 0.3 ? "start" : Math.cos(angle) < -0.3 ? "end" : "middle";
+          const baseline = Math.sin(angle) > 0.3 ? "hanging" : Math.sin(angle) < -0.3 ? "auto" : "central";
+          return '<text class="count" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" text-anchor="' + anchor +
+            '" dominant-baseline="' + baseline + '">' + text + '</text>';
+        }
+
+        // Builds markup from numbers only. The dark track is the whole ring, with
+        // byte 0 at 12 o'clock, and each stored message is drawn where it sits. When
+        // the server sends no frame list, the arc runs solid from tail to head.
+        // Messages brighten with age order, oldest dimmest, and the newest is drawn
+        // near white, so the write position and direction read at a glance. Newly
+        // arrived messages glow for a moment. The count sits just past the newest.
+        function ringSvg(pool, freshCount, spotSeq) {
+          const r = radius(pool);
+          const c = r + stroke;
+          const circumference = 2 * Math.PI * r;
+          const scale = circumference / pool.ring_size;
+          const list = frames(pool);
+          const groups = ageGroups(pool, scale);
+          const pieces = list ? list.map(([offset, bytes]) => drawn(offset, bytes, scale)) : [];
+          const fresh = pieces.slice(pieces.length - Math.min(freshCount, pieces.length));
+          const newest = list && list.length ? list[list.length - 1] : null;
+          const end = (newest ? newest[0] + newest[1] : (pool.ring ? pool.ring.head : 0)) * scale;
+          // Recolors the hovered message and points at its middle from just outside
+          // the ring, so even a sliver can be found.
+          const spot = segmentOf(pool, spotSeq, scale);
+          const spotAngle = spot ? (spot.start + spot.end) / 2 / r - Math.PI / 2 : null;
+          const tip = r + stroke / 2 + 3;
+          const base = tip + 7;
+          const pointer = () => {
+            const [cos, sin] = [Math.cos(spotAngle), Math.sin(spotAngle)];
+            const point = (d, side) => (c + d * cos - side * sin).toFixed(1) + "," + (c + d * sin + side * cos).toFixed(1);
+            return '<polygon class="pointer" points="' + point(tip, 0) + " " + point(base, -4) + " " + point(base, 4) + '"/>';
+          };
+          // The count steps outward past the pointer when the two would touch.
+          const countAngle = end / r - Math.PI / 2;
+          const nearSpot = spot && Math.abs(Math.atan2(Math.sin(countAngle - spotAngle), Math.cos(countAngle - spotAngle))) * base < 18;
+          const countDistance = nearSpot ? base + 5 : r + stroke / 2 + 6;
+          const circle = (className, dash, opacity = 1) => '<circle class="' + className + '" cx="' + c + '" cy="' + c + '" r="' + r +
+            '" stroke-width="' + stroke + '" transform="rotate(-90 ' + c + ' ' + c + ')" stroke-dasharray="' + dash + '"' +
+            (opacity < 1 ? ' opacity="' + opacity.toFixed(2) + '"' : "") + '/>';
+          const bands = groups.bands.map((intervals, k) =>
+            intervals.length ? circle("arc", dashes(intervals, circumference), 0.3 + 0.6 * (k + 1) / ageBands) : "").join("");
+          return '<svg width="' + 2 * c + '" height="' + 2 * c + '" aria-hidden="true">' +
+            circle("track", "none") +
+            bands +
+            (groups.head.length ? circle("head", dashes(groups.head, circumference)) : "") +
+            (fresh.length ? circle("fresh", dashes(fresh, circumference)) : "") +
+            (spot ? circle("spot", dashes([spot], circumference)) + pointer() : "") +
+            outside(c, countDistance, countAngle, shortCount(messageCount(pool))) + '</svg>';
+        }
+
+        function directoryPath() {
+          const path = state.pools[0] && state.pools[0].path;
+          return path ? path.replace(/[\\/][^\\/]*$/, "") : "";
+        }
+
+        function place(element, box) {
+          element.style.left = (box.x || 0) + "px";
+          element.style.top = (box.y || 0) + "px";
+          element.style.width = box.width + "px";
+          element.style.height = box.height + "px";
+        }
+
+        function setStatus(text, isError) {
+          $("status").textContent = text;
+          $("status").classList.toggle("error", Boolean(isError));
+        }
+
+        function currentPool() {
+          return state.pools.find((pool) => pool.name === state.selected);
+        }
+
+        // Pools.
+
+        function createCard(name) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "pool";
+          button.innerHTML = '<span class="ring"></span><span class="label"><span class="name"></span><span class="meta"></span></span>';
+          button.querySelector(".name").textContent = name;
+          button.addEventListener("click", () => state.selected === name ? closePeek() : openPeek(name));
+          return button;
+        }
+
+        function updateCard(button, pool) {
+          const newest = pool.bounds && pool.bounds.newest;
+          const previous = state.newest.get(pool.name);
+          const fresh = previous == null || newest == null ? 0 : Math.max(0, newest - previous);
+          state.newest.set(pool.name, newest);
+          button.querySelector(".ring").innerHTML = ringSvg(pool, fresh, pool.name === state.selected ? state.spotSeq : null);
+          button.querySelector(".label").style.maxWidth = 2 * (radius(pool) - stroke) - 6 + "px";
+          const used = usedFraction(pool);
+          // Label with the size the pool was created at; usage is a share of its message buffer.
+          button.querySelector(".meta").textContent = size(pool.file_size) + " · " + percentLabel(used);
+          const count = messageCount(pool);
+          button.title = count.toLocaleString() + (count === 1 ? " message · " : " messages · ") + (used * 100).toFixed(1) +
+            "% of a " + size(pool.ring_size) + " buffer";
+          button.setAttribute("aria-label", pool.name + ", " + button.title);
+          button.setAttribute("aria-expanded", String(pool.name === state.selected));
+        }
+
+        function updateCards() {
+          for (const pool of state.pools) {
+            const button = cards.get(pool.name);
+            if (button) updateCard(button, pool);
+          }
+          const pool = currentPool();
+          if (pool) updateMore(pool);
+        }
+
+        function updateMore(pool) {
+          const count = messageCount(pool);
+          $("open").textContent = "All " + count + (count === 1 ? " message" : " messages") + " →";
+        }
+
+        // Packs boxes into rows that wrap at maxWidth, in the given order.
+        function flow(boxes, maxWidth) {
+          let x = 0, y = 0, rowHeight = 0, width = 0;
+          const placed = boxes.map((box) => {
+            if (x > 0 && x + box.width > maxWidth) { x = 0; y += rowHeight + gutter; rowHeight = 0; }
+            const at = { ...box, x, y };
+            x += box.width + gutter;
+            rowHeight = Math.max(rowHeight, box.height);
+            width = Math.max(width, at.x + box.width);
+            return at;
+          });
+          return { boxes: placed, width, height: y + rowHeight };
+        }
+
+        function offset(box, by) {
+          return { ...box, x: box.x + by.x, y: box.y + by.y };
+        }
+
+        // Moves existing pools instead of rebuilding them, so CSS can animate the change.
+        function layoutMap() {
+          const maxWidth = Math.max(emptySize.width, scroll.clientWidth - 32 - 2 * machinePad.side - 2 * directoryPad.side);
+          const rows = flow(state.pools.map((pool) => ({ name: pool.name, ...nodeSize(pool) })), maxWidth);
+          const content = { width: Math.max(rows.width, emptySize.width), height: Math.max(rows.height, emptySize.height) };
+          const inner = { x: directoryPad.side, y: directoryPad.top };
+          const directory = { x: machinePad.side, y: machinePad.top,
+            width: content.width + 2 * directoryPad.side, height: content.height + directoryPad.top + directoryPad.bottom };
+          const machine = { width: directory.width + 2 * machinePad.side,
+            height: directory.height + machinePad.top + machinePad.bottom };
+          place($("map"), machine);
+          place($("machine"), machine);
+          place($("directory"), directory);
+          place($("empty"), offset({ x: 0, y: 0, ...emptySize }, inner));
+          $("empty").hidden = state.pools.length > 0;
+          state.directoryWidth = directory.width;
+          state.boxes.clear();
+          const path = directoryPath();
+          const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1;
+          $("path").querySelector(".parent").textContent = path.slice(0, cut);
+          $("path").querySelector("strong").textContent = path.slice(cut) || "–";
+          $("path").title = path;
+          const names = new Set(state.pools.map((pool) => pool.name));
+          for (const [name, button] of cards) {
+            if (!names.has(name)) { button.remove(); cards.delete(name); state.newest.delete(name); }
+          }
+          for (const box of rows.boxes) {
+            let button = cards.get(box.name);
+            if (!button) {
+              button = createCard(box.name);
+              cards.set(box.name, button);
+              $("directory").append(button);
+            }
+            place(button, offset(box, inner));
+            state.boxes.set(box.name, offset(box, inner));
+          }
+          updateCards();
+          placePeek();
+        }
+
+        // Floats the card under the open pool, pointing at its ring, kept inside the directory's sides.
+        function placePeek() {
+          const box = state.boxes.get(state.selected);
+          $("peek").hidden = !box;
+          if (!box) return;
+          const center = box.x + box.width / 2;
+          const x = Math.max(directoryPad.side, Math.min(center - peekWidth / 2, state.directoryWidth - directoryPad.side - peekWidth));
+          const top = box.y + box.height + 10;
+          $("peek").style.left = x + "px";
+          $("peek").style.top = top + "px";
+          $("peek").style.setProperty("--pointer", (center - x) + "px");
+          fitPeek();
+        }
+
+        // Lets the card reach down to 16 px above the bottom of the window, and no
+        // further. Measured from the card's target spot, so a slide in progress
+        // does not throw it off.
+        function fitPeek() {
+          if ($("peek").hidden) return;
+          const top = $("directory").getBoundingClientRect().top + parseFloat($("peek").style.top);
+          $("peek").style.maxHeight = Math.max(160, innerHeight - top - 16) + "px";
+        }
+
+        function topology() {
+          return JSON.stringify(state.pools.map((pool) => [pool.name, radius(pool)]));
+        }
+
+        function relayout() {
+          state.topology = topology();
+          layoutMap();
+        }
+
+        function showPools(payload) {
+          const pools = Array.isArray(payload.pools) ? payload.pools : [];
+          pools.sort((a, b) => a.name.localeCompare(b.name));
+          state.pools = pools;
+          if (state.selected && !currentPool()) closePeek();
+          if (topology() !== state.topology) relayout();
+          else updateCards();
+          setStatus(pools.length + (pools.length === 1 ? " pool" : " pools"));
+          $("map-error").textContent = "";
+        }
+
+        async function refreshPools() {
+          const response = await fetch("/v0/ui/pools", { cache: "no-store" });
+          if (response.status === 401) { location.assign("/ui"); return; }
+          if (!response.ok) throw new Error("Pool list failed (" + response.status + ")");
+          showPools(await response.json());
+        }
+
+        // Peek card.
+
+        function openPeek(name) {
+          stopReader();
+          state.selected = name;
+          state.spotSeq = null;
+          const pool = currentPool();
+          if (!pool) return;
+          const bounds = pool.bounds || {};
+          state.nextSeq = bounds.newest == null ? null : Math.max(bounds.oldest || 1, bounds.newest - maxMessages + 1);
+          messages.replaceChildren();
+          $("peek-name").textContent = name;
+          $("open").href = "/ui/pools/" + encodeURIComponent(name);
+          updateMore(pool);
+          updateCards();
+          placePeek();
+          const url = new URL(location.href);
+          url.searchParams.set("pool", name);
+          history.replaceState(null, "", url);
+          readLoop(++state.generation);
+        }
+
+        function closePeek() {
+          const button = cards.get(state.selected);
+          const hadFocus = $("peek").contains(document.activeElement);
+          stopReader();
+          state.selected = null;
+          state.spotSeq = null;
+          hideTip();
+          updateCards();
+          placePeek();
+          const url = new URL(location.href);
+          url.searchParams.delete("pool");
+          history.replaceState(null, "", url);
+          if (button && hadFocus) button.focus();
+        }
+
+        // One line per message: its own text when it has some, else its first fields.
+        function summaryText(data) {
+          if (typeof data === "string") return data;
+          if (!data || typeof data !== "object" || Array.isArray(data)) return JSON.stringify(data);
+          if (typeof data.message === "string") return data.message;
+          if (typeof data.text === "string") return data.text;
+          return Object.entries(data)
+            .filter(([key]) => key !== "level" && key !== "kind")
+            .map(([key, value]) => key + " " + (typeof value === "object" && value ? JSON.stringify(value) : value))
+            .join(" · ");
+        }
+
+        function kindOf(message) {
+          const data = message.data;
+          if (data && typeof data === "object" && !Array.isArray(data)) {
+            if (typeof data.level === "string") return data.level;
+            if (typeof data.kind === "string") return data.kind;
+          }
+          const tags = (message.meta && message.meta.tags) || [];
+          return tags.length ? String(tags[0]) : "";
+        }
+
+        function addMessage(message) {
+          if (!Number.isFinite(message.seq)) return;
+          if (state.nextSeq != null && message.seq < state.nextSeq) return;
+          state.nextSeq = message.seq + 1;
+          const row = document.createElement("div");
+          row.className = "message";
+          const when = message.time ? new Date(message.time) : null;
+          row.dataset.seq = message.seq;
+          row.dataset.detail = "#" + message.seq + (when ? " · " + when.toLocaleString() : "");
+          const kind = kindOf(message);
+          if (kind) {
+            const badge = document.createElement("span");
+            badge.className = "kind";
+            badge.textContent = kind;
+            const tone = kind.toLowerCase();
+            if (tone.includes("warn")) badge.dataset.tone = "warn";
+            if (tone.includes("error") || tone.includes("fail")) badge.dataset.tone = "error";
+            row.append(badge);
+          }
+          const text = document.createElement("span");
+          text.className = "text";
+          text.textContent = summaryText(message.data);
+          const time = document.createElement("time");
+          time.textContent = when ? when.toLocaleTimeString([], { hour12: false }) : "";
+          row.append(text, time);
+          const nearBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 40;
+          messages.append(row);
+          while (messages.children.length > maxMessages) messages.firstElementChild.remove();
+          if (nearBottom) messages.scrollTop = messages.scrollHeight;
+        }
+
+        function handleFrame(frame) {
+          let event = "";
+          const data = [];
+          for (const line of frame.split("\n")) {
+            if (line.startsWith("event:")) event = line.slice(6).trim();
+            if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+          }
+          if (!data.length) return;
+          const payload = JSON.parse(data.join("\n"));
+          if (event === "message") addMessage(payload);
+          if (event === "pools") showPools(payload);
+          if (event === "error") throw new Error((payload.error && payload.error.message) || "Stream error");
+        }
+
+        function stopListReader() {
+          state.listGeneration++;
+          if (state.listAbort) state.listAbort.abort();
+          state.listAbort = null;
+        }
+
+        async function readPoolList(generation) {
+          const live = () => generation === state.listGeneration && document.visibilityState === "visible";
+          while (live()) {
+            const controller = new AbortController();
+            state.listAbort = controller;
+            try {
+              const response = await fetch("/v0/ui/pools/stream", { cache: "no-store", signal: controller.signal });
+              if (response.status === 401) { location.assign("/ui"); return; }
+              if (!response.ok || !response.body) throw new Error("Pool stream failed (" + response.status + ")");
+              const reader = response.body.getReader();
+              const decoder = new TextDecoder();
+              let buffer = "";
+              while (live()) {
+                const part = await reader.read();
+                if (!live()) return;
+                if (part.done) break;
+                buffer += decoder.decode(part.value, { stream: true }).replaceAll("\r\n", "\n");
+                const frames = buffer.split("\n\n");
+                buffer = frames.pop() || "";
+                for (const frame of frames) handleFrame(frame);
+              }
+            } catch (error) {
+              if (controller.signal.aborted || !live()) return;
+            } finally {
+              if (state.listAbort === controller) state.listAbort = null;
+            }
+            if (!live()) return;
+            setStatus("reconnecting");
+            await new Promise((resolve) => setTimeout(resolve, 1200));
+          }
+        }
+
+        // Each reader keeps the generation it started with; bumping it ends the old one.
+        function stopReader() {
+          state.generation++;
+          if (state.abort) state.abort.abort();
+          state.abort = null;
+        }
+
+        // Follows one pool and quietly reconnects if the stream drops. The server
+        // skips messages that were overwritten; that is normal for a ring, so the
+        // card shows no notice for it.
+        async function readLoop(generation) {
+          const live = () => generation === state.generation;
+          while (live()) {
+            const controller = new AbortController();
+            state.abort = controller;
+            const query = new URLSearchParams({ gap_policy: "continue" });
+            if (state.nextSeq != null) query.set("since_seq", state.nextSeq);
+            try {
+              const response = await fetch("/v0/ui/pools/" + encodeURIComponent(state.selected) + "/events?" + query, {
+                cache: "no-store", signal: controller.signal
+              });
+              if (response.status === 401) { location.assign("/ui"); return; }
+              if (!response.ok || !response.body) throw new Error("Stream failed (" + response.status + ")");
+              const reader = response.body.getReader();
+              const decoder = new TextDecoder();
+              let buffer = "";
+              while (live()) {
+                const part = await reader.read();
+                if (!live()) return;
+                if (part.done) break;
+                buffer += decoder.decode(part.value, { stream: true }).replaceAll("\r\n", "\n");
+                const frames = buffer.split("\n\n");
+                buffer = frames.pop() || "";
+                for (const frame of frames) handleFrame(frame);
+              }
+            } catch (error) {
+              if (controller.signal.aborted || !live()) return;
+              await new Promise((resolve) => setTimeout(resolve, 1200));
+            } finally {
+              if (state.abort === controller) state.abort = null;
+            }
+          }
+        }
+
+        // Clicking anywhere outside the card closes it. A pool's own click handler toggles it.
+        document.addEventListener("pointerdown", (event) => {
+          if (state.selected && !$("peek").contains(event.target) && !event.target.closest(".pool")) closePeek();
+        });
+
+        // Shows the whole message after a short hover, but only when its line is cut off.
+        let tipTimer = null;
+        function hideTip() {
+          clearTimeout(tipTimer);
+          $("tip").hidden = true;
+        }
+
+        // Marks the hovered message's segment on the open pool's ring.
+        function spot(seq) {
+          if (state.spotSeq === seq) return;
+          state.spotSeq = seq;
+          const pool = currentPool();
+          const button = pool && cards.get(pool.name);
+          if (button) button.querySelector(".ring").innerHTML = ringSvg(pool, 0, seq);
+        }
+        // Marks the row under the pointer: its slice on the ring, and after a short
+        // wait, a tooltip when its line is cut off. Does nothing if the row is unchanged.
+        let hoverRow = null;
+        function hover(row) {
+          if (row === hoverRow) return;
+          hoverRow = row;
+          hideTip();
+          spot(row ? Number(row.dataset.seq) : null);
+          if (!row) return;
+          const text = row.querySelector(".text");
+          if (text.scrollWidth <= text.clientWidth) return;
+          tipTimer = setTimeout(() => {
+            const tip = $("tip");
+            const detail = document.createElement("small");
+            detail.textContent = row.dataset.detail;
+            tip.replaceChildren(text.textContent, detail);
+            tip.hidden = false;
+            const rect = row.getBoundingClientRect();
+            const below = rect.bottom + 6 + tip.offsetHeight <= innerHeight;
+            tip.style.left = Math.max(12, Math.min(rect.left, innerWidth - tip.offsetWidth - 12)) + "px";
+            tip.style.top = (below ? rect.bottom + 6 : rect.top - 6 - tip.offsetHeight) + "px";
+          }, 450);
+        }
+
+        // Browsers send hover events only after a scroll settles, so while the list
+        // scrolls, each frame looks up the row under the last pointer position.
+        let pointer = null;
+        let scrollFrame = 0;
+        messages.addEventListener("pointermove", (event) => {
+          pointer = { x: event.clientX, y: event.clientY };
+          hover(event.target.closest(".message"));
+        });
+        messages.addEventListener("pointerleave", () => { pointer = null; hover(null); });
+        messages.addEventListener("scroll", () => {
+          if (!pointer || scrollFrame) return;
+          scrollFrame = requestAnimationFrame(() => {
+            scrollFrame = 0;
+            if (!pointer) return;
+            const under = document.elementFromPoint(pointer.x, pointer.y);
+            hover(under && messages.contains(under) ? under.closest(".message") : null);
+          });
+        });
+        $("path").addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(directoryPath());
+            $("copied").hidden = false;
+            setTimeout(() => { $("copied").hidden = true; }, 1200);
+          } catch (_) { /* Clipboard needs a secure context; the title still shows the path. */ }
+        });
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && state.selected) closePeek();
+        });
+
+        // Capture catches scrolling inside the map as well as the page.
+        window.addEventListener("scroll", fitPeek, { capture: true, passive: true });
+        window.addEventListener("resize", () => {
+          fitPeek();
+          clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(() => { if (state.topology != null) relayout(); }, 180);
+        });
+        document.addEventListener("visibilitychange", () => {
+          stopListReader();
+          if (document.visibilityState === "visible") readPoolList(state.listGeneration);
+        });
+
+        function showError(error) {
+          $("map-error").textContent = String(error.message || error);
+          setStatus("Map unavailable", true);
+        }
+
+        async function boot() {
+          if (location.protocol === "file:") {
+            showError(new Error("Open this page through a running Plasmite server at http://127.0.0.1:9700/ui/map."));
+            return;
+          }
+          try {
+            const session = await fetch("/v0/browser/session", { cache: "no-store" });
+            if (!session.ok) { location.assign("/ui"); return; }
+            $("machine-name").textContent = location.host;
+            await refreshPools();
+            const requested = new URLSearchParams(location.search).get("pool");
+            if (requested && cards.has(requested)) openPeek(requested);
+          } catch (error) { showError(error); }
+          if (document.visibilityState === "visible") readPoolList(state.listGeneration);
+        }
+
+        boot();
+      })();
+    </script>
+  </body>
+</html>

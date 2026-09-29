@@ -22,12 +22,13 @@ use rustls::pki_types::pem::{Error as PemError, PemObject};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
+use std::sync::{Arc, Mutex};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::Duration;
 use tokio_rustls::TlsAcceptor;
@@ -49,8 +50,8 @@ use browser_session::{BrowserSessions, COOKIE_NAME, LIFETIME};
 mod oauth;
 use oauth::OauthService;
 use plasmite::api::{
-    Durability, Error, ErrorKind, GapPolicy, LocalClient, PoolApiExt, PoolOptions, PoolRef,
-    TailOptions, lite3,
+    Durability, Error, ErrorKind, GapPolicy, LocalClient, Pool, PoolApiExt, PoolInfo, PoolOptions,
+    PoolRef, TailOptions, lite3,
 };
 use plasmite::mcp::{
     DispatchOutcome, JsonRpcError as McpJsonRpcError, MCP_PROTOCOL_VERSION, McpDispatcher,
@@ -60,6 +61,9 @@ use plasmite::mcp::{
 
 const UI_INDEX_HTML: &str = include_str!("../ui/index.html");
 const UI_ACCESS_HTML: &str = include_str!("../ui/access.html");
+const UI_MAP_HTML: &str = include_str!("../ui/map.html");
+const UI_INCONSOLATA_WOFF2: &[u8] =
+    include_bytes!("../ui/fonts/inconsolata-latin-wght-normal.woff2");
 const READY_FILE_ENV: &str = "PLASMITE_SERVE_READY_FILE";
 
 #[derive(Clone, Debug)]
@@ -143,6 +147,7 @@ struct AppState {
     tail_semaphore: Arc<Semaphore>,
     mcp_semaphore: Arc<Semaphore>,
     storage_executor: StorageExecutor,
+    ui_pool_watch: Arc<Mutex<Option<watch::Sender<Value>>>>,
 }
 
 pub(crate) async fn serve_secure_pair(
@@ -270,6 +275,7 @@ async fn prepare_server_with_access(
         // Reuse the existing server concurrency budget instead of adding another
         // public tuning flag. Storage operations are shorter lived than tails.
         storage_executor: StorageExecutor::new(config.max_concurrent_tails),
+        ui_pool_watch: Arc::new(Mutex::new(None)),
     });
 
     let mut app = Router::new()
@@ -288,6 +294,8 @@ async fn prepare_server_with_access(
         )
         .route("/mcp", post(mcp_post).get(mcp_get))
         .route("/ui", get(ui_index))
+        .route("/ui/map", get(ui_map))
+        .route("/ui/assets/inconsolata.woff2", get(ui_inconsolata))
         .route("/ui/pools/:pool", get(ui_pool))
         .route("/access", get(ui_access))
         .route("/v0/pools", post(create_pool).get(list_pools))
@@ -300,7 +308,8 @@ async fn prepare_server_with_access(
         .route("/v0/pools/:pool/messages/:seq/lite3", get(get_lite3))
         .route("/v0/pools/:pool/tail", get(tail_messages))
         .route("/v0/pools/:pool/tail_lite3", get(tail_lite3))
-        .route("/v0/ui/pools", get(list_pools))
+        .route("/v0/ui/pools", get(ui_list_pools))
+        .route("/v0/ui/pools/stream", get(ui_pool_stream))
         .route("/v0/ui/pools/:pool/info", get(pool_info))
         .route("/v0/ui/pools/:pool/events", get(ui_events))
         .with_state(state)
@@ -1228,6 +1237,25 @@ async fn ui_index() -> Response {
     html_response(UI_INDEX_HTML)
 }
 
+async fn ui_map() -> Response {
+    html_response(UI_MAP_HTML)
+}
+
+async fn ui_inconsolata() -> Response {
+    let mut response = Response::new(Body::from(UI_INCONSOLATA_WOFF2));
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("font/woff2"));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=86400"),
+    );
+    response
+}
+
 async fn ui_pool(AxumPath(_pool): AxumPath<String>) -> Response {
     html_response(UI_INDEX_HTML)
 }
@@ -1345,20 +1373,195 @@ async fn list_pools(State(state): State<Arc<AppState>>, headers: HeaderMap) -> R
         .await
     {
         Ok(pools) => {
-            let mut out = Vec::new();
-            for info in pools {
-                let name = info
-                    .path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or_default()
-                    .trim_end_matches(".plasmite")
-                    .to_string();
-                out.push(pool_info_json(&name, &info));
-            }
+            let out: Vec<Value> = pools
+                .iter()
+                .map(|info| pool_info_json(&pool_file_name(info), info))
+                .collect();
             json_response(json!({ "pools": out }))
         }
         Err(err) => error_response(err),
+    }
+}
+
+fn pool_file_name(info: &PoolInfo) -> String {
+    info.path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .trim_end_matches(".plasmite")
+        .to_string()
+}
+
+/// Most frames the map lists per pool. A ring on screen cannot draw more apart.
+const UI_MAX_RING_FRAMES: u64 = 4096;
+
+/// Where the ring's stored messages sit: tail and head offsets, and each frame
+/// as `[offset, bytes]`, oldest first. `frames` is null when the pool holds too
+/// many to draw apart, or a writer changed the ring during the walk.
+fn ring_json(pool: &Pool) -> Value {
+    match pool.ring_layout(UI_MAX_RING_FRAMES) {
+        Ok(layout) => json!({
+            "tail": layout.tail,
+            "head": layout.head,
+            "frames": layout.frames.map(|frames| {
+                frames.iter().map(|frame| [frame.offset, frame.len]).collect::<Vec<_>>()
+            }),
+        }),
+        Err(_) => Value::Null,
+    }
+}
+
+type UiPoolCache = BTreeMap<PathBuf, (PoolInfo, Value)>;
+
+/// A directory scan reads current headers. Ring layouts are measured when a
+/// pool appears or its info changes, including a same-name replacement.
+fn ui_pool_snapshot(client: &LocalClient, cache: &mut UiPoolCache) -> Result<(Value, bool), Error> {
+    let mut infos = client.list_pools()?;
+    infos.sort_by(|a, b| a.path.cmp(&b.path));
+    let mut next = UiPoolCache::new();
+    let mut pools = Vec::with_capacity(infos.len());
+    let mut changed = infos.len() != cache.len();
+    for info in infos {
+        let ring = match cache.get(&info.path) {
+            Some((prior, ring)) if *prior == info => ring.clone(),
+            _ => {
+                changed = true;
+                Pool::open(&info.path)
+                    .map(|pool| ring_json(&pool))
+                    .unwrap_or(Value::Null)
+            }
+        };
+        let mut pool = pool_info_json(&pool_file_name(&info), &info);
+        pool["ring"] = ring.clone();
+        next.insert(info.path.clone(), (info, ring));
+        pools.push(pool);
+    }
+    *cache = next;
+    Ok((json!({ "pools": pools }), changed))
+}
+
+/// The pool list plus each pool's ring layout, so the map can draw each message where it sits.
+async fn ui_list_pools(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    let grant = match authorize(&headers, &state) {
+        Ok(grant) => grant,
+        Err(err) => return error_response(err),
+    };
+    let client = state.client.clone();
+    match state
+        .storage_executor
+        .run_authorized(grant, move || {
+            ui_pool_snapshot(&client, &mut UiPoolCache::new()).map(|(snapshot, _)| snapshot)
+        })
+        .await
+    {
+        Ok(snapshot) => json_response(snapshot),
+        Err(err) => error_response(err),
+    }
+}
+
+async fn ui_pool_stream(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    let grant = match authorize(&headers, &state) {
+        Ok(grant) => grant,
+        Err(err) => return error_response(err),
+    };
+    let existing = {
+        let guard = state.ui_pool_watch.lock().unwrap();
+        guard
+            .as_ref()
+            .filter(|tx| tx.receiver_count() > 0)
+            .map(watch::Sender::subscribe)
+    };
+    let mut rx = if let Some(rx) = existing {
+        rx
+    } else {
+        let client = state.client.clone();
+        let initial = state
+            .storage_executor
+            .run_authorized(grant.clone(), move || {
+                let mut cache = UiPoolCache::new();
+                let (snapshot, _) = ui_pool_snapshot(&client, &mut cache)?;
+                Ok((snapshot, cache))
+            })
+            .await;
+        let (snapshot, cache) = match initial {
+            Ok(initial) => initial,
+            Err(err) => return error_response(err),
+        };
+        let mut guard = state.ui_pool_watch.lock().unwrap();
+        if let Some(tx) = guard.as_ref().filter(|tx| tx.receiver_count() > 0) {
+            tx.subscribe()
+        } else {
+            let (tx, rx) = watch::channel(snapshot);
+            *guard = Some(tx.clone());
+            tokio::spawn(watch_ui_pools(state.clone(), tx, cache));
+            rx
+        }
+    };
+
+    let (tx, body_rx) = mpsc::channel::<Bytes>(8);
+    tokio::spawn(async move {
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
+        heartbeat.tick().await;
+        let mut revocation = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            if grant.as_ref().is_some_and(AccessGrant::is_revoked) {
+                break;
+            }
+            let snapshot = rx.borrow_and_update().clone();
+            let frame = match serde_json::to_vec(&snapshot) {
+                Ok(mut payload) => {
+                    let mut frame = b"event: pools\ndata: ".to_vec();
+                    frame.append(&mut payload);
+                    frame.extend_from_slice(b"\n\n");
+                    Bytes::from(frame)
+                }
+                Err(_) => break,
+            };
+            if tx.send(frame).await.is_err() {
+                break;
+            }
+            loop {
+                tokio::select! {
+                    changed = rx.changed() => {
+                        if changed.is_err() { return; }
+                        break;
+                    }
+                    _ = heartbeat.tick() => {
+                        if tx.send(Bytes::from_static(b": keep-alive\n\n")).await.is_err() { return; }
+                    }
+                    _ = revocation.tick() => {
+                        if grant.as_ref().is_some_and(AccessGrant::is_revoked) { return; }
+                    }
+                    _ = tx.closed() => return,
+                }
+            }
+        }
+    });
+    let mut response = Response::new(Body::from_stream(
+        ReceiverStream::new(body_rx).map(Ok::<_, std::io::Error>),
+    ));
+    apply_tail_response_headers(&mut response, TailStreamEncoding::Sse);
+    response
+}
+
+async fn watch_ui_pools(state: Arc<AppState>, tx: watch::Sender<Value>, cache: UiPoolCache) {
+    let cache = Arc::new(Mutex::new(cache));
+    let mut interval = tokio::time::interval(Duration::from_millis(200));
+    interval.tick().await;
+    loop {
+        tokio::select! {
+            _ = tx.closed() => break,
+            _ = interval.tick() => {}
+        }
+        let client = state.client.clone();
+        let cache = cache.clone();
+        let result = state
+            .storage_executor
+            .run(move || ui_pool_snapshot(&client, &mut cache.lock().unwrap()))
+            .await;
+        if let Ok((snapshot, true)) = result {
+            tx.send_replace(snapshot);
+        }
     }
 }
 
@@ -1944,7 +2147,7 @@ fn html_response(body: &str) -> Response {
         HeaderValue::from_static("no-referrer"),
     );
     response.headers_mut().insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(
-        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
     ));
     response.headers_mut().insert(
         header::X_CONTENT_TYPE_OPTIONS,
@@ -2011,16 +2214,39 @@ mod tests {
     use super::{
         AccessStore, AppState, BrowserSessions, Error, ErrorKind, LocalClient, McpHandler,
         ServeConfig, ServeMcpHandler, StorageExecutor, ToolCallRequest, error_response, healthz,
-        list_pools, mcp_post, normalize_tags, parse_tags_from_query, same_origin, validate_config,
-        validate_mcp_origin_header, validate_mcp_protocol_version,
+        list_pools, mcp_post, normalize_tags, parse_tags_from_query, same_origin, ui_pool_snapshot,
+        validate_config, validate_mcp_origin_header, validate_mcp_protocol_version,
     };
     use axum::Json;
     use axum::extract::State;
     use axum::http::{HeaderMap, HeaderValue, Uri, header};
     use plasmite::api::PoolApiExt;
     use serde_json::json;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use tokio::sync::Semaphore;
+
+    #[test]
+    fn pool_snapshot_notices_same_name_replacement() {
+        use plasmite::api::{PoolOptions, PoolRef};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let client = LocalClient::new().with_pool_dir(dir.path());
+        let name = PoolRef::name("replaced");
+        client
+            .create_pool(&name, PoolOptions::new(64 * 1024))
+            .expect("create first pool");
+        let mut cache = Default::default();
+        let (before, _) = ui_pool_snapshot(&client, &mut cache).expect("first snapshot");
+
+        client.delete_pool(&name).expect("delete first pool");
+        client
+            .create_pool(&name, PoolOptions::new(128 * 1024))
+            .expect("replace before next scan");
+        let (after, changed) = ui_pool_snapshot(&client, &mut cache).expect("next snapshot");
+        assert!(changed);
+        assert_ne!(before, after);
+        assert_eq!(after["pools"][0]["file_size"], 128 * 1024);
+    }
 
     fn config() -> ServeConfig {
         ServeConfig {
@@ -2240,6 +2466,7 @@ mod tests {
             tail_semaphore: Arc::new(Semaphore::new(1)),
             mcp_semaphore: Arc::new(Semaphore::new(1)),
             storage_executor: StorageExecutor::new(1),
+            ui_pool_watch: Arc::new(Mutex::new(None)),
         });
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
@@ -2313,6 +2540,7 @@ mod tests {
             tail_semaphore: Arc::new(Semaphore::new(1)),
             mcp_semaphore: Arc::new(Semaphore::new(1)),
             storage_executor: StorageExecutor::new(1),
+            ui_pool_watch: Arc::new(Mutex::new(None)),
         };
         assert_eq!(
             super::authorize(&HeaderMap::new(), &state)

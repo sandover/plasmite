@@ -5,6 +5,7 @@
 - Rust crate: `plasmite` (CLI, library, tests, bindings support)
 - Native C dependency: vendored Lite3 sources under `vendor/lite3/`
 - C shim: `c/lite3_shim.c` exports the narrow ABI used by Rust FFI
+- Web UI font: vendored Inconsolata under `ui/fonts/`, embedded in the server binary (source and checksum in `ui/fonts/README.md`)
 
 `Cargo.toml` declares `build = "build.rs"`, so Cargo always runs the build script when needed.
 

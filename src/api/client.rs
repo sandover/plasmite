@@ -114,7 +114,12 @@ impl LocalClient {
             if path.extension().and_then(|ext| ext.to_str()) != Some("plasmite") {
                 continue;
             }
-            let pool = Pool::open(&path)?;
+            // A pool deleted after the directory read is no longer part of the list.
+            let pool = match Pool::open(&path) {
+                Ok(pool) => pool,
+                Err(err) if err.kind() == ErrorKind::NotFound => continue,
+                Err(err) => return Err(err),
+            };
             pools.push(pool.info()?);
         }
 
