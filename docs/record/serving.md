@@ -149,6 +149,19 @@ its used space as a continuous track instead of individual segments.
 Click a pool to follow its newest messages; hover a message to find it on the
 spiral. The link at the bottom of that card opens the full pool page.
 
+On the local map, the small marks beneath each pool's size open its activity
+card. It lists live browser, HTTP, and MCP requests for that pool, with peer
+IP addresses and client headers when available. The server shares these
+observations across its local and HTTPS listeners. It does not resolve peer
+addresses through DNS or identify a VM from an address.
+
+On macOS and Linux, the card also lists local processes with an open pool
+file when `lsof` can inspect them. An open file does not prove that the process
+is following or writing. The card omits the server itself, and short operations
+can finish between snapshots. If local inspection fails, the card says so.
+These observations require no client registration or heartbeat. The activity
+details remain on the local listener.
+
 The local page at `http://127.0.0.1:9700/access` lists keys and offers Invite
 and Revoke. It works only on the server machine. The remote page cannot
 administer keys. Browser trust setup for a Plasmite-generated certificate is

@@ -110,6 +110,31 @@ Invariants: Message data enters the DOM as text.
       .pool:focus-visible { outline: none; }
       .pool:focus-visible .name { text-decoration: underline; }
       .pool[aria-expanded="true"] .name { color: var(--ok); }
+      .activity-button {
+        position: absolute; z-index: 2; transform: translateX(-50%); display: flex; align-items: center;
+        justify-content: center; gap: 4px; min-width: 40px; height: 20px; padding: 2px 5px;
+        border: 0; border-radius: 6px; background: none; color: var(--muted); font: 11px var(--numbers);
+      }
+      .activity-button:hover, .activity-button:focus-visible { background: var(--panel-raised); color: var(--text); outline: none; }
+      .activity-mark { display: inline-block; width: 5px; height: 5px; border: 1px solid currentColor; border-radius: 50%; }
+      .activity-mark.local { background: currentColor; }
+      .activity-mark.browser { border-radius: 1px; }
+      .activity-mark.mcp { border-radius: 0; transform: rotate(45deg); }
+      .activity-card[hidden] { display: none; }
+      .activity-card {
+        position: fixed; z-index: 10; overflow: auto;
+        width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0;
+        background: #1a2028; color: var(--text); border: 1px solid #526578; border-radius: 12px;
+        box-shadow: 0 10px 40px #0008; font-size: 12px;
+      }
+      .activity-heading { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+      .activity-list { padding: 4px 16px; }
+      .activity-machine { margin: 12px 0 4px; color: var(--accent); font-weight: normal; font-size: 12px; overflow-wrap: anywhere; }
+      .activity-list > section + section { border-top: 1px solid var(--line); margin-top: 10px; }
+      .activity-context { color: var(--muted); font-size: 11px; margin: 6px 0; }
+      .activity-row { padding: 6px 0; }
+      .activity-row small { display: block; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+      .activity-note { color: var(--muted); padding: 10px 16px; margin: 0; border-top: 1px solid var(--line); font-size: 11px; }
 
       .peek {
         position: absolute; z-index: 3; display: flex; flex-direction: column; animation: appear var(--ease);
@@ -184,6 +209,11 @@ Invariants: Message data enters the DOM as text.
       </div>
       <p class="map-error" id="map-error" role="alert"></p>
       <div class="tip" id="tip" role="tooltip" hidden></div>
+      <section class="activity-card" id="activity-card" aria-labelledby="activity-title" hidden>
+        <div class="activity-heading"><strong id="activity-title"></strong></div>
+        <div class="activity-list" id="activity-list"></div>
+        <p class="activity-note" id="activity-note"></p>
+      </section>
     </main>
     <script>
       (() => {
@@ -192,6 +222,12 @@ Invariants: Message data enters the DOM as text.
         const scroll = $("map-scroll");
         const messages = $("messages");
         const cards = new Map();
+        const activityButtons = new Map();
+        let activity = null;
+        let activityPool = null;
+        let activityTimer = null;
+        let activityController = null;
+        let activityAllowed = true;
         const shapes = new Map();
         const stroke = 7;
         const compactPitch = 10;
@@ -267,7 +303,7 @@ Invariants: Message data enters the DOM as text.
           const body = getComputedStyle(document.body).fontFamily;
           const numbers = getComputedStyle(document.documentElement).getPropertyValue("--numbers");
           const width = Math.max(textWidth(pool.name, 13, body), textWidth(size(pool.file_size) + " · 100%", 11, numbers)) + 10;
-          return Math.hypot(width / 2, 11) + stroke / 2 + 3;
+          return Math.hypot(width / 2, 22) + stroke / 2 + 3;
         }
 
         // The largest outer radius that fits the map's width, and no more than maxOuter.
@@ -627,6 +663,171 @@ Invariants: Message data enters the DOM as text.
           for (const pool of state.pools) updateCard(pool);
         }
 
+        // Activity is a snapshot of open files and server requests, never a
+        // complete census of readers. It does not participate in ring layout.
+        function updateActivityButtons() {
+          for (const [name, button] of activityButtons) {
+            const observed = activity && activity.pools && activity.pools[name];
+            button.hidden = !activityAllowed || !observed;
+            if (!observed) continue;
+            const entries = observed.entries || [];
+            const partial = !observed.local_files?.available;
+            button.replaceChildren();
+            for (const entry of entries.slice(0, 3)) {
+              const mark = document.createElement("span");
+              mark.className = "activity-mark " + (entry.kind === "open_file" ? "local" : entry.kind);
+              mark.setAttribute("aria-hidden", "true");
+              button.append(mark);
+            }
+            button.append(entries.length ? String(entries.length) : partial ? "–" : "○");
+            const label = name + " activity · " + entries.length + " observed" + (partial ? " · local files unavailable" : "");
+            button.setAttribute("aria-label", label);
+            button.title = label;
+          }
+          if (activityPool) { renderActivity(); placeActivity(); }
+        }
+
+        function openActivity(name) {
+          if (activityPool === name) { closeActivity(); return; }
+          activityPool = name;
+          renderActivity();
+          $("activity-card").hidden = false;
+          placeActivity();
+        }
+
+        function closeActivity() {
+          const focused = $("activity-card").contains(document.activeElement);
+          const button = activityButtons.get(activityPool);
+          activityPool = null;
+          $("activity-card").hidden = true;
+          if (focused) button?.focus({ preventScroll: true });
+        }
+
+        function placeActivity() {
+          const button = activityButtons.get(activityPool);
+          if (!button) { closeActivity(); return; }
+          const box = button.getBoundingClientRect();
+          const card = $("activity-card");
+          card.style.left = Math.max(16, Math.min(box.left, window.innerWidth - card.offsetWidth - 16)) + "px";
+          card.style.top = Math.max(16, Math.min(box.bottom + 8, window.innerHeight - card.offsetHeight - 16)) + "px";
+        }
+
+        function renderActivity() {
+          $("activity-title").textContent = "Activity";
+          const list = $("activity-list");
+          const focusedClient = list.contains(document.activeElement) ? document.activeElement.closest("details")?.dataset.client : null;
+          const expanded = new Set([...list.querySelectorAll("details[open]")].map(node => node.dataset.client));
+          const scroll = list.scrollTop;
+          list.replaceChildren();
+          const observed = activity?.pools?.[activityPool];
+          if (!observed) {
+            list.textContent = "Activity unavailable";
+            $("activity-note").textContent = "";
+            return;
+          }
+          const entries = observed.entries || [];
+          const sections = [
+            ["Live requests", entries.filter(entry => entry.kind !== "open_file")],
+            ["Local processes", entries.filter(entry => entry.kind === "open_file")],
+          ];
+          for (const [title, rows] of sections) {
+            const section = document.createElement("section");
+            const heading = document.createElement("h3");
+            heading.className = "activity-machine";
+            heading.textContent = title + (rows.length ? " · " + rows.length : "");
+            section.append(heading);
+            if (title === "Local processes" && activity.hostname) {
+              const host = document.createElement("small");
+              host.className = "activity-context";
+              host.textContent = activity.hostname;
+              section.append(host);
+            }
+            if (title === "Local processes" && rows.length && !observed.local_files?.available) {
+              const coverage = document.createElement("small");
+              coverage.className = "activity-context";
+              coverage.textContent = "Partial · Inspection unavailable";
+              section.append(coverage);
+            }
+            if (!rows.length) {
+              const empty = document.createElement("p");
+              empty.className = "activity-context";
+              empty.textContent = title === "Local processes"
+                ? observed.local_files?.available ? "No open files" : "Unavailable"
+                : "None now";
+              section.append(empty);
+            }
+            for (const entry of rows) {
+              const row = document.createElement("div");
+              row.className = "activity-row";
+              const kind = entry.kind === "mcp" ? "MCP" : entry.kind === "browser" ? "Browser" : "HTTP";
+              const operation = entry.operation || "";
+              const action = operation.includes("/events") || operation.includes("/tail") || operation === "plasmite_wait" ? "Following"
+                : operation.includes("feed") || operation.startsWith("POST ") ? "Writing"
+                : operation.includes("delete") || operation.startsWith("DELETE ") ? "Deleting" : "Reading";
+              row.append(entry.kind === "open_file" ? entry.command || "Process" : kind + " · " + action);
+              const detail = document.createElement("small");
+              const local = /^(127\.|::1$)/.test(entry.peer_ip || "");
+              detail.textContent = entry.kind === "open_file"
+                ? "PID " + entry.pid + " · Pool file open"
+                : [local ? "Local · " + entry.peer_ip : entry.peer_ip || "Address unavailable",
+                    entry.age_ms != null ? Math.floor(entry.age_ms / 1000) + "s active" : ""].filter(Boolean).join(" · ");
+              row.append(detail);
+              if (entry.kind !== "open_file") {
+                const client = document.createElement("details");
+                client.dataset.client = [entry.peer_ip, entry.kind, entry.operation, entry.user_agent].join("|");
+                client.open = expanded.has(client.dataset.client);
+                const summary = document.createElement("summary");
+                summary.textContent = "Details";
+                const value = document.createElement("small");
+                value.textContent = [entry.operation, entry.user_agent].filter(Boolean).join(" · ");
+                client.append(summary, value);
+                row.append(client);
+              }
+              section.append(row);
+            }
+            list.append(section);
+          }
+          if (focusedClient) {
+            const client = [...list.querySelectorAll("details")].find(node => node.dataset.client === focusedClient);
+            client?.querySelector("summary")?.focus({ preventScroll: true });
+          }
+          list.scrollTop = scroll;
+          $("activity-note").textContent = observed.local_files?.available
+            ? "Open files do not identify readers or writers."
+            : "Short requests may finish between updates.";
+        }
+
+        async function refreshActivity() {
+          if (!activityAllowed || activityController || document.visibilityState !== "visible") return;
+          const controller = new AbortController();
+          activityController = controller;
+          try {
+            const response = await fetch("/v0/ui/activity", { cache: "no-store", signal: controller.signal });
+            if (response.status === 403) {
+              activityAllowed = false;
+              updateActivityButtons();
+              return;
+            }
+            if (!response.ok) throw new Error("Activity unavailable");
+            activity = await response.json();
+            updateActivityButtons();
+          } catch (_) {
+            if (!controller.signal.aborted) {
+              activity = null;
+              updateActivityButtons();
+            }
+          } finally {
+            if (activityController === controller) activityController = null;
+            if (activityAllowed && document.visibilityState === "visible") activityTimer = setTimeout(refreshActivity, 5000);
+          }
+        }
+
+        function stopActivity() {
+          clearTimeout(activityTimer);
+          activityTimer = null;
+          activityController?.abort();
+        }
+
         // Layout.
 
         // Try the directory sides, circle edges, and gaps between pairs of
@@ -721,15 +922,29 @@ Invariants: Message data enters the DOM as text.
           $("path").querySelector("strong").textContent = path.slice(cut) || "–";
           $("path").title = path;
           for (const [name, button] of cards) {
-            if (!layout.boxes.has(name)) { button.remove(); cards.delete(name); drawnMarkup.delete(name); }
+            if (!layout.boxes.has(name)) {
+              button.remove(); cards.delete(name); drawnMarkup.delete(name);
+              activityButtons.get(name)?.remove(); activityButtons.delete(name);
+            }
           }
           for (const [name, box] of layout.boxes) {
             if (!cards.has(name)) {
               cards.set(name, createCard(name));
               $("directory").append(cards.get(name));
+              const button = document.createElement("button");
+              button.type = "button";
+              button.className = "activity-button";
+              button.hidden = true;
+              button.addEventListener("click", () => openActivity(name));
+              activityButtons.set(name, button);
+              $("directory").append(button);
             }
             place(cards.get(name), box);
+            const button = activityButtons.get(name);
+            button.style.left = (box.x + box.width / 2) + "px";
+            button.style.top = (box.y + box.height / 2 + 20) + "px";
           }
+          updateActivityButtons();
           placePeek();
         }
 
@@ -1033,12 +1248,19 @@ Invariants: Message data enters the DOM as text.
 
         // Clicking anywhere outside the card closes it. A pool's own click handler toggles it.
         document.addEventListener("pointerdown", (event) => {
+          if (event.target.closest(".activity-button, .activity-card")) return;
+          closeActivity();
           const pool = event.target.closest(".pool");
           if (state.selected && !$("peek").contains(event.target) && !(pool && onTrack(pool.dataset.name, event))) closePeek();
         });
         document.addEventListener("keydown", (event) => {
-          if (event.key === "Escape" && state.selected) closePeek();
+          if (event.key !== "Escape") return;
+          if (activityPool) closeActivity();
+          else if (state.selected) closePeek();
         });
+        $("activity-card").addEventListener("toggle", () => { if (activityPool) placeActivity(); }, true);
+        window.addEventListener("scroll", () => { if (activityPool) placeActivity(); }, { capture: true, passive: true });
+        window.addEventListener("resize", () => { if (activityPool) placeActivity(); });
         $("path").addEventListener("click", async () => {
           try {
             await navigator.clipboard.writeText(directoryPath());
@@ -1055,8 +1277,8 @@ Invariants: Message data enters the DOM as text.
         });
         // A hidden tab does no work. Its first snapshot back brings the map current.
         document.addEventListener("visibilitychange", () => {
-          if (document.visibilityState === "visible") startList();
-          else stopList();
+          if (document.visibilityState === "visible") { startList(); refreshActivity(); }
+          else { stopList(); stopActivity(); }
         });
 
         function showError(error) {
@@ -1079,6 +1301,7 @@ Invariants: Message data enters the DOM as text.
           $("machine-name").textContent = location.host;
           state.requested = new URLSearchParams(location.search).get("pool");
           startList();
+          refreshActivity();
         }
 
         boot();
