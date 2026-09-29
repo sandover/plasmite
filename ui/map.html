@@ -176,7 +176,7 @@ Invariants: Message data enters the DOM as text.
               <section class="peek" id="peek" aria-label="Messages" hidden>
                 <div class="message-head"><span>Type</span><span>Message</span><span>Time</span></div>
                 <div class="messages" id="messages" aria-live="polite"></div>
-                <a class="more" id="open" href="/ui"></a>
+                <a class="more" id="open" href="/ui">Recent messages →</a>
               </section>
             </section>
           </section>
@@ -625,13 +625,6 @@ Invariants: Message data enters the DOM as text.
 
         function updateCards() {
           for (const pool of state.pools) updateCard(pool);
-          const pool = currentPool();
-          if (pool) updateMore(pool);
-        }
-
-        function updateMore(pool) {
-          const count = messageCount(pool);
-          $("open").textContent = "All " + count + (count === 1 ? " message" : " messages") + " →";
         }
 
         // Layout.
@@ -896,6 +889,8 @@ Invariants: Message data enters the DOM as text.
           state.nextSeq = bounds.newest == null ? null : Math.max(bounds.oldest || 1, bounds.newest - maxMessages + 1);
           messages.replaceChildren();
           $("peek").setAttribute("aria-label", name + " messages");
+          // Reserve message rows before the first tail frame, so the link stays under the pointer.
+          $("peek").style.height = (100 + 21 * Math.min(messageCount(pool), 8)) + "px";
           $("open").href = "/ui/pools/" + encodeURIComponent(name);
           updateCards();
           placePeek();
