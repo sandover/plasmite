@@ -26,6 +26,7 @@ pub struct FrameRef<'a> {
 pub struct Cursor {
     next_off: usize,
     last_seq: u64,
+    started: bool,
 }
 
 impl Cursor {
@@ -33,12 +34,14 @@ impl Cursor {
         Self {
             next_off: 0,
             last_seq: 0,
+            started: false,
         }
     }
 
     pub fn seek_to(&mut self, offset: usize) {
         self.next_off = offset;
         self.last_seq = 0;
+        self.started = true;
     }
 
     pub fn next<'a>(&mut self, pool: &'a Pool) -> Result<CursorResult<'a>, Error> {
@@ -58,6 +61,10 @@ impl Cursor {
 
         let tail = header.tail_off as usize;
         let head = header.head_off as usize;
+        if !self.started {
+            self.next_off = tail;
+            self.started = true;
+        }
         let is_full = head == tail && header.oldest_seq != 0;
         if !is_full && self.next_off == head {
             return Ok(CursorResult::WouldBlock);

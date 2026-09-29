@@ -848,6 +848,70 @@ mod tests {
     }
 
     #[test]
+    fn tail_and_replay_read_wrapped_messages_in_sequence_order() {
+        const RING_SIZE: u64 = 4096;
+
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(
+            &path,
+            PoolOptions::new(4096 + RING_SIZE).with_index_capacity(0),
+        )
+        .expect("create");
+
+        let mut wrapped_layout = None;
+        for n in 0..1_000_u64 {
+            pool.append_json_now(
+                &json!({"n": n, "padding": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}),
+                &[],
+                Durability::Fast,
+            )
+            .expect("append");
+
+            let layout = pool.ring_layout(4_096).expect("ring layout");
+            let has_padded_wrap = layout.frames.as_ref().is_some_and(|frames| {
+                frames
+                    .windows(2)
+                    .any(|pair| pair[0].offset + pair[0].len < RING_SIZE && pair[1].offset == 0)
+            });
+            if has_padded_wrap {
+                wrapped_layout = Some(layout);
+                break;
+            }
+        }
+
+        let layout = wrapped_layout.expect("pool should retain frames across an uneven wrap");
+        let frames = layout.frames.expect("stored frames");
+        assert_eq!(frames[0].offset, layout.tail);
+        let expected = frames.iter().map(|frame| frame.seq).collect::<Vec<_>>();
+        let oldest = expected[0];
+
+        let mut options = TailOptions::new();
+        options.since_seq = Some(oldest);
+        options.max_messages = Some(expected.len());
+        options.gap_policy = GapPolicy::Error;
+        options.notify = false;
+        let mut tail = pool.tail(options);
+        let mut tailed = Vec::with_capacity(expected.len());
+        for _ in 0..expected.len() {
+            tailed.push(
+                tail.next_message()
+                    .expect("tail read")
+                    .expect("retained message")
+                    .seq,
+            );
+        }
+        assert_eq!(tailed, expected);
+
+        let mut replay = pool.replay(ReplayOptions::new(100.0)).expect("replay");
+        let mut replayed = Vec::new();
+        while let Some(message) = replay.next_message() {
+            replayed.push(message.seq);
+        }
+        assert_eq!(replayed, expected);
+    }
+
+    #[test]
     fn replay_returns_messages_in_order() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
