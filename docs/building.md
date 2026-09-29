@@ -213,6 +213,24 @@ If you need to force a specific build run (for example, during incident recovery
 - These channels are built and smoke-tested in `release.yml` and published through `release-publish.yml`.
 - Windows rollback-only fallback workflows have been removed; official Windows delivery is via Python/Node release channels.
 
+Windows CI also runs secure-sharing tests against the release CLI: private
+state permissions, native connections, browser sessions, direct MCP
+authorization, restart, and revocation. To run that check from PowerShell:
+
+```powershell
+cargo test --release --lib windows_private::tests -- --test-threads=1
+cargo test --release --test secure_sharing --test access_lifecycle --test browser_access --test oauth_access -- --test-threads=1
+```
+
+Use a filesystem that enforces Windows access control lists, such as NTFS, for
+server state and saved connections. The official artifact targets Windows
+x86_64; an ARM64 Windows VM can run it through Windows' x64 emulation.
+
+Source builds require `clang-cl`, the Visual Studio C++ linker, and the Windows
+SDK. The x86_64 Rust and LLVM toolchains also build the supported target inside
+an ARM64 Windows VM. The vendored C code uses extensions that `cl.exe` does not
+support.
+
 ## Windows troubleshooting
 
 - **Source build fails with `cl.exe` errors (`__builtin_expect`, `__attribute__`, parsing errors in `lite3.h`)**

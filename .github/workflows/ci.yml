@@ -73,6 +73,7 @@ jobs:
               - 'scripts/package_release_sdk.sh'
               - 'scripts/python_wheel_smoke.sh'
               - 'scripts/node_pack_smoke.sh'
+              - 'scripts/packaged_serve_smoke.py'
               - 'include/**'
               - 'src/abi.rs'
               - 'tests/abi_adversarial.c'
@@ -84,8 +85,8 @@ jobs:
               - 'Cargo.lock'
               - 'c/**'
               - 'vendor/lite3/**'
-              - 'src/abi.rs'
-              - 'src/core/lite3/**'
+              - 'src/**'
+              - 'tests/**'
               - 'include/**'
               - 'bindings/node/**'
               - 'bindings/python/**'
@@ -94,6 +95,7 @@ jobs:
               - 'scripts/package_node_natives.sh'
               - 'scripts/python_wheel_smoke.sh'
               - 'scripts/node_pack_smoke.sh'
+              - 'scripts/packaged_serve_smoke.py'
               - '.github/workflows/**'
             boundary:
               - 'build.rs'
@@ -222,6 +224,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Lint Windows targets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          cargo clippy --release --all-targets -- -D warnings
       - name: Build release binaries
         shell: pwsh
         run: |
@@ -232,6 +240,13 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           .\target\release\plasmite.exe --version
+      - name: Check private state and secure sharing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          cargo test --release --lib windows_private::tests -- --test-threads=1
+          cargo test --release --test secure_sharing --test access_lifecycle --test browser_access --test oauth_access -- --test-threads=1
       - name: Local pool roundtrip smoke
         shell: pwsh
         run: |
@@ -244,11 +259,15 @@ jobs:
           Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
           Set-Content -Path $payloadPath -Value '{"ci":"windows-smoke"}' -NoNewline
-          & $exe --dir $dir pool create $pool
-          & $exe --dir $dir feed $pool -f $payloadPath
-          $out = & $exe --dir $dir follow $pool --tail 1 --one --timeout 2s --data-only --format jsonl
-          if (-not ($out -match '"ci":"windows-smoke"')) {
-            throw "Roundtrip payload marker missing from follow output."
+          try {
+            & $exe --dir $dir pool create $pool
+            & $exe --dir $dir feed $pool -f $payloadPath
+            $out = & $exe --dir $dir follow $pool --tail 1 --one --timeout 2s --data-only --format jsonl
+            if (-not ($out -match '"ci":"windows-smoke"')) {
+              throw "Roundtrip payload marker missing from follow output."
+            }
+          } finally {
+            Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
           }
 
   full:

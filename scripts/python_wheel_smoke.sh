@@ -3,7 +3,7 @@
 # Exports: N/A (script entry point).
 # Role: CI/local guardrail for Python packaging install-time behavior.
 # Invariants: Uses a clean virtual environment for wheel install checks.
-# Invariants: Verifies import + bundled CLI execution from installed wheel.
+# Invariants: Verifies import + bundled CLI execution and secure server restart from the wheel.
 # Invariants: Requires uv for deterministic Python environment/package operations.
 
 set -euo pipefail
@@ -12,6 +12,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/scripts/normalize_sdk_layout.sh"
 mkdir -p "$ROOT/.scratch"
 WORKDIR="$(mktemp -d "$ROOT/.scratch/python-wheel-smoke.XXXXXX")"
+cleanup_workdir() {
+  local exit_status=$?
+  if [[ "$exit_status" -eq 0 ]]; then
+    rm -rf "$WORKDIR"
+  fi
+}
+trap cleanup_workdir EXIT
 UV_CACHE_DIR="${UV_CACHE_DIR:-$WORKDIR/uv-cache}"
 HAS_RG=0
 if command -v rg >/dev/null 2>&1; then
@@ -21,6 +28,11 @@ fi
 if ! command -v uv >/dev/null 2>&1; then
   echo "error: uv is required for python_wheel_smoke.sh." >&2
   echo "hint: install uv and rerun (brew install uv)." >&2
+  exit 2
+fi
+WHEEL_SMOKE_PYTHON="$(command -v python || command -v python3 || true)"
+if [[ -z "$WHEEL_SMOKE_PYTHON" ]]; then
+  echo "error: Python 3 is required for python_wheel_smoke.sh." >&2
   exit 2
 fi
 
@@ -69,7 +81,7 @@ wheel_has_member() {
   local wheel="$1"
   local pattern="$2"
   local members
-  members="$(python3 -m zipfile -l "$wheel")"
+  members="$("$WHEEL_SMOKE_PYTHON" -m zipfile -l "$wheel")"
   if [[ "$HAS_RG" -eq 1 ]]; then
     rg -q "$pattern" <<<"$members"
   else
@@ -108,6 +120,8 @@ uv pip install --cache-dir "$UV_CACHE_DIR" "$wheel_file"
 unset PLASMITE_LIB_DIR DYLD_LIBRARY_PATH LD_LIBRARY_PATH
 python -c 'import plasmite; from plasmite import Client; print("python-wheel-import-ok")'
 plasmite --version >/dev/null
+BUNDLED_CLI="$(python -c 'from plasmite._cli import _bundled_cli_path; print(_bundled_cli_path())')"
+python "$ROOT/scripts/packaged_serve_smoke.py" --cli "$BUNDLED_CLI" --scratch "$WORKDIR"
 deactivate
 
 echo "[smoke] python wheel install + runtime ok"
