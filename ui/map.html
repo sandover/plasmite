@@ -78,13 +78,10 @@ Invariants: Message data enters the DOM as text.
       }
       .map-scroll { flex: 1; overflow: auto; padding: 16px; }
       .map { position: relative; margin: 0 auto; }
-      .map, .machine, .directory, .pool, .peek { transition: left var(--ease), top var(--ease), width var(--ease), height var(--ease); }
-      .machine, .directory { position: absolute; }
-      .machine { border: 1px solid #6d8592; background: #1c2832e8; border-radius: 18px; }
-      .directory { border: 1px solid #547382; background: #22313b; border-radius: 13px; }
+      .map, .directory, .pool, .peek { transition: left var(--ease), top var(--ease), width var(--ease), height var(--ease); }
+      .directory { position: absolute; border: 1px solid #547382; background: #22313b; border-radius: 13px; }
       .group-label { position: absolute; top: 10px; left: 16px; right: 16px; display: flex; gap: 10px; align-items: baseline; font-size: 12px; }
       .group-label strong { font-weight: 600; }
-      .machine > .group-label { color: var(--muted); }
       .path {
         display: flex; min-width: 0; padding: 1px 4px; margin: -1px -4px; border: 0; border-radius: 5px;
         background: none; color: var(--text); font-size: 12px; white-space: nowrap;
@@ -181,7 +178,7 @@ Invariants: Message data enters the DOM as text.
       .map-error:empty { display: none; }
 
       @media (prefers-reduced-motion: reduce) {
-        .map, .machine, .directory, .pool, .peek { transition: none; }
+        .map, .directory, .pool, .peek { transition: none; }
         .pool, .peek { animation: none; }
       }
     </style>
@@ -199,19 +196,16 @@ Invariants: Message data enters the DOM as text.
       </header>
       <div class="map-scroll" id="map-scroll">
         <div class="map" id="map">
-          <section class="machine" id="machine">
-            <div class="group-label"><strong id="machine-name"></strong></div>
-            <section class="directory" id="directory">
-              <div class="group-label">
-                <button type="button" class="path" id="path" aria-label="Copy directory path"><span class="parent"></span><strong></strong></button>
-                <span class="copied" id="copied" hidden>copied</span>
-              </div>
-              <div class="empty" id="empty" hidden>No pools</div>
-              <section class="peek" id="peek" aria-label="Messages" hidden>
-                <div class="message-head"><span>Type</span><span>Message</span></div>
-                <div class="messages" id="messages" aria-live="polite"></div>
-                <a class="more" id="open" href="/ui">Recent messages →</a>
-              </section>
+          <section class="directory" id="directory">
+            <div class="group-label">
+              <button type="button" class="path" id="path" aria-label="Copy directory path"><span class="parent"></span><strong></strong></button>
+              <span class="copied" id="copied" hidden>copied</span>
+            </div>
+            <div class="empty" id="empty" hidden>No pools</div>
+            <section class="peek" id="peek" aria-label="Messages" hidden>
+              <div class="message-head"><span>Type</span><span>Message</span></div>
+              <div class="messages" id="messages" aria-live="polite"></div>
+              <a class="more" id="open" href="/ui">Recent messages →</a>
             </section>
           </section>
         </div>
@@ -253,7 +247,6 @@ Invariants: Message data enters the DOM as text.
         const indexRoom = { x: 40, y: 26 };
         const peekWidth = 360;
         const emptySize = { width: 240, height: 70 };
-        const machinePad = { top: 36, side: 14, bottom: 14 };
         const directoryPad = { top: 40, side: 18, bottom: 16 };
         const gutter = 10;
         const indexClearance = 24;
@@ -317,7 +310,7 @@ Invariants: Message data enters the DOM as text.
 
         // The largest outer radius that fits the map's width, and no more than maxOuter.
         function outerCap() {
-          const width = scroll.clientWidth - 32 - 2 * (machinePad.side + directoryPad.side + indexRoom.x);
+          const width = scroll.clientWidth - 32 - 2 * (directoryPad.side + indexRoom.x);
           return Math.max(0, Math.min(maxOuter, width / 2 - stroke));
         }
 
@@ -883,18 +876,17 @@ Invariants: Message data enters the DOM as text.
           return { boxes: placed, width, height };
         }
 
-        // Pure: where the machine, the directory, and each pool go, for this width.
+        // Pure: where the directory and each pool go, for this width.
         function computeLayout(pools, availableWidth) {
           const nodes = pools.map((pool) => ({ name: pool.name, radius: pool.track.outer + stroke, ...nodeSize(pool) }));
-          const maxWidth = Math.max(emptySize.width, availableWidth - 2 * machinePad.side - 2 * directoryPad.side,
+          const maxWidth = Math.max(emptySize.width, availableWidth - 2 * directoryPad.side,
             ...nodes.map((node) => node.width));
           const rows = pack(nodes, maxWidth);
           const content = { width: Math.max(rows.width, emptySize.width), height: Math.max(rows.height, emptySize.height) };
-          const directory = { x: machinePad.side, y: machinePad.top,
+          const directory = { x: 0, y: 0,
             width: content.width + 2 * directoryPad.side, height: content.height + directoryPad.top + directoryPad.bottom };
-          const machine = { width: directory.width + 2 * machinePad.side, height: directory.height + machinePad.top + machinePad.bottom };
           const boxes = new Map(rows.boxes.map((box) => [box.name, { ...box, x: box.x + directoryPad.side, y: box.y + directoryPad.top }]));
-          return { machine, directory, boxes };
+          return { directory, boxes };
         }
 
         function place(element, box) {
@@ -907,8 +899,7 @@ Invariants: Message data enters the DOM as text.
         // Moves existing pools instead of rebuilding them, so CSS can animate the change.
         function applyLayout(layout) {
           state.layout = layout;
-          place($("map"), layout.machine);
-          place($("machine"), layout.machine);
+          place($("map"), layout.directory);
           place($("directory"), layout.directory);
           place($("empty"), { x: directoryPad.side, y: directoryPad.top, ...emptySize });
           $("empty").hidden = state.pools.length > 0;
@@ -1307,7 +1298,6 @@ Invariants: Message data enters the DOM as text.
             }
           } catch (error) { showError(error); return; }
           await document.fonts.ready;
-          $("machine-name").textContent = location.host;
           state.requested = new URLSearchParams(location.search).get("pool");
           startList();
           refreshActivity();
