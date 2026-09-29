@@ -7,9 +7,9 @@ Invariants: Each pool is a spiral track whose length is its message buffer,
   on its innermost turn, and a vertical leg joins it back to the start, where
   writing wraps. Turns sit evenly, close together. The newest message's index
   sits level outside the spiral, joined to that message by a thin line. Each
-  stored message is drawn at its real offset and size when the server supplies
-  frames. Otherwise the occupied bytes form a continuous span. The newest five
-  percent of the ring brightens toward the write head.
+  stored message in the newest five percent of the ring is drawn at its real
+  offset and size when the server supplies frames. The trail fades into the
+  default track color.
 Invariants: Pools pack as circles in name order, each at the highest free candidate. Layout changes only when the
   pool set or the window width changes. A track's shape comes from its pool's
   size, so data never moves it.
@@ -430,8 +430,7 @@ Invariants: Message data enters the DOM as text.
         }
 
         // The drawn part of one frame. Frames of 3 px and up end a little early,
-        // leaving a gap before the next. Shorter ones touch, and alternating shades
-        // keep them apart.
+        // leaving a gap before the next. Shorter ones touch.
         function drawn(offset, bytes, scale) {
           const length = bytes * scale;
           const gap = length >= 3 ? Math.min(1, length * 0.3) : 0;
@@ -448,18 +447,17 @@ Invariants: Message data enters the DOM as text.
             : [{ start: start * scale, end: size * scale }, { start: 0, end: (end - size) * scale }];
         }
 
-        // A quiet occupied track and a short trail behind the write head. The
-        // trail covers at most five percent of the ring, even when the pool is full.
+        // A short trail behind the write head fades into the default track.
+        // It covers at most five percent of the ring, even when the pool is full.
         // Exact frame gaps survive when the server can list individual frames.
         function trailLayers(pool, scale) {
           const ring = pool.ring;
-          if (!ring || !messageCount(pool)) return { occupied: [], bands: [], head: [] };
+          if (!ring || !messageCount(pool)) return { bands: [], head: [] };
           const size = pool.ring_size;
           const used = (ring.head - ring.tail + size) % size || size;
           const end = ring.tail + used;
           const list = frames(pool);
           const pieces = list && list.map(([offset, bytes]) => drawn(offset, bytes, scale));
-          const occupied = pieces || byteIntervals(ring.tail, end, size, scale);
           const span = Math.min(used, size * trailFraction);
           const regions = Array.from({ length: trailBands }, (_, i) => byteIntervals(
             end - span + span * i / trailBands, end - span + span * (i + 1) / trailBands, size, scale));
@@ -475,8 +473,10 @@ Invariants: Message data enters the DOM as text.
               }
             }
           }
-          const head = pieces ? pieces.slice(-1) : byteIntervals(end - Math.min(used, 2 / scale), end, size, scale);
-          return { occupied, bands, head };
+          const newest = pieces && pieces[pieces.length - 1];
+          const head = newest ? [{ start: Math.max(newest.start, newest.end - 2), end: newest.end }]
+            : byteIntervals(end - Math.min(used, 2 / scale), end, size, scale);
+          return { bands, head };
         }
 
         // Where one stored message sits, matched by sequence number against the
@@ -507,8 +507,8 @@ Invariants: Message data enters the DOM as text.
           return out;
         }
 
-        // Everything the track draws, as numbers. Occupied bytes stay quiet;
-        // only the short trail before the head brightens toward the newest. A
+        // Everything the track draws, as numbers. Only the short trail before
+        // the head brightens toward the newest. A
         // hovered message turns yellow, with a pointer just outside the track. The
         // newest message's index (#505) sits beside it: outside a ring, or in the
         // gap outside its turn on a spiral, moving to the gap inside if the pointer
@@ -537,7 +537,6 @@ Invariants: Message data enters the DOM as text.
           const start = track.points[0], last = track.points[track.points.length - 1];
           return {
             track,
-            occupied: layers.occupied,
             bands: layers.bands,
             head: layers.head,
             spot,
@@ -577,7 +576,6 @@ Invariants: Message data enters the DOM as text.
           return '<svg width="' + 2 * t.c + '" height="' + 2 * t.c + '" aria-hidden="true">' +
             '<defs><path id="' + id + '" d="' + t.d + '" pathLength="' + t.total.toFixed(2) + '"/></defs>' +
             path("track", null) +
-            path("arc", g.occupied, 0.2) +
             g.bands.map((band) => band.intervals.length ? path("arc", band.intervals, band.opacity) : "").join("") +
             some("head", g.head) +
             // Drawn over the messages, so the seam at 12 o'clock reads as one straight line.
