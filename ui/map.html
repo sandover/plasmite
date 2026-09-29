@@ -1,15 +1,15 @@
 <!--
 Purpose: Live map of the pools in one served directory.
-Role: Browser client for the pool list, its change stream, and pool events.
+Role: Browser client for the pool change stream and each pool's event stream.
 Invariants: Each pool is a ring whose circumference is its message buffer,
   with byte 0 at 12 o'clock. Each stored message is drawn at its real offset
   and size, so the arc turns as the writer moves around the ring. A full ring
   is a closed arc.
 Invariants: Pools sit in rows, in name order. Layout changes only when the
-  pool set, a ring's size step, or the window width changes. The message
-  card floats over the map and never moves pools.
-Invariants: Message data enters the DOM as text. The page shows no process
-  links without process presence data.
+  pool set, a ring's size step, or the window width changes. Rings never
+  shrink while the page is open. The message card floats over the map and
+  never moves pools.
+Invariants: Message data enters the DOM as text.
 -->
 <!doctype html>
 <html lang="en">
@@ -105,7 +105,7 @@ Invariants: Message data enters the DOM as text. The page shows no process
       .pool[aria-expanded="true"] .name { color: var(--ok); }
 
       .peek {
-        position: absolute; z-index: 3; width: 360px; display: flex; flex-direction: column; animation: appear var(--ease);
+        position: absolute; z-index: 3; display: flex; flex-direction: column; animation: appear var(--ease);
         background: #1a2028; border: 1px solid #526578; border-radius: 12px; box-shadow: 0 10px 30px #0b0f1499;
       }
       .peek::before {
@@ -113,9 +113,7 @@ Invariants: Message data enters the DOM as text. The page shows no process
         background: #1a2028; border: solid #526578; border-width: 1px 0 0 1px; transform: rotate(45deg);
         transition: left var(--ease);
       }
-      .peek-head { padding: 10px 14px; border-bottom: 1px solid var(--line); }
-      .peek-head strong { display: block; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .messages { overflow: auto; flex: 1; min-height: 0; padding: 4px 6px; }
+      .messages { overflow: auto; flex: 1; min-height: 0; padding: 6px 6px 4px; }
       .messages:empty::before { content: "–"; display: block; padding: 8px 6px; color: var(--muted); font-size: 12px; }
       .message { display: flex; gap: 8px; align-items: baseline; padding: 4px 6px; border-radius: 5px; font-size: 12px; }
       .message:hover { background: #222b35; }
@@ -135,16 +133,14 @@ Invariants: Message data enters the DOM as text. The page shows no process
         font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere;
       }
       .tip small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
-      .error { color: var(--error); padding: 0 24px; }
-      .error:empty { display: none; }
+      .status-error { color: var(--error); }
+      .map-error { color: var(--error); padding: 0 24px; }
+      .map-error:empty { display: none; }
 
       @media (prefers-reduced-motion: reduce) {
         .map, .machine, .directory, .pool, .peek { transition: none; }
         .pool, .peek { animation: none; }
         .pool .fresh { animation: none; opacity: 0; }
-      }
-      @media (max-width: 600px) {
-        .topbar { gap: 13px; }
       }
     </style>
   </head>
@@ -169,9 +165,6 @@ Invariants: Message data enters the DOM as text. The page shows no process
               </div>
               <div class="empty" id="empty" hidden>No pools</div>
               <section class="peek" id="peek" aria-label="Messages" hidden>
-                <header class="peek-head">
-                  <strong id="peek-name"></strong>
-                </header>
                 <div class="messages" id="messages" aria-live="polite"></div>
                 <a class="more" id="open" href="/ui"></a>
               </section>
@@ -179,7 +172,7 @@ Invariants: Message data enters the DOM as text. The page shows no process
           </section>
         </div>
       </div>
-      <p class="error" id="map-error" role="alert"></p>
+      <p class="map-error" id="map-error" role="alert"></p>
       <div class="tip" id="tip" role="tooltip" hidden></div>
     </main>
     <script>
@@ -188,25 +181,26 @@ Invariants: Message data enters the DOM as text. The page shows no process
         const $ = (id) => document.getElementById(id);
         const scroll = $("map-scroll");
         const messages = $("messages");
-        const state = { pools: [], topology: null, newest: new Map(),
-          selected: null, spotSeq: null, boxes: new Map(), directoryWidth: 0, nextSeq: null, abort: null, generation: 0,
-          listAbort: null, listGeneration: 0 };
         const cards = new Map();
+        const radii = new Map();
         const stroke = 7;
         const maxRadius = 110;
         const radiusStep = 8;
         const minSegment = 2.5;
         const ageBands = 6;
         const countRoom = { x: 28, y: 26 };
-        const peekWidth = 340;
+        const peekWidth = 360;
         const emptySize = { width: 240, height: 70 };
         const machinePad = { top: 36, side: 14, bottom: 14 };
         const directoryPad = { top: 40, side: 18, bottom: 16 };
         const gutter = 20;
         const maxMessages = 200;
+        const retryMs = 1200;
+        const state = { pools: [], topology: null, layout: null, newest: new Map(),
+          selected: null, spotSeq: null, nextSeq: null, stopReader: null, stopList: null, requested: null };
         let resizeTimer = null;
 
-        // Pure helpers.
+        // Numbers and text.
 
         function size(bytes) {
           if (!Number.isFinite(bytes)) return "–";
@@ -214,38 +208,6 @@ Invariants: Message data enters the DOM as text. The page shows no process
           let value = bytes, unit = 0;
           while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
           return (unit ? Number(value.toFixed(1)) : value) + " " + units[unit];
-        }
-
-        const measure = document.createElement("canvas").getContext("2d");
-        function textWidth(text, px, family = getComputedStyle(document.body).fontFamily) {
-          measure.font = px + "px " + family;
-          return measure.measureText(text).width;
-        }
-
-        // Smallest ring whose inside fits the two label lines. Each line sits about
-        // 9 px from the center, where the circle is narrower than its diameter. The
-        // size line is measured at its widest ("100%"), so the percent never resizes it.
-        function labelRadius(pool) {
-          const width = Math.max(textWidth(pool.name, 13), textWidth(size(pool.file_size) + " · 100%", 11,
-            getComputedStyle(document.documentElement).getPropertyValue("--numbers"))) + 10;
-          return Math.hypot(width / 2, 11) + stroke / 2 + 3;
-        }
-
-        // A ring is as small as its label allows. It grows, in steps, only until its
-        // smallest message is wide enough to see. When no ring up to maxRadius could
-        // show every message apart, growing would not help, so it stays small. The
-        // arc is to scale at any size.
-        function radius(pool) {
-          const sizes = (frames(pool) || []).map(([, bytes]) => bytes);
-          const needed = sizes.length ? pool.ring_size * minSegment / (2 * Math.PI * Math.min(...sizes)) : 0;
-          const data = needed > maxRadius ? 0 : needed;
-          return Math.ceil(Math.max(labelRadius(pool), data) / radiusStep) * radiusStep;
-        }
-
-        // Leaves room around the ring for the count beside its newest message.
-        function nodeSize(pool) {
-          const d = 2 * (radius(pool) + stroke);
-          return { width: d + 2 * countRoom.x, height: d + 2 * countRoom.y };
         }
 
         function shortCount(count) {
@@ -272,38 +234,62 @@ Invariants: Message data enters the DOM as text. The page shows no process
           return Number.isFinite(count) ? count : 0;
         }
 
+        // Ring size.
+
+        const measure = document.createElement("canvas").getContext("2d");
+        function textWidth(text, px, family) {
+          measure.font = px + "px " + family;
+          return measure.measureText(text).width;
+        }
+
+        // Smallest ring whose inside fits the two label lines. Each line sits about
+        // 9 px from the center, where the circle is narrower than its diameter. The
+        // size line is measured at its widest ("100%"), so the percent never resizes it.
+        function labelRadius(pool) {
+          const body = getComputedStyle(document.body).fontFamily;
+          const numbers = getComputedStyle(document.documentElement).getPropertyValue("--numbers");
+          const width = Math.max(textWidth(pool.name, 13, body), textWidth(size(pool.file_size) + " · 100%", 11, numbers)) + 10;
+          return Math.hypot(width / 2, 11) + stroke / 2 + 3;
+        }
+
+        // Radius that makes the smallest stored message minSegment px long, or 0
+        // when no ring up to maxRadius could, since growing then would not help.
+        function dataRadius(pool) {
+          const sizes = (frames(pool) || []).map(([, bytes]) => bytes);
+          const needed = sizes.length ? pool.ring_size * minSegment / (2 * Math.PI * Math.min(...sizes)) : 0;
+          return needed > maxRadius ? 0 : needed;
+        }
+
+        // A ring is as small as its label allows and grows, in steps, only as its
+        // messages need, up to maxRadius. The arc is to scale at any size. While the
+        // page is open a ring never shrinks, so a pool whose smallest message comes
+        // and goes, or a snapshot without a frame list, does not reflow the map.
+        function ringRadius(pool) {
+          const step = (value) => Math.ceil(value / radiusStep) * radiusStep;
+          const fit = Math.max(step(labelRadius(pool)), Math.min(maxRadius, step(dataRadius(pool))));
+          return Math.max(radii.get(pool.name) || 0, fit);
+        }
+
+        // Leaves room around the ring for the count beside its newest message.
+        function nodeSize(pool) {
+          const d = 2 * (pool.r + stroke);
+          return { width: d + 2 * countRoom.x, height: d + 2 * countRoom.y };
+        }
+
+        // Ring geometry, in pixels along the circle from 12 o'clock.
+
         // Stored frames as [offset, bytes] pairs, oldest first, or null when the
-        // server sent no list (too many frames, or the ring changed mid-read).
+        // server sent no list (too many frames, or a writer kept changing the ring).
         function frames(pool) {
           return pool.ring && Array.isArray(pool.ring.frames) ? pool.ring.frames : null;
         }
 
-        // The drawn part of one frame, in pixels from 12 o'clock. Frames long enough
-        // to draw apart (1.5 px and up) end a little early, leaving a gap before the
-        // next one; shorter frames join their neighbors.
+        // The drawn part of one frame. Frames long enough to draw apart (1.5 px and
+        // up) end a little early, leaving a gap before the next; shorter ones join.
         function drawn(offset, bytes, scale) {
           const length = bytes * scale;
           const gap = length >= 1.5 ? Math.min(1, length * 0.3) : 0;
           return { start: offset * scale, end: offset * scale + Math.max(0.5, length - gap) };
-        }
-
-        // Dash pattern that paints the given intervals on a circle whose dash
-        // offset 0 is 12 o'clock. Touching intervals merge into one dash.
-        function dashes(intervals, circumference) {
-          const sorted = intervals.slice().sort((a, b) => a.start - b.start);
-          const merged = [];
-          for (const interval of sorted) {
-            const last = merged[merged.length - 1];
-            if (last && interval.start - last.end < 0.01) last.end = Math.max(last.end, interval.end);
-            else merged.push({ ...interval });
-          }
-          if (!merged.length) return "0 " + circumference;
-          let out = "0 " + merged[0].start.toFixed(2);
-          merged.forEach((interval, i) => {
-            const next = i + 1 < merged.length ? merged[i + 1].start : circumference;
-            out += " " + (interval.end - interval.start).toFixed(2) + " " + Math.max(0, next - interval.end).toFixed(2);
-          });
-          return out;
         }
 
         // Pixel intervals for ring bytes [from, to), which may run past the end of
@@ -327,105 +313,117 @@ Invariants: Message data enters the DOM as text. The page shows no process
             const head = pieces.pop();
             const bands = Array.from({ length: ageBands }, () => []);
             pieces.forEach((piece, i) => bands[Math.floor(i * ageBands / pieces.length)].push(piece));
-            return { bands, head: head ? [head] : [] };
+            return { bands, head: head ? [head] : [], pieces: head ? pieces.concat([head]) : [] };
           }
           const ring = pool.ring;
-          if (!ring || !messageCount(pool)) return { bands: [], head: [] };
+          if (!ring || !messageCount(pool)) return { bands: [], head: [], pieces: [] };
           const size = pool.ring_size;
           const used = (ring.head - ring.tail + size) % size || size;
           const bands = Array.from({ length: ageBands }, (_, k) =>
             byteIntervals(ring.tail + used * k / ageBands, ring.tail + used * (k + 1) / ageBands, size, scale));
           const end = ring.tail + used;
-          return { bands, head: byteIntervals(end - Math.min(used, 2 / scale), end, size, scale) };
+          return { bands, head: byteIntervals(end - Math.min(used, 2 / scale), end, size, scale), pieces: [] };
         }
 
-        // Where one stored message sits on the ring. Null when it is gone or the
-        // pool has no frame list.
+        // Where one stored message sits, matched by sequence number against the
+        // ring's own first frame. Null when it is gone or there is no frame list.
         function segmentOf(pool, seq, scale) {
           const list = frames(pool);
-          const index = seq - (pool.bounds && pool.bounds.oldest);
+          const index = seq - (pool.ring && pool.ring.first);
           if (!list || !Number.isInteger(index) || index < 0 || index >= list.length) return null;
           return drawn(list[index][0], list[index][1], scale);
         }
 
-        // Places text just outside the ring at an angle, anchored away from the ring.
-        function outside(c, distance, angle, text) {
-          const x = c + distance * Math.cos(angle);
-          const y = c + distance * Math.sin(angle);
-          const anchor = Math.cos(angle) > 0.3 ? "start" : Math.cos(angle) < -0.3 ? "end" : "middle";
-          const baseline = Math.sin(angle) > 0.3 ? "hanging" : Math.sin(angle) < -0.3 ? "auto" : "central";
-          return '<text class="count" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" text-anchor="' + anchor +
-            '" dominant-baseline="' + baseline + '">' + text + '</text>';
+        // Dash pattern that paints the given intervals on a circle whose dash
+        // offset 0 is 12 o'clock. Touching intervals merge into one dash.
+        function dashes(intervals, circumference) {
+          const sorted = intervals.slice().sort((a, b) => a.start - b.start);
+          const merged = [];
+          for (const interval of sorted) {
+            const last = merged[merged.length - 1];
+            if (last && interval.start - last.end < 0.01) last.end = Math.max(last.end, interval.end);
+            else merged.push({ ...interval });
+          }
+          if (!merged.length) return "0 " + circumference;
+          let out = "0 " + merged[0].start.toFixed(2);
+          merged.forEach((interval, i) => {
+            const next = i + 1 < merged.length ? merged[i + 1].start : circumference;
+            out += " " + (interval.end - interval.start).toFixed(2) + " " + Math.max(0, next - interval.end).toFixed(2);
+          });
+          return out;
         }
 
-        // Builds markup from numbers only. The dark track is the whole ring, with
-        // byte 0 at 12 o'clock, and each stored message is drawn where it sits. When
-        // the server sends no frame list, the arc runs solid from tail to head.
-        // Messages brighten with age order, oldest dimmest, and the newest is drawn
-        // near white, so the write position and direction read at a glance. Newly
-        // arrived messages glow for a moment. The count sits just past the newest.
-        function ringSvg(pool, freshCount, spotSeq) {
-          const r = radius(pool);
+        // Everything the ring draws, as numbers. Messages brighten with age order,
+        // oldest dimmest, and the newest is near white, so the write position and
+        // direction read at a glance. Newly arrived messages glow for a moment. A
+        // hovered message turns yellow, with a pointer just outside the ring. The
+        // count sits past the newest message, stepping outward if the pointer is near.
+        function ringGeometry(pool, freshCount, spotSeq) {
+          const r = pool.r;
           const c = r + stroke;
           const circumference = 2 * Math.PI * r;
           const scale = circumference / pool.ring_size;
-          const list = frames(pool);
           const groups = ageGroups(pool, scale);
-          const pieces = list ? list.map(([offset, bytes]) => drawn(offset, bytes, scale)) : [];
-          const fresh = pieces.slice(pieces.length - Math.min(freshCount, pieces.length));
+          const list = frames(pool);
           const newest = list && list.length ? list[list.length - 1] : null;
           const end = (newest ? newest[0] + newest[1] : (pool.ring ? pool.ring.head : 0)) * scale;
-          // Recolors the hovered message and points at its middle from just outside
-          // the ring, so even a sliver can be found.
           const spot = segmentOf(pool, spotSeq, scale);
           const spotAngle = spot ? (spot.start + spot.end) / 2 / r - Math.PI / 2 : null;
           const tip = r + stroke / 2 + 3;
           const base = tip + 7;
-          const pointer = () => {
-            const [cos, sin] = [Math.cos(spotAngle), Math.sin(spotAngle)];
-            const point = (d, side) => (c + d * cos - side * sin).toFixed(1) + "," + (c + d * sin + side * cos).toFixed(1);
-            return '<polygon class="pointer" points="' + point(tip, 0) + " " + point(base, -4) + " " + point(base, 4) + '"/>';
-          };
-          // The count steps outward past the pointer when the two would touch.
           const countAngle = end / r - Math.PI / 2;
-          const nearSpot = spot && Math.abs(Math.atan2(Math.sin(countAngle - spotAngle), Math.cos(countAngle - spotAngle))) * base < 18;
-          const countDistance = nearSpot ? base + 5 : r + stroke / 2 + 6;
-          const circle = (className, dash, opacity = 1) => '<circle class="' + className + '" cx="' + c + '" cy="' + c + '" r="' + r +
-            '" stroke-width="' + stroke + '" transform="rotate(-90 ' + c + ' ' + c + ')" stroke-dasharray="' + dash + '"' +
-            (opacity < 1 ? ' opacity="' + opacity.toFixed(2) + '"' : "") + '/>';
-          const bands = groups.bands.map((intervals, k) =>
-            intervals.length ? circle("arc", dashes(intervals, circumference), 0.3 + 0.6 * (k + 1) / ageBands) : "").join("");
-          return '<svg width="' + 2 * c + '" height="' + 2 * c + '" aria-hidden="true">' +
-            circle("track", "none") +
-            bands +
-            (groups.head.length ? circle("head", dashes(groups.head, circumference)) : "") +
-            (fresh.length ? circle("fresh", dashes(fresh, circumference)) : "") +
-            (spot ? circle("spot", dashes([spot], circumference)) + pointer() : "") +
-            outside(c, countDistance, countAngle, shortCount(messageCount(pool))) + '</svg>';
+          const turn = spot ? Math.abs(Math.atan2(Math.sin(countAngle - spotAngle), Math.cos(countAngle - spotAngle))) : Infinity;
+          const around = (d, angle, side = 0) => [c + d * Math.cos(angle) - side * Math.sin(angle), c + d * Math.sin(angle) + side * Math.cos(angle)];
+          return {
+            c, r, circumference,
+            bands: groups.bands.map((intervals, k) => ({ intervals, opacity: 0.3 + 0.6 * (k + 1) / ageBands })),
+            head: groups.head,
+            fresh: groups.pieces.slice(groups.pieces.length - Math.min(freshCount, groups.pieces.length)),
+            spot,
+            pointer: spot ? [around(tip, spotAngle), around(base, spotAngle, -4), around(base, spotAngle, 4)] : null,
+            count: { at: around(turn * base < 18 ? base + 5 : r + stroke / 2 + 6, countAngle), angle: countAngle,
+              text: shortCount(messageCount(pool)) },
+          };
         }
+
+        // SVG markup from ring geometry. Every value is a number, except the count
+        // text, which is digits and a unit letter.
+        function ringMarkup(g) {
+          const circle = (className, intervals, opacity = 1) => '<circle class="' + className + '" cx="' + g.c + '" cy="' + g.c +
+            '" r="' + g.r + '" stroke-width="' + stroke + '" transform="rotate(-90 ' + g.c + ' ' + g.c + ')"' +
+            (intervals ? ' stroke-dasharray="' + dashes(intervals, g.circumference) + '"' : "") +
+            (opacity < 1 ? ' opacity="' + opacity.toFixed(2) + '"' : "") + '/>';
+          const some = (className, intervals) => intervals.length ? circle(className, intervals) : "";
+          const [x, y] = g.count.at;
+          const cos = Math.cos(g.count.angle), sin = Math.sin(g.count.angle);
+          const anchor = cos > 0.3 ? "start" : cos < -0.3 ? "end" : "middle";
+          const baseline = sin > 0.3 ? "hanging" : sin < -0.3 ? "auto" : "central";
+          return '<svg width="' + 2 * g.c + '" height="' + 2 * g.c + '" aria-hidden="true">' +
+            circle("track", null) +
+            g.bands.map((band) => band.intervals.length ? circle("arc", band.intervals, band.opacity) : "").join("") +
+            some("head", g.head) +
+            some("fresh", g.fresh) +
+            (g.spot ? circle("spot", [g.spot]) : "") +
+            (g.pointer ? '<polygon class="pointer" points="' + g.pointer.map(([px, py]) => px.toFixed(1) + "," + py.toFixed(1)).join(" ") + '"/>' : "") +
+            '<text class="count" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" text-anchor="' + anchor +
+            '" dominant-baseline="' + baseline + '">' + g.count.text + '</text></svg>';
+        }
+
+        // Pools.
 
         function directoryPath() {
           const path = state.pools[0] && state.pools[0].path;
           return path ? path.replace(/[\\/][^\\/]*$/, "") : "";
         }
 
-        function place(element, box) {
-          element.style.left = (box.x || 0) + "px";
-          element.style.top = (box.y || 0) + "px";
-          element.style.width = box.width + "px";
-          element.style.height = box.height + "px";
-        }
-
-        function setStatus(text, isError) {
-          $("status").textContent = text;
-          $("status").classList.toggle("error", Boolean(isError));
-        }
-
         function currentPool() {
           return state.pools.find((pool) => pool.name === state.selected);
         }
 
-        // Pools.
+        function setStatus(text, isError) {
+          $("status").textContent = text;
+          $("status").classList.toggle("status-error", Boolean(isError));
+        }
 
         function createCard(name) {
           const button = document.createElement("button");
@@ -437,28 +435,37 @@ Invariants: Message data enters the DOM as text. The page shows no process
           return button;
         }
 
-        function updateCard(button, pool) {
-          const newest = pool.bounds && pool.bounds.newest;
-          const previous = state.newest.get(pool.name);
-          const fresh = previous == null || newest == null ? 0 : Math.max(0, newest - previous);
-          state.newest.set(pool.name, newest);
-          button.querySelector(".ring").innerHTML = ringSvg(pool, fresh, pool.name === state.selected ? state.spotSeq : null);
-          button.querySelector(".label").style.maxWidth = 2 * (radius(pool) - stroke) - 6 + "px";
+        // The one way a ring is drawn, from the pool, its new-message count, and the
+        // hover. Unchanged markup is left alone: replacing the element under a press
+        // would stop the browser from sending its click.
+        const drawnMarkup = new Map();
+        function drawRing(pool, fresh) {
+          const button = cards.get(pool.name);
+          if (!button) return;
+          const spotSeq = pool.name === state.selected ? state.spotSeq : null;
+          const markup = ringMarkup(ringGeometry(pool, fresh, spotSeq));
+          if (drawnMarkup.get(pool.name) === markup) return;
+          drawnMarkup.set(pool.name, markup);
+          button.querySelector(".ring").innerHTML = markup;
+        }
+
+        function updateCard(pool, fresh) {
+          const button = cards.get(pool.name);
+          if (!button) return;
+          drawRing(pool, fresh);
+          button.querySelector(".label").style.maxWidth = 2 * (pool.r - stroke) - 6 + "px";
           const used = usedFraction(pool);
+          const count = messageCount(pool);
           // Label with the size the pool was created at; usage is a share of its message buffer.
           button.querySelector(".meta").textContent = size(pool.file_size) + " · " + percentLabel(used);
-          const count = messageCount(pool);
           button.title = count.toLocaleString() + (count === 1 ? " message · " : " messages · ") + (used * 100).toFixed(1) +
             "% of a " + size(pool.ring_size) + " buffer";
           button.setAttribute("aria-label", pool.name + ", " + button.title);
           button.setAttribute("aria-expanded", String(pool.name === state.selected));
         }
 
-        function updateCards() {
-          for (const pool of state.pools) {
-            const button = cards.get(pool.name);
-            if (button) updateCard(button, pool);
-          }
+        function updateCards(freshBy = new Map()) {
+          for (const pool of state.pools) updateCard(pool, freshBy.get(pool.name) || 0);
           const pool = currentPool();
           if (pool) updateMore(pool);
         }
@@ -467,6 +474,8 @@ Invariants: Message data enters the DOM as text. The page shows no process
           const count = messageCount(pool);
           $("open").textContent = "All " + count + (count === 1 ? " message" : " messages") + " →";
         }
+
+        // Layout.
 
         // Packs boxes into rows that wrap at maxWidth, in the given order.
         function flow(boxes, maxWidth) {
@@ -482,61 +491,72 @@ Invariants: Message data enters the DOM as text. The page shows no process
           return { boxes: placed, width, height: y + rowHeight };
         }
 
-        function offset(box, by) {
-          return { ...box, x: box.x + by.x, y: box.y + by.y };
+        // Pure: where the machine, the directory, and each pool go, for this width.
+        function computeLayout(pools, availableWidth) {
+          const maxWidth = Math.max(emptySize.width, availableWidth - 2 * machinePad.side - 2 * directoryPad.side);
+          const rows = flow(pools.map((pool) => ({ name: pool.name, ...nodeSize(pool) })), maxWidth);
+          const content = { width: Math.max(rows.width, emptySize.width), height: Math.max(rows.height, emptySize.height) };
+          const directory = { x: machinePad.side, y: machinePad.top,
+            width: content.width + 2 * directoryPad.side, height: content.height + directoryPad.top + directoryPad.bottom };
+          const machine = { width: directory.width + 2 * machinePad.side, height: directory.height + machinePad.top + machinePad.bottom };
+          const boxes = new Map(rows.boxes.map((box) => [box.name, { ...box, x: box.x + directoryPad.side, y: box.y + directoryPad.top }]));
+          return { machine, directory, boxes };
+        }
+
+        function place(element, box) {
+          element.style.left = (box.x || 0) + "px";
+          element.style.top = (box.y || 0) + "px";
+          element.style.width = box.width + "px";
+          element.style.height = box.height + "px";
         }
 
         // Moves existing pools instead of rebuilding them, so CSS can animate the change.
-        function layoutMap() {
-          const maxWidth = Math.max(emptySize.width, scroll.clientWidth - 32 - 2 * machinePad.side - 2 * directoryPad.side);
-          const rows = flow(state.pools.map((pool) => ({ name: pool.name, ...nodeSize(pool) })), maxWidth);
-          const content = { width: Math.max(rows.width, emptySize.width), height: Math.max(rows.height, emptySize.height) };
-          const inner = { x: directoryPad.side, y: directoryPad.top };
-          const directory = { x: machinePad.side, y: machinePad.top,
-            width: content.width + 2 * directoryPad.side, height: content.height + directoryPad.top + directoryPad.bottom };
-          const machine = { width: directory.width + 2 * machinePad.side,
-            height: directory.height + machinePad.top + machinePad.bottom };
-          place($("map"), machine);
-          place($("machine"), machine);
-          place($("directory"), directory);
-          place($("empty"), offset({ x: 0, y: 0, ...emptySize }, inner));
+        function applyLayout(layout) {
+          state.layout = layout;
+          place($("map"), layout.machine);
+          place($("machine"), layout.machine);
+          place($("directory"), layout.directory);
+          place($("empty"), { x: directoryPad.side, y: directoryPad.top, ...emptySize });
           $("empty").hidden = state.pools.length > 0;
-          state.directoryWidth = directory.width;
-          state.boxes.clear();
           const path = directoryPath();
           const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1;
           $("path").querySelector(".parent").textContent = path.slice(0, cut);
           $("path").querySelector("strong").textContent = path.slice(cut) || "–";
           $("path").title = path;
-          const names = new Set(state.pools.map((pool) => pool.name));
           for (const [name, button] of cards) {
-            if (!names.has(name)) { button.remove(); cards.delete(name); state.newest.delete(name); }
+            if (!layout.boxes.has(name)) { button.remove(); cards.delete(name); drawnMarkup.delete(name); }
           }
-          for (const box of rows.boxes) {
-            let button = cards.get(box.name);
-            if (!button) {
-              button = createCard(box.name);
-              cards.set(box.name, button);
-              $("directory").append(button);
+          for (const [name, box] of layout.boxes) {
+            if (!cards.has(name)) {
+              cards.set(name, createCard(name));
+              $("directory").append(cards.get(name));
             }
-            place(button, offset(box, inner));
-            state.boxes.set(box.name, offset(box, inner));
+            place(cards.get(name), box);
           }
-          updateCards();
           placePeek();
+        }
+
+        function relayout() {
+          state.topology = topology();
+          applyLayout(computeLayout(state.pools, scroll.clientWidth - 32));
+        }
+
+        function topology() {
+          return JSON.stringify(state.pools.map((pool) => [pool.name, pool.r]));
         }
 
         // Floats the card under the open pool, pointing at its ring, kept inside the directory's sides.
         function placePeek() {
-          const box = state.boxes.get(state.selected);
-          $("peek").hidden = !box;
+          const box = state.layout && state.layout.boxes.get(state.selected);
+          const peek = $("peek");
+          peek.hidden = !box;
           if (!box) return;
           const center = box.x + box.width / 2;
-          const x = Math.max(directoryPad.side, Math.min(center - peekWidth / 2, state.directoryWidth - directoryPad.side - peekWidth));
-          const top = box.y + box.height + 10;
-          $("peek").style.left = x + "px";
-          $("peek").style.top = top + "px";
-          $("peek").style.setProperty("--pointer", (center - x) + "px");
+          const x = Math.max(directoryPad.side, Math.min(center - peekWidth / 2, state.layout.directory.width - directoryPad.side - peekWidth));
+          peek.style.width = peekWidth + "px";
+          peek.style.left = x + "px";
+          peek.style.top = (box.y + box.height + 10) + "px";
+          peek.style.setProperty("--pointer", (center - x) + "px");
           fitPeek();
         }
 
@@ -549,62 +569,147 @@ Invariants: Message data enters the DOM as text. The page shows no process
           $("peek").style.maxHeight = Math.max(160, innerHeight - top - 16) + "px";
         }
 
-        function topology() {
-          return JSON.stringify(state.pools.map((pool) => [pool.name, radius(pool)]));
-        }
-
-        function relayout() {
-          state.topology = topology();
-          layoutMap();
-        }
-
+        // Takes one pool snapshot: sizes each ring once, counts new messages since
+        // the last snapshot, then lays out and draws.
         function showPools(payload) {
-          const pools = Array.isArray(payload.pools) ? payload.pools : [];
-          pools.sort((a, b) => a.name.localeCompare(b.name));
+          const pools = (Array.isArray(payload.pools) ? payload.pools : []).slice().sort((a, b) => a.name.localeCompare(b.name));
+          const names = new Set(pools.map((pool) => pool.name));
+          for (const name of radii.keys()) if (!names.has(name)) { radii.delete(name); state.newest.delete(name); }
+          const freshBy = new Map();
+          for (const pool of pools) {
+            pool.r = ringRadius(pool);
+            radii.set(pool.name, pool.r);
+            const newest = pool.bounds && pool.bounds.newest;
+            const previous = state.newest.get(pool.name);
+            freshBy.set(pool.name, previous == null || newest == null ? 0 : Math.max(0, newest - previous));
+            state.newest.set(pool.name, newest);
+          }
           state.pools = pools;
           if (state.selected && !currentPool()) closePeek();
           if (topology() !== state.topology) relayout();
-          else updateCards();
+          updateCards(freshBy);
           setStatus(pools.length + (pools.length === 1 ? " pool" : " pools"));
           $("map-error").textContent = "";
+          if (state.requested) {
+            const requested = state.requested;
+            state.requested = null;
+            if (cards.has(requested)) openPeek(requested);
+          }
         }
 
-        async function refreshPools() {
-          const response = await fetch("/v0/ui/pools", { cache: "no-store" });
-          if (response.status === 401) { location.assign("/ui"); return; }
-          if (!response.ok) throw new Error("Pool list failed (" + response.status + ")");
-          showPools(await response.json());
+        // Streams.
+
+        // Splits a server-sent event stream into events as chunks arrive. Returns
+        // the complete events and the unfinished remainder.
+        function parseEvents(buffer) {
+          const blocks = buffer.split("\n\n");
+          const rest = blocks.pop() || "";
+          const events = [];
+          for (const block of blocks) {
+            let name = "";
+            const data = [];
+            for (const line of block.split("\n")) {
+              if (line.startsWith("event:")) name = line.slice(6).trim();
+              if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+            }
+            if (data.length) events.push({ name, data: JSON.parse(data.join("\n")) });
+          }
+          return { events, rest };
         }
 
-        // Peek card.
+        // Follows a server-sent event stream until the returned stop() is called,
+        // reconnecting retryMs after any drop, including a clean close. url() is
+        // read on each connect, so a reconnect can resume where the last one ended.
+        // Stops for good on 401 (the session ended; sign in again) and on 403 or
+        // 404 (nothing here to read).
+        function follow(url, onEvent, onDrop = () => {}) {
+          const controller = new AbortController();
+          let stopped = false;
+          (async () => {
+            while (!stopped) {
+              try {
+                const response = await fetch(url(), { cache: "no-store", signal: controller.signal });
+                if (response.status === 401) { location.assign("/ui"); return; }
+                if (response.status === 403 || response.status === 404) return;
+                if (!response.ok || !response.body) throw new Error("Stream failed (" + response.status + ")");
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+                for (;;) {
+                  const part = await reader.read();
+                  if (stopped || part.done) break;
+                  const parsed = parseEvents(buffer + decoder.decode(part.value, { stream: true }).replaceAll("\r\n", "\n"));
+                  buffer = parsed.rest;
+                  for (const event of parsed.events) {
+                    if (event.name === "error") throw new Error((event.data.error && event.data.error.message) || "Stream error");
+                    onEvent(event);
+                  }
+                }
+              } catch (_) { /* Reconnect below. */ }
+              if (stopped) return;
+              onDrop();
+              await new Promise((resolve) => setTimeout(resolve, retryMs));
+            }
+          })();
+          return () => { stopped = true; controller.abort(); };
+        }
+
+        function startList() {
+          if (state.stopList || document.visibilityState !== "visible") return;
+          state.stopList = follow(() => "/v0/ui/pools/stream",
+            (event) => { if (event.name === "pools") showPools(event.data); },
+            () => setStatus("reconnecting"));
+        }
+
+        function stopList() {
+          if (state.stopList) state.stopList();
+          state.stopList = null;
+        }
+
+        // The server skips messages that were overwritten; that is normal for a
+        // ring, so the card shows no notice for it.
+        function startReader(name) {
+          stopReader();
+          state.stopReader = follow(() => {
+            const query = new URLSearchParams({ gap_policy: "continue" });
+            if (state.nextSeq != null) query.set("since_seq", state.nextSeq);
+            return "/v0/ui/pools/" + encodeURIComponent(name) + "/events?" + query;
+          }, (event) => { if (event.name === "message") addMessage(event.data); });
+        }
+
+        function stopReader() {
+          if (state.stopReader) state.stopReader();
+          state.stopReader = null;
+        }
+
+        // Card.
 
         function openPeek(name) {
-          stopReader();
           state.selected = name;
           state.spotSeq = null;
+          hover(null);
           const pool = currentPool();
           if (!pool) return;
           const bounds = pool.bounds || {};
           state.nextSeq = bounds.newest == null ? null : Math.max(bounds.oldest || 1, bounds.newest - maxMessages + 1);
           messages.replaceChildren();
-          $("peek-name").textContent = name;
+          $("peek").setAttribute("aria-label", name + " messages");
           $("open").href = "/ui/pools/" + encodeURIComponent(name);
-          updateMore(pool);
           updateCards();
           placePeek();
           const url = new URL(location.href);
           url.searchParams.set("pool", name);
           history.replaceState(null, "", url);
-          readLoop(++state.generation);
+          startReader(name);
         }
 
         function closePeek() {
           const button = cards.get(state.selected);
           const hadFocus = $("peek").contains(document.activeElement);
           stopReader();
+          hover(null);
           state.selected = null;
           state.spotSeq = null;
-          hideTip();
           updateCards();
           placePeek();
           const url = new URL(location.href);
@@ -662,126 +767,29 @@ Invariants: Message data enters the DOM as text. The page shows no process
           row.append(text, time);
           const nearBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 40;
           messages.append(row);
-          while (messages.children.length > maxMessages) messages.firstElementChild.remove();
+          while (messages.children.length > maxMessages) {
+            if (messages.firstElementChild === hoverRow) hover(null);
+            messages.firstElementChild.remove();
+          }
           if (nearBottom) messages.scrollTop = messages.scrollHeight;
         }
 
-        function handleFrame(frame) {
-          let event = "";
-          const data = [];
-          for (const line of frame.split("\n")) {
-            if (line.startsWith("event:")) event = line.slice(6).trim();
-            if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
-          }
-          if (!data.length) return;
-          const payload = JSON.parse(data.join("\n"));
-          if (event === "message") addMessage(payload);
-          if (event === "pools") showPools(payload);
-          if (event === "error") throw new Error((payload.error && payload.error.message) || "Stream error");
-        }
+        // Hover.
 
-        function stopListReader() {
-          state.listGeneration++;
-          if (state.listAbort) state.listAbort.abort();
-          state.listAbort = null;
-        }
-
-        async function readPoolList(generation) {
-          const live = () => generation === state.listGeneration && document.visibilityState === "visible";
-          while (live()) {
-            const controller = new AbortController();
-            state.listAbort = controller;
-            try {
-              const response = await fetch("/v0/ui/pools/stream", { cache: "no-store", signal: controller.signal });
-              if (response.status === 401) { location.assign("/ui"); return; }
-              if (!response.ok || !response.body) throw new Error("Pool stream failed (" + response.status + ")");
-              const reader = response.body.getReader();
-              const decoder = new TextDecoder();
-              let buffer = "";
-              while (live()) {
-                const part = await reader.read();
-                if (!live()) return;
-                if (part.done) break;
-                buffer += decoder.decode(part.value, { stream: true }).replaceAll("\r\n", "\n");
-                const frames = buffer.split("\n\n");
-                buffer = frames.pop() || "";
-                for (const frame of frames) handleFrame(frame);
-              }
-            } catch (error) {
-              if (controller.signal.aborted || !live()) return;
-            } finally {
-              if (state.listAbort === controller) state.listAbort = null;
-            }
-            if (!live()) return;
-            setStatus("reconnecting");
-            await new Promise((resolve) => setTimeout(resolve, 1200));
-          }
-        }
-
-        // Each reader keeps the generation it started with; bumping it ends the old one.
-        function stopReader() {
-          state.generation++;
-          if (state.abort) state.abort.abort();
-          state.abort = null;
-        }
-
-        // Follows one pool and quietly reconnects if the stream drops. The server
-        // skips messages that were overwritten; that is normal for a ring, so the
-        // card shows no notice for it.
-        async function readLoop(generation) {
-          const live = () => generation === state.generation;
-          while (live()) {
-            const controller = new AbortController();
-            state.abort = controller;
-            const query = new URLSearchParams({ gap_policy: "continue" });
-            if (state.nextSeq != null) query.set("since_seq", state.nextSeq);
-            try {
-              const response = await fetch("/v0/ui/pools/" + encodeURIComponent(state.selected) + "/events?" + query, {
-                cache: "no-store", signal: controller.signal
-              });
-              if (response.status === 401) { location.assign("/ui"); return; }
-              if (!response.ok || !response.body) throw new Error("Stream failed (" + response.status + ")");
-              const reader = response.body.getReader();
-              const decoder = new TextDecoder();
-              let buffer = "";
-              while (live()) {
-                const part = await reader.read();
-                if (!live()) return;
-                if (part.done) break;
-                buffer += decoder.decode(part.value, { stream: true }).replaceAll("\r\n", "\n");
-                const frames = buffer.split("\n\n");
-                buffer = frames.pop() || "";
-                for (const frame of frames) handleFrame(frame);
-              }
-            } catch (error) {
-              if (controller.signal.aborted || !live()) return;
-              await new Promise((resolve) => setTimeout(resolve, 1200));
-            } finally {
-              if (state.abort === controller) state.abort = null;
-            }
-          }
-        }
-
-        // Clicking anywhere outside the card closes it. A pool's own click handler toggles it.
-        document.addEventListener("pointerdown", (event) => {
-          if (state.selected && !$("peek").contains(event.target) && !event.target.closest(".pool")) closePeek();
-        });
-
-        // Shows the whole message after a short hover, but only when its line is cut off.
         let tipTimer = null;
         function hideTip() {
           clearTimeout(tipTimer);
           $("tip").hidden = true;
         }
 
-        // Marks the hovered message's segment on the open pool's ring.
+        // Marks the hovered message's slice on the open pool's ring.
         function spot(seq) {
           if (state.spotSeq === seq) return;
           state.spotSeq = seq;
           const pool = currentPool();
-          const button = pool && cards.get(pool.name);
-          if (button) button.querySelector(".ring").innerHTML = ringSvg(pool, 0, seq);
+          if (pool) drawRing(pool, 0);
         }
+
         // Marks the row under the pointer: its slice on the ring, and after a short
         // wait, a tooltip when its line is cut off. Does nothing if the row is unchanged.
         let hoverRow = null;
@@ -824,6 +832,16 @@ Invariants: Message data enters the DOM as text. The page shows no process
             hover(under && messages.contains(under) ? under.closest(".message") : null);
           });
         });
+
+        // Page events.
+
+        // Clicking anywhere outside the card closes it. A pool's own click handler toggles it.
+        document.addEventListener("pointerdown", (event) => {
+          if (state.selected && !$("peek").contains(event.target) && !event.target.closest(".pool")) closePeek();
+        });
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && state.selected) closePeek();
+        });
         $("path").addEventListener("click", async () => {
           try {
             await navigator.clipboard.writeText(directoryPath());
@@ -831,10 +849,6 @@ Invariants: Message data enters the DOM as text. The page shows no process
             setTimeout(() => { $("copied").hidden = true; }, 1200);
           } catch (_) { /* Clipboard needs a secure context; the title still shows the path. */ }
         });
-        document.addEventListener("keydown", (event) => {
-          if (event.key === "Escape" && state.selected) closePeek();
-        });
-
         // Capture catches scrolling inside the map as well as the page.
         window.addEventListener("scroll", fitPeek, { capture: true, passive: true });
         window.addEventListener("resize", () => {
@@ -842,9 +856,10 @@ Invariants: Message data enters the DOM as text. The page shows no process
           clearTimeout(resizeTimer);
           resizeTimer = setTimeout(() => { if (state.topology != null) relayout(); }, 180);
         });
+        // A hidden tab does no work. Its first snapshot back brings the map current.
         document.addEventListener("visibilitychange", () => {
-          stopListReader();
-          if (document.visibilityState === "visible") readPoolList(state.listGeneration);
+          if (document.visibilityState === "visible") startList();
+          else stopList();
         });
 
         function showError(error) {
@@ -852,6 +867,8 @@ Invariants: Message data enters the DOM as text. The page shows no process
           setStatus("Map unavailable", true);
         }
 
+        // Waits for the fonts before the first layout, because ring sizes come from
+        // measured label widths.
         async function boot() {
           if (location.protocol === "file:") {
             showError(new Error("Open this page through a running Plasmite server at http://127.0.0.1:9700/ui/map."));
@@ -860,12 +877,11 @@ Invariants: Message data enters the DOM as text. The page shows no process
           try {
             const session = await fetch("/v0/browser/session", { cache: "no-store" });
             if (!session.ok) { location.assign("/ui"); return; }
-            $("machine-name").textContent = location.host;
-            await refreshPools();
-            const requested = new URLSearchParams(location.search).get("pool");
-            if (requested && cards.has(requested)) openPeek(requested);
-          } catch (error) { showError(error); }
-          if (document.visibilityState === "visible") readPoolList(state.listGeneration);
+          } catch (error) { showError(error); return; }
+          await document.fonts.ready;
+          $("machine-name").textContent = location.host;
+          state.requested = new URLSearchParams(location.search).get("pool");
+          startList();
         }
 
         boot();

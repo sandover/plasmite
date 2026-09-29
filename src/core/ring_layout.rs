@@ -2,8 +2,9 @@
 //! Exports: `RingLayout`, `FrameSpan`, `Pool::ring_layout`.
 //! Role: Read-only view for the web map; never changes the pool.
 //! Invariants: Offsets are byte positions within the ring, from 0 to `ring_size`.
-//! Invariants: Returns no frames, rather than a wrong list, when a writer changes
-//!   the ring during the walk or the pool holds more frames than asked for.
+//! Invariants: Returns no frames, rather than a wrong list, when the pool holds
+//!   more frames than asked for, or when a writer keeps changing the ring
+//!   through every attempt at the walk.
 use crate::core::cursor::{ReadResult, read_frame_at};
 use crate::core::error::Error;
 use crate::core::frame::{self, FRAME_HEADER_LEN};
@@ -17,7 +18,7 @@ pub struct RingLayout {
     /// Offset where the next frame will be written.
     pub head: u64,
     /// Stored frames, oldest first. `None` when there are more than asked for,
-    /// or when a writer overwrote frames during the walk.
+    /// or when a writer overwrote frames during each attempt at the walk.
     pub frames: Option<Vec<FrameSpan>>,
 }
 
@@ -29,28 +30,38 @@ pub struct FrameSpan {
     pub len: u64,
 }
 
+/// Walks that race a writer try again from a fresh header, this many times in all.
+const WALK_ATTEMPTS: usize = 3;
+
 impl Pool {
     /// Reads the ring's tail and head, and lists up to `max_frames` stored frames.
     pub fn ring_layout(&self, max_frames: u64) -> Result<RingLayout, Error> {
-        let header = self.header_from_mmap()?;
-        let frames = if header.oldest_seq == 0 {
-            Some(Vec::new())
-        } else if header.newest_seq - header.oldest_seq >= max_frames {
-            None
-        } else {
-            self.walk_frames(
-                header.ring_offset as usize,
-                header.ring_size as usize,
-                header.tail_off as usize,
-                header.oldest_seq,
-                header.newest_seq,
-            )?
-        };
-        Ok(RingLayout {
-            tail: header.tail_off,
-            head: header.head_off,
-            frames,
-        })
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            let header = self.header_from_mmap()?;
+            let frames = if header.oldest_seq == 0 {
+                Some(Vec::new())
+            } else if header.newest_seq - header.oldest_seq >= max_frames {
+                None
+            } else {
+                self.walk_frames(
+                    header.ring_offset as usize,
+                    header.ring_size as usize,
+                    header.tail_off as usize,
+                    header.oldest_seq,
+                    header.newest_seq,
+                )?
+            };
+            let raced = frames.is_none() && header.newest_seq - header.oldest_seq < max_frames;
+            if !raced || attempt == WALK_ATTEMPTS {
+                return Ok(RingLayout {
+                    tail: header.tail_off,
+                    head: header.head_off,
+                    frames,
+                });
+            }
+        }
     }
 
     // Follows frames from the tail. Each frame must carry the next expected

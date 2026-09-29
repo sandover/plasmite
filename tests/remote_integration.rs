@@ -712,6 +712,7 @@ fn local_ui_pool_list_reports_ring_layout() -> TestResult<()> {
         .collect();
     assert_eq!(frames.len(), 2);
     assert_eq!(frames[0].0, ring["tail"].as_u64().expect("tail"));
+    assert_eq!(ring["first"], find("ring")["bounds"]["oldest"]);
     assert_eq!(frames[1].0, frames[0].0 + frames[0].1);
     assert_eq!(
         frames[1].0 + frames[1].1,
@@ -787,6 +788,14 @@ fn local_ui_pool_stream_sends_changes_and_stays_quiet() -> TestResult<()> {
     let deleted = read_pool_event(&mut reader)?;
     assert!(deleted_at.elapsed() < Duration::from_millis(500));
     assert_eq!(deleted["pools"], json!([]));
+
+    // A pool that holds messages must also go quiet. Its message ages grow on
+    // every read, and the stream must not count that as a change.
+    let resting_ref = PoolRef::name("resting");
+    client.create_pool(&resting_ref, PoolOptions::new(1024 * 1024))?;
+    let resting = client.open_pool(&resting_ref)?;
+    let last = resting.append_json_now(&json!({"n": 1}), &[], Durability::Fast)?;
+    while read_pool_event(&mut reader)?["pools"][0]["bounds"]["newest"] != last.seq {}
 
     // A second reader thread lets this assertion time the idle interval from
     // the last event, instead of from when the HTTP request began.

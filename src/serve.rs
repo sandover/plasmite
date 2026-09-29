@@ -1375,7 +1375,7 @@ async fn list_pools(State(state): State<Arc<AppState>>, headers: HeaderMap) -> R
         Ok(pools) => {
             let out: Vec<Value> = pools
                 .iter()
-                .map(|info| pool_info_json(&pool_file_name(info), info))
+                .map(|info| pool_info_json(&pool_file_name(&info.path), info))
                 .collect();
             json_response(json!({ "pools": out }))
         }
@@ -1383,35 +1383,54 @@ async fn list_pools(State(state): State<Arc<AppState>>, headers: HeaderMap) -> R
     }
 }
 
-fn pool_file_name(info: &PoolInfo) -> String {
-    info.path
-        .file_name()
-        .and_then(|name| name.to_str())
+/// The pool name is the file name without its one `.plasmite` extension.
+fn pool_file_name(path: &Path) -> String {
+    path.file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default()
-        .trim_end_matches(".plasmite")
-        .to_string()
 }
 
 /// Most frames the map lists per pool. A ring on screen cannot draw more apart.
 const UI_MAX_RING_FRAMES: u64 = 4096;
 
 /// Where the ring's stored messages sit: tail and head offsets, and each frame
-/// as `[offset, bytes]`, oldest first. `frames` is null when the pool holds too
-/// many to draw apart, or a writer changed the ring during the walk.
+/// as `[offset, bytes]`, oldest first. `first` is the first frame's sequence
+/// number, so the page can match messages to frames from this one read.
+/// `frames` is null when the pool holds too many to draw apart, or a writer
+/// kept changing the ring during the walk.
 fn ring_json(pool: &Pool) -> Value {
     match pool.ring_layout(UI_MAX_RING_FRAMES) {
-        Ok(layout) => json!({
-            "tail": layout.tail,
-            "head": layout.head,
-            "frames": layout.frames.map(|frames| {
-                frames.iter().map(|frame| [frame.offset, frame.len]).collect::<Vec<_>>()
-            }),
-        }),
+        Ok(layout) => {
+            let first = layout
+                .frames
+                .as_ref()
+                .and_then(|frames| frames.first())
+                .map(|frame| frame.seq);
+            json!({
+                "tail": layout.tail,
+                "head": layout.head,
+                "first": first,
+                "frames": layout.frames.map(|frames| {
+                    frames.iter().map(|frame| [frame.offset, frame.len]).collect::<Vec<_>>()
+                }),
+            })
+        }
         Err(_) => Value::Null,
     }
 }
 
 type UiPoolCache = BTreeMap<PathBuf, (PoolInfo, Value)>;
+
+/// Pool info without message ages. Ages grow on every read, so comparing them
+/// would count every pool that holds messages as changed on every scan.
+fn settled(info: &PoolInfo) -> PoolInfo {
+    let mut info = info.clone();
+    if let Some(metrics) = info.metrics.as_mut() {
+        metrics.age.oldest_age_ms = None;
+        metrics.age.newest_age_ms = None;
+    }
+    info
+}
 
 /// A directory scan reads current headers. Ring layouts are measured when a
 /// pool appears or its info changes, including a same-name replacement.
@@ -1423,7 +1442,7 @@ fn ui_pool_snapshot(client: &LocalClient, cache: &mut UiPoolCache) -> Result<(Va
     let mut changed = infos.len() != cache.len();
     for info in infos {
         let ring = match cache.get(&info.path) {
-            Some((prior, ring)) if *prior == info => ring.clone(),
+            Some((prior, ring)) if settled(prior) == settled(&info) => ring.clone(),
             _ => {
                 changed = true;
                 Pool::open(&info.path)
@@ -1431,7 +1450,7 @@ fn ui_pool_snapshot(client: &LocalClient, cache: &mut UiPoolCache) -> Result<(Va
                     .unwrap_or(Value::Null)
             }
         };
-        let mut pool = pool_info_json(&pool_file_name(&info), &info);
+        let mut pool = pool_info_json(&pool_file_name(&info.path), &info);
         pool["ring"] = ring.clone();
         next.insert(info.path.clone(), (info, ring));
         pools.push(pool);
@@ -2206,6 +2225,21 @@ fn error_body(err: &Error) -> ErrorBody {
         path: err.path().map(|path| path.to_string_lossy().to_string()),
         seq: err.seq(),
         offset: err.offset(),
+    }
+}
+
+#[cfg(test)]
+mod pool_name_tests {
+    use super::pool_file_name;
+    use std::path::Path;
+
+    #[test]
+    fn pool_name_drops_only_one_extension() {
+        assert_eq!(pool_file_name(Path::new("/pools/chat.plasmite")), "chat");
+        assert_eq!(
+            pool_file_name(Path::new("/pools/a.plasmite.plasmite")),
+            "a.plasmite"
+        );
     }
 }
 
