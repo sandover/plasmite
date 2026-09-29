@@ -95,8 +95,10 @@ YMSGO2 adds native access-key sharing. It keeps the existing spec paths and
 - Local HTTP listens on loopback, defaults to port `9700`, and permits
   credential-free local pool operations. HTTPS defaults to port `9743` and
   requires authentication for remote pool operations. Both ports can be
-  configured. Secure serving requires macOS or Linux until Windows server
-  state can enforce private access; Windows remains a native client target.
+  configured. Secure serving supports macOS, Linux, and Windows. Windows state
+  requires a filesystem that enforces access control lists and restricts access
+  to the current user, SYSTEM, and administrators. Startup rejects unsafe
+  existing state and paths through junctions or other reparse points.
 - `access connect` verifies the destination hostname, certificate validity,
   TLS proof of possession, and the certificate public-key fingerprint from
   the access key before sending the access secret. Redirects must not forward

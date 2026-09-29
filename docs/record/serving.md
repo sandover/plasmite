@@ -20,8 +20,12 @@ The local HTTP listener binds to `127.0.0.1:9700` and permits credential-free
 local pool operations. The remote HTTPS listener binds to `0.0.0.0:9743`.
 Both ports can be configured. The shared address is a full HTTPS origin and
 must match an address clients can reach.
-Secure serving currently runs on macOS and Linux. The Windows client can
-connect, but Windows serving waits for protected server-state permissions.
+Secure serving runs on macOS, Linux, and Windows. On Windows, use a filesystem
+that enforces access control lists, such as NTFS. Plasmite creates server state
+with access for your Windows account, SYSTEM, and administrators. It rejects
+unsafe existing permissions, hard links, and paths through junctions or other
+reparse points. It keeps the state directory and its ancestors open while the
+server runs to prevent another process from replacing the path.
 
 Plasmite retains the TLS identity used for native connections. Clients pin its
 public key through the access key. You can supply a TLS certificate and key
@@ -90,6 +94,13 @@ The CLI prompts for the key without echoing it. It verifies the server
 certificate against the key before sending the access secret, then saves the
 connection for the current OS user. CLI and API pool operations select saved
 credentials by destination.
+
+Windows saves connections under `%APPDATA%\Plasmite` with the same private
+permissions as server state and encrypts the credentials for your account.
+Plasmite rejects existing state with unsafe ownership or permissions. Inspect
+that state before changing its permissions; use a fresh private directory and
+connect again if you cannot establish its integrity. `PLASMITE_ACCESS_HOME`
+selects a different saved-connection directory.
 
 Check a saved connection with:
 
@@ -172,11 +183,13 @@ not depend on browser trust.
 On macOS, Plasmite adds the verified leaf to the current user's login
 keychain for SSL. An earlier platform check found that Chrome and Safari
 accepted the exact certificate and rejected a renewed certificate and a child
-certificate signed with the leaf's key. In the current integration, Chrome
-accepted the exact leaf and a same-key renewal left native access intact while
-browser trust became false. A CA-signed, restricted localhost leaf also worked
-when installed as a trusted root for SSL; macOS rejected a child signed by that
-leaf. The effect on other macOS TLS clients has not been established.
+certificate signed with the leaf's key. The operator quit and reopened both
+browsers between test phases; the check did not establish whether a restart is
+required for trust changes. In the current integration, Chrome accepted the
+exact leaf and a same-key renewal left native access intact while browser trust
+became false. A CA-signed, restricted localhost leaf also worked when installed
+as a trusted root for SSL; macOS rejected a child signed by that leaf. The
+effect on other macOS TLS clients has not been established.
 
 `access untrust` selects the exact certificate by its full SHA-256 fingerprint
 even after the server goes offline or changes its certificate. macOS may ask
