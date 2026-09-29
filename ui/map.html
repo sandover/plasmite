@@ -134,7 +134,7 @@ Invariants: Message data enters the DOM as text.
       .activity-context { color: var(--muted); font-size: 11px; margin: 6px 0; }
       .activity-row { padding: 6px 0; }
       .activity-row small { display: block; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
-      .activity-note { color: var(--muted); padding: 10px 16px; margin: 0; border-top: 1px solid var(--line); font-size: 11px; }
+      .activity-client { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
       .peek {
         position: absolute; z-index: 3; display: flex; flex-direction: column; animation: appear var(--ease);
@@ -212,7 +212,6 @@ Invariants: Message data enters the DOM as text.
       <section class="activity-card" id="activity-card" aria-labelledby="activity-title" hidden>
         <div class="activity-heading"><strong id="activity-title"></strong></div>
         <div class="activity-list" id="activity-list"></div>
-        <p class="activity-note" id="activity-note"></p>
       </section>
     </main>
     <script>
@@ -715,14 +714,11 @@ Invariants: Message data enters the DOM as text.
         function renderActivity() {
           $("activity-title").textContent = "Activity";
           const list = $("activity-list");
-          const focusedClient = list.contains(document.activeElement) ? document.activeElement.closest("details")?.dataset.client : null;
-          const expanded = new Set([...list.querySelectorAll("details[open]")].map(node => node.dataset.client));
           const scroll = list.scrollTop;
           list.replaceChildren();
           const observed = activity?.pools?.[activityPool];
           if (!observed) {
             list.textContent = "Activity unavailable";
-            $("activity-note").textContent = "";
             return;
           }
           const entries = observed.entries || [];
@@ -731,6 +727,7 @@ Invariants: Message data enters the DOM as text.
             ["Local processes", entries.filter(entry => entry.kind === "open_file")],
           ];
           for (const [title, rows] of sections) {
+            if (title === "Local processes" && !rows.length) continue;
             const section = document.createElement("section");
             const heading = document.createElement("h3");
             heading.className = "activity-machine";
@@ -751,9 +748,7 @@ Invariants: Message data enters the DOM as text.
             if (!rows.length) {
               const empty = document.createElement("p");
               empty.className = "activity-context";
-              empty.textContent = title === "Local processes"
-                ? observed.local_files?.available ? "No open files" : "Unavailable"
-                : "None now";
+              empty.textContent = "None now";
               section.append(empty);
             }
             for (const entry of rows) {
@@ -773,28 +768,17 @@ Invariants: Message data enters the DOM as text.
                     entry.age_ms != null ? Math.floor(entry.age_ms / 1000) + "s active" : ""].filter(Boolean).join(" · ");
               row.append(detail);
               if (entry.kind !== "open_file") {
-                const client = document.createElement("details");
-                client.dataset.client = [entry.peer_ip, entry.kind, entry.operation, entry.user_agent].join("|");
-                client.open = expanded.has(client.dataset.client);
-                const summary = document.createElement("summary");
-                summary.textContent = "Details";
-                const value = document.createElement("small");
-                value.textContent = [entry.operation, entry.user_agent].filter(Boolean).join(" · ");
-                client.append(summary, value);
+                const client = document.createElement("small");
+                client.className = "activity-client";
+                client.textContent = [entry.operation, entry.user_agent].filter(Boolean).join(" · ");
+                client.title = client.textContent;
                 row.append(client);
               }
               section.append(row);
             }
             list.append(section);
           }
-          if (focusedClient) {
-            const client = [...list.querySelectorAll("details")].find(node => node.dataset.client === focusedClient);
-            client?.querySelector("summary")?.focus({ preventScroll: true });
-          }
           list.scrollTop = scroll;
-          $("activity-note").textContent = observed.local_files?.available
-            ? "Open files do not identify readers or writers."
-            : "Short requests may finish between updates.";
         }
 
         async function refreshActivity() {
@@ -1258,7 +1242,6 @@ Invariants: Message data enters the DOM as text.
           if (activityPool) closeActivity();
           else if (state.selected) closePeek();
         });
-        $("activity-card").addEventListener("toggle", () => { if (activityPool) placeActivity(); }, true);
         window.addEventListener("scroll", () => { if (activityPool) placeActivity(); }, { capture: true, passive: true });
         window.addEventListener("resize", () => { if (activityPool) placeActivity(); });
         $("path").addEventListener("click", async () => {
