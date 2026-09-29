@@ -14,16 +14,16 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
     <title>Plasmite UI</title>
     <style>
       :root {
-        --bg: #16181d;
+        --bg: #15191f;
         --panel: #1f232b;
         --panel-2: #252b36;
-        --text: #e8e9ed;
-        --muted: #a5acbb;
-        --line: #343c4b;
-        --ok: #66d9b8;
+        --text: #e9edf1;
+        --muted: #9aa9b8;
+        --line: #394657;
+        --ok: #74d7b2;
         --warn: #f7cf6e;
-        --error: #ef7e7e;
-        --accent: #7eb5ef;
+        --error: #f08383;
+        --accent: #83c5d7;
       }
 
       * {
@@ -35,9 +35,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         margin: 0;
         min-height: 100%;
         font-size: 20px;
-        background:
-          radial-gradient(1200px 500px at 85% -10%, #2a2e3a 0%, transparent 60%),
-          linear-gradient(180deg, #171a20, #13151a);
+        background: radial-gradient(circle at 30% -20%, #263543, transparent 55%), var(--bg);
         color: var(--text);
         font-family: "Inconsolata", "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
       }
@@ -47,6 +45,24 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         color: var(--accent);
       }
 
+      .topbar {
+        display: flex;
+        align-items: center;
+        gap: 22px;
+        padding: 10px 18px;
+        border-bottom: 1px solid var(--line);
+        background: #1a2028;
+        font: 15px/1.45 "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+      }
+
+      .topbar .brand { color: var(--text); font-size: 14px; letter-spacing: .11em; text-decoration: none; }
+      .topbar nav { display: flex; gap: 16px; }
+      .topbar nav a { text-decoration: none; color: var(--muted); }
+      .topbar nav a[aria-current="page"] { color: var(--text); }
+      .topbar .actions { margin-left: auto; font-size: 12px; }
+      .topbar .actions a { text-decoration: none; }
+      .topbar .actions button { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; }
+
       .app {
         width: min(1100px, 100% - 2rem);
         margin: 1rem auto 2rem;
@@ -54,6 +70,8 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         flex-direction: column;
         gap: 0.8rem;
       }
+
+      .app:not(.app--follow) { font-size: 16px; }
 
       .card {
         background: linear-gradient(180deg, var(--panel), #1a1f28);
@@ -65,31 +83,12 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
       }
 
       .app--follow {
-        height: calc(100vh - 2rem);
+        height: calc(100vh - 43px - 2rem);
       }
 
       .app--follow .card {
         min-height: 0;
         flex: 1;
-      }
-
-      .header {
-        padding: 0.9rem 1rem;
-        border-bottom: 1px solid var(--line);
-        display: flex;
-        gap: 0.8rem;
-        align-items: center;
-        flex-wrap: wrap;
-        flex-shrink: 0;
-      }
-
-      .header--compact {
-        justify-content: flex-end;
-      }
-
-      .title {
-        font-size: 1rem;
-        letter-spacing: 0.02em;
       }
 
       .muted {
@@ -118,14 +117,6 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
       .pill[data-status="error"] {
         color: var(--error);
         border-color: #704848;
-      }
-
-      .toolbar {
-        display: flex;
-        gap: 0.6rem;
-        align-items: center;
-        flex-wrap: wrap;
-        margin-left: auto;
       }
 
       button,
@@ -500,11 +491,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         }
 
         .app--follow {
-          height: calc(100vh - 1.2rem);
-        }
-
-        .header {
-          padding: 0.7rem;
+          height: calc(100vh - 43px - 1.2rem);
         }
 
         .body {
@@ -514,11 +501,6 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         input {
           width: 100%;
           min-width: 0;
-        }
-
-        .toolbar {
-          margin-left: 0;
-          width: 100%;
         }
 
         .tags {
@@ -542,6 +524,14 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
     </style>
   </head>
   <body>
+    <header class="topbar">
+      <a class="brand" href="/ui/map">PLASMITE</a>
+      <nav aria-label="Views">
+        <a href="/ui/map">Map</a>
+        <a href="/ui" aria-current="page">Pools</a>
+      </nav>
+      <span class="actions" id="actions"></span>
+    </header>
     <main id="app" class="app" aria-live="polite"></main>
     <script>
       (() => {
@@ -572,12 +562,12 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
 
         function renderLogin(message) {
           state.stopped = true;
+          document.getElementById('actions').replaceChildren();
           app.classList.remove('app--follow');
           app.textContent = '';
           var card = document.createElement('section');
           card.className = 'card';
-          card.innerHTML = '<header class="header"><div class="title">PLASMITE</div></header>' +
-            '<div class="body"><p>Enter the access key for this server.</p>' +
+          card.innerHTML = '<div class="body"><p>Enter the access key for this server.</p>' +
             '<form data-login><input type="password" autocomplete="off" aria-label="Access key" required /> ' +
             '<button type="submit">Connect</button></form><p class="error" data-login-error></p></div>';
           app.appendChild(card);
@@ -595,6 +585,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
               key = '';
               if (!response.ok) throw new Error('Access key was not accepted.');
               state.stopped = false;
+              renderActions();
               bootPool();
             } catch (err) { card.querySelector('[data-login-error]').textContent = String(err.message || err); }
           });
@@ -607,15 +598,21 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           renderLogin('Signed out.');
         }
 
-        function navHtml() {
-          return state.local
-            ? '<a href="/access">Access</a>'
-            : '<button type="button" data-logout>Log out</button>';
-        }
-
-        function wireNav() {
-          var button = document.querySelector('[data-logout]');
-          if (button) button.addEventListener('click', logout);
+        function renderActions() {
+          var actions = document.getElementById('actions');
+          actions.replaceChildren();
+          if (state.local) {
+            var access = document.createElement('a');
+            access.href = '/access';
+            access.textContent = 'Access';
+            actions.appendChild(access);
+          } else {
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = 'Log out';
+            button.addEventListener('click', logout);
+            actions.appendChild(button);
+          }
         }
 
         function setLiveStatus(status) {
@@ -717,12 +714,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
 
           app.innerHTML =
             '<section class="card">' +
-              '<header class="header">' +
-                '<div class="title">PLASMITE UI</div>' +
-                '<div class="toolbar"><a href="/ui/map">Map</a> ' + navHtml() + '</div>' +
-              '</header>' +
               '<div class="body">' +
-                '<p class="muted">Pool browser. Click a pool to open its follow view.</p>' +
                 (error ? '<p class="error">' + escapeHtml(error) + '</p>' : "") +
                 '<div class="rows">' +
                   (listRows || '<div class="muted">No pools found.</div>') +
@@ -730,7 +722,6 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
               '</div>' +
             '</section>';
 
-          wireNav();
         }
 
         /* ---- Pool follow view ---- */
@@ -738,11 +729,8 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         function renderPoolView(error) {
           app.classList.add("app--follow");
 
-          var headerHtml = '<header class="header header--compact"><a href="/ui/map">Map</a> <a href="/ui">Pools</a> ' + navHtml() + '</header>';
-
           app.innerHTML =
             '<section class="card">' +
-              headerHtml +
               '<div class="info-panel" data-info></div>' +
               (error ? '<div class="body"><p class="error">' + escapeHtml(error) + '</p></div>' : "") +
               '<section class="stream" data-stream></section>' +
@@ -753,7 +741,6 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           updateIndicators();
           setLiveStatus(state.liveStatus);
 
-          wireNav();
           document.querySelector('[data-append]').addEventListener('submit', async function (event) {
             event.preventDefault();
             var input = event.currentTarget.querySelector('input');
@@ -1442,7 +1429,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         async function boot() {
           startTimeUpdater();
           if (window.location.protocol === 'file:') {
-            app.innerHTML = '<section class="card"><header class="header"><div class="title">PLASMITE</div></header>' +
+            app.innerHTML = '<section class="card">' +
               '<div class="body"><p>This is the UI source file. Open the page through a running Plasmite server.</p>' +
               '<p>Start one with <code>plasmite --dir ./shared serve</code>, then open ' +
               '<code>http://127.0.0.1:9700/ui</code>.</p></div></section>';
@@ -1457,6 +1444,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
             if (!session.ok) { renderLogin(''); return; }
             var identity = await session.json();
             state.local = Boolean(identity.local);
+            renderActions();
           } catch (err) { renderLogin('Could not reach the server.'); return; }
           bootPool();
         }

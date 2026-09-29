@@ -5,10 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Plasmite access</title>
     <style>
-      :root { color-scheme: dark; font: 16px/1.5 system-ui, sans-serif; background: #16181d; color: #e8e9ed; }
-      body { max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
-      a { color: #91c2f5; }
-      section { background: #1f232b; border: 1px solid #343c4b; border-radius: 10px; margin: 1rem 0; padding: 1rem; }
+      :root { color-scheme: dark; font: 15px/1.45 "Menlo", "Consolas", "DejaVu Sans Mono", monospace; background: #15191f; color: #e9edf1; }
+      body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 30% -20%, #263543, transparent 55%), #15191f; }
+      main { max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
+      a { color: #83c5d7; }
+      .topbar { display: flex; align-items: center; gap: 22px; padding: 10px 18px; border-bottom: 1px solid #394657; background: #1a2028; font: 15px/1.45 "Menlo", "Consolas", "DejaVu Sans Mono", monospace; }
+      .topbar .brand { color: #e9edf1; font-size: 14px; letter-spacing: .11em; text-decoration: none; }
+      .topbar nav { display: flex; gap: 16px; }
+      .topbar nav a { color: #9aa9b8; text-decoration: none; }
+      .topbar .actions { margin-left: auto; font-size: 12px; }
+      .topbar .actions a { text-decoration: none; }
+      .topbar .actions a[aria-current="page"] { color: #e9edf1; }
+      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+      section { background: #1f232b; border: 1px solid #394657; border-radius: 10px; margin: 1rem 0; padding: 1rem; }
       h1, h2 { margin: 0 0 .7rem; }
       h1 { font-size: 1.5rem; } h2 { font-size: 1.1rem; }
       p { margin: .5rem 0; } .muted { color: #a5acbb; }
@@ -23,7 +32,13 @@
     </style>
   </head>
   <body>
-    <header><a href="/ui">← Pools</a><h1>Access</h1></header>
+    <header class="topbar">
+      <a class="brand" href="/ui/map">PLASMITE</a>
+      <nav aria-label="Views"><a href="/ui/map">Map</a><a href="/ui">Pools</a></nav>
+      <span class="actions"><a href="/access" aria-current="page">Access</a></span>
+    </header>
+    <main>
+    <h1 class="sr-only">Access</h1>
     <section>
       <h2>Server</h2>
       <div id="settings" class="muted">Loading server settings…</div>
@@ -43,6 +58,7 @@
       <div id="keys" class="muted">Loading keys…</div>
     </section>
     <p id="notice" role="status"></p>
+    </main>
     <script>
       (() => {
         const settings = document.getElementById('settings');
