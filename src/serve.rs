@@ -6,13 +6,16 @@
 //! Notes: Streaming uses JSONL or framed Lite3; tail is at-least-once and resumable.
 
 use axum::body::Body;
-use axum::extract::{DefaultBodyLimit, Path as AxumPath, Query, RawQuery, State};
+use axum::extract::{
+    ConnectInfo, DefaultBodyLimit, FromRequestParts, MatchedPath, Path as AxumPath, Query,
+    RawQuery, State,
+};
 use axum::http::Request;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use bytes::Bytes;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder as AutoBuilder;
@@ -40,6 +43,9 @@ use tracing_subscriber::EnvFilter;
 use url::{Host, Url};
 
 use crate::access_store::{AccessGrant, AccessStore};
+#[path = "activity.rs"]
+mod activity;
+use activity::{ActivityRegistry, RequestActivity};
 #[path = "browser_session.rs"]
 mod browser_session;
 use crate::interface_error_kind;
@@ -148,6 +154,7 @@ struct AppState {
     mcp_semaphore: Arc<Semaphore>,
     storage_executor: StorageExecutor,
     ui_pool_watch: Arc<Mutex<Option<watch::Sender<Value>>>>,
+    activity: ActivityRegistry,
 }
 
 pub(crate) async fn serve_secure_pair(
@@ -170,8 +177,11 @@ pub(crate) async fn serve_secure_pair(
         return Err(Error::new(ErrorKind::Usage)
             .with_message("remote sharing requires a TLS certificate and key"));
     }
-    let local_server = prepare_server_with_access(&local, Some(access.clone()), true).await?;
-    let remote_server = prepare_server_with_access(&remote, Some(access.clone()), false).await?;
+    let activity = ActivityRegistry::default();
+    let local_server =
+        prepare_server_with_access(&local, Some(access.clone()), true, activity.clone()).await?;
+    let remote_server =
+        prepare_server_with_access(&remote, Some(access.clone()), false, activity).await?;
     let local_listener = tokio::net::TcpListener::bind(local.bind)
         .await
         .map_err(|err| {
@@ -237,6 +247,7 @@ async fn prepare_server_with_access(
     config: &ServeConfig,
     secure_access: Option<Arc<AccessStore>>,
     local_admin: bool,
+    activity: ActivityRegistry,
 ) -> Result<PreparedServer, Error> {
     validate_config(config)?;
 
@@ -276,6 +287,7 @@ async fn prepare_server_with_access(
         // public tuning flag. Storage operations are shorter lived than tails.
         storage_executor: StorageExecutor::new(config.max_concurrent_tails),
         ui_pool_watch: Arc::new(Mutex::new(None)),
+        activity,
     });
 
     let mut app = Router::new()
@@ -312,6 +324,11 @@ async fn prepare_server_with_access(
         .route("/v0/ui/pools/stream", get(ui_pool_stream))
         .route("/v0/ui/pools/:pool/info", get(pool_info))
         .route("/v0/ui/pools/:pool/events", get(ui_events))
+        .route("/v0/ui/activity", get(ui_activity))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            observe_activity,
+        ))
         .with_state(state)
         .layer(DefaultBodyLimit::max(max_body_bytes))
         .layer(TraceLayer::new_for_http());
@@ -327,6 +344,66 @@ async fn prepare_server_with_access(
     }
 
     Ok(PreparedServer { app, tls_config })
+}
+
+async fn observe_activity(
+    State(state): State<Arc<AppState>>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|path| path.as_str().to_owned())
+        .unwrap_or_default();
+    if route != "/mcp" && !observes_pool_route(&route) {
+        return next.run(request).await;
+    }
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|info| info.0);
+    let kind = if route == "/mcp" {
+        "mcp"
+    } else if route.starts_with("/v0/ui/")
+        || request.headers().contains_key(header::ORIGIN)
+        || request
+            .headers()
+            .get(header::COOKIE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                value.split(';').any(|part| {
+                    part.trim()
+                        .split_once('=')
+                        .is_some_and(|(name, _)| name == COOKIE_NAME)
+                })
+            })
+    {
+        "browser"
+    } else {
+        "native"
+    };
+    let activity = state.activity.request(peer, request.headers(), kind);
+    let method = request.method().to_string();
+    let (mut parts, body) = request.into_parts();
+    if observes_pool_route(&route)
+        && let Ok(AxumPath(params)) =
+            AxumPath::<BTreeMap<String, String>>::from_request_parts(&mut parts, &()).await
+        && let Some(pool) = params.get("pool")
+    {
+        activity.pool(pool.clone(), format!("{method} {route}"));
+    }
+    parts.extensions.insert(activity.clone());
+    let response = next.run(Request::from_parts(parts, body)).await;
+    if !response.status().is_success() {
+        return response;
+    }
+    activity.retain_for_response(response)
+}
+
+fn observes_pool_route(route: &str) -> bool {
+    (route.starts_with("/v0/pools/:pool") && !route.ends_with("/info"))
+        || route == "/v0/ui/pools/:pool/events"
 }
 
 async fn local_request_guard(request: Request<Body>, next: Next) -> Response {
@@ -530,11 +607,14 @@ async fn serve_plain(
     shutdown: impl Future<Output = ()>,
 ) -> Result<(), Error> {
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    let server = axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = shutdown_rx.await;
-        })
-        .into_future();
+    let server = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async {
+        let _ = shutdown_rx.await;
+    })
+    .into_future();
     tokio::pin!(server);
 
     tokio::select! {
@@ -932,6 +1012,7 @@ async fn mcp_post(
     State(state): State<Arc<AppState>>,
     uri: Uri,
     headers: HeaderMap,
+    activity: Option<Extension<RequestActivity>>,
     Json(payload): Json<Value>,
 ) -> Response {
     let grant = if state.local_admin {
@@ -991,7 +1072,13 @@ async fn mcp_post(
         }
     };
     let dispatch_state = state.clone();
+    if let Some(Extension(activity)) = &activity
+        && let Some((pool, operation)) = mcp_activity_pool(&payload)
+    {
+        activity.pool(pool, operation);
+    }
     let dispatch = tokio::task::spawn_blocking(move || {
+        let _activity = activity;
         let _permit = permit;
         let handler = ServeMcpHandler::new(
             dispatch_state.client.clone(),
@@ -1035,6 +1122,34 @@ async fn mcp_post(
             *reply.status_mut() = status;
             reply
         }
+    }
+}
+
+fn mcp_activity_pool(payload: &Value) -> Option<(String, String)> {
+    match payload.get("method")?.as_str()? {
+        "tools/call" => {
+            let name = payload.pointer("/params/name")?.as_str()?;
+            if !matches!(
+                name,
+                "plasmite_pool_delete"
+                    | "plasmite_feed"
+                    | "plasmite_fetch"
+                    | "plasmite_read"
+                    | "plasmite_wait"
+            ) {
+                return None;
+            }
+            let pool = payload.pointer("/params/arguments/pool")?.as_str()?;
+            pool_ref_from_request(pool).ok()?;
+            Some((pool.to_owned(), name.to_owned()))
+        }
+        "resources/read" => {
+            let uri = payload.pointer("/params/uri")?.as_str()?;
+            let pool = uri.strip_prefix("plasmite:///pools/")?;
+            pool_ref_from_request(pool).ok()?;
+            Some((pool.to_owned(), "resources/read".to_owned()))
+        }
+        _ => None,
     }
 }
 
@@ -1470,6 +1585,33 @@ async fn ui_list_pools(State(state): State<Arc<AppState>>, headers: HeaderMap) -
         .storage_executor
         .run_authorized(grant, move || {
             ui_pool_snapshot(&client, &mut UiPoolCache::new()).map(|(snapshot, _)| snapshot)
+        })
+        .await
+    {
+        Ok(snapshot) => json_response(snapshot),
+        Err(err) => error_response(err),
+    }
+}
+
+async fn ui_activity(State(state): State<Arc<AppState>>) -> Response {
+    if !state.local_admin {
+        return error_response_with_status(
+            Error::new(ErrorKind::Permission)
+                .with_message("pool activity requires local administration"),
+            StatusCode::FORBIDDEN,
+        );
+    }
+    let client = state.client.clone();
+    let activity = state.activity.clone();
+    match state
+        .storage_executor
+        .run(move || {
+            let pools = client
+                .list_pools()?
+                .into_iter()
+                .map(|info| (pool_file_name(&info.path), info.path))
+                .collect::<Vec<_>>();
+            Ok(activity.snapshot(&pools))
         })
         .await
     {
@@ -2260,6 +2402,116 @@ mod tests {
     use tokio::sync::Semaphore;
 
     #[test]
+    fn activity_ignores_map_reads_and_identifies_mcp_pool_use() {
+        assert!(super::observes_pool_route("/v0/ui/pools/:pool/events"));
+        assert!(super::observes_pool_route("/v0/pools/:pool/tail"));
+        for route in [
+            "/v0/ui/activity",
+            "/v0/ui/pools",
+            "/v0/ui/pools/stream",
+            "/v0/ui/pools/:pool/info",
+            "/v0/pools/:pool/info",
+        ] {
+            assert!(!super::observes_pool_route(route));
+        }
+        assert_eq!(
+            super::mcp_activity_pool(
+                &json!({"method":"tools/call","params":{"name":"plasmite_wait","arguments":{"pool":"events"}}})
+            ),
+            Some(("events".to_owned(), "plasmite_wait".to_owned()))
+        );
+        assert_eq!(
+            super::mcp_activity_pool(
+                &json!({"method":"resources/read","params":{"uri":"plasmite:///pools/events"}})
+            ),
+            Some(("events".to_owned(), "resources/read".to_owned()))
+        );
+        assert!(super::mcp_activity_pool(&json!({"method":"tools/list"})).is_none());
+        assert!(super::mcp_activity_pool(&json!({"method":"tools/call","params":{"name":"plasmite_pool_info","arguments":{"pool":"events"}}})).is_none());
+    }
+
+    #[tokio::test]
+    async fn activity_route_observes_browser_stream_and_removes_dropped_response() {
+        use axum::body::{Body, to_bytes};
+        use axum::extract::ConnectInfo;
+        use axum::http::Request;
+        use plasmite::api::{PoolOptions, PoolRef};
+        use tower_service::Service;
+
+        let temp = tempfile::tempdir().unwrap();
+        LocalClient::new()
+            .with_pool_dir(temp.path())
+            .create_pool(&PoolRef::name("events"), PoolOptions::new(64 * 1024))
+            .unwrap();
+        let mut cfg = config();
+        cfg.pool_dir = temp.path().to_owned();
+        cfg.max_tail_timeout_ms = 1_000;
+        let activity = super::ActivityRegistry::default();
+        let mut app = super::prepare_server_with_access(&cfg, None, true, activity.clone())
+            .await
+            .unwrap()
+            .app;
+        let mut follow = Request::builder()
+            .uri("/v0/ui/pools/events/events")
+            .header("host", "localhost")
+            .header("user-agent", "Browser test")
+            .body(Body::empty())
+            .unwrap();
+        follow.extensions_mut().insert(ConnectInfo(
+            "127.0.0.1:1234".parse::<std::net::SocketAddr>().unwrap(),
+        ));
+        let response = app.call(follow).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let snapshot = app
+            .call(
+                Request::builder()
+                    .uri("/v0/ui/activity")
+                    .header("host", "localhost")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let snapshot: serde_json::Value =
+            serde_json::from_slice(&to_bytes(snapshot.into_body(), 1024 * 1024).await.unwrap())
+                .unwrap();
+        let entries = snapshot["pools"]["events"]["entries"].as_array().unwrap();
+        let browser = entries
+            .iter()
+            .find(|entry| entry["kind"] == "browser")
+            .unwrap();
+        assert_eq!(browser["peer_ip"], "127.0.0.1");
+        assert_eq!(browser["user_agent"], "Browser test");
+        assert!(browser["age_ms"].is_number());
+        drop(response);
+        let snapshot =
+            activity.snapshot(&[("events".to_owned(), temp.path().join("events.plasmite"))]);
+        assert!(
+            !snapshot["pools"]["events"]["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["kind"] == "browser")
+        );
+
+        let mut remote = super::prepare_server_with_access(&cfg, None, false, activity)
+            .await
+            .unwrap()
+            .app;
+        let forbidden = remote
+            .call(
+                Request::builder()
+                    .uri("/v0/ui/activity")
+                    .header("host", "example.test")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(forbidden.status(), axum::http::StatusCode::FORBIDDEN);
+    }
+
+    #[test]
     fn pool_snapshot_notices_same_name_replacement() {
         use plasmite::api::{PoolOptions, PoolRef};
 
@@ -2501,6 +2753,7 @@ mod tests {
             mcp_semaphore: Arc::new(Semaphore::new(1)),
             storage_executor: StorageExecutor::new(1),
             ui_pool_watch: Arc::new(Mutex::new(None)),
+            activity: Default::default(),
         });
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
@@ -2536,6 +2789,7 @@ mod tests {
                     State(state.clone()),
                     "/mcp".parse().unwrap(),
                     headers.clone(),
+                    None,
                     Json(payload.clone()),
                 )
                 .await
@@ -2551,6 +2805,7 @@ mod tests {
                 State(state),
                 "/mcp".parse().unwrap(),
                 headers,
+                None,
                 Json(payload)
             )
             .await
@@ -2575,6 +2830,7 @@ mod tests {
             mcp_semaphore: Arc::new(Semaphore::new(1)),
             storage_executor: StorageExecutor::new(1),
             ui_pool_watch: Arc::new(Mutex::new(None)),
+            activity: Default::default(),
         };
         assert_eq!(
             super::authorize(&HeaderMap::new(), &state)
