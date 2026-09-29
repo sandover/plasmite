@@ -11,7 +11,9 @@ use rustls::pki_types::CertificateDer;
 use rustls::pki_types::pem::PemObject;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::fs::{File, OpenOptions};
+use std::fs::File;
+#[cfg(not(windows))]
+use std::fs::OpenOptions;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,11 +21,18 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use url::{Host, Url};
 
+#[cfg(windows)]
+type DirectoryGuard = crate::windows_private::Directory;
+#[cfg(not(windows))]
+type DirectoryGuard = ();
+
 pub(crate) struct AccessStore {
     dir: PathBuf,
     cert_path: PathBuf,
     key_path: PathBuf,
     _lock: File,
+    #[cfg(windows)]
+    _directory: crate::windows_private::Directory,
     records: Mutex<AccessState>,
     fingerprint: String,
     shared_address: Option<String>,
@@ -91,7 +100,11 @@ impl AccessStore {
         front_cert: Option<&Path>,
     ) -> Result<Self, Error> {
         let dir = pool_dir.join(".plasmite-serve");
+        #[cfg(windows)]
+        let directory = create_private_dir(&dir)?;
+        #[cfg(not(windows))]
         create_private_dir(&dir)?;
+        #[cfg(not(windows))]
         ensure_private(&dir)?;
         let lock = open_private(&dir.join("lock"))?;
         lock.try_lock_exclusive().map_err(|err| {
@@ -262,6 +275,8 @@ impl AccessStore {
             cert_path,
             key_path,
             _lock: lock,
+            #[cfg(windows)]
+            _directory: directory,
             records: Mutex::new(AccessState { records, runtime }),
             fingerprint,
             shared_address: identity.shared_address,
@@ -288,6 +303,8 @@ impl AccessStore {
     }
 
     pub(crate) fn local_bind(pool_dir: &Path) -> Result<std::net::SocketAddr, Error> {
+        #[cfg(windows)]
+        let _directory = private_directory(&pool_dir.join(".plasmite-serve"))?;
         let path = pool_dir.join(".plasmite-serve/local.json");
         let value: String = read_json(&path)?;
         value.parse().map_err(|_| {
@@ -299,12 +316,16 @@ impl AccessStore {
 
     pub(crate) fn saved_fingerprint(pool_dir: &Path) -> Result<String, Error> {
         let dir = pool_dir.join(".plasmite-serve");
+        #[cfg(windows)]
+        let _directory = private_directory(&dir)?;
         let identity: Identity = read_json(&dir.join("identity.json"))?;
         let name = identity
             .front_cert_file
             .as_ref()
             .unwrap_or(&identity.cert_file);
-        cert_fingerprint(&state_file(&dir, name)?)
+        let certificate = state_file(&dir, name)?;
+        ensure_private(&certificate)?;
+        cert_fingerprint(&certificate)
     }
 
     pub(crate) fn issue(&self, name: &str) -> Result<String, Error> {
@@ -629,7 +650,11 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 }
 
 pub(crate) fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Error> {
-    let bytes = std::fs::read(path).map_err(|err| {
+    #[cfg(windows)]
+    let read = crate::windows_private::read(path);
+    #[cfg(not(windows))]
+    let read = std::fs::read(path);
+    let bytes = read.map_err(|err| {
         Error::new(ErrorKind::Io)
             .with_message("failed to read server state")
             .with_path(path)
@@ -665,13 +690,20 @@ fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<(), Error> {
     let temp = path.with_extension(format!("tmp-{}", hex(&nonce)));
     let mut file = create_private(&temp)?;
     if let Err(err) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+        drop(file);
         let _ = std::fs::remove_file(&temp);
         return Err(Error::new(ErrorKind::Io)
             .with_message("failed to persist server state")
             .with_path(&temp)
             .with_source(err));
     }
-    if let Err(err) = std::fs::rename(&temp, path) {
+    // Windows cannot replace a file while our non-delete-sharing handle is open.
+    drop(file);
+    #[cfg(windows)]
+    let replacement = crate::windows_private::replace(&temp, path);
+    #[cfg(not(windows))]
+    let replacement = std::fs::rename(&temp, path);
+    if let Err(err) = replacement {
         let _ = std::fs::remove_file(&temp);
         return Err(Error::new(ErrorKind::Io)
             .with_message("failed to commit server state")
@@ -704,32 +736,45 @@ fn write_new_private(path: &Path, bytes: &[u8]) -> Result<(), Error> {
 }
 
 fn open_private(path: &Path) -> Result<File, Error> {
-    let mut options = OpenOptions::new();
-    options.read(true).write(true).create(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
-    }
-    let file = options.open(path).map_err(|err| {
+    #[cfg(windows)]
+    let opened = crate::windows_private::open_lock(path);
+    #[cfg(not(windows))]
+    let opened = {
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+        }
+        options.open(path)
+    };
+    let file = opened.map_err(|err| {
         Error::new(ErrorKind::Io)
             .with_message("failed to open server state")
             .with_path(path)
             .with_source(err)
     })?;
+    #[cfg(not(windows))]
     ensure_private(path)?;
     Ok(file)
 }
 
 fn create_private(path: &Path) -> Result<File, Error> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    options.open(path).map_err(|err| {
+    #[cfg(windows)]
+    let created = crate::windows_private::create_file(path);
+    #[cfg(not(windows))]
+    let created = {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        options.open(path)
+    };
+    created.map_err(|err| {
         Error::new(ErrorKind::Io)
             .with_message("failed to create server state")
             .with_path(path)
@@ -737,7 +782,7 @@ fn create_private(path: &Path) -> Result<File, Error> {
     })
 }
 
-fn create_private_dir(path: &Path) -> Result<(), Error> {
+fn create_private_dir(path: &Path) -> Result<DirectoryGuard, Error> {
     #[cfg(unix)]
     {
         if path.exists() {
@@ -755,14 +800,28 @@ fn create_private_dir(path: &Path) -> Result<(), Error> {
     }
     #[cfg(windows)]
     {
-        let _ = path;
-        Err(Error::new(ErrorKind::Usage)
-            .with_message("secure serving on Windows requires private server-state ACL support"))
+        crate::windows_private::create_dir_all(path).map_err(|err| {
+            Error::new(ErrorKind::Permission)
+                .with_message("failed to create private Windows server state")
+                .with_path(path)
+                .with_hint("Use a filesystem that supports private access. Review existing state ownership and permissions before retrying.")
+                .with_source(err)
+        })
     }
     #[cfg(not(any(unix, windows)))]
     std::fs::create_dir(path).map_err(|err| {
         Error::new(ErrorKind::Io)
             .with_message("failed to create server state directory")
+            .with_path(path)
+            .with_source(err)
+    })
+}
+
+#[cfg(windows)]
+fn private_directory(path: &Path) -> Result<crate::windows_private::Directory, Error> {
+    crate::windows_private::open_directory(path).map_err(|err| {
+        Error::new(ErrorKind::Permission)
+            .with_message("Windows server state must use a private directory")
             .with_path(path)
             .with_source(err)
     })
@@ -780,6 +839,14 @@ pub(crate) fn ensure_private(path: &Path) -> Result<(), Error> {
             .with_message("server state must not be a symbolic link")
             .with_path(path));
     }
+    #[cfg(windows)]
+    crate::windows_private::ensure_private(path).map_err(|err| {
+        Error::new(ErrorKind::Permission)
+            .with_message("Windows server state must be private to its owner")
+            .with_path(path)
+            .with_hint("Review the state ownership and permissions before retrying; Plasmite does not change unsafe existing state.")
+            .with_source(err)
+    })?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

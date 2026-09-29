@@ -3,11 +3,18 @@ use crate::core::error::{Error, ErrorKind};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+#[cfg(not(windows))]
+use std::fs::OpenOptions;
+use std::fs::{self, File};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 const STORE_VERSION: u32 = 1;
+
+#[cfg(windows)]
+type DirectoryGuard = crate::windows_private::Directory;
+#[cfg(not(windows))]
+type DirectoryGuard = ();
 
 #[derive(Serialize, Deserialize)]
 struct CredentialFile {
@@ -17,9 +24,12 @@ struct CredentialFile {
 
 pub(super) fn load(destination: &str) -> Result<Option<AccessKey>, Error> {
     let paths = StorePaths::new()?;
-    if !paths.dir.exists() {
+    if !paths.exists()? {
         return Ok(None);
     }
+    #[cfg(windows)]
+    let _directory = paths.prepare_dir()?;
+    #[cfg(not(windows))]
     paths.prepare_dir()?;
     let lock = paths.open_lock()?;
     FileExt::lock_shared(&lock)
@@ -46,6 +56,9 @@ pub(super) fn load(destination: &str) -> Result<Option<AccessKey>, Error> {
 
 pub(super) fn save(destination: &str, key: &AccessKey) -> Result<(), Error> {
     let paths = StorePaths::new()?;
+    #[cfg(windows)]
+    let _directory = paths.prepare_dir()?;
+    #[cfg(not(windows))]
     paths.prepare_dir()?;
     let lock = paths.open_lock()?;
     FileExt::lock_exclusive(&lock)
@@ -69,9 +82,12 @@ pub(super) fn save(destination: &str, key: &AccessKey) -> Result<(), Error> {
 
 pub(super) fn remove(destination: &str) -> Result<(), Error> {
     let paths = StorePaths::new()?;
-    if !paths.dir.exists() {
+    if !paths.exists()? {
         return Ok(());
     }
+    #[cfg(windows)]
+    let _directory = paths.prepare_dir()?;
+    #[cfg(not(windows))]
     paths.prepare_dir()?;
     let lock = paths.open_lock()?;
     FileExt::lock_exclusive(&lock)
@@ -114,6 +130,17 @@ struct StorePaths {
 }
 
 impl StorePaths {
+    fn exists(&self) -> Result<bool, Error> {
+        match fs::symlink_metadata(&self.dir) {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(store_io_error(
+                "failed to inspect saved connection directory",
+                error,
+            )),
+        }
+    }
+
     fn new() -> Result<Self, Error> {
         let dir = if let Some(path) = std::env::var_os("PLASMITE_ACCESS_HOME") {
             if path.is_empty() {
@@ -131,7 +158,12 @@ impl StorePaths {
         })
     }
 
-    fn prepare_dir(&self) -> Result<(), Error> {
+    fn prepare_dir(&self) -> Result<DirectoryGuard, Error> {
+        #[cfg(windows)]
+        let directory = crate::windows_private::create_dir_all(&self.dir).map_err(|error| {
+            store_io_error("failed to create private saved connection directory", error)
+        })?;
+        #[cfg(not(windows))]
         fs::create_dir_all(&self.dir).map_err(|error| {
             store_io_error("failed to create saved connection directory", error)
         })?;
@@ -153,7 +185,14 @@ impl StorePaths {
                 store_io_error("failed to protect saved connection directory", error)
             })?;
         }
-        Ok(())
+        #[cfg(windows)]
+        {
+            Ok(directory)
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(())
+        }
     }
 
     fn open_lock(&self) -> Result<File, Error> {
@@ -163,15 +202,20 @@ impl StorePaths {
                     .with_message("saved connection lock must be a regular file"));
             }
         }
-        let mut options = OpenOptions::new();
-        options.create(true).read(true).write(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let file = options
-            .open(&self.lock)
+        #[cfg(windows)]
+        let opened = crate::windows_private::open_lock(&self.lock);
+        #[cfg(not(windows))]
+        let opened = {
+            let mut options = OpenOptions::new();
+            options.create(true).read(true).write(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            options.open(&self.lock)
+        };
+        let file = opened
             .map_err(|error| store_io_error("failed to open saved connection lock", error))?;
         #[cfg(unix)]
         {
@@ -211,10 +255,12 @@ impl StorePaths {
             fs::set_permissions(&self.file, fs::Permissions::from_mode(0o600))
                 .map_err(|error| store_io_error("failed to protect saved connections", error))?;
         }
-        let mut bytes = Vec::new();
-        File::open(&self.file)
-            .and_then(|mut file| file.read_to_end(&mut bytes))
-            .map_err(|error| store_io_error("failed to read saved connections", error))?;
+        #[cfg(windows)]
+        let read = crate::windows_private::read(&self.file);
+        #[cfg(not(windows))]
+        let read = fs::read(&self.file);
+        let bytes =
+            read.map_err(|error| store_io_error("failed to read saved connections", error))?;
         let file: CredentialFile = serde_json::from_slice(&bytes).map_err(|error| {
             Error::new(ErrorKind::Corrupt)
                 .with_message("saved connection file is invalid")
@@ -239,16 +285,21 @@ impl StorePaths {
             std::process::id(),
             encode_hex(&random)
         ));
-        let mut options = OpenOptions::new();
-        options.create_new(true).write(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
+        #[cfg(windows)]
+        let created = crate::windows_private::create_file(&temp);
+        #[cfg(not(windows))]
+        let created = {
+            let mut options = OpenOptions::new();
+            options.create_new(true).write(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            options.open(&temp)
+        };
         let result = (|| {
-            let mut output = options
-                .open(&temp)
+            let mut output = created
                 .map_err(|error| store_io_error("failed to create saved connection file", error))?;
             output
                 .write_all(&data)
@@ -256,6 +307,7 @@ impl StorePaths {
             output
                 .sync_all()
                 .map_err(|error| store_io_error("failed to flush saved connections", error))?;
+            drop(output);
             replace_file(&temp, &self.file)
         })();
         if result.is_err() {
@@ -320,29 +372,8 @@ fn replace_file(source: &Path, destination: &Path) -> Result<(), Error> {
 
 #[cfg(windows)]
 fn replace_file(source: &Path, destination: &Path) -> Result<(), Error> {
-    use std::os::windows::ffi::OsStrExt;
-    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
-    let destination: Vec<u16> = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect();
-    // MoveFileExW replaces the prior file as one operation and flushes the rename.
-    let ok = unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), 0x1 | 0x8) };
-    if ok == 0 {
-        Err(store_io_error(
-            "failed to save connection",
-            std::io::Error::last_os_error(),
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-#[cfg(windows)]
-#[link(name = "Kernel32")]
-unsafe extern "system" {
-    fn MoveFileExW(existing_file: *const u16, new_file: *const u16, flags: u32) -> i32;
+    crate::windows_private::replace(source, destination)
+        .map_err(|error| store_io_error("failed to save connection", error))
 }
 
 #[cfg(windows)]

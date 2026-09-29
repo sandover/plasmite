@@ -20,6 +20,8 @@ use std::time::SystemTime;
 use std::os::unix::ffi::OsStrExt;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+// The polling fallback keeps this shared result type but cannot produce semaphore events.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub(crate) enum WaitOutcome {
     Signaled,
     TimedOut,
@@ -28,6 +30,8 @@ pub(crate) enum WaitOutcome {
 #[derive(Debug)]
 pub(crate) enum NotifyError {
     Unavailable,
+    // Only the Unix semaphore backend reports operating-system errors.
+    #[cfg_attr(not(unix), allow(dead_code))]
     Io(io::Error),
 }
 

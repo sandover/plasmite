@@ -9,6 +9,7 @@ pub use serde_json::{Value, json};
 pub use std::fs::File;
 pub use std::io::{BufRead, BufReader, Read, Write};
 pub use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+#[cfg(unix)]
 pub use std::os::unix::fs::PermissionsExt;
 pub use std::path::Path;
 pub use std::process::{Command, Stdio};

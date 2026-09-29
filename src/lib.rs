@@ -11,3 +11,5 @@ pub mod mcp;
 pub mod notice;
 mod pool_paths;
 mod since;
+#[cfg(windows)]
+mod windows_private;

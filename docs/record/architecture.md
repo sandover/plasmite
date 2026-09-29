@@ -36,7 +36,7 @@ Interface layer  →  Core domain layer  →  Platform layer
 - Must not: call into interface-layer modules.
 - Must not: make network calls or depend on a runtime async context.
 
-**Platform layer** (`memmap2`, `fs2`, `libc`):
+**Platform layer** (`memmap2`, `fs2`, `libc`, `windows-sys`):
 - Must: provide concurrency and durability primitives.
 - Must not: contain message-semantic logic.
 
@@ -98,6 +98,15 @@ successful revocation bars later requests. Remote tails hold a revocation flag
 for their key and stop when it changes. Native saved connections live under
 the current OS user; disconnect removes one destination without contacting
 the server.
+
+On Windows, server state and saved connections share the private filesystem
+helpers in `windows_private.rs`. Creation sets a protected access control list
+for the effective token user, SYSTEM, and administrators before writing secrets.
+Reads check the owner and permissions through the open file handle. Directory
+handles hold the path in place during a server's lifetime or a saved-connection
+operation. The helpers reject reparse points, hard links, and filesystems that
+do not enforce access control lists. Saved connection values also use Windows
+Data Protection API (DPAPI) encryption for the current user.
 
 ## Data model and on-disk layout
 

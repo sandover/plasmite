@@ -793,6 +793,7 @@ fn already_exists_has_hint_and_path() {
     assert!(hint.contains("different name") || hint.contains("remove"));
 }
 
+#[cfg(unix)]
 #[test]
 fn permission_error_has_hint_and_causes() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -848,6 +849,7 @@ fn permission_error_has_hint_and_causes() {
     std::fs::set_permissions(&pool_dir, perms).expect("unset perms");
 }
 
+#[cfg(unix)]
 #[test]
 fn permission_denied_matrix_for_write_paths() {
     let temp = tempfile::tempdir().expect("tempdir");

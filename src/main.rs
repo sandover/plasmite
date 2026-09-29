@@ -22,6 +22,8 @@ mod pool_paths;
 mod secure_serve;
 mod serve;
 mod since;
+#[cfg(windows)]
+mod windows_private;
 
 use cli::args::{
     AccessSubcommand, Cli, ColorMode, ErrorPolicyCli, FollowFormat, InputMode, PoolCommand,
