@@ -8,7 +8,7 @@ use rustls::pki_types::pem::PemObject;
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use url::Url;
 
 #[allow(dead_code)] // This test uses only the HTTPS and restart helpers.
@@ -16,8 +16,11 @@ use url::Url;
 mod server;
 use server::TestServer;
 
+static ACCESS_HOME_LOCK: Mutex<()> = Mutex::new(());
+
 #[test]
 fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn std::error::Error>> {
+    let _access_home_lock = ACCESS_HOME_LOCK.lock()?;
     let temp = tempfile::tempdir()?;
     unsafe { std::env::set_var("PLASMITE_ACCESS_HOME", temp.path().join("client")) };
     let server = TestServer::try_start_oauth(temp.path())?;
@@ -412,6 +415,57 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
         local_write["result"]["structuredContent"]["message"]["data"]["text"],
         "through local stdio MCP"
     );
+
+    // Ending one direct harness grant must leave other uses of its key intact.
+    let second_client: Value = agent
+        .post(&format!("{issuer}/oauth/register"))
+        .send_json(json!({
+            "client_name": "Second test harness",
+            "redirect_uris": [callback],
+            "token_endpoint_auth_method": "none"
+        }))?
+        .into_json()?;
+    let second_client_id = second_client["client_id"]
+        .as_str()
+        .ok_or("missing second client ID")?;
+    let second_access = issue_access_token(
+        &agent,
+        &issuer,
+        second_client_id,
+        callback,
+        &verifier,
+        &shared_key,
+        "second-harness",
+    )?;
+    assert_eq!(
+        mcp_list(&agent, &resource, &second_access, 35)?.status(),
+        200
+    );
+    agent
+        .post(&format!("{issuer}/oauth/revoke"))
+        .set("Content-Type", "application/x-www-form-urlencoded")
+        .send_string(&form(&[
+            ("token", &second_access),
+            ("client_id", second_client_id),
+        ]))?;
+    assert!(matches!(
+        mcp_list(&agent, &resource, &second_access, 36),
+        Err(error) if matches!(*error, ureq::Error::Status(401, _))
+    ));
+    assert_eq!(
+        mcp_list(&agent, &resource, active_access, 37)?.status(),
+        200
+    );
+    native.list_pools()?;
+    agent
+        .get(&format!("{issuer}/v0/pools"))
+        .set("Cookie", &browser_cookie)
+        .call()?;
+    assert_eq!(
+        local_mcp_read(&mut mcp_input, &mut mcp_output, 38)?["result"]["isError"],
+        Value::Null
+    );
+
     access::disconnect(&issuer)?;
     let disconnected = local_mcp_read(&mut mcp_input, &mut mcp_output, 32)?;
     assert!(disconnected["result"]["isError"] == true);
@@ -503,6 +557,143 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
         Err(ureq::Error::Status(400, _))
     ));
     Ok(())
+}
+
+#[test]
+fn address_change_requires_new_direct_authorization() -> Result<(), Box<dyn std::error::Error>> {
+    let _access_home_lock = ACCESS_HOME_LOCK.lock()?;
+    let temp = tempfile::tempdir()?;
+    unsafe { std::env::set_var("PLASMITE_ACCESS_HOME", temp.path().join("client")) };
+    let server = TestServer::try_start_oauth(temp.path())?;
+    let old_issuer = server.remote_url.clone();
+    let old_resource = format!("{old_issuer}/mcp");
+    let key = server.access_key().to_owned();
+    let agent = trusted_agent(temp.path())?;
+    let callback = "http://127.0.0.1:13579/callback";
+    let verifier = "B".repeat(43);
+    let registered: Value = agent
+        .post(&format!("{old_issuer}/oauth/register"))
+        .send_json(json!({
+            "client_name": "Moving test harness",
+            "redirect_uris": [callback],
+            "token_endpoint_auth_method": "none"
+        }))?
+        .into_json()?;
+    let client_id = registered["client_id"]
+        .as_str()
+        .ok_or("missing client ID")?;
+    let old_access = issue_access_token(
+        &agent,
+        &old_issuer,
+        client_id,
+        callback,
+        &verifier,
+        &key,
+        "before-move",
+    )?;
+    assert_eq!(
+        mcp_list(&agent, &old_resource, &old_access, 1)?.status(),
+        200
+    );
+    let old_port = Url::parse(&old_issuer)?.port().ok_or("missing old port")?;
+    drop(server);
+    let _old_port_reservation = std::net::TcpListener::bind(("127.0.0.1", old_port))?;
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let new_port = listener.local_addr()?.port();
+    drop(listener);
+    let server = TestServer::try_start_oauth_at(temp.path(), new_port)?;
+    let new_issuer = &server.remote_url;
+    let new_resource = format!("{new_issuer}/mcp");
+    assert_ne!(new_issuer, &old_issuer);
+    assert!(matches!(
+        mcp_list(&agent, &new_resource, &old_access, 2),
+        Err(error) if matches!(*error, ureq::Error::Status(401, _))
+    ));
+    access::connect(new_issuer, &key)?;
+    RemoteClient::new(new_issuer)?.list_pools()?;
+    let mut local_mcp = Command::new(env!("CARGO_BIN_EXE_plasmite"))
+        .args(["mcp", "--remote", new_issuer])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let mut mcp_input = local_mcp.stdin.take().ok_or("missing MCP stdin")?;
+    let mut mcp_output = BufReader::new(local_mcp.stdout.take().ok_or("missing MCP stdout")?);
+    mcp_initialize_local(&mut mcp_input, &mut mcp_output)?;
+    assert_eq!(
+        local_mcp_call(
+            &mut mcp_input,
+            &mut mcp_output,
+            4,
+            "plasmite_pool_list",
+            json!({}),
+        )?["result"]["isError"],
+        Value::Null
+    );
+    drop(mcp_input);
+    local_mcp.wait()?;
+
+    let metadata: Value = agent
+        .get(&format!(
+            "{new_issuer}/.well-known/oauth-authorization-server"
+        ))
+        .call()?
+        .into_json()?;
+    assert_eq!(metadata["issuer"], new_issuer.as_str());
+    let new_access = issue_access_token(
+        &agent,
+        new_issuer,
+        client_id,
+        callback,
+        &verifier,
+        &key,
+        "after-move",
+    )?;
+    assert_eq!(
+        mcp_list(&agent, &new_resource, &new_access, 3)?.status(),
+        200
+    );
+    Ok(())
+}
+
+fn issue_access_token(
+    agent: &ureq::Agent,
+    issuer: &str,
+    client_id: &str,
+    callback: &str,
+    verifier: &str,
+    key: &str,
+    state: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let resource = format!("{issuer}/mcp");
+    let mut authorization = Url::parse(&format!("{issuer}/oauth/authorize"))?;
+    authorization
+        .query_pairs_mut()
+        .append_pair("response_type", "code")
+        .append_pair("client_id", client_id)
+        .append_pair("redirect_uri", callback)
+        .append_pair("code_challenge", &code_challenge_s256(verifier))
+        .append_pair("code_challenge_method", "S256")
+        .append_pair("resource", &resource)
+        .append_pair("state", state);
+    let code = approve_code(agent, authorization.as_str(), issuer, key)?;
+    let tokens: Value = agent
+        .post(&format!("{issuer}/oauth/token"))
+        .set("Content-Type", "application/x-www-form-urlencoded")
+        .send_string(&form(&[
+            ("grant_type", "authorization_code"),
+            ("client_id", client_id),
+            ("code", &code),
+            ("redirect_uri", callback),
+            ("code_verifier", verifier),
+            ("resource", &resource),
+        ]))?
+        .into_json()?;
+    Ok(tokens["access_token"]
+        .as_str()
+        .ok_or("missing access token")?
+        .to_owned())
 }
 
 fn approve_code(
