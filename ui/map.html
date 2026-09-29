@@ -7,8 +7,9 @@ Invariants: Each pool is a spiral track whose length is its message buffer,
   on its innermost turn, and a vertical leg joins it back to the start, where
   writing wraps. Turns sit evenly, close together. The newest message's index
   sits level outside the spiral, joined to that message by a thin line. Each
-  stored message is drawn at its real offset and size. A full pool is a fully
-  lit track.
+  stored message is drawn at its real offset and size when the server supplies
+  frames. Otherwise the occupied bytes form a continuous span. The newest five
+  percent of the ring brightens toward the write head.
 Invariants: Pools pack as circles in name order, each at the highest free candidate. Layout changes only when the
   pool set or the window width changes. A track's shape comes from its pool's
   size, so data never moves it.
@@ -249,7 +250,8 @@ Invariants: Message data enters the DOM as text.
         const bigScale = 1.5;
         const radiusStep = 8;
         const minSegment = 1;
-        const ageBands = 10;
+        const trailBands = 8;
+        const trailFraction = 0.05;
         const indexRoom = { x: 40, y: 26 };
         const peekWidth = 360;
         const emptySize = { width: 240, height: 70 };
@@ -455,33 +457,35 @@ Invariants: Message data enters the DOM as text.
             : [{ start: start * scale, end: size * scale }, { start: 0, end: (end - size) * scale }];
         }
 
-        // Stored messages grouped by age, oldest group first, plus the newest
-        // message on its own. With a frame list, each message keeps its own
-        // interval, and every other message (by sequence number, so it keeps its
-        // shade as older ones are overwritten) is marked alt for a dimmer shade.
-        // Without a frame list, the stored bytes from tail to head split evenly,
-        // and the newest message is the last 2 px.
-        function ageGroups(pool, scale) {
-          const list = frames(pool);
-          if (list) {
-            const pieces = list.map(([offset, bytes]) => drawn(offset, bytes, scale));
-            const head = pieces.pop();
-            const bands = [];
-            for (let age = 0; age < ageBands; age++) for (const alt of [false, true]) bands.push({ age, alt, intervals: [] });
-            pieces.forEach((piece, i) => {
-              const age = Math.floor(i * ageBands / pieces.length);
-              bands[age * 2 + (pool.ring.first + i) % 2].intervals.push(piece);
-            });
-            return { bands, head: head ? [head] : [] };
-          }
+        // A quiet occupied track and a short trail behind the write head. The
+        // trail covers at most five percent of the ring, even when the pool is full.
+        // Exact frame gaps survive when the server can list individual frames.
+        function trailLayers(pool, scale) {
           const ring = pool.ring;
-          if (!ring || !messageCount(pool)) return { bands: [], head: [] };
+          if (!ring || !messageCount(pool)) return { occupied: [], bands: [], head: [] };
           const size = pool.ring_size;
           const used = (ring.head - ring.tail + size) % size || size;
-          const bands = Array.from({ length: ageBands }, (_, age) => ({ age, alt: false,
-            intervals: byteIntervals(ring.tail + used * age / ageBands, ring.tail + used * (age + 1) / ageBands, size, scale) }));
           const end = ring.tail + used;
-          return { bands, head: byteIntervals(end - Math.min(used, 2 / scale), end, size, scale) };
+          const list = frames(pool);
+          const pieces = list && list.map(([offset, bytes]) => drawn(offset, bytes, scale));
+          const occupied = pieces || byteIntervals(ring.tail, end, size, scale);
+          const span = Math.min(used, size * trailFraction);
+          const regions = Array.from({ length: trailBands }, (_, i) => byteIntervals(
+            end - span + span * i / trailBands, end - span + span * (i + 1) / trailBands, size, scale));
+          const bands = regions.map((region, i) => ({ intervals: pieces ? [] : region,
+            opacity: 0.9 * (i + 1) / trailBands }));
+          if (pieces) {
+            for (const piece of pieces) {
+              for (let i = 0; i < trailBands; i++) {
+                for (const part of regions[i]) {
+                  const start = Math.max(piece.start, part.start), stop = Math.min(piece.end, part.end);
+                  if (stop > start) bands[i].intervals.push({ start, end: stop });
+                }
+              }
+            }
+          }
+          const head = pieces ? pieces.slice(-1) : byteIntervals(end - Math.min(used, 2 / scale), end, size, scale);
+          return { occupied, bands, head };
         }
 
         // Where one stored message sits, matched by sequence number against the
@@ -512,9 +516,8 @@ Invariants: Message data enters the DOM as text.
           return out;
         }
 
-        // Everything the track draws, as numbers. Messages brighten with age order,
-        // oldest dimmest, and the newest is near white, so the write position and
-        // direction read at a glance. Newly arrived messages glow for a moment. A
+        // Everything the track draws, as numbers. Occupied bytes stay quiet;
+        // only the short trail before the head brightens toward the newest. A
         // hovered message turns yellow, with a pointer just outside the track. The
         // newest message's index (#505) sits beside it: outside a ring, or in the
         // gap outside its turn on a spiral, moving to the gap inside if the pointer
@@ -522,7 +525,7 @@ Invariants: Message data enters the DOM as text.
         function trackGeometry(pool, spotSeq) {
           const track = pool.track;
           const scale = track.total / pool.ring_size;
-          const groups = ageGroups(pool, scale);
+          const layers = trailLayers(pool, scale);
           const list = frames(pool);
           const newest = list && list.length ? list[list.length - 1] : null;
           const end = pointAt(track, newestEnd(pool) * scale);
@@ -543,9 +546,9 @@ Invariants: Message data enters the DOM as text.
           const start = track.points[0], last = track.points[track.points.length - 1];
           return {
             track,
-            bands: groups.bands.map((band) => ({ intervals: band.intervals,
-              opacity: (0.3 + 0.6 * (band.age + 1) / ageBands) * (band.alt ? 0.72 : 1) })),
-            head: groups.head,
+            occupied: layers.occupied,
+            bands: layers.bands,
+            head: layers.head,
             spot,
             pointer: spotAt ? [polar(rim, spotAt.theta), polar(rim + 7, spotAt.theta, -4), polar(rim + 7, spotAt.theta, 4)] : null,
             // From the inner edge of the innermost turn to the outer edge of the
@@ -583,6 +586,7 @@ Invariants: Message data enters the DOM as text.
           return '<svg width="' + 2 * t.c + '" height="' + 2 * t.c + '" aria-hidden="true">' +
             '<defs><path id="' + id + '" d="' + t.d + '" pathLength="' + t.total.toFixed(2) + '"/></defs>' +
             path("track", null) +
+            path("arc", g.occupied, 0.2) +
             g.bands.map((band) => band.intervals.length ? path("arc", band.intervals, band.opacity) : "").join("") +
             some("head", g.head) +
             // Drawn over the messages, so the seam at 12 o'clock reads as one straight line.
