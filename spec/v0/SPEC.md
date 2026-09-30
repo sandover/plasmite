@@ -56,7 +56,7 @@ YMSGO2 adds native access-key sharing. It keeps the existing spec paths and
   access key and displays it only after the server commits it.
 - `plasmite access connect SERVER_URL` prompts for the access key without
   echoing it, verifies the server, and saves the connection for the current OS
-  user. In an interactive macOS terminal, it then offers browser
+  user. In an interactive macOS or Windows terminal, it then offers browser
   trust for the verified server certificate. It shows the address, all DNS and
   IP subject alternative names, the certificate's SHA-256 fingerprint, expiry,
   and the OS trust-store scope before asking. Declining or failing this step
@@ -65,9 +65,8 @@ YMSGO2 adds native access-key sharing. It keeps the existing spec paths and
   whether the server is reachable, and whether it accepts the saved access
   secret. On macOS and Windows, it also reports browser trust for the current
   verified certificate and its expiry when that certificate can be reached.
-  Windows reports the current certificate's Root-store presence, but browser
-  trust installation is disabled pending signed-in platform validation. Status
-  never prints credentials.
+  Windows reports the current certificate's presence in the user's Root store;
+  browser and device policies can still reject it. Status never prints credentials.
 - `plasmite access untrust SHA256` removes one exact certificate from the
   current user's OS trust store by its 64-character SHA-256 fingerprint. It
   works after certificate renewal or server loss and leaves native credentials

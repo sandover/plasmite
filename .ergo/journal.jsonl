@@ -213,3 +213,18 @@
 {"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-30T15:02:18.123073Z","text":"Native saved access reads the Safari message after untrust; certificate absent, disposable key revoked."}
 {"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-30T15:02:18.147288Z","text":"Safari stayed running for install and fresh-window rejection; renewal/scope proof reuses prior results."}
 {"version":1,"task_id":"N7ANEU","kind":"done","at":"2026-09-30T15:02:18.174178Z","text":"Safari product check passes; exact trust removal and native continuation verified; fixture removed."}
+{"version":1,"task_id":"65GOQL","kind":"open","at":"2026-09-30T15:22:55.524713Z","text":"Operator signed into disposable standard-user desktop; resume product certificate approval proof."}
+{"version":1,"task_id":"65GOQL","kind":"claim","at":"2026-09-30T15:22:55.552811Z","agent":"sol@windows-browser-standard"}
+{"version":1,"task_id":"2BWRHB","kind":"created","at":"2026-09-30T18:54:12.359953Z"}
+{"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-30T18:54:33.921423Z","agent":"sol@windows-browser-standard","text":"Standard user: product trust install without elevation; Edge and Chrome login, write, and read after reload passed."}
+{"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-30T18:54:34.00003Z","agent":"sol@windows-browser-standard","text":"Exact untrust passed; fresh Chrome and Edge rejected TLS; saved native access read the Chrome marker at seq 2."}
+{"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-30T18:54:34.075105Z","agent":"sol@windows-browser-standard","text":"Root verified JSON results and rejection screenshots. Release Defender scan passed; debug quarantine tracked in 2BWRHB."}
+{"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-30T18:54:34.15896Z","agent":"sol@windows-browser-standard","text":"Enabled existing Windows trust flow; docs/spec agree. just check and independent security/simplicity review passed."}
+{"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-30T19:44:35.081317Z","agent":"sol@windows-browser-standard","text":"Cleanup verified: key revoked, native disconnected, exact cert absent, listeners stopped, test account/profile removed."}
+{"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-30T19:44:35.158106Z","agent":"sol@windows-browser-standard","text":"Proof retained in Windows validation-20260930; temporary Mac helper credential removed; VM shut down normally."}
+{"version":1,"task_id":"65GOQL","kind":"done","at":"2026-09-30T19:44:35.229828Z","agent":"sol@windows-browser-standard","text":"Standard-user Windows browser setup, exact removal, native continuation, checks, review, and cleanup passed."}
+{"version":1,"task_id":"65MU7N","kind":"claim","at":"2026-09-30T19:44:35.307868Z","agent":"codex@mac"}
+{"version":1,"task_id":"65MU7N","kind":"result","at":"2026-09-30T19:44:35.386299Z","agent":"codex@mac","text":"Windows hosting/client parity, Safari, real harness checks, and standard-user Chrome/Edge validation are complete."}
+{"version":1,"task_id":"65MU7N","kind":"result","at":"2026-09-30T19:44:35.462668Z","agent":"codex@mac","text":"Final Windows enablement adds no new machinery; docs/spec agree; just check and security/simplicity review passed."}
+{"version":1,"task_id":"65MU7N","kind":"done","at":"2026-09-30T19:44:35.593859Z","agent":"codex@mac","text":"Secure sharing validation complete across supported platforms; debug Defender investigation remains separate as 2BWRHB."}
+{"version":1,"task_id":"65MU7N","kind":"result","at":"2026-09-30T19:44:46.873905Z","text":"Reused authority/revocation, SDK/package, CI, renewal/scope and benchmark evidence; Raspberry Pi stays separate."}

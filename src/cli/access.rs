@@ -33,7 +33,7 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
                 browser.as_ref().and_then(|result| result.as_ref().err()),
                 Some(&commands),
             );
-            if cfg!(target_os = "macos")
+            if cfg!(any(target_os = "macos", target_os = "windows"))
                 && io::stdin().is_terminal()
                 && io::stdout().is_terminal()
                 && let Some(Ok(trust)) = browser

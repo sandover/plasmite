@@ -201,9 +201,8 @@ may keep their prior TLS state.
 even after the server goes offline or changes its certificate. macOS may ask
 the user to authorize removal from the login keychain.
 
-Windows browser certificate setup remains disabled until an ordinary signed-in
-user completes the product workflow. Use an HTTPS certificate that Chrome and
-Edge already trust. The Windows adapter uses the current user's Root store,
+Windows browser certificate setup runs in a signed-in interactive terminal.
+The Windows adapter uses the current user's Root store,
 which also serves other Windows TLS clients. `access status` reports whether
 that exact certificate exists in the store; browser and device policies can
 still reject it. Native saved connections do not require this OS trust.
@@ -217,11 +216,12 @@ key use without `keyCertSign`, server-authentication extended use, and a DNS or
 IP Subject Alternative Name. A certificate already trusted by the browser
 needs no Plasmite trust setup.
 
-The product setup passed Chrome and Edge login and pool write/read under the
-VM's administrator account. Exact certificate removal passed from its
-interactive console and preserved native access. Windows requires a visible
-approval for Root-store changes; a headless removal fails. Ordinary-user
-browser setup remains unproven. Run `access untrust` from a signed-in
+The product setup passed Chrome and Edge login, pool write, and read after
+reload under a standard Windows account without elevation. Exact certificate
+removal triggered Windows' visible approval dialog. After removal, fresh
+profiles in both browsers rejected the certificate while saved native access
+still read the pool message. Windows requires visible approval for Root-store
+changes; a headless removal fails. Run `access untrust` from a signed-in
 interactive terminal so Windows can show its approval dialog.
 
 ## Connect an MCP harness

@@ -43,11 +43,6 @@ pub fn status(destination: &str) -> ApiResult<BrowserTrustStatus> {
 /// Ask the operating system to trust the current, pinned leaf certificate.
 /// Call this only after showing the user the certificate and receiving consent.
 pub fn install(destination: &str, expected_sha256: &str) -> ApiResult<BrowserTrustStatus> {
-    if cfg!(target_os = "windows") {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("Windows browser trust setup needs signed-in validation")
-            .with_hint("Use an HTTPS certificate already trusted by the browser. Native Plasmite access remains available."));
-    }
     let (destination, der) = current_certificate(destination)?;
     let names = inspect_leaf(&der)?;
     let fingerprint = encode_hex(&Sha256::digest(&der));
