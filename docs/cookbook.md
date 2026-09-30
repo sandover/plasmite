@@ -394,30 +394,36 @@ pls follow incidents --tag error --tail 100 --jsonl > tmp/errors.jsonl
 
 A machine exposes its local pools over HTTPS.
 
-**On the server (secure default):**
+Replace `pools.example.net` with a hostname or IP the client can reach.
+
+**On the server:**
 
 ```bash
-plasmite pool create events
-plasmite pool create chat
-plasmite serve --shared-address https://192.0.2.10:9743
+plasmite --dir ./shared pool create events
+plasmite --dir ./shared pool create chat
+plasmite --dir ./shared serve --shared-address https://pools.example.net:9743
 ```
 
-**On the server, in another terminal:**
+In another terminal on the server, create an invitation for the whole `./shared`
+directory:
 
 ```bash
-plasmite access invite --name laptop
+plasmite --dir ./shared access invite --name laptop
 ```
 
-**On the client:**
+Send the HTTPS address and access key separately, and keep the key private. On
+the client, connect and enter the key at the prompt; Plasmite does not echo it:
 
 ```bash
-plasmite access connect https://192.0.2.10:9743
-plasmite feed https://192.0.2.10:9743/events '{"sensor": "temp", "value": 23.5}'
+plasmite access connect https://pools.example.net:9743
+plasmite feed https://pools.example.net:9743/events '{"sensor": "temp", "value": 23.5}'
 
-plasmite follow https://192.0.2.10:9743/events --tail 20
+plasmite follow https://pools.example.net:9743/events --tail 20
 ```
 
-The local web UI is available at `http://127.0.0.1:9700/ui` on the server.
+Open the same HTTPS address in a browser to sign in with the key and browse the
+pools. See [Open the pools in a browser](record/serving.md#open-pools-in-a-browser)
+for certificate trust and browser setup.
 
 ---
 
@@ -472,11 +478,11 @@ At initialization, the server explains the core model:
 - `plasmite_read` inspects recent or historical messages, while
   `plasmite_wait` waits once for future messages.
 
-Tool discovery reflects the server's access mode, so a read-only or write-only
-server exposes only the operations the agent can actually call. Existing pools
-also appear as MCP resources; reading one returns up to the latest 20 messages.
-Tag filters require every specified tag. MCP does not currently expose jq
-`where` filtering.
+An invited key grants full access to every pool in the served directory,
+including creating and deleting pools, reading messages, and appending
+messages. Existing pools also appear as MCP resources; reading one returns up
+to the latest 20 messages. Tag filters require every specified tag. MCP does
+not currently expose jq `where` filtering.
 
 `plasmite_feed` is an append, not an upsert. If its transport fails after an
 ambiguous response, retrying can append a duplicate; use an application-level
@@ -512,9 +518,8 @@ claude mcp add --scope user --transport stdio plasmite -- /path/to/plasmite mcp 
 codex mcp add plasmite -- /path/to/plasmite mcp --remote https://pools.example.com:8443
 ```
 
-The Claude Code command syntax was checked with version `2.1.280`; the Codex
-CLI syntax was checked with `0.158.0-alpha.2`. Restart Claude Code after
-adding the server. See the [Claude Code MCP guide](https://code.claude.com/docs/en/mcp)
+Restart Claude Code after adding the server. See the
+[Claude Code MCP guide](https://code.claude.com/docs/en/mcp)
 and [Codex CLI MCP guide](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
 for current command options.
 
@@ -594,7 +599,8 @@ For CI status, a simple split works well:
 - CI pipeline writes with CLI/API (`plasmite feed` or HTTP `/v0/pools/.../messages`).
 - Agents read with MCP (`plasmite_read`, `count: 1`, optional `after_seq` polling).
 
-Browser access across origins needs a separate authorization flow. The native access key works with the CLI and API client.
+For browser access, open the server's HTTPS address and enter the access key on
+the page. See [Open the pools in a browser](record/serving.md#open-pools-in-a-browser).
 
 ## Cookbook Golden Checks
 

@@ -28,15 +28,17 @@ is for credential-free use on the server machine.
 | `duplex` | yes | yes |
 | `doctor` | yes | no |
 
-An access key grants access to every pool in the server’s pool directory.
-For native remote access, create a key with `access invite`, then connect with
-`access connect SERVER_URL`. The client saves the connection for the current OS
-user; remote `feed`, `follow`, and `duplex` use saved credentials selected by
-destination. Use `access status SERVER_URL` to check the connection and
-`access disconnect SERVER_URL` to forget it locally, even while the server is
-offline. Disconnect does not revoke the server key. See the
-[serving guide](record/serving.md) for setup, recovery, and retired access
-paths.
+An access key grants full access to every pool in the server’s pool directory:
+it can list, read, and append messages, and create or delete pools. For native
+remote access, the owner creates a key with `access invite`; the recipient runs
+`access connect SERVER_URL` and enters the key at the hidden prompt. The client
+saves the connection for the current OS user. Remote `feed`, `follow`, and
+`duplex` use saved credentials selected by destination. Use
+`access status SERVER_URL` to check the connection and `access disconnect SERVER_URL` to
+forget it locally, even while the server is offline. Disconnect does not
+revoke the server key. See [Share your first pool](record/serving.md#share-your-first-pool)
+for setup, and the [serving guide](record/serving.md) for access recovery and
+browser or MCP connections.
 
 After `access connect`, Plasmite prints setup commands for Claude Code and
 Codex CLI. Each command starts `plasmite mcp --remote SERVER_URL` over stdio.

@@ -27,7 +27,8 @@ Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and 
 For IPC across machines, `pls serve` exposes local pools over HTTPS. Native
 clients and browsers connect with an access key. A local MCP process can use a
 saved native connection; a remote MCP harness can authorize in the browser.
-See the [serving guide](docs/record/serving.md) for setup and trust requirements.
+The access-key workflow has not shipped yet. To try it, [build from source](docs/building.md#install-the-cli-from-source)
+and follow [Share your first pool](docs/record/serving.md#share-your-first-pool).
 
 #### Local IPC
 
@@ -39,16 +40,15 @@ See the [serving guide](docs/record/serving.md) for setup and trust requirements
   <tr>
     <td valign="top">
       <b>Alice creates a channel (aka a pool)</b><br/>
-      <code>pls pool create channel</code>
+      <code>pls --dir ./pools pool create channel</code>
       <br/><br/>
       <b>Alice sends a message</b><br/>
-      <code>pls --dir ./pools feed channel</code><br/>
-      <code>'{"from": "A", "msg": "hello world"}'</code>
+      <code>echo '{"from":"A","msg":"hello world"}' | pls --dir ./pools feed channel</code>
     </td>
     <td valign="bottom">
     <br/>
       <br/><b>Bob starts watching</b><br/>
-      <code>pls follow channel</code>
+      <code>pls --dir ./pools follow channel</code>
       <br/><br/><br/>
       <b>Bob sees it on stdout</b><br/>
       <code>{ "data": {"from": "A", "msg": "hello world"}, ... }</code>
@@ -66,15 +66,15 @@ See the [serving guide](docs/record/serving.md) for setup and trust requirements
   </tr>
   <tr>
     <td valign="top">
-      <b>Alice starts the server and invites Carol</b><br/>
+      <b>Alice starts the server</b><br/>
       <code>pls --dir ./pools serve --shared-address https://alice.example.test:9743</code><br/>
+      <br/>In another terminal on the server:<br/>
       <code>pls --dir ./pools access invite --name Carol</code>
       <br/><br/>
-      Alice sends Carol the HTTPS address and access key privately.
+      Alice sends Carol the HTTPS address and access key privately. The key grants full access to <code>./pools</code>, including creating and deleting pools.
       <br/><br/><br/>
       <b>Alice sends</b><br/>
-      <code>pls feed channel</code><br/>
-      <code>'{"from": "A", "msg": "hi all"}'</code>
+      <code>echo '{"from":"A","msg":"hi all"}' | pls --dir ./pools feed channel</code>
     </td>
     <td valign="bottom">
       <br/><br/>
@@ -94,6 +94,9 @@ See the [serving guide](docs/record/serving.md) for setup and trust requirements
     </td>
   </tr>
 </table>
+
+Carol enters the key at the hidden prompt. She can also open the HTTPS address
+in a browser to sign in and browse the pools. See [browser access](docs/record/serving.md#open-pools-in-a-browser).
 
 The APIs work the same way as the CLI.
 

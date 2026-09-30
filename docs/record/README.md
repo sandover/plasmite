@@ -2,7 +2,7 @@
 
 Canonical, current truth documentation for Plasmite.
 
-For the full docs index (including specs), see `docs/README.md`.
+For task guides and specifications, start with the [docs index](../README.md).
 
 ## Contents
 
@@ -11,7 +11,8 @@ For the full docs index (including specs), see `docs/README.md`.
 - Testing: `testing.md`
 - Releasing (includes versioning policy): `releasing.md`
 - Distribution contract: `distribution.md`
-- Serving & remote access: `serving.md`
+- [Secure sharing](serving.md): read when sharing pools, managing access,
+  setting browser trust, or operating a server.
 - C ABI header + stability contract: `../../include/plasmite.h`
 
 Do not place proposals, exploratory design drafts, or roadmap notes here.

@@ -1,42 +1,50 @@
-# Docs
+# Plasmite docs
 
-Plasmite documentation is intentionally split into:
+Start with the task you want to do:
 
-- `docs/record/`: canonical docs of record
-- `.ergo/`: feature planning and task tracking via the ergo graph and plans log (`plans.jsonl`)
+| I want to… | Read |
+| --- | --- |
+| Send and read messages on one machine | [Cookbook](cookbook.md) |
+| Share a pool with another machine | [Share your first pool](record/serving.md#share-your-first-pool) |
+| Use shared pools in a browser | [Browser setup](record/serving.md#open-pools-in-a-browser) |
+| Give Claude Code or Codex CLI access to pools | [AI client setup](record/serving.md#connect-an-ai-client) |
+| Revoke access or remove a saved connection | [Manage access](record/serving.md#manage-access) |
+| Run a server with my own certificate or proxy | [Deploy a server](record/serving.md#deploy-a-server) |
+| Fix a connection | [Troubleshooting](record/serving.md#troubleshoot-a-connection) |
+| Install Plasmite | [Install channels](record/distribution.md#install-matrix) |
+| Build from this checkout | [Source installation](building.md#install-the-cli-from-source) |
 
-## Start here
+## Guides and reference
 
-- Docs of record: `docs/record/README.md`
-- Specs index: `spec/README.md`
-- CLI operating model: `docs/cli.md`
-- Task-oriented CLI recipes: `docs/cookbook.md`
-- Measured transport performance: `docs/performance/transport-comparison.md`
+- [CLI guide](cli.md): pool references, input, output, and exit behavior.
+- [Serving guide](record/serving.md): secure sharing, browser trust, server
+  operation, and recovery.
+- [Distribution](record/distribution.md): supported platforms, install
+  channels, and software development kit (SDK) layout.
+- [Transport measurements](performance/transport-comparison.md): compare
+  native and Model Context Protocol (MCP) performance.
 
-## Design audits and proposals
+For exact contracts, start with the [specifications](../spec/README.md):
 
-- CLI and help system audit: `docs/proposals/cli-help-system.md`
-- MCP server proposal: `docs/proposals/mcp-server.md`
-- Secure sharing proposal: [serve-mcp-native.md](proposals/serve-mcp-native.md) — read when designing access keys, native connections, or MCP authorization.
-- Earlier serve access proposal: [serve-access-mvp.md](proposals/serve-access-mvp.md) — read for the preceding invitation-based design.
+- [CLI](../spec/v0/SPEC.md)
+- [Public API](../spec/api/v0/SPEC.md)
+- [Remote HTTP protocol](../spec/remote/v0/SPEC.md)
+- [MCP](../spec/mcp/2025-11-25/SPEC.md)
+- [C interface and ownership rules](../include/plasmite.h)
 
-## Normative specs
+## Work on Plasmite
 
-- v0 CLI + message contract: `spec/v0/SPEC.md`
-- v0 public API contract: `spec/api/v0/SPEC.md`
-- v0 remote protocol: `spec/remote/v0/SPEC.md`
-- MCP 2025-11-25 contract: `spec/mcp/2025-11-25/SPEC.md`
+The [docs of record](record/README.md) describe the current design and
+policies. Start with [vision](record/vision.md) for product scope and
+[architecture](record/architecture.md) for internal structure. Use
+[building](building.md), [testing](record/testing.md), and
+[releasing](record/releasing.md) when changing or shipping code.
 
-## Keystone docs of record
+Design history lives in the proposals:
 
-- Vision: `docs/record/vision.md`
-- Architecture: `docs/record/architecture.md`
+- [Secure sharing](proposals/serve-mcp-native.md)
+- [Earlier invitation design](proposals/serve-access-mvp.md)
+- [MCP server design](proposals/mcp-server.md)
+- [CLI and help audit](proposals/cli-help-system.md)
 
-## Reference docs of record
-
-- Build system + vendoring: `docs/building.md`
-- Testing: `docs/record/testing.md`
-- Releasing (includes versioning policy): `docs/record/releasing.md`
-- Distribution contract: `docs/record/distribution.md`
-- C ABI header + stability contract: `include/plasmite.h`
-- Serving & remote access: `docs/record/serving.md`
+The repository's `.ergo/` backlog and journal track planned work and results.

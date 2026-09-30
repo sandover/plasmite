@@ -26,7 +26,7 @@ docs/
 ├── record/releasing.md                         — Release policy + versioning; read for what/why (mechanics live in release skill)
 ├── record/distribution.md                      — Supported platforms, install channels, and SDK layout; read when adding a channel or platform
 ├── ../include/plasmite.h                       — C ABI header; read for stability contract, ownership rules, linking
-├── record/serving.md                           — Serving + remote access (TLS, auth, CORS, deployment)
+├── record/serving.md                           — Read when sharing pools, setting browser trust, or operating a secure server
 │
 └── images/ui/                                  — UI screenshots; read when updating docs/UI references
 

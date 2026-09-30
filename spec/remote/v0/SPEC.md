@@ -116,7 +116,7 @@ It captures stable wire-level compatibility guarantees only.
 - `200` success
 - `400` usage/malformed input
 - `401` unauthorized
-- `403` forbidden by access mode
+- `403` forbidden request (for example, a mismatched browser origin)
 - `404` not found
 - `409` already exists
 - `410` retention gap
@@ -135,7 +135,10 @@ It captures stable wire-level compatibility guarantees only.
   fail, and its active tails close without emitting data still queued inside
   Plasmite. Bytes already handed to the transport may arrive. A write admitted
   before revocation may finish; a later write cannot start.
-- Access-mode violations return `403`.
+- Each access key grants full pool access throughout the served directory,
+  including listing, reading, appending, creating, and deleting pools.
+  Mismatched browser origins return `403`. Access administration remains
+  local-only.
 
 ### Pool Naming Rules
 

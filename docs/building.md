@@ -9,6 +9,27 @@
 
 `Cargo.toml` declares `build = "build.rs"`, so Cargo always runs the build script when needed.
 
+## Install the CLI from source
+
+Use a source build to try changes that have not reached a published release.
+You need Git, the Rust toolchain pinned in `rust-toolchain.toml`, and a C
+compiler. From a checkout of this repository, run:
+
+```console
+cargo install --path . --locked --force --bin plasmite
+plasmite access --help
+```
+
+This replaces a Cargo-managed Plasmite installation. Cargo installs the
+binary in its bin directory. Put that directory first on `PATH` if your
+shell finds an older npm, Python, or Homebrew installation. If `access`
+still fails, run the binary from Cargo's bin directory directly.
+
+On Windows, use an x64 Visual Studio developer terminal with `clang-cl` on
+`PATH`, the Visual Studio C++ linker, and the Windows SDK. Use the x64 Rust
+toolchain for the supported Windows build, including on ARM64 Windows.
+See [Windows support](#windows-support-policy) for the target and checks.
+
 ## Native build model (Lite3 vendoring)
 
 Plasmite pins Lite3 to an exact upstream commit in
@@ -239,7 +260,7 @@ support.
   - Verify the vendored snapshot with `just verify-lite3`.
   - Plasmite pins a C11-compatible Lite3 revision; unexpected parse errors can indicate a modified or incomplete snapshot.
 - **`feed` fails with `failed to encode json as lite3`**
-  - Use remote refs (`http://host:port/<pool>`) so encoding occurs on the remote server.
+  - After `access connect`, use an HTTPS pool URL so the remote server encodes the message. See [secure sharing](record/serving.md#share-your-first-pool).
 - **Emergency fallback artifact integrity**
   - PowerShell: `Get-FileHash .\\plasmite_<version>_windows_amd64_preview.zip -Algorithm SHA256`
   - Compare with the accompanying `.sha256` file.
