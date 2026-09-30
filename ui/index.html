@@ -147,35 +147,61 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         padding: 1rem;
       }
 
-      .rows {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        display: grid;
-        gap: 0.4rem;
-      }
+      /* --- Pool list: one row per pool, like `plasmite pool list` --- */
 
-      .row {
-        display: flex;
-        justify-content: space-between;
-        gap: 1rem;
-        border: 1px solid var(--line);
-        background: #1b2029;
-        border-radius: 10px;
-        padding: 0.7rem 0.8rem;
-        align-items: center;
-        text-decoration: none;
-        color: var(--text);
+      .list h1 { display: flex; gap: 12px; align-items: baseline; margin: 8px 0 18px; font-size: 20px; font-weight: 600; }
+      .list h1 .count { color: var(--muted); font-weight: 400; }
+      .list h1 .reconnecting { color: var(--warn); font-size: 12px; font-weight: 400; }
+      .summary { display: grid; grid-template-columns: 6.5em 1fr; gap: 12px 0; align-items: baseline; margin: 0 0 28px; }
+      .summary dt { color: var(--muted); font-size: 12px; }
+      .summary dd { margin: 0; min-width: 0; display: flex; gap: 10px; align-items: baseline; }
+      /* The directory: parent folders muted, its own name bright. It breaks only after a
+         slash, like a breadcrumb, so no folder name is split or cut. Click copies it. */
+      .path {
+        display: block; max-width: 100%; padding: 2px 6px; margin: 0 -6px; border: 0; border-radius: 5px;
+        background: none; color: var(--text); font-size: 14px; text-align: left; overflow-wrap: anywhere;
       }
+      .path .parent { color: var(--muted); }
+      .path strong { font-weight: 600; }
+      .path:hover, .path:focus-visible { background: #27313e; border: 0; outline: none; }
+      .copied { color: var(--ok); font-size: 11px; }
 
-      .row:hover {
-        border-color: #4a5570;
-        background: #212836;
+      /* Each row is a link over subgrid cells, so the whole row opens the pool. */
+      .pools {
+        --columns: minmax(8rem, 1fr) repeat(5, max-content);
+        display: grid; grid-template-columns: var(--columns); column-gap: 28px;
+        font-variant-numeric: tabular-nums;
       }
+      .pools > * { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; }
+      .pools-head { padding: 0 10px 6px; color: var(--muted); font-size: 12px; }
+      .pools-head button {
+        padding: 0; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; white-space: nowrap;
+      }
+      .pools-head button:hover, .pools-head button:focus-visible { color: var(--text); outline: none; }
+      .pools-head [aria-sort] button { color: var(--text); }
+      .pool-row {
+        padding: 9px 10px; border-top: 1px solid #2c3643; color: var(--text); text-decoration: none;
+      }
+      a.pool-row:visited { color: var(--text); }
+      .pool-row:hover, .pool-row:focus-visible { background: #1f2630; outline: none; }
+      .pool-row:focus-visible { box-shadow: inset 2px 0 var(--accent); }
+      .pool-row .name { font-weight: 600; overflow-wrap: anywhere; }
+      .pool-row:hover .name, .pool-row:focus-visible .name { color: var(--accent); }
+      .pools .num { text-align: right; white-space: nowrap; }
+      .pools .none, .pools .seq { color: var(--muted); }
+      .pools .fresh { color: var(--ok); }
+      .list .empty { color: var(--muted); padding: 12px 10px; border-top: 1px solid #2c3643; }
+      .list .empty code { color: var(--text); }
+      .list .error { color: var(--error); }
 
-      .stack {
-        display: grid;
-        gap: 0.25rem;
+      @media (max-width: 760px) {
+        .pools { --columns: minmax(6rem, 1fr) repeat(3, max-content); column-gap: 18px; }
+        .pools .c-oldest, .pools .c-newest { display: none; }
+      }
+      @media (max-width: 480px) {
+        .pools { --columns: minmax(5rem, 1fr) repeat(2, max-content); column-gap: 14px; }
+        .pools .c-size { display: none; }
+        .summary { grid-template-columns: 1fr; gap: 4px 0; }
       }
 
       .stream {
@@ -696,41 +722,154 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
 
         /* ---- Pool list ---- */
 
-        function renderPoolList(pools, error, loading) {
-          app.classList.remove("app--follow");
-          var listRows = pools
-            .slice()
-            .sort(function (a, b) { return a.name.localeCompare(b.name); })
-            .map(function (pool) {
-              var metrics = pool.metrics || {};
-              var age = metrics.age || {};
-              var util = metrics.utilization || {};
-              var bounds = pool.bounds || {};
-              var count = metrics.message_count != null ? metrics.message_count
-                : (bounds.oldest != null && bounds.newest != null)
-                  ? (bounds.newest - bounds.oldest + 1) : "-";
-              var newestAge = age.newest_time ? formatRelativeTime(age.newest_time) : "-";
-              var pct = util.used_percent != null ? util.used_percent.toFixed(1) + "%" : "-";
-              return '<a class="row" href="/ui/pools/' + escapeAttr(encodeURIComponent(pool.name)) + '">' +
-                '<span class="stack"><strong>' + escapeHtml(pool.name) + '</strong>' +
-                '<span class="muted">' + escapeHtml(count) + ' msgs \u00b7 ' + escapeHtml(newestAge) + '</span></span>' +
-                '<span class="stack muted" style="text-align:right">' +
-                '<span>' + escapeHtml(formatHumanBytes(pool.file_size)) + '</span>' +
-                '<span>' + escapeHtml(pct) + ' used</span></span></a>';
-            })
-            .join("");
+        // The list follows the server's pool stream; `pools` stays null until the
+        // first snapshot arrives. Sorting and the copied note are the page's own.
+        var list = { pools: null, error: "", reconnecting: false, dir: "", sort: "name", desc: false, copiedUntil: 0, frame: "", section: null, rows: new Map() };
 
-          app.innerHTML =
-            '<section class="card">' +
-              '<div class="body">' +
-                (error ? '<p class="error">' + escapeHtml(error) + '</p>' : "") +
-                '<div class="rows">' +
-                  (listRows || '<div class="muted">' + (loading ? 'Loading pools…' : 'No pools found.') + '</div>') +
-                '</div>' +
-              '</div>' +
-            '</section>';
+        // Columns, in the CLI's order. Numeric columns sort high first on the first click.
+        var poolColumns = [
+          { key: "name", label: "Name" },
+          { key: "messages", label: "Messages", num: true },
+          { key: "oldest", label: "Oldest", num: true },
+          { key: "newest", label: "Newest", num: true },
+          { key: "written", label: "Last write", num: true },
+          { key: "size", label: "Size", num: true },
+        ];
 
+        function poolFacts(pool) {
+          var metrics = pool.metrics || {};
+          var bounds = pool.bounds || {};
+          var newest = metrics.age && metrics.age.newest_time;
+          var written = newest ? new Date(newest).getTime() : NaN;
+          return {
+            name: pool.name,
+            messages: metrics.message_count != null ? metrics.message_count : null,
+            oldest: bounds.oldest != null ? bounds.oldest : null,
+            newest: bounds.newest != null ? bounds.newest : null,
+            written: isFinite(written) ? written : null,
+            size: pool.file_size != null ? pool.file_size : null,
+          };
         }
+
+        function poolDirectory() {
+          if (list.dir) return list.dir;
+          var path = list.pools && list.pools[0] && list.pools[0].path;
+          return path ? path.replace(/[\\/][^\\/]*$/, "") : "";
+        }
+
+        // The directory as a copy button that breaks only after a slash.
+        function directoryMarkup(dir) {
+          var cut = Math.max(dir.lastIndexOf("/"), dir.lastIndexOf("\\")) + 1;
+          var parent = dir.slice(0, cut).split(/(?<=[\\/])/).map(escapeHtml).join("<wbr>");
+          return '<button type="button" class="path" data-copy-dir title="' + escapeAttr(dir) + '" aria-label="Copy directory path">' +
+            '<span class="parent">' + parent + '<wbr></span><strong>' + escapeHtml(dir.slice(cut)) + '</strong></button>' +
+            (Date.now() < list.copiedUntil ? '<span class="copied">copied</span>' : '');
+        }
+
+        function sortedFacts() {
+          var key = list.sort, sign = list.desc ? -1 : 1;
+          return list.pools.map(poolFacts).sort(function (a, b) {
+            var x = a[key], y = b[key];
+            if (x === y) return a.name.localeCompare(b.name);
+            if (x == null) return 1;
+            if (y == null) return -1;
+            return sign * (key === "name" ? x.localeCompare(y) : x - y);
+          });
+        }
+
+        function poolCellsMarkup(f) {
+          var none = '<span class="none">–</span>';
+          var count = function (n) { return n == null ? none : n.toLocaleString(); };
+          var seq = function (n) { return n == null ? none : '<span class="seq">#</span>' + n.toLocaleString(); };
+          var fresh = f.written != null && Date.now() - f.written < 5000;
+          var written = f.written == null ? (f.messages === 0 ? '<span class="none">never</span>' : none)
+            : '<span class="' + (fresh ? "fresh" : "") + '">' + escapeHtml(formatRelativeTime(new Date(f.written).toISOString())) + '</span>';
+          return '<span role="cell" class="name">' + escapeHtml(f.name) + '</span>' +
+            '<span role="cell" class="num">' + count(f.messages) + '</span>' +
+            '<span role="cell" class="num c-oldest">' + seq(f.oldest) + '</span>' +
+            '<span role="cell" class="num c-newest">' + seq(f.newest) + '</span>' +
+            '<span role="cell" class="num">' + written + '</span>' +
+            '<span role="cell" class="num c-size">' + escapeHtml(formatHumanBytes(f.size)) + '</span>';
+        }
+
+        function poolHeadMarkup() {
+          return '<div class="pools-head" role="row">' + poolColumns.map(function (column) {
+            var active = column.key === list.sort;
+            var arrow = active ? (list.desc ? " ↓" : " ↑") : "";
+            return '<span role="columnheader" class="' + (column.num ? "num " : "") + "c-" + column.key + '"' +
+              (active ? ' aria-sort="' + (list.desc ? "descending" : "ascending") + '"' : "") + '>' +
+              '<button type="button" data-sort="' + column.key + '">' + column.label + arrow + '</button></span>';
+          }).join("") + '</div>';
+        }
+
+        // Writes the page around the rows only when it changed, and keeps one link
+        // per pool, changing only its cells. A redraw then never takes focus or a
+        // click away from the row under the pointer.
+        function renderPoolList() {
+          app.classList.remove("app--follow");
+          var pools = list.pools;
+          var dir = poolDirectory();
+          var body = "";
+          if (pools && pools.length) {
+            body = '<div class="pools" role="table" aria-label="Pools">' + poolHeadMarkup() + '</div>';
+          } else if (pools) {
+            body = '<p class="empty">No pools yet. Create one with <code>plasmite ' +
+              (dir ? '--dir ' + escapeHtml(/\s/.test(dir) ? '"' + dir + '"' : dir) + ' ' : '') + 'pool create NAME</code></p>';
+          }
+          var frame = '<section class="list">' +
+            '<h1>Pools' + (pools ? ' <span class="count">' + pools.length + '</span>' : '') +
+              (list.reconnecting ? ' <span class="reconnecting">reconnecting</span>' : '') + '</h1>' +
+            (dir ? '<dl class="summary"><dt>Directory</dt><dd>' + directoryMarkup(dir) + '</dd></dl>' : '') +
+            (list.error ? '<p class="error">' + escapeHtml(list.error) + '</p>' : '') +
+            body + '</section>';
+          if (frame !== list.frame || app.firstElementChild !== list.section) {
+            list.frame = frame;
+            app.innerHTML = frame;
+            list.section = app.firstElementChild;
+          }
+          var table = list.section.querySelector(".pools");
+          if (!table) { list.rows.clear(); return; }
+          var seen = new Set();
+          sortedFacts().forEach(function (f, i) {
+            var row = list.rows.get(f.name);
+            if (!row) {
+              row = document.createElement("a");
+              row.className = "pool-row";
+              row.setAttribute("role", "row");
+              row.href = "/ui/pools/" + encodeURIComponent(f.name);
+              list.rows.set(f.name, row);
+            }
+            var cells = poolCellsMarkup(f);
+            if (row.dataset.cells !== cells) { row.innerHTML = cells; row.dataset.cells = cells; }
+            // Child 0 is the header row.
+            if (table.children[i + 1] !== row) table.insertBefore(row, table.children[i + 1] || null);
+            seen.add(f.name);
+          });
+          list.rows.forEach(function (row, name) {
+            if (!seen.has(name)) { row.remove(); list.rows.delete(name); }
+          });
+        }
+
+        app.addEventListener("click", async function (event) {
+          var sort = event.target.closest("[data-sort]");
+          if (sort) {
+            var column = poolColumns.find(function (c) { return c.key === sort.dataset.sort; });
+            list.desc = list.sort === column.key ? !list.desc : Boolean(column.num);
+            list.sort = column.key;
+            renderPoolList();
+            var again = app.querySelector('[data-sort="' + column.key + '"]');
+            if (again) again.focus();
+            return;
+          }
+          if (event.target.closest("[data-copy-dir]")) {
+            try {
+              await navigator.clipboard.writeText(poolDirectory());
+              list.copiedUntil = Date.now() + 1200;
+              renderPoolList();
+              setTimeout(renderPoolList, 1250);
+            } catch (_) { /* Clipboard needs a secure context; the title still shows the path. */ }
+          }
+        });
 
         /* ---- Pool follow view ---- */
 
@@ -1181,24 +1320,48 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
 
         // The first load shows a loading state; later refreshes keep the current
         // list on screen until the new one arrives.
-        async function loadPoolList(refresh) {
-          if (!refresh) renderPoolList([], null, true);
-          try {
-            var response = await fetch("/v0/ui/pools", {
-              cache: 'no-store',
-            });
-            if (response.status === 401) {
-              renderLogin('Session ended. Enter the key again.');
-              return;
+        // Follows the server's pool snapshots; the server sends one when anything
+        // but message ages changes, and the page ages the times itself.
+        async function followPoolList() {
+          while (!state.stopped) {
+            try {
+              var response = await fetch("/v0/ui/pools/stream", { cache: "no-store" });
+              if (response.status === 401) {
+                renderLogin('Session ended. Enter the key again.');
+                return;
+              }
+              if (!response.ok || !response.body) throw new Error("Pool list failed (" + response.status + ")");
+              var reader = response.body.getReader();
+              var decoder = new TextDecoder();
+              var buffer = "";
+              while (!state.stopped) {
+                var part = await reader.read();
+                if (part.done) break;
+                buffer += decoder.decode(part.value, { stream: true }).replace(/\r\n/g, "\n");
+                var blocks = buffer.split("\n\n");
+                buffer = blocks.pop();
+                for (var i = 0; i < blocks.length; i++) {
+                  var lines = blocks[i].split("\n");
+                  var name = "", data = "";
+                  for (var j = 0; j < lines.length; j++) {
+                    if (lines[j].startsWith("event:")) name = lines[j].slice(6).trim();
+                    else if (lines[j].startsWith("data:")) data += (data ? "\n" : "") + lines[j].slice(5).trimStart();
+                  }
+                  if (name === "error") throw new Error("Pool list stream failed.");
+                  if (name !== "pools") continue;
+                  list.pools = JSON.parse(data).pools || [];
+                  list.error = "";
+                  list.reconnecting = false;
+                  renderPoolList();
+                }
+              }
+            } catch (err) {
+              if (!list.pools) list.error = String(err.message || err);
             }
-            if (!response.ok) {
-              var text = await response.text();
-              throw new Error("pool list failed (" + response.status + "): " + text);
-            }
-            var body = await response.json();
-            renderPoolList(body.pools || [], null);
-          } catch (err) {
-            renderPoolList([], String(err.message || err));
+            if (state.stopped) return;
+            list.reconnecting = Boolean(list.pools);
+            renderPoolList();
+            await wait(1000);
           }
         }
 
@@ -1234,22 +1397,16 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           var info = state.poolInfo;
           var bounds = info.bounds || {};
           var metrics = info.metrics || {};
-          var util = metrics.utilization || {};
           var age = metrics.age || {};
 
           var count = metrics.message_count != null ? metrics.message_count
             : (bounds.oldest != null && bounds.newest != null)
               ? (bounds.newest - bounds.oldest + 1) : "-";
 
-          // Size is the pool file, as the CLI reports it. Storage is the message
-          // space inside it, as used and free, like `plasmite pool info`.
+          // Size is the pool file, as the CLI reports it. A ring is meant to wrap,
+          // so the page shows no used or free share of it.
           var rows = [{ key: "Pool", value: info.name || poolName }];
           rows.push({ key: "Size", value: formatHumanBytes(info.file_size) });
-          if (util.used_bytes != null) {
-            var pct = util.used_percent != null ? util.used_percent.toFixed(2) + "%" : "-";
-            rows.push({ key: "Storage", value: formatHumanBytes(util.used_bytes) + " used, " +
-              formatHumanBytes(util.free_bytes) + " free (" + pct + ")" });
-          }
 
           rows.push({
             key: "Messages",
@@ -1462,8 +1619,15 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
 
         async function bootPool() {
           if (!onPoolPage) {
-            await loadPoolList();
-            setInterval(function () { loadPoolList(true); }, 2000);
+            if (state.local && !list.dir) {
+              // Locally, the server names its directory even when it has no pools yet.
+              try { list.dir = (await (await fetch('/v0/access/status', { cache: 'no-store' })).json()).pool_dir || ""; }
+              catch (_) { /* The pools' own paths name it once there are any. */ }
+            }
+            renderPoolList();
+            followPoolList();
+            // Ages the relative times between snapshots; unchanged markup is not rewritten.
+            if (!list.ticking) list.ticking = setInterval(function () { if (!state.stopped) renderPoolList(); }, 1000);
             return;
           }
           renderPoolView(null);

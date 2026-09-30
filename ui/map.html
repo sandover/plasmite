@@ -124,6 +124,8 @@ Invariants: Message data enters the DOM as text.
         border: 0; border-radius: 6px; background: none; color: var(--muted); font: 11px var(--numbers);
       }
       .activity-button:hover, .activity-button:focus-visible { background: var(--panel-raised); color: var(--text); outline: none; }
+      .activity-button:disabled { cursor: default; }
+      .activity-button:disabled:hover { background: none; color: var(--muted); }
       .activity-mark { display: inline-block; width: 5px; height: 5px; border: 1px solid currentColor; border-radius: 50%; }
       .activity-mark.local { background: currentColor; }
       .activity-mark.browser { border-radius: 1px; }
@@ -274,19 +276,6 @@ Invariants: Message data enters the DOM as text.
           return (count / 1000000).toFixed(1) + "M";
         }
 
-        // Rounds so a nearly empty pool never reads as 0% and a nearly full one never reads as 100%.
-        function percentLabel(fraction) {
-          const percent = fraction * 100;
-          if (percent > 0 && percent < 1) return "<1%";
-          if (percent > 99 && percent < 100) return ">99%";
-          return Math.round(percent) + "%";
-        }
-
-        function usedFraction(pool) {
-          const used = pool.metrics && pool.metrics.utilization && pool.metrics.utilization.used_percent;
-          return Number.isFinite(used) ? Math.min(1, Math.max(0, used / 100)) : 0;
-        }
-
         function messageCount(pool) {
           const count = pool.metrics && pool.metrics.message_count;
           return Number.isFinite(count) ? count : 0;
@@ -301,12 +290,11 @@ Invariants: Message data enters the DOM as text.
         }
 
         // Smallest ring whose inside fits the two label lines. Each line sits about
-        // 9 px from the center, where the circle is narrower than its diameter. The
-        // size line is measured at its widest ("100%"), so the percent never resizes it.
+        // 9 px from the center, where the circle is narrower than its diameter.
         function labelRadius(pool) {
           const body = getComputedStyle(document.body).fontFamily;
           const numbers = getComputedStyle(document.documentElement).getPropertyValue("--numbers");
-          const width = Math.max(textWidth(pool.name, 13, body), textWidth(size(pool.file_size) + " · 100%", 11, numbers)) + 10;
+          const width = Math.max(textWidth(pool.name, 13, body), textWidth(size(pool.file_size), 11, numbers)) + 10;
           return Math.hypot(width / 2, 22) + stroke / 2 + 3;
         }
 
@@ -652,13 +640,11 @@ Invariants: Message data enters the DOM as text.
           button.style.setProperty("--hit-diameter", 2 * (pool.track.outer + stroke) + "px");
           drawRing(pool);
           button.querySelector(".label").style.maxWidth = 2 * (pool.shape.inner - stroke) - 6 + "px";
-          const used = usedFraction(pool);
           const count = messageCount(pool);
-          // Label with the size the pool was created at; usage is a share of its message buffer.
-          button.querySelector(".meta").textContent = size(pool.file_size) + " · " + percentLabel(used);
-          const utilization = (pool.metrics && pool.metrics.utilization) || {};
-          button.title = pool.name + " · " + count.toLocaleString() + (count === 1 ? " message · " : " messages · ") +
-            size(utilization.used_bytes) + " used, " + size(utilization.free_bytes) + " free";
+          // Label with the size the pool was created at. A ring is meant to wrap, so
+          // no share of it reads as "full".
+          button.querySelector(".meta").textContent = size(pool.file_size);
+          button.title = pool.name + " · " + count.toLocaleString() + (count === 1 ? " message" : " messages");
           button.setAttribute("aria-label", button.title);
           button.setAttribute("aria-expanded", String(pool.name === state.selected));
         }
@@ -676,14 +662,22 @@ Invariants: Message data enters the DOM as text.
             if (!observed) continue;
             const entries = observed.entries || [];
             const partial = !observed.local_files?.available;
+            if (!entries.length && activityPool === name) closeActivity();
+            button.disabled = !entries.length;
             button.replaceChildren();
+            if (!entries.length) {
+              button.textContent = "No activity";
+              button.setAttribute("aria-label", name + ": no activity" + (partial ? "; local files unavailable" : ""));
+              button.removeAttribute("title");
+              continue;
+            }
             for (const entry of entries.slice(0, 3)) {
               const mark = document.createElement("span");
               mark.className = "activity-mark " + (entry.kind === "open_file" ? "local" : entry.kind);
               mark.setAttribute("aria-hidden", "true");
               button.append(mark);
             }
-            button.append(entries.length ? String(entries.length) : partial ? "–" : "○");
+            button.append(String(entries.length));
             const label = name + " activity · " + entries.length + " observed" + (partial ? " · local files unavailable" : "");
             button.setAttribute("aria-label", label);
             button.title = label;
@@ -693,6 +687,7 @@ Invariants: Message data enters the DOM as text.
 
         function openActivity(name) {
           if (activityPool === name) { closeActivity(); return; }
+          if (!activity?.pools?.[name]?.entries?.length) return;
           activityPool = name;
           renderActivity();
           $("activity-card").hidden = false;
@@ -732,7 +727,7 @@ Invariants: Message data enters the DOM as text.
             ["Local processes", entries.filter(entry => entry.kind === "open_file")],
           ];
           for (const [title, rows] of sections) {
-            if (title === "Local processes" && !rows.length) continue;
+            if (!rows.length) continue;
             const section = document.createElement("section");
             const heading = document.createElement("h3");
             heading.className = "activity-machine";
@@ -749,12 +744,6 @@ Invariants: Message data enters the DOM as text.
               coverage.className = "activity-context";
               coverage.textContent = "Partial · Inspection unavailable";
               section.append(coverage);
-            }
-            if (!rows.length) {
-              const empty = document.createElement("p");
-              empty.className = "activity-context";
-              empty.textContent = "No activity";
-              section.append(empty);
             }
             for (const entry of rows) {
               const row = document.createElement("div");
