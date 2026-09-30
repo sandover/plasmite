@@ -209,3 +209,7 @@
 {"version":1,"task_id":"HMXU3I","kind":"result","at":"2026-09-30T00:40:21.206573Z","text":"Removed test accounts, profiles, batch-logon grants, firewall rule, credentials and fixture; kept validation logs."}
 {"version":1,"task_id":"DXEVRN","kind":"done","at":"2026-09-30T00:40:33.55505Z","agent":"codex@windows-parity","text":"Windows protocol, lint, installed npm/wheel and packaged secure serving checks pass; docs and CI gates committed."}
 {"version":1,"task_id":"65MU7N","kind":"result","at":"2026-09-30T00:40:33.592727Z","text":"Windows hosting and real harness validation complete; Safari and ordinary-user Windows browser approval remain."}
+{"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-30T15:02:18.092463Z","text":"Safari product login, write and read after reload pass; fresh private window rejects after exact untrust."}
+{"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-30T15:02:18.123073Z","text":"Native saved access reads the Safari message after untrust; certificate absent, disposable key revoked."}
+{"version":1,"task_id":"N7ANEU","kind":"result","at":"2026-09-30T15:02:18.147288Z","text":"Safari stayed running for install and fresh-window rejection; renewal/scope proof reuses prior results."}
+{"version":1,"task_id":"N7ANEU","kind":"done","at":"2026-09-30T15:02:18.174178Z","text":"Safari product check passes; exact trust removal and native continuation verified; fixture removed."}

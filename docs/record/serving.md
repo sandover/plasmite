@@ -191,6 +191,12 @@ became false. A CA-signed, restricted localhost leaf also worked when installed
 as a trusted root for SSL; macOS rejected a child signed by that leaf. The
 effect on other macOS TLS clients has not been established.
 
+A Safari product check completed login, pool write, and read after reload
+through the installed trust entry. After `access untrust`, a fresh private
+Safari window rejected the certificate while saved native access still read
+the message. Safari stayed running throughout this check; existing connections
+may keep their prior TLS state.
+
 `access untrust` selects the exact certificate by its full SHA-256 fingerprint
 even after the server goes offline or changes its certificate. macOS may ask
 the user to authorize removal from the login keychain.
