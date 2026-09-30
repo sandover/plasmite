@@ -266,6 +266,9 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
     drop(server);
     let server = TestServer::try_start_oauth_at(temp.path(), port)?;
     assert_eq!(server.remote_url, issuer);
+    // Open fresh connections after restart; keep the saved keys and OAuth grant.
+    let agent = trusted_agent(temp.path())?;
+    let native = RemoteClient::new(&issuer)?;
     let refresh_form = form(&[
         ("grant_type", "refresh_token"),
         ("client_id", client_id),
@@ -275,7 +278,8 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
     let renewed: Value = agent
         .post(&format!("{issuer}/oauth/token"))
         .set("Content-Type", "application/x-www-form-urlencoded")
-        .send_string(&refresh_form)?
+        .send_string(&refresh_form)
+        .map_err(|err| format!("refresh after server restart failed: {err}"))?
         .into_json()?;
     let second_refresh = renewed["refresh_token"]
         .as_str()
