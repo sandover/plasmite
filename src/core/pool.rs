@@ -2011,7 +2011,11 @@ mod tests {
                 let seq = pool
                     .append_with_options(b"flush-ack", AppendOptions::new(1, Durability::Flush))
                     .expect("flush append");
-                fs::write(ack_path, seq.to_string()).expect("publish acknowledgement");
+                // Write then rename, so the parent sees no file or the whole number,
+                // never a file created but not yet written.
+                let staged = format!("{ack_path}.tmp");
+                fs::write(&staged, seq.to_string()).expect("stage acknowledgement");
+                fs::rename(&staged, &ack_path).expect("publish acknowledgement");
                 loop {
                     thread::sleep(Duration::from_secs(1));
                 }
