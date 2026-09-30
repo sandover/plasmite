@@ -195,11 +195,12 @@ effect on other macOS TLS clients has not been established.
 even after the server goes offline or changes its certificate. macOS may ask
 the user to authorize removal from the login keychain.
 
-Windows browser trust installation is disabled pending a working product
-approval and removal flow and a standard-user check. Use an HTTPS certificate
-that Chrome and Edge already trust. The prepared adapter targets the current
-user's Root store, which also serves Windows-native TLS clients. Native pinned
-access remains available.
+Windows browser certificate setup remains disabled until an ordinary signed-in
+user completes the product workflow. Use an HTTPS certificate that Chrome and
+Edge already trust. The Windows adapter uses the current user's Root store,
+which also serves other Windows TLS clients. `access status` reports whether
+that exact certificate exists in the store; browser and device policies can
+still reject it. Native saved connections do not require this OS trust.
 
 Older Plasmite-generated server certificates renew once on startup to add an
 explicit `CA:false` constraint while keeping their public key. Native access
@@ -210,16 +211,12 @@ key use without `keyCertSign`, server-authentication extended use, and a DNS or
 IP Subject Alternative Name. A certificate already trusted by the browser
 needs no Plasmite trust setup.
 
-The configured VM has a signed-in desktop. A disposable `CA:false` leaf was
-installed with Windows' visible confirmation into the current user's Root
-store. Chrome, Edge, and Windows-native TLS accepted the exact leaf and
-rejected both a renewed leaf and a child signed with its key. This store is not
-browser-only. `Import-Certificate` from the command helper failed with “UI is
-not allowed in this operation,” while both `X509Store.Remove` and `certutil
--user -delstore` failed with `ERROR_NOT_SUPPORTED`. The VM has no enabled
-standard-user account. Keep product setup disabled until its own approval and
-exact removal flow work on a signed-in desktop and standard-user behavior is
-checked.
+The product setup passed Chrome and Edge login and pool write/read under the
+VM's administrator account. Exact certificate removal passed from its
+interactive console and preserved native access. Windows requires a visible
+approval for Root-store changes; a headless removal fails. Ordinary-user
+browser setup remains unproven. Run `access untrust` from a signed-in
+interactive terminal so Windows can show its approval dialog.
 
 ## Connect an MCP harness
 

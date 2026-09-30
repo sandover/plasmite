@@ -173,6 +173,12 @@ fn emit_status(
         println!("Reachable: {}", optional_yes_no(status.reachable));
         println!("Access accepted: {}", optional_yes_no(status.accepted));
         if let Some(browser) = browser {
+            #[cfg(target_os = "windows")]
+            println!(
+                "Certificate installed in Windows Root: {}",
+                yes_no(browser.installed)
+            );
+            #[cfg(not(target_os = "windows"))]
             println!("Browser trust installed: {}", yes_no(browser.installed));
             println!("Certificate SHA-256: {}", browser.certificate_sha256);
             println!("Certificate expires: {}", format_expiry(browser.expires_at));
@@ -220,10 +226,8 @@ fn offer_browser_trust(trust: &BrowserTrustStatus) {
     );
     #[cfg(target_os = "windows")]
     println!(
-        "Scope: current user's Windows Root store. Chrome, Edge, and other Windows TLS clients may use this trust; signed-certificate behavior still needs validation."
+        "Scope: current user's Windows Root store. Edge, Chrome, and other Windows apps may use this trust."
     );
-    #[cfg(target_os = "windows")]
-    println!("Direct MCP harnesses need an independently trusted HTTPS certificate chain.");
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         return;
@@ -240,6 +244,12 @@ fn offer_browser_trust(trust: &BrowserTrustStatus) {
     }
     match browser_trust::install(&trust.destination, &trust.certificate_sha256) {
         Ok(_) => {
+            #[cfg(target_os = "windows")]
+            println!(
+                "Certificate installed in Windows Root. To remove it later: plasmite access untrust {}",
+                trust.certificate_sha256
+            );
+            #[cfg(not(target_os = "windows"))]
             println!(
                 "Browser trust installed. To remove it later: plasmite access untrust {}",
                 trust.certificate_sha256

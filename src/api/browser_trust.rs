@@ -19,6 +19,8 @@ pub struct BrowserTrustStatus {
     pub certificate_sha256: String,
     pub expires_at: i64,
     pub names: Vec<String>,
+    /// On Windows, the exact certificate is present in CurrentUser Root.
+    /// Browser and managed-device policies can still reject it.
     pub installed: bool,
 }
 
@@ -514,12 +516,12 @@ mod platform {
     use std::fs::OpenOptions;
     use std::io::Write;
     use std::path::PathBuf;
-    use std::process::{Command, Output};
+    use std::process::{Command, ExitStatus, Output};
 
     // Compare full SHA-256 digests of certificate bytes. Windows' displayed
     // thumbprint is SHA-1, which is not an adequate selector for removal.
     fn find(fingerprint: &str) -> ApiResult<bool> {
-        let script = "$sha=[Security.Cryptography.SHA256]::Create(); Get-ChildItem Cert:\\CurrentUser\\Root | ForEach-Object { [BitConverter]::ToString($sha.ComputeHash($_.RawData)).Replace('-','') }";
+        let script = "$ErrorActionPreference='Stop'; $sha=[Security.Cryptography.SHA256]::Create(); Get-ChildItem Cert:\\CurrentUser\\Root | ForEach-Object { [BitConverter]::ToString($sha.ComputeHash($_.RawData)).Replace('-','') }";
         let output = Command::new("powershell.exe")
             .args(["-NoProfile", "-Command", script])
             .output()
@@ -547,20 +549,22 @@ mod platform {
     pub(super) fn install(der: &[u8]) -> ApiResult<()> {
         let file = TempCertificate::new(der)?;
         // Import-Certificate requests Windows confirmation for CurrentUser
-        // Root. A headless process fails rather than bypassing that prompt.
-        let output = Command::new("powershell.exe")
+        // Root. Inherit the signed-in command's console so the user can read
+        // and approve that warning. A headless process fails rather than
+        // bypassing it.
+        let status = Command::new("powershell.exe")
             .args([
                 "-NoProfile",
                 "-Command",
-                "Import-Certificate -FilePath $env:PLASMITE_CERT_PATH -CertStoreLocation 'Cert:\\CurrentUser\\Root' | Out-Null",
+                "$ErrorActionPreference='Stop'; Import-Certificate -FilePath $env:PLASMITE_CERT_PATH -CertStoreLocation 'Cert:\\CurrentUser\\Root' | Out-Null",
             ])
             .env("PLASMITE_CERT_PATH", &file.path)
-            .output()
+            .status()
             .map_err(|err| io_error("install browser trust", err))?;
-        if output.status.success() {
+        if status.success() {
             Ok(())
         } else {
-            Err(command_error("install browser trust", &output))
+            Err(status_error("install browser trust", status))
         }
     }
 
@@ -568,14 +572,29 @@ mod platform {
         if !find(fingerprint)? {
             return Ok(());
         }
-        let script = "$store=[Security.Cryptography.X509Certificates.X509Store]::new('Root','CurrentUser'); $store.Open('ReadWrite'); try { $sha=[Security.Cryptography.SHA256]::Create(); $matches=@($store.Certificates | Where-Object { [BitConverter]::ToString($sha.ComputeHash($_.RawData)).Replace('-','') -eq $env:PLASMITE_CERT_SHA256 }); if ($matches.Count -ne 1) { throw 'certificate selection changed' }; $store.Remove($matches[0]) } finally { $store.Close() }";
-        let output = Command::new("powershell.exe")
+        let script = r#"
+$ErrorActionPreference = 'Stop'
+$expected = $env:PLASMITE_CERT_SHA256.ToUpperInvariant()
+$sha = [Security.Cryptography.SHA256]::Create()
+$matches = @(Get-ChildItem 'Cert:\CurrentUser\Root' | Where-Object {
+    [BitConverter]::ToString($sha.ComputeHash($_.RawData)).Replace('-', '') -eq $expected
+})
+if ($matches.Count -ne 1) { throw 'certificate selection changed' }
+$thumbprint = $matches[0].Thumbprint.Replace(' ', '').ToUpperInvariant()
+if ($thumbprint -notmatch '^[0-9A-F]{40}$') { throw 'certificate store path is invalid' }
+$path = "Cert:\CurrentUser\Root\$thumbprint"
+$selected = Get-Item -LiteralPath $path
+$actual = [BitConverter]::ToString($sha.ComputeHash($selected.RawData)).Replace('-', '')
+if ($actual -ne $expected) { throw 'certificate selection changed' }
+Remove-Item -LiteralPath $path
+"#;
+        let status = Command::new("powershell.exe")
             .args(["-NoProfile", "-Command", script])
             .env("PLASMITE_CERT_SHA256", fingerprint.to_ascii_uppercase())
-            .output()
+            .status()
             .map_err(|err| io_error("remove browser trust", err))?;
-        if !output.status.success() {
-            return Err(command_error("remove browser trust", &output));
+        if !status.success() {
+            return Err(status_error("remove browser trust", status));
         }
         if contains(fingerprint)? {
             return Err(Error::new(ErrorKind::Io).with_message("browser trust remains installed"));
@@ -640,6 +659,12 @@ mod platform {
     fn command_error(action: &str, output: &Output) -> Error {
         let detail = String::from_utf8_lossy(&output.stderr);
         Error::new(ErrorKind::Io).with_message(format!("could not {action}: {}", detail.trim()))
+    }
+
+    fn status_error(action: &str, status: ExitStatus) -> Error {
+        Error::new(ErrorKind::Io).with_message(format!(
+            "could not {action}: PowerShell exited with {status}"
+        ))
     }
 }
 
