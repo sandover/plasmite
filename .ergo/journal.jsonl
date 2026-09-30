@@ -190,3 +190,14 @@
 {"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-29T23:23:35.278495Z","agent":"sol@harness","text":"Codex logout removed its local credentials; native same-key access stayed accepted. Server grant persisted."}
 {"version":1,"task_id":"2JA2AZ","kind":"result","at":"2026-09-29T23:41:10.987634Z","agent":"codex@windows-state","text":"Ordinary-user cold reuse, competing-server Busy, and unsafe client/server ACL rejection pass without repair."}
 {"version":1,"task_id":"HMXU3I","kind":"result","at":"2026-09-29T23:41:11.008663Z","text":"Windows→Mac exact HTTPS write/read passed as nonadmin PlmHostQA29; saved-key reload and disconnect also pass."}
+{"version":1,"task_id":"2JA2AZ","kind":"result","at":"2026-09-29T23:45:40.780708Z","agent":"codex@windows-state","text":"Nonadmin restart passed: shutdown releases ownership; identity bytes and existing saved-key access survive restart."}
+{"version":1,"task_id":"2JA2AZ","kind":"done","at":"2026-09-29T23:45:40.797888Z","agent":"codex@windows-state","text":"Private state, foreign-user denial, unsafe-state refusal, locking, and ordinary-user restart pass."}
+{"version":1,"task_id":"HMXU3I","kind":"claim","at":"2026-09-29T23:45:46.046149Z","agent":"codex@windows-host"}
+{"version":1,"task_id":"SGHDDQ","kind":"result","at":"2026-09-30T00:03:31.640637Z","agent":"sol@harness","text":"Stopped Mac test server; HTTPS port 56577 refused connection. Removed isolated test pool, leaf, key, Codex/native homes."}
+{"version":1,"task_id":"SGHDDQ","kind":"done","at":"2026-09-30T00:03:37.041077Z","agent":"sol@harness","text":"Real harness OAuth and remaining browser, grant-isolation, address-change checks passed; disposable fixture cleaned."}
+{"version":1,"task_id":"HMXU3I","kind":"result","at":"2026-09-30T00:05:25.138162Z","agent":"codex@windows-host","text":"Windows native, browser, local/direct MCP, stream revocation and restart suites pass; cross-machine checks pass."}
+{"version":1,"task_id":"HMXU3I","kind":"done","at":"2026-09-30T00:05:25.15628Z","agent":"codex@windows-host","text":"Windows workflows pass with ordinary-user state proof and both cross-machine native directions."}
+{"version":1,"task_id":"DXEVRN","kind":"claim","at":"2026-09-30T00:05:25.177013Z","agent":"codex@windows-parity"}
+{"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-30T00:05:25.197975Z","agent":"luna@windows-browser","text":"Sando product install, Chrome/Edge write/read, exact removal, TLS rejection and native continuation pass."}
+{"version":1,"task_id":"65GOQL","kind":"result","at":"2026-09-30T00:09:19.03728Z","agent":"luna@windows-browser","text":"Ordinary-user console input did not reach the key prompt; installation remains disabled until signed-in proof."}
+{"version":1,"task_id":"65GOQL","kind":"block","at":"2026-09-30T00:09:19.056593Z","agent":"luna@windows-browser","text":"Need ordinary-user interactive install and exact removal; cross-user automation could not deliver console input."}
