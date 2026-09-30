@@ -663,6 +663,8 @@ Invariants: Message data enters the DOM as text.
             const entries = observed.entries || [];
             const partial = !observed.local_files?.available;
             if (!entries.length && activityPool === name) closeActivity();
+            // A disabled button drops focus to the page, so hand it to the pool first.
+            if (!entries.length && document.activeElement === button) cards.get(name)?.focus({ preventScroll: true });
             button.disabled = !entries.length;
             button.replaceChildren();
             if (!entries.length) {
