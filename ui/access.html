@@ -10,7 +10,7 @@ Invariants: Key names and other server data enter the DOM as text.
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Plasmite access</title>
+    <title>Access · local</title>
     <style>
       :root {
         color-scheme: dark;
@@ -45,6 +45,9 @@ Invariants: Key names and other server data enter the DOM as text.
       .topbar nav { display: flex; align-items: baseline; gap: 16px; }
       .topbar nav a { text-decoration: none; color: var(--muted); }
       .topbar nav a[aria-current="page"] { color: var(--text); }
+      .topbar .actions { margin-left: auto; font-size: 12px; }
+      .topbar .where { color: var(--muted); }
+      .topbar .where.local { color: var(--warn); }
 
       main { max-width: 44rem; margin: 0 auto; padding: 28px 18px 48px; }
       h1 { margin: 0 0 18px; font-size: 20px; font-weight: 600; }
@@ -82,7 +85,18 @@ Invariants: Key names and other server data enter the DOM as text.
       .copy:hover, .copy:focus-visible { opacity: 1; color: var(--text); background: var(--panel-raised); outline: none; }
       .copy.done { color: var(--ok); opacity: 1; }
       .copy svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-      .dir { color: var(--text); overflow-wrap: anywhere; font-weight: 400; }
+      /* The directory: parent folders muted, its own name bright. A long path breaks only
+         after a slash, like a breadcrumb, so no folder name is split or cut. Click copies it. */
+      .dir-line { display: flex; gap: 10px; align-items: baseline; min-width: 0; margin: 2px 0 10px; }
+      .path {
+        display: block; max-width: 100%; padding: 2px 6px; margin: 0 -6px; border: 0; border-radius: 5px;
+        background: none; color: var(--text); font-size: 14px; text-align: left; overflow-wrap: normal;
+      }
+      .path .parent { color: var(--muted); }
+      .path strong { font-weight: 600; }
+      .path { overflow-wrap: anywhere; }
+      .path:hover, .path:focus-visible { background: var(--panel-raised); outline: none; }
+      .copied { color: var(--ok); font-size: 11px; }
       .field-label { display: block; margin: 12px 0 4px; color: var(--muted); font-size: 12px; }
 
       form { display: flex; gap: 10px; }
@@ -99,8 +113,29 @@ Invariants: Key names and other server data enter the DOM as text.
       .methods { display: grid; grid-template-columns: 6.5em 1fr; gap: 14px 0; margin-top: 8px; }
       .methods b { padding-top: 8px; font-weight: 400; color: var(--muted); }
       .methods p { margin: 6px 0 0; }
-      .context { margin: 0 0 28px; color: var(--muted); }
-      .context code { color: var(--text); overflow-wrap: anywhere; }
+      /* Where this server shares from and at, as a label column and values. The label
+         column matches the handoff card's, so the page keeps one grid. */
+      .summary { display: grid; grid-template-columns: 6.5em 1fr; gap: 12px 0; align-items: baseline; margin: 0 0 36px; }
+      .summary dt { color: var(--muted); font-size: 12px; }
+      .summary dd { margin: 0; min-width: 0; }
+      .summary .dir-line { margin: 0; }
+      .summary code { font-size: 14px; }
+      /* The page's state, beside its title. */
+      h1 { display: flex; gap: 12px; align-items: center; }
+      .state {
+        display: inline-flex; gap: 6px; align-items: center; padding: 2px 9px; border: 1px solid var(--line);
+        border-radius: 999px; color: var(--muted); font-size: 12px; font-weight: 400;
+      }
+      .state::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+      .state.on { color: var(--ok); border-color: #2f6b56; }
+      /* On narrow screens each label sits above its value, so values get the full width. */
+      @media (max-width: 560px) {
+        .summary, .methods { grid-template-columns: 1fr; }
+        .summary { gap: 4px 0; }
+        .summary dd + dt { margin-top: 12px; }
+        .methods b { padding-top: 0; }
+        .methods > div { margin-bottom: 6px; }
+      }
       .handoff .done { margin-top: 14px; display: flex; justify-content: flex-end; }
 
       table { width: 100%; border-collapse: collapse; }
@@ -111,14 +146,21 @@ Invariants: Key names and other server data enter the DOM as text.
       .empty { color: var(--muted); }
       footer { padding-top: 14px; border-top: 1px solid #2c3643; }
       footer code { overflow-wrap: anywhere; color: var(--text); }
+      .handoff p code { color: var(--text); }
       .choices { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 14px; }
       .choices label {
-        display: flex; gap: 8px; align-items: baseline; padding: 6px 10px; border: 1px solid var(--line);
-        border-radius: 6px; cursor: pointer;
+        display: flex; flex-wrap: wrap; gap: 0 8px; align-items: baseline; max-width: 100%;
+        padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
       }
+      .choices label > span { white-space: nowrap; }
       .choices label:has(input:checked) { border-color: var(--accent); background: #1f2c36; }
       .choices input { accent-color: var(--accent); }
       .choices small { color: var(--muted); }
+      .choices .other { flex-wrap: nowrap; }
+      .choices .other input[type="text"] {
+        min-width: 0; max-width: 100%; padding: 0; border: 0; background: none;
+        color: var(--text); font: inherit; outline: none;
+      }
       .notice { min-height: 1.2em; margin-top: 8px; font-size: 13px; color: var(--error); }
     </style>
   </head>
@@ -130,24 +172,31 @@ Invariants: Key names and other server data enter the DOM as text.
         <a href="/ui/map">Map</a>
         <a href="/access" aria-current="page">Access</a>
       </nav>
+      <span class="actions"><span class="where local" title="No key needed">Local</span></span>
     </header>
     <main>
-      <h1>Access</h1>
+      <h1>Access <span class="state" id="state" hidden></span></h1>
+
+      <!-- Both states open the same way: the directory, then the address once there is one. -->
+      <dl class="summary" id="summary" hidden>
+        <dt>Directory</dt>
+        <dd class="dir-line"><button type="button" class="path" aria-label="Copy directory path"><span class="parent"></span><strong></strong></button><span class="copied" hidden>copied</span></dd>
+        <dt class="address-row" hidden>Address</dt>
+        <dd class="address-row" hidden><code id="address"></code></dd>
+      </dl>
 
       <section id="setup" hidden>
         <div class="panel">
-          <h2>Only this machine can reach the pools in <code class="dir"></code></h2>
-          <p class="muted">To share them with a VM or another machine, pick the address it will use to reach this one:</p>
+          <h2>Share with a VM or another machine</h2>
+          <p class="muted">Pick the address it will use to reach this one:</p>
           <div class="choices" id="choices" role="radiogroup" aria-label="Address"></div>
           <p class="muted">Then stop the <code>plasmite serve</code> running now (Ctrl-C in its terminal) and start it again with:</p>
           <div class="value"><code id="setup-command"></code><button class="copy" type="button" data-copy="setup-command" aria-label="Copy" title="Copy"></button></div>
-          <p class="muted small" style="margin-top: 10px">The other machine must be able to reach port 9743 here. When the server is back, reload this page to create a key for it.</p>
+          <p class="muted small" style="margin-top: 10px">When the server is back, reload this page to create keys. Each key works with the address you chose.</p>
         </div>
       </section>
 
       <div id="shared" hidden>
-        <p class="context">Sharing the pools in <code class="dir"></code> at <code id="address"></code></p>
-
         <section id="invite">
           <h2>Invite</h2>
           <form id="invite-form" novalidate>
@@ -160,14 +209,14 @@ Invariants: Key names and other server data enter the DOM as text.
 
         <section id="handoff" hidden>
           <div class="panel handoff">
-            <h2>Key for <span id="handoff-name"></span> <span class="tag">shown once</span></h2>
+            <h2><span>New key for “<span id="handoff-name"></span>”</span> <span class="tag">shown once</span></h2>
             <div class="value"><code id="handoff-key"></code><button class="copy" type="button" data-copy="handoff-key" aria-label="Copy" title="Copy"></button></div>
-            <p class="muted small" style="margin-top: 8px">Send it privately. Whoever has it can use these pools until you revoke it.</p>
-            <h2 style="margin-top: 18px">On the other machine, connect one way</h2>
+            <p class="muted small" style="margin-top: 8px">Use it with <code id="handoff-address"></code>, and only that address. Send it privately. Whoever has it can use these pools until you revoke it.</p>
+            <h2 style="margin-top: 18px">On the other machine, connect in any of these ways</h2>
             <div class="methods">
               <b>Terminal</b>
               <div><div class="value"><code id="method-terminal"></code><button class="copy" type="button" data-copy="method-terminal" aria-label="Copy" title="Copy"></button></div>
-                <p class="muted small">Paste the key when asked. This can also set up the browser.</p></div>
+                <p class="muted small">Paste the key when asked. On a Mac, it then offers to make the browser trust this server.</p></div>
               <b>Browser</b>
               <div><div class="value"><code id="method-browser"></code><button class="copy" type="button" data-copy="method-browser" aria-label="Copy" title="Copy"></button></div>
                 <p class="muted small">Open it and enter the key. If the browser warns about the certificate, connect in a terminal first.</p></div>
@@ -187,8 +236,8 @@ Invariants: Key names and other server data enter the DOM as text.
       </div>
 
       <footer id="details" class="muted small" hidden>
-        <p>To use a different address, stop the server and start it again with a new <code>--shared-address</code>. Each machine then runs <code>plasmite access connect</code> again with the new address.</p>
-        <p>To use your own certificate, add <code>--tls-cert</code> and <code>--tls-key</code>. If its private key is new, create new keys.</p>
+        <p>To change the address, restart the server with a new <code>--shared-address</code>. Keys keep working once each machine runs <code>plasmite access connect</code> with the new address.</p>
+        <p>To use your own certificate, restart the server with <code>--tls-cert</code> and <code>--tls-key</code>, then create new keys. Keys are tied to the certificate's private key, so renew the certificate with that same private key.</p>
       </footer>
 
       <p class="notice" id="notice" role="alert"></p>
@@ -292,7 +341,8 @@ Invariants: Key names and other server data enter the DOM as text.
         function showHandoff(name, key) {
           $("handoff-name").textContent = name;
           $("handoff-key").textContent = key;
-          $("method-terminal").textContent = "plasmite access connect " + address;
+          $("handoff-address").textContent = address;
+          setCommand($("method-terminal"), "plasmite access connect " + address);
           $("method-browser").textContent = address;
           $("method-agent").textContent = address.replace(/\/$/, "") + "/mcp";
           $("invite").hidden = true;
@@ -340,7 +390,7 @@ Invariants: Key names and other server data enter the DOM as text.
           const copy = event.target.closest("[data-copy]");
           if (!copy) return;
           try {
-            await navigator.clipboard.writeText($(copy.dataset.copy).textContent);
+            await navigator.clipboard.writeText($(copy.dataset.copy).textContent.replaceAll(joiner, ""));
             copy.innerHTML = doneIcon;
             copy.classList.add("done");
             setTimeout(() => { copy.innerHTML = copyIcon; copy.classList.remove("done"); }, 1200);
@@ -356,40 +406,113 @@ Invariants: Key names and other server data enter the DOM as text.
         const kinds = { local: "local network", vm: "VM network", vpn: "VPN", public: "public", name: "this machine's name" };
 
         // Offers this machine's addresses; the command follows the choice.
+        // A word joiner after each hyphen keeps lines from breaking there. Copy strips it.
+        const joiner = "\u2060";
+        function noHyphenBreaks(text) {
+          return text.replace(/-/g, "-" + joiner);
+        }
+
+        // Text that breaks after a slash, never at a hyphen, and inside a piece only
+        // when the piece is wider than the line.
+        function breakAfterSlashes(element, text) {
+          for (const piece of text.split(/(?<=[\\/])/)) element.append(noHyphenBreaks(piece), document.createElement("wbr"));
+        }
+
+        // Shows a command that breaks between arguments, and inside a path only after
+        // a slash; addresses stay whole. Its text stays the exact command, so copying
+        // it copies the command.
+        function setCommand(element, text) {
+          element.replaceChildren(...text.split(" ").flatMap((word, i) => {
+            const piece = document.createElement("span");
+            piece.className = "word";
+            if (word.includes("://")) piece.textContent = noHyphenBreaks(word); else breakAfterSlashes(piece, word);
+            return i ? [" ", piece] : [piece];
+          }));
+        }
+
+        // What someone typed as the address: a host, host:port, or https:// URL. A bare
+        // host gets the default port.
+        function sharedAddress(typed) {
+          const value = typed.trim().replace(/^https?:\/\//, "").replace(/\/+$/, "") || "your-hostname";
+          return "https://" + (/:\d+$/.test(value) ? value : value + ":9743");
+        }
+
         function showSetup(status) {
-          const hosts = (status.addresses || []).length ? status.addresses : [{ host: "your-hostname", kind: "name" }];
-          const command = (host) => "plasmite --dir " + quoted(status.pool_dir || "./shared") +
-            " serve --shared-address https://" + host + ":9743";
+          const hosts = status.addresses || [];
+          const command = (address) => "plasmite --dir " + quoted(status.pool_dir || "./shared") +
+            " serve --shared-address " + address;
           const choices = $("choices");
+          // Other: any name or address this page cannot detect, such as a DNS name.
+          const other = document.createElement("label");
+          other.className = "other";
+          const otherRadio = document.createElement("input");
+          otherRadio.type = "radio";
+          otherRadio.name = "host";
+          otherRadio.checked = !hosts.length;
+          const otherText = document.createElement("input");
+          otherText.type = "text";
+          otherText.placeholder = "Other, like pools.example.net";
+          otherText.setAttribute("aria-label", "Other address");
+          // Wide enough for its placeholder or what was typed, whichever is longer.
+          const fit = () => { otherText.style.width = Math.max(otherText.placeholder.length, otherText.value.length) + 1 + "ch"; };
+          fit();
+          const useOther = () => { otherRadio.checked = true; fit(); setCommand($("setup-command"), command(sharedAddress(otherText.value))); };
+          otherRadio.addEventListener("change", useOther);
+          otherText.addEventListener("focus", useOther);
+          otherText.addEventListener("input", useOther);
+          other.append(otherRadio, otherText);
           choices.replaceChildren(...hosts.map((candidate, i) => {
             const label = document.createElement("label");
             const input = document.createElement("input");
             input.type = "radio";
             input.name = "host";
             input.checked = i === 0;
-            input.addEventListener("change", () => { $("setup-command").textContent = command(candidate.host); });
+            input.addEventListener("change", () => { setCommand($("setup-command"), command(sharedAddress(candidate.host))); });
             const host = document.createElement("span");
             host.textContent = candidate.host;
             const kind = document.createElement("small");
             kind.textContent = kinds[candidate.kind] || candidate.kind;
             label.append(input, host, kind);
             return label;
-          }));
-          $("setup-command").textContent = command(hosts[0].host);
+          }), other);
+          setCommand($("setup-command"), command(sharedAddress(hosts.length ? hosts[0].host : "")));
           $("setup").hidden = false;
         }
 
         async function boot() {
           const status = await request("/v0/access/status");
           fingerprint = status.server_fingerprint || null;
-          for (const dir of document.querySelectorAll(".dir")) dir.textContent = status.pool_dir || "";
+          const dir = status.pool_dir || "";
+          const cut = Math.max(dir.lastIndexOf("/"), dir.lastIndexOf("\\")) + 1;
+          for (const path of document.querySelectorAll(".path")) {
+            // A break opportunity after each separator, and nowhere else.
+            const parent = path.querySelector(".parent");
+            parent.replaceChildren();
+            breakAfterSlashes(parent, dir.slice(0, cut));
+            path.querySelector("strong").textContent = noHyphenBreaks(dir.slice(cut));
+            path.title = dir;
+            path.addEventListener("click", async () => {
+              const copied = path.nextElementSibling;
+              try {
+                await navigator.clipboard.writeText(dir);
+                copied.hidden = false;
+                setTimeout(() => { copied.hidden = true; }, 1200);
+              } catch (_) { /* Clipboard needs a secure context; the title still shows the path. */ }
+            });
+          }
           address = status.shared_address || null;
-          if (!status.ready || !fingerprint || !address) {
+          const shared = status.ready && fingerprint && address;
+          $("state").textContent = shared ? "Sharing" : "Not shared";
+          $("state").classList.toggle("on", Boolean(shared));
+          $("state").hidden = false;
+          $("summary").hidden = false;
+          if (!shared) {
             showSetup(status);
             return;
           }
           $("details").hidden = false;
           $("address").textContent = address;
+          for (const row of document.querySelectorAll(".address-row")) row.hidden = false;
           $("shared").hidden = false;
           await loadKeys();
         }

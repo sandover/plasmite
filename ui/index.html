@@ -21,7 +21,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         --muted: #9aa9b8;
         --line: #394657;
         --ok: #74d7b2;
-        --warn: #f7cf6e;
+        --warn: #e8bc72;
         --error: #f08383;
         --accent: #83c5d7;
       }
@@ -59,7 +59,9 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
       .topbar nav { display: flex; align-items: baseline; gap: 16px; }
       .topbar nav a { text-decoration: none; color: var(--muted); }
       .topbar nav a[aria-current="page"] { color: var(--text); }
-      .topbar .actions { margin-left: auto; font-size: 12px; }
+      .topbar .actions { margin-left: auto; display: flex; gap: 14px; font-size: 12px; }
+      .topbar .where { color: var(--muted); }
+      .topbar .where.local { color: var(--warn); }
       .topbar .actions a { text-decoration: none; }
       .topbar .actions button { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; }
 
@@ -605,6 +607,13 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           var actions = document.getElementById('actions');
           actions.replaceChildren();
           document.getElementById('nav-access').hidden = !state.local;
+          // Name where this view is: this machine, or the server a key reaches.
+          var where = document.createElement('span');
+          where.className = state.local ? 'where local' : 'where';
+          where.textContent = state.local ? 'Local' : window.location.hostname;
+          if (state.local) where.title = 'No key needed';
+          actions.appendChild(where);
+          document.title = (onPoolPage ? poolName : 'Pools') + ' \u00b7 ' + (state.local ? 'local' : window.location.hostname);
           if (!state.local) {
             var button = document.createElement('button');
             button.type = 'button';

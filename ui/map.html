@@ -66,7 +66,9 @@ Invariants: Message data enters the DOM as text.
       .topbar nav a { text-decoration: none; color: var(--muted); }
       .topbar nav a[aria-current="page"] { color: var(--text); }
       .topbar .status { margin-left: auto; color: var(--muted); font-size: 12px; }
-      .topbar .actions { margin-left: auto; font-size: 12px; }
+      .topbar .actions { margin-left: auto; display: flex; gap: 14px; font-size: 12px; }
+      .topbar .where { color: var(--muted); }
+      .topbar .where.local { color: var(--warn); }
       .topbar .status + .actions { margin-left: 0; }
       .topbar .actions a { text-decoration: none; }
       .topbar .actions button { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; }
@@ -1280,6 +1282,13 @@ Invariants: Message data enters the DOM as text.
             const identity = await session.json();
             const actions = $("actions");
             $("nav-access").hidden = !identity.local;
+            // Name where this view is: this machine, or the server a key reaches.
+            const where = document.createElement("span");
+            where.className = identity.local ? "where local" : "where";
+            where.textContent = identity.local ? "Local" : location.hostname;
+            if (identity.local) where.title = "No key needed";
+            actions.append(where);
+            document.title = "Map \u00b7 " + (identity.local ? "local" : location.hostname);
             if (!identity.local) {
               const logout = document.createElement("button");
               logout.type = "button";
