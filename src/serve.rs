@@ -70,6 +70,7 @@ use plasmite::mcp::{
 const UI_INDEX_HTML: &str = include_str!("../ui/index.html");
 const UI_ACCESS_HTML: &str = include_str!("../ui/access.html");
 const UI_MAP_HTML: &str = include_str!("../ui/map.html");
+const UI_POOL_HTML: &str = include_str!("../ui/pool.html");
 const UI_INCONSOLATA_WOFF2: &[u8] =
     include_bytes!("../ui/fonts/inconsolata-latin-wght-normal.woff2");
 const READY_FILE_ENV: &str = "PLASMITE_SERVE_READY_FILE";
@@ -1382,7 +1383,7 @@ async fn ui_inconsolata() -> Response {
 }
 
 async fn ui_pool(AxumPath(_pool): AxumPath<String>) -> Response {
-    html_response(UI_INDEX_HTML)
+    html_response(UI_POOL_HTML)
 }
 
 async fn ui_access(State(state): State<Arc<AppState>>) -> Response {

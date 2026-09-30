@@ -1,0 +1,933 @@
+<!--
+Purpose: One pool's recent messages, live, with any one of them open in full.
+Role: Browser client for a pool's info and event stream.
+Invariants: Message data enters the DOM as text.
+Invariants: Columns are the protocol's own: sequence, time, and tags. A message's
+  data is shown as it is, field by field in the server's order, with no guess at
+  which fields matter. A row shows the start of a value too long for it, with an
+  elision mark; the open message shows more of it and copies it whole.
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plasmite Pool</title>
+    <style>
+      @font-face {
+        font-family: "Inconsolata";
+        src: url("/ui/assets/inconsolata.woff2") format("woff2");
+        font-weight: 200 900;
+        font-display: swap;
+      }
+      :root {
+        color-scheme: dark;
+        --bg: #15191f;
+        --panel: #1a2028;
+        --panel-raised: #27313e;
+        --line: #394657;
+        --rule: #2c3643;
+        --text: #e9edf1;
+        --muted: #9aa9b8;
+        --faint: #6f7d8c;
+        --accent: #83c5d7;
+        --ok: #74d7b2;
+        --warn: #e8bc72;
+        --error: #f08383;
+        --mono: "Inconsolata", "Menlo", "Consolas", monospace;
+      }
+      * { box-sizing: border-box; }
+      [hidden] { display: none !important; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: radial-gradient(circle at 30% -20%, #263543, transparent 55%), var(--bg);
+        color: var(--text);
+        font: 15px/1.45 "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+      }
+      a { color: var(--accent); }
+      button { font: inherit; cursor: pointer; }
+      .shell { height: 100vh; display: flex; flex-direction: column; }
+
+      .topbar {
+        display: flex; align-items: baseline; gap: 22px;
+        padding: 10px 18px; border-bottom: 1px solid var(--line); background: var(--panel);
+      }
+      .brand { color: var(--text); font-size: 14px; letter-spacing: .11em; text-decoration: none; }
+      .topbar nav { display: flex; align-items: baseline; gap: 16px; }
+      .topbar nav a { text-decoration: none; color: var(--muted); }
+      .topbar nav a[aria-current="page"] { color: var(--text); }
+      .topbar .actions { margin-left: auto; display: flex; gap: 14px; font-size: 12px; }
+      .topbar .where { color: var(--muted); }
+      .topbar .where.local { color: var(--warn); }
+      .topbar .actions button { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; }
+
+      /* The pool: its name, whether the page is live, and the facts `plasmite pool info` gives. */
+      .head { padding: 16px 18px 12px; border-bottom: 1px solid var(--line); }
+      .title { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; }
+      h1 { margin: 0; font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
+      /* The way up, quiet like a path's parent folders: this pool is one of the pools. */
+      h1 .up { color: var(--muted); font-weight: 400; text-decoration: none; }
+      h1 .up:hover, h1 .up:focus-visible { color: var(--accent); outline: none; }
+      h1 .sep { color: var(--faint); font-weight: 400; margin: 0 .5ch; }
+      .live { color: var(--muted); font-size: 12px; }
+      .live::before { content: "●"; margin-right: 5px; font-size: 9px; vertical-align: 1px; }
+      .live.on { color: var(--ok); }
+      .live.off { color: var(--warn); }
+      .filter { display: flex; gap: 10px; align-items: baseline; margin-top: 10px; }
+      .filter input {
+        flex: 1; min-width: 0; padding: 5px 9px; border: 1px solid var(--line); border-radius: 6px;
+        background: #12161d; color: var(--text); font: 13px var(--mono);
+      }
+      .filter input:focus { outline: none; border-color: var(--accent); }
+      .filter .count { color: var(--muted); font-size: 12px; white-space: nowrap; }
+      /* The facts `plasmite pool info` gives, at the far end of the name's line. */
+      .facts { margin: 0 0 0 auto; color: var(--muted); font-size: 12px; }
+      .facts .fact { white-space: nowrap; }
+      .facts b { color: var(--text); font-weight: 400; font-family: var(--mono); font-size: 13px; }
+
+      /* The open message takes the lower part, so the log keeps its full width. */
+      .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+      .body.open { grid-template-rows: minmax(0, 1fr) min(50%, 480px); }
+
+      /* The log: one line per message. Monospace, so column widths are exact in ch. */
+      /* Scrolling a row into view clears the sticky column labels above it. */
+      .log {
+        position: relative; min-height: 0; overflow: auto; font: 14px/1.5 var(--mono); outline: none;
+        container-type: inline-size; scroll-padding: 40px 0 8px;
+      }
+      .log-head, .row {
+        display: grid; grid-template-columns: var(--cols); column-gap: 2ch; align-items: baseline;
+        padding: 0 18px;
+      }
+      .log-head {
+        position: sticky; top: 0; z-index: 1; padding-top: 7px; padding-bottom: 5px;
+        background: var(--bg); border-bottom: 1px solid var(--rule); color: var(--faint);
+      }
+      /* Labels are smaller than values, but the row keeps the values' size, since ch widths follow it. */
+      .log-head span { overflow: hidden; white-space: nowrap; font-size: 12px; }
+      .row { padding-top: 2px; padding-bottom: 2px; border-left: 2px solid transparent; cursor: default; }
+      .row:hover { background: #1b222b; }
+      /* Green marks what matters most on the page: here, the open message. */
+      .row[aria-selected="true"] { background: #1c2a28; box-shadow: inset 0 0 0 1px var(--ok); border-radius: 4px; }
+      .row[data-tone="error"] { background: #2a1c20; border-left-color: var(--error); }
+      .row[data-tone="error"]:hover { background: #321f24; }
+      .row[data-tone="error"][aria-selected="true"] { background: #3a2227; }
+      .row[data-tone="warn"] { border-left-color: #8a6f43; }
+      .c { min-width: 0; overflow: hidden; white-space: nowrap; }
+      .num { text-align: right; }
+      .seq { color: var(--faint); text-align: right; }
+      .time { color: var(--muted); }
+      .time small { color: var(--faint); font-size: inherit; }
+      .tags { color: var(--muted); }
+      .tags [data-tone="error"] { color: var(--error); }
+      .tags [data-tone="warn"] { color: var(--warn); }
+      .tags [data-tone="ok"] { color: var(--ok); }
+      .detail .tags { display: flex; flex-wrap: wrap; gap: 0 1.5ch; font-size: 13px; }
+      /* The data cell wraps: each field, key before value, in the server's order. */
+      .main { white-space: normal; overflow-wrap: anywhere; }
+      .main .field { display: inline-block; max-width: 100%; margin-right: 1ch; }
+      .main .field i { font-style: normal; color: var(--faint); }
+      /* A filter match; when it lies in the part of a value a row cuts off, the elision mark. */
+      mark { background: #e8bc7245; color: inherit; border-radius: 2px; }
+      .main .size { color: var(--faint); }
+      .main .more { color: var(--faint); }
+      .day {
+        padding: 10px 18px 3px; color: var(--faint); font-size: 12px;
+        border-bottom: 1px solid var(--rule); margin-bottom: 2px;
+      }
+      .log.filtering .day { display: none; }
+      .empty { padding: 18px; color: var(--muted); font-size: 14px; }
+      .jump {
+        position: sticky; bottom: 12px; float: right; margin: 0 18px 0 0; padding: 4px 12px;
+        border: 1px solid #4a6a78; border-radius: 999px; background: #1f2c36; color: var(--text); font: 12px var(--mono);
+        box-shadow: 0 4px 16px #0008;
+      }
+      .jump:hover { border-color: var(--accent); }
+
+      /* The open message, in full: every field shown, nested ones indented under their key. */
+      .detail { min-height: 0; overflow: auto; border-top: 1px solid var(--line); background: #171c23; font: 14px/1.4 var(--mono); }
+      .detail header {
+        position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: baseline;
+        padding: 6px 16px 5px; background: #171c23; border-bottom: 1px solid var(--rule);
+      }
+      .detail header strong { font-size: 16px; font-weight: 600; }
+      .detail header .when { color: var(--muted); font-size: 13px; }
+      .detail header .tools { margin-left: auto; display: flex; gap: 4px; align-self: center; }
+      .icon {
+        display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px;
+        background: none; color: var(--muted);
+      }
+      .icon:hover, .icon:focus-visible { color: var(--text); background: var(--panel-raised); outline: none; }
+      .icon.done { color: var(--ok); }
+      .icon svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+      .detail section { padding: 8px 16px; border-bottom: 1px solid var(--rule); }
+      .detail h2 { margin: 0 0 3px; color: var(--faint); font-size: 12px; font-weight: 400; }
+      .tree dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 2ch; margin: 0; }
+      .tree dt { color: var(--muted); white-space: nowrap; }
+      .tree dt.index { color: var(--faint); text-align: right; }
+      .tree dd { margin: 0; min-width: 0; }
+      .tree dd > dl { padding-left: 1.5ch; border-left: 1px solid var(--rule); margin-bottom: 2px; }
+      .tree .str { white-space: pre-wrap; overflow-wrap: anywhere; }
+      .tree .str.block { display: block; padding: 3px 8px; margin: 1px 0 2px; background: #12161d; border-radius: 5px; }
+      .tree .num, .tree .bool { color: var(--accent); text-align: left; }
+      .tree .null, .tree .none { color: var(--faint); }
+      .tree .note { display: flex; gap: 8px; align-items: center; color: var(--faint); font-size: 12px; }
+      .tree .note .icon { width: 22px; height: 22px; }
+      .detail .cli { display: flex; gap: 1.5ch; align-items: center; }
+      .cli .label { color: var(--faint); font-size: 12px; }
+      .cli code { flex: 1; min-width: 0; color: var(--muted); font: 13px var(--mono); overflow-wrap: anywhere; }
+
+      .append { display: flex; gap: 8px; padding: 10px 18px 14px; border-top: 1px solid var(--line); background: var(--panel); }
+      .append input {
+        flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
+        background: #12161d; color: var(--text); font: 14px var(--mono);
+      }
+      .append input:focus { outline: none; border-color: var(--accent); }
+      .append button {
+        padding: 6px 14px; border: 1px solid #526076; border-radius: 6px; background: var(--panel-raised); color: var(--text);
+      }
+      .append button:hover, .append button:focus-visible { border-color: var(--accent); outline: none; }
+      .append .error { align-self: center; color: var(--error); font-size: 12px; }
+
+      /* A narrow log, on a small screen or beside the open message: the data takes a
+         line of its own, under the sequence, time, and tags. */
+      @container (max-width: 520px) {
+        .log-head { display: none; }
+        .row { display: flex; flex-wrap: wrap; column-gap: 1.5ch; }
+        .row .c:empty { display: none; }
+        .row .main { flex-basis: 100%; }
+      }
+
+      /* Narrow screens: tighter margins, and the filter takes a line of its own. */
+      @media (max-width: 860px) {
+        .log-head, .row, .day { padding-left: 10px; padding-right: 10px; }
+        .log-head, .row { column-gap: 1.5ch; }
+        .head { padding: 12px 10px 10px; }
+        .append { padding: 8px 10px 10px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="/ui/map">PLASMITE</a>
+        <nav aria-label="Views">
+          <a href="/ui" aria-current="page">Pools</a>
+          <a href="/ui/map">Map</a>
+          <!-- Access shows only on the server machine; the page unhides it for a local session. -->
+          <a href="/access" id="nav-access" hidden>Access</a>
+        </nav>
+        <span class="actions" id="actions"></span>
+      </header>
+
+      <section class="head">
+        <div class="title">
+          <h1><a class="up" href="/ui">Pools</a><span class="sep" aria-hidden="true">/</span><span id="name"></span></h1>
+          <span class="live" id="live">connecting</span>
+          <p class="facts" id="facts"></p>
+        </div>
+        <label class="filter">
+          <input id="filter" type="search" placeholder="Filter" aria-label="Filter messages" autocomplete="off" spellcheck="false" />
+          <span class="count" id="matches"></span>
+        </label>
+      </section>
+
+      <div class="body" id="body">
+        <section class="log" id="log" tabindex="0" aria-label="Messages">
+          <div class="log-head" id="log-head" aria-hidden="true"></div>
+          <div id="rows"></div>
+          <p class="empty" id="empty" hidden></p>
+          <button type="button" class="jump" id="jump" hidden></button>
+        </section>
+        <aside class="detail" id="detail" aria-label="Message" hidden>
+          <header>
+            <strong id="detail-seq"></strong>
+            <span class="when" id="detail-when"></span>
+            <span class="tags" id="tags-tree"></span>
+            <span class="tools">
+              <button type="button" class="icon" id="copy-json" title="Copy JSON" aria-label="Copy JSON"></button>
+              <button type="button" class="icon" id="close" title="Close (Esc)" aria-label="Close">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+              </button>
+            </span>
+          </header>
+          <!-- meta beyond tags is rare, so it is labeled; the data needs no label. -->
+          <section id="detail-meta"><h2>meta</h2><div class="tree" id="meta-tree"></div></section>
+          <section><div class="tree" id="data-tree"></div></section>
+          <section class="cli">
+            <span class="label">terminal</span><code id="cli"></code><button type="button" class="icon" id="copy-cli" title="Copy" aria-label="Copy command"></button>
+          </section>
+        </aside>
+      </div>
+
+      <form class="append" id="append">
+        <input id="append-input" aria-label="Message to append" autocomplete="off" spellcheck="false"
+          placeholder='Append JSON, like {"text": "hello"}, or plain text' />
+        <button type="submit">Append</button>
+        <span class="error" id="append-error"></span>
+      </form>
+    </main>
+
+    <script>
+      (() => {
+        const $ = (id) => document.getElementById(id);
+        const poolPath = location.pathname.slice("/ui/pools/".length);
+        const poolName = (() => { try { return decodeURIComponent(poolPath); } catch (_) { return poolPath; } })();
+        const requested = Number(new URLSearchParams(location.search).get("n") || "400");
+        const keep = Number.isFinite(requested) ? Math.max(1, Math.min(2000, Math.trunc(requested))) : 400;
+        const retryMs = 1000;
+
+        const state = {
+          local: false,
+          info: null,
+          messages: [],      // oldest first, at most `keep`
+          rows: new Map(),   // seq -> row element
+          nextSeq: null,
+          tagged: false,     // whether any loaded message has tags, so a tags column shows
+          tagsWidth: 4,      // ch; never shrinks
+          selected: null,    // the open message
+          unseen: 0,
+          filter: "",
+        };
+
+        // A row shows at most this many fields, strings up to rowChars, and arrays up to
+        // listChars; past that it shows their start and an elision mark. A string with no
+        // spaces, like a hash or base64, is not prose, so it stops at blobChars. The open
+        // message shows strings up to paneChars and copies longer ones whole.
+        const rowFields = 12;
+        const rowChars = 120;
+        const blobChars = 40;
+        const listChars = 80;
+        const paneChars = 2000;
+
+        const copyIcon = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg>';
+        const doneIcon = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>';
+
+        // Reading a message.
+
+        function isObject(value) {
+          return typeof value === "object" && value !== null && !Array.isArray(value);
+        }
+
+        // Every leaf of a message's data, by dotted path. Arrays and empty objects are
+        // leaves; a non-object message is one leaf with an empty path.
+        function leaves(value, prefix = "", out = []) {
+          if (!isObject(value) || (prefix && !Object.keys(value).length)) {
+            out.push([prefix, value]);
+            return out;
+          }
+          for (const [key, child] of Object.entries(value)) leaves(child, prefix ? prefix + "." + key : key, out);
+          return out;
+        }
+
+        function tagsOf(message) {
+          return Array.isArray(message.meta && message.meta.tags) ? message.meta.tags.map(String) : [];
+        }
+
+        // Tags are the protocol's way to label a message, so they alone color it.
+        function toneOfTag(tag) {
+          if (/^(err|error|errors|fatal|fail|failed|failure|panic|crit|critical)$/i.test(tag)) return "error";
+          if (/^(warn|warning)$/i.test(tag)) return "warn";
+          if (/^(ok|done|pass|passed|success|succeeded|result)$/i.test(tag)) return "ok";
+          return "";
+        }
+
+        function toneOf(tags) {
+          const tones = tags.map(toneOfTag);
+          return tones.includes("error") ? "error" : tones.includes("warn") ? "warn" : "";
+        }
+
+        const count = (n) => n.toLocaleString();
+
+        // A value written compactly, like a literal: strings quoted, keys bare. It stops
+        // once past `room`, since a row shows only the start.
+        function literal(value, room = Infinity) {
+          if (!Array.isArray(value) && !isObject(value)) return JSON.stringify(value);
+          const list = Array.isArray(value);
+          const entries = list ? value.map((item) => [null, item]) : Object.entries(value);
+          let out = list ? "[" : "{";
+          for (const [i, [key, item]] of entries.entries()) {
+            if (out.length > room) return out;
+            out += (i ? ", " : "") + (key == null ? "" : key + ": ") + literal(item, room - out.length);
+          }
+          return out + (list ? "]" : "}");
+        }
+
+        const whole = (value) => typeof value === "string" ? value : literal(value);
+
+        // A value as a row shows it: whole when it fits; else its start, marked as cut, and
+        // for a long string its size, which tells a note from a blob.
+        function rowValue(value) {
+          if (typeof value !== "string") {
+            const text = literal(value, listChars);
+            return text.length > listChars ? { text: text.slice(0, listChars), cut: true, size: "" } : { text, cut: false, size: "" };
+          }
+          const lines = value.split("\n");
+          const limit = /\s/.test(value) ? rowChars : blobChars;
+          const text = lines[0].slice(0, limit);
+          const size = [value.length > limit ? count(value.length) + " chars" : "", lines.length > 1 ? count(lines.length) + " lines" : ""]
+            .filter(Boolean).join(" \u00b7 ");
+          return { text, cut: text !== value, size };
+        }
+
+        function applyTemplate() {
+          const last = state.messages[state.messages.length - 1];
+          const cells = [[Math.max(2, String(last ? last.seq : 0).length + 1) + "ch", "#", "num"], ["12ch", "time", ""]];
+          if (state.tagged) cells.push([state.tagsWidth + "ch", "tags", ""]);
+          cells.push(["minmax(0, 1fr)", "data", ""]);
+          $("log").style.setProperty("--cols", cells.map(([width]) => width).join(" "));
+          $("log-head").replaceChildren(...cells.map(([, label, cls]) => span(cls, label)));
+        }
+
+        // Rows.
+        // Rows.
+
+        function pad(n, width = 2) {
+          return String(n).padStart(width, "0");
+        }
+
+        function timeCell(iso) {
+          const cell = document.createElement("span");
+          cell.className = "c time";
+          const date = new Date(iso);
+          if (isNaN(date.getTime())) { cell.textContent = iso || ""; return cell; }
+          cell.title = iso;
+          const small = document.createElement("small");
+          small.textContent = "." + pad(date.getMilliseconds(), 3);
+          cell.append(pad(date.getHours()) + ":" + pad(date.getMinutes()) + ":" + pad(date.getSeconds()), small);
+          return cell;
+        }
+
+        function span(className, text) {
+          const element = document.createElement("span");
+          element.className = className;
+          element.textContent = text;
+          return element;
+        }
+
+        // Text with each match of the filter marked. Matching ignores case, as the filter does.
+        function marked(text) {
+          if (!state.filter) return [text];
+          const pattern = new RegExp(state.filter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+          const parts = [];
+          let at = 0;
+          for (const match of text.matchAll(pattern)) {
+            if (match.index > at) parts.push(text.slice(at, match.index));
+            parts.push(Object.assign(document.createElement("mark"), { textContent: match[0] }));
+            at = match.index + match[0].length;
+          }
+          if (at < text.length) parts.push(text.slice(at));
+          return parts;
+        }
+
+        function markedSpan(className, text) {
+          const element = span(className, "");
+          element.append(...marked(text));
+          return element;
+        }
+
+        // Each tag as a word, colored when it names trouble or success.
+        function tagWords(tags) {
+          return tags.map((tag) => {
+            const word = markedSpan("", tag);
+            const tone = toneOfTag(tag);
+            if (tone) word.dataset.tone = tone;
+            return word;
+          });
+        }
+
+        function buildRow(message) {
+          const row = document.createElement("div");
+          row.className = "row";
+          row.dataset.seq = message.seq;
+          if (message.tone) row.dataset.tone = message.tone;
+          row.setAttribute("aria-selected", String(message === state.selected));
+          row.append(markedSpan("c seq", String(message.seq)), timeCell(message.time));
+
+          if (state.tagged) {
+            const cell = span("c tags", "");
+            tagWords(message.tags).forEach((word, i) => cell.append(...(i ? [" ", word] : [word])));
+            row.append(cell);
+          }
+
+          const main = span("c main", "");
+          message.leaves.slice(0, rowFields).forEach(([path, value], i) => {
+            const field = span("field", "");
+            if (path) {
+              const key = document.createElement("i");
+              key.append(...marked(path), ":");
+              field.append(key, " ");
+            }
+            const shown = rowValue(value);
+            field.append(markedSpan("", shown.text));
+            if (shown.cut) {
+              // When the filter matches only the part cut off, the elision mark is the match.
+              const hidden = state.filter && !shown.text.toLowerCase().includes(state.filter) &&
+                whole(value).toLowerCase().includes(state.filter);
+              field.append(hidden ? Object.assign(document.createElement("mark"), { textContent: "\u2026" }) : "\u2026");
+              if (shown.size) field.append(" ", span("size", shown.size));
+            }
+            main.append(...(i ? [" ", field] : [field]));
+          });
+          const more = message.leaves.length - rowFields;
+          if (more > 0) main.append(span("more", "+" + count(more) + (more === 1 ? " field" : " fields")));
+          row.append(main);
+          return row;
+        }
+
+        function dayLabel(date) {
+          return date.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: "numeric" });
+        }
+
+        function dayOf(message) {
+          const date = new Date(message.time);
+          return isNaN(date.getTime()) ? "" : date.toDateString();
+        }
+
+        // Appends a row per message after `previous`, with a day line wherever the day changes.
+        function appendRows(target, messages, previous) {
+          for (const message of messages) {
+            const day = dayOf(message);
+            if (day && (!previous || day !== dayOf(previous))) target.append(span("day", dayLabel(new Date(message.time))));
+            const row = buildRow(message);
+            state.rows.set(message.seq, row);
+            target.append(row);
+            previous = message;
+          }
+        }
+
+        // Rebuilds every row, as when the tags column comes or goes, keeping the reader's place.
+        function renderRows() {
+          const top = $("log").scrollTop;
+          applyTemplate();
+          state.rows.clear();
+          const fragment = document.createDocumentFragment();
+          appendRows(fragment, state.messages, null);
+          $("rows").replaceChildren(fragment);
+          $("log").scrollTop = top;
+        }
+
+        const atBottom = () => {
+          const log = $("log");
+          return log.scrollHeight - log.scrollTop - log.clientHeight < 24;
+        };
+
+        function scrollToBottom() {
+          $("log").scrollTop = $("log").scrollHeight;
+          state.unseen = 0;
+          $("jump").hidden = true;
+        }
+
+        // Adds messages in order, once per frame. A hidden tab draws no frames, so the
+        // queue keeps only as many messages as the page shows.
+        let pending = [];
+        let frame = 0;
+        function addMessage(raw) {
+          if (!Number.isFinite(raw.seq)) return;
+          if (state.nextSeq != null && raw.seq < state.nextSeq) return;
+          state.nextSeq = raw.seq + 1;
+          const found = leaves(raw.data);
+          const tags = tagsOf(raw);
+          pending.push({
+            seq: raw.seq, time: raw.time, meta: raw.meta || {}, data: raw.data, raw,
+            leaves: found, tags, tone: toneOf(tags), hay: searchText(found, tags),
+          });
+          if (pending.length > keep) pending.shift();
+          if (!frame) frame = requestAnimationFrame(flush);
+        }
+
+        function flush() {
+          frame = 0;
+          const batch = pending;
+          pending = [];
+          if (!batch.length) return;
+          const pinned = atBottom();
+          const tagged = state.tagged;
+          for (const message of batch) state.tagsWidth = Math.max(state.tagsWidth, Math.min(20, message.tags.join(" ").length));
+          state.messages.push(...batch);
+          const dropped = state.messages.splice(0, Math.max(0, state.messages.length - keep));
+          state.tagged = state.messages.some((message) => message.tags.length);
+          if (!state.rows.size || tagged !== state.tagged) {
+            renderRows();
+          } else {
+            applyTemplate();
+            const rows = $("rows");
+            for (const message of dropped) {
+              state.rows.get(message.seq)?.remove();
+              state.rows.delete(message.seq);
+            }
+            while (rows.firstElementChild?.classList.contains("day") && !rows.firstElementChild.nextElementSibling?.classList.contains("row")) {
+              rows.firstElementChild.remove();
+            }
+            const kept = state.messages.length - batch.length;
+            appendRows(rows, batch, kept > 0 ? state.messages[kept - 1] : null);
+          }
+          applyFilter();
+          if (pinned) scrollToBottom();
+          else {
+            state.unseen += batch.filter(matches).length;
+            $("jump").textContent = count(state.unseen) + " new \u2193";
+            $("jump").hidden = !state.unseen;
+          }
+          renderFacts();
+        }
+
+        // Filter: plain text, case ignored, matched against what the page shows: each field
+        // as `path: value`, with the whole value even where a row shows only its size, and
+        // the tags.
+        function searchText(found, tags) {
+          const fields = found.map(([path, value]) => (path ? path + ": " : "") + whole(value));
+          return [...fields, ...tags].join("\n").toLowerCase();
+        }
+
+        function matches(message) {
+          return !state.filter || message.hay.includes(state.filter) || ("#" + message.seq) === state.filter;
+        }
+
+        // Shows the matching rows, how many match, and what to say when none do.
+        function applyFilter() {
+          let visible = 0;
+          for (const message of state.messages) {
+            const show = matches(message);
+            if (show) visible++;
+            const row = state.rows.get(message.seq);
+            if (row) row.hidden = !show;
+          }
+          const none = !state.messages.length;
+          $("log").classList.toggle("filtering", Boolean(state.filter));
+          $("matches").textContent = state.filter ? count(visible) + " of " + count(state.messages.length) : "";
+          $("empty").hidden = !none && visible > 0;
+          $("empty").textContent = none ? "No messages yet." : "No messages match.";
+          $("log-head").hidden = none;
+        }
+
+        // The open message.
+
+        function valueNode(value) {
+          if (typeof value === "string") {
+            if (value === "") return span("none", "\"\"");
+            const lines = value.split("\n").length;
+            if (lines === 1 && value.length <= 100) return markedSpan("str", value);
+            const wrap = document.createElement("div");
+            wrap.append(markedSpan("str block", value.slice(0, paneChars)));
+            const note = document.createElement("small");
+            note.className = "note";
+            const size = count(value.length) + " chars" + (lines > 1 ? " \u00b7 " + count(lines) + " lines" : "");
+            note.append(value.length > paneChars ? size + " \u00b7 showing the first " + count(paneChars) : size);
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "icon";
+            button.title = "Copy the whole value";
+            button.setAttribute("aria-label", "Copy the whole value");
+            button.innerHTML = copyIcon;
+            button.addEventListener("click", () => copy(button, value));
+            note.append(button);
+            wrap.append(note);
+            return wrap;
+          }
+          if (typeof value === "number") return markedSpan("num", String(value));
+          if (typeof value === "boolean") return markedSpan("bool", String(value));
+          if (value === null) return span("null", "null");
+          if (Array.isArray(value)) {
+            if (!value.length) return span("none", "[]");
+            const inline = JSON.stringify(value);
+            if (value.every((item) => !isObject(item) && !Array.isArray(item)) && inline.length <= 60) return markedSpan("num", inline.replaceAll(",", ", "));
+            return listNode(value.map((item, i) => [String(i), item]), true);
+          }
+          const entries = Object.entries(value);
+          return entries.length ? listNode(entries, false) : span("none", "{}");
+        }
+
+        function listNode(entries, indexed) {
+          const list = document.createElement("dl");
+          for (const [key, child] of entries) {
+            const term = document.createElement("dt");
+            term.append(...marked(key));
+            if (indexed) term.className = "index";
+            const detail = document.createElement("dd");
+            // A list of small flat records reads best one record to a line, written as in a row.
+            const flat = isObject(child) && Object.values(child).every((item) => !isObject(item) && !Array.isArray(item));
+            const line = indexed && flat ? literal(child) : "";
+            detail.append(line && line.length <= 72 ? markedSpan("lit", line) : valueNode(child));
+            list.append(term, detail);
+          }
+          return list;
+        }
+
+        function poolRef() {
+          if (!state.local) return location.origin + "/" + poolName;
+          return poolName;
+        }
+
+        function cliCommand(seq) {
+          const path = state.info && state.info.path;
+          const dir = path ? path.replace(/[\\/][^\\/]*$/, "") : "";
+          const quote = (text) => /^[\w@%+=:,./-]+$/.test(text) ? text : "'" + text.replaceAll("'", "'\\''") + "'";
+          return "plasmite " + (state.local && dir ? "--dir " + quote(dir) + " " : "") + "fetch " + quote(poolRef()) + " " + seq;
+        }
+
+        function renderDetail() {
+          const message = state.selected;
+          $("detail").hidden = !message;
+          $("body").classList.toggle("open", Boolean(message));
+          if (!message) return;
+          $("detail-seq").textContent = "#" + message.seq;
+          const date = new Date(message.time);
+          $("detail-when").textContent = isNaN(date.getTime()) ? String(message.time || "")
+            : date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) +
+              "." + pad(date.getMilliseconds(), 3) + " · " + ago(date);
+          $("detail-when").title = message.time;
+          $("tags-tree").replaceChildren(...tagWords(message.tags));
+          const extra = Object.fromEntries(Object.entries(message.meta).filter(([key]) => key !== "tags"));
+          $("detail-meta").hidden = !Object.keys(extra).length;
+          $("meta-tree").replaceChildren(valueNode(extra));
+          $("data-tree").replaceChildren(valueNode(message.data));
+          $("cli").textContent = cliCommand(message.seq);
+        }
+
+        function select(message) {
+          const previous = state.selected && state.rows.get(state.selected.seq);
+          if (previous) previous.setAttribute("aria-selected", "false");
+          state.selected = message;
+          renderDetail();
+          const row = message && state.rows.get(message.seq);
+          if (row) {
+            row.setAttribute("aria-selected", "true");
+            // Opening the message shortens the log; this keeps the row wholly in view.
+            row.scrollIntoView({ block: "nearest" });
+          }
+        }
+
+        function step(by) {
+          const visible = state.messages.filter(matches);
+          if (!visible.length) return;
+          const at = visible.indexOf(state.selected);
+          const next = at < 0 ? (by > 0 ? 0 : visible.length - 1) : Math.max(0, Math.min(visible.length - 1, at + by));
+          select(visible[next]);
+        }
+
+        async function copy(button, text) {
+          try {
+            await navigator.clipboard.writeText(text);
+            button.innerHTML = doneIcon;
+            button.classList.add("done");
+            setTimeout(() => { button.innerHTML = copyIcon; button.classList.remove("done"); }, 1200);
+          } catch (_) { /* Clipboard needs a secure context; the text stays selectable. */ }
+        }
+
+        // Header.
+
+        function ago(date) {
+          const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+          if (seconds < 5) return "just now";
+          if (seconds < 60) return seconds + "s ago";
+          const minutes = Math.round(seconds / 60);
+          if (minutes < 60) return minutes + " min ago";
+          const hours = Math.round(minutes / 60);
+          if (hours < 48) return hours + "h ago";
+          return Math.round(hours / 24) + " days ago";
+        }
+
+        function size(bytes) {
+          const units = ["B", "KB", "MB", "GB", "TB"];
+          let value = bytes, unit = 0;
+          while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+          return (unit ? Number(value.toFixed(1)) : value) + " " + units[unit];
+        }
+
+        function renderFacts() {
+          const info = state.info;
+          if (!info) return;
+          const bounds = info.bounds || {};
+          const metrics = info.metrics || {};
+          const total = metrics.message_count || 0;
+          const facts = [];
+          const fact = (value, label) => { const b = document.createElement("b"); b.textContent = value; facts.push(label ? [b, " " + label] : [b]); };
+          fact(count(total), total === 1 ? "message" : "messages");
+          if (bounds.oldest != null) fact("#" + count(bounds.oldest) + "–#" + count(bounds.newest));
+          fact(size(info.file_size));
+          const newest = metrics.age && metrics.age.newest_time;
+          if (newest) facts.push(["newest ", Object.assign(document.createElement("b"), { textContent: ago(new Date(newest)) })]);
+          // From the page's window, not the count so far, so it holds still while messages load.
+          if (total > keep) facts.push(["showing the last " + count(keep)]);
+          // Each fact stays whole; a narrow line breaks only between them.
+          const factSpan = (parts) => { const fact = span("fact", ""); fact.append(...parts); return fact; };
+          $("facts").replaceChildren(...facts.flatMap((parts, i) => (i ? [" · ", factSpan(parts)] : [factSpan(parts)])));
+        }
+
+        function setLive(on) {
+          $("live").textContent = on ? "live" : "reconnecting";
+          $("live").className = "live " + (on ? "on" : "off");
+        }
+
+        // Server.
+
+        function toLogin() {
+          location.assign("/ui?next=" + encodeURIComponent(location.pathname + location.search));
+        }
+
+        async function loadInfo() {
+          const response = await fetch("/v0/ui/pools/" + encodeURIComponent(poolName) + "/info", { cache: "no-store" });
+          if (response.status === 401) { toLogin(); return false; }
+          if (response.status === 404) { showMissing(); return false; }
+          if (!response.ok) throw new Error("Pool info failed (" + response.status + ")");
+          state.info = (await response.json()).pool || null;
+          renderFacts();
+          return true;
+        }
+
+        function showMissing() {
+          $("live").hidden = true;
+          $("log-head").hidden = true;
+          $("empty").hidden = false;
+          $("empty").textContent = "No pool named “" + poolName + "” here.";
+          $("append").hidden = true;
+        }
+
+        function parseEvents(buffer) {
+          const blocks = buffer.split("\n\n");
+          const rest = blocks.pop() || "";
+          const events = [];
+          for (const block of blocks) {
+            let name = "";
+            const data = [];
+            for (const line of block.split("\n")) {
+              if (line.startsWith("event:")) name = line.slice(6).trim();
+              if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+            }
+            if (data.length) events.push({ name, data: JSON.parse(data.join("\n")) });
+          }
+          return { events, rest };
+        }
+
+        // Follows the pool from the next unseen message, reconnecting after any drop.
+        async function followPool() {
+          for (;;) {
+            try {
+              const query = new URLSearchParams({ gap_policy: "continue" });
+              if (state.nextSeq != null) query.set("since_seq", state.nextSeq);
+              const response = await fetch("/v0/ui/pools/" + encodeURIComponent(poolName) + "/events?" + query, { cache: "no-store" });
+              if (response.status === 401) { toLogin(); return; }
+              if (response.status === 404) { showMissing(); return; }
+              if (!response.ok || !response.body) throw new Error("Stream failed (" + response.status + ")");
+              setLive(true);
+              const reader = response.body.getReader();
+              const decoder = new TextDecoder();
+              let buffer = "";
+              for (;;) {
+                const part = await reader.read();
+                if (part.done) break;
+                const parsed = parseEvents(buffer + decoder.decode(part.value, { stream: true }).replaceAll("\r\n", "\n"));
+                buffer = parsed.rest;
+                for (const event of parsed.events) {
+                  if (event.name === "error") throw new Error("Stream error");
+                  if (event.name === "message") addMessage(event.data);
+                }
+              }
+            } catch (_) { /* Reconnect below. */ }
+            setLive(false);
+            await new Promise((resolve) => setTimeout(resolve, retryMs));
+          }
+        }
+
+        // Page events.
+
+        $("rows").addEventListener("click", (event) => {
+          const row = event.target.closest(".row");
+          if (!row || !window.getSelection().isCollapsed) return;
+          const message = state.messages.find((item) => item.seq === Number(row.dataset.seq));
+          select(message === state.selected ? null : message);
+        });
+        $("close").addEventListener("click", () => select(null));
+        $("copy-json").innerHTML = copyIcon;
+        $("copy-cli").innerHTML = copyIcon;
+        $("copy-json").addEventListener("click", () => {
+          if (state.selected) copy($("copy-json"), JSON.stringify(state.selected.raw, null, 2));
+        });
+        $("copy-cli").addEventListener("click", () => copy($("copy-cli"), $("cli").textContent));
+        $("jump").addEventListener("click", scrollToBottom);
+        $("log").addEventListener("scroll", () => { if (atBottom()) { state.unseen = 0; $("jump").hidden = true; } }, { passive: true });
+        $("filter").addEventListener("input", () => {
+          state.filter = $("filter").value.trim().toLowerCase();
+          renderRows();
+          applyFilter();
+          renderDetail();
+          scrollToBottom();
+        });
+        document.addEventListener("keydown", (event) => {
+          const typing = event.target instanceof Element ? event.target.closest("input, textarea") : null;
+          if (event.key === "Escape") {
+            if (typing === $("filter") && $("filter").value) { $("filter").value = ""; $("filter").dispatchEvent(new Event("input")); return; }
+            if (typing) { typing.blur(); return; }
+            if (state.selected) select(null);
+            return;
+          }
+          if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
+          if (event.key === "/") { event.preventDefault(); $("filter").focus(); }
+          else if (event.key === "j" || event.key === "ArrowDown") { event.preventDefault(); step(1); }
+          else if (event.key === "k" || event.key === "ArrowUp") { event.preventDefault(); step(-1); }
+        });
+
+        // Plain text goes in as {"text": ...}; anything that parses as JSON goes in as is, as `feed` takes it.
+        $("append").addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const input = $("append-input");
+          const error = $("append-error");
+          error.textContent = "";
+          if (!input.value.trim()) return;
+          let data;
+          try { data = JSON.parse(input.value); } catch (_) { data = { text: input.value }; }
+          try {
+            const response = await fetch("/v0/pools/" + encodeURIComponent(poolName) + "/append", {
+              method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ data }),
+            });
+            if (response.status === 401) { toLogin(); return; }
+            if (!response.ok) throw new Error("Append failed (" + response.status + ")");
+            input.value = "";
+            scrollToBottom();
+          } catch (err) { error.textContent = String(err.message || err); }
+        });
+
+        async function boot() {
+          $("name").textContent = poolName;
+          if (location.protocol === "file:") {
+            $("empty").hidden = false;
+            $("empty").textContent = "Open this page through a running Plasmite server, like http://127.0.0.1:9700/ui.";
+            return;
+          }
+          try {
+            const session = await fetch("/v0/browser/session", { cache: "no-store" });
+            if (!session.ok) { toLogin(); return; }
+            state.local = Boolean((await session.json()).local);
+          } catch (_) { setLive(false); return; }
+          $("nav-access").hidden = !state.local;
+          const where = span(state.local ? "where local" : "where", state.local ? "Local" : location.hostname);
+          if (state.local) where.title = "No key needed";
+          $("actions").append(where);
+          if (!state.local) {
+            const logout = document.createElement("button");
+            logout.type = "button";
+            logout.textContent = "Log out";
+            logout.addEventListener("click", async () => {
+              await fetch("/v0/browser/session", { method: "DELETE" });
+              location.assign("/ui");
+            });
+            $("actions").append(logout);
+          }
+          document.title = poolName + " · " + (state.local ? "local" : location.hostname);
+          try { if (!(await loadInfo())) return; } catch (_) { /* The stream still runs; facts fill in on the next try. */ }
+          const bounds = (state.info && state.info.bounds) || {};
+          if (Number.isFinite(bounds.newest)) state.nextSeq = Math.max(bounds.oldest || 1, bounds.newest - keep + 1);
+          applyFilter();
+          // Rows take their height from the font, so the first scroll to the newest waits for it.
+          await document.fonts.ready;
+          followPool();
+          setInterval(() => { if (!document.hidden) loadInfo().catch(() => {}); }, 3000);
+        }
+
+        boot();
+      })();
+    </script>
+  </body>
+</html>

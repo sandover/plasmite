@@ -362,6 +362,22 @@ its used space as a continuous track instead of individual segments.
 Click a pool to follow its newest messages; hover a message to find it on the
 spiral. The link at the bottom of that card opens the full pool page.
 
+The pool page shows the pool's last 400 messages, one line each, and adds new
+ones as they arrive. Each line has the message's sequence number, time, and
+tags, then its data, field by field in the server's order; nested fields show
+their dotted path, like `run.id`. A value too long for the line shows its
+start and an ellipsis; a long string also shows its size. Tags such as
+`error` and `warn` color a line; no field inside the data does. Click a line
+to open the whole message below the list, with nested fields indented under
+their keys, and a `plasmite fetch` command that reads the same message from a
+terminal. There a string longer than 2,000 characters shows its start, its
+size, and a button that copies all of it.
+Type in Filter to keep lines that contain that text, as `path: value` or in a
+tag, and mark it; a match in a cut-off part marks the ellipsis. `j` and `k` move
+between lines, `/` focuses the filter, and Esc closes the open message. The
+Append box takes JSON, as `plasmite feed` does, or plain text, which it sends
+as `{"text": ...}`.
+
 On the local map, the small marks beneath each pool's size open its activity
 card. It lists live browser, HTTP, and MCP requests for that pool, with peer
 IP addresses and client headers when available. The server shares these

@@ -1,10 +1,8 @@
 <!--
-Purpose: Single-file web UI for watching Plasmite pools in real time.
-Key exports: Route entry points `/ui` and `/ui/pools/{name}` in this same document.
-Role: Browser client for list/info/SSE endpoints provided by `plasmite serve`.
+Purpose: The pools in one served directory, live, and the sign-in form for a key.
+Role: Browser client for the pool change stream; `/ui/pools/{name}` is pool.html.
 Invariants: No framework runtime, no build step, and no local JS package dependencies.
-Invariants: Message content is rendered as text (never injected as HTML).
-Invariants: Client scrollback is bounded by N and oldest entries are dropped first.
+Invariants: Pool names are rendered as text (never injected as HTML).
 -->
 <!doctype html>
 <html lang="en">
@@ -73,7 +71,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         gap: 0.8rem;
       }
 
-      .app:not(.app--follow) { font-size: 16px; }
+      .app { font-size: 16px; }
 
       .card {
         background: linear-gradient(180deg, var(--panel), #1a1f28);
@@ -84,41 +82,8 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         flex-direction: column;
       }
 
-      .app--follow {
-        height: calc(100vh - 43px - 2rem);
-      }
-
-      .app--follow .card {
-        min-height: 0;
-        flex: 1;
-      }
-
       .muted {
         color: var(--muted);
-      }
-
-      .pill {
-        border: 1px solid var(--line);
-        background: var(--panel-2);
-        border-radius: 999px;
-        padding: 0.18rem 0.6rem;
-        font-size: 0.8rem;
-        color: var(--muted);
-      }
-
-      .pill[data-status="live"] {
-        color: var(--ok);
-        border-color: #2f6a5a;
-      }
-
-      .pill[data-status="reconnecting"] {
-        color: var(--warn);
-        border-color: #6a5a2f;
-      }
-
-      .pill[data-status="error"] {
-        color: var(--error);
-        border-color: #704848;
       }
 
       button,
@@ -204,310 +169,6 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         .summary { grid-template-columns: 1fr; gap: 4px 0; }
       }
 
-      .stream {
-        border-top: 1px solid var(--line);
-        flex: 1;
-        min-height: 0;
-        overflow: auto;
-        padding: 0.44rem 0.6rem;
-        background: #12161d;
-      }
-
-      /* --- Pool info panel --- */
-
-      .info-panel {
-        padding: 0.5rem 0.8rem;
-        border-bottom: 1px solid var(--line);
-        font-size: 0.74rem;
-        display: grid;
-        gap: 0.08rem;
-        background: var(--panel);
-        flex-shrink: 0;
-      }
-
-      .info-row {
-        display: flex;
-        gap: 0.5rem;
-        line-height: 1.35;
-        align-items: flex-start;
-      }
-
-      .info-key {
-        color: #7e8ca4;
-        min-width: 5.2rem;
-        padding-top: 0.02rem;
-      }
-
-      .info-val {
-        color: #c8d3e2;
-        min-width: 0;
-        word-break: break-all;
-      }
-
-      .info-val--stream {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.28rem 0.5rem;
-      }
-
-      .stream-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.28rem;
-        padding: 0.08rem 0.5rem;
-        font-size: 0.69rem;
-        line-height: 1;
-      }
-
-      .stream-pill::before {
-        content: "";
-        width: 0.36rem;
-        height: 0.36rem;
-        border-radius: 999px;
-        background: currentColor;
-        flex-shrink: 0;
-      }
-
-      .stream-detail {
-        color: #c8d3e2;
-      }
-
-      .stream-note {
-        color: #90a0b8;
-        font-size: 0.7rem;
-      }
-
-      /* --- Message cards --- */
-
-      .msg {
-        border: 1px solid #2a3140;
-        border-radius: 6px;
-        background: rgba(16, 20, 28, 0.52);
-        padding: 0.38rem 0.5rem 0.32rem;
-        border-left: 3px solid transparent;
-      }
-
-      .msg + .msg {
-        margin-top: 0.3rem;
-      }
-
-      .msg[data-tint="ok"] {
-        border-left-color: var(--ok);
-      }
-
-      .msg[data-tint="warn"] {
-        border-left-color: var(--warn);
-      }
-
-      .msg[data-tint="error"] {
-        border-left-color: var(--error);
-      }
-
-      .msg[data-tint="accent"] {
-        border-left-color: var(--accent);
-      }
-
-      .msg-head {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 0.35rem 0.6rem;
-      }
-
-      .msg-tags {
-        display: flex;
-        gap: 0.32rem;
-        flex-wrap: wrap;
-        align-items: center;
-        min-width: 0;
-      }
-
-      .msg-ident {
-        display: inline-flex;
-        align-items: baseline;
-        gap: 0.28rem;
-        color: #93a0b4;
-        font-size: 0.76rem;
-        white-space: nowrap;
-      }
-
-      .dot {
-        color: #4a5570;
-        font-size: 0.78rem;
-      }
-
-      .time {
-        color: #93a0b4;
-        font-size: 0.76rem;
-        cursor: default;
-      }
-
-      .seq {
-        color: #8ca6c7;
-        font-weight: 600;
-      }
-
-      .msg-meta {
-        margin-top: 0.14rem;
-        color: #8393ad;
-      }
-
-      .msg-data {
-        margin-top: 0.16rem;
-        display: grid;
-        gap: 0.24rem;
-      }
-
-      .tag {
-        display: inline-flex;
-        align-items: center;
-        border: 1px solid #3b4558;
-        border-radius: 999px;
-        background: transparent;
-        color: #b7c4dc;
-        padding: 0.15rem 0.52rem;
-        font-size: 0.7rem;
-        font-weight: 600;
-        line-height: 1.15;
-        max-width: 9.8rem;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .tag--neutral {
-        border-color: #42506a;
-        color: #b4c0d5;
-      }
-
-      .kv-line {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: baseline;
-        gap: 0.06rem 0;
-        line-height: 1.28;
-      }
-
-      .msg-meta .kv-line {
-        font-size: 0.7rem;
-      }
-
-      .msg-data .kv-line {
-        font-size: 0.74rem;
-      }
-
-      .kv-item {
-        display: inline-flex;
-        gap: 0.16rem;
-        align-items: baseline;
-        max-width: min(46rem, 100%);
-      }
-
-      .kv-item + .kv-item::before {
-        content: "\00b7";
-        color: #4a5570;
-        padding: 0 0.22rem;
-        flex-shrink: 0;
-      }
-
-      .kv-item kbd {
-        color: #8393ad;
-        font-family: inherit;
-        font-size: 0.66rem;
-        line-height: 1.2;
-        letter-spacing: 0.012em;
-      }
-
-      .msg-data .kv-item kbd {
-        color: #8e9eb8;
-      }
-
-      .kv-item span {
-        min-width: 0;
-        overflow-wrap: anywhere;
-      }
-
-      .msg-meta .kv-item span {
-        color: #9aa8bf;
-      }
-
-      .msg-data .kv-item span {
-        color: #d2dae7;
-      }
-
-      .data-block {
-        border-left: 2px solid #39465d;
-        padding-left: 0.5rem;
-        display: grid;
-        gap: 0.08rem;
-      }
-
-      .data-block-key {
-        color: #8e9eb8;
-        font-size: 0.66rem;
-        letter-spacing: 0.012em;
-      }
-
-      .data-block-value {
-        margin: 0;
-        color: #d7deeb;
-        font-size: 0.73rem;
-        line-height: 1.35;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-      }
-
-      .tag[data-kind="error"] {
-        border-color: #7a4d52;
-        color: #f0bec3;
-      }
-
-      .tag[data-kind="warn"] {
-        border-color: #776136;
-        color: #eedcae;
-      }
-
-      .tag[data-kind="ok"] {
-        border-color: #3c6f5f;
-        color: #bae6d8;
-      }
-
-      .preview {
-        margin-top: 0.14rem;
-        color: #c8d3e2;
-        font-size: 0.77rem;
-        line-height: 1.28;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-      }
-
-      .details {
-        margin-top: 0.1rem;
-      }
-
-      .details > summary {
-        cursor: pointer;
-        color: #7f8ea5;
-        font-size: 0.67rem;
-        letter-spacing: 0.02em;
-      }
-
-      .details > summary::marker {
-        color: #6f7f99;
-      }
-
-      .value-text {
-        margin: 0;
-        color: #dde1ea;
-        white-space: pre-wrap;
-        word-break: break-word;
-        line-height: 1.24;
-        font-size: 0.75rem;
-      }
-
       .error {
         color: var(--error);
       }
@@ -518,10 +179,6 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           margin-top: 0.6rem;
         }
 
-        .app--follow {
-          height: calc(100vh - 43px - 1.2rem);
-        }
-
         .body {
           padding: 0.7rem;
         }
@@ -529,24 +186,6 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         input {
           width: 100%;
           min-width: 0;
-        }
-
-        .tags {
-          margin-left: 0;
-        }
-
-        .tag {
-          max-width: 100%;
-        }
-
-        .msg-head {
-          flex-wrap: wrap;
-          gap: 0.24rem 0.5rem;
-        }
-
-        .msg-ident {
-          order: 2;
-          width: 100%;
         }
       }
     </style>
@@ -566,27 +205,11 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
     <script>
       (() => {
         const app = document.getElementById("app");
-        const path = decodeURIComponent(window.location.pathname);
-        const onPoolPage = path.startsWith("/ui/pools/");
-        const poolName = onPoolPage ? path.slice("/ui/pools/".length) : "";
-
         const params = new URLSearchParams(window.location.search);
-        const requestedN = Number(params.get("n") || "400");
-        const N = Number.isFinite(requestedN)
-          ? Math.max(1, Math.min(2000, Math.trunc(requestedN)))
-          : 400;
 
         const state = {
           local: false,
-          n: N,
-          p: null,
-          poolInfo: null,
-          infoError: false,
-          liveStatus: "reconnecting",
-          messages: [],
-          nextSeq: null,
           stopped: false,
-          reconnectTimer: null,
         };
 
         /* ---- Utility functions ---- */
@@ -594,7 +217,6 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         function renderLogin(message) {
           state.stopped = true;
           document.getElementById('actions').replaceChildren();
-          app.classList.remove('app--follow');
           app.textContent = '';
           var card = document.createElement('section');
           card.className = 'card';
@@ -616,8 +238,9 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
               key = '';
               if (!response.ok) throw new Error('Access key was not accepted.');
               state.stopped = false;
+              if (returnToNext()) return;
               renderActions();
-              bootPool();
+              bootList();
             } catch (err) { card.querySelector('[data-login-error]').textContent = String(err.message || err); }
           });
         }
@@ -625,7 +248,6 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         async function logout() {
           state.stopped = true;
           await fetch('/v0/browser/session', { method: 'DELETE' });
-          state.messages = [];
           renderLogin('Signed out.');
         }
 
@@ -639,7 +261,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           where.textContent = state.local ? 'Local' : window.location.hostname;
           if (state.local) where.title = 'No key needed';
           actions.appendChild(where);
-          document.title = (onPoolPage ? poolName : 'Pools') + ' \u00b7 ' + (state.local ? 'local' : window.location.hostname);
+          document.title = 'Pools \u00b7 ' + (state.local ? 'local' : window.location.hostname);
           if (!state.local) {
             var button = document.createElement('button');
             button.type = 'button';
@@ -647,15 +269,6 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
             button.addEventListener('click', logout);
             actions.appendChild(button);
           }
-        }
-
-        function setLiveStatus(status) {
-          state.liveStatus = status;
-          renderPoolInfo();
-        }
-
-        function updateIndicators() {
-          renderPoolInfo();
         }
 
         function pad2(n) {
@@ -691,33 +304,6 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           var value = bytes, unit = 0;
           while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
           return (unit ? Number(value.toFixed(1)) : value) + " " + units[unit];
-        }
-
-        function isIsoTimestamp(value) {
-          return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value);
-        }
-
-        function humanizeTimestamp(isoString) {
-          var date = new Date(isoString);
-          if (isNaN(date.getTime())) return isoString;
-          var now = new Date();
-          if (date.toDateString() === now.toDateString()) {
-            return pad2(date.getHours()) + ":" + pad2(date.getMinutes()) + ":" + pad2(date.getSeconds());
-          }
-          var months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-          return months[date.getMonth()] + " " + date.getDate() + " " + pad2(date.getHours()) + ":" + pad2(date.getMinutes());
-        }
-
-        function startTimeUpdater() {
-          setInterval(function () {
-            var els = document.querySelectorAll("[data-time]");
-            for (var i = 0; i < els.length; i++) {
-              var iso = els[i].dataset.time;
-              if (iso) {
-                els[i].textContent = formatRelativeTime(iso);
-              }
-            }
-          }, 10000);
         }
 
         /* ---- Pool list ---- */
@@ -806,7 +392,6 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         // per pool, changing only its cells. A redraw then never takes focus or a
         // click away from the row under the pointer.
         function renderPoolList() {
-          app.classList.remove("app--follow");
           var pools = list.pools;
           var dir = poolDirectory();
           var body = "";
@@ -871,437 +456,7 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           }
         });
 
-        /* ---- Pool follow view ---- */
-
-        function renderPoolView(error) {
-          app.classList.add("app--follow");
-
-          app.innerHTML =
-            '<section class="card">' +
-              '<div class="info-panel" data-info></div>' +
-              (error ? '<div class="body"><p class="error">' + escapeHtml(error) + '</p></div>' : "") +
-              '<section class="stream" data-stream></section>' +
-              '<form class="body" data-append><input aria-label="Message" placeholder="Message" required /> ' +
-              '<button type="submit">Append</button><span class="error" data-append-error></span></form>' +
-            '</section>';
-
-          updateIndicators();
-          setLiveStatus(state.liveStatus);
-
-          document.querySelector('[data-append]').addEventListener('submit', async function (event) {
-            event.preventDefault();
-            var input = event.currentTarget.querySelector('input');
-            var error = event.currentTarget.querySelector('[data-append-error]');
-            error.textContent = '';
-            try {
-              var response = await fetch('/v0/pools/' + encodeURIComponent(poolName) + '/append', {
-                method: 'POST', headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ data: { text: input.value } })
-              });
-              if (response.status === 401) { renderLogin('Session ended. Enter the key again.'); return; }
-              if (!response.ok) throw new Error('Append failed (' + response.status + ').');
-              input.value = '';
-            } catch (err) { error.textContent = String(err.message || err); }
-          });
-        }
-
-        /* ---- Message rendering ---- */
-
-        function appendMessageLine(message) {
-          var seq = Number(message.seq);
-          if (Number.isFinite(seq)) {
-            state.nextSeq = seq + 1;
-          }
-
-          var streamEl = document.querySelector("[data-stream]");
-          if (!streamEl) {
-            return;
-          }
-
-          var nearBottom =
-            streamEl.scrollHeight - (streamEl.scrollTop + streamEl.clientHeight) < 16;
-
-          state.messages.push(message);
-          streamEl.appendChild(renderMessage(message));
-
-          while (state.messages.length > state.n) {
-            state.messages.shift();
-            if (streamEl.firstChild) {
-              streamEl.removeChild(streamEl.firstChild);
-            }
-          }
-
-          if (nearBottom) {
-            streamEl.scrollTop = streamEl.scrollHeight;
-          }
-
-          updateIndicators();
-        }
-
-        function renderMessage(message) {
-          var meta = message && typeof message.meta === "object" && message.meta ? message.meta : {};
-          var tags = Array.isArray(meta.tags) ? meta.tags : [];
-          var unpacked = unpackEnvelope(message.data);
-          var dataFields = collectDataFields(unpacked.primary, unpacked.envelope);
-
-          var card = document.createElement("article");
-          card.className = "msg";
-          var tint = getMessageTint(message, tags);
-          if (tint) card.dataset.tint = tint;
-
-          // --- Line 1: tags (left) and time/seq (right) ---
-          var head = document.createElement("div");
-          head.className = "msg-head";
-
-          var tagsWrap = document.createElement("div");
-          tagsWrap.className = "msg-tags";
-          var tagsToRender = tags.slice();
-          if (!tagsToRender.length && isPlainObject(unpacked.primary) && typeof unpacked.primary.type === "string") {
-            tagsToRender.push(unpacked.primary.type);
-          }
-          for (var ti = 0; ti < tagsToRender.length; ti++) {
-            var tagText = String(tagsToRender[ti]);
-            var tagEl = document.createElement("span");
-            tagEl.className = "tag";
-            if (!tags.length) {
-              tagEl.classList.add("tag--neutral");
-            }
-            tagEl.textContent = tagText;
-            var tagKind = classifyTag(tagText);
-            if (tagKind) tagEl.dataset.kind = tagKind;
-            tagsWrap.appendChild(tagEl);
-          }
-          head.appendChild(tagsWrap);
-
-          var ident = document.createElement("div");
-          ident.className = "msg-ident";
-          var isoTime = message.time || "";
-          var timeEl = document.createElement("span");
-          timeEl.className = "time";
-          timeEl.dataset.time = isoTime;
-          timeEl.title = isoTime;
-          timeEl.textContent = isoTime ? formatRelativeTime(isoTime) : "";
-          ident.appendChild(timeEl);
-
-          var dotEl = document.createElement("span");
-          dotEl.className = "dot";
-          dotEl.textContent = "\u00b7";
-          ident.appendChild(dotEl);
-
-          var seqEl = document.createElement("span");
-          seqEl.className = "seq";
-          seqEl.textContent = "#" + (message.seq != null ? message.seq : "-");
-          ident.appendChild(seqEl);
-
-          head.appendChild(ident);
-          card.appendChild(head);
-
-          // --- Line 2: non-tag meta context (optional) ---
-          var metaEntriesRaw = orderedObjectEntries(meta, []);
-          var metaPairs = [];
-          for (var mi = 0; mi < metaEntriesRaw.length; mi++) {
-            var metaKey = metaEntriesRaw[mi][0];
-            var metaRaw = metaEntriesRaw[mi][1];
-            if (metaKey === "tags" || metaRaw == null) continue;
-            var metaText = compactInlineValue(metaRaw, 140);
-            if (!metaText) continue;
-            metaPairs.push([metaKey, metaText]);
-          }
-
-          if (metaPairs.length > 0) {
-            var metaLine = document.createElement("div");
-            metaLine.className = "msg-meta";
-            appendKvLine(metaLine, metaPairs, true);
-            card.appendChild(metaLine);
-          }
-
-          // --- Line 3+: data content (primary) ---
-          var dataSection = document.createElement("div");
-          dataSection.className = "msg-data";
-          var inlinePairs = [];
-          var blockPairs = [];
-          for (var di = 0; di < dataFields.length; di++) {
-            var dataKey = dataFields[di][0];
-            var dataRaw = dataFields[di][1];
-            if (isLongDisplayValue(dataRaw)) {
-              blockPairs.push([dataKey, dataRaw]);
-              continue;
-            }
-            var dataText = compactInlineValue(dataRaw, 120);
-            if (!dataText) continue;
-            inlinePairs.push([dataKey, dataText]);
-          }
-
-          if (inlinePairs.length > 0) {
-            appendKvLine(dataSection, inlinePairs, false);
-          }
-          for (var bi = 0; bi < blockPairs.length; bi++) {
-            appendDataBlock(dataSection, blockPairs[bi][0], blockPairs[bi][1]);
-          }
-          if (!inlinePairs.length && !blockPairs.length) {
-            var fallback = formatBlockValue(unpacked.primary != null ? unpacked.primary : message.data);
-            if (fallback) {
-              appendDataBlock(dataSection, "value", fallback);
-            }
-          }
-          card.appendChild(dataSection);
-
-          // --- Raw JSON (complete message, outside sections) ---
-          appendRawJson(card, message);
-
-          return card;
-        }
-
-        function getMessageTint(message, tags) {
-          var hasOk = false;
-          for (var i = 0; i < tags.length; i++) {
-            var kind = classifyTag(tags[i]);
-            if (kind === "error") return "error";
-            if (kind === "warn") return "warn";
-            if (kind === "ok") hasOk = true;
-          }
-          var data = isPlainObject(message.data) ? message.data : {};
-          if (data.type === "result" || hasOk) return "ok";
-          if (data.type === "claim") return "accent";
-          return "";
-        }
-
-        function appendKvLine(parent, pairs, isMeta) {
-          if (!pairs.length) return;
-          var wrap = document.createElement("div");
-          wrap.className = "kv-line";
-          for (var i = 0; i < pairs.length; i++) {
-            var key = pairs[i][0];
-            var value = pairs[i][1];
-            var fact = document.createElement("span");
-            fact.className = "kv-item";
-            var keyEl = document.createElement("kbd");
-            keyEl.textContent = key + ":";
-            fact.appendChild(keyEl);
-            var valueEl = document.createElement("span");
-            if (!isMeta && isIsoTimestamp(value)) {
-              valueEl.textContent = humanizeTimestamp(value);
-              valueEl.title = value;
-            } else {
-              valueEl.textContent = value;
-            }
-            fact.appendChild(valueEl);
-            wrap.appendChild(fact);
-          }
-          parent.appendChild(wrap);
-        }
-
-        function appendDataBlock(parent, key, value) {
-          var block = document.createElement("div");
-          block.className = "data-block";
-          var keyEl = document.createElement("div");
-          keyEl.className = "data-block-key";
-          keyEl.textContent = key + ":";
-          block.appendChild(keyEl);
-          var valueEl = document.createElement("pre");
-          valueEl.className = "data-block-value";
-          valueEl.textContent = formatBlockValue(value);
-          block.appendChild(valueEl);
-          parent.appendChild(block);
-        }
-
-        function appendRawJson(parent, message) {
-          var details = document.createElement("details");
-          details.className = "details";
-          var summary = document.createElement("summary");
-          summary.textContent = "json";
-          details.appendChild(summary);
-          var pre = document.createElement("pre");
-          pre.className = "value-text";
-          pre.textContent = prettyJson(reorderMessageForDisplay(message));
-          details.appendChild(pre);
-          parent.appendChild(details);
-        }
-
-        /* ---- Data processing ---- */
-
-        function unpackEnvelope(value) {
-          if (
-            isPlainObject(value) &&
-            "data" in value &&
-            (Object.hasOwn(value, "type") || Object.hasOwn(value, "ts"))
-          ) {
-            return { primary: value.data, envelope: value };
-          }
-          return { primary: value, envelope: {} };
-        }
-
-        function collectDataFields(primary, envelope) {
-          var orderedKeys = [
-            "env",
-            "service",
-            "version",
-            "status",
-            "msg",
-            "message",
-            "severity",
-            "cpu",
-            "mem_mb",
-            "rps",
-            "type",
-            "id",
-            "state",
-            "task_id",
-            "agent_id",
-            "from_id",
-            "to_id",
-            "path",
-            "ts",
-          ];
-          var seen = {};
-          var pairs = [];
-
-          function pushFrom(value) {
-            if (!isPlainObject(value)) return;
-            var entries = orderedObjectEntries(value, orderedKeys);
-            for (var i = 0; i < entries.length; i++) {
-              var key = entries[i][0];
-              var raw = entries[i][1];
-              if (raw == null || key === "data" || key === "tags") continue;
-              if (seen[key]) continue;
-              pairs.push([key, raw]);
-              seen[key] = true;
-            }
-          }
-
-          pushFrom(primary);
-          pushFrom(envelope);
-
-          if (pairs.length > 0) {
-            return pairs;
-          }
-
-          if (primary != null && !isPlainObject(primary)) {
-            return [["value", primary]];
-          }
-          return [];
-        }
-
-        function compactInlineValue(value, maxChars) {
-          if (value == null) return "";
-          var text =
-            typeof value === "string" ? value.replace(/\s+/g, " ").trim() : compactJson(value);
-          if (!text) return "";
-          return text.length > maxChars ? text.slice(0, maxChars - 1) + "\u2026" : text;
-        }
-
-        function isLongDisplayValue(value) {
-          if (value == null) return false;
-          if (typeof value === "string") {
-            return value.includes("\n") || value.length > 120;
-          }
-          if (Array.isArray(value) || isPlainObject(value)) {
-            var text = compactJson(value);
-            return text.length > 120;
-          }
-          return false;
-        }
-
-        function formatBlockValue(value) {
-          if (value == null) return "";
-          if (typeof value === "string") return value.trim();
-          if (Array.isArray(value) || isPlainObject(value)) return prettyJson(value);
-          return String(value);
-        }
-
         /* ---- Helpers ---- */
-
-        function isPlainObject(value) {
-          return typeof value === "object" && value != null && !Array.isArray(value);
-        }
-
-        function classifyTag(tag) {
-          var t = String(tag).toLowerCase();
-          if (
-            t.includes("error") ||
-            t.includes("fail") ||
-            t.includes("panic") ||
-            t.includes("fatal")
-          ) {
-            return "error";
-          }
-          if (
-            t.includes("warn") ||
-            t.includes("retry") ||
-            t.includes("reconnect") ||
-            t.includes("cancel")
-          ) {
-            return "warn";
-          }
-          if (t.includes("done") || t.includes("ok") || t.includes("success") || t.includes("result")) {
-            return "ok";
-          }
-          return "";
-        }
-
-        function compactJson(value) {
-          try {
-            var text = JSON.stringify(value);
-            return text.length > 280 ? prettyJson(value) : text;
-          } catch (_) {
-            return String(value);
-          }
-        }
-
-        function orderedObjectEntries(value, preferredKeys) {
-          if (!isPlainObject(value)) return [];
-          var entries = Object.entries(value);
-          if (!preferredKeys || !preferredKeys.length) return entries;
-          var byKey = {};
-          for (var i = 0; i < entries.length; i++) {
-            byKey[entries[i][0]] = entries[i][1];
-          }
-          var ordered = [];
-          var seen = {};
-          for (var pi = 0; pi < preferredKeys.length; pi++) {
-            var key = preferredKeys[pi];
-            if (Object.hasOwn(byKey, key)) {
-              ordered.push([key, byKey[key]]);
-              seen[key] = true;
-            }
-          }
-          for (var ei = 0; ei < entries.length; ei++) {
-            var eKey = entries[ei][0];
-            if (seen[eKey]) continue;
-            ordered.push(entries[ei]);
-          }
-          return ordered;
-        }
-
-        function reorderMessageForDisplay(value) {
-          if (!isPlainObject(value)) return value;
-          var out = {};
-          var preferred = ["seq", "time", "meta", "data"];
-          var ordered = orderedObjectEntries(value, preferred);
-          for (var i = 0; i < ordered.length; i++) {
-            var key = ordered[i][0];
-            var raw = ordered[i][1];
-            if (key === "meta" && isPlainObject(raw)) {
-              var metaObj = {};
-              var metaEntries = orderedObjectEntries(raw, ["tags"]);
-              for (var mi = 0; mi < metaEntries.length; mi++) {
-                metaObj[metaEntries[mi][0]] = metaEntries[mi][1];
-              }
-              out[key] = metaObj;
-              continue;
-            }
-            out[key] = raw;
-          }
-          return out;
-        }
-
-        function prettyJson(value) {
-          try {
-            return JSON.stringify(value, null, 2);
-          } catch (_) {
-            return String(value);
-          }
-        }
 
         function escapeHtml(value) {
           return String(value)
@@ -1365,229 +520,6 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
           }
         }
 
-        async function loadPoolInfo() {
-          var response = await fetch("/v0/ui/pools/" + encodeURIComponent(poolName) + "/info", {
-            cache: 'no-store',
-          });
-          if (response.status === 401) {
-            renderLogin('Session ended. Enter the key again.');
-            throw new Error("Authentication required");
-          }
-          if (!response.ok) {
-            var text = await response.text();
-            throw new Error("pool info failed (" + response.status + "): " + text);
-          }
-          var body = await response.json();
-          state.poolInfo = body && body.pool ? body.pool : null;
-          state.infoError = false;
-          state.p = state.poolInfo ? state.poolInfo.ring_size : null;
-          var newest = state.poolInfo && state.poolInfo.bounds ? state.poolInfo.bounds.newest : null;
-          var oldest = state.poolInfo && state.poolInfo.bounds ? state.poolInfo.bounds.oldest : null;
-          if (state.nextSeq == null && Number.isFinite(newest)) {
-            var floor = Number.isFinite(oldest) ? oldest : 1;
-            state.nextSeq = Math.max(floor, newest - state.n + 1);
-          }
-          updateIndicators();
-          renderPoolInfo();
-        }
-
-        function renderPoolInfo() {
-          var el = document.querySelector("[data-info]");
-          if (!el || !state.poolInfo) return;
-          var info = state.poolInfo;
-          var bounds = info.bounds || {};
-          var metrics = info.metrics || {};
-          var age = metrics.age || {};
-
-          var count = metrics.message_count != null ? metrics.message_count
-            : (bounds.oldest != null && bounds.newest != null)
-              ? (bounds.newest - bounds.oldest + 1) : "-";
-
-          // Size is the pool file, as the CLI reports it. A ring is meant to wrap,
-          // so the page shows no used or free share of it.
-          var rows = [{ key: "Pool", value: info.name || poolName }];
-          rows.push({ key: "Size", value: formatHumanBytes(info.file_size) });
-
-          rows.push({
-            key: "Messages",
-            value:
-              count + " buffered (seq " +
-              (bounds.oldest != null ? bounds.oldest : "-") +
-              " → " +
-              (bounds.newest != null ? bounds.newest : "-") +
-              ")",
-          });
-          rows.push({
-            key: "Stream",
-            stream: {
-              status: state.liveStatus,
-              shown: state.messages.length,
-              max: state.n,
-            },
-          });
-          if (state.infoError) rows.push({ key: "Metadata", value: "Unavailable · last values shown", error: true });
-
-          if (age.oldest_time) {
-            rows.push({
-              key: "Oldest",
-              value: age.oldest_time + " (" + formatRelativeTime(age.oldest_time) + ")",
-            });
-          }
-          if (age.newest_time) {
-            rows.push({
-              key: "Newest",
-              value: age.newest_time + " (" + formatRelativeTime(age.newest_time) + ")",
-            });
-          }
-
-          el.textContent = "";
-          for (var i = 0; i < rows.length; i++) {
-            var row = document.createElement("div");
-            row.className = "info-row";
-            var key = document.createElement("span");
-            key.className = "info-key";
-            var rowData = rows[i];
-            key.textContent = rowData.key;
-            row.appendChild(key);
-            var val = document.createElement("span");
-            val.className = "info-val";
-            if (rowData.stream) {
-              val.classList.add("info-val--stream");
-
-              var status = rowData.stream.status || "reconnecting";
-              var statusPill = document.createElement("span");
-              statusPill.className = "pill stream-pill";
-              statusPill.dataset.status = status;
-              statusPill.textContent = status;
-              val.appendChild(statusPill);
-
-              var streamDetail = document.createElement("span");
-              streamDetail.className = "stream-detail";
-              streamDetail.textContent = rowData.stream.shown + " of " + rowData.stream.max + " shown";
-              val.appendChild(streamDetail);
-
-              var streamNote = document.createElement("span");
-              streamNote.className = "stream-note";
-              streamNote.textContent =
-                status === "live"
-                  ? "connected to event stream"
-                  : status === "error"
-                    ? "last read failed; retrying"
-                    : "opening event stream";
-              val.appendChild(streamNote);
-            } else {
-              val.textContent = rowData.value;
-              if (rowData.error) val.classList.add("error");
-            }
-            row.appendChild(val);
-            el.appendChild(row);
-          }
-        }
-
-        async function streamEventsLoop() {
-          while (!state.stopped) {
-            setLiveStatus("reconnecting");
-            var since = state.nextSeq == null ? "" : "since_seq=" + encodeURIComponent(state.nextSeq) + "&";
-            var url = "/v0/ui/pools/" + encodeURIComponent(poolName) + "/events?" + since + "timeout_ms=30000";
-
-            try {
-              var response = await fetch(url, {
-                cache: 'no-store',
-              });
-              if (response.status === 401) {
-                renderLogin('Session ended. Enter the key again.');
-                return;
-              }
-              if (!response.ok) {
-                var text = await response.text();
-                throw new Error("stream failed (" + response.status + "): " + text);
-              }
-              if (!response.body) {
-                throw new Error("stream response body unavailable");
-              }
-
-              setLiveStatus("live");
-              var reader = response.body.getReader();
-              var decoder = new TextDecoder();
-              var buf = "";
-              var event = "";
-              var data = "";
-
-              while (!state.stopped) {
-                var part = await reader.read();
-                if (part.done) {
-                  break;
-                }
-                buf += decoder.decode(part.value, { stream: true });
-                var lines = buf.split("\n");
-                buf = lines.pop() || "";
-
-                for (var li = 0; li < lines.length; li++) {
-                  var lineRaw = lines[li];
-                  var line = lineRaw.endsWith("\r")
-                    ? lineRaw.slice(0, -1)
-                    : lineRaw;
-                  if (!line) {
-                    if (event === "message" && data) {
-                      try {
-                        appendMessageLine(JSON.parse(data));
-                      } catch (_) {
-                        /* ignore malformed event payloads */
-                      }
-                    }
-                    event = "";
-                    data = "";
-                    continue;
-                  }
-                  if (line.startsWith("event:")) {
-                    event = line.slice(6).trim();
-                  } else if (line.startsWith("data:")) {
-                    var chunk = line.slice(5).trimStart();
-                    data = data ? data + "\n" + chunk : chunk;
-                  }
-                }
-              }
-            } catch (err) {
-              setLiveStatus("error");
-              var streamEl = document.querySelector("[data-stream]");
-              if (streamEl) {
-                var errCard = document.createElement("article");
-                errCard.className = "msg";
-                errCard.dataset.tint = "error";
-                var errText = document.createElement("pre");
-                errText.className = "value-text error";
-                errText.textContent = String(err.message || err);
-                errCard.appendChild(errText);
-                streamEl.appendChild(errCard);
-              }
-            }
-
-            if (!state.stopped) {
-              await wait(700);
-            }
-          }
-        }
-
-        async function restartStream() {
-          state.stopped = true;
-          if (state.reconnectTimer) {
-            clearTimeout(state.reconnectTimer);
-            state.reconnectTimer = null;
-          }
-          await wait(30);
-          state.stopped = false;
-          state.messages = [];
-          state.nextSeq = null;
-          var streamEl = document.querySelector("[data-stream]");
-          if (streamEl) streamEl.textContent = "";
-          try {
-            await loadPoolInfo();
-            streamEventsLoop();
-          } catch (err) {
-            renderPoolView(String(err.message || err));
-          }
-        }
-
         function wait(ms) {
           return new Promise(function (resolve) { setTimeout(resolve, ms); });
         }
@@ -1595,7 +527,6 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
         /* ---- Boot ---- */
 
         async function boot() {
-          startTimeUpdater();
           if (window.location.protocol === 'file:') {
             app.innerHTML = '<section class="card">' +
               '<div class="body"><p>This is the UI source file. Open the page through a running Plasmite server.</p>' +
@@ -1614,43 +545,29 @@ Invariants: Client scrollback is bounded by N and oldest entries are dropped fir
             state.local = Boolean(identity.local);
             renderActions();
           } catch (err) { renderLogin('Could not reach the server.'); return; }
-          bootPool();
+          if (returnToNext()) return;
+          bootList();
         }
 
-        async function bootPool() {
-          if (!onPoolPage) {
-            if (state.local && !list.dir) {
-              // Locally, the server names its directory even when it has no pools yet.
-              try { list.dir = (await (await fetch('/v0/access/status', { cache: 'no-store' })).json()).pool_dir || ""; }
-              catch (_) { /* The pools' own paths name it once there are any. */ }
-            }
-            renderPoolList();
-            followPoolList();
-            // Ages the relative times between snapshots; unchanged markup is not rewritten.
-            if (!list.ticking) list.ticking = setInterval(function () { if (!state.stopped) renderPoolList(); }, 1000);
-            return;
+        async function bootList() {
+          if (state.local && !list.dir) {
+            // Locally, the server names its directory even when it has no pools yet.
+            try { list.dir = (await (await fetch('/v0/access/status', { cache: 'no-store' })).json()).pool_dir || ""; }
+            catch (_) { /* The pools' own paths name it once there are any. */ }
           }
-          renderPoolView(null);
-          try {
-            await loadPoolInfo();
-          } catch (err) {
-            if (state.stopped) return;
-            renderPoolView(String(err.message || err));
-            return;
-          }
-          streamEventsLoop();
-          refreshPoolInfo();
+          renderPoolList();
+          followPoolList();
+          // Ages the relative times between snapshots; unchanged markup is not rewritten.
+          if (!list.ticking) list.ticking = setInterval(function () { if (!state.stopped) renderPoolList(); }, 1000);
         }
 
-        async function refreshPoolInfo() {
-          await wait(3000);
-          while (!state.stopped) {
-            if (!document.hidden) {
-              try { await loadPoolInfo(); }
-              catch (_) { state.infoError = true; renderPoolInfo(); }
-            }
-            await wait(3000);
-          }
+        // Another page sends the reader here to sign in, then back. Only a page of
+        // this UI can be the way back, so the link cannot lead off the server.
+        function returnToNext() {
+          var next = params.get('next');
+          if (!next || !/^\/ui\/[^/\\]/.test(next)) return false;
+          location.replace(next);
+          return true;
         }
 
         boot();
