@@ -24,6 +24,38 @@ pub fn cmd() -> Command {
     Command::new(exe)
 }
 
+/// Waits for a child that should exit by itself. A child that hangs is killed and
+/// the test fails naming it, so a hang shows as a failure, not a run that never ends.
+pub fn wait_within(
+    child: &mut std::process::Child,
+    limit: Duration,
+    what: &str,
+) -> std::process::ExitStatus {
+    let deadline = Instant::now() + limit;
+    loop {
+        if let Some(status) = child.try_wait().expect("child status") {
+            return status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("{what} did not exit within {limit:?}");
+        }
+        sleep(Duration::from_millis(20));
+    }
+}
+
+/// A child that is killed when the test ends, even when the test fails, so a long-lived
+/// follower never outlives its test.
+pub struct KillOnDrop(pub std::process::Child);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 pub fn cmd_tty(args: &[&str]) -> std::process::Output {
     let exe = env!("CARGO_BIN_EXE_plasmite");
     #[cfg(target_os = "linux")]
