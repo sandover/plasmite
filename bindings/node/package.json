@@ -10,6 +10,8 @@
     "pls": "bin/plasmite.js"
   },
   "files": [
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "index.js",
     "message.js",
     "mappings.js",
