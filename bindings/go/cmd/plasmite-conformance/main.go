@@ -395,15 +395,8 @@ func runRetentionGap(client *plasmite.Client, step map[string]any, index int, st
 		Timeout:    50 * time.Millisecond,
 		ErrorOnGap: true,
 	})
-	select {
-	case message := <-filteredOut:
-		return stepErr(index, stepID, fmt.Sprintf("stale filtered tail delivered post-gap message: %#v", message))
-	case err := <-filteredErrs:
-		if err := requireRetentionGap(err, first.Seq); err != nil {
-			return stepErr(index, stepID, err.Error())
-		}
-	case <-ctx.Done():
-		return stepErr(index, stepID, "stale filtered tail did not fail")
+	if err := drainBeforeRetentionGap(ctx, filteredOut, filteredErrs, first.Seq, first.Seq-1, 0); err != nil {
+		return stepErr(index, stepID, err.Error())
 	}
 
 	establishedPool, err := client.CreatePool(plasmite.PoolRefName(base+"-established"), sizeBytes)
@@ -416,6 +409,10 @@ func runRetentionGap(client *plasmite.Client, step map[string]any, index int, st
 		return stepErr(index, stepID, err.Error())
 	}
 	second, err := establishedPool.Append(map[string]any{"kind": "second"}, nil)
+	if err != nil {
+		return stepErr(index, stepID, err.Error())
+	}
+	bridge, err := establishedPool.Append(map[string]any{"kind": "bridge"}, nil)
 	if err != nil {
 		return stepErr(index, stepID, err.Error())
 	}
@@ -435,6 +432,19 @@ func runRetentionGap(client *plasmite.Client, step map[string]any, index int, st
 	case <-ctx.Done():
 		return stepErr(index, stepID, "tail did not establish a position")
 	}
+	// Once second is buffered, the producer can own at most the bridge as a
+	// pending send. It cannot read firstMissing until we drain the full channel.
+	// Observing channel occupancy establishes this barrier without a sleep.
+	for len(establishedOut) != cap(establishedOut) {
+		select {
+		case err := <-establishedErrs:
+			return stepErr(index, stepID, fmt.Sprintf("tail failed before its buffer filled: %v", err))
+		case <-ctx.Done():
+			return stepErr(index, stepID, "tail did not fill its buffer")
+		default:
+			runtime.Gosched()
+		}
+	}
 
 	firstMissing, err := establishedPool.Append(map[string]any{"kind": "first-missing"}, nil)
 	if err != nil {
@@ -443,27 +453,42 @@ func runRetentionGap(client *plasmite.Client, step map[string]any, index int, st
 	if err := fillPoolPast(establishedPool, firstMissing.Seq); err != nil {
 		return stepErr(index, stepID, err.Error())
 	}
-	select {
-	case message := <-establishedOut:
-		if message == nil || message.Seq != second.Seq {
-			return stepErr(index, stepID, fmt.Sprintf("unexpected pre-gap message: %#v", message))
-		}
-	case err := <-establishedErrs:
-		return stepErr(index, stepID, fmt.Sprintf("tail failed before its buffered message was delivered: %v", err))
-	case <-ctx.Done():
-		return stepErr(index, stepID, "tail did not deliver its buffered message")
-	}
-	select {
-	case message := <-establishedOut:
-		return stepErr(index, stepID, fmt.Sprintf("established tail delivered post-gap message: %#v", message))
-	case err := <-establishedErrs:
-		if err := requireRetentionGap(err, firstMissing.Seq); err != nil {
-			return stepErr(index, stepID, err.Error())
-		}
-	case <-ctx.Done():
-		return stepErr(index, stepID, "established tail did not report retention gap")
+	// The bridge may already be an owned snapshot, or may itself have been
+	// overwritten before the producer read it. Both cases must report the exact
+	// first unread sequence, and neither may deliver firstMissing or later data.
+	if err := drainBeforeRetentionGap(ctx, establishedOut, establishedErrs, second.Seq, bridge.Seq, 1); err != nil {
+		return stepErr(index, stepID, err.Error())
 	}
 	return nil
+}
+
+func drainBeforeRetentionGap(ctx context.Context, out <-chan *api.Message, errs <-chan error, nextSeq, lastAllowed uint64, minimumDelivered int) error {
+	delivered := 0
+	for {
+		select {
+		case message, open := <-out:
+			if !open {
+				if delivered < minimumDelivered {
+					return fmt.Errorf("tail closed before its buffered messages were delivered")
+				}
+				// Tail buffers the error before closing out. Drain out first so
+				// channel closure cannot win a select against the actual error.
+				select {
+				case err := <-errs:
+					return requireRetentionGap(err, nextSeq)
+				case <-ctx.Done():
+					return fmt.Errorf("tail did not report retention gap: %w", ctx.Err())
+				}
+			}
+			if message == nil || message.Seq != nextSeq || message.Seq > lastAllowed {
+				return fmt.Errorf("tail delivered unexpected or post-gap message: %#v", message)
+			}
+			nextSeq++
+			delivered++
+		case <-ctx.Done():
+			return fmt.Errorf("tail did not close after retention gap: %w", ctx.Err())
+		}
+	}
 }
 
 func fillPoolPast(pool api.Pool, seq uint64) error {

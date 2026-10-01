@@ -256,22 +256,16 @@ func TestTailRetentionGapPolicy(t *testing.T) {
 		Timeout:    50 * time.Millisecond,
 		ErrorOnGap: true,
 	})
-	select {
-	case message := <-gapOut:
-		t.Fatalf("received post-gap message before error: %#v", message)
-	case err := <-gapErrs:
-		var plasmiteErr *Error
-		if !errors.As(err, &plasmiteErr) {
-			t.Fatalf("expected plasmite error, got %T: %v", err, err)
-		}
-		if plasmiteErr.Kind != ErrorRetentionGap {
-			t.Fatalf("expected retention gap, got kind %d", plasmiteErr.Kind)
-		}
-		if plasmiteErr.Seq == nil || *plasmiteErr.Seq != first.Seq {
-			t.Fatalf("expected gap sequence %d, got %#v", first.Seq, plasmiteErr.Seq)
-		}
-	case <-ctx.Done():
-		t.Fatalf("gap tail did not fail: %v", ctx.Err())
+	err = tailErrorAfterNoMessages(t, ctx, gapOut, gapErrs)
+	var plasmiteErr *Error
+	if !errors.As(err, &plasmiteErr) {
+		t.Fatalf("expected plasmite error, got %T: %v", err, err)
+	}
+	if plasmiteErr.Kind != ErrorRetentionGap {
+		t.Fatalf("expected retention gap, got kind %d", plasmiteErr.Kind)
+	}
+	if plasmiteErr.Seq == nil || *plasmiteErr.Seq != first.Seq {
+		t.Fatalf("expected gap sequence %d, got %#v", first.Seq, plasmiteErr.Seq)
 	}
 }
 
@@ -291,16 +285,35 @@ func TestTailLite3RetentionGapPolicy(t *testing.T) {
 		Timeout:    50 * time.Millisecond,
 		ErrorOnGap: true,
 	})
-	select {
-	case frame := <-out:
-		t.Fatalf("received post-gap frame before error: %#v", frame)
-	case err := <-errs:
-		var plasmiteErr *Error
-		if !errors.As(err, &plasmiteErr) || plasmiteErr.Kind != ErrorRetentionGap {
-			t.Fatalf("expected retention gap, got %T: %v", err, err)
+	err = tailErrorAfterNoMessages(t, ctx, out, errs)
+	var plasmiteErr *Error
+	if !errors.As(err, &plasmiteErr) || plasmiteErr.Kind != ErrorRetentionGap {
+		t.Fatalf("expected retention gap, got %T: %v", err, err)
+	}
+	if plasmiteErr.Seq == nil || *plasmiteErr.Seq != first.Seq {
+		t.Fatalf("expected gap sequence %d, got %#v", first.Seq, plasmiteErr.Seq)
+	}
+}
+
+// Tail sends its terminal error before closing both channels. Drain output to
+// closure before reading the error so a closed output cannot win the select.
+func tailErrorAfterNoMessages[T any](t *testing.T, ctx context.Context, out <-chan T, errs <-chan error) error {
+	t.Helper()
+	for {
+		select {
+		case message, open := <-out:
+			if open {
+				t.Fatalf("received post-gap message before error: %#v", message)
+			}
+			select {
+			case err := <-errs:
+				return err
+			case <-ctx.Done():
+				t.Fatalf("gap tail did not report error: %v", ctx.Err())
+			}
+		case <-ctx.Done():
+			t.Fatalf("gap tail did not close: %v", ctx.Err())
 		}
-	case <-ctx.Done():
-		t.Fatalf("Lite3 gap tail did not fail: %v", ctx.Err())
 	}
 }
 
