@@ -2100,9 +2100,10 @@ mod tests {
                 let staged = format!("{ack_path}.tmp");
                 fs::write(&staged, seq.to_string()).expect("stage acknowledgement");
                 fs::rename(&staged, &ack_path).expect("publish acknowledgement");
-                loop {
-                    thread::sleep(Duration::from_secs(1));
-                }
+                // Wait to be killed, but exit on our own if the parent failed first and
+                // will never kill us. The parent gives up after five seconds.
+                thread::sleep(Duration::from_secs(60));
+                std::process::exit(0);
             }
             "crash-phase" => {
                 let phase = std::env::var("PLASMITE_TEST_PHASE").expect("crash phase");
