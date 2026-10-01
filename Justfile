@@ -77,7 +77,15 @@ bindings-node-typecheck:
 bindings-test: bindings-go-test bindings-python-test bindings-node-test bindings-node-typecheck
 
 # Core, deterministic checks for every local change and pull request.
-check: fmt clippy test check-version-alignment check-release-targets verify-lite3
+check: _trim-target fmt clippy test check-version-alignment check-release-targets verify-lite3
+
+# Cargo never removes builds that newer ones replace, so target/ grows without bound.
+# A clean build is about 1 GB and takes under a minute, so past 2 GB start over.
+_trim-target:
+	@if [ -d target ] && [ "$(du -sk target | cut -f1)" -gt 2097152 ]; then \
+	  echo "target/ is over 2 GB; running cargo clean"; \
+	  cargo clean; \
+	fi
 
 # Cross-language and artifact checks. Requires Go, Node, Python, and uv.
 # `bindings-test` includes node pack and remote-only smoke tests.

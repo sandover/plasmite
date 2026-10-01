@@ -107,6 +107,11 @@ debug metadata. A debugging session that needs full variable inspection can
 override the profile temporarily with `CARGO_PROFILE_DEV_DEBUG=2` or
 `CARGO_PROFILE_TEST_DEBUG=2`.
 
+Cargo keeps every build it replaces, so `target/` grows with each change to
+dependencies, flags, or the toolchain. A clean build of everything `just check`
+needs is about 1 GB, so `just check` runs `cargo clean` first whenever
+`target/` is over 2 GB.
+
 Run the complete local gate when work is ready for handoff or push:
 
 ```bash

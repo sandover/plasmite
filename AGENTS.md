@@ -53,7 +53,7 @@ When you add, rename, move, or delete a doc in `docs/` or `spec/`, update the tr
 # Build hygiene
 - Keep current debug artifacts during active development.
 - Ensure scratch directories are removed after successful tests.
-- Run `cargo clean` after release work or when `target/` exceeds 8 GB.
+- Run `cargo clean` after release work. `just check` cleans `target/` itself when it exceeds 2 GB.
 - Preserve release evidence, active Ergo state, and all source changes during cleanup.
 
 # Guidance
