@@ -19,9 +19,13 @@ if [[ -d "$NODE_DIR/native" ]]; then
 fi
 
 restore_native() {
+  local exit_status=$?
   rm -rf "$NODE_DIR/native"
   if [[ -d "$backup_dir" ]]; then
     cp -R "$backup_dir" "$NODE_DIR/native"
+  fi
+  if [[ "$exit_status" -eq 0 ]]; then
+    rm -rf "$WORKDIR"
   fi
 }
 trap restore_native EXIT
