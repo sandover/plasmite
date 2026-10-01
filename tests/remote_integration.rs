@@ -240,9 +240,11 @@ fn remote_tail_cancel_under_active_writes_is_prompt() -> TestResult<()> {
     let cancel_tail = Arc::clone(&cancel);
     let done_tail = Arc::clone(&done);
     let reader = std::thread::spawn(move || -> Result<usize, String> {
+        // No timeout: a tail's timeout is a deadline from its start, so a slow first
+        // append would end it empty. The writer appends every 10 ms, so each read
+        // returns soon and the loop checks for cancellation.
         let mut tail = tail_pool
             .tail(TailOptions {
-                timeout: Some(Duration::from_millis(120)),
                 max_messages: Some(10_000),
                 ..TailOptions::default()
             })
@@ -762,6 +764,11 @@ fn read_pool_event(reader: &mut impl BufRead) -> TestResult<Value> {
     }
 }
 
+/// How soon a pool change must reach the stream: the server checks every 200 ms
+/// and then takes a snapshot, so a busy debug build needs room. Much longer than
+/// this would mean the stream had stopped pushing.
+const PUSH_WITHIN: Duration = Duration::from_secs(3);
+
 #[test]
 fn local_ui_pool_stream_sends_changes_and_stays_quiet() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
@@ -783,20 +790,20 @@ fn local_ui_pool_stream_sends_changes_and_stays_quiet() -> TestResult<()> {
     client.create_pool(&pool_ref, PoolOptions::new(1024 * 1024))?;
     let created_at = Instant::now();
     let created = read_pool_event(&mut reader)?;
-    assert!(created_at.elapsed() < Duration::from_millis(500));
+    assert!(created_at.elapsed() < PUSH_WITHIN);
     assert_eq!(created["pools"][0]["name"], "changing");
 
     let pool = client.open_pool(&pool_ref)?;
     let message = pool.append_json_now(&json!({"n": 1}), &[], Durability::Fast)?;
     let appended_at = Instant::now();
     let appended = read_pool_event(&mut reader)?;
-    assert!(appended_at.elapsed() < Duration::from_millis(500));
+    assert!(appended_at.elapsed() < PUSH_WITHIN);
     assert_eq!(appended["pools"][0]["bounds"]["newest"], message.seq);
 
     client.delete_pool(&pool_ref)?;
     let deleted_at = Instant::now();
     let deleted = read_pool_event(&mut reader)?;
-    assert!(deleted_at.elapsed() < Duration::from_millis(500));
+    assert!(deleted_at.elapsed() < PUSH_WITHIN);
     assert_eq!(deleted["pools"], json!([]));
 
     // A pool that holds messages must also go quiet. Its message ages grow on

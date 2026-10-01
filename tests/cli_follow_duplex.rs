@@ -369,6 +369,10 @@ fn follow_timeout_with_one_exits_on_message() {
             "follow",
             "demo",
             "--jsonl",
+            // The feed may land before or after this follower attaches; with --tail 1
+            // it sees the message either way.
+            "--tail",
+            "1",
             "--one",
             "--timeout",
             "5s",
@@ -1341,6 +1345,7 @@ fn follow_emits_drop_notice_on_stderr() {
     let stdout = follower.stdout.take().expect("stdout");
     let stderr = follower.stderr.take().expect("stderr");
 
+    let (attached_tx, attached_rx) = mpsc::channel();
     thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
         let mut line = String::new();
@@ -1349,6 +1354,7 @@ fn follow_emits_drop_notice_on_stderr() {
             if reader.read_line(&mut line).unwrap_or(0) == 0 {
                 break;
             }
+            let _ = attached_tx.send(());
             thread::sleep(Duration::from_millis(500));
         }
     });
@@ -1369,6 +1375,23 @@ fn follow_emits_drop_notice_on_stderr() {
             }
         }
     });
+
+    // Feed one message and wait for the follower to read it. A follower that attached
+    // after the bulk feed would start at the live end and never fall behind.
+    let first = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "feed",
+            "demo",
+            "{\"x\":\"first\"}",
+        ])
+        .output()
+        .expect("feed");
+    assert!(first.status.success());
+    attached_rx
+        .recv_timeout(Duration::from_secs(30))
+        .expect("follower attached");
 
     for i in 0..200u64 {
         let payload = "a".repeat(8192);
@@ -1682,9 +1705,13 @@ fn follow_remote_url_rejects_api_shaped_path() {
 #[test]
 fn follow_remote_url_rejects_since_and_replay() {
     let pool_url = "http://localhost:9170/demo";
+    // A URL makes the CLI read saved connections; a temporary home keeps the user's own
+    // store out of the test.
+    let access_home = tempfile::tempdir().expect("tempdir");
 
     let since = cmd()
         .args(["follow", pool_url, "--since", "5m"])
+        .env("PLASMITE_ACCESS_HOME", access_home.path())
         .output()
         .expect("follow");
     assert!(!since.status.success());
@@ -1698,6 +1725,7 @@ fn follow_remote_url_rejects_since_and_replay() {
 
     let replay = cmd()
         .args(["follow", pool_url, "--tail", "5", "--replay", "1"])
+        .env("PLASMITE_ACCESS_HOME", access_home.path())
         .output()
         .expect("follow");
     assert!(!replay.status.success());
@@ -1713,9 +1741,13 @@ fn follow_remote_url_rejects_since_and_replay() {
 #[test]
 fn follow_remote_url_rejects_future_since() {
     let pool_url = "http://localhost:9170/demo";
+    // A URL makes the CLI read saved connections; a temporary home keeps the user's own
+    // store out of the test.
+    let access_home = tempfile::tempdir().expect("tempdir");
 
     let since = cmd()
         .args(["follow", pool_url, "--since", "2999-01-01T00:00:00Z"])
+        .env("PLASMITE_ACCESS_HOME", access_home.path())
         .output()
         .expect("follow");
     assert_eq!(since.status.code(), Some(2));
@@ -2154,6 +2186,19 @@ fn follow_replay_respects_speed_timing() {
     );
 }
 
+/// The time between the first two messages, as the pool recorded it.
+fn recorded_gap(messages: &[Value]) -> Duration {
+    let at = |message: &Value| {
+        time::OffsetDateTime::parse(
+            message["time"].as_str().expect("message time"),
+            &time::format_description::well_known::Rfc3339,
+        )
+        .expect("RFC 3339 time")
+    };
+    let gap = at(&messages[1]) - at(&messages[0]);
+    Duration::try_from(gap).expect("the second message is later")
+}
+
 #[test]
 fn follow_replay_speed_2x_halves_delay() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -2179,7 +2224,7 @@ fn follow_replay_speed_2x_halves_delay() {
         ])
         .output()
         .expect("feed");
-    sleep(Duration::from_millis(400));
+    sleep(Duration::from_millis(1200));
     cmd()
         .args([
             "--dir",
@@ -2210,13 +2255,17 @@ fn follow_replay_speed_2x_halves_delay() {
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
     assert_eq!(messages.len(), 2);
+    // The pool's own timestamps give the gap the replay reproduces; process startup
+    // only adds to the measured time, so half the gap is a floor and the whole gap,
+    // what 1x would take, is a ceiling with startup room to spare.
+    let gap = recorded_gap(&messages);
     assert!(
-        elapsed >= Duration::from_millis(150),
-        "replay at 2x of 400ms gap should wait ~200ms, took {elapsed:?}"
+        elapsed >= gap.mul_f64(0.45),
+        "replay at 2x of a {gap:?} gap should wait about half of it, took {elapsed:?}"
     );
     assert!(
-        elapsed < Duration::from_millis(2200),
-        "replay at 2x should be faster than 1x, took {elapsed:?}"
+        elapsed < gap,
+        "replay at 2x should finish before a 1x replay of {gap:?} could, took {elapsed:?}"
     );
 }
 
@@ -2464,7 +2513,7 @@ fn follow_replay_zero_speed_emits_without_delay() {
         ])
         .output()
         .expect("feed");
-    sleep(Duration::from_millis(200));
+    sleep(Duration::from_millis(1200));
     cmd()
         .args([
             "--dir",
@@ -2495,8 +2544,10 @@ fn follow_replay_zero_speed_emits_without_delay() {
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
     assert_eq!(messages.len(), 2);
+    // A replay that waited at all would take the recorded gap; startup alone does not.
+    let gap = recorded_gap(&messages);
     assert!(
-        elapsed < Duration::from_millis(300),
-        "--replay 0 should emit without delay, took {elapsed:?}"
+        elapsed < gap,
+        "--replay 0 should emit without the {gap:?} delay, took {elapsed:?}"
     );
 }

@@ -603,10 +603,8 @@ fn address_change_requires_new_direct_authorization() -> Result<(), Box<dyn std:
     drop(server);
     let _old_port_reservation = std::net::TcpListener::bind(("127.0.0.1", old_port))?;
 
-    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
-    let new_port = listener.local_addr()?.port();
-    drop(listener);
-    let server = TestServer::try_start_oauth_at(temp.path(), new_port)?;
+    // A fresh free port; the old one stays reserved above, so it cannot be chosen.
+    let server = TestServer::try_start_oauth(temp.path())?;
     let new_issuer = &server.remote_url;
     let new_resource = format!("{new_issuer}/mcp");
     assert_ne!(new_issuer, &old_issuer);

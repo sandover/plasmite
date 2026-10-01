@@ -344,26 +344,10 @@ fn write_frame_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        SNAPSHOT_PREFIX, SnapshotMode, debug_assert_pool_state,
-        debug_assert_pool_state_with_snapshot,
-    };
+    use super::{SnapshotMode, debug_assert_pool_state, debug_assert_pool_state_with_snapshot};
     use crate::core::frame::FRAME_HEADER_LEN;
     use crate::core::pool::{Pool, PoolHeader, PoolOptions};
-    use std::collections::HashSet;
     use std::fs;
-
-    fn snapshot_set() -> HashSet<String> {
-        let dir = std::path::Path::new(super::SNAPSHOT_DIR);
-        let Ok(entries) = fs::read_dir(dir) else {
-            return HashSet::new();
-        };
-        entries
-            .filter_map(|entry| entry.ok())
-            .filter_map(|entry| entry.file_name().into_string().ok())
-            .filter(|name| name.starts_with(SNAPSHOT_PREFIX))
-            .collect()
-    }
 
     #[test]
     fn snapshot_written_on_validation_failure() {
@@ -385,17 +369,26 @@ mod tests {
             newest_seq: 1,
         };
         let mmap = vec![0u8; ring_size];
-        let before = snapshot_set();
         let result = std::panic::catch_unwind(|| {
             debug_assert_pool_state_with_snapshot(header, &mmap, SnapshotMode::OnFailure);
         });
-        assert!(result.is_err());
-        let after = snapshot_set();
-        let new_files: Vec<_> = after.difference(&before).cloned().collect();
-        assert!(!new_files.is_empty());
-        for name in new_files {
-            let _ = fs::remove_file(std::path::Path::new(super::SNAPSHOT_DIR).join(name));
-        }
+        // The panic names the snapshot it wrote. Checking that file, not the shared
+        // directory's new files, keeps another test run in the same checkout from
+        // taking or removing it in between.
+        let payload = result.expect_err("an invalid pool must fail validation");
+        let message = payload
+            .downcast_ref::<String>()
+            .expect("panic message is a String");
+        let path = message
+            .split("(snapshot: ")
+            .nth(1)
+            .and_then(|rest| rest.strip_suffix(')'))
+            .expect("panic names the snapshot it wrote");
+        assert!(
+            std::path::Path::new(path).is_file(),
+            "snapshot {path} exists"
+        );
+        let _ = fs::remove_file(path);
     }
 
     #[test]

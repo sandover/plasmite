@@ -4,8 +4,15 @@ mod build_version;
 use std::process::Command;
 
 fn git(dir: &std::path::Path, args: &[&str]) {
+    // Without the user's global and system git config, a setting like commit signing
+    // cannot make these commits and tags fail or prompt. A missing file reads as empty.
     let output = Command::new("git")
         .current_dir(dir)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            dir.join(".git").join("no-global-config"),
+        )
         .args(args)
         .output()
         .unwrap();
