@@ -520,6 +520,16 @@ pub(crate) fn follow_pool(
                 if cfg.tail > 0 {
                     cursor.seek_to(header.tail_off as usize);
                 } else {
+                    // Jumping to the live end skips every message after the last one
+                    // seen. Report it now: if the pool goes quiet, no later message
+                    // would reveal the gap. Reading resumes after the newest message.
+                    if let Some(seen) = last_seen_seq
+                        && header.newest_seq > seen
+                    {
+                        queue_drop(seen, header.newest_seq + 1, &mut pending_drop);
+                        maybe_emit_pending(&mut pending_drop, &mut last_notice_at);
+                        last_seen_seq = Some(header.newest_seq);
+                    }
                     cursor.seek_to(header.head_off as usize);
                 }
             }
