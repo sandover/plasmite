@@ -232,12 +232,15 @@ NOTES
         errors: ErrorPolicyCli,
     },
     #[command(
+        args_conflicts_with_subcommands = true,
         about = "Share pools securely with named access keys",
         long_about = r#"Serve pools locally and share them over HTTPS with named access keys.
 
 Run `plasmite access invite --name <name>` in another terminal to create a key."#,
         after_help = r#"EXAMPLES
   $ plasmite --dir ./pools serve
+  $ plasmite serve status
+  $ plasmite serve status --json
   $ plasmite --dir ./pools access invite --name laptop
 
 CONSTRAINTS
@@ -245,6 +248,8 @@ CONSTRAINTS
   - The local admin listener stays on loopback; remote clients use HTTPS"#,
         after_long_help = r#"EXAMPLES
   $ plasmite --dir ./pools serve
+  $ plasmite serve status
+  $ plasmite serve status --json
   $ plasmite --dir ./pools serve --shared-address https://pools.example.com:8443
 
   # On the server, create a named key. On the client, enter it at the hidden prompt.
@@ -253,6 +258,8 @@ CONSTRAINTS
   $ plasmite access status https://pools.example.com:8443"#
     )]
     Serve {
+        #[command(subcommand)]
+        command: Option<ServeSubcommand>,
         #[command(flatten)]
         run: ServeRunArgs,
     },
@@ -579,6 +586,15 @@ to enable tab completion."#,
     Completion {
         #[arg(help = "Shell to generate completions for")]
         shell: Shell,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ServeSubcommand {
+    #[command(about = "Show all running Plasmite servers for this user")]
+    Status {
+        #[arg(long, help = "Print server details as a JSON array")]
+        json: bool,
     },
 }
 

@@ -22,9 +22,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use url::{Host, Url};
 
 #[cfg(windows)]
-type DirectoryGuard = crate::windows_private::Directory;
+pub(crate) type DirectoryGuard = crate::windows_private::Directory;
 #[cfg(not(windows))]
-type DirectoryGuard = ();
+pub(crate) type DirectoryGuard = ();
 
 pub(crate) struct AccessStore {
     dir: PathBuf,
@@ -782,7 +782,7 @@ fn create_private(path: &Path) -> Result<File, Error> {
     })
 }
 
-fn create_private_dir(path: &Path) -> Result<DirectoryGuard, Error> {
+pub(crate) fn create_private_dir(path: &Path) -> Result<DirectoryGuard, Error> {
     #[cfg(unix)]
     {
         if path.exists() {
@@ -791,12 +791,21 @@ fn create_private_dir(path: &Path) -> Result<DirectoryGuard, Error> {
         use std::os::unix::fs::DirBuilderExt;
         let mut builder = std::fs::DirBuilder::new();
         builder.mode(0o700);
-        builder.create(path).map_err(|err| {
-            Error::new(ErrorKind::Io)
-                .with_message("failed to create server state directory")
-                .with_path(path)
-                .with_source(err)
-        })
+        builder
+            .create(path)
+            .or_else(|err| {
+                if err.kind() == std::io::ErrorKind::AlreadyExists {
+                    Ok(())
+                } else {
+                    Err(err)
+                }
+            })
+            .map_err(|err| {
+                Error::new(ErrorKind::Io)
+                    .with_message("failed to create server state directory")
+                    .with_path(path)
+                    .with_source(err)
+            })
     }
     #[cfg(windows)]
     {

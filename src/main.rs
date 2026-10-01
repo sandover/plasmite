@@ -21,6 +21,7 @@ mod pool_info_json;
 mod pool_paths;
 mod secure_serve;
 mod serve;
+mod serve_registry;
 mod since;
 #[cfg(windows)]
 mod windows_private;
@@ -233,6 +234,7 @@ mod tests {
                     "tls-key",
                 ],
             ),
+            ("plasmite serve status", vec!["help", "json"]),
             (
                 "plasmite tap",
                 vec![

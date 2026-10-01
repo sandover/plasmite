@@ -28,6 +28,28 @@ is for credential-free use on the server machine.
 | `duplex` | yes | yes |
 | `doctor` | yes | no |
 
+## Server status
+
+`plasmite serve status` shows Plasmite servers running for your current OS
+user, including the pool directory and local and remote addresses. It finds
+servers started with different `--dir` values, so the top-level `--dir` option
+does not narrow this list. If no server is running, it prints
+`No Plasmite servers running.`
+
+Only servers started with this version register. Restart older running servers
+to make them appear. Stopped servers do not appear in the list.
+
+```console
+plasmite serve status
+plasmite serve status --json
+```
+
+The JSON form is an array. Each object has `pid`, `pool_dir` (an absolute
+path), `local_url`, and `remote_url`. `remote_url` uses `--shared-address` or
+a loopback HTTPS bind. It is `null` when the client-facing HTTPS address is
+unknown; a non-loopback bind needs `--shared-address`, even with a TLS
+certificate configured. Secure serving still has a remote listener.
+
 An access key grants full access to every pool in the server’s pool directory:
 it can list, read, and append messages, and create or delete pools. For native
 remote access, the owner creates a key with `access invite`; the recipient runs

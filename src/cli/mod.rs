@@ -142,7 +142,7 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             },
             &context,
         ),
-        Command::Serve { run } => server::run(run, &context),
+        Command::Serve { command, run } => server::run(command, run, &context),
         Command::Access { command } => access::run(command, &context),
         Command::Mcp { dir, remote } => utility::run(
             utility::UtilityCommand::Mcp {

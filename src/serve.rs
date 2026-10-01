@@ -205,12 +205,43 @@ pub(crate) async fn serve_secure_pair(
             .with_message("failed to inspect local listener")
             .with_source(err)
     })?)?;
+    let remote_address = remote_listener.local_addr().map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message("failed to inspect HTTPS listener")
+            .with_source(err)
+    })?;
+    let remote_url = access.shared_address().map(str::to_owned).or_else(|| {
+        remote_address
+            .ip()
+            .is_loopback()
+            .then(|| format!("https://{remote_address}"))
+    });
+    let registered = crate::serve_registry::register(
+        &local.pool_dir,
+        local_listener.local_addr().map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_message("failed to inspect local listener")
+                .with_source(err)
+        })?,
+        remote_url,
+    )?;
+    let registration = registered.registration.clone();
+    let status_route = Router::new()
+        .route(
+            crate::serve_registry::STATUS_PATH,
+            get(move || {
+                let registration = registration.clone();
+                async move { Json(registration) }
+            }),
+        )
+        .layer(middleware::from_fn(local_request_guard));
+    let local_app = local_server.app.merge(status_route);
     notify_ready_file(&remote_listener)?;
     let remote_tls = remote_server.tls_config.ok_or_else(|| {
         Error::new(ErrorKind::Internal).with_message("remote TLS was not configured")
     })?;
     tokio::try_join!(
-        serve_plain(local_listener, local_server.app, shutdown_signal()),
+        serve_plain(local_listener, local_app, shutdown_signal()),
         serve_tls(
             remote_listener,
             remote_server.app,

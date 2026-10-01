@@ -51,6 +51,17 @@ It keeps only script-level guarantees; signatures, walkthroughs, and examples li
 YMSGO2 adds native access-key sharing. It keeps the existing spec paths and
 `/v0` HTTP route prefix. Local pool use remains credential-free.
 
+- `plasmite serve status` lists every Plasmite server running for the current
+  OS user. Top-level `--dir` does not limit discovery. `--json` emits a JSON
+  array of server objects with stable fields: `pid` (process ID), `pool_dir`
+  (absolute pool directory), `local_url`, and `remote_url`. `remote_url` uses
+  `--shared-address` or a loopback HTTPS bind. It is `null` when the
+  client-facing HTTPS address is unknown; for example, a non-loopback bind
+  needs `--shared-address`, even with a TLS certificate configured. Secure
+  serving still has a remote listener. Only servers started with this version
+  register; restart older running servers to make them discoverable. Stopped
+  servers do not appear in the list. With no running servers, the
+  human-readable output says `No Plasmite servers running.`
 - `plasmite --dir DIR serve` starts the server for the selected pool directory.
   `--bind` and `--remote-bind` set listener addresses; `--shared-address`
   names the client-facing HTTPS origin. `--tls-cert` and `--tls-key` supply a
