@@ -145,28 +145,58 @@ jobs:
       - name: Install smoke-test tooling
         if: matrix.sdk
         shell: bash
+        env:
+          RUNNER_LABEL: ${{ matrix.os }}
         run: |
-          if [[ "${{ matrix.os }}" == ubuntu-* ]]; then
+          if [[ "$RUNNER_LABEL" == ubuntu-* ]]; then
             sudo apt-get update
-            sudo apt-get install -y pkg-config
+            sudo apt-get install -y pkg-config python3
           else
             brew install pkg-config
           fi
+      - name: Install ARMv7 cross compiler and emulator
+        if: matrix.armv7_cross
+        shell: bash
+        run: |
+          sudo apt-get install -y gcc-arm-linux-gnueabihf libc6-dev-armhf-cross qemu-user-binfmt
+          [[ "$(dpkg-query -W -f='${Version}' libc6-armhf-cross)" == 2.35* ]]
+          sudo update-binfmts --enable qemu-arm
+          grep -q '^enabled$' /proc/sys/fs/binfmt_misc/qemu-arm
+      - name: Check ARM64 libc build baseline
+        if: matrix.sdk_platform == 'linux_arm64'
+        shell: bash
+        run: test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.35'
+      - name: Configure ARMv7 C and Rust linkers
+        if: matrix.armv7_cross
+        shell: bash
+        run: |
+          {
+            echo 'CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc'
+            echo 'AR_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-ar'
+            echo 'CFLAGS_armv7_unknown_linux_gnueabihf=-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard'
+            echo 'CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc'
+            echo 'CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUNNER=qemu-arm -L /usr/arm-linux-gnueabihf'
+            echo 'QEMU_LD_PREFIX=/usr/arm-linux-gnueabihf'
+          } >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
+        if: matrix.build_python
         with:
           python-version: "3.11"
       - uses: astral-sh/setup-uv@v5
+        if: matrix.build_python
         with:
           enable-cache: true
           cache-dependency-glob: bindings/python/pyproject.toml
           cache-local-path: ${{ github.workspace }}/.cache/uv
           cache-suffix: release-${{ matrix.target }}
       - uses: actions/setup-node@v4
+        if: matrix.build_node
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: bindings/node/package-lock.json
       - run: cd bindings/node && npm ci
+        if: matrix.build_node
       - name: Build native artifacts once for this platform
         shell: bash
         run: |
@@ -176,6 +206,7 @@ jobs:
             ./scripts/build_release_artifacts.sh "${{ matrix.target }}"
           fi
       - name: Build and smoke-test Python wheel
+        if: matrix.build_python
         shell: bash
         env:
           PLASMITE_SDK_DIR: ${{ github.workspace }}/target/${{ matrix.target }}/release
@@ -199,7 +230,28 @@ jobs:
       - name: Smoke test packaged SDK
         if: matrix.sdk
         shell: bash
-        run: ./scripts/cross_artifact_smoke.sh "dist/plasmite_${{ needs.release-context.outputs.version }}_${{ matrix.sdk_platform }}.tar.gz"
+        run: ./scripts/cross_artifact_smoke.sh "dist/plasmite_${{ needs.release-context.outputs.version }}_${{ matrix.sdk_platform }}.tar.gz" "${{ matrix.target }}"
+      - name: Run ARM runtime suites
+        if: matrix.sdk_platform == 'linux_arm64' || matrix.armv7_cross
+        shell: bash
+        run: |
+          cargo test --release --target "${{ matrix.target }}" \
+            --lib \
+            --test cli_pool \
+            --test secure_serving \
+            --test secure_sharing \
+            --test oauth_access \
+            --test access_lifecycle \
+            --test remote_integration \
+            -- --test-threads=1
+      - name: Check shared pools across 64-bit and ARMv7 CLIs
+        if: matrix.armv7_cross
+        shell: bash
+        run: |
+          cargo build --release --bin plasmite
+          ./scripts/arm_pool_compatibility.sh \
+            target/release/plasmite \
+            target/armv7-unknown-linux-gnueabihf/release/plasmite
       - uses: actions/upload-artifact@v4
         if: matrix.sdk
         with:
@@ -207,10 +259,12 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
       - name: Build Node addon
+        if: matrix.build_node
         env:
           PLASMITE_LIB_DIR: ${{ github.workspace }}/target/${{ matrix.target }}/release
         run: cd bindings/node && npm run build
       - name: Stage node native payload
+        if: matrix.build_node
         shell: bash
         run: ./scripts/package_node_natives.sh "${{ matrix.target }}" "${{ github.workspace }}/target/${{ matrix.target }}/release" "${{ github.workspace }}/bindings/node/index.node"
       - name: Windows node pack/install smoke
@@ -220,6 +274,7 @@ jobs:
           PLASMITE_SDK_DIR: ${{ github.workspace }}/target/${{ matrix.target }}/release
         run: ./scripts/node_pack_smoke.sh
       - uses: actions/upload-artifact@v4
+        if: matrix.build_node
         with:
           name: node-native-${{ matrix.node_platform }}
           path: bindings/node/native/${{ matrix.node_platform }}/*
@@ -261,7 +316,7 @@ jobs:
           echo "Assembled platforms:"
           ls -la bindings/node/native/
           for dir in bindings/node/native/*/; do
-            echo "  $(basename "$dir"): $(ls "$dir" | wc -l) files"
+            echo "  $(basename "$dir"): $(find "$dir" -maxdepth 1 -type f | wc -l) files"
           done
       - name: npm pack + install smoke (linux-x64 runtime)
         run: |

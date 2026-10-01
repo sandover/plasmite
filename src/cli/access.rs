@@ -228,38 +228,36 @@ fn offer_browser_trust(trust: &BrowserTrustStatus) {
     println!(
         "Scope: current user's Windows Root store. Edge, Chrome, and other Windows apps may use this trust."
     );
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
-        return;
-    }
-
-    eprint!("Trust this certificate for browser access? [y/N] ");
-    use std::io::Write;
-    if io::stderr().flush().is_err() {
-        return;
-    }
-    let mut answer = String::new();
-    if io::stdin().read_line(&mut answer).is_err() || !answer.trim().eq_ignore_ascii_case("y") {
-        return;
-    }
-    match browser_trust::install(&trust.destination, &trust.certificate_sha256) {
-        Ok(_) => {
-            #[cfg(target_os = "windows")]
-            println!(
-                "Certificate installed in Windows Root. To remove it later: plasmite access untrust {}",
-                trust.certificate_sha256
-            );
-            #[cfg(not(target_os = "windows"))]
-            println!(
-                "Browser trust installed. To remove it later: plasmite access untrust {}",
-                trust.certificate_sha256
-            );
-            if let Err(error) = browser_trust::open(&trust.destination) {
-                eprintln!("Could not open {}: {error}", trust.destination);
-            }
+        eprint!("Trust this certificate for browser access? [y/N] ");
+        use std::io::Write;
+        if io::stderr().flush().is_err() {
+            return;
         }
-        Err(error) => {
-            eprintln!("Browser trust setup failed: {error}. Native access remains saved.")
+        let mut answer = String::new();
+        if io::stdin().read_line(&mut answer).is_err() || !answer.trim().eq_ignore_ascii_case("y") {
+            return;
+        }
+        match browser_trust::install(&trust.destination, &trust.certificate_sha256) {
+            Ok(_) => {
+                #[cfg(target_os = "windows")]
+                println!(
+                    "Certificate installed in Windows Root. To remove it later: plasmite access untrust {}",
+                    trust.certificate_sha256
+                );
+                #[cfg(not(target_os = "windows"))]
+                println!(
+                    "Browser trust installed. To remove it later: plasmite access untrust {}",
+                    trust.certificate_sha256
+                );
+                if let Err(error) = browser_trust::open(&trust.destination) {
+                    eprintln!("Could not open {}: {error}", trust.destination);
+                }
+            }
+            Err(error) => {
+                eprintln!("Browser trust setup failed: {error}. Native access remains saved.")
+            }
         }
     }
 }

@@ -39,15 +39,9 @@ pub fn plan_append(
     if payload_len > u32::MAX as usize {
         return Err(Error::new(ErrorKind::Usage).with_message("payload too large"));
     }
+    header.validate(storage.len() as u64)?;
     let ring_offset = header.ring_offset as usize;
     let ring_size = header.ring_size as usize;
-    if ring_size == 0 {
-        return Err(Error::new(ErrorKind::Corrupt).with_message("ring size is zero"));
-    }
-    if ring_offset + ring_size > storage.len() {
-        return Err(Error::new(ErrorKind::Corrupt).with_message("ring exceeds storage bounds"));
-    }
-
     let max_payload = frame::max_payload(ring_size, FRAME_HEADER_LEN);
     if payload_len > max_payload {
         return Err(Error::new(ErrorKind::Usage).with_message("payload exceeds ring capacity"));
@@ -396,6 +390,19 @@ mod tests {
             oldest_seq,
             newest_seq,
         }
+    }
+
+    #[test]
+    fn oversized_offsets_cannot_truncate_into_storage() {
+        let storage = vec![0; RING_OFFSET + 1024];
+        let mut header = header_for(1024, 0, 0, 0, 0, 0);
+        header.ring_offset += 1u64 << 32;
+        assert_eq!(
+            plan_append(header, &storage, 8)
+                .expect_err("invalid offset")
+                .kind(),
+            crate::core::error::ErrorKind::Corrupt
+        );
     }
 
     fn write_frame(storage: &mut [u8], offset: usize, header: &FrameHeader, payload_len: usize) {

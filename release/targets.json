@@ -18,6 +18,38 @@
       }
     },
     {
+      "rust_target": "aarch64-unknown-linux-gnu",
+      "runner": "ubuntu-22.04-arm",
+      "sdk_platform": "linux_arm64",
+      "node_platform": "linux-arm64",
+      "build_sdk": true,
+      "upload_sdist": false,
+      "upload_wheel": false,
+      "channels": {
+        "github_sdk": "preview",
+        "homebrew": null,
+        "npm": null,
+        "pypi": null,
+        "cargo_binstall": null
+      }
+    },
+    {
+      "rust_target": "armv7-unknown-linux-gnueabihf",
+      "runner": "ubuntu-22.04",
+      "sdk_platform": "linux_armv7",
+      "node_platform": "linux-armv7",
+      "build_sdk": true,
+      "upload_sdist": false,
+      "upload_wheel": false,
+      "channels": {
+        "github_sdk": "preview",
+        "homebrew": null,
+        "npm": null,
+        "pypi": null,
+        "cargo_binstall": null
+      }
+    },
+    {
       "rust_target": "x86_64-apple-darwin",
       "runner": "macos-15-intel",
       "sdk_platform": "darwin_amd64",

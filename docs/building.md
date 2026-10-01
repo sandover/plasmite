@@ -132,6 +132,8 @@ Use `uv` for Python environment and package operations in this project.
 - `x86_64-unknown-linux-gnu` (`linux_amd64`)
 - `x86_64-apple-darwin` (`darwin_amd64`)
 - `aarch64-apple-darwin` (`darwin_arm64`)
+- `aarch64-unknown-linux-gnu` (`linux_arm64`)
+- `armv7-unknown-linux-gnueabihf` (`linux_armv7`)
 - `x86_64-pc-windows-msvc` (`windows_amd64` for Python and `win32-x64` for Node)
 
 Each release tarball now follows the SDK layout contract:
@@ -177,6 +179,40 @@ export PKG_CONFIG_PATH=/path/to/sdk/lib/pkgconfig
 pkg-config --cflags --libs plasmite
 ```
 
+The planned Linux ARM archives also include the `plasmite` and `pls`
+executables, so you can run the CLI and server without installing Rust. Once a
+release publishes these preview archives, download the one for your Raspberry
+Pi's architecture, extract it, and put its `bin/` directory on `PATH`:
+
+```bash
+mkdir -p "$HOME/.local/share/plasmite"
+tar -xzf plasmite_<version>_linux_arm64.tar.gz -C "$HOME/.local/share/plasmite"
+export PATH="$HOME/.local/share/plasmite/bin:$PATH"
+plasmite --version
+```
+
+Use `linux_armv7` for 32-bit ARM Linux with the hard-float ABI. For a server,
+run Plasmite as the operating-system account that owns its pool directory, and
+keep that directory private to the service. Start with the
+[serving guide](record/serving.md#share-your-first-pool) for server setup and
+pool ownership; this archive does not prescribe a service manager. These
+archives are GitHub SDK previews. This change configures their release builds
+and smoke checks; it does not publish them. The configured checks do not
+replace testing on physical Raspberry Pi hardware or published-release
+verification.
+
+On ARMv7, a pool file can be at most 2,147,483,647 bytes (2 GiB minus one
+byte). Plasmite rejects creation of a larger pool or mapping of a larger
+existing pool. A smaller pool can still fail to map if the operating system
+lacks memory.
+
+The ARM64 build uses Ubuntu 22.04 on ARM64, with glibc 2.35 as its intended
+runtime baseline. The ARMv7 build uses GCC's `arm-linux-gnueabihf` cross
+compiler with an Ubuntu 22.04 glibc 2.35 sysroot. Its compiler flags pin
+`-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard`; the Rust target also uses
+Thumb-2; dependencies can select optional NEON routines at runtime. These are configured build baselines; live
+runner smoke and runtime compatibility on target systems remain pending.
+
 For static linking on Linux:
 
 ```bash
@@ -218,13 +254,17 @@ If you need to force a specific build run (for example, during incident recovery
   - `bash skills/plasmite-release-manager/scripts/compare_local_benchmarks.sh --base-tag <vX.Y.Z> --runs 3`
 - Multi-platform performance sweeps are optional and should be run when platform-sensitive code changes (I/O, mmap, locking, FFI/bindings), not required for every patch release.
 
-## Linux arm64 policy
+## Linux ARM archive preview
 
-- `aarch64-unknown-linux-gnu` is currently best-effort.
-- It is not a blocking CI target in `.github/workflows/ci.yml`.
-- It is not built or published in the blocking release matrix in `.github/workflows/release.yml`.
-- It is not a release-gating target in `release-publish.yml`.
-- ARM64 Linux users should build from source unless/until gated support is reintroduced.
+- `aarch64-unknown-linux-gnu` (`linux_arm64`) and
+  `armv7-unknown-linux-gnueabihf` (`linux_armv7`) are GitHub SDK preview
+  targets for Raspberry Pi CLI/server use.
+- The archives contain the CLI and SDK layout. Users can install and run them
+  without Rust.
+- The release workflow is configured to build and smoke-test both targets.
+  Physical Raspberry Pi testing and published-release verification remain
+  separate evidence and must be recorded before either is claimed complete.
+- ARMv6 is outside this preview. npm, PyPI, and Homebrew remain unchanged.
 
 ## Windows support policy
 

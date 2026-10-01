@@ -42,6 +42,11 @@ cookbook-smoke:
 check-version-alignment:
 	./scripts/check-version-alignment.sh
 
+# Keep the release matrix and documented support tiers aligned.
+check-release-targets:
+	./scripts/test_release_targets.sh
+	./scripts/validate_distribution_targets.sh
+
 # Run Go bindings tests with repo-local caches.
 bindings-go-test:
 	cargo build -p plasmite
@@ -72,7 +77,7 @@ bindings-node-typecheck:
 bindings-test: bindings-go-test bindings-python-test bindings-node-test bindings-node-typecheck
 
 # Core, deterministic checks for every local change and pull request.
-check: fmt clippy test check-version-alignment verify-lite3
+check: fmt clippy test check-version-alignment check-release-targets verify-lite3
 
 # Cross-language and artifact checks. Requires Go, Node, Python, and uv.
 # `bindings-test` includes node pack and remote-only smoke tests.
@@ -120,7 +125,7 @@ sdk-from-source target="x86_64-unknown-linux-gnu":
 	platform="$(./scripts/release_target_field.sh "{{target}}" sdk_platform)"; \
 	./scripts/build_release_artifacts.sh "{{target}}" --static; \
 	./scripts/package_release_sdk.sh "{{target}}" "$version"; \
-	./scripts/cross_artifact_smoke.sh "dist/plasmite_${version}_${platform}.tar.gz"; \
+	./scripts/cross_artifact_smoke.sh "dist/plasmite_${version}_${platform}.tar.gz" "{{target}}"; \
 	echo "sdk-from-source complete: dist/plasmite_${version}_${platform}.tar.gz"
 
 # Ensure scratch workspace exists.

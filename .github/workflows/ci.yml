@@ -38,6 +38,7 @@ jobs:
     outputs:
       lite3: ${{ steps.filter.outputs.lite3 }}
       packaging: ${{ steps.filter.outputs.packaging }}
+      arm: ${{ steps.filter.outputs.arm }}
       windows: ${{ steps.filter.outputs.windows }}
       boundary: ${{ steps.filter.outputs.boundary }}
     steps:
@@ -79,6 +80,25 @@ jobs:
               - 'tests/abi_adversarial.c'
               - 'scripts/abi_adversarial.sh'
               - '.github/workflows/**'
+            arm:
+              - 'build.rs'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'c/**'
+              - 'vendor/lite3/**'
+              - 'src/**'
+              - 'tests/**'
+              - 'include/**'
+              - 'release/**'
+              - 'scripts/build_release_artifacts.sh'
+              - 'scripts/package_release_sdk.sh'
+              - 'scripts/cross_artifact_smoke.sh'
+              - 'scripts/arm_pool_compatibility.sh'
+              - 'scripts/packaged_serve_smoke.py'
+              - 'scripts/validate_release_targets.sh'
+              - 'scripts/render_release_matrix.sh'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/release.yml'
             windows:
               - 'build.rs'
               - 'Cargo.toml'
@@ -181,6 +201,96 @@ jobs:
           PLASMITE_SDK_DIR: ${{ github.workspace }}/target/${{ matrix.target }}/release
           UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
         run: ./scripts/python_wheel_smoke.sh
+
+  arm-sdk-smoke:
+    needs: [pr-paths]
+    if: >-
+      always()
+      && github.event_name != 'schedule'
+      && (github.event_name != 'pull_request' || needs.pr-paths.outputs.arm == 'true')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            platform: linux_arm64
+          - os: ubuntu-22.04
+            target: armv7-unknown-linux-gnueabihf
+            platform: linux_armv7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install SDK smoke tools
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config python3
+          if [[ "$TARGET" == armv7-* ]]; then
+            sudo apt-get install -y gcc-arm-linux-gnueabihf libc6-dev-armhf-cross qemu-user-binfmt
+            [[ "$(dpkg-query -W -f='${Version}' libc6-armhf-cross)" == 2.35* ]]
+            sudo update-binfmts --enable qemu-arm
+            grep -q '^enabled$' /proc/sys/fs/binfmt_misc/qemu-arm
+            {
+              echo 'CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc'
+              echo 'AR_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-ar'
+              echo 'CFLAGS_armv7_unknown_linux_gnueabihf=-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard'
+              echo 'CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc'
+              echo 'CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUNNER=qemu-arm -L /usr/arm-linux-gnueabihf'
+              echo 'QEMU_LD_PREFIX=/usr/arm-linux-gnueabihf'
+            } >> "$GITHUB_ENV"
+          else
+            test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.35'
+          fi
+      - name: Build and smoke SDK archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "plasmite") | .version')"
+          ./scripts/build_release_artifacts.sh "${{ matrix.target }}" --static
+          ./scripts/package_release_sdk.sh "${{ matrix.target }}" "$version"
+          ./scripts/cross_artifact_smoke.sh "dist/plasmite_${version}_${{ matrix.platform }}.tar.gz" "${{ matrix.target }}"
+          (cd dist && sha256sum "plasmite_${version}_${{ matrix.platform }}.tar.gz" > sha256sums.txt)
+          jq -n --arg source_sha "$(git rev-parse HEAD)" \
+            --arg version "$version" --arg target "${{ matrix.target }}" \
+            '{source_sha: $source_sha, version: $version, target: $target}' > dist/ci-build.json
+      - name: Run ARM runtime suites
+        run: |
+          cargo test --release --target "${{ matrix.target }}" \
+            --lib \
+            --test cli_pool \
+            --test secure_serving \
+            --test secure_sharing \
+            --test oauth_access \
+            --test access_lifecycle \
+            --test remote_integration \
+            -- --test-threads=1
+      - name: Check shared pools across 64-bit and ARMv7 CLIs
+        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        shell: bash
+        run: |
+          cargo build --release --bin plasmite
+          ./scripts/arm_pool_compatibility.sh \
+            target/release/plasmite \
+            target/armv7-unknown-linux-gnueabihf/release/plasmite
+
+      - name: Preserve verified ARM SDK archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-sdk-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/sha256sums.txt
+            dist/ci-build.json
+          if-no-files-found: error
+          retention-days: 30
 
   boundary-contracts:
     needs: [pr-paths]

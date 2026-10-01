@@ -4,7 +4,8 @@
 //! Role: IO boundary for the core: owns file handles/mmap and delegates planning to `plan`.
 //! Invariants: All mutations hold an exclusive append lock across processes.
 //! Invariants: Append writes mark frames `Writing` -> payload -> `Committed`; header persists last.
-//! Invariants: Header size is fixed (4096) and validated strictly on open.
+//! Invariants: Mapped lengths fit isize; validated headers keep offsets within that mapping.
+//! Invariants: Header size is fixed (4096) and validated on open and refresh.
 use std::collections::{HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -139,7 +140,7 @@ impl PoolHeader {
         })
     }
 
-    fn validate(&self, actual_file_size: u64) -> Result<(), Error> {
+    pub(crate) fn validate(&self, actual_file_size: u64) -> Result<(), Error> {
         if self.file_size == 0 {
             return Err(Error::new(ErrorKind::Corrupt).with_message("invalid file size"));
         }
@@ -162,7 +163,7 @@ impl PoolHeader {
         if self.ring_offset != expected_ring_offset {
             return Err(Error::new(ErrorKind::Corrupt).with_message("ring offset mismatch"));
         }
-        if self.ring_offset + self.ring_size != self.file_size {
+        if self.ring_offset.checked_add(self.ring_size) != Some(self.file_size) {
             return Err(Error::new(ErrorKind::Corrupt).with_message("ring bounds mismatch"));
         }
         if self.ring_size == 0 {
@@ -192,6 +193,20 @@ impl PoolHeader {
         }
         Ok(())
     }
+}
+
+// Rust slices and pointer offsets must fit the process's signed address space.
+// Check before creating a file or mapping it, so all later u64 -> usize offsets fit.
+fn validate_mapped_size(file_size: u64) -> Result<(), Error> {
+    let maximum = isize::MAX as u64;
+    if file_size > maximum {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message(format!(
+                "pool size exceeds this process's {maximum}-byte mapping limit"
+            ))
+            .with_hint("Choose a smaller pool or use a 64-bit Plasmite build."));
+    }
+    Ok(())
 }
 
 fn read_4(buf: &[u8], offset: usize) -> [u8; 4] {
@@ -419,6 +434,7 @@ pub struct Pool {
 impl Pool {
     pub fn create(path: impl AsRef<Path>, options: PoolOptions) -> Result<Self, Error> {
         let path = path.as_ref().to_path_buf();
+        validate_mapped_size(options.file_size).map_err(|err| err.with_path(&path))?;
         let index_capacity = options.resolved_index_capacity();
         let header = PoolHeader::new(options.file_size, index_capacity)?;
 
@@ -519,6 +535,7 @@ impl Pool {
             .map(|meta| meta.len())
             .map_err(|err| Error::new(ErrorKind::Io).with_path(&path).with_source(err))?;
 
+        validate_mapped_size(actual_size).map_err(|err| err.with_path(&path))?;
         let header = read_header(&mut file, &path)?;
         header.validate(actual_size)?;
 
@@ -540,7 +557,9 @@ impl Pool {
     }
 
     pub fn header_from_mmap(&self) -> Result<PoolHeader, Error> {
-        PoolHeader::decode(&self.mmap[0..HEADER_SIZE])
+        let header = PoolHeader::decode(&self.mmap[0..HEADER_SIZE])?;
+        header.validate(self.mmap.len() as u64)?;
+        Ok(header)
     }
 
     pub(crate) fn path(&self) -> &Path {
@@ -1198,6 +1217,71 @@ mod tests {
     use std::process::Command;
     use std::thread;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn oversized_creation_has_no_filesystem_side_effects() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let parent = dir.path().join("not-created");
+        let path = parent.join("pool.plasmite");
+        let err = Pool::create(&path, PoolOptions::new(isize::MAX as u64 + 1))
+            .err()
+            .expect("oversized pool must fail");
+        assert_eq!(err.kind(), ErrorKind::Usage);
+        assert_eq!(err.path(), Some(path.as_path()));
+        assert!(err.message().expect("message").contains("mapping limit"));
+        assert!(!parent.exists());
+    }
+
+    #[test]
+    fn overflowing_ring_extent_returns_corrupt() {
+        let mut header = PoolHeader::new(1024 * 1024, 64).expect("header");
+        header.ring_size = u64::MAX;
+        assert_eq!(
+            header
+                .validate(header.file_size)
+                .expect_err("overflow")
+                .kind(),
+            ErrorKind::Corrupt
+        );
+    }
+
+    #[test]
+    fn header_refresh_rejects_invalid_extent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("pool");
+        let mut header = pool.header();
+        header.ring_size = u64::MAX;
+        pool.mmap[..HEADER_SIZE].copy_from_slice(&header.encode());
+        assert_eq!(
+            pool.bounds().expect_err("invalid extent").kind(),
+            ErrorKind::Corrupt
+        );
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn oversized_open_preserves_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("oversized.plasmite");
+        let original = b"unchanged";
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&path)
+            .expect("file");
+        file.write_all(original).expect("sentinel");
+        let size = isize::MAX as u64 + 1;
+        file.set_len(size).expect("sparse size");
+        drop(file);
+        let err = Pool::open(&path).err().expect("oversized open must fail");
+        assert_eq!(err.kind(), ErrorKind::Usage);
+        assert_eq!(fs::metadata(&path).expect("metadata").len(), size);
+        let mut file = std::fs::File::open(&path).expect("read file");
+        let mut bytes = [0u8; 9];
+        std::io::Read::read_exact(&mut file, &mut bytes).expect("read sentinel");
+        assert_eq!(&bytes, original);
+    }
 
     #[test]
     fn create_and_open_pool() {

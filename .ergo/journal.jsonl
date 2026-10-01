@@ -231,3 +231,29 @@
 {"version":1,"task_id":"2BWRHB","kind":"claim","at":"2026-09-30T19:53:00.874768Z","agent":"codex@mac"}
 {"version":1,"task_id":"2BWRHB","kind":"block","at":"2026-09-30T21:42:44.659218Z","agent":"codex@mac","text":"Local reproduction checks passed with Defender enabled. Need Microsoft's determination of the original quarantined file to explain the detection conclusively; external file submission needs specific user approval. Do not call it a confirmed false positive."}
 {"version":1,"task_id":"2BWRHB","kind":"result","at":"2026-09-30T21:43:17.127086Z","text":"Fresh debug and release scans pass; debug server runs without alerts. Original detection needs Microsoft review."}
+{"version":1,"task_id":"LF5FM3","kind":"created","at":"2026-10-01T01:11:59.910144Z"}
+{"version":1,"task_id":"6UENVE","kind":"created","at":"2026-10-01T01:11:59.910165Z"}
+{"version":1,"task_id":"TAF4FU","kind":"created","at":"2026-10-01T01:11:59.910168Z"}
+{"version":1,"task_id":"K4K7AJ","kind":"created","at":"2026-10-01T01:11:59.910171Z"}
+{"version":1,"task_id":"FIGM6X","kind":"created","at":"2026-10-01T01:11:59.910174Z"}
+{"version":1,"task_id":"KPIMZ6","kind":"created","at":"2026-10-01T01:11:59.942343Z"}
+{"version":1,"task_id":"WAOV3E","kind":"created","at":"2026-10-01T01:11:59.942363Z"}
+{"version":1,"task_id":"5WUS4W","kind":"created","at":"2026-10-01T01:11:59.942367Z"}
+{"version":1,"task_id":"RGFVNJ","kind":"created","at":"2026-10-01T01:11:59.942369Z"}
+{"version":1,"task_id":"U5HWOR","kind":"created","at":"2026-10-01T01:11:59.942372Z"}
+{"version":1,"task_id":"6UENVE","kind":"open","at":"2026-10-01T01:12:44.878314Z"}
+{"version":1,"task_id":"TAF4FU","kind":"open","at":"2026-10-01T01:12:44.908328Z"}
+{"version":1,"task_id":"K4K7AJ","kind":"open","at":"2026-10-01T01:12:44.937384Z"}
+{"version":1,"task_id":"FIGM6X","kind":"open","at":"2026-10-01T01:12:44.966497Z"}
+{"version":1,"task_id":"WAOV3E","kind":"open","at":"2026-10-01T01:12:45.161312Z"}
+{"version":1,"task_id":"5WUS4W","kind":"open","at":"2026-10-01T01:12:45.187267Z"}
+{"version":1,"task_id":"RGFVNJ","kind":"open","at":"2026-10-01T01:12:45.213279Z"}
+{"version":1,"task_id":"U5HWOR","kind":"open","at":"2026-10-01T01:12:45.23864Z"}
+{"version":1,"task_id":"WAOV3E","kind":"claim","at":"2026-10-01T01:21:46.038157Z","agent":"codex@mac"}
+{"version":1,"task_id":"6UENVE","kind":"claim","at":"2026-10-01T01:21:46.068656Z","agent":"codex@mac"}
+{"version":1,"task_id":"6UENVE","kind":"done","at":"2026-10-01T01:33:14.93856Z","agent":"codex@mac","text":"Built and ran pinned Rust 1.88.0 on native ARM64 Linux (Docker, Debian 12/glibc 2.36/GCC 12). Library, pool/concurrent writer, OAuth, HTTPS/MCP, revocation and remote integration checks pass; permission checks pass separately as uid 65534. ARM64 archive CLI/C link and HTTPS recovery pass on Ubuntu 22.04/glibc 2.35. ELF needs GLIBC_2.34. Source: HEAD 153a2526 plus current implementation diff. Evidence: tmp/arm-validation. Physical Pi remains K4K7AJ."}
+{"version":1,"task_id":"WAOV3E","kind":"done","at":"2026-10-01T01:33:14.975038Z","agent":"codex@mac","text":"ARMv7 hard-float build and QEMU runtime pass with Rust 1.88.0. Added pre-mutation/pre-mmap isize length guard, checked extent arithmetic, refresh validation and planner guard before narrowing offsets. 160 library tests including 32-bit sparse oversized-open preservation pass (one permission check run separately unprivileged); CLI/pool, HTTPS/OAuth/MCP, revocation, remote suites pass. Wrapped pool handoffs 64-\u003e32 and32-\u003e64 pass. Archive CLI/C link and HTTPS restart pass with Ubuntu22 glibc2.35 sysroot; TLS/remote checks also pass with cortex-r5f emulation (no NEON). Source HEAD153a2526 plus current diff; evidence tmp/arm-validation. Real Pi remains RGFVNJ."}
+{"version":1,"task_id":"TAF4FU","kind":"result","at":"2026-10-01T01:34:00.186524Z","text":"ARM64 archive implementation and local checks pass; hosted artifact CI remains open.","file":{"path":"tmp/arm-validation/validation.md","sha256":"7153bfb2311ff33ca0150aca885af3b097cd7b6d3f7c65f98c35e50554e150ac","mtime":"2026-10-01T01:34:00.167583536Z","git_commit":"153a2526e3ceb7216b8937dddb18106d042e3311"}}
+{"version":1,"task_id":"5WUS4W","kind":"result","at":"2026-10-01T01:34:00.218345Z","text":"ARMv7 archive implementation and local checks pass; hosted artifact CI remains open.","file":{"path":"tmp/arm-validation/validation.md","sha256":"7153bfb2311ff33ca0150aca885af3b097cd7b6d3f7c65f98c35e50554e150ac","mtime":"2026-10-01T01:34:00.167583536Z","git_commit":"153a2526e3ceb7216b8937dddb18106d042e3311"}}
+{"version":1,"task_id":"FIGM6X","kind":"result","at":"2026-10-01T01:34:00.246935Z","text":"Docs updated; hosted CI and physical Pi evidence remain open.","file":{"path":"tmp/arm-validation/validation.md","sha256":"7153bfb2311ff33ca0150aca885af3b097cd7b6d3f7c65f98c35e50554e150ac","mtime":"2026-10-01T01:34:00.167583536Z","git_commit":"153a2526e3ceb7216b8937dddb18106d042e3311"}}
+{"version":1,"task_id":"U5HWOR","kind":"result","at":"2026-10-01T01:34:00.275774Z","text":"Docs updated; hosted CI and physical Pi evidence remain open.","file":{"path":"tmp/arm-validation/validation.md","sha256":"7153bfb2311ff33ca0150aca885af3b097cd7b6d3f7c65f98c35e50554e150ac","mtime":"2026-10-01T01:34:00.167583536Z","git_commit":"153a2526e3ceb7216b8937dddb18106d042e3311"}}

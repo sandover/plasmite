@@ -69,7 +69,8 @@ Costs below are intentionally qualitative; exact runtimes vary by machine and Gi
    - Gate: every build + packaging + smoke test job must succeed for the matrix targets.
    - Cost: expensive (multi-platform compilation + packaging; typically the longest stage).
    - Output (high-level):
-     - “SDK tarballs” for macOS (Intel + Apple Silicon) and Linux (x86_64)
+     - “SDK tarballs” for macOS (Intel + Apple Silicon) and Linux (x86_64,
+       plus the Linux ARM64 and ARMv7 preview targets)
      - Python distributions (sdist + wheels for supported platforms)
      - Node publish artifact (an npm tarball)
 
@@ -157,6 +158,25 @@ Failure policy:
 - Post-release delivery smoke is mandatory for release completion: run `post-release-smoke.yml` (or the script locally) and archive results.
 - Homebrew tap is updated locally from `../homebrew-tap` using `scripts/update_homebrew_formula.sh` and pushed before live publish dispatch. The `sync-homebrew-tap` CI job verifies alignment.
 - Publish-only retry after credential fixes must target the same release tag (or explicit successful `build_run_id`) without rebuilding matrix artifacts.
+
+### Linux ARM SDK preview
+
+The GitHub SDK preview configures `aarch64-unknown-linux-gnu` (`linux_arm64`)
+and `armv7-unknown-linux-gnueabihf` (`linux_armv7`). Once published, these
+archives will support manual CLI/server installation without Rust. They do not
+add npm, PyPI, or Homebrew targets. The ARMv7 target is 32-bit hard-float;
+ARMv6 is outside the preview.
+The configured ARM64 build uses Ubuntu 22.04 with glibc 2.35 as its intended
+runtime baseline. The ARMv7 build pins Armv7-A, VFPv3-D16 hard-float, and
+Thumb-2, with NEON optional, and uses an Ubuntu 22.04 glibc 2.35 sysroot.
+
+The build workflow's target build and packaged CLI smoke are release gates for
+these archives. The publish workflow must verify that both expected SDK
+archives are present before it attaches assets to a GitHub Release. This
+implementation configures archive production and publication gates; it does
+not publish a release. Live runner smoke, physical Raspberry Pi validation, and
+published-asset verification remain pending. Do not report these as complete
+until separately recorded.
 
 ## Support-tier enforcement
 

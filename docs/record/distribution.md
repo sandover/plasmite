@@ -23,8 +23,20 @@ Official platforms:
 - Windows: `x86_64-pc-windows-msvc` via npm and PyPI release artifacts
 
 Not currently targeted:
-- `aarch64-unknown-linux-gnu`
 - Linux distro packages (`apt`, `yum`, `pacman`, etc.)
+
+GitHub SDK preview platforms:
+- Linux ARM64: `aarch64-unknown-linux-gnu` (`linux_arm64`)
+- Linux ARMv7, 32-bit hard-float: `armv7-unknown-linux-gnueabihf` (`linux_armv7`)
+
+These preview archives are configured to provide the CLI/server and SDK layout
+for manual installation without Rust. This implementation does not publish
+them. Once a release publishes them, the ARM64 archive will target Ubuntu 22.04
+with glibc 2.35 as the intended runtime baseline. The ARMv7 archive will target
+Armv7-A, VFPv3-D16 hard-float, and Thumb-2, with NEON optional, using an Ubuntu 22.04
+glibc 2.35 sysroot. Release smoke checks are configured, but physical
+Raspberry Pi compatibility and published-release delivery remain pending.
+ARMv6 is outside this preview.
 
 ## Install Matrix
 
@@ -38,6 +50,25 @@ Not currently targeted:
 | Go module | `go get github.com/sandover/plasmite/bindings/go/local` | No | Yes (Go bindings) | `official` (macOS/Linux) | Requires system SDK (brew/manual) for cgo; import pure contracts from `/api` when needed. |
 | GitHub release tarball | Download from releases | Yes | Yes (SDK layout) | `official` (manual path) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |
 | cargo-binstall (Rust binary installer) | `cargo binstall plasmite --no-confirm` | Yes | No | `preview` (`x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`) | Uses `package.metadata.binstall` URL mapping to GitHub release SDK tarballs; release-publish smoke gate is currently Linux-only. |
+
+The `GitHub release tarball` row applies to official macOS and Linux x86_64
+archives. The Linux ARM archives are a separate GitHub SDK preview and do not
+change npm, PyPI, or Homebrew support.
+
+## Linux ARM SDK preview install
+
+Once a release publishes the preview assets, download
+`plasmite_<version>_linux_arm64.tar.gz` for 64-bit ARM Linux or
+`plasmite_<version>_linux_armv7.tar.gz` for 32-bit ARM Linux with the hard-float
+ABI. This implementation configures the archives but does not publish them.
+Extract a published archive and add its `bin/` directory to `PATH`; it contains
+`plasmite` and `pls`, so Rust is not required on the target machine.
+For a server, run the executable as the operating-system account that owns the
+pool directory. Follow the [serving guide](serving.md#share-your-first-pool)
+for directory setup and server operation. On ARMv7, pool files can be at most
+2,147,483,647 bytes (2 GiB minus one byte); Plasmite rejects creation of a
+larger pool or mapping of a larger existing pool. Smaller pools can still fail
+to map when system memory is insufficient.
 
 ## cargo-binstall Promotion Criteria
 

@@ -12,6 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LIB_DIR="$ROOT/target/debug"
 mkdir -p "$ROOT/.scratch"
 WORKDIR="$(mktemp -d "$ROOT/.scratch/cross-artifact.XXXXXX")"
+trap 'rm -rf "$WORKDIR"' EXIT
 HAS_RG=0
 if command -v rg >/dev/null 2>&1; then
   HAS_RG=1
@@ -36,6 +37,7 @@ require_file() {
 
 smoke_release_tarball() {
   local tarball="$1"
+  local target="${2:-}"
   local extract_dir="$WORKDIR/release-sdk"
   mkdir -p "$extract_dir"
   tar -C "$extract_dir" -xzf "$tarball"
@@ -82,13 +84,71 @@ smoke_release_tarball() {
       grep -Eq '^Cflags: (-I|.* -I)' "$extract_dir/lib/pkgconfig/plasmite.pc"
     fi
   fi
-  "$extract_dir/bin/plasmite" --version >/dev/null
-  "$extract_dir/bin/pls" --help >/dev/null
+  if [[ "$target" == "armv7-unknown-linux-gnueabihf" ]]; then
+    local machine library_machine
+    machine="$(readelf -h "$extract_dir/bin/plasmite" | sed -n 's/.*Machine:[[:space:]]*//p')"
+    library_machine="$(readelf -h "$extract_dir/lib/libplasmite.so" | sed -n 's/.*Machine:[[:space:]]*//p')"
+    [[ "$machine" == ARM && "$library_machine" == ARM ]] || {
+      echo "expected ARMv7 CLI and library, got: $machine and $library_machine" >&2
+      exit 1
+    }
+    for artifact in "$extract_dir/bin/plasmite" "$extract_dir/bin/pls" "$shared_lib"; do
+      readelf -h "$artifact" | stream_matches 'Class:.*ELF32'
+      readelf -h "$artifact" | stream_matches 'Flags:.*hard-float ABI'
+    done
+    readelf -l "$extract_dir/bin/plasmite" | stream_matches 'interpreter: /lib/ld-linux-armhf.so.3'
+    qemu-arm -L /usr/arm-linux-gnueabihf -E "LD_LIBRARY_PATH=$extract_dir/lib" "$extract_dir/bin/plasmite" --version >/dev/null
+    qemu-arm -L /usr/arm-linux-gnueabihf -E "LD_LIBRARY_PATH=$extract_dir/lib" "$extract_dir/bin/pls" --help >/dev/null
+  else
+    if [[ "$target" == "aarch64-unknown-linux-gnu" ]]; then
+      for artifact in "$extract_dir/bin/plasmite" "$extract_dir/bin/pls" "$shared_lib"; do
+        readelf -h "$artifact" | stream_matches 'Class:.*ELF64'
+        readelf -h "$artifact" | stream_matches 'Machine:.*AArch64'
+      done
+    fi
+    "$extract_dir/bin/plasmite" --version >/dev/null
+    "$extract_dir/bin/pls" --help >/dev/null
+  fi
+
+  if [[ "$target" == "armv7-unknown-linux-gnueabihf" || "$target" == "aarch64-unknown-linux-gnu" ]]; then
+    local compiler
+    compiler=cc
+    if [[ "$target" == "armv7-unknown-linux-gnueabihf" ]]; then
+      compiler=arm-linux-gnueabihf-gcc
+    fi
+    cat > "$WORKDIR/sdk-smoke.c" <<'C'
+#include "plasmite.h"
+
+int main(int argc, char **argv) {
+    plsm_client_t *client = 0;
+    plsm_error_t *error = 0;
+    if (argc != 2 || plsm_client_new(argv[1], &client, &error) != 0) {
+        plsm_error_free(error);
+        return 1;
+    }
+    plsm_client_free(client);
+    return 0;
+}
+C
+    local compiler_flags=()
+    if [[ "$target" == "armv7-unknown-linux-gnueabihf" ]]; then
+      compiler_flags=(-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard)
+    fi
+    "$compiler" "${compiler_flags[@]}" -I "$extract_dir/include" "$WORKDIR/sdk-smoke.c" \
+      -L "$extract_dir/lib" -lplasmite -o "$WORKDIR/sdk-smoke"
+    if [[ "$target" == "armv7-unknown-linux-gnueabihf" ]]; then
+      qemu-arm -L /usr/arm-linux-gnueabihf -E "LD_LIBRARY_PATH=$extract_dir/lib" "$WORKDIR/sdk-smoke" "$WORKDIR"
+    else
+      LD_LIBRARY_PATH="$extract_dir/lib" "$WORKDIR/sdk-smoke" "$WORKDIR"
+    fi
+    python3 "$ROOT/scripts/packaged_serve_smoke.py" \
+      --cli "$extract_dir/bin/plasmite" --scratch "$WORKDIR/serve-smoke"
+  fi
   echo "[smoke] release tarball SDK layout ok: $tarball"
 }
 
 if [[ $# -gt 0 ]]; then
-  smoke_release_tarball "$1"
+  smoke_release_tarball "$1" "${2:-}"
   exit 0
 fi
 

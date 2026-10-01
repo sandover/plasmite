@@ -16,6 +16,9 @@ jq -c '[
     node_platform,
     sdk: .build_sdk,
     upload_sdist,
-    upload_wheel
+    upload_wheel,
+    build_node: (.channels.npm != null),
+    build_python: (.upload_sdist or .upload_wheel),
+    armv7_cross: (.rust_target == "armv7-unknown-linux-gnueabihf")
   }
 ]' "$manifest"

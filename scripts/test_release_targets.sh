@@ -25,31 +25,23 @@ expect_invalid() {
 
 expect_invalid duplicate-target '.targets += [.targets[0]]'
 expect_invalid missing-runner 'del(.targets[0].runner)'
-expect_invalid unsupported-homebrew '.targets[3].channels.homebrew = "official"'
+expect_invalid unsupported-homebrew '(.targets[] | select(.rust_target == "x86_64-pc-windows-msvc").channels.homebrew) = "official"'
+expect_invalid armv7-npm '(.targets[] | select(.rust_target == "armv7-unknown-linux-gnueabihf").channels.npm) = "preview"'
+expect_invalid arm64-wheel '(.targets[] | select(.rust_target == "aarch64-unknown-linux-gnu").upload_wheel) = true'
+expect_invalid newer-arm64-runner '(.targets[] | select(.rust_target == "aarch64-unknown-linux-gnu").runner) = "ubuntu-24.04-arm"'
 
-test_manifest="$tmp_dir/non-publishing-target.json"
-jq '.targets += [{
-  rust_target: "aarch64-unknown-linux-gnu",
-  runner: "ubuntu-24.04-arm",
-  sdk_platform: "linux_arm64",
-  node_platform: "linux-arm64",
-  build_sdk: true,
-  upload_sdist: false,
-  upload_wheel: false,
-  channels: {
-    github_sdk: "preview",
-    homebrew: null,
-    npm: null,
-    pypi: null,
-    cargo_binstall: null
-  }
-}]' "$manifest" >"$test_manifest"
-
-matrix="$("$root_dir/scripts/render_release_matrix.sh" "$test_manifest")"
-test_row="$(jq -c '.[] | select(.target == "aarch64-unknown-linux-gnu")' <<<"$matrix")"
-[[ "$(jq -r '.os' <<<"$test_row")" == "ubuntu-24.04-arm" ]]
-[[ "$(jq -r '.sdk_platform' <<<"$test_row")" == "linux_arm64" ]]
-[[ "$(jq -r '"plasmite_9.9.9_\(.sdk_platform).tar.gz"' <<<"$test_row")" == \
-  "plasmite_9.9.9_linux_arm64.tar.gz" ]]
+matrix="$("$root_dir/scripts/render_release_matrix.sh" "$manifest")"
+[[ "$(jq -r '. | length' <<<"$matrix")" == 6 ]]
+for target in aarch64-unknown-linux-gnu armv7-unknown-linux-gnueabihf; do
+  row="$(jq -c --arg target "$target" '.[] | select(.target == $target)' <<<"$matrix")"
+  [[ -n "$row" ]]
+  [[ "$(jq -r '.sdk and (.build_node | not) and (.build_python | not) and (.upload_sdist | not) and (.upload_wheel | not)' <<<"$row")" == true ]]
+done
+[[ "$(jq -r '.[] | select(.target == "aarch64-unknown-linux-gnu") | .os' <<<"$matrix")" == ubuntu-22.04-arm ]]
+[[ "$(jq -r '.[] | select(.target == "armv7-unknown-linux-gnueabihf") | .armv7_cross' <<<"$matrix")" == true ]]
+[[ "$(jq -r '.[] | select(.target == "x86_64-unknown-linux-gnu") | .build_python and .upload_sdist and .build_node' <<<"$matrix")" == true ]]
+[[ "$(jq -r '.[] | select(.target == "x86_64-pc-windows-msvc") | .build_python and .upload_wheel and .build_node' <<<"$matrix")" == true ]]
+preview_sdks="$("$root_dir/scripts/release_channel_targets.sh" github_sdk preview sdk_platform | sort)"
+[[ "$preview_sdks" == $'linux_arm64\nlinux_armv7' ]]
 
 echo "release target validator fixtures ok"

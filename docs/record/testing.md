@@ -27,6 +27,26 @@ There are three top-level commands, ordered by cost and coverage:
   smoke. Run it before merging, tagging, or publishing; main and scheduled CI
   run it on Linux and macOS.
 
+### Linux ARM release archives
+
+The GitHub SDK preview targets are `aarch64-unknown-linux-gnu` and
+`armv7-unknown-linux-gnueabihf`. The release workflow is configured to build
+each target, package its SDK archive, and run its packaged CLI smoke check.
+ARM64 uses the `ubuntu-22.04-arm` runner with glibc 2.35 as its intended
+runtime baseline. ARMv7 cross-builds on Ubuntu 22.04 against a glibc 2.35
+hard-float sysroot; the target requires Armv7-A, VFPv3-D16, hard-float, and
+Thumb-2; NEON is optional. QEMU runs the packaged ARMv7 binary. Runner smoke results
+are still pending. Passing these checks will establish the configured build
+and archive behavior in CI, not behavior on a physical Raspberry Pi.
+
+Record physical Raspberry Pi checks separately from CI results. Include the
+Pi model, OS and architecture, archive version, CLI/server commands, and the
+pool sizes exercised. On ARMv7, the maximum pool file length is 2,147,483,647
+bytes (2 GiB minus one byte); Plasmite rejects creation of a larger pool or
+mapping of a larger existing pool. A smaller mapping can still fail under
+memory pressure. Do not describe an archive as built, published, or Pi-validated
+until evidence exists for that specific boundary.
+
 The main CI gate gives Go a stable runner-local build cache that
 `actions/setup-go` restores and saves. Test scripts honor an existing
 `GOCACHE`; local runs default to repository-local scratch directories.
