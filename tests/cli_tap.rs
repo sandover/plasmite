@@ -217,7 +217,8 @@ fn tap_forwards_sigterm_and_reaps_wrapped_child() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
     let child_pid_path = temp.path().join("child.pid");
-    let script = "import os,pathlib,time,sys; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(60)";
+    // Write then rename, so the test sees no file or the whole pid, never an empty file.
+    let script = "import os,pathlib,time,sys; p=pathlib.Path(sys.argv[1]); t=p.with_suffix('.tmp'); t.write_text(str(os.getpid())); os.replace(t,p); time.sleep(60)";
 
     let mut tap = cmd()
         .args([
