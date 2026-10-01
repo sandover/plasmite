@@ -162,6 +162,15 @@ jobs:
           [[ "$(dpkg-query -W -f='${Version}' libc6-armhf-cross)" == 2.35* ]]
           sudo update-binfmts --enable qemu-arm
           grep -q '^enabled$' /proc/sys/fs/binfmt_misc/qemu-arm
+      - name: Pin macOS native deployment targets
+        if: matrix.sdk_platform == 'darwin_amd64' || matrix.sdk_platform == 'darwin_arm64'
+        shell: bash
+        run: |
+          if [[ "${{ matrix.sdk_platform }}" == darwin_amd64 ]]; then
+            echo 'MACOSX_DEPLOYMENT_TARGET=10.12' >> "$GITHUB_ENV"
+          else
+            echo 'MACOSX_DEPLOYMENT_TARGET=11.0' >> "$GITHUB_ENV"
+          fi
       - name: Check ARM64 libc build baseline
         if: matrix.sdk_platform == 'linux_arm64'
         shell: bash

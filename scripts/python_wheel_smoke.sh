@@ -102,8 +102,6 @@ fi
   rm -rf dist
   PLASMITE_SDK_DIR="$SDK_DIR" python -m build
 )
-deactivate
-
 wheel_file="$(ls -1 "$ROOT"/bindings/python/dist/*.whl | tail -n 1)"
 if [[ -z "$wheel_file" ]]; then
   echo "wheel build failed"
@@ -112,6 +110,8 @@ fi
 
 wheel_has_member "$wheel_file" 'plasmite/_native/(plasmite\.dll|libplasmite\.(dylib|so))'
 wheel_has_member "$wheel_file" 'plasmite/_native/plasmite(\.exe)?'
+python "$ROOT/scripts/verify_python_wheel_platform.py" "$wheel_file" "$SDK_DIR"
+deactivate
 
 uv venv "$install_env" --cache-dir "$UV_CACHE_DIR"
 activate_venv "$install_env"
