@@ -19,6 +19,11 @@ use serde_json::Value;
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+/// How long a one-shot request may take, start to finish. Streams have no deadline: a
+/// follower on a quiet pool waits as long as the pool stays quiet.
+pub(super) const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 use url::{Host, Url};
 
 type ApiResult<T> = Result<T, Error>;
@@ -324,6 +329,10 @@ impl RemoteClient {
     }
 
     fn request(&self, method: &str, url: &Url) -> ApiResult<ureq::Request> {
+        Ok(self.open(method, url)?.timeout(REQUEST_TIMEOUT))
+    }
+
+    fn open(&self, method: &str, url: &Url) -> ApiResult<ureq::Request> {
         let saved_key = if matches!(&self.inner.credentials, CredentialSource::Saved) {
             super::access::load_saved_key(self.inner.base_url.as_str())?
         } else {
@@ -382,7 +391,7 @@ impl RemoteClient {
 
     fn request_stream(&self, url: &Url) -> ApiResult<ureq::Response> {
         let response = self
-            .request("GET", url)?
+            .open("GET", url)?
             .set("Accept", "application/json")
             .call();
         match response {
@@ -396,7 +405,7 @@ impl RemoteClient {
 
     fn request_stream_lite3(&self, url: &Url) -> ApiResult<ureq::Response> {
         let response = self
-            .request("GET", url)?
+            .open("GET", url)?
             .set("Accept", "application/x-plasmite-lite3-stream")
             .call();
         match response {

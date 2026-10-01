@@ -117,6 +117,9 @@ Stable error kinds:
 - A local tail cancellation flag ends the tail promptly and returns no further
   messages after cancellation is observed.
 - Reconnect behavior (for remote transports) must be explicit and must not reorder messages.
+- Remote one-shot operations end with `Io` when the server sends no complete
+  response within a deadline (30 seconds in the Rust client). Remote streams
+  have no deadline, because a stream on a quiet pool carries nothing.
 
 Pools use bounded retention, so a stream cursor can be overtaken when writers
 wrap the ring buffer. Every tail tracks an expected sequence:
