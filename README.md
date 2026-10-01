@@ -27,8 +27,10 @@ Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and 
 For IPC across machines, `pls serve` exposes local pools over HTTPS. Native
 clients and browsers connect with an access key. A local MCP process can use a
 saved native connection; a remote MCP harness can authorize in the browser.
-The access-key workflow has not shipped yet. To try it, [build from source](docs/building.md#install-the-cli-from-source)
-and follow [Share your first pool](docs/record/serving.md#share-your-first-pool).
+The access-key workflow has not shipped in a release yet. To try it, use a
+[Linux ARM preview archive](docs/record/distribution.md#linux-arm-sdk-preview-install)
+or [build from source](docs/building.md#install-the-cli-from-source), then follow
+[Share your first pool](docs/record/serving.md#share-your-first-pool).
 
 #### Local IPC
 
@@ -126,6 +128,29 @@ brew install sandover/tap/plasmite
 
 Installs the CLI (`plasmite` + `pls`) and the full SDK (`libplasmite`, C header, pkg-config). Go bindings link against this SDK, so install Homebrew first if using Go.
 
+### Linux ARM / Raspberry Pi (preview)
+
+Prebuilt ARM archives include `plasmite`, `pls`, and the full SDK. You can run
+local pools and the HTTPS server without installing Rust or a desktop.
+
+| Linux userland | Archive suffix | Minimum |
+| --- | --- | --- |
+| ARM64 (64-bit) | `linux_arm64` | ARMv8-A, glibc 2.35 |
+| ARMv7 (32-bit hard-float) | `linux_armv7` | Armv7-A with VFPv3-D16 and Thumb-2, glibc 2.35 |
+
+A Raspberry Pi 2 running Raspberry Pi OS Lite (32-bit) uses `linux_armv7`.
+Choose the archive for the installed userland; a 64-bit kernel can run a
+32-bit userland.
+
+Both targets passed [hosted CI](https://github.com/sandover/plasmite/actions/runs/36803923793),
+including extracted CLI/library checks and HTTPS recovery. ARMv7 uses QEMU
+emulation. Physical Pi installation and reboot checks remain pending.
+
+Until a release publishes the ARM archives, use the verified CI artifacts.
+See the [ARM installation guide](docs/record/distribution.md#linux-arm-sdk-preview-install)
+for downloads, checksums, and setup. ARMv7 pools can be at most 2 GiB minus one
+byte. ARMv6 falls outside this preview.
+
 ### Rust
 
 ```bash
@@ -140,7 +165,10 @@ uv tool install plasmite   # standalone CLI + Python bindings
 uv add plasmite            # add to a uv-managed project
 ```
 
-PyPI ships pre-built native bindings on macOS and Windows x86_64. On Linux today, prefer Homebrew or a GitHub release tarball for the system SDK; see the distribution docs for the current matrix.
+PyPI ships pre-built native bindings on macOS and Windows x86_64. Linux
+x86_64 users can install the system SDK through Homebrew or a GitHub release
+tarball. Linux ARM users can use the preview SDK archives above. See the
+[distribution guide](docs/record/distribution.md#install-matrix) for the current matrix.
 
 ### Node
 
@@ -148,7 +176,8 @@ PyPI ships pre-built native bindings on macOS and Windows x86_64. On Linux today
 npm i -g plasmite
 ```
 
-Package includes pre-built native bindings.
+The package includes pre-built native bindings for macOS, Linux x86_64, and
+Windows x86_64. Use the SDK preview archives for Linux ARM.
 
 ### Go
 

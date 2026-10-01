@@ -161,22 +161,25 @@ Failure policy:
 
 ### Linux ARM SDK preview
 
-The GitHub SDK preview configures `aarch64-unknown-linux-gnu` (`linux_arm64`)
-and `armv7-unknown-linux-gnueabihf` (`linux_armv7`). Once published, these
-archives will support manual CLI/server installation without Rust. They do not
-add npm, PyPI, or Homebrew targets. The ARMv7 target is 32-bit hard-float;
-ARMv6 is outside the preview.
-The configured ARM64 build uses Ubuntu 22.04 with glibc 2.35 as its intended
-runtime baseline. The ARMv7 build pins Armv7-A, VFPv3-D16 hard-float, and
-Thumb-2, with NEON optional, and uses an Ubuntu 22.04 glibc 2.35 sysroot.
+The GitHub SDK preview supports CI-built `aarch64-unknown-linux-gnu`
+(`linux_arm64`) and `armv7-unknown-linux-gnueabihf` (`linux_armv7`) archives for
+manual CLI/server installation without Rust. The passing
+[ARM SDK CI run](https://github.com/sandover/plasmite/actions/runs/36803923793)
+built and smoke-tested both SDK archives. The run retained them for 30 days as
+`ci-sdk-aarch64-unknown-linux-gnu` and
+`ci-sdk-armv7-unknown-linux-gnueabihf`, with checksums and build provenance.
+GitHub release asset names are `plasmite_<version>_linux_arm64.tar.gz` and
+`plasmite_<version>_linux_armv7.tar.gz`; no GitHub release has published these
+assets yet.
 
-The build workflow's target build and packaged CLI smoke are release gates for
-these archives. The publish workflow must verify that both expected SDK
-archives are present before it attaches assets to a GitHub Release. This
-implementation configures archive production and publication gates; it does
-not publish a release. Live runner smoke, physical Raspberry Pi validation, and
-published-asset verification remain pending. Do not report these as complete
-until separately recorded.
+ARM64 uses Ubuntu 22.04 with glibc 2.35 as its runtime baseline. ARMv7 uses an
+Ubuntu 22.04 glibc 2.35 sysroot and pins Armv7-A, VFPv3-D16 hard-float, and
+Thumb-2, with NEON optional. The ARMv7 target is 32-bit hard-float; ARMv6 is
+outside the preview. These targets do not add npm, PyPI, or Homebrew support.
+
+The release workflow builds these archives and checks for both before
+attaching them to a GitHub Release. Physical Raspberry Pi validation remains
+separate from CI evidence.
 
 ## Support-tier enforcement
 

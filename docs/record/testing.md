@@ -30,14 +30,23 @@ There are three top-level commands, ordered by cost and coverage:
 ### Linux ARM release archives
 
 The GitHub SDK preview targets are `aarch64-unknown-linux-gnu` and
-`armv7-unknown-linux-gnueabihf`. The release workflow is configured to build
-each target, package its SDK archive, and run its packaged CLI smoke check.
-ARM64 uses the `ubuntu-22.04-arm` runner with glibc 2.35 as its intended
-runtime baseline. ARMv7 cross-builds on Ubuntu 22.04 against a glibc 2.35
-hard-float sysroot; the target requires Armv7-A, VFPv3-D16, hard-float, and
-Thumb-2; NEON is optional. QEMU runs the packaged ARMv7 binary. Runner smoke results
-are still pending. Passing these checks will establish the configured build
-and archive behavior in CI, not behavior on a physical Raspberry Pi.
+`armv7-unknown-linux-gnueabihf`. The passing
+[ARM SDK CI run](https://github.com/sandover/plasmite/actions/runs/36803923793)
+built and packaged both targets, then extracted each archive, compiled and
+linked a C SDK consumer, and exercised the CLI and HTTPS restart path. It ran
+the `cli_pool`, `secure_serving`, `secure_sharing`, `oauth_access`,
+`access_lifecycle`, and `remote_integration` suites on each target. ARM64 ran on
+`ubuntu-22.04-arm` with glibc 2.35. ARMv7 cross-built on Ubuntu 22.04 against a
+glibc 2.35 hard-float sysroot and ran under QEMU; the target requires Armv7-A,
+VFPv3-D16 hard-float, and Thumb-2, with NEON optional. The run also passed
+64-bit to ARMv7 and ARMv7 to 64-bit shared-pool handoffs. These CI checks do not
+establish behavior on physical Raspberry Pi hardware.
+
+The run retains the verified archives for 30 days as
+`ci-sdk-aarch64-unknown-linux-gnu` and
+`ci-sdk-armv7-unknown-linux-gnueabihf`. Each includes `sha256sums.txt` and
+`ci-build.json` with the SDK tarball. No GitHub release currently publishes
+these ARM assets.
 
 Record physical Raspberry Pi checks separately from CI results. Include the
 Pi model, OS and architecture, archive version, CLI/server commands, and the

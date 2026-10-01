@@ -29,14 +29,21 @@ GitHub SDK preview platforms:
 - Linux ARM64: `aarch64-unknown-linux-gnu` (`linux_arm64`)
 - Linux ARMv7, 32-bit hard-float: `armv7-unknown-linux-gnueabihf` (`linux_armv7`)
 
-These preview archives are configured to provide the CLI/server and SDK layout
-for manual installation without Rust. This implementation does not publish
-them. Once a release publishes them, the ARM64 archive will target Ubuntu 22.04
-with glibc 2.35 as the intended runtime baseline. The ARMv7 archive will target
-Armv7-A, VFPv3-D16 hard-float, and Thumb-2, with NEON optional, using an Ubuntu 22.04
-glibc 2.35 sysroot. Release smoke checks are configured, but physical
-Raspberry Pi compatibility and published-release delivery remain pending.
-ARMv6 is outside this preview.
+These preview archives provide the CLI/server and SDK layout for manual
+installation without Rust. CI builds and smoke-tests both targets. ARM64 uses
+Ubuntu 22.04 with glibc 2.35 as its runtime baseline. ARMv7 uses Armv7-A,
+VFPv3-D16 hard-float, and Thumb-2, with NEON optional, against an Ubuntu 22.04
+glibc 2.35 sysroot. Physical Raspberry Pi compatibility remains to be checked,
+and no GitHub release has published these assets yet. ARMv6 is outside this
+preview.
+
+The passing [ARM SDK CI run](https://github.com/sandover/plasmite/actions/runs/36803923793)
+retains the archives for 30 days as `ci-sdk-aarch64-unknown-linux-gnu` and
+`ci-sdk-armv7-unknown-linux-gnueabihf`. Each artifact includes the SDK tarball,
+`sha256sums.txt`, and `ci-build.json` provenance. The CI archive filenames use
+`plasmite_<version>_linux_arm64.tar.gz` and
+`plasmite_<version>_linux_armv7.tar.gz`, which are also the planned GitHub
+release asset names.
 
 ## Install Matrix
 
@@ -49,6 +56,8 @@ ARMv6 is outside this preview.
 | npm (Node) | `npm i -g plasmite` | Yes | Yes (Node bindings) | `official` (macOS/Linux/Windows x86_64) | Bundles addon, native assets, and CLI. |
 | Go module | `go get github.com/sandover/plasmite/bindings/go/local` | No | Yes (Go bindings) | `official` (macOS/Linux) | Requires system SDK (brew/manual) for cgo; import pure contracts from `/api` when needed. |
 | GitHub release tarball | Download from releases | Yes | Yes (SDK layout) | `official` (manual path) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |
+| GitHub Actions artifact (Linux ARM64) | Download `ci-sdk-aarch64-unknown-linux-gnu` | Yes | Yes (SDK layout) | `preview` | CI archive, retained for 30 days; includes checksum and build provenance. |
+| GitHub Actions artifact (Linux ARMv7) | Download `ci-sdk-armv7-unknown-linux-gnueabihf` | Yes | Yes (SDK layout) | `preview` | 32-bit hard-float CI archive, retained for 30 days; includes checksum and build provenance. |
 | cargo-binstall (Rust binary installer) | `cargo binstall plasmite --no-confirm` | Yes | No | `preview` (`x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`) | Uses `package.metadata.binstall` URL mapping to GitHub release SDK tarballs; release-publish smoke gate is currently Linux-only. |
 
 The `GitHub release tarball` row applies to official macOS and Linux x86_64
@@ -57,12 +66,26 @@ change npm, PyPI, or Homebrew support.
 
 ## Linux ARM SDK preview install
 
-Once a release publishes the preview assets, download
-`plasmite_<version>_linux_arm64.tar.gz` for 64-bit ARM Linux or
-`plasmite_<version>_linux_armv7.tar.gz` for 32-bit ARM Linux with the hard-float
-ABI. This implementation configures the archives but does not publish them.
-Extract a published archive and add its `bin/` directory to `PATH`; it contains
-`plasmite` and `pls`, so Rust is not required on the target machine.
+For a CI-built SDK, download the matching artifact from the
+[ARM SDK CI run](https://github.com/sandover/plasmite/actions/runs/36803923793).
+With GitHub CLI, download the ARM64 artifact using
+`gh run download 36803923793 --repo sandover/plasmite -n ci-sdk-aarch64-unknown-linux-gnu`, or download
+the ARMv7 artifact with:
+
+```bash
+gh run download 36803923793 --repo sandover/plasmite -n ci-sdk-armv7-unknown-linux-gnueabihf
+```
+
+Each artifact contains the SDK tarball, checksum, and build provenance. The same tarball names are planned for GitHub releases, but no release publishes them yet. See the
+[build guide](../building.md#install-a-linux-arm-preview) for checksum, extraction,
+and `PATH` commands. Each archive contains `plasmite` and `pls`, so Rust is not
+required on the target machine.
+
+Choose the archive from the operating system's userspace architecture. Run
+`getconf LONG_BIT` on the Pi to distinguish 32-bit and 64-bit Linux; the kernel
+architecture alone does not establish which userspace archive to use. Both
+targets require glibc 2.35 or newer; check with `getconf GNU_LIBC_VERSION`. The
+intended 32-bit target is a Raspberry Pi 2 running 32-bit Raspberry Pi OS Lite.
 For a server, run the executable as the operating-system account that owns the
 pool directory. Follow the [serving guide](serving.md#share-your-first-pool)
 for directory setup and server operation. On ARMv7, pool files can be at most
