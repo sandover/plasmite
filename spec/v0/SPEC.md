@@ -39,6 +39,10 @@ It keeps only script-level guarantees; signatures, walkthroughs, and examples li
 - Commands that expose `--json` provide stable machine-readable output through it.
 - `fetch` always emits one JSON message envelope.
 - `version` emits human text to a TTY and JSON when piped.
+- All product-version output uses the same build identity. A clean checkout at
+  the matching release tag reports the package version. Other source builds
+  append `-dev` and Git commit metadata, plus `.dirty` for changes to tracked
+  files. Stage new files to include them in that check.
 - Streaming reads provide stable JSON Lines via `--format jsonl` or `--jsonl`.
 - `feed` append receipts include `seq`, `time`, and `meta` (not echoed `data`).
 

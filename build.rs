@@ -3,13 +3,18 @@
 //! Invariants: `cargo:rerun-if-changed` covers the C sources used by Plasmite.
 //! Invariants: Produces a `lite3` object library linked into the Rust crate.
 //! Invariants: Builds the pinned Lite3 snapshot in C11 mode.
-//! Invariants: Uses only Cargo-provided env vars (e.g. `CARGO_MANIFEST_DIR`).
+//! Invariants: Source builds identify their Git revision and local changes.
 use std::env;
 use std::path::PathBuf;
+mod build_version;
 
 fn main() {
     let target = env::var("TARGET").unwrap_or_default();
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let version = env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION");
+    println!("cargo:rerun-if-changed=build_version.rs");
+    let identity = build_version::build_identity(&manifest_dir, &version);
+    println!("cargo:rustc-env=PLASMITE_BUILD_VERSION={identity}");
     let lite3_dir = manifest_dir.join("vendor").join("lite3");
     let include_dir = lite3_dir.join("include");
     let lib_dir = lite3_dir.join("lib");

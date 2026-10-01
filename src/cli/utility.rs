@@ -29,12 +29,12 @@ pub(super) fn run(command: UtilityCommand, context: &CliContext) -> Result<Comma
     match command {
         UtilityCommand::Version => {
             if io::stdout().is_terminal() {
-                println!("plasmite {}", env!("CARGO_PKG_VERSION"));
+                println!("plasmite {}", env!("PLASMITE_BUILD_VERSION"));
             } else {
                 emit_json(
                     json!({
                         "name": "plasmite",
-                        "version": env!("CARGO_PKG_VERSION"),
+                        "version": env!("PLASMITE_BUILD_VERSION"),
                     }),
                     context.color_mode(),
                 );

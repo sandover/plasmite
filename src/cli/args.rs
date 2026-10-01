@@ -12,7 +12,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(
     name = "plasmite",
-    version,
+    version = env!("PLASMITE_BUILD_VERSION"),
     about = "Persistent JSON message pools for local and host-adjacent IPC",
     help_template = r#"{about-with-newline}
 {before-help}USAGE

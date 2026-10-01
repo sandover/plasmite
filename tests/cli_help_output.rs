@@ -195,7 +195,7 @@ fn version_non_tty_emits_machine_readable_json() {
     assert!(output.stderr.is_empty());
     let value = parse_json(std::str::from_utf8(&output.stdout).expect("utf8"));
     assert_eq!(value["name"], "plasmite");
-    assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(value["version"], env!("PLASMITE_BUILD_VERSION"));
 }
 
 #[test]
