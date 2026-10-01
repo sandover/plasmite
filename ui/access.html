@@ -12,6 +12,12 @@ Invariants: Key names and other server data enter the DOM as text.
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Access · local</title>
     <style>
+      @font-face {
+        font-family: "Inconsolata";
+        src: url("/ui/assets/inconsolata.woff2") format("woff2");
+        font-weight: 200 900;
+        font-display: swap;
+      }
       :root {
         color-scheme: dark;
         --bg: #15191f;
@@ -24,6 +30,10 @@ Invariants: Key names and other server data enter the DOM as text.
         --ok: #74d7b2;
         --warn: #e8bc72;
         --error: #f08383;
+        /* Two voices: the system's own sans for the interface, which loads nothing, and
+           the embedded Inconsolata for data. A region uses one or the other throughout. */
+        --sans: system-ui, sans-serif;
+        --mono: "Inconsolata", "Menlo", "Consolas", monospace;
       }
       * { box-sizing: border-box; }
       [hidden] { display: none !important; }
@@ -32,16 +42,19 @@ Invariants: Key names and other server data enter the DOM as text.
         min-height: 100vh;
         background: radial-gradient(circle at 30% -20%, #263543, transparent 55%), var(--bg);
         color: var(--text);
-        font: 15px/1.45 "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+        font: 14px/1.5 var(--sans);
       }
       a { color: var(--accent); }
       button, input { font: inherit; }
+      /* Things to copy or type are data: commands, keys, paths, addresses. The address
+         choices are one region, since the Other field sizes itself in ch. */
+      code, .path, .choices { font-family: var(--mono); }
       button { cursor: pointer; }
       .topbar {
         display: flex; align-items: baseline; gap: 22px;
         padding: 10px 18px; border-bottom: 1px solid var(--line); background: #1a2028;
       }
-      .brand { color: var(--text); font-size: 14px; letter-spacing: .11em; text-decoration: none; }
+      .brand { color: var(--text); font: 14px var(--mono); letter-spacing: .11em; text-decoration: none; }
       .topbar nav { display: flex; align-items: baseline; gap: 16px; }
       .topbar nav a { text-decoration: none; color: var(--muted); }
       .topbar nav a[aria-current="page"] { color: var(--text); }

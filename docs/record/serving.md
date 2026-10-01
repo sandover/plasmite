@@ -103,7 +103,7 @@ For Plasmite's browser trust setup:
 3. Approve the operating system's certificate prompt. On Windows, use a
    signed-in interactive terminal so Windows can show the prompt.
 4. Plasmite opens the shared HTTPS address. Enter the access key on that
-   page, open `events`, and use Append to send a message.
+   page, open `events`, and use Feed to send a message.
 
 The browser keeps a private session for later visits. Sign out to end that
 browser session. The key remains usable until the owner revokes it.
@@ -375,7 +375,7 @@ size, and a button that copies all of it.
 Type in Filter to keep lines that contain that text, as `path: value` or in a
 tag, and mark it; a match in a cut-off part marks the ellipsis. `j` and `k` move
 between lines, `/` focuses the filter, and Esc closes the open message. The
-Append box takes JSON, as `plasmite feed` does, or plain text, which it sends
+Feed box takes JSON, as `plasmite feed` does, or plain text, which it sends
 as `{"text": ...}`.
 
 On the local map, the small marks beneath each pool's size open its activity

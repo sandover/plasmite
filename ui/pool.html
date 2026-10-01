@@ -27,6 +27,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         --panel-raised: #27313e;
         --line: #394657;
         --rule: #2c3643;
+        --layer: #1f2731;
         --text: #e9edf1;
         --muted: #9aa9b8;
         --faint: #6f7d8c;
@@ -34,6 +35,9 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         --ok: #74d7b2;
         --warn: #e8bc72;
         --error: #f08383;
+        /* Two voices: the system's own sans for the interface, which loads nothing, and
+           the embedded Inconsolata for data. A region uses one or the other throughout. */
+        --sans: system-ui, sans-serif;
         --mono: "Inconsolata", "Menlo", "Consolas", monospace;
       }
       * { box-sizing: border-box; }
@@ -43,7 +47,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         margin: 0;
         background: radial-gradient(circle at 30% -20%, #263543, transparent 55%), var(--bg);
         color: var(--text);
-        font: 15px/1.45 "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+        font: 14px/1.5 var(--sans);
       }
       a { color: var(--accent); }
       button { font: inherit; cursor: pointer; }
@@ -53,7 +57,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         display: flex; align-items: baseline; gap: 22px;
         padding: 10px 18px; border-bottom: 1px solid var(--line); background: var(--panel);
       }
-      .brand { color: var(--text); font-size: 14px; letter-spacing: .11em; text-decoration: none; }
+      .brand { color: var(--text); font: 14px var(--mono); letter-spacing: .11em; text-decoration: none; }
       .topbar nav { display: flex; align-items: baseline; gap: 16px; }
       .topbar nav a { text-decoration: none; color: var(--muted); }
       .topbar nav a[aria-current="page"] { color: var(--text); }
@@ -84,7 +88,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
       /* The facts `plasmite pool info` gives, at the far end of the name's line. */
       .facts { margin: 0 0 0 auto; color: var(--muted); font-size: 12px; }
       .facts .fact { white-space: nowrap; }
-      .facts b { color: var(--text); font-weight: 400; font-family: var(--mono); font-size: 13px; }
+      .facts b { color: var(--text); font-weight: 400; }
 
       /* The open message takes the lower part, so the log keeps its full width. */
       .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
@@ -130,26 +134,31 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
       .main .field i { font-style: normal; color: var(--faint); }
       /* A filter match; when it lies in the part of a value a row cuts off, the elision mark. */
       mark { background: #e8bc7245; color: inherit; border-radius: 2px; }
-      .main .size { color: var(--faint); }
+      .main .size { color: var(--faint); white-space: nowrap; }
       .main .more { color: var(--faint); }
       .day {
         padding: 10px 18px 3px; color: var(--faint); font-size: 12px;
         border-bottom: 1px solid var(--rule); margin-bottom: 2px;
       }
       .log.filtering .day { display: none; }
-      .empty { padding: 18px; color: var(--muted); font-size: 14px; }
+      .empty { padding: 18px; color: var(--muted); font: 14px var(--sans); }
       .jump {
         position: sticky; bottom: 12px; float: right; margin: 0 18px 0 0; padding: 4px 12px;
-        border: 1px solid #4a6a78; border-radius: 999px; background: #1f2c36; color: var(--text); font: 12px var(--mono);
+        border: 1px solid #4a6a78; border-radius: 999px; background: #1f2c36; color: var(--text); font: 12px var(--sans);
         box-shadow: 0 4px 16px #0008;
       }
       .jump:hover { border-color: var(--accent); }
 
       /* The open message, in full: every field shown, nested ones indented under their key. */
-      .detail { min-height: 0; overflow: auto; border-top: 1px solid var(--line); background: #171c23; font: 14px/1.4 var(--mono); }
+      /* A layer over the log: lighter, casting a shadow upward, with a green edge that
+         ties it to the green-outlined row it opened from. */
+      .detail {
+        position: relative; z-index: 2; min-height: 0; overflow: auto; font: 14px/1.4 var(--mono);
+        background: var(--layer); border-top: 1px solid #4f7f6e; box-shadow: 0 -10px 28px #000a;
+      }
       .detail header {
         position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: baseline;
-        padding: 6px 16px 5px; background: #171c23; border-bottom: 1px solid var(--rule);
+        padding: 6px 16px 5px; background: var(--layer); border-bottom: 1px solid var(--rule);
       }
       .detail header strong { font-size: 16px; font-weight: 600; }
       .detail header .when { color: var(--muted); font-size: 13px; }
@@ -174,9 +183,21 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
       .tree .null, .tree .none { color: var(--faint); }
       .tree .note { display: flex; gap: 8px; align-items: center; color: var(--faint); font-size: 12px; }
       .tree .note .icon { width: 22px; height: 22px; }
-      .detail .cli { display: flex; gap: 1.5ch; align-items: center; }
-      .cli .label { color: var(--faint); font-size: 12px; }
-      .cli code { flex: 1; min-width: 0; color: var(--muted); font: 13px var(--mono); overflow-wrap: anywhere; }
+      /* The panel's chrome, above and below the message, speaks in the interface's voice. */
+      .labeled {
+        display: flex; gap: 6px; align-items: center; padding: 3px 8px; border: 1px solid var(--line); border-radius: 5px;
+        background: none; color: var(--muted); font: 12px var(--sans);
+      }
+      .labeled:hover, .labeled:focus-visible { color: var(--text); border-color: var(--accent); outline: none; }
+      .labeled.done { color: var(--ok); border-color: #2f6b56; }
+      .labeled svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+      .labeled span, .icon span { display: contents; }
+      .detail .fetch {
+        display: flex; flex-wrap: wrap; gap: 0 8px; align-items: center; margin: 0; padding: 6px 16px 10px;
+        color: var(--faint); font: 12px var(--sans);
+      }
+      .detail .fetch code { color: var(--muted); font: 12px var(--mono); overflow-wrap: anywhere; }
+      .detail .fetch .icon { width: 22px; height: 22px; }
 
       .append { display: flex; gap: 8px; padding: 10px 18px 14px; border-top: 1px solid var(--line); background: var(--panel); }
       .append input {
@@ -246,7 +267,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
             <span class="when" id="detail-when"></span>
             <span class="tags" id="tags-tree"></span>
             <span class="tools">
-              <button type="button" class="icon" id="copy-json" title="Copy JSON" aria-label="Copy JSON"></button>
+              <button type="button" class="labeled" id="copy-json"><span data-icon></span>Copy JSON</button>
               <button type="button" class="icon" id="close" title="Close (Esc)" aria-label="Close">
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
               </button>
@@ -255,16 +276,17 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           <!-- meta beyond tags is rare, so it is labeled; the data needs no label. -->
           <section id="detail-meta"><h2>meta</h2><div class="tree" id="meta-tree"></div></section>
           <section><div class="tree" id="data-tree"></div></section>
-          <section class="cli">
-            <span class="label">terminal</span><code id="cli"></code><button type="button" class="icon" id="copy-cli" title="Copy" aria-label="Copy command"></button>
-          </section>
+          <!-- A helper, not part of the message: a footnote after it, in small faint type. -->
+          <p class="fetch">
+            <span>In a terminal:</span><code id="cli"></code><button type="button" class="icon" id="copy-cli" title="Copy command" aria-label="Copy command"><span data-icon></span></button>
+          </p>
         </aside>
       </div>
 
       <form class="append" id="append">
-        <input id="append-input" aria-label="Message to append" autocomplete="off" spellcheck="false"
-          placeholder='Append JSON, like {"text": "hello"}, or plain text' />
-        <button type="submit">Append</button>
+        <input id="append-input" aria-label="Message to feed" autocomplete="off" spellcheck="false"
+          placeholder='Feed a message: JSON, like {"text": "hello"}, or plain text' />
+        <button type="submit">Feed</button>
         <span class="error" id="append-error"></span>
       </form>
     </main>
@@ -710,9 +732,10 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         async function copy(button, text) {
           try {
             await navigator.clipboard.writeText(text);
-            button.innerHTML = doneIcon;
+            const icon = button.querySelector("[data-icon]") || button;
+            icon.innerHTML = doneIcon;
             button.classList.add("done");
-            setTimeout(() => { button.innerHTML = copyIcon; button.classList.remove("done"); }, 1200);
+            setTimeout(() => { icon.innerHTML = copyIcon; button.classList.remove("done"); }, 1200);
           } catch (_) { /* Clipboard needs a secure context; the text stays selectable. */ }
         }
 
@@ -840,8 +863,8 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           select(message === state.selected ? null : message);
         });
         $("close").addEventListener("click", () => select(null));
-        $("copy-json").innerHTML = copyIcon;
-        $("copy-cli").innerHTML = copyIcon;
+        $("copy-json").querySelector("[data-icon]").innerHTML = copyIcon;
+        $("copy-cli").querySelector("[data-icon]").innerHTML = copyIcon;
         $("copy-json").addEventListener("click", () => {
           if (state.selected) copy($("copy-json"), JSON.stringify(state.selected.raw, null, 2));
         });
@@ -883,7 +906,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
               method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ data }),
             });
             if (response.status === 401) { toLogin(); return; }
-            if (!response.ok) throw new Error("Append failed (" + response.status + ")");
+            if (!response.ok) throw new Error("Feed failed (" + response.status + ")");
             input.value = "";
             scrollToBottom();
           } catch (err) { error.textContent = String(err.message || err); }

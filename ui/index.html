@@ -11,6 +11,12 @@ Invariants: Pool names are rendered as text (never injected as HTML).
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Plasmite UI</title>
     <style>
+      @font-face {
+        font-family: "Inconsolata";
+        src: url("/ui/assets/inconsolata.woff2") format("woff2");
+        font-weight: 200 900;
+        font-display: swap;
+      }
       :root {
         --bg: #15191f;
         --panel: #1f232b;
@@ -22,6 +28,10 @@ Invariants: Pool names are rendered as text (never injected as HTML).
         --warn: #e8bc72;
         --error: #f08383;
         --accent: #83c5d7;
+        /* Two voices: the system's own sans for the interface, which loads nothing, and
+           the embedded Inconsolata for data. A region uses one or the other throughout. */
+        --sans: system-ui, sans-serif;
+        --mono: "Inconsolata", "Menlo", "Consolas", monospace;
       }
 
       * {
@@ -35,7 +45,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
         font-size: 20px;
         background: radial-gradient(circle at 30% -20%, #263543, transparent 55%), var(--bg);
         color: var(--text);
-        font-family: "Inconsolata", "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+        font-family: var(--sans);
       }
 
       a,
@@ -50,10 +60,10 @@ Invariants: Pool names are rendered as text (never injected as HTML).
         padding: 10px 18px;
         border-bottom: 1px solid var(--line);
         background: #1a2028;
-        font: 15px/1.45 "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+        font: 14px/1.5 var(--sans);
       }
 
-      .topbar .brand { color: var(--text); font-size: 14px; letter-spacing: .11em; text-decoration: none; }
+      .topbar .brand { color: var(--text); font: 14px var(--mono); letter-spacing: .11em; text-decoration: none; }
       .topbar nav { display: flex; align-items: baseline; gap: 16px; }
       .topbar nav a { text-decoration: none; color: var(--muted); }
       .topbar nav a[aria-current="page"] { color: var(--text); }
@@ -124,7 +134,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
          slash, like a breadcrumb, so no folder name is split or cut. Click copies it. */
       .path {
         display: block; max-width: 100%; padding: 2px 6px; margin: 0 -6px; border: 0; border-radius: 5px;
-        background: none; color: var(--text); font-size: 14px; text-align: left; overflow-wrap: anywhere;
+        background: none; color: var(--text); font: 14px var(--mono); text-align: left; overflow-wrap: anywhere;
       }
       .path .parent { color: var(--muted); }
       .path strong { font-weight: 600; }
@@ -135,7 +145,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
       .pools {
         --columns: minmax(8rem, 1fr) repeat(5, max-content);
         display: grid; grid-template-columns: var(--columns); column-gap: 28px;
-        font-variant-numeric: tabular-nums;
+        font-family: var(--mono);
       }
       .pools > * { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; }
       .pools-head { padding: 0 10px 6px; color: var(--muted); font-size: 12px; }

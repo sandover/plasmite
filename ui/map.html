@@ -42,7 +42,10 @@ Invariants: Message data enters the DOM as text.
         --error: #f08383;
         --spot: #ffd166;
         --head: #e6f6fa;
-        --numbers: "Inconsolata", "Menlo", "Consolas", monospace;
+        /* Two voices: the system's own sans for the interface, which loads nothing, and
+           the embedded Inconsolata for data. A region uses one or the other throughout. */
+        --sans: system-ui, sans-serif;
+        --mono: "Inconsolata", "Menlo", "Consolas", monospace;
         --ease: .35s ease;
       }
       * { box-sizing: border-box; }
@@ -52,7 +55,7 @@ Invariants: Message data enters the DOM as text.
         min-height: 100vh;
         background: radial-gradient(circle at 30% -20%, #263543, transparent 55%), var(--bg);
         color: var(--text);
-        font: 15px/1.45 "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+        font: 14px/1.5 var(--sans);
       }
       a { color: var(--accent); }
       button { font: inherit; cursor: pointer; }
@@ -61,7 +64,7 @@ Invariants: Message data enters the DOM as text.
         display: flex; align-items: baseline; gap: 22px;
         padding: 10px 18px; border-bottom: 1px solid var(--line); background: #1a2028;
       }
-      .brand { color: var(--text); font-size: 14px; letter-spacing: .11em; text-decoration: none; }
+      .brand { color: var(--text); font: 14px var(--mono); letter-spacing: .11em; text-decoration: none; }
       .topbar nav { display: flex; align-items: baseline; gap: 16px; }
       .topbar nav a { text-decoration: none; color: var(--muted); }
       .topbar nav a[aria-current="page"] { color: var(--text); }
@@ -85,7 +88,7 @@ Invariants: Message data enters the DOM as text.
       .group-label strong { font-weight: 600; }
       .path {
         display: flex; min-width: 0; padding: 1px 4px; margin: -1px -4px; border: 0; border-radius: 5px;
-        background: none; color: var(--text); font-size: 12px; white-space: nowrap;
+        background: none; color: var(--text); font: 12px var(--mono); white-space: nowrap;
       }
       .path .parent { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
       .path strong { flex: none; }
@@ -110,10 +113,10 @@ Invariants: Message data enters the DOM as text.
       .pool .spot { fill: none; stroke: var(--spot); }
       .pool .pointer { fill: var(--spot); filter: drop-shadow(0 0 3px #ffd16680); }
       .pool .head { fill: none; stroke: var(--head); }
-      .pool .index { fill: var(--text); font-family: var(--numbers); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+      .pool .index { fill: var(--text); font-family: var(--mono); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
       .pool .name, .pool .meta { max-width: 100%; }
-      .pool .name { font-size: 13px; line-height: 1.2; text-align: center; overflow-wrap: anywhere; }
-      .pool .meta { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-family: var(--numbers); font-size: 11px; }
+      .pool .name { font: 13px/1.2 var(--mono); text-align: center; overflow-wrap: anywhere; }
+      .pool .meta { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-family: var(--mono); font-size: 11px; }
       .pool:hover .track, .pool:focus-visible .track { stroke: #1b2631; }
       .pool:focus-visible { outline: none; }
       .pool:focus-visible .name { text-decoration: underline; }
@@ -121,7 +124,7 @@ Invariants: Message data enters the DOM as text.
       .activity-button {
         position: absolute; z-index: 2; transform: translateX(-50%); display: flex; align-items: center;
         justify-content: center; gap: 4px; min-width: 40px; height: 20px; padding: 2px 5px;
-        border: 0; border-radius: 6px; background: none; color: var(--muted); font: 11px var(--numbers);
+        border: 0; border-radius: 6px; background: none; color: var(--muted); font: 11px var(--mono);
       }
       .activity-button:hover, .activity-button:focus-visible { background: var(--panel-raised); color: var(--text); outline: none; }
       .activity-button:disabled { cursor: default; }
@@ -156,12 +159,13 @@ Invariants: Message data enters the DOM as text.
         transition: left var(--ease);
       }
       .message-head, .message { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 8px; align-items: baseline; }
-      .message-head { padding: 6px 12px 5px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+      .peek, .tip { font-family: var(--mono); }
+      .message-head { padding: 6px 12px 5px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
       .messages { overflow: auto; flex: 1; min-height: 0; padding: 4px 6px; }
       .messages:empty::before { content: "–"; display: block; padding: 8px 6px; color: var(--muted); font-size: 12px; }
-      .message { padding: 3px 6px; border-radius: 5px; font-size: 11px; line-height: 1.35; }
+      .message { padding: 3px 6px; border-radius: 5px; font-size: 12px; line-height: 1.35; }
       .message:hover { background: #222b35; }
-      .message .kind { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font-size: 10px; }
+      .message .kind { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font-size: 11px; }
       .message .kind[data-tone="warn"] { color: var(--warn); }
       .message .kind[data-tone="error"] { color: var(--error); }
       .message .text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -292,9 +296,8 @@ Invariants: Message data enters the DOM as text.
         // Smallest ring whose inside fits the two label lines. Each line sits about
         // 9 px from the center, where the circle is narrower than its diameter.
         function labelRadius(pool) {
-          const body = getComputedStyle(document.body).fontFamily;
-          const numbers = getComputedStyle(document.documentElement).getPropertyValue("--numbers");
-          const width = Math.max(textWidth(pool.name, 13, body), textWidth(size(pool.file_size), 11, numbers)) + 10;
+          const mono = getComputedStyle(document.documentElement).getPropertyValue("--mono");
+          const width = Math.max(textWidth(pool.name, 13, mono), textWidth(size(pool.file_size), 11, mono)) + 10;
           return Math.hypot(width / 2, 22) + stroke / 2 + 3;
         }
 
