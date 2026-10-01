@@ -14,7 +14,9 @@ pub struct TestServer {
     pub remote_url: String,
     pub local_url: String,
     access_key: String,
-    _ready_dir: tempfile::TempDir,
+    /// Holds the ready file and the server's home, so a test server never registers
+    /// itself or saves state in the real user's home.
+    _scratch: tempfile::TempDir,
 }
 
 impl TestServer {
@@ -84,8 +86,10 @@ impl TestServer {
         remote_bind: &str,
         shared_address: &str,
     ) -> TestResult<Self> {
-        let ready_dir = tempfile::tempdir()?;
-        let ready_path = ready_dir.path().join("address");
+        let scratch = tempfile::tempdir()?;
+        let ready_path = scratch.path().join("address");
+        let home = scratch.path().join("home");
+        std::fs::create_dir(&home)?;
         let mut command = Command::new(env!("CARGO_BIN_EXE_plasmite"));
         command
             .arg("--dir")
@@ -99,6 +103,8 @@ impl TestServer {
             .arg(shared_address)
             .args(extra_args)
             .env("PLASMITE_SERVE_READY_FILE", &ready_path)
+            .env("HOME", &home)
+            .env("PLASMITE_ACCESS_HOME", &home)
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
         let mut child = command.spawn()?;
@@ -130,6 +136,8 @@ impl TestServer {
                         .arg("--dir")
                         .arg(pool_dir)
                         .args(["access", "invite", "--name", "integration-test"])
+                        .env("HOME", &home)
+                        .env("PLASMITE_ACCESS_HOME", &home)
                         .output()?;
                     if !invite.status.success() {
                         return Err(format!(
@@ -149,7 +157,7 @@ impl TestServer {
                         remote_url,
                         local_url,
                         access_key,
-                        _ready_dir: ready_dir,
+                        _scratch: scratch,
                     });
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
