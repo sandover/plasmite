@@ -47,7 +47,10 @@ pub(crate) fn verified_leaf(
             .with_message("invalid server address")
             .with_source(error)
     })?;
-    let response = agent.get(endpoint.as_str()).call();
+    let response = agent
+        .get(endpoint.as_str())
+        .timeout(crate::api::remote::REQUEST_TIMEOUT)
+        .call();
     match response {
         Ok(_) | Err(ureq::Error::Status(401, _)) => {}
         Err(ureq::Error::Status(300..=399, _)) => {

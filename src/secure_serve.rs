@@ -183,5 +183,8 @@ fn local_admin_endpoint(pool_dir: &Path, operation: &str) -> Result<(String, Str
 }
 
 fn local_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new().redirects(0).build()
+    ureq::AgentBuilder::new()
+        .redirects(0)
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
 }
