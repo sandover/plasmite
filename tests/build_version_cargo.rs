@@ -79,7 +79,8 @@ fn main() {
             .env("CARGO_NET_OFFLINE", "true")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_CONFIG_GLOBAL", &self.git_config)
-            .args(["build", "--offline", "-vv"])
+            // CI forces Cargo color globally; inspect diagnostics as stable text.
+            .args(["build", "--offline", "--color", "never", "-vv"])
             .output()
             .expect("run cargo build");
         assert_success(&output, "cargo build", &[]);
