@@ -10,6 +10,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use fs2::FileExt;
@@ -429,6 +430,7 @@ pub struct Pool {
     file: File,
     mmap: MmapMut,
     header: PoolHeader,
+    snapshot_lock: Mutex<()>,
 }
 
 impl Pool {
@@ -506,6 +508,7 @@ impl Pool {
             file,
             mmap,
             header,
+            snapshot_lock: Mutex::new(()),
         };
         let index_start = pool.header.index_offset as usize;
         let index_end = pool.header.ring_offset as usize;
@@ -536,19 +539,34 @@ impl Pool {
             .map_err(|err| Error::new(ErrorKind::Io).with_path(&path).with_source(err))?;
 
         validate_mapped_size(actual_size).map_err(|err| err.with_path(&path))?;
-        let header = read_header(&mut file, &path)?;
-        header.validate(actual_size)?;
-
-        let mmap = unsafe {
-            MmapMut::map_mut(&file)
-                .map_err(|err| Error::new(ErrorKind::Io).with_path(&path).with_source(err))?
-        };
+        FileExt::lock_shared(&file).map_err(|err| {
+            Error::new(lock_error_kind(&err))
+                .with_path(&path)
+                .with_source(err)
+        })?;
+        let snapshot = (|| {
+            let header = read_header(&mut file, &path)?;
+            header.validate(actual_size)?;
+            let mmap = unsafe {
+                MmapMut::map_mut(&file)
+                    .map_err(|err| Error::new(ErrorKind::Io).with_path(&path).with_source(err))?
+            };
+            Ok::<_, Error>((header, mmap))
+        })();
+        let unlock = FileExt::unlock(&file).map_err(|err| {
+            Error::new(lock_error_kind(&err))
+                .with_path(&path)
+                .with_source(err)
+        });
+        let (header, mmap) = snapshot?;
+        unlock?;
 
         Ok(Self {
             path,
             file,
             mmap,
             header,
+            snapshot_lock: Mutex::new(()),
         })
     }
 
@@ -557,6 +575,11 @@ impl Pool {
     }
 
     pub fn header_from_mmap(&self) -> Result<PoolHeader, Error> {
+        let _lock = self.read_lock()?;
+        self.header_locked()
+    }
+
+    pub(crate) fn header_locked(&self) -> Result<PoolHeader, Error> {
         let header = PoolHeader::decode(&self.mmap[0..HEADER_SIZE])?;
         header.validate(self.mmap.len() as u64)?;
         Ok(header)
@@ -572,6 +595,31 @@ impl Pool {
 
     pub(crate) fn mmap(&self) -> &MmapMut {
         &self.mmap
+    }
+
+    pub(crate) fn malformed_frame_error(&self, offset: usize) -> Error {
+        Error::new(ErrorKind::Corrupt)
+            .with_message("malformed frame in the retained ring")
+            .with_path(&self.path)
+            .with_offset(offset as u64)
+            .with_hint("Run `plasmite doctor` to inspect the pool.")
+    }
+
+    pub(crate) fn read_lock(&self) -> Result<ReadLock<'_>, Error> {
+        // flock belongs to the open file description. Serializing snapshots on
+        // this handle prevents one thread from unlocking another thread's read.
+        let snapshot = self.snapshot_lock.lock().map_err(|_| {
+            Error::new(ErrorKind::Internal).with_message("pool snapshot lock is unavailable")
+        })?;
+        FileExt::lock_shared(&self.file).map_err(|err| {
+            Error::new(lock_error_kind(&err))
+                .with_path(&self.path)
+                .with_source(err)
+        })?;
+        Ok(ReadLock {
+            file: &self.file,
+            _snapshot: snapshot,
+        })
     }
 
     pub fn bounds(&self) -> Result<Bounds, Error> {
@@ -595,8 +643,9 @@ impl Pool {
         })
     }
 
-    pub fn get(&self, seq: u64) -> Result<crate::core::cursor::FrameRef<'_>, Error> {
-        let mut header = self.header_from_mmap()?;
+    pub fn get(&self, seq: u64) -> Result<crate::core::cursor::FrameRef, Error> {
+        let _lock = self.read_lock()?;
+        let header = self.header_locked()?;
         let bounds = bounds_from_header(header);
         let (oldest, newest) = match (bounds.oldest_seq, bounds.newest_seq) {
             (Some(oldest), Some(newest)) => (oldest, newest),
@@ -617,44 +666,10 @@ impl Pool {
             return Ok(frame);
         }
 
-        let mut cursor = crate::core::cursor::Cursor::new();
-        cursor.seek_to(header.tail_off as usize);
-
-        loop {
-            match cursor.next(self)? {
-                crate::core::cursor::CursorResult::Message(frame) => {
-                    if frame.seq == seq {
-                        return Ok(frame);
-                    }
-                    if frame.seq > seq {
-                        return Err(Error::new(ErrorKind::NotFound)
-                            .with_message("message not found")
-                            .with_seq(seq));
-                    }
-                }
-                crate::core::cursor::CursorResult::WouldBlock => {
-                    return Err(Error::new(ErrorKind::NotFound)
-                        .with_message("message not found")
-                        .with_seq(seq));
-                }
-                crate::core::cursor::CursorResult::FellBehind => {
-                    header = self.header_from_mmap()?;
-                    if header.oldest_seq != 0 && seq < header.oldest_seq {
-                        return Err(Error::new(ErrorKind::NotFound)
-                            .with_message("message not found")
-                            .with_seq(seq));
-                    }
-                    cursor.seek_to(header.tail_off as usize);
-                }
-            }
-        }
+        self.get_by_scan(seq, header, None)
     }
 
-    fn get_via_index(
-        &self,
-        header: PoolHeader,
-        seq: u64,
-    ) -> Option<crate::core::cursor::FrameRef<'_>> {
+    fn get_via_index(&self, header: PoolHeader, seq: u64) -> Option<crate::core::cursor::FrameRef> {
         let index_capacity = header.index_capacity as u64;
         if index_capacity == 0 {
             return None;
@@ -683,7 +698,7 @@ impl Pool {
             stored_offset as usize,
         ) {
             Ok(crate::core::cursor::ReadResult::Message { frame, .. }) if frame.seq == seq => {
-                Some(frame)
+                Some(frame.into_owned())
             }
             _ => None,
         }
@@ -695,8 +710,9 @@ impl Pool {
         &self,
         seq: u64,
         cache: &mut SeqOffsetCache,
-    ) -> Result<crate::core::cursor::FrameRef<'_>, Error> {
-        let mut header = self.header_from_mmap()?;
+    ) -> Result<crate::core::cursor::FrameRef, Error> {
+        let _lock = self.read_lock()?;
+        let header = self.header_locked()?;
         let bounds = bounds_from_header(header);
         let (oldest, newest) = match (bounds.oldest_seq, bounds.newest_seq) {
             (Some(oldest), Some(newest)) => (oldest, newest),
@@ -721,19 +737,41 @@ impl Pool {
                 crate::core::cursor::read_frame_at(self.mmap(), ring_offset, ring_size, offset);
             if let Ok(crate::core::cursor::ReadResult::Message { frame, .. }) = cached {
                 if frame.seq == seq {
-                    return Ok(frame);
+                    return Ok(frame.into_owned());
                 }
             }
             cache.remove(seq);
         }
 
+        self.get_by_scan(seq, header, Some(cache))
+    }
+
+    // The caller holds the shared lock. Skipped payloads remain private borrowed
+    // views; only the selected message is copied across the public boundary.
+    fn get_by_scan(
+        &self,
+        seq: u64,
+        header: PoolHeader,
+        mut cache: Option<&mut SeqOffsetCache>,
+    ) -> Result<crate::core::cursor::FrameRef, Error> {
+        let ring_offset = header.ring_offset as usize;
+        let ring_size = header.ring_size as usize;
         let mut offset = header.tail_off as usize;
+        let mut last_seq = 0;
         loop {
             match crate::core::cursor::read_frame_at(self.mmap(), ring_offset, ring_size, offset)? {
                 crate::core::cursor::ReadResult::Message { frame, next_off } => {
-                    cache.insert(frame.seq, offset);
+                    if frame.seq < header.oldest_seq
+                        || frame.seq > header.newest_seq
+                        || (last_seq != 0 && frame.seq <= last_seq)
+                    {
+                        return Err(self.malformed_frame_error(offset));
+                    }
+                    if let Some(cache) = cache.as_deref_mut() {
+                        cache.insert(frame.seq, offset);
+                    }
                     if frame.seq == seq {
-                        return Ok(frame);
+                        return Ok(frame.into_owned());
                     }
                     if frame.seq > seq {
                         return Err(Error::new(ErrorKind::NotFound)
@@ -741,40 +779,60 @@ impl Pool {
                             .with_seq(seq));
                     }
                     offset = next_off;
+                    last_seq = frame.seq;
                 }
                 crate::core::cursor::ReadResult::Wrap => {
+                    if offset == 0 {
+                        return Err(self.malformed_frame_error(offset));
+                    }
                     offset = 0;
                 }
-                crate::core::cursor::ReadResult::WouldBlock => {
-                    return Err(Error::new(ErrorKind::NotFound)
-                        .with_message("message not found")
-                        .with_seq(seq));
-                }
                 crate::core::cursor::ReadResult::FellBehind => {
-                    header = self.header_from_mmap()?;
-                    if header.oldest_seq != 0 && seq < header.oldest_seq {
-                        return Err(Error::new(ErrorKind::NotFound)
-                            .with_message("message not found")
-                            .with_seq(seq));
-                    }
-                    offset = header.tail_off as usize;
+                    return Err(self.malformed_frame_error(offset));
                 }
             }
         }
     }
 
+    /// Hold an exclusive pool lock until the returned guard is dropped.
+    ///
+    /// This guard uses its own file description, so other locks cannot release
+    /// it. Do not call a pool read or append while retaining the guard on the
+    /// same thread: those operations wait for the exclusive guard to be dropped.
     pub fn append_lock(&self) -> Result<AppendLock, Error> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&self.path)
+            .map_err(|err| {
+                Error::new(map_io_error_kind(&err))
+                    .with_path(&self.path)
+                    .with_source(err)
+            })?;
+        let same = same_file_identity(&self.file, &file).map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_path(&self.path)
+                .with_source(err)
+        })?;
+        if !same {
+            return Err(Error::new(ErrorKind::NotFound)
+                .with_message("pool path now refers to a different file")
+                .with_path(&self.path)
+                .with_hint("Open the pool again before acquiring an explicit append lock."));
+        }
+        lock_for_append(file, &self.path)
+    }
+
+    // Ordinary append has exclusive Rust access to Pool, so its original file
+    // description cannot have a concurrent same-handle read. Public guards use
+    // independent descriptions and therefore still exclude this lock.
+    fn append_operation_lock(&self) -> Result<AppendLock, Error> {
         let file = self.file.try_clone().map_err(|err| {
             Error::new(ErrorKind::Io)
                 .with_path(&self.path)
                 .with_source(err)
         })?;
-        file.lock_exclusive().map_err(|err| {
-            Error::new(lock_error_kind(&err))
-                .with_path(&self.path)
-                .with_source(err)
-        })?;
-        Ok(AppendLock { file })
+        lock_for_append(file, &self.path)
     }
 
     pub fn append(&mut self, payload: &[u8]) -> Result<u64, Error> {
@@ -794,9 +852,9 @@ impl Pool {
         payload: &[u8],
         options: AppendOptions,
     ) -> Result<u64, Error> {
-        let _lock = self.append_lock()?;
+        let _lock = self.append_operation_lock()?;
         // Refresh header after acquiring the lock to avoid stale state across processes.
-        self.header = self.header_from_mmap()?;
+        self.header = self.header_locked()?;
         self.append_locked(payload, options)
     }
 
@@ -946,10 +1004,58 @@ pub struct AppendLock {
     file: File,
 }
 
+pub(crate) struct ReadLock<'a> {
+    file: &'a File,
+    _snapshot: MutexGuard<'a, ()>,
+}
+
+impl Drop for ReadLock<'_> {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(self.file);
+    }
+}
+
 impl Drop for AppendLock {
     fn drop(&mut self) {
         let _ = FileExt::unlock(&self.file);
     }
+}
+
+fn lock_for_append(file: File, path: &Path) -> Result<AppendLock, Error> {
+    file.lock_exclusive().map_err(|err| {
+        Error::new(lock_error_kind(&err))
+            .with_path(path)
+            .with_source(err)
+    })?;
+    Ok(AppendLock { file })
+}
+
+#[cfg(unix)]
+fn same_file_identity(first: &File, second: &File) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    let first = first.metadata()?;
+    let second = second.metadata()?;
+    Ok(first.dev() == second.dev() && first.ino() == second.ino())
+}
+
+#[cfg(windows)]
+fn same_file_identity(first: &File, second: &File) -> io::Result<bool> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+    fn identity(file: &File) -> io::Result<(u32, u32, u32)> {
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok((
+            info.dwVolumeSerialNumber,
+            info.nFileIndexHigh,
+            info.nFileIndexLow,
+        ))
+    }
+    Ok(identity(first)? == identity(second)?)
 }
 
 fn lock_error_kind(err: &io::Error) -> ErrorKind {
@@ -1883,7 +1989,7 @@ mod tests {
         assert_eq!(bounds.newest_seq, Some(3));
 
         let frame = pool.get(2).expect("get");
-        let doc = Lite3DocRef::new(frame.payload);
+        let doc = Lite3DocRef::new(&frame.payload);
         let json = doc.to_json(false).expect("json");
         let value: serde_json::Value = serde_json::from_str(&json).expect("parse");
         assert_eq!(value["data"]["x"], 2);
@@ -1906,7 +2012,7 @@ mod tests {
         }
 
         let frame = pool.get(1).expect("fallback get");
-        let doc = Lite3DocRef::new(frame.payload);
+        let doc = Lite3DocRef::new(&frame.payload);
         let json = doc.to_json(false).expect("json");
         let value: serde_json::Value = serde_json::from_str(&json).expect("parse");
         assert_eq!(value["data"]["x"], 1);
@@ -1978,6 +2084,87 @@ mod tests {
     }
 
     #[test]
+    fn sequence_exhaustion_preserves_last_frame_and_storage() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 2048).with_index_capacity(0))
+            .expect("create");
+        pool.append(b"before").expect("first append");
+        let mut header = pool.header_from_mmap().expect("header");
+        let start = header.ring_offset as usize + header.tail_off as usize;
+        let mut frame =
+            FrameHeader::decode(&pool.mmap[start..start + FRAME_HEADER_LEN]).expect("frame header");
+        frame.seq = u64::MAX - 1;
+        pool.mmap[start..start + FRAME_HEADER_LEN].copy_from_slice(&frame.encode());
+        header.oldest_seq = u64::MAX - 1;
+        header.newest_seq = u64::MAX - 1;
+        super::write_pool_header(&mut pool.mmap, &header);
+
+        assert_eq!(pool.append(b"last").expect("final sequence"), u64::MAX);
+        assert_eq!(pool.get(u64::MAX).expect("last frame").payload, b"last");
+        let before = pool.mmap.to_vec();
+        let before_header = pool.header_from_mmap().expect("final header");
+        let err = pool
+            .append(b"cannot append")
+            .expect_err("sequence exhausted");
+        assert_eq!(err.kind(), ErrorKind::Usage);
+        assert!(
+            err.message()
+                .expect("message")
+                .contains("sequence space exhausted")
+        );
+        assert_eq!(
+            pool.header_from_mmap().expect("unchanged header"),
+            before_header
+        );
+        assert_eq!(&pool.mmap[..], before.as_slice());
+        assert_eq!(
+            pool.get(u64::MAX).expect("retained last frame").payload,
+            b"last"
+        );
+    }
+
+    #[test]
+    fn reads_cross_short_ring_padding_after_wrap() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(4096 + 1024).with_index_capacity(0))
+            .expect("create");
+        // 64-byte header + 128-byte payload + 8-byte marker = 200 bytes.
+        // Five frames leave 24 padding bytes, too short for a wrap marker.
+        for _ in 0..6 {
+            pool.append(&[b'x'; 128]).expect("append");
+        }
+        assert_eq!(pool.get(6).expect("scan across padding").seq, 6);
+        let mut cache = SeqOffsetCache::new(8);
+        assert_eq!(
+            pool.get_with_cache(6, &mut cache).expect("cached scan").seq,
+            6
+        );
+        let mut cursor = crate::core::cursor::Cursor::new();
+        for seq in 2..=6 {
+            let crate::core::cursor::CursorResult::Message(frame) =
+                cursor.next(&pool).expect("cursor")
+            else {
+                panic!("expected retained message {seq}")
+            };
+            assert_eq!(frame.seq, seq);
+        }
+        assert_eq!(
+            cursor.next(&pool).expect("at head"),
+            crate::core::cursor::CursorResult::WouldBlock
+        );
+        assert_eq!(
+            pool.ring_layout(8)
+                .expect("layout")
+                .frames
+                .expect("frames")
+                .len(),
+            5
+        );
+    }
+
+    #[test]
     fn append_overwrites_index_slot_on_collision() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
@@ -2027,6 +2214,297 @@ mod tests {
     }
 
     #[test]
+    fn get_with_cache_ignores_out_of_bounds_caller_offset() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(64 * 1024)).expect("create");
+        pool.append(b"original").expect("append");
+        let mut cache = SeqOffsetCache::new(4);
+        cache.insert(1, usize::MAX);
+        let frame = pool.get_with_cache(1, &mut cache).expect("fallback");
+        assert_eq!(frame.seq, 1);
+        assert_eq!(frame.payload, b"original");
+    }
+
+    #[test]
+    fn malformed_retained_frames_fail_reads_without_retrying_forever() {
+        use crate::core::cursor::Cursor;
+
+        for damage in [
+            "magic",
+            "payload-length",
+            "commit-marker",
+            "wrap-at-zero",
+            "writing",
+            "empty",
+        ] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = dir.path().join("pool.plasmite");
+            let mut pool = Pool::create(&path, PoolOptions::new(64 * 1024).with_index_capacity(0))
+                .expect("create");
+            let payload = b"original".to_vec();
+            pool.append(&payload).expect("append");
+            let start = pool.header.ring_offset as usize;
+            match damage {
+                "magic" => pool.mmap[start..start + 4].copy_from_slice(b"NOPE"),
+                "payload-length" => pool.mmap[start + 36] ^= 1,
+                "commit-marker" => pool.mmap[start + FRAME_HEADER_LEN + payload.len()] ^= 1,
+                "wrap-at-zero" => {
+                    let wrap = FrameHeader::new(FrameState::Wrap, 0, 0, 0, 0, 0);
+                    pool.mmap[start..start + FRAME_HEADER_LEN].copy_from_slice(&wrap.encode());
+                }
+                "writing" => pool.mmap[start + 4] = FrameState::Writing as u8,
+                "empty" => pool.mmap[start + 4] = FrameState::Empty as u8,
+                _ => unreachable!(),
+            }
+            let mut cursor = Cursor::new();
+            assert_eq!(
+                cursor.next(&pool).expect_err(damage).kind(),
+                ErrorKind::Corrupt
+            );
+            assert_eq!(pool.get(1).expect_err(damage).kind(), ErrorKind::Corrupt);
+            let mut cache = SeqOffsetCache::new(4);
+            assert_eq!(
+                pool.get_with_cache(1, &mut cache).expect_err(damage).kind(),
+                ErrorKind::Corrupt
+            );
+        }
+    }
+
+    #[test]
+    fn unpublished_frame_at_head_is_not_visible() {
+        use crate::core::cursor::{Cursor, CursorResult};
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(64 * 1024).with_index_capacity(0))
+            .expect("create");
+        pool.append(b"first").expect("append");
+        let start = (pool.header.ring_offset + pool.header.head_off) as usize;
+        let unpublished = FrameHeader::new(FrameState::Writing, 0, 2, 2, 0, 0);
+        pool.mmap[start..start + FRAME_HEADER_LEN].copy_from_slice(&unpublished.encode());
+        let mut cursor = Cursor::new();
+        assert!(
+            matches!(cursor.next(&pool).expect("retained"), CursorResult::Message(frame) if frame.seq == 1)
+        );
+        assert_eq!(cursor.next(&pool).expect("head"), CursorResult::WouldBlock);
+        assert_eq!(
+            pool.get(2).expect_err("unpublished get").kind(),
+            ErrorKind::NotFound
+        );
+        assert_eq!(
+            pool.get_with_cache(2, &mut SeqOffsetCache::new(4))
+                .expect_err("unpublished cached get")
+                .kind(),
+            ErrorKind::NotFound
+        );
+    }
+
+    #[test]
+    fn public_append_guard_is_not_downgraded_by_same_pool_reads() {
+        use std::sync::{Arc, mpsc};
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(64 * 1024)).expect("create");
+        pool.append(b"first").expect("append");
+        let mut writer = Pool::open(&path).expect("writer");
+        let pool = Arc::new(pool);
+        let guard = pool.append_lock().expect("explicit guard");
+        let (read_tx, read_rx) = mpsc::channel();
+        let reader = Arc::clone(&pool);
+        let read_thread = thread::spawn(move || {
+            read_tx.send(reader.get(1)).expect("send read");
+        });
+        let (write_tx, write_rx) = mpsc::channel();
+        let write_thread = thread::spawn(move || {
+            write_tx
+                .send(writer.append(b"second"))
+                .expect("send append");
+        });
+        assert!(matches!(
+            read_rx.recv_timeout(Duration::from_millis(50)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        assert!(matches!(
+            write_rx.recv_timeout(Duration::from_millis(50)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        drop(guard);
+        assert_eq!(
+            read_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("read completed")
+                .expect("read")
+                .payload,
+            b"first"
+        );
+        assert_eq!(
+            write_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("append completed")
+                .expect("append"),
+            2
+        );
+        read_thread.join().expect("reader thread");
+        write_thread.join().expect("writer thread");
+    }
+
+    #[test]
+    fn open_waits_for_header_publication() {
+        use std::sync::mpsc;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(64 * 1024)).expect("create");
+        pool.append(b"first").expect("append");
+        let guard = pool.append_lock().expect("guard");
+        pool.mmap[0..4].copy_from_slice(b"NOPE");
+        let (tx, rx) = mpsc::channel();
+        let opener = thread::spawn(move || tx.send(Pool::open(&path)).expect("send open"));
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_millis(50)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        pool.mmap[0..HEADER_SIZE].copy_from_slice(&pool.header.encode());
+        drop(guard);
+        let opened = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("open completed")
+            .expect("open");
+        assert_eq!(opened.get(1).expect("get").payload, b"first");
+        opener.join().expect("opener");
+    }
+
+    #[test]
+    fn public_append_guard_rejects_a_replaced_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let pool = Pool::create(&path, PoolOptions::new(64 * 1024)).expect("create");
+        std::fs::rename(&path, dir.path().join("old.plasmite")).expect("rename");
+        let _replacement = Pool::create(&path, PoolOptions::new(64 * 1024)).expect("replacement");
+        assert!(matches!(pool.append_lock(), Err(error) if error.kind() == ErrorKind::NotFound));
+    }
+
+    #[test]
+    fn frame_snapshot_waits_for_writer_to_publish() {
+        use crate::core::cursor::{Cursor, CursorResult};
+        use std::sync::mpsc;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let payload = b"original".to_vec();
+        let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, payload.len()).expect("len");
+        let mut writer = Pool::create(
+            &path,
+            PoolOptions::new(HEADER_SIZE as u64 + frame_len as u64).with_index_capacity(0),
+        )
+        .expect("create");
+        writer.append(&payload).expect("append first");
+        let reader = Pool::open(&path).expect("open reader");
+        let (damaged_tx, damaged_rx) = mpsc::channel();
+        let (publish_tx, publish_rx) = mpsc::channel();
+        let writer_thread = thread::spawn(move || {
+            let _lock = writer.append_lock().expect("lock");
+            let plan = plan::plan_append(writer.header, &writer.mmap, payload.len()).expect("plan");
+            let start = writer.header.ring_offset as usize;
+            writer.mmap[start..start + 4].copy_from_slice(b"NOPE");
+            damaged_tx.send(()).expect("signal damage");
+            publish_rx.recv().expect("wait to publish");
+            apply_append(&mut writer.mmap, start, &plan, &payload, 2).expect("publish");
+        });
+        damaged_rx.recv().expect("wait for damage");
+        let (result_tx, result_rx) = mpsc::channel();
+        let reader_thread = thread::spawn(move || {
+            let mut cursor = Cursor::new();
+            let first = cursor
+                .next(&reader)
+                .map(|result| matches!(result, CursorResult::Message(frame) if frame.seq == 2 && frame.payload == b"original"));
+            result_tx.send(first).expect("signal recovery");
+        });
+        assert!(matches!(
+            result_rx.recv_timeout(Duration::from_millis(50)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        publish_tx.send(()).expect("publish overwrite");
+        assert!(
+            result_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("recovery result")
+                .expect("read")
+        );
+        writer_thread.join().expect("writer thread");
+        reader_thread.join().expect("reader thread");
+    }
+
+    #[test]
+    fn returned_frames_keep_their_payload_after_overwrite_and_pool_drop() {
+        use crate::core::cursor::{Cursor, CursorResult};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut writer = Pool::create(
+            &path,
+            PoolOptions::new(HEADER_SIZE as u64 + 80).with_index_capacity(0),
+        )
+        .expect("create");
+        writer.append(b"original").expect("append first");
+        let reader = Pool::open(&path).expect("open reader");
+        let frame = reader.get(1).expect("get");
+        let cached = reader
+            .get_with_cache(1, &mut SeqOffsetCache::new(4))
+            .expect("cached get");
+        let cursor_frame = match Cursor::new().next(&reader).expect("cursor") {
+            CursorResult::Message(frame) => frame,
+            other => panic!("expected first frame, got {other:?}"),
+        };
+        writer
+            .append(b"replaced")
+            .expect("overwrite while snapshots exist");
+        drop(reader);
+        drop(writer);
+        for snapshot in [frame, cached, cursor_frame] {
+            assert_eq!(snapshot.seq, 1);
+            assert_eq!(snapshot.payload, b"original");
+        }
+    }
+
+    #[test]
+    fn corrupt_middle_frame_and_repeated_sequences_terminate_reads() {
+        use crate::core::cursor::{Cursor, CursorResult};
+
+        for damage in ["magic", "sequence"] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = dir.path().join("pool.plasmite");
+            let mut pool = Pool::create(&path, PoolOptions::new(64 * 1024).with_index_capacity(0))
+                .expect("create");
+            pool.append(b"original").expect("first");
+            pool.append(b"original").expect("second");
+            let mut cursor = Cursor::new();
+            assert!(matches!(
+                cursor.next(&pool).expect("first frame"),
+                CursorResult::Message(_)
+            ));
+            let second = pool.header.ring_offset as usize + 80;
+            match damage {
+                "magic" => pool.mmap[second..second + 4].copy_from_slice(b"NOPE"),
+                "sequence" => {
+                    pool.mmap[second + 16..second + 24].copy_from_slice(&1u64.to_le_bytes())
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                cursor.next(&pool).expect_err(damage).kind(),
+                ErrorKind::Corrupt
+            );
+            assert_eq!(pool.get(2).expect_err(damage).kind(), ErrorKind::Corrupt);
+            assert_eq!(
+                pool.get_with_cache(2, &mut SeqOffsetCache::new(4))
+                    .expect_err(damage)
+                    .kind(),
+                ErrorKind::Corrupt
+            );
+        }
+    }
+
+    #[test]
     fn get_with_cache_stale_entry_falls_back() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
@@ -2060,6 +2538,18 @@ mod tests {
         };
         let path = std::env::var("PLASMITE_TEST_POOL").expect("pool path");
         match role.as_str() {
+            "snapshot-writer" => {
+                let mut pool = Pool::open(&path).expect("open");
+                for seq in 2u64..=1001 {
+                    let written = pool
+                        .append_with_options(
+                            &seq.to_le_bytes(),
+                            AppendOptions::new(seq, Durability::Fast),
+                        )
+                        .expect("append snapshot fixture");
+                    assert_eq!(written, seq);
+                }
+            }
             "writer" => {
                 let count: usize = std::env::var("PLASMITE_TEST_COUNT")
                     .expect("count")
@@ -2117,6 +2607,66 @@ mod tests {
             }
             _ => panic!("unknown role"),
         }
+    }
+
+    #[test]
+    fn owned_snapshots_remain_coherent_with_an_independent_writer_process() {
+        use crate::core::cursor::{Cursor, CursorResult};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut initial = Pool::create(
+            &path,
+            PoolOptions::new(HEADER_SIZE as u64 + 80).with_index_capacity(0),
+        )
+        .expect("create");
+        initial
+            .append_with_options(&1u64.to_le_bytes(), AppendOptions::new(1, Durability::Fast))
+            .expect("first");
+        drop(initial);
+        let reader = Pool::open(&path).expect("open reader");
+        let retained_snapshot = reader.get(1).expect("snapshot before overwrite");
+        let mut child = Command::new(std::env::current_exe().expect("exe"))
+            .args([
+                "--exact",
+                "core::pool::tests::multi_writer_child",
+                "--nocapture",
+            ])
+            .env("PLASMITE_TEST_ROLE", "snapshot-writer")
+            .env("PLASMITE_TEST_POOL", &path)
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn writer");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut cursor = Cursor::new();
+        loop {
+            if let Some(status) = child.try_wait().expect("writer status") {
+                assert!(status.success());
+                break;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("snapshot writer did not finish");
+            }
+            match cursor
+                .next(&reader)
+                .expect("coherent snapshot while writing")
+            {
+                CursorResult::Message(frame) => {
+                    let payload_seq =
+                        u64::from_le_bytes(frame.payload.as_slice().try_into().expect("payload"));
+                    assert_eq!(frame.seq, payload_seq);
+                    assert_eq!(frame.timestamp_ns, payload_seq);
+                }
+                CursorResult::WouldBlock => thread::yield_now(),
+                CursorResult::FellBehind => {}
+            }
+        }
+        let latest = reader.get(1001).expect("final snapshot");
+        assert_eq!(latest.payload, 1001u64.to_le_bytes());
+        assert_eq!(retained_snapshot.seq, 1);
+        assert_eq!(retained_snapshot.payload, 1u64.to_le_bytes());
     }
 
     #[test]

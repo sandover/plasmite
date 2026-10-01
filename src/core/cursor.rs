@@ -1,25 +1,49 @@
 //! Purpose: Iterate committed frames in the ring with overwrite safety and minimal scanning.
 //! Exports: `Cursor`, `CursorResult`, `FrameRef`.
 //! Role: Read-side API used by CLI commands (fetch/follow) without exposing raw offsets.
-//! Invariants: Never returns `Writing` or invalid frames; treats them as non-visible.
+//! Invariants: Never returns `Writing` or invalid frames; retained damage is corruption.
 //! Invariants: Detects overwrite (fell-behind) and resynchronizes to the current tail.
 use crate::core::error::{Error, ErrorKind};
 use crate::core::frame::{self, FRAME_HEADER_LEN, FrameHeader, FrameState};
-use crate::core::pool::Pool;
+use crate::core::pool::{Pool, PoolHeader};
 
 #[derive(Debug, PartialEq)]
-pub enum CursorResult<'a> {
-    Message(FrameRef<'a>),
+pub enum CursorResult {
+    Message(FrameRef),
     WouldBlock,
     FellBehind,
 }
 
+/// A stable, owned snapshot of one committed frame.
+///
+/// The payload is copied while holding a shared pool lock. The snapshot retains
+/// no pool lock or mapping borrow and stays valid after overwrite or pool drop.
 #[derive(Debug, PartialEq)]
-pub struct FrameRef<'a> {
+pub struct FrameRef {
+    pub seq: u64,
+    pub timestamp_ns: u64,
+    pub flags: u32,
+    pub payload: Vec<u8>,
+}
+
+// This view stays inside a caller's shared pool lock. Copy only the frame that
+// crosses the public boundary, rather than every frame skipped by a scan.
+pub(crate) struct FrameView<'a> {
     pub seq: u64,
     pub timestamp_ns: u64,
     pub flags: u32,
     pub payload: &'a [u8],
+}
+
+impl FrameView<'_> {
+    pub(crate) fn into_owned(self) -> FrameRef {
+        FrameRef {
+            seq: self.seq,
+            timestamp_ns: self.timestamp_ns,
+            flags: self.flags,
+            payload: self.payload.to_vec(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -27,6 +51,7 @@ pub struct Cursor {
     next_off: usize,
     last_seq: u64,
     started: bool,
+    observed_header: Option<PoolHeader>,
 }
 
 impl Cursor {
@@ -35,6 +60,7 @@ impl Cursor {
             next_off: 0,
             last_seq: 0,
             started: false,
+            observed_header: None,
         }
     }
 
@@ -42,10 +68,19 @@ impl Cursor {
         self.next_off = offset;
         self.last_seq = 0;
         self.started = true;
+        self.observed_header = None;
     }
 
-    pub fn next<'a>(&mut self, pool: &'a Pool) -> Result<CursorResult<'a>, Error> {
-        let header = pool.header_from_mmap()?;
+    pub fn next(&mut self, pool: &Pool) -> Result<CursorResult, Error> {
+        let _lock = pool.read_lock()?;
+        self.next_locked(pool)
+    }
+
+    // The caller retains the shared pool lock through the payload copy.
+    pub(crate) fn next_locked(&mut self, pool: &Pool) -> Result<CursorResult, Error> {
+        let header = pool.header_locked()?;
+        let position_may_be_stale = self.observed_header != Some(header);
+        self.observed_header = Some(header);
         if header.oldest_seq == 0 {
             return Ok(CursorResult::WouldBlock);
         }
@@ -87,19 +122,35 @@ impl Cursor {
             )?;
             match read {
                 ReadResult::Wrap => {
+                    if self.next_off == 0 {
+                        return Err(pool.malformed_frame_error(self.next_off));
+                    }
                     self.next_off = 0;
                     continue;
                 }
-                ReadResult::WouldBlock => return Ok(CursorResult::WouldBlock),
                 ReadResult::FellBehind => {
+                    if self.next_off == tail || !position_may_be_stale {
+                        return Err(pool.malformed_frame_error(self.next_off));
+                    }
                     self.next_off = tail;
                     self.last_seq = 0;
                     return Ok(CursorResult::FellBehind);
                 }
                 ReadResult::Message { frame, next_off } => {
+                    if frame.seq < header.oldest_seq
+                        || frame.seq > header.newest_seq
+                        || (self.last_seq != 0 && frame.seq <= self.last_seq)
+                    {
+                        if frame.seq < header.oldest_seq && self.next_off != tail {
+                            self.next_off = tail;
+                            self.last_seq = 0;
+                            return Ok(CursorResult::FellBehind);
+                        }
+                        return Err(pool.malformed_frame_error(self.next_off));
+                    }
                     self.next_off = next_off;
                     self.last_seq = frame.seq;
-                    return Ok(CursorResult::Message(frame));
+                    return Ok(CursorResult::Message(frame.into_owned()));
                 }
             }
         }
@@ -114,11 +165,10 @@ impl Default for Cursor {
 
 pub(crate) enum ReadResult<'a> {
     Message {
-        frame: FrameRef<'a>,
+        frame: FrameView<'a>,
         next_off: usize,
     },
     Wrap,
-    WouldBlock,
     FellBehind,
 }
 
@@ -128,10 +178,14 @@ pub(crate) fn read_frame_at<'a>(
     ring_size: usize,
     offset: usize,
 ) -> Result<ReadResult<'a>, Error> {
+    if offset >= ring_size {
+        return Ok(ReadResult::FellBehind);
+    }
     let start = ring_offset + offset;
     let end = start + FRAME_HEADER_LEN;
     if end > ring_offset + ring_size {
-        return Ok(ReadResult::FellBehind);
+        // The planner leaves short end padding when a wrap marker cannot fit.
+        return Ok(ReadResult::Wrap);
     }
 
     let h1 = match FrameHeader::decode(&mmap[start..end]) {
@@ -142,7 +196,9 @@ pub(crate) fn read_frame_at<'a>(
     match h1.state {
         FrameState::Wrap => return Ok(ReadResult::Wrap),
         FrameState::Committed => {}
-        _ => return Ok(ReadResult::WouldBlock),
+        // Writers are excluded by the caller's shared lock. A retained frame
+        // left Writing/Empty after a crash is invalid, not future publication.
+        _ => return Ok(ReadResult::FellBehind),
     }
 
     if h1.validate(ring_size).is_err() {
@@ -173,7 +229,7 @@ pub(crate) fn read_frame_at<'a>(
     }
 
     Ok(ReadResult::Message {
-        frame: FrameRef {
+        frame: FrameView {
             seq: h1.seq,
             timestamp_ns: h1.timestamp_ns,
             flags: h1.flags,
@@ -253,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    fn writing_state_would_block() {
+    fn writing_state_is_invalid_under_a_snapshot_lock() {
         let payload = lite3::encode_message(&[], &json!({"x": 1})).expect("payload");
         let ring_size = FRAME_HEADER_LEN + payload.len();
         let mut buf = vec![0u8; ring_size];
@@ -262,7 +318,7 @@ mod tests {
         buf[FRAME_HEADER_LEN..FRAME_HEADER_LEN + payload.len()].copy_from_slice(payload.as_slice());
 
         let result = read_frame_at(&buf, 0, ring_size, 0).expect("read");
-        assert!(matches!(result, ReadResult::WouldBlock));
+        assert!(matches!(result, ReadResult::FellBehind));
     }
 
     #[test]

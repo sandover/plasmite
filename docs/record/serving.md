@@ -15,6 +15,7 @@ share a smaller set of pools, serve a separate directory.
 - [Connect an AI client](#connect-an-ai-client)
 - [Manage access](#manage-access)
 - [Deploy a server](#deploy-a-server)
+- [Use Tailscale](#use-tailscale)
 - [Troubleshoot a connection](#troubleshoot-a-connection)
 
 ## Share your first pool
@@ -241,7 +242,10 @@ routes to the server.
 
 Use `--bind` and `--remote-bind` to change the listening addresses. Restrict
 network access to intended recipients. Keep the local HTTP listener on
-loopback and keep it out of any public proxy.
+loopback and keep it out of every network proxy, including a tailnet-only proxy.
+`--remote-bind` takes a numeric IP and port; bracket an IPv6 address.
+`--shared-address` advertises an origin and sets certificate names; it does
+not restrict the listener. Its default remote bind still covers all IPv4 interfaces.
 
 ### Use a trusted certificate
 
@@ -282,6 +286,88 @@ If an HTTPS proxy presents a different certificate, pass its certificate
 to Plasmite with `--front-cert`. New access keys then identify that public
 key. Configure the proxy to verify Plasmite's backend HTTPS certificate,
 and forward the remote listener only.
+Preserve the client's Host header: browser writes check Origin against Host,
+and `X-Forwarded-Host` does not replace it. The frontend pin persists in the
+server identity; omitting `--front-cert` later does not clear it. Before
+switching to direct TLS, configure the certificate clients will actually
+see as the frontend identity and issue keys for that identity. Check native
+access before revoking old keys. Protect and retain the server state.
+
+### Use Tailscale
+
+Install and connect Tailscale on both machines. Use the owner's real numeric
+tailnet IP and full MagicDNS name in place of the examples below. Find them
+in the Tailscale client; keep the same full name and port in every Plasmite
+command. [MagicDNS](https://tailscale.com/docs/features/magicdns) resolves
+node names; it does not discover Plasmite pools.
+
+Bind the authenticated HTTPS listener directly to that tailnet interface:
+
+```console
+plasmite --dir ./shared pool create events
+plasmite --dir ./shared serve --remote-bind 100.101.102.103:9743 --shared-address https://node.tail123.ts.net:9743
+```
+
+In another owner terminal, create a key:
+
+```console
+plasmite --dir ./shared access invite --name laptop
+```
+
+Send the address and key privately. On the recipient, paste the key at the
+hidden prompt, then check the connection and send/read a message:
+
+```console
+plasmite access connect https://node.tail123.ts.net:9743
+plasmite access status https://node.tail123.ts.net:9743
+echo '{"text":"hello over the tailnet"}' | plasmite feed https://node.tail123.ts.net:9743/events
+plasmite follow https://node.tail123.ts.net:9743/events --tail 1 --no-follow --json
+```
+
+For IPv6, use a bind such as `[fd7a:115c:a1e0::abcd]:9743`. Plasmite runs one
+remote listener per server. Tailnet permission rules must allow the port;
+Plasmite still requires its directory access key. Those rules do not grant
+per-pool permissions or protect a separate LAN listener. Generated
+certificates work with native access-key clients; browser and direct MCP
+trust still require [browser setup](#open-pools-in-a-browser).
+
+If direct interface binding is unavailable, an optional
+[raw TCP Serve forwarder](https://tailscale.com/docs/reference/tailscale-cli/serve)
+can preserve Plasmite's TLS:
+
+```console
+plasmite --dir ./shared serve --remote-bind 127.0.0.1:9743 --shared-address https://node.tail123.ts.net:9743
+# In a separate terminal; this exposes the authenticated listener to the tailnet:
+tailscale serve --tcp=9743 tcp://127.0.0.1:9743
+```
+
+Use the same recipient commands. Raw forwarding needs no `--front-cert`
+and does not provide a browser-trusted certificate. Stop this foreground
+forwarder with Ctrl+C, then inspect `tailscale serve status`. For a saved
+route, remove only this route with `tailscale serve --tcp=9743 off`; keep
+unrelated Serve routes intact. Revoke the Plasmite key separately to end
+application access.
+
+Never forward the credential-free local HTTP port, normally `9700`.
+[Funnel](https://tailscale.com/docs/features/tailscale-funnel) exposes a
+service to the public internet; it needs a separate deployment review.
+An HTTPS-terminating Serve setup also needs separate verification: the
+actual frontend certificate must match the access-key pin, backend TLS
+must be verified, and Host must be preserved. A certificate obtained
+separately through `tailscale cert` need not have Serve's public key.
+
+Validation for 1.0 covered certificate names, native authentication and
+revocation, a local raw TCP relay, and a local HTTPS proxy. A real two-node
+tailnet test, MagicDNS routing, and Tailscale Serve renewal were not run.
+Verify connect/feed/follow/revoke from a recipient before relying on a deployment.
+
+| Symptom | Check |
+| --- | --- |
+| Cannot reach the server | Both Tailscale clients are connected; full name resolves; actual IP, port, listener and tailnet permissions agree. Use `tailscale ping` for network diagnosis and `access status` for application access. |
+| Certificate or pin mismatch | Exact advertised name and presented certificate; a TLS-terminating proxy or retained frontend identity can change the expected key. Keep certificate verification enabled. |
+| Native access works; browser does not | Complete browser trust setup or supply a trusted certificate. Raw forwarding does not terminate TLS. |
+| Server reachable outside the tailnet | Check `--remote-bind`; choosing only `--shared-address` leaves the wildcard default. |
+| Access survives a Tailscale disconnect | Check other network routes to the listener. Revoke the Plasmite key to withdraw application permission. |
 
 ### Protect server and client state
 

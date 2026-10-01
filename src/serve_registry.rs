@@ -12,9 +12,19 @@ pub(crate) const STATUS_PATH: &str = "/v0/serve/status";
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct ServerDetails {
     pub(crate) pid: u32,
+    #[serde(serialize_with = "serialize_directory")]
     pub(crate) pool_dir: PathBuf,
     pub(crate) local_url: String,
     pub(crate) remote_url: Option<String>,
+}
+
+fn serialize_directory<S: serde::Serializer>(
+    path: &Path,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    // Discovery only displays this path. Unix filenames need not be UTF-8, so
+    // use the same readable spelling as path display instead of blocking serve.
+    serializer.serialize_str(&path.to_string_lossy())
 }
 
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -169,4 +179,28 @@ fn running_in(directory: &Path) -> Result<Vec<ServerDetails>, Error> {
     }
     servers.sort_by(|a, b| (&a.pool_dir, a.pid).cmp(&(&b.pool_dir, b.pid)));
     Ok(servers)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::ffi::OsStringExt;
+
+    #[test]
+    fn non_utf8_directory_serializes_for_registry_and_live_status() {
+        let registration = Registration {
+            instance: "test".to_owned(),
+            details: ServerDetails {
+                pid: 1,
+                pool_dir: std::ffi::OsString::from_vec(b"/tmp/pools-\xff".to_vec()).into(),
+                local_url: "http://127.0.0.1:9700".to_owned(),
+                remote_url: None,
+            },
+        };
+        let json = serde_json::to_string(&registration).expect("directory display serializes");
+        let saved: Registration = serde_json::from_str(&json).expect("registry entry");
+        let live: Registration = serde_json::from_str(&json).expect("live status");
+        assert!(saved == live);
+        assert_eq!(saved.details.pool_dir.to_str(), Some("/tmp/pools-\u{fffd}"));
+    }
 }

@@ -118,6 +118,48 @@ just release-gate   # check + integration + Python wheel smoke
 Packaging smoke (npm pack + wheel install) is covered in CI pull requests by
 the `dist-smoke` job in `.github/workflows/ci.yml`.
 
+## Local developer server
+
+`just serve-dev` builds the CLI, seeds a demo pool under `/tmp/plasmite-dev/pools`,
+and starts the local browser interface at `http://127.0.0.1:9009/ui`. Its HTTPS
+listener uses an ephemeral loopback port to avoid collisions with other servers.
+Use `just serve-status` and `just serve-log` to inspect it, and `just serve-stop`
+to stop it. These recipes stop only their tracked dev process after verifying
+its executable, pool directory, and listener arguments; they leave unrelated
+listeners alone. A stale PID that identifies another process causes a refusal.
+
+Secure sharing is part of the normal server. For a local development client that exercises HTTPS
+access, find this dev server's HTTPS address with
+`./target/debug/plasmite serve status`, then
+create a key explicitly:
+
+```bash
+./target/debug/plasmite --dir /tmp/plasmite-dev/pools access invite --name laptop
+# On the client, paste the key at the hidden prompt:
+plasmite access connect https://127.0.0.1:<HTTPS-port>
+```
+
+`access invite` prints the new key; keep it private. The server helpers print
+only status, addresses, and log paths. The old `serve-dev-auth` bearer-token
+recipe has been removed.
+
+For a server that lasts only as long as a command, use
+`just serve-with '<command>'`; it stops its own server when the command ends.
+Both developer recipes use the fixed local port `9009` and report a startup
+failure if another process already owns it.
+
+For a repeatable review of command help, human output, explicit JSON, finite
+history, and recovery errors, run:
+
+```bash
+cargo build --bin plasmite
+bash scripts/cli_ux_tour.sh
+```
+
+The tour logs output to `tmp/cli-ux-tour.log`, uses temporary pool and saved-access
+directories, and removes them when it finishes. `serve status` reads the current
+user's registry so the tour can show the installed discovery workflow.
+
 ## Python tooling policy
 
 Use `uv` for Python environment and package operations in this project.

@@ -1,7 +1,7 @@
 /*
 Purpose: C ABI for Plasmite bindings using libplasmite.
 Key Exports: Client/Pool/Stream handles, JSON + Lite3 append/get/tail functions, buffers, errors.
-Role: Stable boundary for official bindings (Go/Python/Node) in v0.
+Role: Stable boundary for official bindings (Go/Python/Node).
 
 ABI stability:
   - Within a major version, this header is additive-only: no field removals,
@@ -25,6 +25,9 @@ Ownership rules:
     same output struct again is a no-op.
 
 Caller obligations:
+  - Serialize all calls on each opaque client, pool, or stream handle,
+    including reads and free. Never free a handle while a call uses it.
+    Distinct independently opened handles may be used concurrently.
   - Every non-NULL pointer and pointer/length pair must refer to valid,
     suitably aligned storage for the complete call. Handles and error pointers
     must come from this library and be passed to their matching free exactly
@@ -39,7 +42,7 @@ Linking:
     via Homebrew tap or release SDK tarball).
 
 Notes: All allocations returned must be freed by the caller via provided free functions.
-Notes: Remote pool refs are not supported in v0 ABI; use CLI or HTTP API instead.
+Notes: Remote pool refs are not supported by this ABI; use CLI or HTTP API instead.
 */
 
 #ifndef PLASMITE_H

@@ -620,8 +620,8 @@ pub(crate) fn message_to_json(message: &plasmite::api::Message) -> Value {
     .expect("message wire data is serializable")
 }
 
-pub(crate) fn message_from_frame(frame: &FrameRef<'_>) -> Result<Value, Error> {
-    let (meta, data) = decode_payload(frame.payload)?;
+pub(crate) fn message_from_frame(frame: &FrameRef) -> Result<Value, Error> {
+    let (meta, data) = decode_payload(&frame.payload)?;
     let tags = serde_json::from_value(
         meta.get("tags")
             .cloned()

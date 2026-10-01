@@ -2,7 +2,7 @@
 Purpose: Provide Python bindings for the libplasmite C ABI (v0).
 Key Exports: Client, Pool, Stream, Durability, ErrorKind, PlasmiteError.
 Role: Minimal, ergonomic wrapper around include/plasmite.h for Python users.
-Invariants: JSON bytes in/out; explicit close/free for native handles.
+Invariants: JSON bytes in/out; native operations and close serialize per handle.
 Invariants: Errors preserve stable kinds and context fields.
 Notes: Uses ctypes and links to libplasmite resolved at runtime.
 """
@@ -26,6 +26,8 @@ from ctypes import (
 )
 from datetime import datetime, timezone
 from enum import IntEnum
+from functools import wraps
+from threading import RLock
 import json
 import os
 from pathlib import Path
@@ -441,6 +443,16 @@ def _require_open(ptr: object, target: str) -> None:
         raise _closed_error(target)
 
 
+def _serialized_handle(method):
+    """Keep handle checks, native calls, and owned-result cleanup together."""
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return locked
+
+
 def _ensure_bytes(payload: bytes | bytearray | memoryview, name: str) -> bytes:
     if isinstance(payload, bytes):
         return payload
@@ -483,6 +495,8 @@ def _stream_options(
 
 class Client:
     def __init__(self, pool_dir: str | None = None) -> None:
+        self._lock = RLock()
+        self._ptr = None
         if pool_dir is None:
             pool_dir = default_pool_dir()
         if not pool_dir:
@@ -494,6 +508,7 @@ class Client:
             raise _take_error(out_err)
         self._ptr = out_client
 
+    @_serialized_handle
     def create_pool(
         self,
         pool_ref: str,
@@ -516,6 +531,7 @@ class Client:
             raise _take_error(out_err)
         return Pool(out_pool)
 
+    @_serialized_handle
     def open_pool(self, pool_ref: str) -> Pool:
         _require_open(self._ptr, "client")
         if not pool_ref:
@@ -542,13 +558,15 @@ class Client:
         except NotFoundError:
             return self.create_pool(pool_ref, size_bytes)
 
+    @_serialized_handle
     def close(self) -> None:
         if getattr(self, "_ptr", None):
             _LIB.plsm_client_free(self._ptr)
             self._ptr = None
 
     def __enter__(self) -> Client:
-        _require_open(self._ptr, "client")
+        with self._lock:
+            _require_open(self._ptr, "client")
         return self
 
     def __exit__(self, _exc_type, _exc, _tb) -> None:
@@ -572,8 +590,10 @@ class Lite3Frame:
 
 class Pool:
     def __init__(self, ptr: POINTER(plsm_pool_t)) -> None:
+        self._lock = RLock()
         self._ptr = ptr
 
+    @_serialized_handle
     def append_json(self, payload: bytes, tags: Iterable[str], durability: Durability) -> bytes:
         _require_open(self._ptr, "pool")
         payload = _ensure_bytes(payload, "payload")
@@ -610,6 +630,7 @@ class Pool:
         )
         return parse_message(payload)
 
+    @_serialized_handle
     def append_lite3(self, payload: bytes, durability: Durability) -> int:
         _require_open(self._ptr, "pool")
         payload = _ensure_bytes(payload, "payload")
@@ -630,6 +651,7 @@ class Pool:
             raise _take_error(out_err)
         return int(out_seq.value)
 
+    @_serialized_handle
     def get_json(self, seq: int) -> bytes:
         _require_open(self._ptr, "pool")
         seq = _ensure_non_negative_int(seq, "seq")
@@ -643,6 +665,7 @@ class Pool:
     def get(self, seq: int) -> Message:
         return parse_message(self.get_json(seq))
 
+    @_serialized_handle
     def get_lite3(self, seq: int) -> Lite3Frame:
         _require_open(self._ptr, "pool")
         seq = _ensure_non_negative_int(seq, "seq")
@@ -653,6 +676,7 @@ class Pool:
             raise _take_error(out_err)
         return _frame_to_py(frame)
 
+    @_serialized_handle
     def open_stream(
         self,
         since_seq: Optional[int] = None,
@@ -690,6 +714,7 @@ class Pool:
             raise _take_error(out_err)
         return Stream(out_stream)
 
+    @_serialized_handle
     def open_lite3_stream(
         self,
         since_seq: Optional[int] = None,
@@ -817,13 +842,15 @@ class Pool:
         finally:
             stream.close()
 
+    @_serialized_handle
     def close(self) -> None:
         if getattr(self, "_ptr", None):
             _LIB.plsm_pool_free(self._ptr)
             self._ptr = None
 
     def __enter__(self) -> Pool:
-        _require_open(self._ptr, "pool")
+        with self._lock:
+            _require_open(self._ptr, "pool")
         return self
 
     def __exit__(self, _exc_type, _exc, _tb) -> None:
@@ -835,8 +862,10 @@ class Pool:
 
 class Stream:
     def __init__(self, ptr: POINTER(plsm_stream_t)) -> None:
+        self._lock = RLock()
         self._ptr = ptr
 
+    @_serialized_handle
     def next_json(self) -> Optional[bytes]:
         _require_open(self._ptr, "stream")
         buf = plsm_buf_t()
@@ -857,13 +886,15 @@ class Stream:
             raise StopIteration
         return message
 
+    @_serialized_handle
     def close(self) -> None:
         if getattr(self, "_ptr", None):
             _LIB.plsm_stream_free(self._ptr)
             self._ptr = None
 
     def __enter__(self) -> Stream:
-        _require_open(self._ptr, "stream")
+        with self._lock:
+            _require_open(self._ptr, "stream")
         return self
 
     def __exit__(self, _exc_type, _exc, _tb) -> None:
@@ -875,8 +906,10 @@ class Stream:
 
 class Lite3Stream:
     def __init__(self, ptr: POINTER(plsm_lite3_stream_t)) -> None:
+        self._lock = RLock()
         self._ptr = ptr
 
+    @_serialized_handle
     def next(self) -> Optional[Lite3Frame]:
         _require_open(self._ptr, "stream")
         frame = plsm_lite3_frame_t()
@@ -897,13 +930,15 @@ class Lite3Stream:
             raise StopIteration
         return frame
 
+    @_serialized_handle
     def close(self) -> None:
         if getattr(self, "_ptr", None):
             _LIB.plsm_lite3_stream_free(self._ptr)
             self._ptr = None
 
     def __enter__(self) -> Lite3Stream:
-        _require_open(self._ptr, "stream")
+        with self._lock:
+            _require_open(self._ptr, "stream")
         return self
 
     def __exit__(self, _exc_type, _exc, _tb) -> None:

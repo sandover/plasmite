@@ -373,6 +373,11 @@ fn array_count(bytes: &[u8], ofs: usize) -> Result<u32, Error> {
     if ret < 0 {
         return Err(Error::new(ErrorKind::Corrupt).with_message("invalid array"));
     }
+    // Each encoded element occupies bytes. A corrupt node count must not drive
+    // decoder allocations or iteration beyond even this conservative bound.
+    if u64::from(out) > bytes.len() as u64 {
+        return Err(Error::new(ErrorKind::Corrupt).with_message("array count exceeds payload size"));
+    }
     Ok(out)
 }
 
@@ -447,6 +452,27 @@ mod tests {
         let buf = [0u8; 8];
         let err = validate_bytes(&buf).expect_err("should fail");
         assert_eq!(err.kind(), crate::core::error::ErrorKind::Corrupt);
+    }
+
+    #[test]
+    fn corrupt_array_count_is_rejected_before_decoder_allocation() {
+        let buf = encode_message(&[], &json!({"x": 1})).expect("encode");
+        let doc = buf.as_doc();
+        let meta = doc.key_offset("meta").expect("meta");
+        let tags = doc.key_offset_at(meta, "tags").expect("tags");
+        let mut bytes = buf.as_slice().to_vec();
+        // Lite3 size_kc stores count in the high 26 bits and key count in the
+        // low six. Keep the empty array's key count and corrupt only its size.
+        bytes[tags + 32..tags + 36].copy_from_slice(&(u32::MAX & !63).to_le_bytes());
+        let doc = super::Lite3DocRef::new(&bytes);
+        let err = doc.count_at(tags).expect_err("impossible count");
+        assert_eq!(err.kind(), crate::core::error::ErrorKind::Corrupt);
+        assert_eq!(
+            validate_bytes(&bytes)
+                .expect_err("invalid canonical message")
+                .kind(),
+            crate::core::error::ErrorKind::Corrupt
+        );
     }
 
     #[test]

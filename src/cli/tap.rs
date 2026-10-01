@@ -63,6 +63,8 @@ pub(super) fn run(args: TapArgs, context: &CliContext) -> Result<CommandResult, 
         }
     };
 
+    let max_line_bytes = pool_handle.info()?.ring_size;
+
     let mut child = std::process::Command::new(&args.command[0])
         .args(&args.command[1..])
         .stdin(std::process::Stdio::inherit())
@@ -75,8 +77,8 @@ pub(super) fn run(args: TapArgs, context: &CliContext) -> Result<CommandResult, 
     if status_on_tty_stderr {
         eprintln!(
             "tapping {} <- {}",
-            args.pool,
-            render_shell_agnostic_command(&args.command)
+            super::output_support::human_literal(&args.pool),
+            super::output_support::human_literal(&render_shell_agnostic_command(&args.command))
         );
     }
 
@@ -107,11 +109,17 @@ pub(super) fn run(args: TapArgs, context: &CliContext) -> Result<CommandResult, 
         child_stdout,
         TapStream::Stdout,
         !args.quiet,
+        max_line_bytes,
         event_tx.clone(),
     );
-    let stderr_reader = tap_spawn_reader(child_stderr, TapStream::Stderr, !args.quiet, event_tx);
+    let stderr_reader = tap_spawn_reader(
+        child_stderr,
+        TapStream::Stderr,
+        !args.quiet,
+        max_line_bytes,
+        event_tx,
+    );
 
-    let mut reader_error: Option<Error> = None;
     let mut child_status = None;
     let mut event_channel_closed = false;
     let mut line_count: u64 = 0;
@@ -142,9 +150,9 @@ pub(super) fn run(args: TapArgs, context: &CliContext) -> Result<CommandResult, 
                 }
             }
             Ok(TapEvent::ReaderError(err)) => {
-                if reader_error.is_none() {
-                    reader_error = Some(err);
-                }
+                drop(event_rx);
+                tap_terminate_child(&mut child);
+                return Err(err);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => event_channel_closed = true,
@@ -159,6 +167,7 @@ pub(super) fn run(args: TapArgs, context: &CliContext) -> Result<CommandResult, 
     }
 
     let child_status = child_status.expect("status set once loop exits");
+    let mut reader_error: Option<Error> = None;
     if stdout_reader.join().is_err() && reader_error.is_none() {
         reader_error =
             Some(Error::new(ErrorKind::Internal).with_message("tap stdout reader panicked"));
@@ -189,7 +198,7 @@ pub(super) fn run(args: TapArgs, context: &CliContext) -> Result<CommandResult, 
             eprintln!(
                 "tapped {line_count} lines ({}) -> {} signal {}",
                 format_tap_elapsed(elapsed_ms),
-                args.pool,
+                super::output_support::human_literal(&args.pool),
                 signal_name
             );
         }
@@ -210,7 +219,7 @@ pub(super) fn run(args: TapArgs, context: &CliContext) -> Result<CommandResult, 
             eprintln!(
                 "tapped {line_count} lines ({}) -> {} exit {}",
                 format_tap_elapsed(elapsed_ms),
-                args.pool,
+                super::output_support::human_literal(&args.pool),
                 code
             );
         }
@@ -261,23 +270,22 @@ fn tap_spawn_reader<R>(
     reader: R,
     stream: TapStream,
     passthrough: bool,
+    max_line_bytes: u64,
     tx: mpsc::SyncSender<TapEvent>,
 ) -> std::thread::JoinHandle<()>
 where
     R: Read + Send + 'static,
 {
     std::thread::spawn(move || {
-        use std::io::BufRead as _;
         use std::io::Write as _;
 
         let mut reader = std::io::BufReader::new(reader);
         let mut passthrough_enabled = passthrough;
-        let mut line = String::new();
+        let mut buffer = Vec::new();
         loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) => break,
-                Ok(_) => {
+            match tap_read_line(&mut reader, &mut buffer, max_line_bytes) {
+                Ok(None) => break,
+                Ok(Some(line)) => {
                     if passthrough_enabled {
                         let write_result = match stream {
                             TapStream::Stdout => {
@@ -302,21 +310,70 @@ where
                             }
                         }
                     }
-                    let _ = tx.send(TapEvent::Line {
-                        stream,
-                        raw_line: line.clone(),
-                    });
+                    if tx
+                        .send(TapEvent::Line {
+                            stream,
+                            raw_line: line,
+                        })
+                        .is_err()
+                    {
+                        return;
+                    }
                 }
                 Err(err) => {
-                    let _ = tx.send(TapEvent::ReaderError(
-                        Error::new(ErrorKind::Io)
-                            .with_message("failed to read wrapped command output")
-                            .with_source(err),
-                    ));
+                    let _ = tx.send(TapEvent::ReaderError(err));
                     return;
                 }
             }
         }
+    })
+}
+
+fn tap_read_line<R: std::io::BufRead>(
+    reader: &mut R,
+    buffer: &mut Vec<u8>,
+    max_line_bytes: u64,
+) -> Result<Option<String>, Error> {
+    use std::io::BufRead as _;
+    buffer.clear();
+    // Read one overflow byte first, then at most two terminator bytes. A
+    // newline-free writer cannot force us to wait beyond an oversized payload.
+    let mut read_limit = max_line_bytes.saturating_add(1);
+    loop {
+        let read = reader
+            .take(read_limit)
+            .read_until(b'\n', buffer)
+            .map_err(|err| {
+                Error::new(ErrorKind::Io)
+                    .with_message("failed to read wrapped command output")
+                    .with_source(err)
+            })?;
+        if read == 0 {
+            if buffer.is_empty() {
+                return Ok(None);
+            }
+            break;
+        }
+        let line_bytes = buffer
+            .iter()
+            .rposition(|byte| !matches!(byte, b'\r' | b'\n'))
+            .map_or(0, |index| index + 1);
+        if buffer.len() as u64 > max_line_bytes.saturating_add(2)
+            || line_bytes as u64 > max_line_bytes
+        {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message(format!("captured line exceeds pool ring capacity ({max_line_bytes} bytes)"))
+                .with_hint("Write shorter lines or capture into a larger pool; use --create-size when creating a new pool."));
+        }
+        if buffer.last() == Some(&b'\n') || (read as u64) < read_limit {
+            break;
+        }
+        read_limit = 1;
+    }
+    String::from_utf8(buffer.clone()).map(Some).map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message("wrapped command output is not valid UTF-8")
+            .with_source(err)
     })
 }
 
@@ -386,4 +443,96 @@ fn tap_spawn_signal_forwarder(_child_pid: i32) {}
 #[cfg(unix)]
 fn tap_forward_signal(child_pid: i32, signal: i32) {
     let _ = unsafe { libc::kill(child_pid, signal) };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn bounded_reader_preserves_crlf_and_unterminated_lines() {
+        let mut reader = Cursor::new(b"12345678\r\nlast\r\nend");
+        let mut buffer = Vec::new();
+        for expected in ["12345678\r\n", "last\r\n", "end"] {
+            assert_eq!(
+                tap_read_line(&mut reader, &mut buffer, 8)
+                    .unwrap()
+                    .as_deref(),
+                Some(expected)
+            );
+        }
+        assert!(
+            tap_read_line(&mut reader, &mut buffer, 8)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn bounded_reader_rejects_one_overflow_byte_without_reading_more() {
+        let mut reader = Cursor::new(b"123456789still-running");
+        let mut buffer = Vec::new();
+        let error = tap_read_line(&mut reader, &mut buffer, 8).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Usage);
+        assert_eq!(reader.position(), 9);
+        assert_eq!(buffer.len(), 9);
+        assert!(error.hint().unwrap().contains("larger pool"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oversized_unterminated_output_stops_and_reaps_owned_child() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("capture.plasmite");
+        let pool = Pool::create(&path, PoolOptions::new(8192).with_index_capacity(0)).unwrap();
+        let capacity = pool.info().unwrap().ring_size;
+        drop(pool);
+        let pid_path = temporary.path().join("writer.pid");
+        let args = TapArgs {
+            pool: "capture".into(), create: false, create_size: None,
+            tags: vec![], quiet: true, durability: "fast".into(),
+            command: vec!["python3".into(), "-c".into(),
+                "import os,sys,time; open(sys.argv[1], 'w').write(str(os.getpid())); sys.stdout.buffer.write(b'x' * int(sys.argv[2])); sys.stdout.buffer.flush(); time.sleep(60)".into(),
+                pid_path.to_str().unwrap().into(), (capacity + 1).to_string()],
+        };
+        let context = CliContext::new(
+            temporary.path().to_path_buf(),
+            crate::ColorMode::Never,
+            false,
+        );
+        let (tx, rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let _ = tx.send(run(args, &context));
+        });
+        let result = rx.recv_timeout(Duration::from_secs(5));
+        let pid: i32 = std::fs::read_to_string(&pid_path).unwrap().parse().unwrap();
+        // Clean up the test's child even if this regression ever hangs again.
+        if result.is_err() {
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
+        worker.join().unwrap();
+        let error = result
+            .expect("tap must fail before the writer exits")
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Usage);
+        assert!(
+            error
+                .message()
+                .unwrap()
+                .contains("captured line exceeds pool ring capacity")
+        );
+        assert!(error.hint().unwrap().contains("--create-size"));
+        assert_eq!(
+            unsafe { libc::kill(pid, 0) },
+            -1,
+            "wrapped child remains alive"
+        );
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
+        );
+    }
 }

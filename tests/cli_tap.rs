@@ -3,6 +3,24 @@
 pub mod support;
 use support::cli::*;
 
+fn assert_tap_error_text(output: &std::process::Output, exit_code: i32, message: &str, hint: &str) {
+    assert_eq!(output.status.code(), Some(exit_code));
+    assert!(output.stdout.is_empty());
+    let stderr = std::str::from_utf8(&output.stderr).expect("utf8 diagnostic");
+    assert!(
+        stderr.starts_with("error:"),
+        "expected human diagnostic: {stderr}"
+    );
+    assert!(
+        stderr.contains(message),
+        "missing message {message:?}: {stderr}"
+    );
+    assert!(
+        stderr.contains("hint:") && stderr.contains(hint),
+        "missing hint {hint:?}: {stderr}"
+    );
+}
+
 #[test]
 fn tap_with_no_args_prints_help() {
     let output = cmd().args(["tap"]).output().expect("tap");
@@ -20,6 +38,8 @@ fn tap_help_renders_examples() {
     assert!(stdout.contains("plasmite tap build --create -- cargo build"));
     assert!(stdout.contains("plasmite tap api --create --create-size 64M -- ./server"));
     assert!(stdout.contains("`--` is required before wrapped command args"));
+    assert!(stdout.contains("Lines larger than the pool ring capacity"));
+    assert!(stdout.contains("wrapped child is terminated"));
 }
 
 #[test]
@@ -30,18 +50,11 @@ fn tap_requires_wrapped_command_after_separator() {
     assert!(stdout.contains("Usage: plasmite tap [OPTIONS] <POOL> -- <COMMAND>..."));
 
     let output = cmd().args(["tap", "build"]).output().expect("tap");
-    assert_eq!(output.status.code(), Some(2));
-    let error = parse_error_json(&output.stderr);
-    assert_eq!(error["error"]["kind"], "Usage");
-    assert!(
-        error["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("requires a wrapped command after `--`"))
-    );
-    assert!(
-        error["error"]["hint"]
-            .as_str()
-            .is_some_and(|hint| hint.contains("plasmite tap <pool> -- <command...>"))
+    assert_tap_error_text(
+        &output,
+        2,
+        "requires a wrapped command after `--`",
+        "plasmite tap <pool> -- <command...>",
     );
 }
 
@@ -51,8 +64,9 @@ fn tap_remote_url_rejected_as_local_only() {
         .args(["tap", "http://127.0.0.1:65535/demo", "--", "echo", "hi"])
         .output()
         .expect("tap");
-    assert_actionable_usage_feedback(
+    assert_tap_error_text(
         &output,
+        2,
         "tap accepts local pool refs only",
         "Use a local pool name/path",
     );
@@ -495,8 +509,9 @@ fn tap_missing_wrapped_executable_is_actionable_nonzero_error() {
         ])
         .output()
         .expect("tap");
-    assert_actionable_usage_feedback(
+    assert_tap_error_text(
         &output,
+        2,
         "wrapped command not found",
         "Check PATH or use an absolute executable path",
     );
@@ -519,15 +534,8 @@ fn tap_missing_pool_without_create_has_create_hint() {
         ])
         .output()
         .expect("tap");
-    assert_eq!(output.status.code(), Some(3));
-    let err = parse_error_json(&output.stderr);
-    let inner = err.get("error").and_then(|v| v.as_object()).expect("error");
-    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("NotFound"));
-    let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(
-        hint.contains("--create"),
-        "expected --create hint in '{hint}'"
-    );
+    assert_tap_error_text(&output, 3, "not found", "--create");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("missingpool.plasmite"));
 }
 
 #[test]
@@ -536,8 +544,9 @@ fn tap_empty_command_after_separator_is_usage_error() {
         .args(["tap", "demo", "--create", "--"])
         .output()
         .expect("tap");
-    assert_actionable_usage_feedback(
+    assert_tap_error_text(
         &output,
+        2,
         "tap requires a wrapped command after `--`",
         "plasmite tap <pool> -- <command...>",
     );

@@ -205,7 +205,7 @@ impl RemoteClient {
             Err(ureq::Error::Status(code, response)) => Err(parse_error_response(code, response)),
             Err(ureq::Error::Transport(error)) => Err(Error::new(ErrorKind::Io)
                 .with_message(format!("failed to reach or verify {url}"))
-                .with_hint("Check network access, the certificate name and validity, and the key's SPKI fingerprint.")
+                .with_hint("Check the exact HTTPS hostname and port, network route, certificate name and validity, and the key's SPKI fingerprint. For Tailscale, check MagicDNS and port permissions. A TLS-terminating proxy must present the certificate identified by --front-cert; raw TCP forwarding preserves Plasmite's certificate.")
                 .with_source(error)),
         }
     }

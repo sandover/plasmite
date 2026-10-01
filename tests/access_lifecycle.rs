@@ -16,7 +16,7 @@ fn invite(pool_dir: &std::path::Path, name: &str) -> TestResult<String> {
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_plasmite"))
         .arg("--dir")
         .arg(pool_dir)
-        .args(["access", "invite", "--name", name])
+        .args(["access", "invite", "--name", name, "--json"])
         .output()?;
     if !output.status.success() {
         return Err(format!(
@@ -38,6 +38,7 @@ fn access_cli(pool_dir: &std::path::Path, args: &[&str]) -> TestResult<Value> {
         .arg(pool_dir)
         .arg("access")
         .args(args)
+        .arg("--json")
         .output()?;
     if !output.status.success() {
         return Err(format!(

@@ -169,8 +169,8 @@ built and smoke-tested both SDK archives. The run retained them for 30 days as
 `ci-sdk-aarch64-unknown-linux-gnu` and
 `ci-sdk-armv7-unknown-linux-gnueabihf`, with checksums and build provenance.
 GitHub release asset names are `plasmite_<version>_linux_arm64.tar.gz` and
-`plasmite_<version>_linux_armv7.tar.gz`; no GitHub release has published these
-assets yet.
+`plasmite_<version>_linux_armv7.tar.gz`; the 1.0.0 release introduces these
+preview assets.
 
 ARM64 uses Ubuntu 22.04 with glibc 2.35 as its runtime baseline. ARMv7 uses an
 Ubuntu 22.04 glibc 2.35 sysroot and pins Armv7-A, VFPv3-D16 hard-float, and

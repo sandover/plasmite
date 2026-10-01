@@ -930,6 +930,37 @@ mod tests {
     }
 
     #[test]
+    fn frontend_identity_persists_until_explicitly_replaced() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let frontend =
+            Certificate::from_params(CertificateParams::new(vec!["node.tail123.ts.net".into()]))
+                .expect("frontend certificate");
+        let front_path = temp.path().join("frontend.pem");
+        std::fs::write(&front_path, frontend.serialize_pem().expect("pem")).expect("frontend file");
+        let first = AccessStore::open(temp.path(), None, None, Some(&front_path))
+            .expect("frontend identity");
+        let frontend_fingerprint = first.fingerprint().to_owned();
+        let backend_path = first.cert_path();
+        assert_ne!(
+            super::cert_fingerprint(&backend_path).unwrap(),
+            frontend_fingerprint
+        );
+        drop(first);
+
+        let restarted = AccessStore::open(temp.path(), None, None, None).expect("restart");
+        assert_eq!(restarted.fingerprint(), frontend_fingerprint);
+        drop(restarted);
+
+        let direct = AccessStore::open(temp.path(), None, None, Some(&backend_path))
+            .expect("explicit direct certificate identity");
+        assert_eq!(
+            direct.fingerprint(),
+            super::cert_fingerprint(&backend_path).unwrap()
+        );
+        assert_ne!(direct.fingerprint(), frontend_fingerprint);
+    }
+
+    #[test]
     fn invalid_front_certificate_leaves_previous_identity_usable() {
         let temp = tempfile::tempdir().expect("tempdir");
         let first = AccessStore::open(temp.path(), None, None, None).expect("first identity");

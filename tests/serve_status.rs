@@ -203,6 +203,29 @@ fn status_reports_an_empty_registry_as_text_and_json() -> TestResult<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn status_discovers_a_server_with_a_non_utf8_pool_directory() -> TestResult<()> {
+    use std::os::unix::ffi::OsStringExt;
+    let home = TestHome::new()?;
+    let pool = home
+        .cwd
+        .join(std::ffi::OsString::from_vec(b"pools-\xff".to_vec()));
+    let server = RunningServer::start(&home, &pool, "127.0.0.1:0")?;
+    let servers = wait_for_servers(&home, Path::new("unused"), 1)?;
+    let canonical = std::fs::canonicalize(&pool)?;
+    assert_eq!(
+        servers[0]["pool_dir"].as_str(),
+        Some(canonical.to_string_lossy().as_ref())
+    );
+    assert_eq!(
+        servers[0]["pid"].as_u64(),
+        Some(server.child.as_ref().unwrap().id() as u64)
+    );
+    drop(server);
+    Ok(())
+}
+
 #[test]
 fn status_finds_two_servers_and_ignores_dir_for_discovery() -> TestResult<()> {
     let home = TestHome::new()?;

@@ -79,7 +79,8 @@ parsed variants into explicit argument structures for these command families:
 - `server` and `access` for serving and connection commands;
 - `utility` for version, completion, and MCP stdio.
 
-`CliContext` contains only the resolved pool directory and color mode.
+`CliContext` contains the resolved pool directory, color mode, and explicit
+JSON presentation choice.
 `CommandResult` carries the selected exit code back to `main.rs`. The larger
 command families use focused helper modules: `doctor_support`, `pool_support`,
 `feed_support`, and `stream_support`. Shared parsing, pool
@@ -146,10 +147,17 @@ Invariants:
 
 Get-by-seq path:
 
-1. Validate requested seq is in visible bounds.
-2. Probe index slot.
-3. If probe fails validation, fall back to scan.
-4. Return decoded message envelope.
+1. Acquire a shared file lock and capture visible bounds.
+2. Validate requested seq and probe the index slot.
+3. If probe fails validation, fall back to scan under the same lock.
+4. Copy the selected payload into an owned frame before releasing the lock.
+5. Decode the owned payload into the message envelope.
+
+Read snapshots use the same OS lock as appends. A per-Pool mutex serializes
+read-lock ownership on the shared file description. Returned frames own their
+payload bytes, so retaining a frame cannot observe a later overwrite. Internal
+frame views remain inside the lock lifetime; scans do not copy skipped
+payloads. Corrupt stable frames return `Corrupt` rather than retrying forever.
 
 Tail path:
 
@@ -160,10 +168,12 @@ Tail path:
 Invariant: Correctness of the tail path must not depend on notify delivery. Notify is a latency optimization; a tail that never receives a notification must still eventually return all committed messages. Removing notify must not cause failures in non-timing tests.
 
 The CLI's interactive `follow` loop and the public API's `Tail` and `Replay`
-share `Pool` and `Cursor`, but have different contracts. CLI follow filters
-before counting `--tail` matches, resets its timeout after output, and reports
-dropped messages. API tails use sequence checkpoints, an absolute timeout, and
-an optional retention-gap error. Keep those policies at their interface
+share `Pool` and `Cursor`, but have different contracts. CLI follow selects
+retained `--tail` history before filtering, resets its timeout after output,
+and reports dropped messages. Finite CLI follow and replay stop at the initial
+sequence boundary and hold only one owned message at a time. Remote history
+uses the existing bounds and tail protocol. API tails use sequence checkpoints,
+an absolute timeout, and an optional retention-gap error. Keep those policies at their interface
 boundaries; sharing a loop would make either interface inherit the other's
 behavior. Extract a rule only when both interfaces require the same result.
 
@@ -190,7 +200,9 @@ prevent health and MCP routing from making progress.
 Once admitted, a blocking operation runs to completion even if its requesting
 future is dropped. Its permit remains held until the operation exits. This
 preserves the synchronous core's ownership and locking rules during request
-cancellation.
+cancellation. HTTP tail producers carry an absolute deadline from admission
+through reads and bounded output-queue waits. Expiry releases the tail permit
+even if the connected client stops draining the queue.
 
 ## Tap execution model (CLI adapter)
 
@@ -200,7 +212,10 @@ cancellation.
 2. Spawn child process with inherited stdin and piped stdout/stderr.
 3. Run one reader thread per stream (`stdout`, `stderr`) and frame each line as a JSON message.
    Readers use a bounded event queue so a slow pool append backpressures the
-   child pipes instead of accumulating pending lines without limit.
+   child pipes instead of accumulating pending lines without limit. Each
+   captured line is bounded by the pool ring capacity; an oversized line or
+   reader failure terminates and reaps the wrapped child with an actionable
+   error.
 4. Emit lifecycle messages (`start`, then `exit`) around captured output.
 5. Append all messages via the shared local append path; tap does not introduce a parallel storage path.
 6. On Unix, forward SIGINT/SIGTERM received by tap to the child, then drain buffered output before emitting the exit lifecycle message.

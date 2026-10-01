@@ -1,7 +1,7 @@
 //! Purpose: `plasmite` CLI entry point and v0.0.1 command dispatch.
 //! Role: Binary crate root; parses args, runs commands, emits JSON on stdout.
 //! Invariants: Commands emit stable stdout formats (human or JSON by command/flags).
-//! Invariants: Non-interactive errors are emitted as JSON on stderr.
+//! Invariants: Errors are readable text unless structured output is explicitly requested.
 //! Invariants: Process exit code is derived from the shared interface error policy.
 //! Invariants: All pool mutations go through `api::Pool` (locks + mmap safety).
 #![allow(clippy::result_large_err)]
@@ -44,27 +44,41 @@ enum PoolTarget {
 fn main() {
     let exit_code = match run() {
         Ok(outcome) => outcome.exit_code,
-        Err((err, color_mode)) => {
-            emit_error(&err, color_mode);
+        Err((err, color_mode, json_output)) => {
+            emit_error(&err, color_mode, json_output);
             error_policy(interface_error_kind(err.kind())).cli_exit_code
         }
     };
     std::process::exit(exit_code);
 }
 
-fn run() -> Result<RunOutcome, (Error, ColorMode)> {
-    let cli = match Cli::try_parse_from(normalize_args(std::env::args_os())) {
+fn run() -> Result<RunOutcome, (Error, ColorMode, bool)> {
+    let args = normalize_args(std::env::args_os());
+    let explicit_json = requests_json(&args);
+    let conflicting_dirs = has_conflicting_directories(&args);
+    let cli = match Cli::try_parse_from(args) {
         Ok(cli) => cli,
         Err(err) => match err.kind() {
             ClapErrorKind::DisplayHelp
             | ClapErrorKind::DisplayVersion
             | ClapErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
-                err.print().map_err(|io_err| {
+                let written = if matches!(err.kind(), ClapErrorKind::DisplayVersion) {
+                    use std::io::Write;
+                    writeln!(
+                        std::io::stdout(),
+                        "plasmite {}",
+                        env!("PLASMITE_BUILD_VERSION")
+                    )
+                } else {
+                    err.print()
+                };
+                written.map_err(|io_err| {
                     (
                         Error::new(ErrorKind::Io)
-                            .with_message("failed to write help")
+                            .with_message("failed to write CLI output")
                             .with_source(io_err),
                         ColorMode::Auto,
+                        explicit_json,
                     )
                 })?;
                 let exit_code = if matches!(
@@ -85,29 +99,95 @@ fn run() -> Result<RunOutcome, (Error, ColorMode)> {
                         .with_message(message)
                         .with_hint(hint),
                     ColorMode::Auto,
+                    explicit_json,
                 ));
             }
         },
     };
 
-    let pool_dir = cli.dir.unwrap_or_else(default_pool_dir);
     let color_mode = cli.color;
-
-    let result = cli::dispatch(cli.command, CliContext::new(pool_dir, color_mode));
+    let json_output = cli.command.json_output();
+    if conflicting_dirs {
+        return Err((
+            Error::new(ErrorKind::Usage)
+                .with_message("conflicting --dir values select different pool directories")
+                .with_hint("Use one --dir value for the whole invocation."),
+            color_mode,
+            json_output,
+        ));
+    }
+    if !cli.dir.is_empty() && matches!(&cli.command, cli::args::Command::Mcp { remote: Some(_) }) {
+        return Err((
+            Error::new(ErrorKind::Usage)
+                .with_message("--remote cannot be used with --dir")
+                .with_hint("Use --dir for local MCP or --remote for a saved server connection."),
+            color_mode,
+            json_output,
+        ));
+    }
+    let pool_dir = cli.dir.into_iter().next().unwrap_or_else(default_pool_dir);
+    let result = cli::dispatch(
+        cli.command,
+        CliContext::new(pool_dir, color_mode, json_output),
+    );
 
     result
         .map_err(add_corrupt_hint)
         .map_err(add_io_hint)
         .map_err(add_internal_hint)
-        .map_err(|err| (err, color_mode))
+        .map_err(|err| (err, color_mode, json_output))
+}
+
+// Clap propagates the last scope's global argument values. Check every
+// explicit directory first so a nested --dir cannot silently replace another.
+fn has_conflicting_directories(args: &[OsString]) -> bool {
+    let mut first = None;
+    let mut args = args.iter().skip(1).take_while(|arg| *arg != "--");
+    while let Some(arg) = args.next() {
+        let value = if arg == "--dir" {
+            args.next().map(|value| value.as_encoded_bytes())
+        } else {
+            arg.as_encoded_bytes().strip_prefix(b"--dir=")
+        };
+        if let Some(value) = value {
+            if first.is_some_and(|first| first != value) {
+                return true;
+            }
+            first = Some(value);
+        }
+    }
+    false
+}
+
+// The parser may fail before it can produce a command. Respect an explicit
+// output request, but never interpret flags belonging to tap's child process.
+fn requests_json(args: &[OsString]) -> bool {
+    let mut format_value = false;
+    for arg in args.iter().skip(1).take_while(|arg| *arg != "--") {
+        if format_value && arg == "jsonl" {
+            return true;
+        }
+        if arg == "--json" || arg == "--jsonl" || arg == "--format=jsonl" {
+            return true;
+        }
+        format_value = arg == "--format";
+    }
+    false
 }
 
 fn normalize_args<I>(args: I) -> Vec<OsString>
 where
     I: IntoIterator<Item = OsString>,
 {
+    let mut child_args = false;
     args.into_iter()
         .map(|arg| {
+            if arg == "--" {
+                child_args = true;
+            }
+            if child_args {
+                return arg;
+            }
             let replacement = arg.to_str().and_then(|value| match value {
                 "---help" => Some("--help"),
                 "---version" => Some("--version"),
@@ -141,6 +221,43 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn directory_conflicts_include_all_scopes_and_equal_spellings() {
+        use std::ffi::OsString;
+        let conflict = ["plasmite", "--dir", "/one", "pool", "list", "--dir=/two"];
+        let equal = ["plasmite", "--dir", "/one", "pool", "list", "--dir=/one"];
+        let child = [
+            "plasmite",
+            "--dir",
+            "/one",
+            "tap",
+            "demo",
+            "--",
+            "echo",
+            "--dir=/two",
+        ];
+        for (args, expected) in [
+            (conflict.as_slice(), true),
+            (equal.as_slice(), false),
+            (child.as_slice(), false),
+        ] {
+            let args = args.iter().map(OsString::from).collect::<Vec<_>>();
+            assert_eq!(super::has_conflicting_directories(&args), expected);
+        }
+    }
+
+    #[test]
+    fn argument_normalization_preserves_child_arguments() {
+        use std::ffi::OsString;
+        let args = ["plasmite", "---help", "--", "---version", "--json"];
+        let args = super::normalize_args(args.into_iter().map(OsString::from));
+        assert_eq!(
+            args,
+            ["plasmite", "--help", "--", "---version", "--json"].map(OsString::from)
+        );
+        assert!(!super::requests_json(&args));
+    }
+
+    #[test]
     fn cli_command_inventory() {
         Cli::command().debug_assert();
         let mut command = Cli::command();
@@ -151,13 +268,14 @@ mod tests {
         let expected = vec![
             ("plasmite", vec!["color", "dir", "help", "version"]),
             ("plasmite access", vec!["help"]),
-            ("plasmite access connect", vec!["help"]),
-            ("plasmite access disconnect", vec!["help"]),
-            ("plasmite access invite", vec!["help", "name"]),
-            ("plasmite access keys", vec!["help"]),
-            ("plasmite access revoke", vec!["help"]),
-            ("plasmite access status", vec!["help"]),
-            ("plasmite access untrust", vec!["help"]),
+            ("plasmite access connect", vec!["help", "json"]),
+            ("plasmite access disconnect", vec!["help", "json"]),
+            ("plasmite access invite", vec!["help", "json", "name"]),
+            ("plasmite access keys", vec!["help", "json"]),
+            ("plasmite access list", vec!["help", "json"]),
+            ("plasmite access revoke", vec!["help", "json"]),
+            ("plasmite access status", vec!["help", "json"]),
+            ("plasmite access untrust", vec!["help", "json"]),
             ("plasmite completion", vec!["help"]),
             ("plasmite doctor", vec!["all", "help", "json"]),
             (
@@ -167,6 +285,7 @@ mod tests {
                     "echo-self",
                     "format",
                     "help",
+                    "json",
                     "jsonl",
                     "me",
                     "since",
@@ -184,12 +303,13 @@ mod tests {
                     "file",
                     "help",
                     "in",
+                    "json",
                     "retry",
                     "retry-delay",
                     "tag",
                 ],
             ),
-            ("plasmite fetch", vec!["help"]),
+            ("plasmite fetch", vec!["help", "json"]),
             (
                 "plasmite follow",
                 vec![
@@ -197,7 +317,9 @@ mod tests {
                     "data-only",
                     "format",
                     "help",
+                    "json",
                     "jsonl",
+                    "no-follow",
                     "no-notify",
                     "one",
                     "quiet-drops",
@@ -210,7 +332,7 @@ mod tests {
                 ],
             ),
             ("plasmite help", vec![]),
-            ("plasmite mcp", vec!["dir", "help", "remote"]),
+            ("plasmite mcp", vec!["help", "remote"]),
             ("plasmite pool", vec!["help"]),
             (
                 "plasmite pool create",
@@ -246,7 +368,7 @@ mod tests {
                     "tag",
                 ],
             ),
-            ("plasmite version", vec!["help"]),
+            ("plasmite version", vec!["help", "json"]),
         ]
         .into_iter()
         .map(|(path, options)| {
@@ -289,9 +411,20 @@ mod tests {
         path: &str,
         inventory: &mut Vec<(String, Vec<String>)>,
     ) {
+        for global in ["dir", "color", "help", "version"] {
+            assert!(
+                command
+                    .get_arguments()
+                    .any(|arg| arg.get_long() == Some(global)),
+                "{path} omitted shared --{global}"
+            );
+        }
         let mut options = command
             .get_arguments()
             .filter(|arg| !arg.is_hide_set())
+            .filter(|arg| {
+                path == "plasmite" || !matches!(arg.get_long(), Some("dir" | "color" | "version"))
+            })
             .filter_map(|arg| arg.get_long())
             .map(str::to_string)
             .collect::<Vec<_>>();

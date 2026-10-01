@@ -1,6 +1,8 @@
-# Plasmite CLI Spec (v0)
+# Plasmite CLI Spec (1.x)
 
-This document defines the normative CLI compatibility contract for v0.
+This document defines the normative CLI compatibility contract for Plasmite 1.x.
+The historical `spec/v0/` path is retained for existing documentation links;
+it does not preserve the superseded pre-1.0 CLI behavior.
 It keeps only script-level guarantees; signatures, walkthroughs, and examples live in code docs and `docs/cookbook.md`.
 
 ## Scope
@@ -10,17 +12,17 @@ It keeps only script-level guarantees; signatures, walkthroughs, and examples li
 
 ## Versioning + Compatibility
 
-- The CLI surface is versioned as `v0`.
-- Within v0, compatibility is additive-only.
+- The CLI surface follows the package major version: `1.x`.
+- Within 1.x, compatibility is additive-only.
 - Existing commands, machine-readable flags, and field meanings must not be removed or redefined.
 - New commands/flags/fields may be added when existing behavior remains stable.
-- Any breaking change requires a new major version. The secure-sharing release
-  is a breaking major-version change with no migration path and removes
-  superseded secure connection commands and options.
+- Any breaking change requires a new major version. Plasmite 1.0 removes superseded secure connection commands and options and
+  changes default output and history selection. See
+  [the upgrade guide](../../docs/record/upgrading-1.0.md).
 
 ## Stable Surface
 
-### Frozen v0.0.1 Command Set
+### Stable Command Families
 
 - `plasmite pool create`
 - `plasmite pool info`
@@ -31,14 +33,21 @@ It keeps only script-level guarantees; signatures, walkthroughs, and examples li
 - `plasmite follow`
 - `plasmite version`
 
-`plasmite duplex` is implemented but not frozen in v0.0.1.
+`duplex`, `tap`, `doctor`, `serve`, `access`, `mcp`, and `completion` also
+form the current command inventory. The separately versioned MCP contract
+owns its protocol guarantees.
 
 ### Machine-Readable Interfaces
 
-- Top-level `--dir`, placed before the command, selects the local pool directory.
+- Global `--dir` selects the local pool directory before or after a command.
+  It also applies to local MCP stdio. Conflicting repeated directory values
+  are rejected. Options after `tap`'s `--` belong to the child process.
 - Commands that expose `--json` provide stable machine-readable output through it.
-- `fetch` always emits one JSON message envelope.
-- `version` emits human text to a TTY and JSON when piped.
+- Output defaults to readable text even when piped. Explicit `--json` selects
+  machine output and structured errors, without ANSI color or commentary.
+- JSON reports emit one document; JSON streams and append receipts emit one
+  document per line. `fetch --json` emits one message envelope.
+- `version --json` emits its version report; bare `version` emits human text.
 - All product-version output uses the same build identity. A clean checkout at
   the matching release tag reports the package version. Other source builds
   append `-dev` and Git commit metadata, plus `.dirty` for changes to tracked
@@ -48,7 +57,7 @@ It keeps only script-level guarantees; signatures, walkthroughs, and examples li
 
 ### Secure Sharing
 
-YMSGO2 adds native access-key sharing. It keeps the existing spec paths and
+Plasmite 1.0 provides native access-key sharing. It keeps the existing spec paths and
 `/v0` HTTP route prefix. Local pool use remains credential-free.
 
 - `plasmite serve status` lists every Plasmite server running for the current
@@ -76,6 +85,9 @@ YMSGO2 adds native access-key sharing. It keeps the existing spec paths and
   IP subject alternative names, the certificate's SHA-256 fingerprint, expiry,
   and the OS trust-store scope before asking. Declining or failing this step
   leaves the native connection usable. Scripts never wait for this prompt.
+- `plasmite access list` inventories saved destination URLs offline, without
+  exposing credentials or probing servers. `--json` emits an array of objects
+  with a `destination` string.
 - `plasmite access status SERVER_URL` reports whether a connection is saved,
   whether the server is reachable, and whether it accepts the saved access
   secret. On macOS and Windows, it also reports browser trust for the current
@@ -131,15 +143,15 @@ YMSGO2 adds native access-key sharing. It keeps the existing spec paths and
 - `seq` is monotonic per pool.
 - `time` is RFC 3339 UTC text in CLI JSON output.
 - `meta.tags` is always present (empty array when unset).
-- Message workflows are JSON-in/JSON-out.
+- Message data is JSON. Explicit JSON output preserves the envelope contract.
 
 ### Error + Exit Contract
 
 - Errors are emitted on stderr.
-- On TTY stderr: concise human text plus actionable guidance.
-- On non-TTY stderr: JSON envelope with required `error.kind` and `error.message`.
+- Default stderr is concise human text plus actionable guidance.
+- Explicit JSON selects an envelope with required `error.kind` and `error.message`.
 - Optional error fields may include `error.hint`, `error.path`, `error.seq`, `error.offset`, `error.causes`.
-- Exit-code mapping by error kind is stable for v0 and defined by implementation in `src/core/error.rs`.
+- Exit-code mapping by error kind is stable for 1.x and defined by implementation in `src/core/error.rs`.
 
 ## Behavioral Semantics
 
@@ -158,28 +170,32 @@ YMSGO2 adds native access-key sharing. It keeps the existing spec paths and
 - Incompatible on-disk changes must bump format version.
 - Older binaries must refuse newer incompatible formats with actionable guidance.
 
-### Time Filters
+### History and Time Filters
 
-- `follow --since` accepts RFC 3339 timestamps and relative values such as `5m`.
+- Bare `follow` starts with new messages. `--tail N` selects the newest N
+  retained messages before applying tag or jq filters.
+- `--since` accepts RFC 3339 timestamps and relative values such as `5m`,
+  resolved at invocation start. Local and remote follow/duplex accept it.
+- `follow --no-follow` requires a history selector and stops at the initial
+  history boundary even while writers append. `--one` stops at the first match.
+- Local `--replay SPEED` requires a history selector and implies finite
+  playback. Output deadlines also bound replay waits. Remote replay is rejected.
+- CLI `--timeout` is an idle output deadline; API tails retain their separately
+  documented absolute timeout.
 - Timestamps before the Unix epoch use zero as their comparison time.
 
 ### Platforms
 
-- The frozen v0.0.1 baseline supports macOS and Linux.
+- Supported native CLI platforms include macOS and Linux.
 - Current official CLI delivery also includes Windows x86_64 through npm and
   PyPI. The current distribution matrix is maintained in
   `docs/record/distribution.md`.
 
 ## Non-Contract Surface
 
-The following are implemented but not frozen in v0.0.1 and may evolve within v0:
+The following details are outside the stable machine contract:
 
-- `plasmite duplex`
-- `plasmite tap`
-- `plasmite mcp`
 - `plasmite mcp --remote SERVER_URL` uses a saved native HTTPS connection for a local stdio MCP process. MCP methods and messages follow the separately versioned [MCP contract](../mcp/2025-11-25/SPEC.md).
-- `plasmite completion`
-- `plasmite doctor`
 - Remote shorthand refs in CLI commands
 - Notice payload details and frequency controls
 
@@ -187,8 +203,11 @@ Current remote shorthand constraints (documented, non-frozen):
 
 - URL refs are explicit remote opt-in in core commands that accept pool refs.
 - `tap` currently accepts local pool refs only; URL refs are rejected with an actionable usage hint.
-- `duplex` remote refs reject `--create` and `--since`; use `--tail` for remote history.
-- `follow` remote refs reject `--since` and `--replay`; use `--tail` for remote history.
+- `duplex` remote refs reject `--create`.
+- `follow` remote refs reject `--replay`.
+- `fetch` and `pool info` accept local or remote pool refs. `pool list` accepts
+  an optional server URL. Remote results use the same report fields; unknown
+  remote modification time is `null`.
 
 ## References
 

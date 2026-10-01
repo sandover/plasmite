@@ -28,18 +28,6 @@ fn read_mcp(stdout: &mut BufReader<impl std::io::Read>) -> Value {
     serde_json::from_str(line.trim()).expect("valid MCP response")
 }
 
-fn cli_error(output: &std::process::Output) -> Value {
-    let text = format!(
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    text.lines()
-        .rev()
-        .find_map(|line| serde_json::from_str(line).ok())
-        .expect("CLI emits a JSON error")
-}
-
 #[test]
 fn serve_rejects_invalid_bind_and_nonpositive_limits() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -59,9 +47,11 @@ fn serve_rejects_invalid_bind_and_nonpositive_limits() {
             ])
             .output()
             .expect("serve with invalid limit");
-        assert!(!output.status.success(), "{option} accepted zero");
-        let error = cli_error(&output);
-        assert_eq!(error["error"]["kind"], "Usage");
+        assert_eq!(output.status.code(), Some(2), "{option} accepted zero");
+        assert!(output.stdout.is_empty());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains(option), "{error}");
+        assert!(error.contains("greater than zero"), "{error}");
     }
 
     let output = cli()
@@ -74,9 +64,50 @@ fn serve_rejects_invalid_bind_and_nonpositive_limits() {
         ])
         .output()
         .expect("serve with invalid bind");
-    assert!(!output.status.success());
-    let error = cli_error(&output);
-    assert_eq!(error["error"]["kind"], "Usage");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("invalid local bind address"), "{error}");
+}
+
+#[test]
+fn tailnet_endpoint_errors_explain_bind_and_origin_without_creating_state() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("unused");
+    for (args, message, hint) in [
+        (
+            vec!["--remote-bind", "node.tail123.ts.net:9743"],
+            "invalid remote bind address",
+            "numeric IP:port",
+        ),
+        (
+            vec![
+                "--remote-bind",
+                "[fd7a:115c:a1e0::abcd]:9743",
+                "--shared-address",
+                "https://node.tail123.ts.net:9743/events",
+            ],
+            "--shared-address must be an HTTPS origin",
+            "--remote-bind controls the listening interface",
+        ),
+        (
+            vec!["--shared-address", "http://node.tail123.ts.net:9743"],
+            "--shared-address must be an HTTPS origin",
+            "without a pool path",
+        ),
+    ] {
+        let output = cli()
+            .args(["--dir", pool_dir.to_str().expect("pool dir"), "serve"])
+            .args(args)
+            .output()
+            .expect("invalid endpoint");
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(message), "{stderr}");
+        assert!(stderr.contains(hint), "{stderr}");
+        assert!(!pool_dir.exists(), "invalid endpoint created server state");
+    }
 }
 
 #[test]

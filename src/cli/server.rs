@@ -38,14 +38,14 @@ pub(super) fn run(
                     .max(9);
                 let local_width = servers
                     .iter()
-                    .map(|server| server.local_url.len())
+                    .map(|server| super::output_support::human_literal(&server.local_url).len())
                     .max()
                     .unwrap_or(0)
                     .max(9);
                 let remote_width = servers
                     .iter()
                     .filter_map(|server| server.remote_url.as_ref())
-                    .map(String::len)
+                    .map(|url| super::output_support::human_literal(url).len())
                     .max()
                     .unwrap_or(0)
                     .max(12);
@@ -57,8 +57,10 @@ pub(super) fn run(
                     println!(
                         "{:<directory_width$}  {:<local_width$}  {:<remote_width$}  {}",
                         directory,
-                        server.local_url,
-                        server.remote_url.as_deref().unwrap_or("—"),
+                        super::output_support::human_literal(&server.local_url),
+                        super::output_support::human_literal(
+                            server.remote_url.as_deref().unwrap_or("—")
+                        ),
                         server.pid
                     );
                 }

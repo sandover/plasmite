@@ -12,6 +12,7 @@ fn small_pool_wrap_keeps_reported_oldest_readable() {
         .args([
             "--dir", directory, "pool", "create", "--size", "64K", "wrapped",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(
@@ -24,6 +25,7 @@ fn small_pool_wrap_keeps_reported_oldest_readable() {
         .args(["--dir", directory, "feed", "wrapped"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
+        .arg("--json")
         .spawn()
         .expect("feed");
     {
@@ -111,6 +113,7 @@ fn pool_info_json_includes_metrics() {
             "create",
             "metrics",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -123,6 +126,7 @@ fn pool_info_json_includes_metrics() {
             "metrics",
             "{\"x\":1}",
         ])
+        .arg("--json")
         .output()
         .expect("feed");
     assert!(feed_one.status.success());
@@ -135,6 +139,7 @@ fn pool_info_json_includes_metrics() {
             "metrics",
             "{\"x\":2}",
         ])
+        .arg("--json")
         .output()
         .expect("feed");
     assert!(feed_two.status.success());
@@ -183,6 +188,7 @@ fn pool_create_supports_explicit_and_zero_index_capacity() {
             "1024",
             "indexed",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create_explicit.status.success());
@@ -215,6 +221,7 @@ fn pool_create_supports_explicit_and_zero_index_capacity() {
             "0",
             "scanonly",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create_scan_only.status.success());
@@ -254,6 +261,7 @@ fn pool_create_rejects_oversized_index_capacity() {
             "5000",
             "too-big",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(!create.status.success());
@@ -373,6 +381,7 @@ fn pool_info_missing_does_not_emit_path_or_causes() {
             "info",
             "channel",
         ])
+        .arg("--json")
         .output()
         .expect("pool info");
     assert_eq!(output.status.code(), Some(3));
@@ -414,6 +423,7 @@ fn readme_quickstart_flow() {
             "--size",
             "128K",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -428,6 +438,7 @@ fn readme_quickstart_flow() {
             "--tag",
             "ping",
         ])
+        .arg("--json")
         .output()
         .expect("feed");
     assert!(feed_out.status.success());
@@ -442,6 +453,7 @@ fn readme_quickstart_flow() {
             "demo",
             &seq.to_string(),
         ])
+        .arg("--json")
         .output()
         .expect("fetch");
     assert!(get.status.success());
@@ -459,6 +471,7 @@ fn readme_quickstart_flow() {
             "--jsonl",
         ])
         .stdout(Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("follow");
     let stdout = follower.stdout.take().expect("stdout");
@@ -484,6 +497,7 @@ fn pool_list_lists_pools_sorted_by_name() {
             "beta",
             "alpha",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -560,6 +574,7 @@ fn pool_delete_removes_pool_file() {
             "create",
             "deleteme",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -609,6 +624,7 @@ fn pool_delete_multiple_best_effort_mixed_results() {
             "a",
             "b",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -667,6 +683,7 @@ fn pool_delete_multiple_with_invalid_ref_continues() {
 
     let create = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "ok"])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -758,6 +775,7 @@ fn already_exists_has_hint_and_path() {
             "create",
             "testpool",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -770,6 +788,7 @@ fn already_exists_has_hint_and_path() {
             "create",
             "testpool",
         ])
+        .arg("--json")
         .output()
         .expect("create again");
     assert_eq!(again.status.code().unwrap(), 4);
@@ -815,6 +834,7 @@ fn permission_error_has_hint_and_causes() {
             "create",
             "testpool",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert_eq!(create.status.code().unwrap(), 6);
@@ -864,6 +884,7 @@ fn permission_denied_matrix_for_write_paths() {
             "create",
             "base",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -883,6 +904,7 @@ fn permission_denied_matrix_for_write_paths() {
             "create",
             "other",
         ])
+        .arg("--json")
         .output()
         .expect("create denied");
     assert!(
@@ -912,6 +934,7 @@ fn permission_denied_matrix_for_write_paths() {
             "delete",
             "base",
         ])
+        .arg("--json")
         .output()
         .expect("delete denied");
     assert_eq!(output_delete.status.code(), Some(8));
@@ -934,6 +957,7 @@ fn truncated_pool_file_variants_are_rejected() {
             "create",
             "probe",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -954,6 +978,7 @@ fn truncated_pool_file_variants_are_rejected() {
         std::fs::write(&pool_path, &bytes).expect("write mutated pool");
         let output = cmd()
             .args(["--dir", pool_dir.to_str().unwrap(), "pool", "info", "probe"])
+            .arg("--json")
             .output()
             .expect("info");
         assert_ne!(
@@ -984,6 +1009,7 @@ fn corrupt_pool_has_hint_and_path() {
 
     let info = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "pool", "info", "bad"])
+        .arg("--json")
         .output()
         .expect("info");
     assert_eq!(info.status.code().unwrap(), 7);
@@ -1020,6 +1046,7 @@ fn doctor_reports_ok_as_json() {
             "create",
             "doctorpool",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -1090,6 +1117,7 @@ fn doctor_detects_wrong_tail_next_offset() {
             "create",
             "doctorpool",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -1101,6 +1129,7 @@ fn doctor_detects_wrong_tail_next_offset() {
             "doctorpool",
             "{}",
         ])
+        .arg("--json")
         .output()
         .expect("feed");
     assert!(feed.status.success());
@@ -1143,6 +1172,7 @@ fn doctor_all_reports_mixed_ok_and_corrupt() {
 
     let create = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "ok"])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -1326,6 +1356,7 @@ fn doctor_rejects_pool_with_all() {
             "foo",
             "--all",
         ])
+        .arg("--json")
         .output()
         .expect("doctor");
     assert!(!doctor.status.success());
@@ -1346,6 +1377,7 @@ fn doctor_missing_pool_reports_not_found() {
 
     let doctor = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "doctor", "missing"])
+        .arg("--json")
         .output()
         .expect("doctor");
     assert!(!doctor.status.success());

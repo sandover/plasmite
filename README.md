@@ -18,16 +18,23 @@ What would it take to make IPC pleasant and predictable?
 - Message brokers bring complexity and ceremony... so for local IPC, **don't require a broker**
 - Observability matters... so **messages must be inspectable**
 - Schemas are great... but **schemas should be optional**
-- Latency matters... so **IPC should be fast**, zero-copy wherever possible
+- Latency matters... so **IPC should do only the work each operation needs**
 
 So, there's **Plasmite**.
 
-Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and receiving JSON messages through persistent, disk-backed channels called "pools", which are ring buffers. There's no daemon or broker for local IPC, no fancy config, and it's fast (~60k 1KB msgs/sec writes, ~3M msgs/sec reads on a laptop). Readers mmap the pool file and walk frames in place, and payloads use [Lite3](https://github.com/fastserial/lite3), a zero-copy JSON binary encoding.
+Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and
+receiving JSON messages through persistent, disk-backed channels called
+**pools**. A pool is a bounded ring buffer: old messages disappear when writers
+fill it. Local messaging needs no daemon or broker. Payloads use
+[Lite3](https://github.com/fastserial/lite3), a binary JSON encoding. Readers
+take owned message snapshots so a concurrent write cannot alter a message
+while they inspect it.
 
 For IPC across machines, `pls serve` exposes local pools over HTTPS. Native
 clients and browsers connect with an access key. A local MCP process can use a
 saved native connection; a remote MCP harness can authorize in the browser.
-The access-key workflow has not shipped in a release yet. To try it, use a
+The access-key workflow is part of the upcoming 1.0 release. To try the
+candidate before publication, use a
 [Linux ARM preview archive](docs/record/distribution.md#linux-arm-sdk-preview-install)
 or [build from source](docs/building.md#install-the-cli-from-source), then follow
 [Share your first pool](docs/record/serving.md#share-your-first-pool).
@@ -50,10 +57,10 @@ or [build from source](docs/building.md#install-the-cli-from-source), then follo
     <td valign="bottom">
     <br/>
       <br/><b>Bob starts watching</b><br/>
-      <code>pls --dir ./pools follow channel</code>
+      <code>pls --dir ./pools follow channel --tail 1 --json --data-only</code>
       <br/><br/><br/>
       <b>Bob sees it on stdout</b><br/>
-      <code>{ "data": {"from": "A", "msg": "hello world"}, ... }</code>
+      <code>{"from":"A","msg":"hello world"}</code>
     </td>
   </tr>
 </table>
@@ -84,15 +91,15 @@ or [build from source](docs/building.md#install-the-cli-from-source), then follo
       <br/><br/>
       <br/><br/><br/>
       <b>Bob sees it</b><br/>
-      <code>{ "data": {"from": "A", "msg": "hi all"}, ... }</code>
+      <code>{"from":"A","msg":"hi all"}</code>
     </td>
     <td valign="bottom">
       <b>Carol connects and watches</b><br/>
       <code>pls access connect https://alice.example.test:9743</code><br/>
-      <code>pls follow https://alice.example.test:9743/channel</code>
+      <code>pls follow https://alice.example.test:9743/channel --tail 1 --json --data-only</code>
       <br/><br/><br/><br/>
       <b>Carol sees it</b><br/>
-      <code>{ "data": {"from": "A", "msg": "hi all"}, ... }</code>
+      <code>{"from":"A","msg":"hi all"}</code>
     </td>
   </tr>
 </table>
@@ -100,19 +107,25 @@ or [build from source](docs/building.md#install-the-cli-from-source), then follo
 Carol enters the key at the hidden prompt. She can also open the HTTPS address
 in a browser to sign in and browse the pools. See [browser access](docs/record/serving.md#open-pools-in-a-browser).
 
-The APIs work the same way as the CLI.
+The bindings share message and retention semantics. Rust and the CLI provide
+secure native connections; Node's HTTP client supports credential-free
+loopback use but does not load saved access keys or verify their certificate
+pins. Python, Go, C, and local Node bindings operate on local pools. See the
+[binding guides](#more) for the methods each language exposes.
 
-## Comparison with other styles of IPC
+Updating an earlier installation? Read the [1.0 upgrade guide](docs/record/upgrading-1.0.md)
+for output flags, history rules, and secure-sharing migration.
 
-| | Drawbacks | Plasmite |
-|---|---|---|
-| **Kafka**, **RabbitMQ**,  | Lots of machinery: partitions, groups, exchanges, bindings, oh my. | Covers the 80/20 cases: no config, no broker, no partitions, no topology. |
-| **Redis / NATS** | Server required even for local messaging. Messages live in server memory; if the server dies, messaging stops. | Pools persist on disk independent of any process. Server only if you need one. |
-| **Log files / `tail -f`** | Messages are unstructured. Logs grow and must be rotated (which breaks `tail -f`). Can't easily replay from a specific point. No remote access without setting up syslog. | Messages have structure and sequence numbers. Disk usage is bounded. Replay from any point. Remote access is idiomatic. |
-| **Ad-hoc files (temp files, locks, polled dirs)** | Readers have to poll for new files. Locking is manual; crashes leave a stale lock. Files accumulate. No ordering unless you bake it into filenames. | Readers stream in real time. Writers append concurrently without explicit locks, and messages are ordered. Ring buffer bounds disk usage.  |
-| **SQLite as a queue** | Readers have to poll. Writers contend. Have to design & migrate schemas. SQLite explicitly discourages network access to the DB file. | Follow & replay without polling. No `SQLITE_BUSY`. No schema, no migrations, no cleanup, easy remote access. |
-| **OS primitives (pipes, sockets, shm)** | Named pipes mean if the reader dies, the writer blocks or gets SIGPIPE. With sockets you have to implement your own framing and reconnection. Shared memory has to be coordinated with semaphores; be careful not to crash while holding a lock. Machine-local only. | Many readers, many writers, crash-safe, persistent across reboots. |
-| **ZeroMQ** | Messages vanish when processes restart. The pattern matrix is expressive but hard to get right. Binary protocol means you can't inspect messages with standard tools. | Messages persist. One mental model fits most cases. Plain JSON you can pipe through `jq`. |
+## Choosing a pool
+
+A pool fits workflows where independent processes need a bounded, inspectable
+history and can track their own progress. Local processes share its file;
+HTTPS adds access from another machine without changing the message model.
+
+Choose its capacity for the history you need. Readers do not hold back writers,
+and a slow reader can lose messages when the ring wraps. Plasmite provides no
+consumer acknowledgments, work claiming, replication, or automatic retries.
+Those guarantees belong in your application or a service designed to supply them.
 
 **Use cases** — CI gates, live event streams, duplex chat, system log ring buffers, replay & debug: see the **[Cookbook](docs/cookbook.md)**. 
 
@@ -172,12 +185,16 @@ tarball. Linux ARM users can use the preview SDK archives above. See the
 
 ### Node
 
+Requires **Node.js 24 or newer**, including for the npm CLI.
+
 ```bash
 npm i -g plasmite
 ```
 
 The package includes pre-built native bindings for macOS, Linux x86_64, and
-Windows x86_64. Use the SDK preview archives for Linux ARM.
+Windows x86_64. Linux ARM has no published npm native addon or CLI; use the
+SDK preview archives for its native CLI/server. Installing that SDK does not
+add a Node addon.
 
 ### Go
 
@@ -210,8 +227,8 @@ Windows builds (`x86_64-pc-windows-msvc`) are available via npm and PyPI. See th
 | | |
 |---|---|
 | `pool create` *name* | Create a pool |
-| `pool list` | List pools |
-| `pool info` *name* | Show pool metadata and metrics |
+| `pool list` [*server*] | List local pools or a remote server's pools |
+| `pool info` *pool* | Show local or remote pool metadata and metrics |
 | `pool delete` *name…* | Delete one or more pools |
 | `doctor` *pool* ǀ `--all` | Validate pool integrity |
 
@@ -220,9 +237,13 @@ Windows builds (`x86_64-pc-windows-msvc`) are available via npm and PyPI. See th
 | | |
 |---|---|
 | `serve` | Serve local pools over loopback HTTP and remote HTTPS |
+| `serve status` | List this user's running servers |
 | `access invite` | Create an access key for another client |
 | `access connect` | Verify a server and save its access key |
+| `access list` | List saved server destinations |
 | `access status` | Check a saved server connection |
+| `access disconnect` | Forget a saved connection locally |
+| `access revoke` | Withdraw a server key's access |
 
 **Agent and CLI support**
 
@@ -239,38 +260,31 @@ Windows builds (`x86_64-pc-windows-msvc`) are available via npm and PyPI. See th
 A pool is a single `.plasmite` file containing a persistent ring buffer:
 
 - **Multiple writers** append concurrently (serialized via OS file locks)
-- **Multiple readers** follow concurrently (lock-free, zero-copy)
+- **Multiple readers** follow concurrently; shared file locks protect each message snapshot
 - **Bounded retention** — old messages overwritten when full (default 1 MB, configurable)
-- **Crash-safe** — processes crash and restart; torn writes never propagate
+- **Committed frames** keep unfinished writes out of readers' results; choose flush durability when writes must reach disk before success
 
 Every message carries a **seq** (monotonic), a **time** (nanosecond precision), optional **tags**, and your JSON **data**. Tags and `--where` (jq predicates) compose for filtering. See [Live Event Stream](docs/cookbook.md#live-event-stream).
 
-Default pool directory: `~/.plasmite/pools/`.
+Default pool directory: `~/.plasmite/pools/`. Plasmite does not acknowledge
+consumption or keep messages until a reader handles them. Use sequence
+checkpoints and [retention-gap detection](docs/cookbook.md#detect-retention-gaps)
+when a consumer must notice lost history.
 
-## Performance
+## Performance and storage
 
-| Metric | |
-|---|---|
-| Write throughput | ~60k msg/sec (1KB payload, single writer) |
-| Read throughput | ~3M msg/sec (in-process, lock-free) |
-| Indexed lookup | ~1.5M lookups/sec |
-| Message overhead | 72–79 bytes (header + commit marker + alignment) |
-| Default pool size | 1 MB |
+The file is memory-mapped. Reads copy a validated message under a shared file
+lock, then inspect the immutable snapshot after releasing the lock. Lite3
+supports field lookup without decoding the full payload into JSON.
 
-Measured locally on M3 MacBook, `Durability::Fast`. Reproduce with `scripts/bench_runtime_lanes.sh`.
+Writers encode before taking the exclusive file lock, then place the frame,
+commit it, and publish the new bounds. An inline sequence index accelerates
+`fetch`; a missing or stale slot falls back to scanning retained history.
 
-**How reads work**: The pool file is memory-mapped. Readers walk frames directly — no read syscalls, no buffer copies. Payloads use [Lite3](https://github.com/fastserial/lite3), a zero-copy binary encoding that supports field lookup by offset, so tag filtering and `--where` predicates run without deserializing the full message. JSON conversion happens only at the output boundary.
-
-**How writes work**: Writers acquire an OS file lock, write the frame as `Writing`, flip it to `Committed`, and update the header. The lock is held only for memcpy + header update — no allocation or encoding under the lock.
-
-**How lookups work**: Each pool has an inline index (hash table mapping seq → byte offset). `fetch POOL 42` jumps directly to the frame. If the slot is stale or collided, it scans forward from the tail.
-
-| Operation | Complexity |
-|---|---|
-| Append | O(1) |
-| Fetch by seq | O(1) typical, O(N) worst case |
-| Follow / tail | O(1) per message |
-| Replay window | O(R) messages replayed |
+Throughput depends on payload size, durability, readers, writers, and the host.
+Run [`scripts/bench_runtime_lanes.sh`](scripts/bench_runtime_lanes.sh) for a
+reproducible local measurement. The earlier lock-free read measurements do not
+describe the 1.0 snapshot implementation.
 
 ## More
 

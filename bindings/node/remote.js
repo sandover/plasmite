@@ -9,7 +9,7 @@ Invariants: Tail streams are JSONL and exposed as async iterables.
 
 const { Readable } = require("node:stream");
 const readline = require("node:readline");
-const { messageFromEnvelope } = require("./message");
+const { messageFromEnvelope, parseMessageJson } = require("./message");
 const { ERROR_KIND_VALUES, mapDurability, mapErrorKind } = require("./mappings");
 
 class RemoteError extends Error {
@@ -135,7 +135,7 @@ class RemoteClient {
     if (response.status === 204) {
       return null;
     }
-    return response.json();
+    return parseMessageJson(await response.text(), "message");
   }
 
   async _requestStream(url, controller) {
@@ -247,7 +247,7 @@ class RemotePool {
           continue;
         }
         const raw = Buffer.from(line, "utf8");
-        const payload = JSON.parse(line);
+        const payload = parseMessageJson(line);
         if (payload && payload.error) {
           throw new RemoteError(payload, response.status);
         }

@@ -4,6 +4,91 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-01
+
+Plasmite 1.0 makes local and shared pools easier to discover and read, replaces
+remote token configuration with named, pinned connections, and corrects the
+lifetime of message snapshots. Existing pool files and the C ABI remain
+compatible. See [Upgrade to 1.0](docs/record/upgrading-1.0.md) for CLI scripts
+and Rust source changes.
+
+### Share pools through verified connections
+
+- Servers provide credential-free loopback HTTP and authenticated HTTPS for
+  remote use. Named access keys bind a directory's authority to its server's
+  public key; verification occurs before sending credentials.
+- Invite, connect, inspect, revoke, disconnect, and browser trust are separate
+  operations. Saved connections coexist by destination, and offline
+  `access list` inventories them without probing servers or revealing keys.
+- Browser sessions and independently revocable MCP grants support shared
+  pools. Windows protects server state with filesystem access control and
+  saved credentials with the current user's DPAPI encryption.
+- `serve status` discovers running servers for the current OS user and reports
+  their directories and known local/remote addresses.
+- The serving guide covers direct Tailscale binding and raw TCP forwarding
+  with existing authentication. Endpoint and certificate guidance distinguishes
+  advertised names, actual listeners, and terminating proxy pins. Real two-node
+  tailnet verification remains outstanding.
+
+### Use one CLI operating model
+
+- Root help presents a compact, task-ordered command inventory. Global
+  directory and color options work before or after commands, including MCP;
+  conflicting repeated directories fail with actionable guidance.
+- Commands produce readable output by default, including when piped. Scripts
+  select stable, uncolored output and errors explicitly with `--json`.
+  Streaming `--jsonl` and `--format jsonl` aliases remain available.
+- `fetch` and `pool info` accept remote pool URLs, and `pool list` accepts a
+  server URL using saved native connections. Local and remote reports share
+  their presentation and fields.
+- `follow --tail N` selects retained history before filters. `--no-follow`
+  reads a fixed snapshot and exits; local and remote `--since` use the same
+  starting-time rules. `--one` returns the first matching message.
+- Local replay uses bounded cursor state rather than collecting all messages,
+  reports overwritten history, and honors output deadlines during playback.
+
+### Preserve message values and recovery behavior
+
+- Core reads copy payloads into owned snapshots under the writer-compatible
+  file lock. Retained Rust frames cannot change after a later append, and
+  Rust/FFI consumers decode stable bytes.
+- Stable malformed ring frames return corruption errors instead of retrying
+  forever; readers still recover from legal overwrite and report retention
+  gaps. Wrap and tail-position regressions have targeted coverage.
+- Impossible Lite3 array counts fail before allocation. Appending after the
+  final unsigned 64-bit sequence returns an error without changing pool storage.
+- Public Rust replay fixes its initial history boundary, bounds requested-tail
+  storage, treats zero speed as immediate playback, and rejects invalid speeds.
+- Backpressured HTTP tails release their concurrency permit at the configured
+  absolute deadline, including when the output queue is full.
+- Node preserves the full unsigned 64-bit sequence range as `bigint` in native
+  and HTTP message envelopes without changing user payload number semantics.
+- The Python CLI fallback skips its own console wrapper and finds a native
+  system SDK executable, preventing recursive launches after source installs.
+- Go and Python serialize each native handle's calls and close, preventing
+  foreground operations and stream workers from aliasing or freeing live handles.
+- Tap bounds each captured line by the pool capacity and stops its wrapped
+  child promptly on reader errors, so newline-free output cannot accumulate
+  without limit. Human labels escape terminal control characters.
+- Atomic acknowledgments and deterministic process/stream handshakes reduce
+  test flakiness without weakening assertions.
+
+### Delivery and support
+
+- Node now requires version 24 or newer. Secure native connection APIs are
+  available in Rust and the CLI; other bindings retain their documented
+  capabilities rather than implying identical transport support.
+- Linux ARM64 and ARMv7 GitHub SDK archives are preview targets with checked
+  portability and cross-architecture pool compatibility. Physical Raspberry
+  Pi installation/reboot qualification remains outstanding; ARMv6 is unsupported.
+- Release artifacts attest the checked-out tag's source identity. Packaging,
+  target selection, Homebrew parity, and delivery verification remain
+  fail-closed across the supported channels.
+- HTTP/TLS dependencies and memmap2 were updated for security advisories;
+  vendored Lite3 uses pinned upstream provenance and sanitizer checks.
+- Guides and examples now describe bounded retention, explicit JSON,
+  connection scope, and supported install paths consistently.
+
 ## [0.8.0] - 2026-07-28
 
 Plasmite 0.8.0 lets consumers choose whether a retention gap should stop a

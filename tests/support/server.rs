@@ -35,11 +35,22 @@ impl TestServer {
         Self::try_start_with_options(pool_dir, &[], "https")
     }
 
+    /// OAuth needs the shared address to name the server's port before it starts, so
+    /// the test picks a free port and releases it. A parallel test can take it in
+    /// between; then the start fails to bind, and another free port is tried.
     pub fn try_start_oauth(pool_dir: &Path) -> TestResult<Self> {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
-        let port = listener.local_addr()?.port();
-        drop(listener);
-        Self::try_start_oauth_at(pool_dir, port)
+        let mut failure = None;
+        for _ in 0..5 {
+            let port = std::net::TcpListener::bind("127.0.0.1:0")?
+                .local_addr()?
+                .port();
+            match Self::try_start_oauth_at(pool_dir, port) {
+                Ok(server) => return Ok(server),
+                Err(err) if err.to_string().contains("bind") => failure = Some(err),
+                Err(err) => return Err(err),
+            }
+        }
+        Err(failure.expect("five failed starts"))
     }
 
     pub fn try_start_oauth_at(pool_dir: &Path, port: u16) -> TestResult<Self> {
@@ -118,7 +129,7 @@ impl TestServer {
                     let invite = Command::new(env!("CARGO_BIN_EXE_plasmite"))
                         .arg("--dir")
                         .arg(pool_dir)
-                        .args(["access", "invite", "--name", "integration-test"])
+                        .args(["access", "invite", "--name", "integration-test", "--json"])
                         .output()?;
                     if !invite.status.success() {
                         return Err(format!(

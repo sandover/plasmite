@@ -1,4 +1,4 @@
-//! Purpose: Execute local pool lifecycle and inspection commands.
+//! Purpose: Execute local pool lifecycle and local or remote inspection commands.
 //! Exports: `run`.
 //! Role: Own pool-command orchestration while core APIs own storage semantics.
 
@@ -11,10 +11,11 @@ use super::pool_support::{
 };
 use super::result::CommandResult;
 use super::support::{
-    DEFAULT_POOL_SIZE, add_missing_pool_hint, ensure_pool_dir, parse_size, resolve_poolref,
+    DEFAULT_POOL_SIZE, add_missing_pool_hint, ensure_pool_dir, parse_size, remote_client,
+    resolve_pool_target, resolve_poolref,
 };
-use crate::PoolCommand;
 use crate::pool_info_json::pool_info_json;
+use crate::{PoolCommand, PoolTarget};
 use plasmite::api::{Error, ErrorKind, LocalClient, PoolOptions, PoolRef, to_exit_code};
 use serde_json::json;
 use std::io::{self, IsTerminal};
@@ -28,6 +29,11 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
             index_capacity,
             json: json_output,
         } => {
+            if names.iter().any(|name| name.contains("://")) {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("pool create accepts local pool names or paths only")
+                    .with_hint("Create a pool on the server with its local CLI."));
+            }
             let client = LocalClient::new().with_pool_dir(pool_dir);
             let size = size
                 .as_deref()
@@ -71,17 +77,22 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
             name,
             json: json_output,
         } => {
-            let client = LocalClient::new().with_pool_dir(pool_dir);
-            let path = resolve_poolref(&name, pool_dir)?;
-            let pool_ref = PoolRef::path(path);
-            let info = client.pool_info(&pool_ref).map_err(|err| {
-                if err.kind() == ErrorKind::NotFound {
-                    let base = Error::new(ErrorKind::NotFound).with_message("not found");
-                    add_missing_pool_hint(base, &name, &name)
-                } else {
-                    err
+            let info = match resolve_pool_target(&name, pool_dir)? {
+                PoolTarget::LocalPath(path) => {
+                    let client = LocalClient::new().with_pool_dir(pool_dir);
+                    client.pool_info(&PoolRef::path(path)).map_err(|err| {
+                        if err.kind() == ErrorKind::NotFound {
+                            let base = Error::new(ErrorKind::NotFound).with_message("not found");
+                            add_missing_pool_hint(base, &name, &name)
+                        } else {
+                            err
+                        }
+                    })?
                 }
-            })?;
+                PoolTarget::Remote { base_url, pool } => {
+                    remote_client(base_url)?.pool_info(&PoolRef::name(pool))?
+                }
+            };
             if json_output {
                 emit_json(pool_info_json(&name, &info), context.color_mode());
             } else {
@@ -192,13 +203,19 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                     if let Some((name, status)) = human_rows.first() {
                         match status {
                             HumanDeleteStatus::Ok => {
-                                println!("Deleted pool \"{name}\".");
+                                println!(
+                                    "Deleted pool \"{}\".",
+                                    super::output_support::human_literal(name)
+                                );
                             }
                             HumanDeleteStatus::Err {
                                 kind: ErrorKind::NotFound,
                                 ..
                             } => {
-                                println!("Pool \"{name}\" not found. Nothing to delete.");
+                                println!(
+                                    "Pool \"{}\" not found. Nothing to delete.",
+                                    super::output_support::human_literal(name)
+                                );
                                 println!();
                                 println!(
                                     "  Pool directory: {}",
@@ -207,9 +224,15 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                                 println!("  List pools:     pls pool list");
                             }
                             HumanDeleteStatus::Err { detail, .. } => {
-                                println!("Failed to delete pool \"{name}\".");
+                                println!(
+                                    "Failed to delete pool \"{}\".",
+                                    super::output_support::human_literal(name)
+                                );
                                 println!();
-                                println!("  Reason:         {detail}");
+                                println!(
+                                    "  Reason:         {}",
+                                    super::output_support::human_literal(detail)
+                                );
                                 println!(
                                     "  Pool directory: {}",
                                     display_pool_dir_for_humans(pool_dir)
@@ -222,7 +245,7 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                     println!();
                     for (name, status) in &human_rows {
                         if matches!(status, HumanDeleteStatus::Ok) {
-                            println!("  ✓ {name}");
+                            println!("  ✓ {}", super::output_support::human_literal(name));
                         }
                     }
                     println!();
@@ -235,9 +258,15 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                     println!();
                     for (name, status) in &human_rows {
                         match status {
-                            HumanDeleteStatus::Ok => println!("  ✓ {name}"),
+                            HumanDeleteStatus::Ok => {
+                                println!("  ✓ {}", super::output_support::human_literal(name))
+                            }
                             HumanDeleteStatus::Err { detail, .. } => {
-                                println!("  ✗ {name} — {detail}");
+                                println!(
+                                    "  ✗ {} — {}",
+                                    super::output_support::human_literal(name),
+                                    super::output_support::human_literal(detail)
+                                );
                             }
                         }
                     }
@@ -256,13 +285,41 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                 Ok(CommandResult::ok())
             }
         }
-        PoolCommand::List { json: json_output } => {
-            let client = LocalClient::new().with_pool_dir(pool_dir);
-            let pools = list_pools(pool_dir, &client);
+        PoolCommand::List {
+            server,
+            json: json_output,
+        } => {
+            let pools = match server.as_deref() {
+                Some(server) => {
+                    let mut pools = remote_client(server.to_string())?
+                        .list_pools()?
+                        .into_iter()
+                        .map(|info| {
+                            // Remote paths use the server's separators, not this machine's.
+                            let path = info.path.to_string_lossy();
+                            let file = path.rsplit(['/', '\\']).next().unwrap_or("unknown");
+                            let name = file.strip_suffix(".plasmite").unwrap_or(file);
+                            json!({
+                                "name": name,
+                                "path": info.path.display().to_string(),
+                                "file_size": info.file_size,
+                                "bounds": crate::pool_info_json::bounds_json(info.bounds),
+                                "mtime": null,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    pools.sort_by_key(super::pool_support::pool_list_name);
+                    pools
+                }
+                None => {
+                    let client = LocalClient::new().with_pool_dir(pool_dir);
+                    list_pools(pool_dir, &client)
+                }
+            };
             if json_output {
                 emit_json(json!({ "pools": pools }), context.color_mode());
             } else {
-                emit_pool_list_table(&pools, pool_dir);
+                emit_pool_list_table(&pools, pool_dir, server.as_deref());
             }
             Ok(CommandResult::ok())
         }

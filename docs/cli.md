@@ -8,7 +8,9 @@ exact arguments, and the [cookbook](cookbook.md) for complete workflows.
 
 Local commands accept a pool name such as `events` or an explicit
 `.plasmite` path. Names resolve beneath the pool directory, which defaults to
-`~/.plasmite/pools`. Put top-level options before the command:
+`~/.plasmite/pools`. Global `--dir` and `--color` work before or after a
+command. One directory applies to the entire invocation, including `mcp`;
+conflicting repeated directory values are rejected:
 
 ```console
 plasmite --dir ./pools follow events
@@ -20,9 +22,11 @@ is for credential-free use on the server machine.
 
 | Command | Local name/path | Remote URL |
 | --- | --- | --- |
-| `pool create/info/list/delete` | yes | no |
+| `pool create/delete` | yes | no |
+| `pool info` | yes | yes |
+| `pool list [SERVER]` | yes | yes (server origin) |
 | `feed` | yes | yes |
-| `fetch` | yes | no |
+| `fetch` | yes | yes |
 | `follow` | yes | yes |
 | `tap` | yes | no |
 | `duplex` | yes | yes |
@@ -50,12 +54,21 @@ a loopback HTTPS bind. It is `null` when the client-facing HTTPS address is
 unknown; a non-loopback bind needs `--shared-address`, even with a TLS
 certificate configured. Secure serving still has a remote listener.
 
+## Saved connections
+
+`access list` lists this user's saved server destinations without contacting
+them. Use `access list --json` for an array of objects with a `destination`
+field. `access status SERVER_URL` checks one destination's reachability and
+authorization. It exits zero when the check completes, even when the report
+says access failed; scripts should inspect the JSON fields.
+
 An access key grants full access to every pool in the server’s pool directory:
 it can list, read, and append messages, and create or delete pools. For native
 remote access, the owner creates a key with `access invite`; the recipient runs
 `access connect SERVER_URL` and enters the key at the hidden prompt. The client
 saves the connection for the current OS user. Remote `feed`, `follow`, and
-`duplex` use saved credentials selected by destination. Use
+`duplex`, remote `fetch`, and remote pool inspection use saved credentials
+selected by destination. Use
 `access status SERVER_URL` to check the connection and `access disconnect SERVER_URL` to
 forget it locally, even while the server is offline. Disconnect does not
 revoke the server key. See [Share your first pool](record/serving.md#share-your-first-pool)
@@ -81,32 +94,60 @@ for the message and HTTP details.
 - `duplex` reads line-oriented chat from a terminal (requiring `--me`) and a
   JSON stream from non-terminal stdin.
 - `mcp` reads newline-delimited JSON-RPC from stdin until EOF and writes
-  JSON-RPC to stdout. Use `mcp --dir` for local pools or
+  JSON-RPC to stdout. Use `--dir DIR mcp` (or `mcp --dir DIR`) for local pools or
   `mcp --remote SERVER_URL` for a saved native HTTPS connection.
 
 ## Output
 
-Use human output for inspection and machine output for scripts:
+Commands produce readable output by default, including when piped. Select
+`--json` explicitly for scripts. Terminal detection controls presentation,
+such as color; it does not select the output contract.
 
-- Pool management and `doctor` expose `--json`.
-- `fetch` always emits a JSON message envelope.
-- `feed` receipts and `version` adapt to stdout: human text on
-  a terminal and JSON when piped.
-- `follow` and `duplex` use readable terminal output by default. Select JSON
-  Lines with `--format jsonl` or `--jsonl`.
-- `mcp` reserves stdout for JSON-RPC.
+| Commands | `--json` output |
+| --- | --- |
+| `pool`, `doctor`, `serve status`, `access`, `version` | One JSON document |
+| `fetch` | One JSON message envelope |
+| `follow`, `duplex` | One JSON message envelope per line |
+| `feed` | One append receipt per line |
+
+Structured output has no color or commentary. `--jsonl` and `--format jsonl`
+remain aliases for message streams. `mcp` always uses JSON-RPC;
+`completion` always prints shell code. `tap` passes through child output;
+`--quiet` suppresses that output.
 
 Message envelopes contain `seq`, `time`, `meta`, and `data`. Compatibility
 guarantees for machine output live in the [CLI specification](../spec/v0/SPEC.md).
 
+## History and playback
+
+`follow POOL` waits for new messages. `--tail N` adds the last N retained
+messages, and `--since TIME` adds messages since an RFC 3339 or relative time
+such as `5m`. Local and remote reads follow these same rules.
+
+Use `--no-follow` with either selector to read history and exit:
+
+```console
+plasmite follow events --tail 100 --no-follow
+plasmite follow https://pools.example.net:9743/events --since 5m --no-follow --json
+```
+
+A finite read fixes its upper sequence boundary when it starts. Later writes
+cannot keep it running. Relative times use that same starting point. `--tail`
+counts retained messages before filters; `--tag` and `--where` then select
+matches within that history and use the same filters for new messages.
+If retention overtakes the reader, it reports the dropped messages and
+continues through the history still available. `--one` exits at the first
+match; a timeout exits 124.
+
+`--replay SPEED` controls local history timing and implies a finite read.
+It requires `--tail` or `--since`. Speed `1` preserves timing, `2` doubles it,
+and `0` emits immediately. Remote replay timing remains unsupported.
+
 ## Errors and exits
 
-Top-level `--dir` and `--color` must precede the command. `mcp --dir` is a
-command-scoped override; when both forms are present, the MCP value wins.
-
-Errors go to stderr. They are concise text on a terminal and a JSON error
-envelope when stderr is piped. Argument parsing and help output remain plain
-text. General exit codes are mapped by error kind; these command workflows
+Errors go to stderr as concise text by default; `--json` selects a structured
+error envelope. Help stays readable text. General exit codes are mapped by
+error kind; these command workflows
 also have specific meanings:
 
 - `follow` and `duplex` return 124 on timeout.

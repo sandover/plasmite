@@ -613,7 +613,7 @@ fn bench_follow_local(
     loop {
         match cursor.next(&pool)? {
             CursorResult::Message(frame) => {
-                let data = decode_payload_data(frame.payload)?;
+                let data = decode_payload_data(&frame.payload)?;
                 if let Some(sent_ns) = data.sent_ns {
                     let now = now_ns()?;
                     let delta = now.saturating_sub(sent_ns);
@@ -949,7 +949,7 @@ fn run_follower_worker(args: WorkerArgs) -> Result<(), Error> {
         }
         match cursor.next(&pool)? {
             CursorResult::Message(frame) => {
-                let data = decode_payload_data(frame.payload)?;
+                let data = decode_payload_data(&frame.payload)?;
                 if let Some(sent_ns) = data.sent_ns {
                     let now = now_ns()?;
                     let delta = now.saturating_sub(sent_ns);

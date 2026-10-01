@@ -1,6 +1,7 @@
 //! Purpose: Follow and duplex black-box CLI integration tests.
 
 pub mod support;
+use plasmite::api::PoolApiExt;
 use support::cli::*;
 
 fn connect_to_server(server: &ServeProcess, home: &std::path::Path) {
@@ -187,7 +188,7 @@ fn follow_one_exits_after_first_match() {
 }
 
 #[test]
-fn follow_tail_one_emits_nth_match() {
+fn follow_tail_one_exits_after_first_live_match() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -257,7 +258,7 @@ fn follow_tail_one_emits_nth_match() {
         .recv_timeout(Duration::from_secs(2))
         .expect("follow output");
     let value = parse_json(line.trim());
-    assert_eq!(value.get("data").unwrap()["x"], 2);
+    assert_eq!(value.get("data").unwrap()["x"], 1);
 
     let (exit_tx, exit_rx) = mpsc::channel();
     thread::spawn(move || {
@@ -369,6 +370,10 @@ fn follow_timeout_with_one_exits_on_message() {
             "follow",
             "demo",
             "--jsonl",
+            // The feed may land before or after this follower attaches; with --tail 1
+            // it sees the message either way.
+            "--tail",
+            "1",
             "--one",
             "--timeout",
             "5s",
@@ -838,6 +843,7 @@ fn follow_where_invalid_expression_is_usage_error() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -850,6 +856,7 @@ fn follow_where_invalid_expression_is_usage_error() {
             "demo",
             "{\"x\":1}",
         ])
+        .arg("--json")
         .output()
         .expect("feed");
     assert!(emit_out.status.success());
@@ -866,6 +873,7 @@ fn follow_where_invalid_expression_is_usage_error() {
             "--where",
             "not valid jq",
         ])
+        .arg("--json")
         .output()
         .expect("follow");
     assert_eq!(follower.status.code().unwrap(), 2);
@@ -890,6 +898,7 @@ fn follow_where_non_boolean_expression_is_usage_error() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -902,6 +911,7 @@ fn follow_where_non_boolean_expression_is_usage_error() {
             "demo",
             "{\"x\":1}",
         ])
+        .arg("--json")
         .output()
         .expect("feed");
     assert!(emit_out.status.success());
@@ -918,6 +928,7 @@ fn follow_where_non_boolean_expression_is_usage_error() {
             "--where",
             ".data",
         ])
+        .arg("--json")
         .output()
         .expect("follow");
     assert_eq!(follower.status.code().unwrap(), 2);
@@ -1202,6 +1213,7 @@ fn follow_since_future_exits_empty() {
             "demo",
             "--since",
             "2999-01-01T00:00:00Z",
+            "--no-follow",
         ])
         .output()
         .expect("follow");
@@ -1223,6 +1235,7 @@ fn follow_since_future_missing_pool_reports_not_found() {
             "--since",
             "2999-01-01T00:00:00Z",
         ])
+        .arg("--json")
         .output()
         .expect("follow");
     assert_eq!(follower.status.code(), Some(3));
@@ -1321,9 +1334,22 @@ fn follow_emits_drop_notice_on_stderr() {
             "1M",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
+
+    let client = plasmite::api::LocalClient::new().with_pool_dir(&pool_dir);
+    let mut pool = client
+        .open_pool(&plasmite::api::PoolRef::name("demo"))
+        .expect("pool");
+    let payload = "a".repeat(8192);
+    pool.append_json_now(
+        &serde_json::json!({"x": "first", "pad": payload}),
+        &[],
+        plasmite::api::Durability::Fast,
+    )
+    .expect("first message");
 
     let mut follower = cmd()
         .args([
@@ -1332,24 +1358,37 @@ fn follow_emits_drop_notice_on_stderr() {
             "follow",
             "demo",
             "--jsonl",
+            "--tail",
+            "1",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("follow");
 
     let stdout = follower.stdout.take().expect("stdout");
     let stderr = follower.stderr.take().expect("stderr");
 
+    let (attached_tx, attached_rx) = mpsc::channel();
+    let (resume_tx, resume_rx) = mpsc::channel();
     thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
         let mut line = String::new();
+        if reader.read_line(&mut line).unwrap_or(0) == 0 {
+            return;
+        }
+        let _ = attached_tx.send(());
+        // Hold stdout until the ring wraps. Pipe backpressure then forces the
+        // follower behind; timing and process startup cannot decide the outcome.
+        if resume_rx.recv().is_err() {
+            return;
+        }
         loop {
             line.clear();
             if reader.read_line(&mut line).unwrap_or(0) == 0 {
                 break;
             }
-            thread::sleep(Duration::from_millis(500));
         }
     });
 
@@ -1370,23 +1409,19 @@ fn follow_emits_drop_notice_on_stderr() {
         }
     });
 
-    for i in 0..200u64 {
-        let payload = "a".repeat(8192);
-        let emit_out = cmd()
-            .args([
-                "--dir",
-                pool_dir.to_str().unwrap(),
-                "feed",
-                "demo",
-                &format!("{{\"x\":{i},\"pad\":\"{payload}\"}}"),
-            ])
-            .output()
-            .expect("feed");
-        if !emit_out.status.success() {
-            let stderr = String::from_utf8_lossy(&emit_out.stderr);
-            panic!("feed failed at {i}: {stderr}");
-        }
+    attached_rx
+        .recv_timeout(Duration::from_secs(30))
+        .expect("follower attached");
+
+    for i in 0..400u64 {
+        pool.append_json_now(
+            &serde_json::json!({"x": i, "pad": payload}),
+            &[],
+            plasmite::api::Durability::Fast,
+        )
+        .expect("append");
     }
+    resume_tx.send(()).expect("resume reader");
 
     let notice_line = rx
         .recv_timeout(Duration::from_secs(15))
@@ -1428,6 +1463,7 @@ fn follow_rejects_conflicting_output_flags() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -1444,6 +1480,7 @@ fn follow_rejects_conflicting_output_flags() {
             "--format",
             "jsonl",
         ])
+        .arg("--json")
         .output()
         .expect("follow");
     assert_eq!(follower.status.code().unwrap(), 2);
@@ -1481,7 +1518,11 @@ fn follow_create_flag_creates_missing_pool() {
 #[test]
 fn follow_missing_pool_has_actionable_hint() {
     // This assertion currently checks the fallback exact command hint text for missing pools.
-    let output = cmd().args(["follow", "-n", "1"]).output().expect("follow");
+    let output = cmd()
+        .args(["follow", "-n", "1"])
+        .arg("--json")
+        .output()
+        .expect("follow");
     assert_eq!(output.status.code().unwrap(), 2);
     let err = parse_error_json(&output.stderr);
     let hint = err
@@ -1500,6 +1541,7 @@ fn follow_missing_pool_hint_suggests_create() {
 
     let output = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "follow", "missing"])
+        .arg("--json")
         .output()
         .expect("follow");
     assert_eq!(output.status.code(), Some(3));
@@ -1526,6 +1568,7 @@ fn follow_remote_url_rejects_create_flag() {
             "http://127.0.0.1:65535/demo",
             "--create",
         ])
+        .arg("--json")
         .output()
         .expect("follow");
     assert_eq!(output.status.code(), Some(2));
@@ -1667,6 +1710,7 @@ fn follow_remote_url_rejects_api_shaped_path() {
             "http://localhost:9170/v0/pools/demo/tail",
             "--jsonl",
         ])
+        .arg("--json")
         .output()
         .expect("follow");
     assert!(!output.status.success());
@@ -1680,58 +1724,76 @@ fn follow_remote_url_rejects_api_shaped_path() {
 }
 
 #[test]
-fn follow_remote_url_rejects_since_and_replay() {
-    let pool_url = "http://localhost:9170/demo";
-
+fn follow_remote_url_supports_since_and_rejects_replay() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    std::fs::create_dir_all(&pool_dir).expect("pool directory");
+    let client = plasmite::api::LocalClient::new().with_pool_dir(&pool_dir);
+    client
+        .create_pool(
+            &plasmite::api::PoolRef::name("demo"),
+            plasmite::api::PoolOptions::new(1024 * 1024),
+        )
+        .expect("create");
+    let mut pool = client
+        .open_pool(&plasmite::api::PoolRef::name("demo"))
+        .expect("pool");
+    pool.append_json_now(&json!({"x": 1}), &[], plasmite::api::Durability::Fast)
+        .expect("append");
+    let server = ServeProcess::start(&pool_dir);
+    let access_home = temp.path().join("access-home");
+    connect_to_server(&server, &access_home);
+    let pool_url = format!("{}/demo", server.remote_url);
     let since = cmd()
-        .args(["follow", pool_url, "--since", "5m"])
+        .args([
+            "follow",
+            &pool_url,
+            "--since",
+            "5m",
+            "--no-follow",
+            "--json",
+        ])
+        .env("PLASMITE_ACCESS_HOME", &access_home)
         .output()
         .expect("follow");
-    assert!(!since.status.success());
-    let since_err = parse_error_json(&since.stderr);
-    let since_message = since_err
-        .get("error")
-        .and_then(|v| v.get("message"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    assert!(since_message.contains("does not support --since"));
-
+    assert!(
+        since.status.success(),
+        "{}",
+        String::from_utf8_lossy(&since.stderr)
+    );
+    let messages = parse_json_lines(&since.stdout);
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["data"]["x"], 1);
     let replay = cmd()
-        .args(["follow", pool_url, "--tail", "5", "--replay", "1"])
+        .args([
+            "follow", &pool_url, "--tail", "5", "--replay", "1", "--json",
+        ])
+        .env("PLASMITE_ACCESS_HOME", &access_home)
         .output()
         .expect("follow");
-    assert!(!replay.status.success());
+    assert_eq!(replay.status.code(), Some(2));
     let replay_err = parse_error_json(&replay.stderr);
-    let replay_message = replay_err
-        .get("error")
-        .and_then(|v| v.get("message"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    assert!(replay_message.contains("does not support --replay"));
-}
-
-#[test]
-fn follow_remote_url_rejects_future_since() {
-    let pool_url = "http://localhost:9170/demo";
-
-    let since = cmd()
-        .args(["follow", pool_url, "--since", "2999-01-01T00:00:00Z"])
+    assert_eq!(replay_err["error"]["kind"], "Usage");
+    assert!(
+        replay_err["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("does not support --replay")
+    );
+    let future = cmd()
+        .args([
+            "follow",
+            &pool_url,
+            "--since",
+            "2999-01-01T00:00:00Z",
+            "--no-follow",
+            "--json",
+        ])
+        .env("PLASMITE_ACCESS_HOME", &access_home)
         .output()
-        .expect("follow");
-    assert_eq!(since.status.code(), Some(2));
-    let since_err = parse_error_json(&since.stderr);
-    let since_kind = since_err
-        .get("error")
-        .and_then(|v| v.get("kind"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    assert_eq!(since_kind, "Usage");
-    let since_message = since_err
-        .get("error")
-        .and_then(|v| v.get("message"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    assert!(since_message.contains("does not support --since"));
+        .expect("future follow");
+    assert!(future.status.success());
+    assert!(future.stdout.is_empty());
 }
 
 #[test]
@@ -1878,6 +1940,7 @@ fn duplex_remote_url_rejects_create_flag() {
             "--me",
             "alice",
         ])
+        .arg("--json")
         .output()
         .expect("duplex");
     assert_eq!(output.status.code(), Some(2));
@@ -1889,22 +1952,54 @@ fn duplex_remote_url_rejects_create_flag() {
 }
 
 #[test]
-fn duplex_remote_url_rejects_since_even_when_future() {
-    let output = cmd()
+fn duplex_remote_url_accepts_future_since() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    std::fs::create_dir_all(&pool_dir).expect("pool directory");
+    let client = plasmite::api::LocalClient::new().with_pool_dir(&pool_dir);
+    client
+        .create_pool(
+            &plasmite::api::PoolRef::name("chat"),
+            plasmite::api::PoolOptions::new(1024 * 1024),
+        )
+        .expect("create");
+    let server = ServeProcess::start(&pool_dir);
+    let access_home = temp.path().join("access-home");
+    connect_to_server(&server, &access_home);
+    let pool_url = format!("{}/chat", server.remote_url);
+    let mut duplex = cmd()
         .args([
             "duplex",
-            "http://127.0.0.1:65535/chat",
+            &pool_url,
             "--since",
             "2999-01-01T00:00:00Z",
+            "--json",
         ])
-        .output()
+        .env("PLASMITE_ACCESS_HOME", &access_home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .expect("duplex");
-    assert_eq!(output.status.code(), Some(2));
-    let err = parse_error_json(&output.stderr);
-    let inner = err.get("error").and_then(|v| v.as_object()).expect("error");
-    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Usage"));
-    let message = inner.get("message").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(message.contains("does not support --since"));
+    writeln!(
+        duplex.stdin.take().expect("stdin"),
+        "{{\"from\":\"alice\",\"msg\":\"hello\"}}"
+    )
+    .expect("send JSON");
+    let output = duplex.wait_with_output().expect("duplex output");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    let pool = client
+        .open_pool(&plasmite::api::PoolRef::name("chat"))
+        .expect("pool");
+    assert_eq!(
+        pool.get_message(1).expect("sent message").data,
+        json!({"from":"alice", "msg":"hello"})
+    );
 }
 
 #[test]
@@ -1921,6 +2016,7 @@ fn duplex_since_future_missing_pool_reports_not_found() {
             "--since",
             "2999-01-01T00:00:00Z",
         ])
+        .arg("--json")
         .output()
         .expect("duplex");
     assert_eq!(output.status.code(), Some(3));
@@ -2154,6 +2250,19 @@ fn follow_replay_respects_speed_timing() {
     );
 }
 
+/// The time between the first two messages, as the pool recorded it.
+fn recorded_gap(messages: &[Value]) -> Duration {
+    let at = |message: &Value| {
+        time::OffsetDateTime::parse(
+            message["time"].as_str().expect("message time"),
+            &time::format_description::well_known::Rfc3339,
+        )
+        .expect("RFC 3339 time")
+    };
+    let gap = at(&messages[1]) - at(&messages[0]);
+    Duration::try_from(gap).expect("the second message is later")
+}
+
 #[test]
 fn follow_replay_speed_2x_halves_delay() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -2179,7 +2288,7 @@ fn follow_replay_speed_2x_halves_delay() {
         ])
         .output()
         .expect("feed");
-    sleep(Duration::from_millis(400));
+    sleep(Duration::from_millis(1200));
     cmd()
         .args([
             "--dir",
@@ -2210,13 +2319,17 @@ fn follow_replay_speed_2x_halves_delay() {
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
     assert_eq!(messages.len(), 2);
+    // The pool's own timestamps give the gap the replay reproduces; process startup
+    // only adds to the measured time, so half the gap is a floor and the whole gap,
+    // what 1x would take, is a ceiling with startup room to spare.
+    let gap = recorded_gap(&messages);
     assert!(
-        elapsed >= Duration::from_millis(150),
-        "replay at 2x of 400ms gap should wait ~200ms, took {elapsed:?}"
+        elapsed >= gap.mul_f64(0.45),
+        "replay at 2x of a {gap:?} gap should wait about half of it, took {elapsed:?}"
     );
     assert!(
-        elapsed < Duration::from_millis(2200),
-        "replay at 2x should be faster than 1x, took {elapsed:?}"
+        elapsed < gap,
+        "replay at 2x should finish before a 1x replay of {gap:?} could, took {elapsed:?}"
     );
 }
 
@@ -2464,7 +2577,7 @@ fn follow_replay_zero_speed_emits_without_delay() {
         ])
         .output()
         .expect("feed");
-    sleep(Duration::from_millis(200));
+    sleep(Duration::from_millis(1200));
     cmd()
         .args([
             "--dir",
@@ -2495,8 +2608,10 @@ fn follow_replay_zero_speed_emits_without_delay() {
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
     assert_eq!(messages.len(), 2);
+    // A replay that waited at all would take the recorded gap; startup alone does not.
+    let gap = recorded_gap(&messages);
     assert!(
-        elapsed < Duration::from_millis(300),
-        "--replay 0 should emit without delay, took {elapsed:?}"
+        elapsed < gap,
+        "--replay 0 should emit without the {gap:?} delay, took {elapsed:?}"
     );
 }

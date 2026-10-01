@@ -110,7 +110,7 @@ pub fn connect(destination: &str, access_key: &str) -> ApiResult<ConnectionStatu
     let accepted = client.check_access().map_err(|error| {
         Error::new(ErrorKind::Io)
             .with_message(format!("could not verify or reach server at {destination}"))
-            .with_hint("Check the URL, certificate name and validity, and access-key fingerprint. The access secret was withheld until those checks passed.")
+            .with_hint("Check the exact HTTPS hostname and port, network route, certificate name and validity, and access-key fingerprint. For Tailscale, use the full MagicDNS name and allow the port. A TLS-terminating proxy needs its actual frontend certificate configured with --front-cert. The access secret was withheld until TLS verification passed.")
             .with_source(error)
     })?;
     if !accepted {
@@ -164,6 +164,24 @@ pub fn status(destination: &str) -> ApiResult<ConnectionStatus> {
             problem: Some(actionable_problem(&error)),
         }),
     }
+}
+
+/// List this OS user's saved server destinations without contacting servers.
+///
+/// Destinations are sorted, and the result never contains credential material.
+/// This does not check reachability or whether a saved key remains accepted.
+pub fn list() -> ApiResult<Vec<String>> {
+    let destinations = access_store::list()?;
+    for destination in &destinations {
+        let normalized = secure_destination(destination).map_err(|_| {
+            Error::new(ErrorKind::Corrupt).with_message("saved connection destination is invalid")
+        })?;
+        if normalized.as_str() != destination {
+            return Err(Error::new(ErrorKind::Corrupt)
+                .with_message("saved connection destination is invalid"));
+        }
+    }
+    Ok(destinations)
 }
 
 /// Remove this OS user's saved connection for a server without contacting it.

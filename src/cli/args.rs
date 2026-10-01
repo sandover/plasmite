@@ -19,7 +19,39 @@ use std::path::PathBuf;
   {usage}
 
 COMMANDS
-{subcommands}
+  Send and read
+    feed POOL [DATA | --file PATH]       Append JSON (omitted input uses stdin)
+    follow POOL [--tail N | --since TIME]
+                [--no-follow] [--replay SPEED]
+                [--tag TAG] [--where EXPR] [--one] [--timeout DURATION]
+    fetch POOL SEQ                      Read one message
+    tap POOL -- COMMAND...              Capture command output
+    duplex POOL [--me NAME]              Send and receive in one session
+
+  Manage pools
+    pool create NAME... [--size SIZE]    Create local pools
+    pool list [SERVER]                   List local or remote pools
+    pool info POOL                      Inspect capacity, bounds, and metrics
+    pool delete POOL...                  Delete local pools
+    doctor <POOL | --all>                Check local pool integrity
+
+  Share and connect
+    serve [--shared-address SERVER]      Run a server for this directory
+    serve status                        List this user's local servers
+    access invite --name NAME            Create a full-access directory key
+    access keys                         List server-side keys
+    access revoke ID                    Revoke a server-side key
+    access connect SERVER               Verify a key and save a connection
+    access list                         List saved server destinations
+    access status SERVER                Check access, reachability, browser trust
+    access disconnect SERVER            Forget saved credentials
+    access untrust SHA256                Remove trust for one certificate
+
+  Integrate and learn
+    mcp [--remote SERVER]                Run Model Context Protocol on stdio
+    completion SHELL                    Print shell completion code
+    version                             Print the build version
+    help [COMMAND...]                   Show root or command help
 
 OPTIONS
 {options}
@@ -27,21 +59,24 @@ OPTIONS
 {after-help}
 "#,
     long_about = None,
+    propagate_version = true,
     before_help = r#"A pool is a persistent, bounded stream that multiple processes can write and read.
 Messages are JSON: `feed` appends, `follow` streams, and `fetch` reads one by sequence.
-"#,
-    after_help = r#"FIRST LOCAL WORKFLOW
+
+FIRST LOCAL WORKFLOW
   $ plasmite pool create chat
   $ plasmite follow chat                                      # Terminal 1
   $ plasmite feed chat '{"from":"alice","msg":"hello"}'       # Terminal 2
 
-OUTPUT
-  Commands default to readable terminal output. Use --json or --format jsonl
-  where offered for scripts; command help describes adaptive output.
+"#,
+    after_help = r#"OUTPUT
+  Human-readable by default. Use --json on reports and message commands for scripts.
+  Structured output contains no color or commentary; errors go to stderr.
 
 OPTIONS AND HELP
-  Top-level options precede the command: plasmite --dir ./pools follow chat
-  Command options follow it:              plasmite follow --tail 10 chat
+  Global options work before or after commands, up to tap's -- separator.
+  One --dir selects pools and server-side keys, including mcp; conflicting repeats fail.
+  $ plasmite follow chat --dir ./pools --tail 10
   $ plasmite <command> --help
 
 GUIDES
@@ -53,12 +88,15 @@ GUIDES
 pub(crate) struct Cli {
     #[arg(
         long,
-        help = "Pool directory for named pools (default: ~/.plasmite/pools)",
+        global = true,
+        action = clap::ArgAction::Append,
+        help = "Directory for local pools and server-side keys (default: ~/.plasmite/pools)",
         value_hint = ValueHint::DirPath
     )]
-    pub(crate) dir: Option<PathBuf>,
+    pub(crate) dir: Vec<PathBuf>,
     #[arg(
         long,
+        global = true,
         default_value = "auto",
         value_enum,
         help = "Colorize stderr diagnostics and pretty JSON output: auto|always|never"
@@ -111,6 +149,7 @@ impl ColorMode {
 pub(crate) enum Command {
     #[command(
         arg_required_else_help = true,
+        display_order = 5,
         about = "Manage pool files",
         long_about = r#"Create and inspect pool files.
 
@@ -132,6 +171,7 @@ NOTES
     },
     #[command(
         arg_required_else_help = true,
+        display_order = 0,
         about = "Send a message to a pool",
         long_about = r#"Send JSON messages to a pool.
 
@@ -144,39 +184,12 @@ inline JSON, file input (-f/--file), or streams via stdin (auto-detected)."#,
 
 INPUT AND OUTPUT
   - Choose one input source: inline DATA, --file, or stdin
-  - Receipts are human-readable on a terminal and JSON when piped
-  - --errors skip continues after bad records and exits 1 if any were rejected"#,
-        after_long_help = r#"EXAMPLES
-  # Inline JSON
-  $ plasmite feed foo '{"hello": "world"}'
-
-  # Tag messages with --tag
-  $ plasmite feed foo --tag ping --tag from-alice '{"msg": "hello bob"}'
-
-  # Pipe JSON Lines
-  $ jq -c '.items[]' data.json | plasmite feed foo
-
-  # Replay a JSONL file
-  $ plasmite feed foo -f events.jsonl
-
-  # Stream from curl (event streams auto-detected)
-  $ curl -N https://api.example.com/events | plasmite feed events
-
-  # Remote shorthand ref (serve must already expose the pool)
-  $ plasmite feed http://127.0.0.1:9700/demo --tag remote '{"msg":"hello"}'
-
-  # Auto-create pool on first feed
-  $ plasmite feed bar --create '{"first": "message"}'
-
-NOTES
-  - Remote refs must be shorthand: http(s)://host:port/<pool> (no trailing slash)
-  - API-shaped URLs (e.g. /v0/pools/<pool>/append) are rejected as POOL refs
-  - `--create` is local-only; remote feed never creates remote pools
-  - `--in auto` detects JSONL, JSON-seq (0x1e), event streams (data: prefix)
-  - `--errors skip` continues past bad records; `--durability flush` syncs to disk
-  - `--retry N` retries on transient failures (lock contention, etc.)"#
+  - Receipts are human-readable by default; --json emits one receipt per line
+  - --errors skip continues after bad records and exits 1 if any were rejected"#
     )]
     Feed {
+        #[arg(long, help = "Emit structured JSON without color or commentary")]
+        json: bool,
         #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
         pool: String,
         #[arg(help = "Inline JSON value")]
@@ -233,6 +246,7 @@ NOTES
     },
     #[command(
         args_conflicts_with_subcommands = true,
+        display_order = 7,
         about = "Share pools securely with named access keys",
         long_about = r#"Serve pools locally and share them over HTTPS with named access keys.
 
@@ -245,17 +259,7 @@ Run `plasmite access invite --name <name>` in another terminal to create a key."
 
 CONSTRAINTS
   - Request body, tail timeout, and tail concurrency limits must be positive
-  - The local admin listener stays on loopback; remote clients use HTTPS"#,
-        after_long_help = r#"EXAMPLES
-  $ plasmite --dir ./pools serve
-  $ plasmite serve status
-  $ plasmite serve status --json
-  $ plasmite --dir ./pools serve --shared-address https://pools.example.com:8443
-
-  # On the server, create a named key. On the client, enter it at the hidden prompt.
-  $ plasmite --dir ./pools access invite --name laptop
-  $ plasmite access connect https://pools.example.com:8443
-  $ plasmite access status https://pools.example.com:8443"#
+  - The local admin listener stays on loopback; remote clients use HTTPS"#
     )]
     Serve {
         #[command(subcommand)]
@@ -264,6 +268,7 @@ CONSTRAINTS
         run: ServeRunArgs,
     },
     #[command(
+        display_order = 9,
         about = "Serve local or remote MCP tools and resources on stdio",
         long_about = r#"Start an MCP process on stdio.
 
@@ -276,16 +281,13 @@ responses to stdout. It exits when stdin closes."#,
         after_help = r#"EXAMPLES
   $ plasmite mcp
   $ plasmite mcp --dir /path/to/pools
-  $ plasmite mcp --remote https://pools.example.com:8443"#
+  $ plasmite mcp --remote https://pools.example.com:8443
+
+INPUT AND OUTPUT
+  Reads JSON-RPC on stdin and writes JSON-RPC on stdout until stdin closes.
+  --dir selects local pools; --remote uses a saved connection and conflicts with --dir."#
     )]
     Mcp {
-        #[arg(
-            long,
-            conflicts_with = "remote",
-            help = "Pool directory for named pools (default: ~/.plasmite/pools)",
-            value_hint = ValueHint::DirPath
-        )]
-        dir: Option<PathBuf>,
         #[arg(
             long,
             value_name = "SERVER_URL",
@@ -296,6 +298,7 @@ responses to stdout. It exits when stdin closes."#,
     },
     #[command(
         arg_required_else_help = true,
+        display_order = 8,
         about = "Manage secure access to a shared pool directory",
         long_about = r#"Create access keys and connect to a shared pool server.
 
@@ -309,73 +312,57 @@ Create a key with `invite` on the server machine. Use `connect` and `status` on 
     },
     #[command(
         arg_required_else_help = true,
+        display_order = 2,
         about = "Fetch one message by sequence number",
-        long_about = r#"Fetch a specific message by its seq number and print as JSON."#,
+        long_about = r#"Fetch a message from a local name/path or remote pool URL. Human-readable by default; --json emits one message envelope."#,
         after_help = r#"EXAMPLES
   $ plasmite fetch foo 1
-  $ plasmite fetch foo 42 | jq '.data'"#
+  $ plasmite fetch foo 42 --json | jq '.data'
+
+INPUT AND OUTPUT
+  Local names/paths and HTTP(S) pool URLs are accepted.
+  Human-readable by default; --json emits one message envelope."#
     )]
     Fetch {
-        #[arg(help = "Pool name or path")]
+        #[arg(long, help = "Emit structured JSON without color or commentary")]
+        json: bool,
+        #[arg(help = "Pool ref: local name/path or HTTP(S) pool URL")]
         pool: String,
         #[arg(help = "Sequence number")]
         seq: u64,
     },
     #[command(
         arg_required_else_help = true,
+        display_order = 1,
         about = "Follow messages from a pool",
         long_about = r#"Follow a pool and stream messages as they arrive.
 
 By default, `follow` waits for new messages forever (Ctrl-C to stop).
 Use `--tail N` to see recent history first, then keep following.
-Use `--replay N` with `--tail` or `--since` to replay with timing."#,
+Use --no-follow with --tail or --since to read finite history.
+Use --replay SPEED with history for local timed playback; it implies --no-follow."#,
         after_help = r#"EXAMPLES
   $ plasmite follow foo                                           # follow live
   $ plasmite follow foo --tail 10                                 # last 10 + live
   $ plasmite follow foo --where '.data.ok == true' --one          # match & exit
-  $ plasmite follow foo --format jsonl | jq '.data'               # pipe to jq
+  $ plasmite follow foo --json | jq '.data'               # pipe to jq
 
 LOCAL AND REMOTE
-  Remote refs support --tail, filters, --one, --timeout, and output.
-  They reject --create, --since, --replay, --no-notify, and --quiet-drops."#,
-        after_long_help = r#"EXAMPLES
-  # Follow for new messages
-  $ plasmite follow foo
-
-  # Last 10 messages, then keep following
-  $ plasmite follow foo --tail 10
-
-  # Emit one matching message, then exit
-  $ plasmite follow foo --where '.data.status == "error"' --one
-
-  # Messages from the last 5 minutes
-  $ plasmite follow foo --since 5m
-
-  # Replay at original timing (or 2x, 0.5x, 0 = instant)
-  $ plasmite follow foo --tail 100 --replay 1
-
-  # Filter by exact tag (repeat for AND)
-  $ plasmite follow foo --tag ping --one
-
-  # Pipe to jq
-  $ plasmite follow foo --format jsonl | jq -r '.data.msg'
-
-  # Wait up to 5 seconds for a message
-  $ plasmite follow foo --timeout 5s
-
-  # Remote shorthand ref (serve must already expose the pool)
-  $ plasmite follow http://127.0.0.1:9700/demo --tail 20 --format jsonl
-
-NOTES
-  - Use `--format jsonl` for scripts (one JSON object per line)
-  - `--tag` matches exact tags; `--where` uses jq-style expressions; repeat either for AND
-  - `--since 5m` and `--since 2026-01-15T10:00:00Z` both work
-  - Remote refs must be shorthand: http(s)://host:port/<pool> (no trailing slash)
-  - Remote `follow` supports `--tail`, `--tag`, `--where`, `--one`, `--timeout`, `--data-only`, and `--format`
-  - `--create` is local-only; remote follow never creates remote pools
-  - `--replay N` exits when all selected messages are emitted (no live follow); `--replay 0` emits instantly"#
+  Local and remote refs support --tail, --since, --no-follow, filters, and output.
+  Remote refs reject --create, --replay, --no-notify, and --quiet-drops.
+  --no-follow requires --tail or --since; finite history ends at the starting bound.
+  --tail counts retained messages before filters. Filters apply to history and live output.
+  Human-readable by default; --json emits one envelope per line.
+  --jsonl and --format jsonl retain their meanings as compatibility aliases."#
     )]
     Follow {
+        #[arg(
+            long,
+            help = "Read selected history and exit; requires --tail or --since"
+        )]
+        no_follow: bool,
+        #[arg(long, help = "Emit structured JSON without color or commentary")]
+        json: bool,
         #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
         pool: String,
         #[arg(long, help = "Create local pool if missing before following")]
@@ -389,7 +376,10 @@ NOTES
         tail: u64,
         #[arg(long, help = "Exit after emitting one matching message")]
         one: bool,
-        #[arg(long, help = "Emit JSON Lines (one object per line)")]
+        #[arg(
+            long,
+            help = "Compatibility alias for structured JSON Lines output (prefer --json)"
+        )]
         jsonl: bool,
         #[arg(
             long,
@@ -401,7 +391,7 @@ NOTES
         #[arg(
             long,
             value_enum,
-            help = "Output format: pretty|jsonl (use --jsonl as alias for jsonl)"
+            help = "Output format: pretty|jsonl (--json is the preferred structured-output flag)"
         )]
         format: Option<FollowFormat>,
         #[arg(
@@ -435,6 +425,7 @@ NOTES
     },
     #[command(
         arg_required_else_help = true,
+        display_order = 3,
         about = "Capture command output into a local pool",
         override_usage = "plasmite tap [OPTIONS] <POOL> -- <COMMAND>...",
         long_about = r#"Run a command, capture stdout/stderr as line messages, and append them to a local pool.
@@ -450,6 +441,7 @@ Use `--` to separate tap flags from the wrapped command argv."#,
 CAPTURE AND EXIT
   - `--` is required before wrapped command args
   - Use --create-size for long-running/high-volume captures
+  - Lines larger than the pool ring capacity fail; the wrapped child is terminated
   - Emits start, stdout/stderr line, and exit messages
   - Returns the wrapped command's exit status; `tap` accepts local pools only"#
     )]
@@ -479,6 +471,7 @@ CAPTURE AND EXIT
     },
     #[command(
         arg_required_else_help = true,
+        display_order = 4,
         about = "Send and follow from one command",
         long_about = r#"Read and write a pool from one process.
 
@@ -490,13 +483,16 @@ CAPTURE AND EXIT
   Duplex exits when stdin ends (EOF) or when the receive side ends (e.g. timeout/error).
 
 Notes:
-- Remote refs do not support `--create` or `--since` (use `--tail` for remote)."#,
+- Remote refs do not support --create. Both targets support --tail and --since."#,
         after_help = r#"INPUT AND EXIT
   - Terminal input requires --me and sends one chat message per non-empty line
   - Piped input is a JSON stream; connect before using a remote ref
+  - Human-readable output by default; --json emits one message envelope per line
   - Exits 124 on timeout"#
     )]
     Duplex {
+        #[arg(long, help = "Emit structured JSON without color or commentary")]
+        json: bool,
         #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
         pool: String,
         #[arg(
@@ -513,7 +509,10 @@ Notes:
             help = "Print the last N messages first"
         )]
         tail: u64,
-        #[arg(long, help = "Emit JSON Lines (one object per line)")]
+        #[arg(
+            long,
+            help = "Compatibility alias for structured JSON Lines output (prefer --json)"
+        )]
         jsonl: bool,
         #[arg(
             long,
@@ -523,7 +522,7 @@ Notes:
         #[arg(
             long = "format",
             value_enum,
-            help = "Output format: pretty|jsonl (use --jsonl as alias for jsonl)"
+            help = "Output format: pretty|jsonl (--json is the preferred structured-output flag)"
         )]
         format: Option<FollowFormat>,
         #[arg(
@@ -537,6 +536,7 @@ Notes:
     },
     #[command(
         arg_required_else_help = true,
+        display_order = 6,
         about = "Diagnose pool health",
         override_usage = "plasmite doctor [OPTIONS] <POOL|--all>",
         long_about = r#"Validate one pool (or all pools) and emit a diagnostic report."#,
@@ -559,17 +559,22 @@ NOTES
         json: bool,
     },
     #[command(
+        display_order = 11,
         about = "Print version information",
-        long_about = r#"Print human-readable version information on a terminal.
+        long_about = r#"Print human-readable version information by default.
 
-When stdout is redirected or piped, emit stable machine-readable JSON."#,
+Use --json for a stable machine-readable JSON report."#,
         after_help = r#"EXAMPLES
   $ plasmite version
-  $ plasmite version | jq -r '.version'"#
+  $ plasmite version --json | jq -r '.version'"#
     )]
-    Version,
+    Version {
+        #[arg(long, help = "Emit a JSON version report")]
+        json: bool,
+    },
     #[command(
         arg_required_else_help = true,
+        display_order = 10,
         about = "Generate shell completions",
         long_about = r#"Generate shell completion scripts.
 
@@ -602,6 +607,7 @@ pub(crate) enum ServeSubcommand {
 pub(crate) enum PoolCommand {
     #[command(
         arg_required_else_help = true,
+        display_order = 0,
         about = "Create one or more pools",
         long_about = r#"Create pool files. Default size is 1MB (use --size for larger).
 
@@ -630,20 +636,26 @@ NOTES
     },
     #[command(
         arg_required_else_help = true,
+        display_order = 2,
         about = "Show pool metadata and bounds",
-        long_about = r#"Show pool size, bounds, and metrics in human-readable format by default."#,
+        long_about = r#"Show local or remote pool size, bounds, and metrics. Human-readable by default; --json emits a report."#,
         after_help = r#"EXAMPLES
   $ plasmite pool info foo
-  $ plasmite pool info foo --json"#
+  $ plasmite pool info foo --json
+
+TARGET AND OUTPUT
+  Local names/paths and HTTP(S) pool URLs are accepted.
+  Human-readable by default; --json emits one report."#
     )]
     Info {
-        #[arg(help = "Pool name or path")]
+        #[arg(help = "Pool ref: local name/path or HTTP(S) pool URL")]
         name: String,
         #[arg(long, help = "Emit JSON instead of human-readable output")]
         json: bool,
     },
     #[command(
         arg_required_else_help = true,
+        display_order = 3,
         about = "Delete one or more pool files",
         long_about = r#"Delete one or more pool files (destructive, cannot be undone)."#,
         after_help = r#"EXAMPLES
@@ -664,13 +676,15 @@ NOTES
         json: bool,
     },
     #[command(
-        about = "List pools in the pool directory",
-        long_about = r#"List pools in the pool directory.
+        display_order = 1,
+        about = "List local pools or a remote server directory",
+        long_about = r#"List local pools or pools at the supplied HTTPS server origin.
 
 Prints a human-readable table by default. Use --json for machine-readable output."#,
         after_help = r#"EXAMPLES
   $ plasmite pool list
   $ plasmite pool list --json
+  $ plasmite pool list https://pools.example.com:9743 --json
 
 NOTES
   - Human-readable output is the default.
@@ -679,6 +693,11 @@ NOTES
   - Pools that cannot be read include an error field."#
     )]
     List {
+        #[arg(
+            value_name = "SERVER",
+            help = "HTTPS server origin (omit for local pools)"
+        )]
+        server: Option<String>,
         #[arg(long, help = "Emit JSON instead of human-readable output")]
         json: bool,
     },
@@ -686,50 +705,94 @@ NOTES
 
 #[derive(Subcommand)]
 pub(crate) enum AccessSubcommand {
-    #[command(about = "Create a named access key on the server machine")]
+    #[command(
+        display_order = 0,
+        about = "Create a named access key on the server machine",
+        after_help = "Keys grant full access to the selected pool directory. Human-readable by default; --json emits a report containing the new key."
+    )]
     Invite {
+        #[arg(long, help = "Emit a JSON report")]
+        json: bool,
         #[arg(long, value_name = "NAME", help = "Name to identify this client")]
         name: String,
     },
     #[command(
+        display_order = 3,
         about = "Connect this machine to a shared pool server",
+        after_help = "Reads a key from a hidden terminal prompt or stdin, verifies it, and saves the connection for this OS user. Human-readable by default; --json emits a report.",
         long_about = "Verify the server URL and access key, then save the connection for future remote pool commands. The key is read from a hidden prompt or stdin. Reconnect with the same key to recover a lost local connection."
     )]
     Connect {
-        #[arg(value_name = "URL", help = "HTTPS address printed by the server")]
+        #[arg(long, help = "Emit a JSON report")]
+        json: bool,
+        #[arg(value_name = "SERVER", help = "HTTPS address printed by the server")]
         url: String,
     },
     #[command(
+        display_order = 5,
         about = "Show this machine's connection to a shared pool server",
-        long_about = "Check whether the server is reachable and whether this machine's saved access key still works."
+        after_help = "Checks saved access, reachability, and browser trust without changing state. A completed check exits zero even when access fails. Human-readable by default; --json emits a report.",
+        long_about = "Check saved access, reachability, and browser trust without changing state. A completed check exits zero even when access fails."
     )]
     Status {
-        #[arg(value_name = "URL", help = "HTTPS address printed by the server")]
+        #[arg(long, help = "Emit a JSON report")]
+        json: bool,
+        #[arg(value_name = "SERVER", help = "HTTPS address printed by the server")]
         url: String,
     },
     #[command(
+        display_order = 6,
         about = "Forget this machine's saved connection",
+        after_help = "Forgets saved credentials for this OS user without contacting the server. Server permission remains until revoked. Human-readable by default; --json emits a report.",
         long_about = "Remove this machine's saved access key for a server. This does not revoke the key on the server and works while the server is offline."
     )]
     Disconnect {
-        #[arg(value_name = "URL", help = "HTTPS address of the saved connection")]
+        #[arg(long, help = "Emit a JSON report")]
+        json: bool,
+        #[arg(value_name = "SERVER", help = "HTTPS address of the saved connection")]
         url: String,
     },
     #[command(
+        display_order = 7,
         about = "Remove one exact browser-trusted certificate",
+        after_help = "Removes browser trust for one exact certificate; native credentials remain saved. Human-readable by default; --json emits a report.",
         long_about = "Remove the certificate identified by its SHA-256 fingerprint from this OS user's trust store. This works after the server renews its certificate or goes offline. Native credentials remain saved."
     )]
     Untrust {
+        #[arg(long, help = "Emit a JSON report")]
+        json: bool,
         #[arg(
             value_name = "SHA256",
             help = "Certificate fingerprint shown by access status"
         )]
         fingerprint: String,
     },
-    #[command(about = "List access keys on the server machine")]
-    Keys,
-    #[command(about = "Revoke an access key on the server machine")]
+    #[command(
+        display_order = 1,
+        about = "List access keys on the server machine",
+        after_help = "Lists server-side keys for the selected --dir. Human-readable by default; --json emits a report."
+    )]
+    Keys {
+        #[arg(long, help = "Emit a JSON report")]
+        json: bool,
+    },
+    #[command(
+        display_order = 4,
+        about = "List saved server destinations without contacting servers",
+        after_help = "Reads this OS user's saved destinations without probing servers. Human-readable by default; --json emits an array."
+    )]
+    List {
+        #[arg(long, help = "Emit a JSON report")]
+        json: bool,
+    },
+    #[command(
+        display_order = 2,
+        about = "Revoke an access key on the server machine",
+        after_help = "Withdraws server permission for the selected --dir. Human-readable by default; --json emits a report."
+    )]
     Revoke {
+        #[arg(long, help = "Emit a JSON report")]
+        json: bool,
         #[arg(value_name = "ID", help = "Key ID shown by `access keys`")]
         id: String,
     },
@@ -740,14 +803,14 @@ pub(crate) struct ServeRunArgs {
     #[arg(
         long,
         default_value = "127.0.0.1:9700",
-        help = "Bind address",
+        help = "Local loopback bind address for credential-free administration",
         help_heading = "Connection"
     )]
     pub(crate) bind: String,
     #[arg(
         long = "remote-bind",
         default_value = "0.0.0.0:9743",
-        help = "HTTPS bind address for remote clients",
+        help = "Numeric IP:port for authenticated HTTPS (bracket IPv6)",
         help_heading = "Connection"
     )]
     pub(crate) remote_bind: String,
@@ -791,4 +854,48 @@ pub(crate) struct ServeRunArgs {
         help_heading = "Safety"
     )]
     pub(crate) max_tail_concurrency: usize,
+}
+
+impl Command {
+    pub(crate) fn json_output(&self) -> bool {
+        match self {
+            Self::Version { json }
+            | Self::Doctor { json, .. }
+            | Self::Feed { json, .. }
+            | Self::Fetch { json, .. } => *json,
+            Self::Follow {
+                json,
+                jsonl,
+                format,
+                ..
+            }
+            | Self::Duplex {
+                json,
+                jsonl,
+                format,
+                ..
+            } => *json || *jsonl || matches!(format, Some(FollowFormat::Jsonl)),
+            Self::Pool { command } => match command {
+                PoolCommand::Create { json, .. }
+                | PoolCommand::Info { json, .. }
+                | PoolCommand::Delete { json, .. }
+                | PoolCommand::List { json, .. } => *json,
+            },
+            Self::Access { command } => match command {
+                AccessSubcommand::Invite { json, .. }
+                | AccessSubcommand::Connect { json, .. }
+                | AccessSubcommand::Status { json, .. }
+                | AccessSubcommand::Disconnect { json, .. }
+                | AccessSubcommand::Untrust { json, .. }
+                | AccessSubcommand::Keys { json }
+                | AccessSubcommand::List { json }
+                | AccessSubcommand::Revoke { json, .. } => *json,
+            },
+            Self::Serve {
+                command: Some(ServeSubcommand::Status { json }),
+                ..
+            } => *json,
+            _ => false,
+        }
+    }
 }

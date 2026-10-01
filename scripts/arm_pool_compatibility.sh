@@ -35,11 +35,11 @@ check_direction() {
   newest="$(jq -r '.bounds.newest' <<<"$read_info")"
   [[ "$oldest" -gt 1 && "$newest" == 450 ]]
   for ((i=oldest; i<=newest; i++)); do
-    message="$(run_cli "$reader" --dir "$directory" fetch wrapped "$i")"
+    message="$(run_cli "$reader" --dir "$directory" fetch wrapped "$i" --json)"
     jq -e --argjson seq "$i" '.seq == $seq and .data.message == ("tick " + ($seq|tostring)) and .data.level == "info"' <<<"$message" >/dev/null
   done
   printf '{"message":"after handoff"}\n' | run_cli "$reader" --dir "$directory" feed wrapped >/dev/null
-  message="$(run_cli "$writer" --dir "$directory" fetch wrapped 451)"
+  message="$(run_cli "$writer" --dir "$directory" fetch wrapped 451 --json)"
   jq -e '.seq == 451 and .data.message == "after handoff"' <<<"$message" >/dev/null
   run_cli "$writer" --dir "$directory" doctor wrapped --json >/dev/null
   run_cli "$reader" --dir "$directory" doctor wrapped --json >/dev/null
