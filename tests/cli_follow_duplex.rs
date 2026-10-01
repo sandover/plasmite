@@ -18,7 +18,7 @@ fn connect_to_server(server: &ServeProcess, home: &std::path::Path) {
         server.access_key()
     )
     .expect("key");
-    assert!(connect.wait().expect("connect status").success());
+    assert!(wait_within(&mut connect, Duration::from_secs(60), "access connect").success());
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn follow_emits_new_messages() {
     assert!(!line.is_empty(), "expected a line from follow output");
     let value = parse_json(line.trim());
     assert_eq!(value.get("data").unwrap()["x"], 42);
-    let status = follower.wait().expect("follow wait");
+    let status = wait_within(&mut follower, Duration::from_secs(60), "follow --one");
     assert!(status.success(), "follow status={status:?}");
 }
 
@@ -178,7 +178,7 @@ fn follow_one_exits_after_first_match() {
 
     let (exit_tx, exit_rx) = mpsc::channel();
     thread::spawn(move || {
-        let status = follower.wait().expect("wait");
+        let status = wait_within(&mut follower, Duration::from_secs(60), "finite follower");
         let _ = exit_tx.send(status);
     });
     let status = exit_rx
@@ -262,7 +262,7 @@ fn follow_tail_one_exits_after_first_live_match() {
 
     let (exit_tx, exit_rx) = mpsc::channel();
     thread::spawn(move || {
-        let status = follower.wait().expect("wait");
+        let status = wait_within(&mut follower, Duration::from_secs(60), "finite follower");
         let _ = exit_tx.send(status);
     });
     let status = exit_rx
@@ -1351,24 +1351,26 @@ fn follow_emits_drop_notice_on_stderr() {
     )
     .expect("first message");
 
-    let mut follower = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "demo",
-            "--jsonl",
-            "--tail",
-            "1",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .arg("--json")
-        .spawn()
-        .expect("follow");
+    let mut follower = KillOnDrop(
+        cmd()
+            .args([
+                "--dir",
+                pool_dir.to_str().unwrap(),
+                "follow",
+                "demo",
+                "--jsonl",
+                "--tail",
+                "1",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .arg("--json")
+            .spawn()
+            .expect("follow"),
+    );
 
-    let stdout = follower.stdout.take().expect("stdout");
-    let stderr = follower.stderr.take().expect("stderr");
+    let stdout = follower.0.stdout.take().expect("stdout");
+    let stderr = follower.0.stderr.take().expect("stderr");
 
     let (attached_tx, attached_rx) = mpsc::channel();
     let (resume_tx, resume_rx) = mpsc::channel();
@@ -1446,8 +1448,7 @@ fn follow_emits_drop_notice_on_stderr() {
     assert!(details.get("last_seen_seq").is_some());
     assert!(details.get("next_seen_seq").is_some());
 
-    let _ = follower.kill();
-    let _ = follower.wait();
+    drop(follower);
 }
 
 #[test]
@@ -1902,7 +1903,11 @@ fn duplex_non_tty_echoes_followed_messages_without_self_echo() {
         "expected self-suppression to avoid echoing alice message"
     );
     let _ = duplex.stdin.take();
-    let status = duplex.wait().expect("duplex wait");
+    let status = wait_within(
+        &mut duplex,
+        Duration::from_secs(60),
+        "duplex after its input closed",
+    );
     assert_eq!(status.code(), Some(0), "unexpected duplex exit code");
 
     let follow_out = cmd()
@@ -2079,7 +2084,11 @@ fn duplex_remote_happy_path_sends_and_reads() {
             .expect("write stdin");
     }
     let _ = duplex.stdin.take();
-    let status = duplex.wait().expect("duplex wait");
+    let status = wait_within(
+        &mut duplex,
+        Duration::from_secs(60),
+        "duplex after its input closed",
+    );
     assert_eq!(status.code(), Some(0), "unexpected duplex exit code");
 
     let follow_out = cmd()
