@@ -852,10 +852,14 @@ impl Pool {
         payload: &[u8],
         options: AppendOptions,
     ) -> Result<u64, Error> {
-        let _lock = self.append_operation_lock()?;
+        let lock = self.append_operation_lock()?;
         // Refresh header after acquiring the lock to avoid stale state across processes.
         self.header = self.header_locked()?;
-        self.append_locked(payload, options)
+        let seq = self.append_locked(payload, options)?;
+        drop(lock);
+        // Notification is optional wake-up work after committed storage publication.
+        let _ = notify::post_for_path(&self.path);
+        Ok(seq)
     }
 
     fn append_locked(&mut self, payload: &[u8], options: AppendOptions) -> Result<u64, Error> {
@@ -938,8 +942,6 @@ impl Pool {
             self.header.tail_next_off as usize,
             self.header.oldest_seq,
         );
-
-        let _ = notify::post_for_path(&self.path);
 
         Ok(plan.seq)
     }
@@ -2162,6 +2164,82 @@ mod tests {
                 .len(),
             5
         );
+    }
+
+    #[test]
+    fn notify_reader_child() {
+        use crate::api::{PoolApiExt, TailOptions};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let Some(path) = std::env::var_os("PLASMITE_NOTIFY_READER_PATH") else {
+            return;
+        };
+        let path = std::path::PathBuf::from(path);
+        let reader = Pool::open(&path).expect("independent reader");
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut options = TailOptions::new();
+        options.poll_interval = Duration::from_millis(5);
+        options.timeout = Some(Duration::from_secs(3));
+        options.cancel = Some(Arc::clone(&cancelled));
+        let mut tail = reader.tail(options);
+        // The separate process registers its waiter before any append.
+        fs::write(path.with_extension("ready"), b"ready").expect("ready");
+        for expected in 1..=128 {
+            let message = tail.next_message().expect("tail").expect("message");
+            assert_eq!(message.seq, expected);
+            assert_eq!(message.data["n"].as_u64(), Some(expected));
+        }
+        fs::write(path.with_extension("received"), b"received").expect("received");
+        let cancel_path = path.with_extension("cancel");
+        let cancel_flag = Arc::clone(&cancelled);
+        let watcher = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while !cancel_path.exists() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(1));
+            }
+            assert!(
+                cancel_path.exists(),
+                "parent must cancel the waiting reader"
+            );
+            cancel_flag.store(true, Ordering::Release);
+        });
+        assert!(tail.next_message().expect("cancelled wait").is_none());
+        watcher.join().expect("cancel watcher");
+        assert!(cancelled.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn independent_registered_tail_reads_publications_and_cancels() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("notify.plasmite");
+        let mut writer = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("writer");
+        let mut child = Command::new(std::env::current_exe().expect("test executable"))
+            .args(["core::pool::tests::notify_reader_child", "--exact"])
+            .env("PLASMITE_NOTIFY_READER_PATH", &path)
+            .spawn()
+            .expect("reader process");
+        let wait_for = |suffix: &str| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while !path.with_extension(suffix).exists() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(1));
+            }
+            path.with_extension(suffix).exists()
+        };
+        if !wait_for("ready") {
+            let _ = child.kill();
+            panic!("reader did not register");
+        }
+        for seq in 1..=128 {
+            let payload =
+                lite3::encode_message(&[], &serde_json::json!({"n": seq})).expect("encode");
+            assert_eq!(writer.append(payload.as_slice()).expect("publish"), seq);
+        }
+        if !wait_for("received") {
+            let _ = child.kill();
+            panic!("reader missed published messages");
+        }
+        fs::write(path.with_extension("cancel"), b"cancel").expect("cancel");
+        assert!(child.wait().expect("reader exit").success());
     }
 
     #[test]

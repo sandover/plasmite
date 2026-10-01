@@ -383,7 +383,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
             if (x === y) return a.name.localeCompare(b.name);
             if (x == null) return 1;
             if (y == null) return -1;
-            return sign * (key === "name" ? x.localeCompare(y) : x - y);
+            return sign * (key === "name" ? x.localeCompare(y) : (x < y ? -1 : 1));
           });
         }
 
@@ -495,7 +495,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
               copyButton.innerHTML = doneIcon;
               copyButton.classList.add("done");
               setTimeout(function () { copyButton.innerHTML = copyIcon; copyButton.classList.remove("done"); }, 1200);
-            } catch (_) { /* Clipboard needs a secure context; the title still shows the command. */ }
+            } catch (_) { showNotice("Could not copy. Copy this command manually: " + copyButton.dataset.command); }
             return;
           }
           var poolRow = event.target.closest(".pool-row");
@@ -579,7 +579,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
                   }
                   if (name === "error") throw new Error("Pool list stream failed.");
                   if (name !== "pools") continue;
-                  list.pools = JSON.parse(data).pools || [];
+                  list.pools = PlasmiteUI.parseJSON(data).pools || [];
                   list.error = "";
                   list.reconnecting = false;
                   renderPoolList();

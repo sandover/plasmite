@@ -1,8 +1,119 @@
-// Purpose: What every UI page's top bar shares: the served directory and the jump to a pool.
-// Role: Loaded by each page before its own script; defines showDirectory() for the page to call.
-// Invariants: Pool names and paths enter the DOM as text.
+// Purpose: Exact protocol sequence IDs, status notices, and shared top bar controls.
+// Role: Loaded by each page before its own script.
+// Invariants: User data keeps JSON number semantics; pool names and paths enter the DOM as text.
 (() => {
+  const maxSequence = 18446744073709551615n;
+  const sequence = (text) => {
+    const digits = String(text).replace(/^0+/, "");
+    if (!digits.length || digits.length > 20 || !/^[0-9]+$/.test(digits) ||
+      (digits.length === 20 && digits > String(maxSequence))) return null;
+    return BigInt(digits);
+  };
+
+  // JSON numbers round u64 sequence IDs in browsers. Read their original tokens,
+  // only at protocol paths; data and meta keep ordinary JSON number semantics.
+  // This works without the newer JSON reviver context.source API.
+  function parseJSON(source) {
+    const parsed = JSON.parse(source); // Malformed input cannot stall the scanner.
+    const matches = [...source.matchAll(/"(?:\\[\s\S]|[^"\\])*"|[{}\[\]:,]|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null/g)];
+    const tokens = matches.map((match) => match[0]);
+    let at = 0;
+    const edits = [];
+    const protocolPath = (path) => {
+      if (path[0] === "pool" || path[0] === "message") return path.slice(1);
+      if (path[0] === "pools" && typeof path[1] === "number") return path.slice(2);
+      return path;
+    };
+    const isSequence = (path) => {
+      const p = protocolPath(path);
+      return (p.length === 1 && p[0] === "seq" && (path.length === 1 || path[0] === "message")) ||
+        (p.length === 2 && ((p[0] === "bounds" && (p[1] === "oldest" || p[1] === "newest")) ||
+          (p[0] === "ring" && p[1] === "first")) && path[0] !== "message");
+    };
+    const enters = (path) => {
+      if (!path.length) return true;
+      if (path.length === 1 && ["pool", "message", "pools"].includes(path[0])) return true;
+      if (path.length === 2 && path[0] === "pools" && typeof path[1] === "number") return true;
+      const p = protocolPath(path);
+      return p.length === 1 && ["bounds", "ring"].includes(p[0]) && path[0] !== "message";
+    };
+    function visit(path) {
+      const token = tokens[at++];
+      if (token === "{" || token === "[") {
+        if (!enters(path)) {
+          let depth = 1;
+          while (depth) {
+            const t = tokens[at++];
+            if (t === "{" || t === "[") depth++;
+            if (t === "}" || t === "]") depth--;
+          }
+          return;
+        }
+        let index = 0;
+        const end = token === "{" ? "}" : "]";
+        while (tokens[at] !== end) {
+          const key = token === "{" ? JSON.parse(tokens[at++]) : index++;
+          if (token === "{") at++; // colon
+          visit([...path, key]);
+          if (tokens[at] === ",") at++;
+        }
+        at++;
+      } else if (isSequence(path)) {
+        if (/^[0-9]+$/.test(token)) edits.push(matches[at - 1]);
+      }
+    }
+    visit([]);
+    if (!edits.length) return parsed;
+    for (const edit of edits.reverse()) {
+      source = source.slice(0, edit.index) + '"' + edit[0] + '"' + source.slice(edit.index + edit[0].length);
+    }
+    const value = JSON.parse(source);
+    const exact = (object, key) => {
+      if (object && typeof object[key] === "string" && /^[0-9]+$/.test(object[key])) object[key] = BigInt(object[key]);
+    };
+    const pool = (object) => {
+      exact(object?.bounds, "oldest"); exact(object?.bounds, "newest"); exact(object?.ring, "first");
+    };
+    exact(value, "seq"); exact(value.message, "seq");
+    pool(value); pool(value.pool);
+    if (Array.isArray(value.pools)) value.pools.forEach(pool);
+    return value;
+  }
+
+  window.PlasmiteUI = {
+    parseJSON, sequence,
+    cursor: (next) => next > maxSequence ? null : String(next),
+    tailStart: (bounds, count) => {
+      if (typeof bounds.newest !== "bigint") return null;
+      const start = bounds.newest - BigInt(count) + 1n;
+      return start > (bounds.oldest || 1n) ? start : (bounds.oldest || 1n);
+    },
+    messageJSON: (message) => JSON.stringify({ ...message, seq: String(message.seq) }, null, 2)
+      .replace(/^  "seq": "([0-9]+)"/m, '  "seq": $1'),
+    loginURL: () => "/ui?next=" + encodeURIComponent(location.pathname + location.search +
+      (sequence(location.hash.slice(1)) != null ? location.hash : "")),
+  };
+
+  let noticeTimer;
+  window.showNotice = (text, persistent = false) => {
+    let notice = document.getElementById("ui-notice");
+    if (!notice) {
+      notice = document.createElement("div");
+      notice.id = "ui-notice";
+      notice.setAttribute("role", "status");
+      document.body.append(notice);
+    }
+    clearTimeout(noticeTimer);
+    notice.textContent = text;
+    notice.hidden = !text;
+    if (!persistent) noticeTimer = setTimeout(() => { notice.hidden = true; }, 8000);
+  };
+
   const css = `
+    #ui-notice { position: fixed; bottom: 16px; left: 16px; max-width: min(560px, calc(100vw - 32px));
+      z-index: 30; padding: 10px 14px; border: 1px solid var(--muted); border-radius: 6px;
+      background: #162026; color: var(--text); font: 13px/1.5 var(--sans); overflow-wrap: anywhere; box-shadow: 0 4px 20px #0006; }
+    #ui-notice[hidden] { display: none; }
     /* The served directory: named "Serving", parent folders muted, its own name bright,
        breaking only after a slash. A click copies it, as its copy mark says. */
     .topbar { flex-wrap: wrap; row-gap: 4px; }
@@ -74,7 +185,7 @@
       button.classList.add("done");
       button.querySelector(".mark").innerHTML = doneIcon;
       setTimeout(() => { button.classList.remove("done"); button.querySelector(".mark").innerHTML = copyIcon; }, 1200);
-    } catch (_) { /* Clipboard needs a secure context; the title still shows the path. */ }
+    } catch (_) { showNotice("Could not copy. Copy this path manually: " + button.dataset.dir); }
   });
 
   // The jump: g opens a list of the pools; typing narrows it, matching anywhere in a

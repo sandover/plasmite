@@ -355,6 +355,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
     <script>
       (() => {
         const $ = (id) => document.getElementById(id);
+        const { parseJSON, sequence, cursor, tailStart, messageJSON, loginURL } = PlasmiteUI;
         const poolPath = location.pathname.slice("/ui/pools/".length);
         const poolName = (() => { try { return decodeURIComponent(poolPath); } catch (_) { return poolPath; } })();
         const requested = Number(new URLSearchParams(location.search).get("n") || "400");
@@ -647,12 +648,17 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         let pending = [];
         let frame = 0;
         function addMessage(raw) {
-          if (!Number.isFinite(raw.seq)) return;
+          if (typeof raw.seq !== "bigint") return;
           if (state.nextSeq != null && raw.seq < state.nextSeq) return;
-          state.nextSeq = raw.seq + 1;
+          state.nextSeq = raw.seq + 1n;
           pending.push(fromRaw(raw));
           if (pending.length > state.keep) pending.shift();
           if (!frame) frame = requestAnimationFrame(flush);
+          if (cursor(state.nextSeq) == null) {
+            setLive(false);
+            $("live").textContent = "sequence limit";
+            showNotice("This pool reached the maximum sequence number. Its messages remain available; start a new pool to continue feeding.", true);
+          }
         }
 
         function flush() {
@@ -902,7 +908,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           if (target > state.messages[state.messages.length - 1].seq) return;
           try {
             const response = await fetch("/v0/pools/" + encodeURIComponent(poolName) + "/messages/" + target, { cache: "no-store" });
-            if (response.ok) select(fromRaw((await response.json()).message));
+            if (response.ok) select(fromRaw(parseJSON(await response.text()).message));
           } catch (_) { /* The address stays; the log is still here. */ }
         }
 
@@ -936,7 +942,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
             icon.innerHTML = doneIcon;
             button.classList.add("done");
             setTimeout(() => { icon.innerHTML = copyIcon; button.classList.remove("done"); }, 1200);
-          } catch (_) { /* Clipboard needs a secure context; the text stays selectable. */ }
+          } catch (_) { showNotice("Could not copy. Select the text and copy it manually, or allow clipboard access."); }
         }
 
         // Header.
@@ -995,15 +1001,15 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         // Server.
 
         function toLogin() {
-          location.assign("/ui?next=" + encodeURIComponent(location.pathname + location.search));
+          location.assign(loginURL());
         }
 
-        async function loadInfo() {
-          const response = await fetch("/v0/ui/pools/" + encodeURIComponent(poolName) + "/info", { cache: "no-store" });
+        async function loadInfo(signal) {
+          const response = await fetch("/v0/ui/pools/" + encodeURIComponent(poolName) + "/info", { cache: "no-store", signal });
           if (response.status === 401) { toLogin(); return false; }
           if (response.status === 404) { showMissing(); return false; }
           if (!response.ok) throw new Error("Pool info failed (" + response.status + ")");
-          state.info = (await response.json()).pool || null;
+          state.info = parseJSON(await response.text()).pool || null;
           renderFacts();
           return true;
         }
@@ -1027,7 +1033,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
               if (line.startsWith("event:")) name = line.slice(6).trim();
               if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
             }
-            if (data.length) events.push({ name, data: JSON.parse(data.join("\n")) });
+            if (data.length) events.push({ name, data: parseJSON(data.join("\n")) });
           }
           return { events, rest };
         }
@@ -1036,29 +1042,37 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         // through everything the ring still holds.
         function oldestHeld() {
           const bounds = (state.info && state.info.bounds) || {};
-          return Number.isFinite(bounds.oldest) ? bounds.oldest : null;
+          return typeof bounds.oldest === "bigint" ? bounds.oldest : null;
         }
 
         function showEarlier() {
           const first = state.messages[0];
           const oldest = oldestHeld();
-          const more = first && oldest != null ? first.seq - oldest : 0;
+          const more = first && oldest != null ? first.seq - oldest : 0n;
           $("earlier").hidden = more <= 0;
-          $("earlier").textContent = "Load " + count(Math.min(pageSize, more)) + " earlier";
+          $("earlier").textContent = "Load " + count(more > BigInt(pageSize) ? pageSize : Number(more)) + " earlier";
         }
 
-        // Reads up to one page of messages before the first shown. The stream runs on into
-        // messages already shown, so reading stops at the first of those.
+        // Read one bounded page. Refresh retention first: a writer may have overwritten
+        // the older messages since the last snapshot. Both server and browser time out.
         async function loadEarlier() {
+          if ($("earlier").disabled) return;
           const first = state.messages[0];
-          const oldest = oldestHeld();
-          if (!first || oldest == null || first.seq <= oldest) return;
-          const from = Math.max(oldest, first.seq - pageSize);
+          if (!first) return;
           const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 5000);
           const older = [];
           $("earlier").disabled = true;
           try {
-            const query = new URLSearchParams({ gap_policy: "continue", since_seq: from, max: first.seq - from });
+            if (!(await loadInfo(controller.signal))) return;
+            const oldest = oldestHeld();
+            if (oldest == null || first.seq <= oldest) {
+              showNotice("Those earlier messages have been overwritten. The log shows the retained messages.");
+              return;
+            }
+            const start = first.seq - BigInt(pageSize);
+            const from = start > oldest ? start : oldest;
+            const query = new URLSearchParams({ gap_policy: "error", since_seq: from, max: first.seq - from, timeout_ms: 1000 });
             const response = await fetch("/v0/ui/pools/" + encodeURIComponent(poolName) + "/events?" + query,
               { cache: "no-store", signal: controller.signal });
             if (response.status === 401) { toLogin(); return; }
@@ -1072,14 +1086,24 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
               const parsed = parseEvents(buffer + decoder.decode(part.value, { stream: true }).replaceAll("\r\n", "\n"));
               buffer = parsed.rest;
               for (const event of parsed.events) {
+                if (event.name === "error") throw new Error(event.data.error?.message || "Earlier messages were overwritten");
                 if (event.name !== "message") continue;
                 if (event.data.seq >= first.seq) break reading;
                 older.push(fromRaw(event.data));
+                if (older.length >= pageSize) break reading;
               }
             }
-          } catch (_) { /* Keep what arrived; the button stays to try again. */ }
-          finally { controller.abort(); $("earlier").disabled = false; }
-          if (!older.length) { showEarlier(); return; }
+            if (!older.length) showNotice("No earlier messages arrived. They may have been overwritten; try Load earlier again.");
+          } catch (error) {
+            showNotice(controller.signal.aborted ? "Loading earlier messages timed out. Try Load earlier again." :
+              "Could not load earlier messages: " + (error.message || error) + ". Try Load earlier again.");
+          } finally {
+            clearTimeout(timer);
+            controller.abort();
+            $("earlier").disabled = false;
+            showEarlier();
+          }
+          if (!older.length) return;
           // Keep the reader's place: the rows they were reading stay where they were.
           const log = $("log");
           const fromBottom = log.scrollHeight - log.scrollTop;
@@ -1096,9 +1120,10 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         // Follows the pool from the next unseen message, reconnecting after any drop.
         async function followPool() {
           for (;;) {
+            if (state.nextSeq != null && cursor(state.nextSeq) == null) return;
             try {
               const query = new URLSearchParams({ gap_policy: "continue" });
-              if (state.nextSeq != null) query.set("since_seq", state.nextSeq);
+              if (state.nextSeq != null) query.set("since_seq", cursor(state.nextSeq));
               const response = await fetch("/v0/ui/pools/" + encodeURIComponent(poolName) + "/events?" + query, { cache: "no-store" });
               if (response.status === 401) { toLogin(); return; }
               if (response.status === 404) { showMissing(); return; }
@@ -1114,7 +1139,10 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
                 buffer = parsed.rest;
                 for (const event of parsed.events) {
                   if (event.name === "error") throw new Error("Stream error");
-                  if (event.name === "message") addMessage(event.data);
+                  if (event.name === "message") {
+                    addMessage(event.data);
+                    if (cursor(state.nextSeq) == null) { await reader.cancel(); return; }
+                  }
                 }
               }
             } catch (_) { /* Reconnect below. */ }
@@ -1128,7 +1156,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         $("rows").addEventListener("click", (event) => {
           const row = event.target.closest(".row");
           if (!row || !window.getSelection().isCollapsed) return;
-          const message = state.messages.find((item) => item.seq === Number(row.dataset.seq));
+          const message = state.messages.find((item) => item.seq === sequence(row.dataset.seq));
           select(message === state.selected ? null : message);
         });
         $("close").addEventListener("click", () => select(null));
@@ -1138,12 +1166,12 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           if (state.selected) copy($("copy-link"), messageLink(state.selected));
         });
         window.addEventListener("hashchange", () => {
-          const seq = Number(location.hash.slice(1));
-          if (Number.isInteger(seq) && seq >= 0 && seq !== state.selected?.seq) { state.target = seq; openTarget(); }
+          const seq = sequence(location.hash.slice(1));
+          if (seq != null && seq !== state.selected?.seq) { state.target = seq; openTarget(); }
         });
         $("copy-cli").querySelector("[data-icon]").innerHTML = copyIcon;
         $("copy-json").addEventListener("click", () => {
-          if (state.selected) copy($("copy-json"), JSON.stringify(state.selected.raw, null, 2));
+          if (state.selected) copy($("copy-json"), messageJSON(state.selected.raw));
         });
         $("copy-cli").addEventListener("click", () => copy($("copy-cli"), $("cli").textContent));
         $("jump").addEventListener("click", scrollToBottom);
@@ -1201,7 +1229,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
             const session = await fetch("/v0/browser/session", { cache: "no-store" });
             if (!session.ok) { toLogin(); return; }
             state.local = Boolean((await session.json()).local);
-          } catch (_) { setLive(false); return; }
+          } catch (_) { setLive(false); showNotice("Could not check your session. Reload this page to retry.", true); return; }
           $("nav-access").hidden = !state.local;
           const where = span(state.local ? "where local" : "where", state.local ? "Local" : location.hostname);
           if (state.local) where.title = "No key needed";
@@ -1217,13 +1245,12 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
             $("actions").append(logout);
           }
           document.title = poolName + " · " + (state.local ? "local" : location.hostname);
-          try { if (!(await loadInfo())) return; } catch (_) { /* The stream still runs; facts fill in on the next try. */ }
+          try { if (!(await loadInfo())) return; } catch (_) { showNotice("Could not load pool details. Retrying while the message stream connects."); }
           const bounds = (state.info && state.info.bounds) || {};
-          if (Number.isFinite(bounds.newest)) state.nextSeq = Math.max(bounds.oldest || 1, bounds.newest - state.keep + 1);
+          state.nextSeq = tailStart(bounds, state.keep);
           loadPins();
           try { state.utc = localStorage.getItem("plasmite.utc") === "1"; } catch (_) { state.utc = false; }
-          const linked = Number(location.hash.slice(1));
-          if (location.hash && Number.isInteger(linked) && linked >= 0) state.target = linked;
+          state.target = sequence(location.hash.slice(1));
           applyFilter();
           // Rows take their height from the font, so the first scroll to the newest waits for it.
           await document.fonts.ready;

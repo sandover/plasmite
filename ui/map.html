@@ -237,6 +237,7 @@ Invariants: Message data enters the DOM as text.
       (() => {
         "use strict";
         const $ = (id) => document.getElementById(id);
+        const { parseJSON, sequence, cursor, tailStart } = PlasmiteUI;
         const scroll = $("map-scroll");
         const messages = $("messages");
         const cards = new Map();
@@ -459,7 +460,7 @@ Invariants: Message data enters the DOM as text.
             for (let age = 0; age < ageBands; age++) for (const alt of [false, true]) bands.push({ age, alt, intervals: [] });
             pieces.forEach((piece, i) => {
               const age = Math.floor(i * ageBands / pieces.length);
-              bands[age * 2 + (pool.ring.first + i) % 2].intervals.push(piece);
+              bands[age * 2 + Number((pool.ring.first + BigInt(i)) % 2n)].intervals.push(piece);
             });
             return { bands, head: head ? [head] : [] };
           }
@@ -477,9 +478,10 @@ Invariants: Message data enters the DOM as text.
         // ring's own first frame. Null when it is gone or there is no frame list.
         function segmentOf(pool, seq, scale) {
           const list = frames(pool);
-          const index = seq - (pool.ring && pool.ring.first);
-          if (!list || !Number.isInteger(index) || index < 0 || index >= list.length) return null;
-          return drawn(list[index][0], list[index][1], scale);
+          if (!list || typeof seq !== "bigint" || typeof pool.ring.first !== "bigint") return null;
+          const index = seq - pool.ring.first;
+          if (index < 0n || index >= BigInt(list.length)) return null;
+          return drawn(list[Number(index)][0], list[Number(index)][1], scale);
         }
 
         // Dash pattern that paints the given intervals on a circle whose dash
@@ -528,7 +530,7 @@ Invariants: Message data enters the DOM as text.
           // pointer when the two meet.
           const near = spotAt && Math.abs(Math.atan2(Math.sin(end.theta - spotAt.theta), Math.cos(end.theta - spotAt.theta))) * rim < 24;
           const indexRadius = near ? rim + 14 : rim + 3;
-          const newestSeq = list ? (list.length ? pool.ring.first + list.length - 1 : null) : pool.bounds && pool.bounds.newest;
+          const newestSeq = list ? (list.length ? pool.ring.first + BigInt(list.length) - 1n : null) : pool.bounds && pool.bounds.newest;
           const start = track.points[0], last = track.points[track.points.length - 1];
           return {
             track,
@@ -1034,7 +1036,7 @@ Invariants: Message data enters the DOM as text.
               if (line.startsWith("event:")) name = line.slice(6).trim();
               if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
             }
-            if (data.length) events.push({ name, data: JSON.parse(data.join("\n")) });
+            if (data.length) events.push({ name, data: parseJSON(data.join("\n")) });
           }
           return { events, rest };
         }
@@ -1095,7 +1097,7 @@ Invariants: Message data enters the DOM as text.
           stopReader();
           state.stopReader = follow(() => {
             const query = new URLSearchParams({ gap_policy: "continue" });
-            if (state.nextSeq != null) query.set("since_seq", state.nextSeq);
+            if (state.nextSeq != null) query.set("since_seq", cursor(state.nextSeq));
             return "/v0/ui/pools/" + encodeURIComponent(name) + "/events?" + query;
           }, (event) => { if (event.name === "message") addMessage(event.data); });
         }
@@ -1114,7 +1116,7 @@ Invariants: Message data enters the DOM as text.
           const pool = currentPool();
           if (!pool) return;
           const bounds = pool.bounds || {};
-          state.nextSeq = bounds.newest == null ? null : Math.max(bounds.oldest || 1, bounds.newest - maxMessages + 1);
+          state.nextSeq = tailStart(bounds, maxMessages);
           messages.replaceChildren();
           $("peek").setAttribute("aria-label", name + " messages");
           // Reserve message rows before the first tail frame, so the link stays under the pointer.
@@ -1191,9 +1193,9 @@ Invariants: Message data enters the DOM as text.
         }
 
         function addMessage(message) {
-          if (!Number.isFinite(message.seq)) return;
+          if (typeof message.seq !== "bigint") return;
           if (state.nextSeq != null && message.seq < state.nextSeq) return;
-          state.nextSeq = message.seq + 1;
+          state.nextSeq = message.seq + 1n;
           const row = document.createElement("div");
           row.className = "message";
           row.dataset.seq = message.seq;
@@ -1218,6 +1220,10 @@ Invariants: Message data enters the DOM as text.
             messages.firstElementChild.remove();
           }
           if (nearBottom) messages.scrollTop = messages.scrollHeight;
+          if (cursor(state.nextSeq) == null) {
+            stopReader();
+            showNotice("This pool reached the maximum sequence number. Its messages remain available; start a new pool to continue feeding.", true);
+          }
         }
 
         // Hover.
@@ -1243,7 +1249,7 @@ Invariants: Message data enters the DOM as text.
           if (row === hoverRow) return;
           hoverRow = row;
           hideTip();
-          spot(row ? Number(row.dataset.seq) : null);
+          spot(row ? sequence(row.dataset.seq) : null);
           if (!row) return;
           const text = row.querySelector(".text");
           if (text.scrollWidth <= text.clientWidth) return;
@@ -1304,7 +1310,7 @@ Invariants: Message data enters the DOM as text.
             followIcon.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>';
             $("follow-copy").classList.add("done");
             setTimeout(() => { followIcon.innerHTML = followCopyIcon; $("follow-copy").classList.remove("done"); }, 1200);
-          } catch (_) { /* Clipboard needs a secure context; the command stays selectable. */ }
+          } catch (_) { showNotice("Could not copy. Copy this command manually: " + $("follow-copy").dataset.command); }
         });
         // Capture catches scrolling inside the map as well as the page.
         window.addEventListener("scroll", fitPeek, { capture: true, passive: true });

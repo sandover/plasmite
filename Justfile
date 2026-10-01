@@ -76,12 +76,16 @@ bindings-node-typecheck:
 # Run all language bindings tests and checks.
 bindings-test: bindings-go-test bindings-python-test bindings-node-test bindings-node-typecheck
 
+# Check browser sequence precision, bounded history, and recovery behavior.
+ui-smoke:
+	node --test scripts/ui_smoke.cjs
+
 # Core, deterministic checks for every local change and pull request.
 check: fmt clippy test check-version-alignment check-release-targets verify-lite3
 
 # Cross-language and artifact checks. Requires Go, Node, Python, and uv.
 # `bindings-test` includes node pack and remote-only smoke tests.
-integration: cookbook-smoke abi-smoke conformance-all cross-artifact-smoke bindings-test
+integration: cookbook-smoke abi-smoke conformance-all cross-artifact-smoke bindings-test ui-smoke
 
 # Canonical release candidate gate before merging, tagging, or publishing.
 release-gate: check integration abi-release
