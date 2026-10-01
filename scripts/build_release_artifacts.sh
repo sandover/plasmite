@@ -28,6 +28,10 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 "$root_dir/scripts/release_target_field.sh" "$target" node_platform >/dev/null
 
 build_static=false
+case "$target" in
+  x86_64-apple-darwin) export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-10.12}" ;;
+  aarch64-apple-darwin) export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}" ;;
+esac
 if [[ $# -eq 2 ]]; then
   if [[ "$2" != "--static" ]]; then
     usage

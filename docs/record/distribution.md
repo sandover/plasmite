@@ -24,6 +24,17 @@ Official platforms:
 - Linux: `x86_64-unknown-linux-gnu`
 - Windows: `x86_64-pc-windows-msvc` via npm and PyPI release artifacts
 
+The 1.0 Linux x86_64 prebuilt CLI (SDK, Homebrew, and npm) requires glibc
+2.39 or newer. Ubuntu 22.04 and Debian 12 have older glibc versions; use a
+source build on those systems. The ARM preview has its separate glibc 2.35
+baseline below. Check your system with `getconf GNU_LIBC_VERSION`.
+
+macOS native artifacts target macOS 10.12 on Intel and macOS 11 on Apple
+Silicon. Python wheel tags describe the bundled CLI and library architecture
+and their minimum OS version; a thin native bundle does not claim `universal2`.
+These compiler deployment targets do not establish runtime testing on every
+older macOS version. Release smoke tests run on the declared CI hosts.
+
 Not currently targeted:
 - Linux distro packages (`apt`, `yum`, `pacman`, etc.)
 

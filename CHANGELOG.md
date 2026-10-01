@@ -18,6 +18,7 @@ Install or update using the [supported distribution channels](https://github.com
 - **Remote access must be set up again.** Old token configuration and insecure TLS options are removed, with no automatic conversion. Update shared servers and recipients together, then use `access invite` and `access connect`.
 - **Access keys grant full access to a served directory, including future pools.** The old read-only mode has no replacement in 1.0. Separate directories can isolate groups of pools, but do not provide read-only access.
 - **Node.js 24 or later is required.**
+- **Linux x86_64 prebuilt CLI binaries require glibc 2.39 or later.** On older systems, see the [source-build requirements and instructions](https://github.com/sandover/plasmite/blob/v1.0.0/docs/building.md#install-the-cli-from-source).
 - **Rust callers may need source changes.** Remote-client builders and frame lifetimes changed; see the [Rust migration steps](https://github.com/sandover/plasmite/blob/v1.0.0/docs/record/upgrading-1.0.md#update-rust-clients).
 
 ### A more consistent CLI

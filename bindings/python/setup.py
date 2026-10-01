@@ -11,20 +11,13 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 from setuptools import setup
 from setuptools.command.build_py import build_py
-
-try:
-    from setuptools.command.bdist_wheel import bdist_wheel
-except ImportError:  # pragma: no cover - fallback for older setuptools
-    from wheel.bdist_wheel import bdist_wheel
-
-try:
-    from setuptools.command.bdist_wheel import bdist_wheel
-except ImportError:  # pragma: no cover - fallback for older setuptools
-    from wheel.bdist_wheel import bdist_wheel
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from wheel_platform import macos_platform_tag
 
 try:
     from setuptools.command.bdist_wheel import bdist_wheel
@@ -96,6 +89,14 @@ class BdistWheelWithNativeBundle(bdist_wheel):
     def finalize_options(self) -> None:
         super().finalize_options()
         self.root_is_pure = False
+
+    def get_tag(self) -> tuple[str, str, str]:
+        python_tag, abi_tag, platform_tag = super().get_tag()
+        if platform_tag.startswith("macosx_"):
+            install = self.get_finalized_command("install")
+            native_dir = Path(install.install_lib) / "plasmite" / "_native"
+            platform_tag = macos_platform_tag(native_dir, platform_tag)
+        return python_tag, abi_tag, platform_tag
 
 
 setup(cmdclass={"build_py": BuildPyWithNativeBundle, "bdist_wheel": BdistWheelWithNativeBundle})
