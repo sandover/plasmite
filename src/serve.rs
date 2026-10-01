@@ -415,10 +415,11 @@ async fn local_request_guard(request: Request<Body>, next: Next) -> Response {
         .get(header::HOST)
         .and_then(|value| value.to_str().ok());
     let Some(host) = host else {
-        return error_response_with_status(
+        return reject_after_body(
+            request,
             Error::new(ErrorKind::Permission).with_message("local request requires a Host header"),
-            StatusCode::FORBIDDEN,
-        );
+        )
+        .await;
     };
     let parsed_host = Url::parse(&format!("http://{host}/"));
     let host_is_local = parsed_host.as_ref().is_ok_and(|url| {
@@ -439,10 +440,11 @@ async fn local_request_guard(request: Request<Body>, next: Next) -> Response {
         }),
     };
     if !host_is_local || !origin_matches {
-        return error_response_with_status(
+        return reject_after_body(
+            request,
             Error::new(ErrorKind::Permission).with_message("untrusted local request origin"),
-            StatusCode::FORBIDDEN,
-        );
+        )
+        .await;
     }
     next.run(request).await
 }
@@ -454,12 +456,27 @@ async fn remote_browser_guard(request: Request<Body>, next: Next) -> Response {
         && cookie_token(request.headers()).is_some()
         && !request.headers().contains_key(header::AUTHORIZATION);
     if (browser_login || cookie_write) && !same_origin(request.headers(), request.uri(), "https") {
-        return error_response_with_status(
+        return reject_after_body(
+            request,
             Error::new(ErrorKind::Permission).with_message("untrusted browser request origin"),
-            StatusCode::FORBIDDEN,
-        );
+        )
+        .await;
     }
     next.run(request).await
+}
+
+/// Largest request body a guard reads before it rejects the request.
+const REJECTED_BODY_DRAIN_BYTES: usize = 64 * 1024;
+
+/// Rejects a request with 403 after reading its body.
+///
+/// When a response goes out before the request body arrives, hyper closes the
+/// connection, and body bytes that arrive after the close make the kernel reset
+/// it. The reset can destroy the response before the client reads it. Reading
+/// the body first keeps the connection open. Bodies over the cap still close it.
+async fn reject_after_body(request: Request<Body>, err: Error) -> Response {
+    let _ = axum::body::to_bytes(request.into_body(), REJECTED_BODY_DRAIN_BYTES).await;
+    error_response_with_status(err, StatusCode::FORBIDDEN)
 }
 
 fn same_origin(headers: &HeaderMap, uri: &Uri, scheme: &str) -> bool {
