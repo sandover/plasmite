@@ -71,6 +71,7 @@ const UI_INDEX_HTML: &str = include_str!("../ui/index.html");
 const UI_ACCESS_HTML: &str = include_str!("../ui/access.html");
 const UI_MAP_HTML: &str = include_str!("../ui/map.html");
 const UI_POOL_HTML: &str = include_str!("../ui/pool.html");
+const UI_COMMON_JS: &str = include_str!("../ui/common.js");
 const UI_INCONSOLATA_WOFF2: &[u8] =
     include_bytes!("../ui/fonts/inconsolata-latin-wght-normal.woff2");
 const READY_FILE_ENV: &str = "PLASMITE_SERVE_READY_FILE";
@@ -311,6 +312,7 @@ async fn prepare_server_with_access(
         .route("/ui", get(ui_index))
         .route("/ui/map", get(ui_map))
         .route("/ui/assets/inconsolata.woff2", get(ui_inconsolata))
+        .route("/ui/assets/common.js", get(ui_common_js))
         .route("/ui/pools/:pool", get(ui_pool))
         .route("/access", get(ui_access))
         .route("/v0/pools", post(create_pool).get(list_pools))
@@ -1399,6 +1401,22 @@ async fn ui_inconsolata() -> Response {
     response
 }
 
+/// The top bar every UI page shares: the served directory and the jump to a pool.
+async fn ui_common_js() -> Response {
+    let mut response = Response::new(Body::from(UI_COMMON_JS));
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/javascript; charset=utf-8"),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
 async fn ui_pool(AxumPath(_pool): AxumPath<String>) -> Response {
     html_response(UI_POOL_HTML)
 }
@@ -2336,7 +2354,7 @@ fn html_response(body: &str) -> Response {
         HeaderValue::from_static("no-referrer"),
     );
     response.headers_mut().insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(
-        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+        "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
     ));
     response.headers_mut().insert(
         header::X_CONTENT_TYPE_OPTIONS,

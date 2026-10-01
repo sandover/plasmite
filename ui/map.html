@@ -29,19 +29,22 @@ Invariants: Message data enters the DOM as text.
         font-weight: 200 900;
         font-display: swap;
       }
+      /* Colors: the Solar Eclipse "Ashen" ground and text, with accents at the text's
+         lightness and low chroma, so nothing glows against the dark. */
       :root {
         color-scheme: dark;
-        --bg: #15191f;
-        --panel-raised: #27313e;
-        --line: #394657;
-        --text: #e9edf1;
-        --muted: #9aa9b8;
-        --accent: #83c5d7;
-        --ok: #74d7b2;
-        --warn: #e8bc72;
-        --error: #f08383;
-        --spot: #ffd166;
-        --head: #e6f6fa;
+        --bg: #0f181e;
+        --panel-raised: #182228;
+        --line: #2d373e;
+        --text: #979ca0;
+        --bright: #a4a9ad;
+        --muted: #868b90;
+        --accent: #64a6a8;
+        --ok: #74a78e;
+        --warn: #bba074;
+        --error: #c0807b;
+        --spot: #dab975;
+        --head: #e7ead7;
         /* Two voices: the system's own sans for the interface, which loads nothing, and
            the embedded Inconsolata for data. A region uses one or the other throughout. */
         --sans: system-ui, sans-serif;
@@ -53,7 +56,7 @@ Invariants: Message data enters the DOM as text.
       body {
         margin: 0;
         min-height: 100vh;
-        background: radial-gradient(circle at 30% -20%, #263543, transparent 55%), var(--bg);
+        background: radial-gradient(circle at 30% -20%, #16222a, transparent 55%), var(--bg);
         color: var(--text);
         font: 14px/1.5 var(--sans);
       }
@@ -62,12 +65,12 @@ Invariants: Message data enters the DOM as text.
       .shell { min-height: 100vh; display: flex; flex-direction: column; }
       .topbar {
         display: flex; align-items: baseline; gap: 22px;
-        padding: 10px 18px; border-bottom: 1px solid var(--line); background: #1a2028;
+        padding: 10px 18px; border-bottom: 1px solid var(--line); background: #111b21;
       }
-      .brand { color: var(--text); font: 14px var(--mono); letter-spacing: .11em; text-decoration: none; }
+      .brand { color: var(--accent); font: 14px var(--mono); letter-spacing: .11em; text-decoration: none; }
       .topbar nav { display: flex; align-items: baseline; gap: 16px; }
       .topbar nav a { text-decoration: none; color: var(--muted); }
-      .topbar nav a[aria-current="page"] { color: var(--text); }
+      .topbar nav a[aria-current="page"] { color: var(--bright); text-decoration: underline 2px var(--accent); text-underline-offset: 7px; }
       .topbar .status { margin-left: auto; color: var(--muted); font-size: 12px; }
       .topbar .actions { margin-left: auto; display: flex; gap: 14px; font-size: 12px; }
       .topbar .where { color: var(--muted); }
@@ -83,17 +86,7 @@ Invariants: Message data enters the DOM as text.
       .map-scroll { flex: 1; overflow: auto; padding: 16px; }
       .map { position: relative; margin: 0 auto; }
       .map, .directory, .pool, .peek { transition: left var(--ease), top var(--ease), width var(--ease), height var(--ease); }
-      .directory { position: absolute; border: 1px solid #547382; background: #22313b; border-radius: 13px; }
-      .group-label { position: absolute; top: 10px; left: 16px; right: 16px; display: flex; gap: 10px; align-items: baseline; font-size: 12px; }
-      .group-label strong { font-weight: 600; }
-      .path {
-        display: flex; min-width: 0; padding: 1px 4px; margin: -1px -4px; border: 0; border-radius: 5px;
-        background: none; color: var(--text); font: 12px var(--mono); white-space: nowrap;
-      }
-      .path .parent { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
-      .path strong { flex: none; }
-      .path:hover, .path:focus-visible { background: var(--panel-raised); outline: none; }
-      .copied { color: var(--ok); font-size: 11px; }
+      .directory { position: absolute; }
       .empty { position: absolute; display: grid; place-items: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; }
 
       .pool {
@@ -106,38 +99,48 @@ Invariants: Message data enters the DOM as text.
       .pool .label { display: flex; flex-direction: column; align-items: center; gap: 1px; pointer-events: none; }
       @keyframes appear { from { opacity: 0; transform: scale(.94); } }
       .pool svg { display: block; overflow: visible; }
-      .pool .track { fill: none; stroke: #16202a; }
-      .pool .leg { stroke: #3a4a5a; stroke-width: 1.5; }
+      .pool .track { fill: none; stroke: #1d272d; }
+      .pool .leg { stroke: #3f4950; stroke-width: 1.5; }
       .pool .leader { stroke: var(--head); stroke-width: 1; opacity: .75; }
       .pool .arc { fill: none; stroke: var(--accent); }
       .pool .spot { fill: none; stroke: var(--spot); }
-      .pool .pointer { fill: var(--spot); filter: drop-shadow(0 0 3px #ffd16680); }
+      .pool .pointer { fill: var(--spot); filter: drop-shadow(0 0 3px #dab97580); }
       .pool .head { fill: none; stroke: var(--head); }
+      /* A new message lights the ring's newest segment for a moment. */
+      @media (prefers-reduced-motion: no-preference) {
+        .pool.arrived .head { animation: head-arrived 1.6s ease-out; }
+        @keyframes head-arrived { from { filter: drop-shadow(0 0 5px #e7ead7cc); } }
+      }
+      .foot { display: flex; align-items: center; gap: 8px; padding: 0 10px 0 0; border-top: 1px solid var(--line); }
+      .foot .more { flex: 1; border-top: 0; }
+      .follow-copy {
+        display: inline-flex; gap: 5px; align-items: center; padding: 2px 6px; border: 0; border-radius: 5px;
+        background: none; color: var(--muted); font: 11px var(--sans); white-space: nowrap;
+      }
+      .follow-copy:hover, .follow-copy:focus-visible { color: var(--text); background: var(--panel-raised); outline: none; }
+      .follow-copy.done { color: var(--ok); }
+      .follow-copy svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
       .pool .index { fill: var(--text); font-family: var(--mono); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
       .pool .name, .pool .meta { max-width: 100%; }
       .pool .name { font: 13px/1.2 var(--mono); text-align: center; overflow-wrap: anywhere; }
       .pool .meta { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-family: var(--mono); font-size: 11px; }
-      .pool:hover .track, .pool:focus-visible .track { stroke: #1b2631; }
+      .pool:hover .track, .pool:focus-visible .track { stroke: #263038; }
       .pool:focus-visible { outline: none; }
       .pool:focus-visible .name { text-decoration: underline; }
       .pool[aria-expanded="true"] .name { color: var(--ok); }
       .activity-button {
-        position: absolute; z-index: 2; transform: translateX(-50%); display: flex; align-items: center;
-        justify-content: center; gap: 4px; min-width: 40px; height: 20px; padding: 2px 5px;
-        border: 0; border-radius: 6px; background: none; color: var(--muted); font: 11px var(--mono);
+        position: absolute; z-index: 2; transform: translateX(-50%); min-width: 40px; padding: 2px 5px;
+        border: 0; border-radius: 6px; background: none; color: var(--muted); font: 11px/1.25 var(--mono); text-align: center;
       }
+      .activity-button .part { white-space: nowrap; }
       .activity-button:hover, .activity-button:focus-visible { background: var(--panel-raised); color: var(--text); outline: none; }
       .activity-button:disabled { cursor: default; }
       .activity-button:disabled:hover { background: none; color: var(--muted); }
-      .activity-mark { display: inline-block; width: 5px; height: 5px; border: 1px solid currentColor; border-radius: 50%; }
-      .activity-mark.local { background: currentColor; }
-      .activity-mark.browser { border-radius: 1px; }
-      .activity-mark.mcp { border-radius: 0; transform: rotate(45deg); }
       .activity-card[hidden] { display: none; }
       .activity-card {
         position: fixed; z-index: 10; overflow: auto;
         width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0;
-        background: #1a2028; color: var(--text); border: 1px solid #526578; border-radius: 12px;
+        background: #111b21; color: var(--text); border: 1px solid #3f4950; border-radius: 12px;
         box-shadow: 0 10px 40px #0008; font-size: 12px;
       }
       .activity-heading { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--line); }
@@ -151,32 +154,33 @@ Invariants: Message data enters the DOM as text.
 
       .peek {
         position: absolute; z-index: 3; display: flex; flex-direction: column; animation: appear var(--ease);
-        background: #1a2028; border: 1px solid #526578; border-radius: 12px; box-shadow: 0 10px 30px #0b0f1499;
+        background: #111b21; border: 1px solid #3f4950; border-radius: 12px; box-shadow: 0 10px 30px #0b0f1499;
       }
       .peek::before {
         content: ""; position: absolute; top: -7px; left: calc(var(--pointer, 50%) - 7px); width: 12px; height: 12px;
-        background: #1a2028; border: solid #526578; border-width: 1px 0 0 1px; transform: rotate(45deg);
+        background: #111b21; border: solid #3f4950; border-width: 1px 0 0 1px; transform: rotate(45deg);
         transition: left var(--ease);
       }
       .message-head, .message { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 8px; align-items: baseline; }
       .peek, .tip { font-family: var(--mono); }
+      .peek-summary { margin: 0; padding: 8px 12px 0; color: var(--muted); font-size: 12px; }
       .message-head { padding: 6px 12px 5px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
       .messages { overflow: auto; flex: 1; min-height: 0; padding: 4px 6px; }
       .messages:empty::before { content: "–"; display: block; padding: 8px 6px; color: var(--muted); font-size: 12px; }
       .message { padding: 3px 6px; border-radius: 5px; font-size: 12px; line-height: 1.35; }
-      .message:hover { background: #222b35; }
+      .message:hover { background: #182228; }
       .message .kind { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font-size: 11px; }
       .message .kind[data-tone="warn"] { color: var(--warn); }
       .message .kind[data-tone="error"] { color: var(--error); }
       .message .text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
       .more {
-        display: block; padding: 8px 14px; border-top: 1px solid var(--line); border-radius: 0 0 12px 12px;
+        display: block; padding: 8px 14px; border-top: 1px solid var(--line);
         font-size: 11px; text-decoration: none;
       }
       .more:hover, .more:focus-visible { background: var(--panel-raised); outline: none; }
       .tip {
         position: fixed; z-index: 10; max-width: min(460px, calc(100vw - 24px)); padding: 8px 10px; pointer-events: none;
-        background: #0f1419; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px #0009;
+        background: #081116; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px #0009;
         font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere;
       }
       .tip small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
@@ -200,21 +204,23 @@ Invariants: Message data enters the DOM as text.
           <!-- Access shows only on the server machine; the page unhides it for a local session. -->
           <a href="/access" id="nav-access" hidden>Access</a>
         </nav>
+        <button type="button" class="dir" id="dir" hidden><span class="what">Serving</span><span class="path"><span class="parent"></span><strong></strong></span><span class="mark" aria-hidden="true"></span></button>
         <span class="status" id="status">Connecting…</span>
         <span class="actions" id="actions"></span>
       </header>
       <div class="map-scroll" id="map-scroll">
         <div class="map" id="map">
           <section class="directory" id="directory">
-            <div class="group-label">
-              <button type="button" class="path" id="path" aria-label="Copy directory path"><span class="parent"></span><strong></strong></button>
-              <span class="copied" id="copied" hidden>copied</span>
-            </div>
             <div class="empty" id="empty" hidden>No pools</div>
             <section class="peek" id="peek" aria-label="Messages" hidden>
+              <p class="peek-summary" id="peek-summary"></p>
               <div class="message-head"><span>Type</span><span>Message</span></div>
               <div class="messages" id="messages" aria-live="polite"></div>
-              <a class="more" id="open" href="/ui">Recent messages →</a>
+              <!-- The card's foot: the pool's page, and a helper that copies the command to follow it. -->
+              <div class="foot">
+                <a class="more" id="open" href="/ui"></a>
+                <button type="button" class="follow-copy" id="follow-copy"><span data-icon></span>Copy follow command</button>
+              </div>
             </section>
           </section>
         </div>
@@ -226,6 +232,7 @@ Invariants: Message data enters the DOM as text.
         <div class="activity-list" id="activity-list"></div>
       </section>
     </main>
+    <script src="/ui/assets/common.js"></script>
     <script>
       (() => {
         "use strict";
@@ -252,15 +259,17 @@ Invariants: Message data enters the DOM as text.
         const radiusStep = 8;
         const minSegment = 1;
         const ageBands = 10;
-        const indexRoom = { x: 40, y: 26 };
+        // Room for a sequence number written in full, up to eight digits, so the layout
+        // never moves as the numbers grow.
+        const indexRoom = { x: 64, y: 26 };
         const peekWidth = 360;
         const emptySize = { width: 240, height: 70 };
-        const directoryPad = { top: 40, side: 18, bottom: 16 };
+        const directoryPad = { top: 4, side: 4, bottom: 4 };
         const gutter = 10;
-        const indexClearance = 24;
+        const indexClearance = 36;
         const maxMessages = 200;
         const retryMs = 1200;
-        const state = { pools: [], topology: null, layout: null,
+        const state = { local: false, pools: [], topology: null, layout: null,
           selected: null, spotSeq: null, nextSeq: null, stopReader: null, stopList: null, requested: null };
         let resizeTimer = null;
 
@@ -272,12 +281,6 @@ Invariants: Message data enters the DOM as text.
           let value = bytes, unit = 0;
           while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
           return (unit ? Number(value.toFixed(1)) : value) + " " + units[unit];
-        }
-
-        function shortCount(count) {
-          if (count < 10000) return String(count);
-          if (count < 1000000) return (count / 1000).toFixed(count < 100000 ? 1 : 0) + "k";
-          return (count / 1000000).toFixed(1) + "M";
         }
 
         function messageCount(pool) {
@@ -537,13 +540,13 @@ Invariants: Message data enters the DOM as text.
             // From the inner edge of the innermost turn to the outer edge of the
             // outermost, so the seam spans the whole band and ends flush with it.
             leg: [[last.x, last.y + stroke / 2], [start.x, start.y - stroke / 2]],
-            index: newestSeq == null ? null : { at: polar(indexRadius, end.theta), theta: end.theta, text: "#" + shortCount(newestSeq),
+            index: newestSeq == null ? null : { at: polar(indexRadius, end.theta), theta: end.theta, text: "#" + newestSeq,
               leader: [polar(end.r + stroke / 2, end.theta), polar(indexRadius - 2, end.theta)] },
           };
         }
 
         // SVG markup from track geometry. Every value is a number, except the index
-        // text, which is "#", digits, and a unit letter.
+        // text, which is "#" and digits.
         // The track's path is written once, and each layer draws it again by
         // reference with its own dashes, so a long spiral does not repeat its points
         // for every layer. Dash patterns and stroke styles pass through to the shape.
@@ -642,18 +645,40 @@ Invariants: Message data enters the DOM as text.
           if (!button) return;
           button.style.setProperty("--hit-diameter", 2 * (pool.track.outer + stroke) + "px");
           drawRing(pool);
-          button.querySelector(".label").style.maxWidth = 2 * (pool.shape.inner - stroke) - 6 + "px";
+          const inside = 2 * (pool.shape.inner - stroke) - 6 + "px";
+          button.querySelector(".label").style.maxWidth = inside;
+          const activityButton = activityButtons.get(pool.name);
+          if (activityButton) activityButton.style.maxWidth = inside;
           const count = messageCount(pool);
           // Label with the size the pool was created at. A ring is meant to wrap, so
           // no share of it reads as "full".
           button.querySelector(".meta").textContent = size(pool.file_size);
-          button.title = pool.name + " · " + count.toLocaleString() + (count === 1 ? " message" : " messages");
+          button.title = pool.name + " · " + count.toLocaleString() + (count === 1 ? " message" : " messages") +
+            " · " + size(pool.file_size) + " capacity";
           button.setAttribute("aria-label", button.title);
           button.setAttribute("aria-expanded", String(pool.name === state.selected));
         }
 
         function updateCards() {
           for (const pool of state.pools) updateCard(pool);
+        }
+
+        // The map's own preview follows the open pool, so it is not activity anyone else
+        // caused; one such stream on that pool is left out of its count.
+        function othersThan(name, entries) {
+          if (name !== state.selected) return entries;
+          const own = entries.findIndex((entry) => entry.kind === "browser" && /\/events$/.test(entry.operation || ""));
+          return own < 0 ? entries : entries.filter((_, i) => i !== own);
+        }
+
+        // What the activity mark counts, in words: streams following the pool, processes
+        // with its file open, and any other requests in progress.
+        function activitySummary(entries) {
+          const following = entries.filter((entry) => entry.kind !== "open_file" && /\/events$|tail|wait/.test(entry.operation || "")).length;
+          const processes = entries.filter((entry) => entry.kind === "open_file").length;
+          const other = entries.length - following - processes;
+          return [[following, "following"], [processes, processes === 1 ? "process" : "processes"], [other, other === 1 ? "request" : "requests"]]
+            .filter(([n]) => n).map(([n, word]) => n + " " + word);
         }
 
         // Activity is a snapshot of open files and server requests, never a
@@ -663,7 +688,7 @@ Invariants: Message data enters the DOM as text.
             const observed = activity && activity.pools && activity.pools[name];
             button.hidden = !activityAllowed || !observed;
             if (!observed) continue;
-            const entries = observed.entries || [];
+            const entries = othersThan(name, observed.entries || []);
             const partial = !observed.local_files?.available;
             if (!entries.length && activityPool === name) closeActivity();
             // A disabled button drops focus to the page, so hand it to the pool first.
@@ -676,14 +701,15 @@ Invariants: Message data enters the DOM as text.
               button.removeAttribute("title");
               continue;
             }
-            for (const entry of entries.slice(0, 3)) {
-              const mark = document.createElement("span");
-              mark.className = "activity-mark " + (entry.kind === "open_file" ? "local" : entry.kind);
-              mark.setAttribute("aria-hidden", "true");
-              button.append(mark);
-            }
-            button.append(String(entries.length));
-            const label = name + " activity · " + entries.length + " observed" + (partial ? " · local files unavailable" : "");
+            // Each part stays whole, so a narrow ring breaks the line only between them.
+            const parts = activitySummary(entries);
+            button.append(...parts.flatMap((part, i) => {
+              const piece = document.createElement("span");
+              piece.className = "part";
+              piece.textContent = part;
+              return i ? [", ", piece] : [piece];
+            }));
+            const label = name + ": " + parts.join(", ") + (partial ? "; local files unavailable" : "");
             button.setAttribute("aria-label", label);
             button.title = label;
           }
@@ -692,7 +718,7 @@ Invariants: Message data enters the DOM as text.
 
         function openActivity(name) {
           if (activityPool === name) { closeActivity(); return; }
-          if (!activity?.pools?.[name]?.entries?.length) return;
+          if (!othersThan(name, activity?.pools?.[name]?.entries || []).length) return;
           activityPool = name;
           renderActivity();
           $("activity-card").hidden = false;
@@ -897,11 +923,7 @@ Invariants: Message data enters the DOM as text.
           place($("directory"), layout.directory);
           place($("empty"), { x: directoryPad.side, y: directoryPad.top, ...emptySize });
           $("empty").hidden = state.pools.length > 0;
-          const path = directoryPath();
-          const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1;
-          $("path").querySelector(".parent").textContent = path.slice(0, cut);
-          $("path").querySelector("strong").textContent = path.slice(cut) || "–";
-          $("path").title = path;
+          showDirectory(directoryPath());
           for (const [name, button] of cards) {
             if (!layout.boxes.has(name)) {
               button.remove(); cards.delete(name); drawnMarkup.delete(name);
@@ -969,15 +991,25 @@ Invariants: Message data enters the DOM as text.
           const inner = sharedInner(pools);
           const names = new Set(pools.map((pool) => pool.name));
           for (const name of shapes.keys()) if (!names.has(name)) shapes.delete(name);
+          const before = new Map(state.pools.map((pool) => [pool.name, pool.bounds && pool.bounds.newest]));
           for (const pool of pools) {
             pool.shape = trackShape(pool, inner);
             pool.track = layTrack(pool);
             shapes.set(pool.name, pool.shape);
           }
+          const arrived = pools.filter((pool) => before.get(pool.name) != null && pool.bounds && pool.bounds.newest > before.get(pool.name));
           state.pools = pools;
           if (state.selected && !currentPool()) closePeek();
+          showPeekSummary();
           if (topology() !== state.topology) relayout();
           updateCards();
+          for (const pool of arrived) {
+            const card = cards.get(pool.name);
+            if (!card) continue;
+            card.classList.remove("arrived");
+            void card.offsetWidth;
+            card.classList.add("arrived");
+          }
           setStatus(pools.length + (pools.length === 1 ? " pool" : " pools"));
           $("map-error").textContent = "";
           if (state.requested) {
@@ -1086,14 +1118,38 @@ Invariants: Message data enters the DOM as text.
           messages.replaceChildren();
           $("peek").setAttribute("aria-label", name + " messages");
           // Reserve message rows before the first tail frame, so the link stays under the pointer.
-          $("peek").style.height = (100 + 21 * Math.min(messageCount(pool), 8)) + "px";
+          $("peek").style.height = (124 + 21 * Math.min(messageCount(pool), 8)) + "px";
+          showPeekSummary();
           $("open").href = "/ui/pools/" + encodeURIComponent(name);
+          // Names where the link goes: the pool's own page, titled with its name.
+          $("open").textContent = "Open " + name + " \u2192";
           updateCards();
+          updateActivityButtons();
           placePeek();
           const url = new URL(location.href);
           url.searchParams.set("pool", name);
           history.replaceState(null, "", url);
           startReader(name);
+        }
+
+        // The command that follows a pool from a terminal: by name in this directory
+        // here, by its address from elsewhere.
+        function followCommand(name) {
+          const quote = (text) => /^[\w@%+=:,./-]+$/.test(text) ? text : "'" + text.replaceAll("'", "'\\''") + "'";
+          if (!state.local) return "plasmite follow " + quote(location.origin + "/" + name);
+          const dir = directoryPath();
+          return "plasmite " + (dir ? "--dir " + quote(dir) + " " : "") + "follow " + quote(name);
+        }
+
+        // The open pool's count and capacity, said in words over its messages.
+        function showPeekSummary() {
+          const pool = currentPool();
+          if (!pool) return;
+          $("follow-copy").dataset.command = followCommand(pool.name);
+          $("follow-copy").title = followCommand(pool.name);
+          const count = messageCount(pool);
+          $("peek-summary").textContent = count.toLocaleString() + (count === 1 ? " message" : " messages") +
+            " · " + size(pool.file_size) + " capacity";
         }
 
         function closePeek() {
@@ -1104,6 +1160,7 @@ Invariants: Message data enters the DOM as text.
           state.selected = null;
           state.spotSeq = null;
           updateCards();
+          updateActivityButtons();
           placePeek();
           const url = new URL(location.href);
           url.searchParams.delete("pool");
@@ -1238,12 +1295,16 @@ Invariants: Message data enters the DOM as text.
         });
         window.addEventListener("scroll", () => { if (activityPool) placeActivity(); }, { capture: true, passive: true });
         window.addEventListener("resize", () => { if (activityPool) placeActivity(); });
-        $("path").addEventListener("click", async () => {
+        const followCopyIcon = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg>';
+        const followIcon = $("follow-copy").querySelector("[data-icon]");
+        followIcon.innerHTML = followCopyIcon;
+        $("follow-copy").addEventListener("click", async () => {
           try {
-            await navigator.clipboard.writeText(directoryPath());
-            $("copied").hidden = false;
-            setTimeout(() => { $("copied").hidden = true; }, 1200);
-          } catch (_) { /* Clipboard needs a secure context; the title still shows the path. */ }
+            await navigator.clipboard.writeText($("follow-copy").dataset.command);
+            followIcon.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>';
+            $("follow-copy").classList.add("done");
+            setTimeout(() => { followIcon.innerHTML = followCopyIcon; $("follow-copy").classList.remove("done"); }, 1200);
+          } catch (_) { /* Clipboard needs a secure context; the command stays selectable. */ }
         });
         // Capture catches scrolling inside the map as well as the page.
         window.addEventListener("scroll", fitPeek, { capture: true, passive: true });
@@ -1274,6 +1335,7 @@ Invariants: Message data enters the DOM as text.
             const session = await fetch("/v0/browser/session", { cache: "no-store" });
             if (!session.ok) { location.assign("/ui"); return; }
             const identity = await session.json();
+            state.local = Boolean(identity.local);
             const actions = $("actions");
             $("nav-access").hidden = !identity.local;
             // Name where this view is: this machine, or the server a key reaches.

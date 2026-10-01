@@ -20,21 +20,34 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         font-weight: 200 900;
         font-display: swap;
       }
+      /* Colors: the Solar Eclipse "Ashen" ground and text, with accents at the text's
+         lightness and low chroma, so nothing glows against the dark. */
       :root {
         color-scheme: dark;
-        --bg: #15191f;
-        --panel: #1a2028;
-        --panel-raised: #27313e;
-        --line: #394657;
-        --rule: #2c3643;
-        --layer: #1f2731;
-        --text: #e9edf1;
-        --muted: #9aa9b8;
-        --faint: #6f7d8c;
-        --accent: #83c5d7;
-        --ok: #74d7b2;
-        --warn: #e8bc72;
-        --error: #f08383;
+        --bg: #0f181e;
+        --panel: #111b21;
+        --panel-raised: #182228;
+        --line: #2d373e;
+        --rule: #222c32;
+        /* Data colored by JSON type, a fact of every message, never by guessing which
+           field matters: keys a receding blue-gray, numbers violet, true and false teal,
+           strings the body text. */
+        --key: #6d858d;
+        /* The map's language on the log's edge: its ring teal, dimmed, for sequence
+           numbers and days, and its pale "newest" for the newest message. */
+        --rail: #578081;
+        --pale: #e7ead7;
+        --number: #a393b7;
+        --constant: #64a6a8;
+        --layer: #162026;
+        --text: #979ca0;
+        --bright: #a4a9ad;
+        --muted: #868b90;
+        --faint: #72787d;
+        --accent: #64a6a8;
+        --ok: #74a78e;
+        --warn: #bba074;
+        --error: #c0807b;
         /* Two voices: the system's own sans for the interface, which loads nothing, and
            the embedded Inconsolata for data. A region uses one or the other throughout. */
         --sans: system-ui, sans-serif;
@@ -45,7 +58,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
       html, body { height: 100%; }
       body {
         margin: 0;
-        background: radial-gradient(circle at 30% -20%, #263543, transparent 55%), var(--bg);
+        background: radial-gradient(circle at 30% -20%, #16222a, transparent 55%), var(--bg);
         color: var(--text);
         font: 14px/1.5 var(--sans);
       }
@@ -57,10 +70,10 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         display: flex; align-items: baseline; gap: 22px;
         padding: 10px 18px; border-bottom: 1px solid var(--line); background: var(--panel);
       }
-      .brand { color: var(--text); font: 14px var(--mono); letter-spacing: .11em; text-decoration: none; }
+      .brand { color: var(--accent); font: 14px var(--mono); letter-spacing: .11em; text-decoration: none; }
       .topbar nav { display: flex; align-items: baseline; gap: 16px; }
       .topbar nav a { text-decoration: none; color: var(--muted); }
-      .topbar nav a[aria-current="page"] { color: var(--text); }
+      .topbar nav a[aria-current="page"] { color: var(--bright); text-decoration: underline 2px var(--accent); text-underline-offset: 7px; }
       .topbar .actions { margin-left: auto; display: flex; gap: 14px; font-size: 12px; }
       .topbar .where { color: var(--muted); }
       .topbar .where.local { color: var(--warn); }
@@ -69,7 +82,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
       /* The pool: its name, whether the page is live, and the facts `plasmite pool info` gives. */
       .head { padding: 16px 18px 12px; border-bottom: 1px solid var(--line); }
       .title { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; }
-      h1 { margin: 0; font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
+      h1 { margin: 0; color: var(--bright); font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
       /* The way up, quiet like a path's parent folders: this pool is one of the pools. */
       h1 .up { color: var(--muted); font-weight: 400; text-decoration: none; }
       h1 .up:hover, h1 .up:focus-visible { color: var(--accent); outline: none; }
@@ -81,10 +94,17 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
       .filter { display: flex; gap: 10px; align-items: baseline; margin-top: 10px; }
       .filter input {
         flex: 1; min-width: 0; padding: 5px 9px; border: 1px solid var(--line); border-radius: 6px;
-        background: #12161d; color: var(--text); font: 13px var(--mono);
+        background: #081116; color: var(--text); font: 13px var(--mono);
       }
       .filter input:focus { outline: none; border-color: var(--accent); }
-      .filter .count { color: var(--muted); font-size: 12px; white-space: nowrap; }
+      .filter .count, .filter .hint { color: var(--muted); font-size: 12px; white-space: nowrap; }
+      .filter .hint { color: var(--faint); }
+      /* Keys look like keys: small caps of the accent teal, so the hint reads at a glance. */
+      .hint kbd {
+        display: inline-block; min-width: 1.6em; margin: 0 1px; padding: 0 4px; border: 1px solid var(--line);
+        border-bottom-width: 2px; border-radius: 4px; color: var(--accent); font: 11px/1.4 var(--mono); text-align: center;
+      }
+      .facts .newest { color: var(--pale); }
       /* The facts `plasmite pool info` gives, at the far end of the name's line. */
       .facts { margin: 0 0 0 auto; color: var(--muted); font-size: 12px; }
       .facts .fact { white-space: nowrap; }
@@ -111,16 +131,33 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
       /* Labels are smaller than values, but the row keeps the values' size, since ch widths follow it. */
       .log-head span { overflow: hidden; white-space: nowrap; font-size: 12px; }
       .row { padding-top: 2px; padding-bottom: 2px; border-left: 2px solid transparent; cursor: default; }
-      .row:hover { background: #1b222b; }
+      .row:hover { background: #182228; }
       /* Green marks what matters most on the page: here, the open message. */
-      .row[aria-selected="true"] { background: #1c2a28; box-shadow: inset 0 0 0 1px var(--ok); border-radius: 4px; }
-      .row[data-tone="error"] { background: #2a1c20; border-left-color: var(--error); }
-      .row[data-tone="error"]:hover { background: #321f24; }
-      .row[data-tone="error"][aria-selected="true"] { background: #3a2227; }
-      .row[data-tone="warn"] { border-left-color: #8a6f43; }
+      .row[aria-selected="true"] { background: #17271f; box-shadow: inset 0 0 0 1px var(--ok); border-radius: 4px; }
+      .row[data-tone="error"] { background: #2e1e1c; border-left-color: var(--error); }
+      .row[data-tone="error"]:hover { background: #392422; }
+      .row[data-tone="error"][aria-selected="true"] { background: #392422; }
+      .row[data-tone="warn"] { border-left-color: #5d4d33; }
+      /* A message that arrives while the page is open glows in the map's "newest" pale, then settles. */
+      @media (prefers-reduced-motion: no-preference) {
+        .row.arrived { animation: row-arrived 2s ease-out; }
+        @keyframes row-arrived { from { background: #e7ead71c; } }
+      }
+      .log-head .time-zone {
+        padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer;
+      }
+      .log-head .time-zone:hover, .log-head .time-zone:focus-visible { color: var(--text); text-decoration: underline; outline: none; }
+      /* A value or tag in the open message filters by itself when clicked. */
+      .tree .pick, .detail .tags .pick {
+        padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: inherit; cursor: pointer;
+      }
+      .tree .pick:hover, .tree .pick:focus-visible, .detail .tags .pick:hover, .detail .tags .pick:focus-visible {
+        text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; outline: none;
+      }
       .c { min-width: 0; overflow: hidden; white-space: nowrap; }
       .num { text-align: right; }
-      .seq { color: var(--faint); text-align: right; }
+      .seq { color: var(--rail); text-align: right; }
+      .row.newest .seq { color: var(--pale); }
       .time { color: var(--muted); }
       .time small { color: var(--faint); font-size: inherit; }
       .tags { color: var(--muted); }
@@ -131,20 +168,38 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
       /* The data cell wraps: each field, key before value, in the server's order. */
       .main { white-space: normal; overflow-wrap: anywhere; }
       .main .field { display: inline-block; max-width: 100%; margin-right: 1ch; }
-      .main .field i { font-style: normal; color: var(--faint); }
+      .main .field i { font-style: normal; color: var(--key); }
+      .t-number { color: var(--number); }
+      .t-boolean { color: var(--constant); }
+      .t-null { color: var(--faint); }
       /* A filter match; when it lies in the part of a value a row cuts off, the elision mark. */
-      mark { background: #e8bc7245; color: inherit; border-radius: 2px; }
+      mark { background: #bba07445; color: inherit; border-radius: 2px; }
       .main .size { color: var(--faint); white-space: nowrap; }
       .main .more { color: var(--faint); }
       .day {
-        padding: 10px 18px 3px; color: var(--faint); font-size: 12px;
+        padding: 10px 18px 3px; color: var(--rail); font-size: 12px;
         border-bottom: 1px solid var(--rule); margin-bottom: 2px;
       }
       .log.filtering .day { display: none; }
+      .earlier {
+        display: block; margin: 8px 18px 4px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 5px;
+        background: none; color: var(--muted); font: 12px var(--sans);
+      }
+      .earlier:hover, .earlier:focus-visible { color: var(--text); border-color: var(--accent); outline: none; }
+      .earlier:disabled { opacity: .6; cursor: default; }
+      /* A pinned field leads every line; its key is a step brighter than the others. */
+      .main .field.pinned i { color: var(--muted); }
+      .tree dt .pin {
+        padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: inherit; cursor: pointer;
+      }
+      .tree dt .pin:hover, .tree dt .pin:focus-visible { color: var(--text); text-decoration: underline; outline: none; }
+      .tree dt .pin[aria-pressed="true"] { color: var(--accent); }
+      .tree .note .show { padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; background: none; color: var(--muted); font: 12px var(--sans); }
+      .tree .note .show:hover, .tree .note .show:focus-visible { color: var(--text); border-color: var(--accent); outline: none; }
       .empty { padding: 18px; color: var(--muted); font: 14px var(--sans); }
       .jump {
         position: sticky; bottom: 12px; float: right; margin: 0 18px 0 0; padding: 4px 12px;
-        border: 1px solid #4a6a78; border-radius: 999px; background: #1f2c36; color: var(--text); font: 12px var(--sans);
+        border: 1px solid #305859; border-radius: 999px; background: #132727; color: var(--text); font: 12px var(--sans);
         box-shadow: 0 4px 16px #0008;
       }
       .jump:hover { border-color: var(--accent); }
@@ -154,7 +209,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
          ties it to the green-outlined row it opened from. */
       .detail {
         position: relative; z-index: 2; min-height: 0; overflow: auto; font: 14px/1.4 var(--mono);
-        background: var(--layer); border-top: 1px solid #4f7f6e; box-shadow: 0 -10px 28px #000a;
+        background: var(--layer); border-top: 1px solid #385849; box-shadow: 0 -10px 28px #000a;
       }
       .detail header {
         position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: baseline;
@@ -173,13 +228,14 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
       .detail section { padding: 8px 16px; border-bottom: 1px solid var(--rule); }
       .detail h2 { margin: 0 0 3px; color: var(--faint); font-size: 12px; font-weight: 400; }
       .tree dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 2ch; margin: 0; }
-      .tree dt { color: var(--muted); white-space: nowrap; }
+      .tree dt { color: var(--key); white-space: nowrap; }
       .tree dt.index { color: var(--faint); text-align: right; }
       .tree dd { margin: 0; min-width: 0; }
       .tree dd > dl { padding-left: 1.5ch; border-left: 1px solid var(--rule); margin-bottom: 2px; }
       .tree .str { white-space: pre-wrap; overflow-wrap: anywhere; }
-      .tree .str.block { display: block; padding: 3px 8px; margin: 1px 0 2px; background: #12161d; border-radius: 5px; }
-      .tree .num, .tree .bool { color: var(--accent); text-align: left; }
+      .tree .str.block { display: block; padding: 3px 8px; margin: 1px 0 2px; background: #081116; border-radius: 5px; }
+      .tree .num { color: var(--number); text-align: left; }
+      .tree .bool { color: var(--constant); }
       .tree .null, .tree .none { color: var(--faint); }
       .tree .note { display: flex; gap: 8px; align-items: center; color: var(--faint); font-size: 12px; }
       .tree .note .icon { width: 22px; height: 22px; }
@@ -189,7 +245,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         background: none; color: var(--muted); font: 12px var(--sans);
       }
       .labeled:hover, .labeled:focus-visible { color: var(--text); border-color: var(--accent); outline: none; }
-      .labeled.done { color: var(--ok); border-color: #2f6b56; }
+      .labeled.done { color: var(--ok); border-color: #385849; }
       .labeled svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
       .labeled span, .icon span { display: contents; }
       .detail .fetch {
@@ -202,11 +258,11 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
       .append { display: flex; gap: 8px; padding: 10px 18px 14px; border-top: 1px solid var(--line); background: var(--panel); }
       .append input {
         flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
-        background: #12161d; color: var(--text); font: 14px var(--mono);
+        background: #081116; color: var(--text); font: 14px var(--mono);
       }
       .append input:focus { outline: none; border-color: var(--accent); }
       .append button {
-        padding: 6px 14px; border: 1px solid #526076; border-radius: 6px; background: var(--panel-raised); color: var(--text);
+        padding: 6px 14px; border: 1px solid #3f4950; border-radius: 6px; background: var(--panel-raised); color: var(--text);
       }
       .append button:hover, .append button:focus-visible { border-color: var(--accent); outline: none; }
       .append .error { align-self: center; color: var(--error); font-size: 12px; }
@@ -239,6 +295,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           <!-- Access shows only on the server machine; the page unhides it for a local session. -->
           <a href="/access" id="nav-access" hidden>Access</a>
         </nav>
+        <button type="button" class="dir" id="dir" hidden><span class="what">Serving</span><span class="path"><span class="parent"></span><strong></strong></span><span class="mark" aria-hidden="true"></span></button>
         <span class="actions" id="actions"></span>
       </header>
 
@@ -251,12 +308,14 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         <label class="filter">
           <input id="filter" type="search" placeholder="Filter" aria-label="Filter messages" autocomplete="off" spellcheck="false" />
           <span class="count" id="matches"></span>
+          <span class="hint" id="hint"><kbd>/</kbd> to filter · <kbd>↑</kbd><kbd>↓</kbd> or <kbd>j</kbd><kbd>k</kbd> to move · <kbd>Esc</kbd> to close</span>
         </label>
       </section>
 
       <div class="body" id="body">
         <section class="log" id="log" tabindex="0" aria-label="Messages">
           <div class="log-head" id="log-head" aria-hidden="true"></div>
+          <button type="button" class="earlier" id="earlier" hidden></button>
           <div id="rows"></div>
           <p class="empty" id="empty" hidden></p>
           <button type="button" class="jump" id="jump" hidden></button>
@@ -267,6 +326,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
             <span class="when" id="detail-when"></span>
             <span class="tags" id="tags-tree"></span>
             <span class="tools">
+              <button type="button" class="labeled" id="copy-link"><span data-icon></span>Copy link</button>
               <button type="button" class="labeled" id="copy-json"><span data-icon></span>Copy JSON</button>
               <button type="button" class="icon" id="close" title="Close (Esc)" aria-label="Close">
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
@@ -291,19 +351,22 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
       </form>
     </main>
 
+    <script src="/ui/assets/common.js"></script>
     <script>
       (() => {
         const $ = (id) => document.getElementById(id);
         const poolPath = location.pathname.slice("/ui/pools/".length);
         const poolName = (() => { try { return decodeURIComponent(poolPath); } catch (_) { return poolPath; } })();
         const requested = Number(new URLSearchParams(location.search).get("n") || "400");
-        const keep = Number.isFinite(requested) ? Math.max(1, Math.min(2000, Math.trunc(requested))) : 400;
+        const pageSize = Number.isFinite(requested) ? Math.max(1, Math.min(2000, Math.trunc(requested))) : 400;
         const retryMs = 1000;
 
         const state = {
           local: false,
           info: null,
-          messages: [],      // oldest first, at most `keep`
+          messages: [],      // oldest first, at most state.keep
+          keep: pageSize,    // grows by each batch of earlier messages the reader loads
+          pins: [],          // field paths this pool's lines show first, in the order pinned
           rows: new Map(),   // seq -> row element
           nextSeq: null,
           tagged: false,     // whether any loaded message has tags, so a tags column shows
@@ -311,6 +374,8 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           selected: null,    // the open message
           unseen: 0,
           filter: "",
+          target: null,      // the sequence number a link asked for, until it is found
+          utc: false,        // times in UTC instead of this machine's zone
         };
 
         // A row shows at most this many fields, strings up to rowChars, and arrays up to
@@ -399,7 +464,19 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           if (state.tagged) cells.push([state.tagsWidth + "ch", "tags", ""]);
           cells.push(["minmax(0, 1fr)", "data", ""]);
           $("log").style.setProperty("--cols", cells.map(([width]) => width).join(" "));
-          $("log-head").replaceChildren(...cells.map(([, label, cls]) => span(cls, label)));
+          $("log-head").replaceChildren(...cells.map(([, label, cls]) => {
+            if (label !== "time") return span(cls, label);
+            // The time heading switches the zone, so a log lines up with UTC server logs.
+            const zone = document.createElement("button");
+            zone.type = "button";
+            zone.className = "time-zone";
+            zone.textContent = state.utc ? "time UTC" : "time";
+            zone.title = state.utc ? "Show times in this machine's zone" : "Show times in UTC";
+            zone.addEventListener("click", toggleZone);
+            const cell = span(cls, "");
+            cell.append(zone);
+            return cell;
+          }));
         }
 
         // Rows.
@@ -417,7 +494,9 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           cell.title = iso;
           const small = document.createElement("small");
           small.textContent = "." + pad(date.getMilliseconds(), 3);
-          cell.append(pad(date.getHours()) + ":" + pad(date.getMinutes()) + ":" + pad(date.getSeconds()), small);
+          const [h, m, sec] = state.utc ? [date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds()]
+            : [date.getHours(), date.getMinutes(), date.getSeconds()];
+          cell.append(pad(h) + ":" + pad(m) + ":" + pad(sec), small);
           return cell;
         }
 
@@ -474,15 +553,19 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           }
 
           const main = span("c main", "");
-          message.leaves.slice(0, rowFields).forEach(([path, value], i) => {
-            const field = span("field", "");
+          const first = state.pins.map((pin) => message.leaves.find(([path]) => path === pin)).filter(Boolean);
+          const fields = [...first, ...message.leaves.filter((leaf) => !first.includes(leaf))];
+          fields.slice(0, rowFields).forEach(([path, value], i) => {
+            const field = span(state.pins.includes(path) ? "field pinned" : "field", "");
             if (path) {
               const key = document.createElement("i");
               key.append(...marked(path), ":");
               field.append(key, " ");
             }
             const shown = rowValue(value);
-            field.append(markedSpan("", shown.text));
+            // A whole number, boolean, or null takes its type's color; a cut value is text.
+            const type = value === null ? "null" : typeof value;
+            field.append(markedSpan(shown.cut || type === "string" || type === "object" ? "" : "t-" + type, shown.text));
             if (shown.cut) {
               // When the filter matches only the part cut off, the elision mark is the match.
               const hidden = state.filter && !shown.text.toLowerCase().includes(state.filter) &&
@@ -499,12 +582,13 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         }
 
         function dayLabel(date) {
-          return date.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: "numeric" });
+          return date.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: "numeric", timeZone: state.utc ? "UTC" : undefined });
         }
 
         function dayOf(message) {
           const date = new Date(message.time);
-          return isNaN(date.getTime()) ? "" : date.toDateString();
+          if (isNaN(date.getTime())) return "";
+          return state.utc ? date.toISOString().slice(0, 10) : date.toDateString();
         }
 
         // Appends a row per message after `previous`, with a day line wherever the day changes.
@@ -519,6 +603,13 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           }
         }
 
+        // The newest message's number takes the map's "newest" color.
+        function markNewest() {
+          $("rows").querySelector(".row.newest")?.classList.remove("newest");
+          const last = state.messages[state.messages.length - 1];
+          state.rows.get(last?.seq)?.classList.add("newest");
+        }
+
         // Rebuilds every row, as when the tags column comes or goes, keeping the reader's place.
         function renderRows() {
           const top = $("log").scrollTop;
@@ -527,6 +618,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           const fragment = document.createDocumentFragment();
           appendRows(fragment, state.messages, null);
           $("rows").replaceChildren(fragment);
+          markNewest();
           $("log").scrollTop = top;
         }
 
@@ -541,6 +633,15 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           $("jump").hidden = true;
         }
 
+        function fromRaw(raw) {
+          const found = leaves(raw.data);
+          const tags = tagsOf(raw);
+          return {
+            seq: raw.seq, time: raw.time, meta: raw.meta || {}, data: raw.data, raw,
+            leaves: found, tags, tone: toneOf(tags), hay: searchText(found, tags),
+          };
+        }
+
         // Adds messages in order, once per frame. A hidden tab draws no frames, so the
         // queue keeps only as many messages as the page shows.
         let pending = [];
@@ -549,13 +650,8 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           if (!Number.isFinite(raw.seq)) return;
           if (state.nextSeq != null && raw.seq < state.nextSeq) return;
           state.nextSeq = raw.seq + 1;
-          const found = leaves(raw.data);
-          const tags = tagsOf(raw);
-          pending.push({
-            seq: raw.seq, time: raw.time, meta: raw.meta || {}, data: raw.data, raw,
-            leaves: found, tags, tone: toneOf(tags), hay: searchText(found, tags),
-          });
-          if (pending.length > keep) pending.shift();
+          pending.push(fromRaw(raw));
+          if (pending.length > state.keep) pending.shift();
           if (!frame) frame = requestAnimationFrame(flush);
         }
 
@@ -568,7 +664,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           const tagged = state.tagged;
           for (const message of batch) state.tagsWidth = Math.max(state.tagsWidth, Math.min(20, message.tags.join(" ").length));
           state.messages.push(...batch);
-          const dropped = state.messages.splice(0, Math.max(0, state.messages.length - keep));
+          const dropped = state.messages.splice(0, Math.max(0, state.messages.length - state.keep));
           state.tagged = state.messages.some((message) => message.tags.length);
           if (!state.rows.size || tagged !== state.tagged) {
             renderRows();
@@ -584,6 +680,8 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
             }
             const kept = state.messages.length - batch.length;
             appendRows(rows, batch, kept > 0 ? state.messages[kept - 1] : null);
+            for (const message of batch) state.rows.get(message.seq)?.classList.add("arrived");
+            markNewest();
           }
           applyFilter();
           if (pinned) scrollToBottom();
@@ -593,6 +691,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
             $("jump").hidden = !state.unseen;
           }
           renderFacts();
+          openTarget();
         }
 
         // Filter: plain text, case ignored, matched against what the page shows: each field
@@ -619,6 +718,8 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           const none = !state.messages.length;
           $("log").classList.toggle("filtering", Boolean(state.filter));
           $("matches").textContent = state.filter ? count(visible) + " of " + count(state.messages.length) : "";
+          $("hint").hidden = Boolean(state.filter);
+          showEarlier();
           $("empty").hidden = !none && visible > 0;
           $("empty").textContent = none ? "No messages yet." : "No messages match.";
           $("log-head").hidden = none;
@@ -626,17 +727,31 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
 
         // The open message.
 
-        function valueNode(value) {
+        function valueNode(value, path = "") {
           if (typeof value === "string") {
             if (value === "") return span("none", "\"\"");
             const lines = value.split("\n").length;
             if (lines === 1 && value.length <= 100) return markedSpan("str", value);
             const wrap = document.createElement("div");
-            wrap.append(markedSpan("str block", value.slice(0, paneChars)));
+            const block = markedSpan("str block", value.slice(0, paneChars));
+            wrap.append(block);
             const note = document.createElement("small");
             note.className = "note";
             const size = count(value.length) + " chars" + (lines > 1 ? " \u00b7 " + count(lines) + " lines" : "");
-            note.append(value.length > paneChars ? size + " \u00b7 showing the first " + count(paneChars) : size);
+            const said = span("", value.length > paneChars ? size + " \u00b7 showing the first " + count(paneChars) : size);
+            note.append(said);
+            if (value.length > paneChars) {
+              const show = document.createElement("button");
+              show.type = "button";
+              show.className = "show";
+              show.textContent = "Show all";
+              show.addEventListener("click", () => {
+                block.replaceChildren(...marked(value));
+                said.textContent = size;
+                show.remove();
+              });
+              note.append(show);
+            }
             const button = document.createElement("button");
             button.type = "button";
             button.className = "icon";
@@ -654,27 +769,69 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           if (Array.isArray(value)) {
             if (!value.length) return span("none", "[]");
             const inline = JSON.stringify(value);
-            if (value.every((item) => !isObject(item) && !Array.isArray(item)) && inline.length <= 60) return markedSpan("num", inline.replaceAll(",", ", "));
-            return listNode(value.map((item, i) => [String(i), item]), true);
+            if (value.every((item) => !isObject(item) && !Array.isArray(item)) && inline.length <= 60) return markedSpan("lit", inline.replaceAll(",", ", "));
+            return listNode(value.map((item, i) => [String(i), item]), true, path);
           }
           const entries = Object.entries(value);
-          return entries.length ? listNode(entries, false) : span("none", "{}");
+          return entries.length ? listNode(entries, false, path) : span("none", "{}");
         }
 
-        function listNode(entries, indexed) {
+        // Keys of fields a line shows are buttons: one pins the field to the front of every
+        // line. Array items and nested objects are not fields a line shows, so they do not pin.
+        function listNode(entries, indexed, prefix = "") {
           const list = document.createElement("dl");
           for (const [key, child] of entries) {
             const term = document.createElement("dt");
-            term.append(...marked(key));
+            const path = prefix ? prefix + "." + key : key;
+            const leaf = !indexed && !(isObject(child) && Object.keys(child).length);
+            if (leaf) {
+              const pin = document.createElement("button");
+              pin.type = "button";
+              pin.className = "pin";
+              const pinned = state.pins.includes(path);
+              pin.setAttribute("aria-pressed", String(pinned));
+              pin.title = pinned ? "Stop showing this field first" : "Show this field first in every line";
+              pin.append(...marked(key));
+              pin.addEventListener("click", () => togglePin(path));
+              term.append(pin);
+            } else {
+              term.append(...marked(key));
+            }
             if (indexed) term.className = "index";
             const detail = document.createElement("dd");
             // A list of small flat records reads best one record to a line, written as in a row.
             const flat = isObject(child) && Object.values(child).every((item) => !isObject(item) && !Array.isArray(item));
             const line = indexed && flat ? literal(child) : "";
-            detail.append(line && line.length <= 72 ? markedSpan("lit", line) : valueNode(child));
+            const shown = line && line.length <= 72 ? markedSpan("lit", line) : valueNode(child, indexed ? "" : path);
+            const text = typeof child === "string" ? child : JSON.stringify(child);
+            if (leaf && !isObject(child) && !Array.isArray(child) && !text.includes("\n") && text.length <= 100) {
+              const pick = document.createElement("button");
+              pick.type = "button";
+              pick.className = "pick";
+              pick.title = "Show only lines with " + path + ": " + text;
+              pick.append(shown);
+              pick.addEventListener("click", () => setFilter(path + ": " + text));
+              detail.append(pick);
+            } else {
+              detail.append(shown);
+            }
             list.append(term, detail);
           }
           return list;
+        }
+
+        const pinsKey = "plasmite.pins." + poolName;
+        function loadPins() {
+          try { state.pins = JSON.parse(localStorage.getItem(pinsKey) || "[]").filter((pin) => typeof pin === "string"); }
+          catch (_) { state.pins = []; }
+        }
+
+        function togglePin(path) {
+          state.pins = state.pins.includes(path) ? state.pins.filter((pin) => pin !== path) : [...state.pins, path];
+          try { localStorage.setItem(pinsKey, JSON.stringify(state.pins)); } catch (_) { /* Pins then last only this visit. */ }
+          renderRows();
+          applyFilter();
+          renderDetail();
         }
 
         function poolRef() {
@@ -697,10 +854,18 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           $("detail-seq").textContent = "#" + message.seq;
           const date = new Date(message.time);
           $("detail-when").textContent = isNaN(date.getTime()) ? String(message.time || "")
-            : date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) +
-              "." + pad(date.getMilliseconds(), 3) + " · " + ago(date);
+            : date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: state.utc ? "UTC" : undefined }) +
+              "." + pad(date.getMilliseconds(), 3) + (state.utc ? " UTC" : "") + " · " + ago(date);
           $("detail-when").title = message.time;
-          $("tags-tree").replaceChildren(...tagWords(message.tags));
+          $("tags-tree").replaceChildren(...tagWords(message.tags).map((word) => {
+            const pick = document.createElement("button");
+            pick.type = "button";
+            pick.className = "pick";
+            pick.title = "Show only lines with this tag";
+            pick.append(word);
+            pick.addEventListener("click", () => setFilter(word.textContent));
+            return pick;
+          }));
           const extra = Object.fromEntries(Object.entries(message.meta).filter(([key]) => key !== "tags"));
           $("detail-meta").hidden = !Object.keys(extra).length;
           $("meta-tree").replaceChildren(valueNode(extra));
@@ -708,10 +873,44 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           $("cli").textContent = cliCommand(message.seq);
         }
 
+        // Each open message has an address, #seq, like `plasmite fetch` takes it.
+        function messageLink(message) {
+          return location.origin + location.pathname + location.search + "#" + message.seq;
+        }
+
+        function setFilter(text) {
+          $("filter").value = text;
+          $("filter").dispatchEvent(new Event("input"));
+        }
+
+        function toggleZone() {
+          state.utc = !state.utc;
+          try { localStorage.setItem("plasmite.utc", state.utc ? "1" : ""); } catch (_) { /* Then only this visit. */ }
+          renderRows();
+          applyFilter();
+          renderDetail();
+        }
+
+        // Opens the message a link names: from the log when it is there, or fetched on
+        // its own when it is older than the log reaches.
+        async function openTarget() {
+          const target = state.target;
+          if (target == null || !state.messages.length) return;
+          const found = state.messages.find((message) => message.seq === target);
+          state.target = null;
+          if (found) { select(found); return; }
+          if (target > state.messages[state.messages.length - 1].seq) return;
+          try {
+            const response = await fetch("/v0/pools/" + encodeURIComponent(poolName) + "/messages/" + target, { cache: "no-store" });
+            if (response.ok) select(fromRaw((await response.json()).message));
+          } catch (_) { /* The address stays; the log is still here. */ }
+        }
+
         function select(message) {
           const previous = state.selected && state.rows.get(state.selected.seq);
           if (previous) previous.setAttribute("aria-selected", "false");
           state.selected = message;
+          history.replaceState(null, "", message ? messageLink(message) : location.pathname + location.search);
           renderDetail();
           const row = message && state.rows.get(message.seq);
           if (row) {
@@ -727,6 +926,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           const at = visible.indexOf(state.selected);
           const next = at < 0 ? (by > 0 ? 0 : visible.length - 1) : Math.max(0, Math.min(visible.length - 1, at + by));
           select(visible[next]);
+          if (!$("log").contains(document.activeElement)) $("log").focus({ preventScroll: true });
         }
 
         async function copy(button, text) {
@@ -765,17 +965,25 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           const bounds = info.bounds || {};
           const metrics = info.metrics || {};
           const total = metrics.message_count || 0;
+          if (info.path) showDirectory(info.path.replace(/[\\/][^\\/]*$/, ""));
           const facts = [];
           const fact = (value, label) => { const b = document.createElement("b"); b.textContent = value; facts.push(label ? [b, " " + label] : [b]); };
           fact(count(total), total === 1 ? "message" : "messages");
-          if (bounds.oldest != null) fact("#" + count(bounds.oldest) + "–#" + count(bounds.newest));
-          fact(size(info.file_size));
+          // Sequence numbers are written in full, as the CLI prints them and `fetch` takes them.
+          // Named like the pools list's columns. The newest message's number takes the map's
+          // "newest" pale, and its age goes with it.
           const newest = metrics.age && metrics.age.newest_time;
-          if (newest) facts.push(["newest ", Object.assign(document.createElement("b"), { textContent: ago(new Date(newest)) })]);
+          if (bounds.oldest != null) {
+            facts.push(["oldest ", Object.assign(document.createElement("b"), { textContent: "#" + bounds.oldest })]);
+            facts.push(["newest ", span("newest", "#" + bounds.newest), ...(newest ? [", " + ago(new Date(newest))] : [])]);
+          }
+          facts.push([size(info.file_size) + " capacity"]);
           // From the page's window, not the count so far, so it holds still while messages load.
-          if (total > keep) facts.push(["showing the last " + count(keep)]);
+          if (total > state.keep) facts.push(["showing the last " + count(state.keep)]);
           // Each fact stays whole; a narrow line breaks only between them.
           const factSpan = (parts) => { const fact = span("fact", ""); fact.append(...parts); return fact; };
+          // The ring's oldest message moves as it wraps, so the way back follows it.
+          showEarlier();
           $("facts").replaceChildren(...facts.flatMap((parts, i) => (i ? [" · ", factSpan(parts)] : [factSpan(parts)])));
         }
 
@@ -824,6 +1032,67 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           return { events, rest };
         }
 
+        // Earlier messages: the batch before the oldest one shown, so a reader can go back
+        // through everything the ring still holds.
+        function oldestHeld() {
+          const bounds = (state.info && state.info.bounds) || {};
+          return Number.isFinite(bounds.oldest) ? bounds.oldest : null;
+        }
+
+        function showEarlier() {
+          const first = state.messages[0];
+          const oldest = oldestHeld();
+          const more = first && oldest != null ? first.seq - oldest : 0;
+          $("earlier").hidden = more <= 0;
+          $("earlier").textContent = "Load " + count(Math.min(pageSize, more)) + " earlier";
+        }
+
+        // Reads up to one page of messages before the first shown. The stream runs on into
+        // messages already shown, so reading stops at the first of those.
+        async function loadEarlier() {
+          const first = state.messages[0];
+          const oldest = oldestHeld();
+          if (!first || oldest == null || first.seq <= oldest) return;
+          const from = Math.max(oldest, first.seq - pageSize);
+          const controller = new AbortController();
+          const older = [];
+          $("earlier").disabled = true;
+          try {
+            const query = new URLSearchParams({ gap_policy: "continue", since_seq: from, max: first.seq - from });
+            const response = await fetch("/v0/ui/pools/" + encodeURIComponent(poolName) + "/events?" + query,
+              { cache: "no-store", signal: controller.signal });
+            if (response.status === 401) { toLogin(); return; }
+            if (!response.ok || !response.body) throw new Error("Earlier messages failed (" + response.status + ")");
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            reading: for (;;) {
+              const part = await reader.read();
+              if (part.done) break;
+              const parsed = parseEvents(buffer + decoder.decode(part.value, { stream: true }).replaceAll("\r\n", "\n"));
+              buffer = parsed.rest;
+              for (const event of parsed.events) {
+                if (event.name !== "message") continue;
+                if (event.data.seq >= first.seq) break reading;
+                older.push(fromRaw(event.data));
+              }
+            }
+          } catch (_) { /* Keep what arrived; the button stays to try again. */ }
+          finally { controller.abort(); $("earlier").disabled = false; }
+          if (!older.length) { showEarlier(); return; }
+          // Keep the reader's place: the rows they were reading stay where they were.
+          const log = $("log");
+          const fromBottom = log.scrollHeight - log.scrollTop;
+          state.messages = [...older, ...state.messages];
+          state.keep += older.length;
+          for (const message of older) state.tagsWidth = Math.max(state.tagsWidth, Math.min(20, message.tags.join(" ").length));
+          state.tagged = state.messages.some((message) => message.tags.length);
+          renderRows();
+          applyFilter();
+          log.scrollTop = log.scrollHeight - fromBottom;
+          renderFacts();
+        }
+
         // Follows the pool from the next unseen message, reconnecting after any drop.
         async function followPool() {
           for (;;) {
@@ -864,12 +1133,21 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         });
         $("close").addEventListener("click", () => select(null));
         $("copy-json").querySelector("[data-icon]").innerHTML = copyIcon;
+        $("copy-link").querySelector("[data-icon]").innerHTML = copyIcon;
+        $("copy-link").addEventListener("click", () => {
+          if (state.selected) copy($("copy-link"), messageLink(state.selected));
+        });
+        window.addEventListener("hashchange", () => {
+          const seq = Number(location.hash.slice(1));
+          if (Number.isInteger(seq) && seq >= 0 && seq !== state.selected?.seq) { state.target = seq; openTarget(); }
+        });
         $("copy-cli").querySelector("[data-icon]").innerHTML = copyIcon;
         $("copy-json").addEventListener("click", () => {
           if (state.selected) copy($("copy-json"), JSON.stringify(state.selected.raw, null, 2));
         });
         $("copy-cli").addEventListener("click", () => copy($("copy-cli"), $("cli").textContent));
         $("jump").addEventListener("click", scrollToBottom);
+        $("earlier").addEventListener("click", loadEarlier);
         $("log").addEventListener("scroll", () => { if (atBottom()) { state.unseen = 0; $("jump").hidden = true; } }, { passive: true });
         $("filter").addEventListener("input", () => {
           state.filter = $("filter").value.trim().toLowerCase();
@@ -941,7 +1219,11 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           document.title = poolName + " · " + (state.local ? "local" : location.hostname);
           try { if (!(await loadInfo())) return; } catch (_) { /* The stream still runs; facts fill in on the next try. */ }
           const bounds = (state.info && state.info.bounds) || {};
-          if (Number.isFinite(bounds.newest)) state.nextSeq = Math.max(bounds.oldest || 1, bounds.newest - keep + 1);
+          if (Number.isFinite(bounds.newest)) state.nextSeq = Math.max(bounds.oldest || 1, bounds.newest - state.keep + 1);
+          loadPins();
+          try { state.utc = localStorage.getItem("plasmite.utc") === "1"; } catch (_) { state.utc = false; }
+          const linked = Number(location.hash.slice(1));
+          if (location.hash && Number.isInteger(linked) && linked >= 0) state.target = linked;
           applyFilter();
           // Rows take their height from the font, so the first scroll to the newest waits for it.
           await document.fonts.ready;

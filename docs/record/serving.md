@@ -355,12 +355,14 @@ cannot reach its pool API.
 The map draws each pool's message buffer as a spiral. Byte 0 starts at 12
 o'clock on the outside. Each stored message takes its real share of the track;
 new messages wrap to the outside when they reach the end. Older messages are
-dimmer, and the newest is near white. The number beside the newest message,
-such as `#505`, is its sequence number. Larger buffers get more turns, up to
-the map's width limit. When a pool has more than 4,096 messages, the map draws
-its used space as a continuous track instead of individual segments.
-Click a pool to follow its newest messages; hover a message to find it on the
-spiral. The link at the bottom of that card opens the full pool page.
+dimmer, the newest is near white, and dark track is unused space. The number
+beside the newest message, such as `#505`, is its sequence number, written in
+full. Larger buffers get more turns, up to the map's width limit. When a pool
+has more than 4,096 messages, the map draws its used space as a continuous
+track instead of individual segments.
+Click a pool to follow its newest messages; the card above them gives the
+pool's message count and capacity. Hover a message to find it on the spiral.
+The link at the bottom of that card opens the full pool page.
 
 The pool page shows the pool's last 400 messages, one line each, and adds new
 ones as they arrive. Each line has the message's sequence number, time, and
@@ -370,16 +372,30 @@ start and an ellipsis; a long string also shows its size. Tags such as
 `error` and `warn` color a line; no field inside the data does. Click a line
 to open the whole message below the list, with nested fields indented under
 their keys, and a `plasmite fetch` command that reads the same message from a
-terminal. There a string longer than 2,000 characters shows its start, its
-size, and a button that copies all of it.
+terminal. There a string longer than 2,000 characters shows its start and
+size, with buttons to show all of it or copy it. Click a field's key there to
+pin it: every line then shows that field first. This browser remembers pins
+for each pool. Load earlier, above the oldest line, reads the 400 messages
+before it, as far back as the ring holds.
 Type in Filter to keep lines that contain that text, as `path: value` or in a
-tag, and mark it; a match in a cut-off part marks the ellipsis. `j` and `k` move
-between lines, `/` focuses the filter, and Esc closes the open message. The
+tag, and mark it; a match in a cut-off part marks the ellipsis. `j` and `k`, or
+the arrow keys, move between lines, `/` focuses the filter, and Esc closes the
+open message; a hint beside the filter says so. The
 Feed box takes JSON, as `plasmite feed` does, or plain text, which it sends
 as `{"text": ...}`.
 
-On the local map, the small marks beneath each pool's size open its activity
-card. It lists live browser, HTTP, and MCP requests for that pool, with peer
+Each open message has an address, such as `/ui/pools/alerts#592`, that opens
+the page on it, even when it is older than the messages shown; Copy link copies
+it. Click a value or tag in the open message to filter by it. Click the time
+column's heading to switch between this machine's time zone and UTC. On any
+page, `g` opens a jump to a pool by name. The Pools list moves between pools
+with `j` and `k` and opens one with Enter. Each of its rows, and the map's card,
+copies the `plasmite follow` command for that pool.
+
+On the local map, the line beneath each pool's capacity says what is using it,
+such as "1 following, 1 process", and opens its activity card. The map's own
+preview of the open pool is left out of that count. The card lists live
+browser, HTTP, and MCP requests for that pool, with peer
 IP addresses and client headers when available. The server shares these
 observations across its local and HTTPS listeners. It does not resolve peer
 addresses through DNS or identify a VM from an address.

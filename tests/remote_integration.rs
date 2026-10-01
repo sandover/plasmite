@@ -667,6 +667,16 @@ fn remote_ui_routes_serve_single_page_html() -> TestResult<()> {
     std::io::Read::read_to_end(&mut font.into_reader(), &mut bytes)?;
     assert!(bytes.starts_with(b"wOF2"));
 
+    let common = ureq::get(&format!("{}/ui/assets/common.js", server.local_url))
+        .call()
+        .expect("shared UI script");
+    assert_eq!(common.status(), 200);
+    assert_eq!(
+        common.header("content-type"),
+        Some("text/javascript; charset=utf-8")
+    );
+    assert!(common.into_string()?.contains("showDirectory"));
+
     let pool_view = ureq::get(&format!("{}/ui/pools/demo", server.local_url))
         .call()
         .expect("pool ui route");

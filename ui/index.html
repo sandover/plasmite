@@ -17,17 +17,24 @@ Invariants: Pool names are rendered as text (never injected as HTML).
         font-weight: 200 900;
         font-display: swap;
       }
+      /* Colors: the Solar Eclipse "Ashen" ground and text, with accents at the text's
+         lightness and low chroma, so nothing glows against the dark. */
       :root {
-        --bg: #15191f;
-        --panel: #1f232b;
-        --panel-2: #252b36;
-        --text: #e9edf1;
-        --muted: #9aa9b8;
-        --line: #394657;
-        --ok: #74d7b2;
-        --warn: #e8bc72;
-        --error: #f08383;
-        --accent: #83c5d7;
+        --bg: #0f181e;
+        --panel: #111b21;
+        --panel-2: #182228;
+        --text: #979ca0;
+        --bright: #a4a9ad;
+        --muted: #868b90;
+        --line: #2d373e;
+        --ok: #74a78e;
+        --warn: #bba074;
+        --error: #c0807b;
+        --accent: #64a6a8;
+        /* The map's language, shared with the pool page: pools in its teal, sequence
+           numbers on its dimmed rail teal, and the newest in its pale. */
+        --rail: #578081;
+        --pale: #e7ead7;
         /* Two voices: the system's own sans for the interface, which loads nothing, and
            the embedded Inconsolata for data. A region uses one or the other throughout. */
         --sans: system-ui, sans-serif;
@@ -43,7 +50,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
         margin: 0;
         min-height: 100%;
         font-size: 20px;
-        background: radial-gradient(circle at 30% -20%, #263543, transparent 55%), var(--bg);
+        background: radial-gradient(circle at 30% -20%, #16222a, transparent 55%), var(--bg);
         color: var(--text);
         font-family: var(--sans);
       }
@@ -59,14 +66,14 @@ Invariants: Pool names are rendered as text (never injected as HTML).
         gap: 22px;
         padding: 10px 18px;
         border-bottom: 1px solid var(--line);
-        background: #1a2028;
+        background: #111b21;
         font: 14px/1.5 var(--sans);
       }
 
-      .topbar .brand { color: var(--text); font: 14px var(--mono); letter-spacing: .11em; text-decoration: none; }
+      .topbar .brand { color: var(--accent); font: 14px var(--mono); letter-spacing: .11em; text-decoration: none; }
       .topbar nav { display: flex; align-items: baseline; gap: 16px; }
       .topbar nav a { text-decoration: none; color: var(--muted); }
-      .topbar nav a[aria-current="page"] { color: var(--text); }
+      .topbar nav a[aria-current="page"] { color: var(--bright); text-decoration: underline 2px var(--accent); text-underline-offset: 7px; }
       .topbar .actions { margin-left: auto; display: flex; gap: 14px; font-size: 12px; }
       .topbar .where { color: var(--muted); }
       .topbar .where.local { color: var(--warn); }
@@ -84,7 +91,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
       .app { font-size: 16px; }
 
       .card {
-        background: linear-gradient(180deg, var(--panel), #1a1f28);
+        background: linear-gradient(180deg, var(--panel), #111b21);
         border: 1px solid var(--line);
         border-radius: 12px;
         overflow: hidden;
@@ -111,7 +118,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
       }
 
       button:hover {
-        border-color: #4a5570;
+        border-color: #3f4950;
       }
 
       input {
@@ -124,26 +131,13 @@ Invariants: Pool names are rendered as text (never injected as HTML).
 
       /* --- Pool list: one row per pool, like `plasmite pool list` --- */
 
-      .list h1 { display: flex; gap: 12px; align-items: baseline; margin: 8px 0 18px; font-size: 20px; font-weight: 600; }
+      .list h1 { display: flex; gap: 12px; align-items: baseline; margin: 8px 0 18px; color: var(--bright); font-size: 20px; font-weight: 600; }
       .list h1 .count { color: var(--muted); font-weight: 400; }
       .list h1 .reconnecting { color: var(--warn); font-size: 12px; font-weight: 400; }
-      .summary { display: grid; grid-template-columns: 6.5em 1fr; gap: 12px 0; align-items: baseline; margin: 0 0 28px; }
-      .summary dt { color: var(--muted); font-size: 12px; }
-      .summary dd { margin: 0; min-width: 0; display: flex; gap: 10px; align-items: baseline; }
-      /* The directory: parent folders muted, its own name bright. It breaks only after a
-         slash, like a breadcrumb, so no folder name is split or cut. Click copies it. */
-      .path {
-        display: block; max-width: 100%; padding: 2px 6px; margin: 0 -6px; border: 0; border-radius: 5px;
-        background: none; color: var(--text); font: 14px var(--mono); text-align: left; overflow-wrap: anywhere;
-      }
-      .path .parent { color: var(--muted); }
-      .path strong { font-weight: 600; }
-      .path:hover, .path:focus-visible { background: #27313e; border: 0; outline: none; }
-      .copied { color: var(--ok); font-size: 11px; }
 
       /* Each row is a link over subgrid cells, so the whole row opens the pool. */
       .pools {
-        --columns: minmax(8rem, 1fr) repeat(5, max-content);
+        --columns: minmax(8rem, 1fr) repeat(5, max-content) 26px;
         display: grid; grid-template-columns: var(--columns); column-gap: 28px;
         font-family: var(--mono);
       }
@@ -155,28 +149,52 @@ Invariants: Pool names are rendered as text (never injected as HTML).
       .pools-head button:hover, .pools-head button:focus-visible { color: var(--text); outline: none; }
       .pools-head [aria-sort] button { color: var(--text); }
       .pool-row {
-        padding: 9px 10px; border-top: 1px solid #2c3643; color: var(--text); text-decoration: none;
+        padding: 9px 10px; border-top: 1px solid #222c32; color: var(--text); text-decoration: none;
       }
-      a.pool-row:visited { color: var(--text); }
-      .pool-row:hover, .pool-row:focus-visible { background: #1f2630; outline: none; }
-      .pool-row:focus-visible { box-shadow: inset 2px 0 var(--accent); }
-      .pool-row .name { font-weight: 600; overflow-wrap: anywhere; }
-      .pool-row:hover .name, .pool-row:focus-visible .name { color: var(--accent); }
+      .pool-row { cursor: pointer; }
+      .pool-row:hover { background: #182228; }
+      /* Green marks the row the keys have chosen, as it marks the open message on a pool's page. */
+      .pool-row.current { background: #182228; box-shadow: inset 0 0 0 1px var(--ok); border-radius: 4px; outline: none; }
+      .pool-row .name { color: var(--accent); font-weight: 600; overflow-wrap: anywhere; text-decoration: none; }
+      .pool-row .name:visited { color: var(--accent); }
+      .pool-row:hover .name, .pool-row.current .name, .pool-row .name:focus-visible { color: var(--pale); outline: none; }
+      .copy-command {
+        align-self: center; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0;
+        border-radius: 5px; background: none; color: var(--muted); opacity: 0; cursor: pointer;
+      }
+      .pool-row:hover .copy-command, .pool-row.current .copy-command, .copy-command:focus-visible { opacity: .8; }
+      .copy-command:hover, .copy-command:focus-visible { opacity: 1; color: var(--text); background: #1d272d; outline: none; }
+      .copy-command.done { opacity: 1; color: var(--ok); }
+      .copy-command svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+      @media (hover: none) { .copy-command { opacity: .8; } }
       .pools .num { text-align: right; white-space: nowrap; }
-      .pools .none, .pools .seq { color: var(--muted); }
+      .pools .none { color: var(--muted); }
+      .pool-row .c-oldest { color: var(--rail); }
+      .pool-row .c-newest { color: var(--bright); }
+      /* A new message lights the pool's newest number for a moment, in the map's "newest" pale. */
+      @media (prefers-reduced-motion: no-preference) {
+        .pool-row .c-newest.arrived { animation: arrived 1.8s ease-out; }
+        @keyframes arrived { from { color: var(--pale); text-shadow: 0 0 10px #e7ead766; } }
+      }
+      .list .hint { margin-left: auto; color: #72787d; font: 400 12px var(--sans); }
+      .list .hint kbd {
+        display: inline-block; min-width: 1.6em; margin: 0 1px; padding: 0 4px; border: 1px solid var(--line);
+        border-bottom-width: 2px; border-radius: 4px; color: var(--accent); font: 11px/1.4 var(--mono); text-align: center;
+      }
+      .pool-row .c-size, .pool-row .c-written { color: var(--muted); }
       .pools .fresh { color: var(--ok); }
-      .list .empty { color: var(--muted); padding: 12px 10px; border-top: 1px solid #2c3643; }
+      .list .empty { color: var(--muted); padding: 12px 10px; border-top: 1px solid #222c32; }
       .list .empty code { color: var(--text); }
       .list .error { color: var(--error); }
 
       @media (max-width: 760px) {
-        .pools { --columns: minmax(6rem, 1fr) repeat(3, max-content); column-gap: 18px; }
+        .pools { --columns: minmax(6rem, 1fr) repeat(3, max-content) 26px; column-gap: 18px; }
+        .list .hint { display: none; }
         .pools .c-oldest, .pools .c-newest { display: none; }
       }
       @media (max-width: 480px) {
-        .pools { --columns: minmax(5rem, 1fr) repeat(2, max-content); column-gap: 14px; }
+        .pools { --columns: minmax(5rem, 1fr) repeat(2, max-content) 26px; column-gap: 14px; }
         .pools .c-size { display: none; }
-        .summary { grid-template-columns: 1fr; gap: 4px 0; }
       }
 
       .error {
@@ -209,9 +227,11 @@ Invariants: Pool names are rendered as text (never injected as HTML).
         <!-- Access shows only on the server machine; the page unhides it for a local session. -->
         <a href="/access" id="nav-access" hidden>Access</a>
       </nav>
+      <button type="button" class="dir" id="dir" hidden><span class="what">Serving</span><span class="path"><span class="parent"></span><strong></strong></span><span class="mark" aria-hidden="true"></span></button>
       <span class="actions" id="actions"></span>
     </header>
     <main id="app" class="app" aria-live="polite"></main>
+    <script src="/ui/assets/common.js"></script>
     <script>
       (() => {
         const app = document.getElementById("app");
@@ -299,8 +319,11 @@ Invariants: Pool names are rendered as text (never injected as HTML).
           if (diffM < 60) return diffM + "m ago";
           const diffH = Math.floor(diffM / 60);
           if (diffH < 24) return diffH + "h ago";
-          const diffD = Math.floor(diffH / 24);
-          if (diffD === 1) {
+          // "Yesterday" means the calendar day before today, not any time 24 to 48 hours ago.
+          const yesterday = new Date();
+          yesterday.setHours(0, 0, 0, 0);
+          yesterday.setDate(yesterday.getDate() - 1);
+          if (date.toDateString() === yesterday.toDateString()) {
             return "yesterday " + pad2(date.getHours()) + ":" + pad2(date.getMinutes());
           }
           var months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -320,7 +343,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
 
         // The list follows the server's pool stream; `pools` stays null until the
         // first snapshot arrives. Sorting and the copied note are the page's own.
-        var list = { pools: null, error: "", reconnecting: false, dir: "", sort: "name", desc: false, copiedUntil: 0, frame: "", section: null, rows: new Map() };
+        var list = { pools: null, error: "", reconnecting: false, dir: "", sort: "name", desc: false, frame: "", section: null, rows: new Map(), newest: new Map(), current: null };
 
         // Columns, in the CLI's order. Numeric columns sort high first on the first click.
         var poolColumns = [
@@ -329,7 +352,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
           { key: "oldest", label: "Oldest", num: true },
           { key: "newest", label: "Newest", num: true },
           { key: "written", label: "Last write", num: true },
-          { key: "size", label: "Size", num: true },
+          { key: "size", label: "Capacity", num: true },
         ];
 
         function poolFacts(pool) {
@@ -353,15 +376,6 @@ Invariants: Pool names are rendered as text (never injected as HTML).
           return path ? path.replace(/[\\/][^\\/]*$/, "") : "";
         }
 
-        // The directory as a copy button that breaks only after a slash.
-        function directoryMarkup(dir) {
-          var cut = Math.max(dir.lastIndexOf("/"), dir.lastIndexOf("\\")) + 1;
-          var parent = dir.slice(0, cut).split(/(?<=[\\/])/).map(escapeHtml).join("<wbr>");
-          return '<button type="button" class="path" data-copy-dir title="' + escapeAttr(dir) + '" aria-label="Copy directory path">' +
-            '<span class="parent">' + parent + '<wbr></span><strong>' + escapeHtml(dir.slice(cut)) + '</strong></button>' +
-            (Date.now() < list.copiedUntil ? '<span class="copied">copied</span>' : '');
-        }
-
         function sortedFacts() {
           var key = list.sort, sign = list.desc ? -1 : 1;
           return list.pools.map(poolFacts).sort(function (a, b) {
@@ -376,16 +390,32 @@ Invariants: Pool names are rendered as text (never injected as HTML).
         function poolCellsMarkup(f) {
           var none = '<span class="none">–</span>';
           var count = function (n) { return n == null ? none : n.toLocaleString(); };
-          var seq = function (n) { return n == null ? none : '<span class="seq">#</span>' + n.toLocaleString(); };
+          // A sequence number is written in full, as the CLI prints it and `fetch` takes it;
+          // its column heading says what it is, so it needs no "#".
+          var seq = function (n) { return n == null ? none : String(n); };
           var fresh = f.written != null && Date.now() - f.written < 5000;
           var written = f.written == null ? (f.messages === 0 ? '<span class="none">never</span>' : none)
             : '<span class="' + (fresh ? "fresh" : "") + '">' + escapeHtml(formatRelativeTime(new Date(f.written).toISOString())) + '</span>';
-          return '<span role="cell" class="name">' + escapeHtml(f.name) + '</span>' +
+          return '<span role="cell"><a class="name" href="/ui/pools/' + escapeAttr(encodeURIComponent(f.name)) + '">' + escapeHtml(f.name) + '</a></span>' +
             '<span role="cell" class="num">' + count(f.messages) + '</span>' +
             '<span role="cell" class="num c-oldest">' + seq(f.oldest) + '</span>' +
             '<span role="cell" class="num c-newest">' + seq(f.newest) + '</span>' +
-            '<span role="cell" class="num">' + written + '</span>' +
-            '<span role="cell" class="num c-size">' + escapeHtml(formatHumanBytes(f.size)) + '</span>';
+            '<span role="cell" class="num c-written">' + written + '</span>' +
+            '<span role="cell" class="num c-size">' + escapeHtml(formatHumanBytes(f.size)) + '</span>' +
+            '<span role="cell"><button type="button" class="copy-command" data-command="' + escapeAttr(followCommand(f.name)) + '"' +
+              ' title="Copy ' + escapeAttr(followCommand(f.name)) + '" aria-label="Copy the command that follows ' + escapeAttr(f.name) + '">' + copyIcon + '</button></span>';
+        }
+
+        var copyIcon = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg>';
+        var doneIcon = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>';
+
+        // The command that follows a pool from a terminal: by name in this directory
+        // here, by its address from elsewhere.
+        function followCommand(name) {
+          var quote = function (text) { return /^[\w@%+=:,./-]+$/.test(text) ? text : "'" + text.replace(/'/g, "'\\''") + "'"; };
+          var dir = poolDirectory();
+          if (!state.local) return "plasmite follow " + quote(location.origin + "/" + name);
+          return "plasmite " + (dir ? "--dir " + quote(dir) + " " : "") + "follow " + quote(name);
         }
 
         function poolHeadMarkup() {
@@ -395,7 +425,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
             return '<span role="columnheader" class="' + (column.num ? "num " : "") + "c-" + column.key + '"' +
               (active ? ' aria-sort="' + (list.desc ? "descending" : "ascending") + '"' : "") + '>' +
               '<button type="button" data-sort="' + column.key + '">' + column.label + arrow + '</button></span>';
-          }).join("") + '</div>';
+          }).join("") + '<span role="columnheader"></span></div>';
         }
 
         // Writes the page around the rows only when it changed, and keeps one link
@@ -404,6 +434,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
         function renderPoolList() {
           var pools = list.pools;
           var dir = poolDirectory();
+          showDirectory(dir);
           var body = "";
           if (pools && pools.length) {
             body = '<div class="pools" role="table" aria-label="Pools">' + poolHeadMarkup() + '</div>';
@@ -413,8 +444,9 @@ Invariants: Pool names are rendered as text (never injected as HTML).
           }
           var frame = '<section class="list">' +
             '<h1>Pools' + (pools ? ' <span class="count">' + pools.length + '</span>' : '') +
-              (list.reconnecting ? ' <span class="reconnecting">reconnecting</span>' : '') + '</h1>' +
-            (dir ? '<dl class="summary"><dt>Directory</dt><dd>' + directoryMarkup(dir) + '</dd></dl>' : '') +
+              (list.reconnecting ? ' <span class="reconnecting">reconnecting</span>' : '') +
+              (pools && pools.length ? '<span class="hint"><kbd>j</kbd><kbd>k</kbd> to choose · <kbd>Enter</kbd> to open · <kbd>g</kbd> to jump</span>' : '') + '</h1>' +
+
             (list.error ? '<p class="error">' + escapeHtml(list.error) + '</p>' : '') +
             body + '</section>';
           if (frame !== list.frame || app.firstElementChild !== list.section) {
@@ -428,14 +460,24 @@ Invariants: Pool names are rendered as text (never injected as HTML).
           sortedFacts().forEach(function (f, i) {
             var row = list.rows.get(f.name);
             if (!row) {
-              row = document.createElement("a");
+              row = document.createElement("div");
               row.className = "pool-row";
               row.setAttribute("role", "row");
-              row.href = "/ui/pools/" + encodeURIComponent(f.name);
+              row.tabIndex = -1;
+              row.dataset.name = f.name;
               list.rows.set(f.name, row);
             }
             var cells = poolCellsMarkup(f);
             if (row.dataset.cells !== cells) { row.innerHTML = cells; row.dataset.cells = cells; }
+            row.classList.toggle("current", f.name === list.current);
+            var before = list.newest.get(f.name);
+            list.newest.set(f.name, f.newest);
+            if (before != null && f.newest != null && f.newest > before) {
+              var cell = row.querySelector(".c-newest");
+              cell.classList.remove("arrived");
+              void cell.offsetWidth;
+              cell.classList.add("arrived");
+            }
             // Child 0 is the header row.
             if (table.children[i + 1] !== row) table.insertBefore(row, table.children[i + 1] || null);
             seen.add(f.name);
@@ -446,6 +488,21 @@ Invariants: Pool names are rendered as text (never injected as HTML).
         }
 
         app.addEventListener("click", async function (event) {
+          var copyButton = event.target.closest("[data-command]");
+          if (copyButton) {
+            try {
+              await navigator.clipboard.writeText(copyButton.dataset.command);
+              copyButton.innerHTML = doneIcon;
+              copyButton.classList.add("done");
+              setTimeout(function () { copyButton.innerHTML = copyIcon; copyButton.classList.remove("done"); }, 1200);
+            } catch (_) { /* Clipboard needs a secure context; the title still shows the command. */ }
+            return;
+          }
+          var poolRow = event.target.closest(".pool-row");
+          if (poolRow && !event.target.closest("a, button") && window.getSelection().isCollapsed) {
+            location.assign("/ui/pools/" + encodeURIComponent(poolRow.dataset.name));
+            return;
+          }
           var sort = event.target.closest("[data-sort]");
           if (sort) {
             var column = poolColumns.find(function (c) { return c.key === sort.dataset.sort; });
@@ -456,14 +513,22 @@ Invariants: Pool names are rendered as text (never injected as HTML).
             if (again) again.focus();
             return;
           }
-          if (event.target.closest("[data-copy-dir]")) {
-            try {
-              await navigator.clipboard.writeText(poolDirectory());
-              list.copiedUntil = Date.now() + 1200;
-              renderPoolList();
-              setTimeout(renderPoolList, 1250);
-            } catch (_) { /* Clipboard needs a secure context; the title still shows the path. */ }
-          }
+        });
+
+        document.addEventListener("keydown", function (event) {
+          if (!list.rows.size || event.metaKey || event.ctrlKey || event.altKey) return;
+          if (event.target instanceof Element && event.target.closest("input, textarea, button")) return;
+          var names = sortedFacts().map(function (f) { return f.name; });
+          var at = names.indexOf(list.current);
+          if (event.key === "j" || event.key === "ArrowDown") at = Math.min(names.length - 1, at + 1);
+          else if (event.key === "k" || event.key === "ArrowUp") at = at < 0 ? names.length - 1 : Math.max(0, at - 1);
+          else if (event.key === "Enter" && list.current) { location.assign("/ui/pools/" + encodeURIComponent(list.current)); return; }
+          else return;
+          event.preventDefault();
+          list.current = names[at];
+          renderPoolList();
+          var row = list.rows.get(list.current);
+          if (row) { row.focus({ preventScroll: true }); row.scrollIntoView({ block: "nearest" }); }
         });
 
         /* ---- Helpers ---- */
