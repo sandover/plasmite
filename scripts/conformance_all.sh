@@ -70,4 +70,6 @@ echo "[conformance] python runner/tests"
   PYTHONPATH="$ROOT/bindings/python" python3 -m unittest discover -s tests -p "test_*.py"
 )
 
+# Runners keep their last pools for debugging a failure; a full pass needs none of them.
+rm -rf "$ROOT"/conformance/work "$ROOT"/conformance/work-*
 echo "[conformance] complete"
