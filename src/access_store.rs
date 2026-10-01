@@ -22,9 +22,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use url::{Host, Url};
 
 #[cfg(windows)]
-type DirectoryGuard = crate::windows_private::Directory;
+pub(crate) type DirectoryGuard = crate::windows_private::Directory;
 #[cfg(not(windows))]
-type DirectoryGuard = ();
+pub(crate) type DirectoryGuard = ();
 
 pub(crate) struct AccessStore {
     dir: PathBuf,
@@ -782,7 +782,7 @@ fn create_private(path: &Path) -> Result<File, Error> {
     })
 }
 
-fn create_private_dir(path: &Path) -> Result<DirectoryGuard, Error> {
+pub(crate) fn create_private_dir(path: &Path) -> Result<DirectoryGuard, Error> {
     #[cfg(unix)]
     {
         if path.exists() {
@@ -791,12 +791,21 @@ fn create_private_dir(path: &Path) -> Result<DirectoryGuard, Error> {
         use std::os::unix::fs::DirBuilderExt;
         let mut builder = std::fs::DirBuilder::new();
         builder.mode(0o700);
-        builder.create(path).map_err(|err| {
-            Error::new(ErrorKind::Io)
-                .with_message("failed to create server state directory")
-                .with_path(path)
-                .with_source(err)
-        })
+        builder
+            .create(path)
+            .or_else(|err| {
+                if err.kind() == std::io::ErrorKind::AlreadyExists {
+                    Ok(())
+                } else {
+                    Err(err)
+                }
+            })
+            .map_err(|err| {
+                Error::new(ErrorKind::Io)
+                    .with_message("failed to create server state directory")
+                    .with_path(path)
+                    .with_source(err)
+            })
     }
     #[cfg(windows)]
     {
@@ -918,6 +927,37 @@ mod tests {
             .expect("same-key certificate renewal");
         assert_eq!(moved.fingerprint(), fingerprint);
         assert!(moved.authorize_secret(secret).is_some());
+    }
+
+    #[test]
+    fn frontend_identity_persists_until_explicitly_replaced() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let frontend =
+            Certificate::from_params(CertificateParams::new(vec!["node.tail123.ts.net".into()]))
+                .expect("frontend certificate");
+        let front_path = temp.path().join("frontend.pem");
+        std::fs::write(&front_path, frontend.serialize_pem().expect("pem")).expect("frontend file");
+        let first = AccessStore::open(temp.path(), None, None, Some(&front_path))
+            .expect("frontend identity");
+        let frontend_fingerprint = first.fingerprint().to_owned();
+        let backend_path = first.cert_path();
+        assert_ne!(
+            super::cert_fingerprint(&backend_path).unwrap(),
+            frontend_fingerprint
+        );
+        drop(first);
+
+        let restarted = AccessStore::open(temp.path(), None, None, None).expect("restart");
+        assert_eq!(restarted.fingerprint(), frontend_fingerprint);
+        drop(restarted);
+
+        let direct = AccessStore::open(temp.path(), None, None, Some(&backend_path))
+            .expect("explicit direct certificate identity");
+        assert_eq!(
+            direct.fingerprint(),
+            super::cert_fingerprint(&backend_path).unwrap()
+        );
+        assert_ne!(direct.fingerprint(), frontend_fingerprint);
     }
 
     #[test]

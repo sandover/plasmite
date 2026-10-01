@@ -9,13 +9,15 @@ use std::path::{Path, PathBuf};
 pub(crate) struct CliContext {
     pool_dir: PathBuf,
     color_mode: ColorMode,
+    json_output: bool,
 }
 
 impl CliContext {
-    pub(crate) fn new(pool_dir: PathBuf, color_mode: ColorMode) -> Self {
+    pub(crate) fn new(pool_dir: PathBuf, color_mode: ColorMode, json_output: bool) -> Self {
         Self {
             pool_dir,
             color_mode,
+            json_output,
         }
     }
 
@@ -23,7 +25,15 @@ impl CliContext {
         &self.pool_dir
     }
 
+    pub(crate) fn json_output(&self) -> bool {
+        self.json_output
+    }
+
     pub(crate) fn color_mode(&self) -> ColorMode {
-        self.color_mode
+        if self.json_output {
+            ColorMode::Never
+        } else {
+            self.color_mode
+        }
     }
 }

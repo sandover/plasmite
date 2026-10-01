@@ -1,15 +1,14 @@
 # plasmite
 
-Persistent JSON message queues backed by plain files. No daemon, no broker, no
-config.
+Persistent, bounded JSON message streams backed by plain files. Local use
+needs no daemon or broker.
 
-Plasmite gives you fast, crash-safe, disk-backed ring buffers ("pools") that
-multiple processes can read and write concurrently. Use it for IPC, event
-sourcing, job queues, or anywhere you'd reach for Redis or a database-backed
-queue but don't want to run a server.
+Plasmite gives you disk-backed ring buffers ("pools") that multiple processes
+can read and write concurrently. Use them for IPC, recent event history,
+and process output. Old messages disappear when the ring fills; Plasmite
+does not acknowledge work or retain it until a consumer finishes.
 
-- ~60k 1KB msgs/sec append throughput on a laptop (single writer, `Durability::Fast`)
-- Lock-free, zero-copy reads via mmap
+- Owned message snapshots from memory-mapped pool files
 - Crash-safe writes with configurable durability
 - Bounded disk usage (ring buffer — old messages overwritten when full)
 - Structured JSON messages with sequence numbers, timestamps, and tags
@@ -42,8 +41,10 @@ println!("seq={} time={}", msg.seq, msg.time);
 let fetched = pool.get_message(1)?;
 assert_eq!(fetched.data["user"], "alice");
 
-// Tail — stream messages as they arrive
+// Read back this message through the streaming API
 let mut tail = pool.tail(TailOptions {
+    since_seq: Some(msg.seq),
+    max_messages: Some(1),
     tags: vec!["user-event".into()],
     ..TailOptions::default()
 });
@@ -65,7 +66,8 @@ Every message carries:
 - **data** — your JSON payload
 
 Multiple processes can write to the same pool concurrently (serialized via OS
-file locks). Multiple processes can read concurrently (lock-free).
+file locks). Multiple processes read concurrently using shared file locks
+while copying each message into an owned snapshot.
 
 ## API overview
 
@@ -142,9 +144,9 @@ use plasmite::api::{PoolApiExt, TailOptions};
 use std::time::Duration;
 
 let mut tail = pool.tail(TailOptions {
-    since_seq: Some(100),                  // start after seq 100
+    since_seq: Some(100),                  // start at seq 100 (inclusive)
     max_messages: Some(50),                // stop after 50
-    timeout: Some(Duration::from_secs(5)), // stop after 5s idle
+    timeout: Some(Duration::from_secs(5)), // stop after 5s from the start
     tags: vec!["important".into()],        // filter by tag
     ..TailOptions::default()
 });
@@ -169,14 +171,13 @@ while let Some(msg) = replay.next_message() {
 
 ### Remote pools
 
-Connect to a plasmite server over HTTP:
+Use the server's credential-free loopback listener on the same machine:
 
 ```rust
 use plasmite::api::{RemoteClient, PoolRef, Durability};
 use serde_json::json;
 
-let client = RemoteClient::new("http://127.0.0.1:9700")?
-    .with_token("my-secret-token");
+let client = RemoteClient::new("http://127.0.0.1:9700")?;
 
 let pool = client.open_pool(&PoolRef::name("events"))?;
 let msg = pool.append_json_now(
@@ -192,6 +193,12 @@ while let Some(msg) = tail.next_message()? {
 }
 tail.cancel();
 ```
+
+For HTTPS sharing, run `plasmite access connect SERVER_URL` first, then
+construct `RemoteClient::new(SERVER_URL)`. An application can instead supply
+an in-memory access key with `RemoteClient::with_access_key(SERVER_URL, key)`.
+See the [1.0 upgrade guide](https://github.com/sandover/plasmite/blob/main/docs/record/upgrading-1.0.md) for removed builders
+and configuration changes.
 
 ### Error handling
 
@@ -213,7 +220,11 @@ match pool.get_message(9999) {
 ```
 
 Error kinds: `Internal`, `Usage`, `NotFound`, `AlreadyExists`, `Busy`,
-`Permission`, `Corrupt`, `Io`.
+`Permission`, `Corrupt`, `Io`, `RetentionGap`.
+
+Set `TailOptions::gap_policy` to `GapPolicy::Error` to stop a tail before
+delivering a message after lost history. Its `RetentionGap` error identifies the first missing sequence.
+Persist the next sequence to read and choose how to recover before restarting.
 
 ### Pool validation
 

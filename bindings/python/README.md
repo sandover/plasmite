@@ -130,3 +130,20 @@ except RetentionGapError as err:
 
 - **Missing pool directory**: pool creation creates parent directories automatically. If you call `open_pool(...)` on a missing pool, catch `NotFoundError` or use `client.pool(...)` to create-or-open.
 - **Permission denied**: choose a writable pool directory (`Client("/path/to/pools")`) and verify directory permissions/ownership. Errors include `err.path` when available.
+
+### Threads and handle ownership
+
+The Python wrapper serializes native operations and `close()` on each `Client`,
+`Pool`, `Stream`, and `Lite3Stream` instance. You can share an instance between
+threads without racing its native handle or freeing it during a call. Independent
+handles can operate concurrently. Message values are owned snapshots and can
+outlive the pool.
+
+Each opened stream owns an independent handle. `tail()` and `replay()` release
+handle locks between reads, including while yielding messages or sleeping for
+replay timing. Consume each generator from one thread at a time.
+
+`close()` waits for an active native call to finish; it does not interrupt a
+blocking stream read. Pass a finite `timeout_ms` when opening a stream if another
+thread needs to close it within a bounded wait. A stream without a timeout can
+keep `close()` waiting indefinitely.

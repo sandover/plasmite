@@ -31,6 +31,7 @@ use std::future::IntoFuture;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::Duration;
@@ -71,6 +72,7 @@ const UI_INDEX_HTML: &str = include_str!("../ui/index.html");
 const UI_ACCESS_HTML: &str = include_str!("../ui/access.html");
 const UI_MAP_HTML: &str = include_str!("../ui/map.html");
 const UI_POOL_HTML: &str = include_str!("../ui/pool.html");
+const UI_COMMON_JS: &str = include_str!("../ui/common.js");
 const UI_INCONSOLATA_WOFF2: &[u8] =
     include_bytes!("../ui/fonts/inconsolata-latin-wght-normal.woff2");
 const READY_FILE_ENV: &str = "PLASMITE_SERVE_READY_FILE";
@@ -204,12 +206,43 @@ pub(crate) async fn serve_secure_pair(
             .with_message("failed to inspect local listener")
             .with_source(err)
     })?)?;
+    let remote_address = remote_listener.local_addr().map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message("failed to inspect HTTPS listener")
+            .with_source(err)
+    })?;
+    let remote_url = access.shared_address().map(str::to_owned).or_else(|| {
+        remote_address
+            .ip()
+            .is_loopback()
+            .then(|| format!("https://{remote_address}"))
+    });
+    let registered = crate::serve_registry::register(
+        &local.pool_dir,
+        local_listener.local_addr().map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_message("failed to inspect local listener")
+                .with_source(err)
+        })?,
+        remote_url,
+    )?;
+    let registration = registered.registration.clone();
+    let status_route = Router::new()
+        .route(
+            crate::serve_registry::STATUS_PATH,
+            get(move || {
+                let registration = registration.clone();
+                async move { Json(registration) }
+            }),
+        )
+        .layer(middleware::from_fn(local_request_guard));
+    let local_app = local_server.app.merge(status_route);
     notify_ready_file(&remote_listener)?;
     let remote_tls = remote_server.tls_config.ok_or_else(|| {
         Error::new(ErrorKind::Internal).with_message("remote TLS was not configured")
     })?;
     tokio::try_join!(
-        serve_plain(local_listener, local_server.app, shutdown_signal()),
+        serve_plain(local_listener, local_app, shutdown_signal()),
         serve_tls(
             remote_listener,
             remote_server.app,
@@ -311,6 +344,7 @@ async fn prepare_server_with_access(
         .route("/ui", get(ui_index))
         .route("/ui/map", get(ui_map))
         .route("/ui/assets/inconsolata.woff2", get(ui_inconsolata))
+        .route("/ui/assets/common.js", get(ui_common_js))
         .route("/ui/pools/:pool", get(ui_pool))
         .route("/access", get(ui_access))
         .route("/v0/pools", post(create_pool).get(list_pools))
@@ -1016,6 +1050,7 @@ enum TailStreamEncoding {
 struct TailRuntime {
     permit: OwnedSemaphorePermit,
     options: TailOptions,
+    deadline: Instant,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1396,6 +1431,22 @@ async fn ui_inconsolata() -> Response {
         header::CACHE_CONTROL,
         HeaderValue::from_static("public, max-age=86400"),
     );
+    response
+}
+
+/// The top bar every UI page shares: the served directory and the jump to a pool.
+async fn ui_common_js() -> Response {
+    let mut response = Response::new(Body::from(UI_COMMON_JS));
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/javascript; charset=utf-8"),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
 }
 
@@ -1907,7 +1958,7 @@ async fn get_lite3(
         .run_authorized(grant, move || {
             client.open_pool(&pool_ref).and_then(|pool| {
                 let frame = pool.get_lite3(seq)?;
-                let payload = frame.payload.to_vec();
+                let payload = frame.payload;
                 lite3::validate_bytes(&payload)?;
                 Ok(payload)
             })
@@ -2030,7 +2081,7 @@ async fn precheck_lite3_since_seq(
         .run(move || {
             client.open_pool(&pool_ref).and_then(|pool| {
                 let frame = pool.get_lite3(since_seq)?;
-                lite3::validate_bytes(frame.payload)?;
+                lite3::validate_bytes(&frame.payload)?;
                 Ok(())
             })
         })
@@ -2071,15 +2122,23 @@ fn prepare_tail_runtime(
     }
     let permit = acquire_tail_permit(state)?;
     let timeout_ms = query.timeout_ms.unwrap_or(state.max_tail_timeout_ms);
+    let timeout = Duration::from_millis(timeout_ms);
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .ok_or_else(|| Error::new(ErrorKind::Usage).with_message("tail timeout is out of range"))?;
     let options = TailOptions {
         since_seq: query.since_seq,
         max_messages: query.max.map(|value| value as usize),
         tags: parse_tags_from_query(raw_query),
-        timeout: Some(Duration::from_millis(timeout_ms)),
+        timeout: Some(timeout),
         gap_policy,
         ..TailOptions::default()
     };
-    Ok(TailRuntime { permit, options })
+    Ok(TailRuntime {
+        permit,
+        options,
+        deadline,
+    })
 }
 
 fn acquire_tail_permit(state: &Arc<AppState>) -> Result<OwnedSemaphorePermit, Error> {
@@ -2107,22 +2166,32 @@ fn spawn_tail_stream_response(
     let TailRuntime {
         permit,
         mut options,
+        deadline,
     } = runtime;
     options.cancel = grant.as_ref().map(AccessGrant::cancellation_flag);
     let (tx, rx) = mpsc::channel::<Result<Bytes, Error>>(16);
     let producer_grant = grant.clone();
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        if producer_grant.as_ref().is_some_and(AccessGrant::is_revoked) {
+        if Instant::now() >= deadline
+            || producer_grant.as_ref().is_some_and(AccessGrant::is_revoked)
+        {
             return;
         }
         let result = client.open_pool(&pool_ref).and_then(|pool| {
-            stream_tail_bytes(&pool, options, encoding, tx.clone(), producer_grant.clone())
+            stream_tail_bytes(
+                &pool,
+                options,
+                encoding,
+                tx.clone(),
+                producer_grant.clone(),
+                deadline,
+            )
         });
         if let Err(err) = result
             && !producer_grant.as_ref().is_some_and(AccessGrant::is_revoked)
         {
-            let _ = send_tail_result(&tx, Err(err), producer_grant.as_ref());
+            let _ = send_tail_result(&tx, Err(err), producer_grant.as_ref(), deadline);
         }
     });
 
@@ -2145,11 +2214,14 @@ fn spawn_tail_stream_response(
 
 fn stream_tail_bytes(
     pool: &plasmite::api::Pool,
-    options: TailOptions,
+    mut options: TailOptions,
     encoding: TailStreamEncoding,
     tx: mpsc::Sender<Result<Bytes, Error>>,
     grant: Option<AccessGrant>,
+    deadline: Instant,
 ) -> Result<(), Error> {
+    // Admission, producer scheduling, reads, and backpressure share one budget.
+    options.timeout = Some(deadline.saturating_duration_since(Instant::now()));
     match encoding {
         TailStreamEncoding::Jsonl | TailStreamEncoding::Sse => {
             let mut tail = pool.tail(options);
@@ -2162,7 +2234,7 @@ fn stream_tail_bytes(
                     TailStreamEncoding::Sse => encode_sse_message(&message)?,
                     TailStreamEncoding::Lite3 => unreachable!("handled in separate branch"),
                 };
-                if !send_tail_result(&tx, Ok(encoded), grant.as_ref()) {
+                if !send_tail_result(&tx, Ok(encoded), grant.as_ref(), deadline) {
                     break;
                 }
             }
@@ -2173,9 +2245,9 @@ fn stream_tail_bytes(
                 if grant.as_ref().is_some_and(AccessGrant::is_revoked) {
                     break;
                 }
-                lite3::validate_bytes(frame.payload)?;
+                lite3::validate_bytes(&frame.payload)?;
                 let encoded = encode_lite3_stream_frame(&frame)?;
-                if !send_tail_result(&tx, Ok(encoded), grant.as_ref()) {
+                if !send_tail_result(&tx, Ok(encoded), grant.as_ref(), deadline) {
                     break;
                 }
             }
@@ -2188,9 +2260,10 @@ fn send_tail_result(
     tx: &mpsc::Sender<Result<Bytes, Error>>,
     mut result: Result<Bytes, Error>,
     grant: Option<&AccessGrant>,
+    deadline: Instant,
 ) -> bool {
     loop {
-        if grant.is_some_and(AccessGrant::is_revoked) {
+        if Instant::now() >= deadline || grant.is_some_and(AccessGrant::is_revoked) {
             return false;
         }
         match tx.try_send(result) {
@@ -2198,7 +2271,10 @@ fn send_tail_result(
             Err(mpsc::error::TrySendError::Closed(_)) => return false,
             Err(mpsc::error::TrySendError::Full(remaining)) => {
                 result = remaining;
-                std::thread::sleep(Duration::from_millis(10));
+                std::thread::sleep(
+                    Duration::from_millis(10)
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                );
             }
         }
     }
@@ -2336,7 +2412,7 @@ fn html_response(body: &str) -> Response {
         HeaderValue::from_static("no-referrer"),
     );
     response.headers_mut().insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(
-        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+        "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
     ));
     response.headers_mut().insert(
         header::X_CONTENT_TYPE_OPTIONS,
@@ -2345,7 +2421,7 @@ fn html_response(body: &str) -> Response {
     response
 }
 
-fn encode_lite3_stream_frame(frame: &plasmite::api::FrameRef<'_>) -> Result<Bytes, Error> {
+fn encode_lite3_stream_frame(frame: &plasmite::api::FrameRef) -> Result<Bytes, Error> {
     let payload_len: u32 = frame.payload.len().try_into().map_err(|_| {
         Error::new(ErrorKind::Usage).with_message("lite3 payload exceeds max frame length")
     })?;
@@ -2353,7 +2429,7 @@ fn encode_lite3_stream_frame(frame: &plasmite::api::FrameRef<'_>) -> Result<Byte
     buf.extend_from_slice(&frame.seq.to_be_bytes());
     buf.extend_from_slice(&frame.timestamp_ns.to_be_bytes());
     buf.extend_from_slice(&payload_len.to_be_bytes());
-    buf.extend_from_slice(frame.payload);
+    buf.extend_from_slice(&frame.payload);
     Ok(Bytes::from(buf))
 }
 
@@ -2428,6 +2504,50 @@ mod tests {
     use serde_json::json;
     use std::sync::{Arc, Mutex};
     use tokio::sync::Semaphore;
+
+    #[test]
+    fn tail_backpressure_expires_and_releases_permit_without_draining_queued_data() {
+        use bytes::Bytes;
+        use std::time::{Duration, Instant};
+        use tokio::sync::mpsc;
+
+        // Both ordinary frames and terminal errors use the same bounded send.
+        for result in [
+            Ok(Bytes::from_static(b"next")),
+            Err(Error::new(ErrorKind::Corrupt).with_message("terminal error")),
+        ] {
+            let semaphore = Arc::new(Semaphore::new(1));
+            let permit = semaphore.clone().try_acquire_owned().unwrap();
+            let (tx, mut rx) = mpsc::channel(1);
+            tx.try_send(Ok(Bytes::from_static(b"queued"))).unwrap();
+            let deadline = Instant::now() + Duration::from_millis(20);
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            let producer = std::thread::spawn(move || {
+                let sent = {
+                    let _permit = permit;
+                    super::send_tail_result(&tx, result, None, deadline)
+                };
+                done_tx.send(sent).unwrap();
+            });
+            let completion = done_rx.recv_timeout(Duration::from_millis(300));
+            let available_before_drain = semaphore.available_permits();
+            assert_eq!(
+                rx.try_recv().unwrap().unwrap(),
+                Bytes::from_static(b"queued")
+            );
+            // Cleanup also bounds this regression when the sender fails to expire.
+            drop(rx);
+            producer.join().unwrap();
+            assert!(
+                !completion.unwrap(),
+                "full sender must stop at its deadline"
+            );
+            assert_eq!(
+                available_before_drain, 1,
+                "stalled client must release its tail slot"
+            );
+        }
+    }
 
     #[test]
     fn activity_ignores_map_reads_and_identifies_mcp_pool_use() {

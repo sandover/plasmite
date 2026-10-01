@@ -10,8 +10,9 @@ use crate::core::cursor::{Cursor, CursorResult, FrameRef};
 use crate::core::error::{Error, ErrorKind};
 use crate::core::lite3::{Lite3DocRef, sys, validate_bytes};
 use crate::core::notify::{NotifyError, PoolSemaphore, WaitOutcome, open_for_path};
-use crate::core::pool::{AppendOptions, Durability, Pool};
+use crate::core::pool::{AppendOptions, Durability, Pool, PoolHeader};
 use serde_json::Value;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -94,7 +95,9 @@ pub struct Lite3Tail<'a> {
 
 #[derive(Clone, Debug)]
 pub struct ReplayOptions {
+    /// Playback multiplier; zero emits immediately. Must be finite and non-negative.
     pub speed: f64,
+    /// Keep the last N retained messages that match `since_ns`.
     pub tail: Option<u64>,
     pub since_ns: Option<u64>,
 }
@@ -118,35 +121,22 @@ pub struct Replay {
 
 impl Replay {
     fn new(pool: &Pool, options: ReplayOptions) -> Result<Self, Error> {
-        let mut cursor = Cursor::new();
-        let mut entries: Vec<(u64, Message)> = Vec::new();
-
-        loop {
-            match cursor.next(pool)? {
-                CursorResult::Message(frame) => {
-                    if let Some(since) = options.since_ns {
-                        if frame.timestamp_ns < since {
-                            continue;
-                        }
-                    }
-                    let ts = frame.timestamp_ns;
-                    let msg = message_from_frame(&frame)?;
-                    entries.push((ts, msg));
-                }
-                CursorResult::WouldBlock => break,
-                CursorResult::FellBehind => continue,
-            }
+        if !options.speed.is_finite() || options.speed < 0.0 {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("replay speed must be finite and non-negative"));
         }
-
-        if let Some(n) = options.tail {
-            let n = n as usize;
-            if entries.len() > n {
-                entries = entries.split_off(entries.len() - n);
-            }
-        }
-
+        let header = pool.header_from_mmap()?;
+        let entries = collect_replay_snapshot(pool, &options, header)?;
         let (timestamps_ns, messages): (Vec<u64>, Vec<Message>) = entries.into_iter().unzip();
-
+        if options.speed > 0.0 {
+            for pair in timestamps_ns.windows(2) {
+                let delay_ns = pair[1].saturating_sub(pair[0]) as f64 / options.speed;
+                if !delay_ns.is_finite() || delay_ns >= u64::MAX as f64 {
+                    return Err(Error::new(ErrorKind::Usage)
+                        .with_message("replay speed produces a delay that is too large"));
+                }
+            }
+        }
         Ok(Self {
             messages,
             timestamps_ns,
@@ -160,7 +150,7 @@ impl Replay {
             return None;
         }
 
-        if self.index > 0 {
+        if self.index > 0 && self.speed > 0.0 {
             let prev_ts = self.timestamps_ns[self.index - 1];
             let curr_ts = self.timestamps_ns[self.index];
             if curr_ts > prev_ts {
@@ -176,6 +166,61 @@ impl Replay {
         self.index += 1;
         Some(msg)
     }
+}
+
+// Selection uses a fixed upper sequence and keeps at most the requested tail
+// of timestamp matches. Unlike CLI tail selection, API replay applies since
+// before choosing the last N messages.
+fn collect_replay_snapshot(
+    pool: &Pool,
+    options: &ReplayOptions,
+    header: PoolHeader,
+) -> Result<VecDeque<(u64, Message)>, Error> {
+    let mut entries = VecDeque::new();
+    if header.oldest_seq == 0 || options.tail == Some(0) {
+        return Ok(entries);
+    }
+    let upper = header.newest_seq;
+    let mut next_seq = header.oldest_seq;
+    let tail = options
+        .tail
+        .map(|n| usize::try_from(n).unwrap_or(usize::MAX));
+    let mut cursor = Cursor::new();
+    cursor.seek_to(header.tail_off as usize);
+    while next_seq <= upper {
+        match cursor.next(pool)? {
+            CursorResult::Message(frame) => {
+                if frame.seq < next_seq {
+                    continue;
+                }
+                if frame.seq > upper {
+                    break;
+                }
+                next_seq = frame.seq.saturating_add(1);
+                if options
+                    .since_ns
+                    .is_none_or(|since| frame.timestamp_ns >= since)
+                {
+                    if tail.is_some_and(|limit| entries.len() == limit) {
+                        entries.pop_front();
+                    }
+                    entries.push_back((frame.timestamp_ns, message_from_frame(&frame)?));
+                }
+                if frame.seq == upper {
+                    break;
+                }
+            }
+            CursorResult::WouldBlock => break,
+            CursorResult::FellBehind => {
+                let current = pool.header_from_mmap()?;
+                if current.oldest_seq == 0 {
+                    break;
+                }
+                next_seq = next_seq.max(current.oldest_seq);
+            }
+        }
+    }
+    Ok(entries)
 }
 
 impl<'a> Tail<'a> {
@@ -294,7 +339,7 @@ impl<'a> Lite3Tail<'a> {
         }
     }
 
-    pub fn next_frame(&mut self) -> Result<Option<FrameRef<'a>>, Error> {
+    pub fn next_frame(&mut self) -> Result<Option<FrameRef>, Error> {
         if self.terminated {
             return Ok(None);
         }
@@ -335,7 +380,7 @@ impl<'a> Lite3Tail<'a> {
                     if !should_process {
                         continue;
                     }
-                    let (meta, _) = decode_payload(frame.payload)?;
+                    let (meta, _) = decode_payload(&frame.payload)?;
                     if !has_required_tags(&meta.tags, self.options.tags.as_slice()) {
                         continue;
                     }
@@ -440,13 +485,15 @@ pub trait PoolApiExt {
     fn get_message(&self, seq: u64) -> Result<Message, Error>;
 
     /// Fetch the raw Lite3 payload for a sequence number.
-    fn get_lite3(&self, seq: u64) -> Result<FrameRef<'_>, Error>;
+    fn get_lite3(&self, seq: u64) -> Result<FrameRef, Error>;
 
     fn tail(&self, options: TailOptions) -> Tail<'_>;
 
     /// Tail frames without JSON decoding.
     fn tail_lite3(&self, options: TailOptions) -> Lite3Tail<'_>;
 
+    /// Collect a finite retained-history snapshot for timed playback.
+    /// Returns Usage for invalid speeds or an unrepresentable playback delay.
     fn replay(&self, options: ReplayOptions) -> Result<Replay, Error>;
 }
 
@@ -496,7 +543,7 @@ impl PoolApiExt for Pool {
         message_from_frame(&frame)
     }
 
-    fn get_lite3(&self, seq: u64) -> Result<FrameRef<'_>, Error> {
+    fn get_lite3(&self, seq: u64) -> Result<FrameRef, Error> {
         self.get(seq)
     }
 
@@ -513,8 +560,8 @@ impl PoolApiExt for Pool {
     }
 }
 
-fn message_from_frame(frame: &FrameRef<'_>) -> Result<Message, Error> {
-    let (meta, data) = decode_payload(frame.payload)?;
+fn message_from_frame(frame: &FrameRef) -> Result<Message, Error> {
+    let (meta, data) = decode_payload(&frame.payload)?;
     Ok(Message {
         seq: frame.seq,
         time: format_ts(frame.timestamp_ns)?,
@@ -938,5 +985,158 @@ mod tests {
         assert_eq!(collected[0], values[0]);
         assert_eq!(collected[1], values[1]);
         assert_eq!(collected[2], values[2]);
+    }
+    #[test]
+    fn replay_zero_speed_returns_immediately() {
+        let dir = tempdir().expect("tempdir");
+        let mut pool = Pool::create(
+            dir.path().join("pool.plasmite"),
+            PoolOptions::new(1024 * 1024),
+        )
+        .expect("create");
+        for timestamp in [1, 1_000_000_001] {
+            pool.append_json(
+                &json!({"timestamp": timestamp}),
+                &[],
+                crate::core::pool::AppendOptions::new(timestamp, Durability::Fast),
+            )
+            .expect("append");
+        }
+        let mut replay = pool.replay(ReplayOptions::new(0.0)).expect("replay");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut seqs = Vec::new();
+            while let Some(message) = replay.next_message() {
+                seqs.push(message.seq);
+            }
+            tx.send(seqs).expect("send");
+        });
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(2))
+                .expect("speed zero must not wait"),
+            vec![1, 2]
+        );
+    }
+
+    #[test]
+    fn replay_rejects_invalid_or_unrepresentable_speeds() {
+        let dir = tempdir().expect("tempdir");
+        let mut pool = Pool::create(
+            dir.path().join("pool.plasmite"),
+            PoolOptions::new(1024 * 1024),
+        )
+        .expect("create");
+        for timestamp in [1, 1_000_000_001] {
+            pool.append_json(
+                &json!({"timestamp": timestamp}),
+                &[],
+                crate::core::pool::AppendOptions::new(timestamp, Durability::Fast),
+            )
+            .expect("append");
+        }
+        for speed in [
+            -1.0,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::MIN_POSITIVE,
+        ] {
+            let error = pool
+                .replay(ReplayOptions::new(speed))
+                .err()
+                .expect("invalid speed");
+            assert_eq!(error.kind(), ErrorKind::Usage);
+        }
+    }
+
+    #[test]
+    fn replay_tail_keeps_last_timestamp_matches() {
+        let dir = tempdir().expect("tempdir");
+        let mut pool = Pool::create(
+            dir.path().join("pool.plasmite"),
+            PoolOptions::new(1024 * 1024),
+        )
+        .expect("create");
+        for timestamp in [10, 1, 20, 1, 30] {
+            pool.append_json(
+                &json!({"timestamp": timestamp}),
+                &[],
+                crate::core::pool::AppendOptions::new(timestamp, Durability::Fast),
+            )
+            .expect("append");
+        }
+        let mut options = ReplayOptions::new(0.0);
+        options.since_ns = Some(5);
+        options.tail = Some(2);
+        let mut replay = pool.replay(options.clone()).expect("replay");
+        assert_eq!(replay.messages.len(), 2);
+        assert_eq!(replay.next_message().expect("first").seq, 3);
+        assert_eq!(replay.next_message().expect("second").seq, 5);
+        assert!(replay.next_message().is_none());
+        options.tail = Some(0);
+        assert!(
+            pool.replay(options)
+                .expect("empty replay")
+                .next_message()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn replay_snapshot_finishes_while_an_independent_writer_continues() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::{Arc, mpsc};
+        use std::time::Duration;
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(8 * 1024 * 1024)).expect("create");
+        for n in 0..128 {
+            pool.append_json_now(
+                &json!({"n":n,"padding":"x".repeat(1024)}),
+                &[],
+                Durability::Fast,
+            )
+            .expect("seed");
+        }
+        let header = pool.header_from_mmap().expect("initial snapshot");
+        let reader = Pool::open(&path).expect("reader");
+        let stop = Arc::new(AtomicBool::new(false));
+        let writer_stop = stop.clone();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            let payload = encode_message(&[], &json!({"live":true})).expect("payload");
+            pool.append_lite3_now(payload.as_slice(), Durability::Fast)
+                .expect("first new write");
+            ready_tx.send(()).expect("ready");
+            while !writer_stop.load(Ordering::Acquire) {
+                pool.append_lite3_now(payload.as_slice(), Durability::Fast)
+                    .expect("write");
+            }
+        });
+        ready_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("writer active");
+        let (done_tx, done_rx) = mpsc::channel();
+        let replay_reader = std::thread::spawn(move || {
+            let entries = super::collect_replay_snapshot(&reader, &ReplayOptions::new(0.0), header);
+            let _ = done_tx.send(entries);
+        });
+        let result = done_rx.recv_timeout(Duration::from_secs(2));
+        stop.store(true, Ordering::Release);
+        writer.join().expect("writer");
+        replay_reader.join().expect("reader");
+        let entries = result
+            .expect("construction must finish while writer is active")
+            .expect("snapshot");
+        assert!(
+            entries
+                .iter()
+                .all(|(_, message)| message.seq <= header.newest_seq)
+        );
+        assert!(
+            entries
+                .iter()
+                .all(|(_, message)| message.data.get("live").is_none())
+        );
     }
 }

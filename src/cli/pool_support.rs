@@ -23,6 +23,7 @@ use super::output_support::format_seq_range;
 use super::output_support::format_system_time;
 use super::output_support::format_timestamp_human;
 use super::output_support::human_age;
+use super::output_support::human_literal;
 use super::output_support::short_display_path;
 use super::support::add_corrupt_hint;
 use super::support::add_io_hint;
@@ -129,15 +130,19 @@ pub(crate) fn list_pools(pool_dir: &Path, client: &LocalClient) -> Vec<Value> {
     pools
 }
 
-pub(crate) fn emit_pool_list_table(pools: &[Value], pool_dir: &Path) {
+pub(crate) fn emit_pool_list_table(pools: &[Value], pool_dir: &Path, server: Option<&str>) {
     let interactive = io::stdout().is_terminal();
     if interactive && pools.is_empty() {
-        println!(
-            "No pools found in {}",
-            display_pool_dir_for_humans(pool_dir)
-        );
-        println!();
-        println!("  Create one: plasmite pool create <name>");
+        if let Some(server) = server {
+            println!("No pools found at {}", human_literal(server));
+        } else {
+            println!(
+                "No pools found in {}",
+                display_pool_dir_for_humans(pool_dir)
+            );
+            println!();
+            println!("  Create one: plasmite pool create <name>");
+        }
         return;
     }
 
@@ -167,6 +172,8 @@ pub(crate) fn emit_pool_list_table(pools: &[Value], pool_dir: &Path) {
                 .unwrap_or("-");
             let display_path = if path_value == "-" {
                 "-".to_string()
+            } else if server.is_some() {
+                path_value.to_string()
             } else {
                 short_display_path(Path::new(path_value), Some(pool_dir))
             };
@@ -273,8 +280,11 @@ pub(crate) fn emit_pool_create_table(created: &[Value], pool_dir: &Path) {
                     .and_then(|value| value.as_str())
                     .map(|value| short_display_path(Path::new(value), Some(pool_dir)))
                     .unwrap_or_else(|| "-".to_string());
-                println!("Created {name} ({size}, {index} index slots)");
-                println!("  path: {path}");
+                println!(
+                    "Created {} ({size}, {index} index slots)",
+                    human_literal(name)
+                );
+                println!("  path: {}", human_literal(&path));
             }
             return;
         }
@@ -296,7 +306,7 @@ pub(crate) fn emit_pool_create_table(created: &[Value], pool_dir: &Path) {
                 .and_then(|value| value.as_str())
                 .map(|value| short_display_path(Path::new(value), Some(pool_dir)))
                 .unwrap_or_else(|| "-".to_string());
-            println!("  - {name} ({path})");
+            println!("  - {} ({})", human_literal(name), human_literal(&path));
         }
         return;
     }
@@ -349,8 +359,8 @@ pub(crate) fn pool_list_name(value: &Value) -> String {
 
 pub(crate) fn emit_pool_info_pretty(pool_ref: &str, info: &plasmite::api::PoolInfo) {
     if !io::stdout().is_terminal() {
-        println!("Pool: {pool_ref}");
-        println!("Path: {}", info.path.display());
+        println!("Pool: {}", human_literal(pool_ref));
+        println!("Path: {}", human_literal(&info.path.display().to_string()));
         println!(
             "Size: {} bytes (index: offset={} slots={} bytes={}, ring: offset={} size={})",
             info.file_size,
@@ -390,12 +400,12 @@ pub(crate) fn emit_pool_info_pretty(pool_ref: &str, info: &plasmite::api::PoolIn
             );
             println!(
                 "Oldest: {} ({})",
-                metrics.age.oldest_time.as_deref().unwrap_or("-"),
+                human_literal(metrics.age.oldest_time.as_deref().unwrap_or("-")),
                 human_age(metrics.age.oldest_age_ms),
             );
             println!(
                 "Newest: {} ({})",
-                metrics.age.newest_time.as_deref().unwrap_or("-"),
+                human_literal(metrics.age.newest_time.as_deref().unwrap_or("-")),
                 human_age(metrics.age.newest_age_ms),
             );
         }
@@ -403,10 +413,10 @@ pub(crate) fn emit_pool_info_pretty(pool_ref: &str, info: &plasmite::api::PoolIn
     }
 
     let count = message_count_from_info(info);
-    println!("{pool_ref}");
+    println!("{}", human_literal(pool_ref));
     println!(
         "  path:      {}",
-        short_display_path(&info.path, info.path.parent())
+        human_literal(&short_display_path(&info.path, info.path.parent()))
     );
     let messages_summary =
         format_pool_messages_summary(count, info.bounds.oldest_seq, info.bounds.newest_seq);
@@ -490,6 +500,6 @@ pub(crate) fn format_pool_time_summary(age_ms: Option<u64>, timestamp: Option<&s
     format!(
         "{} ({})",
         format_relative_time(age_ms),
-        format_timestamp_human(timestamp)
+        human_literal(&format_timestamp_human(timestamp))
     )
 }

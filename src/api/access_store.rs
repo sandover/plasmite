@@ -54,6 +54,33 @@ pub(super) fn load(destination: &str) -> Result<Option<AccessKey>, Error> {
     result
 }
 
+/// Read destination names without decrypting saved credentials.
+pub(super) fn list() -> Result<Vec<String>, Error> {
+    let paths = StorePaths::new()?;
+    if !paths.exists()? {
+        return Ok(Vec::new());
+    }
+    #[cfg(windows)]
+    let _directory = paths.prepare_dir()?;
+    #[cfg(not(windows))]
+    paths.prepare_dir()?;
+    let lock = paths.open_lock()?;
+    FileExt::lock_shared(&lock)
+        .map_err(|error| store_io_error("failed to lock saved connections", error))?;
+    let result = (|| {
+        let Some(file) = paths.read_file()? else {
+            return Ok(Vec::new());
+        };
+        if file.version != STORE_VERSION {
+            return Err(Error::new(ErrorKind::Corrupt)
+                .with_message("saved connection file has an unsupported version"));
+        }
+        Ok(file.connections.into_keys().collect())
+    })();
+    let _ = FileExt::unlock(&lock);
+    result
+}
+
 pub(super) fn save(destination: &str, key: &AccessKey) -> Result<(), Error> {
     let paths = StorePaths::new()?;
     #[cfg(windows)]

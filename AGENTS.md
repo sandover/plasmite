@@ -11,9 +11,12 @@ docs/
 ├── cli.md                                     — CLI operating model; read when resolving pool refs, input/output modes, or exits
 ├── cookbook.md                                — Task-oriented examples; read when you want copy/paste CLI workflows
 ├── performance/transport-comparison.md        — Measured transport throughput; read when comparing native API and MCP paths
+├── performance/1.0-release.md                  — Read when assessing 1.0 read costs, writer contention, or benchmark results
+├── performance/consumer-latency.rs             — Read when reproducing the full-consumer latency measurements
 │
 │   Design audits and proposals
 ├── proposals/cli-help-system.md               — CLI/help audit and reform model; read before redesigning command discovery
+├── proposals/cli-surface.md                   — Proposed command surface; read when reviewing CLI naming, shared rules, or help
 ├── proposals/mcp-server.md                    — MCP design history; read when revisiting the MCP surface
 ├── proposals/serve-mcp-native.md              — Secure sharing; read when designing access keys, native connections, or MCP authorization
 ├── proposals/serve-access-mvp.md              — Earlier access proposal; read when tracing the preceding invitation design
@@ -24,6 +27,7 @@ docs/
 ├── record/architecture.md                      — Implementation architecture; read when changing internals or layering
 ├── record/testing.md                           — Test strategy + commands; read when adding/fixing tests
 ├── record/releasing.md                         — Release policy + versioning; read for what/why (mechanics live in release skill)
+├── record/upgrading-1.0.md                     — Read when updating scripts, remote configuration, or Rust clients to 1.0
 ├── record/distribution.md                      — Supported platforms, install channels, and SDK layout; read when adding a channel or platform
 ├── ../include/plasmite.h                       — C ABI header; read for stability contract, ownership rules, linking
 ├── record/serving.md                           — Read when sharing pools, setting browser trust, or operating a secure server
@@ -53,7 +57,7 @@ When you add, rename, move, or delete a doc in `docs/` or `spec/`, update the tr
 # Build hygiene
 - Keep current debug artifacts during active development.
 - Ensure scratch directories are removed after successful tests.
-- Run `cargo clean` after release work or when `target/` exceeds 8 GB.
+- Run `cargo clean` after release work. `just check` cleans `target/` itself when it exceeds 2 GB.
 - Preserve release evidence, active Ergo state, and all source changes during cleanup.
 
 # Guidance

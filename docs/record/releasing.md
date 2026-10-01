@@ -169,8 +169,8 @@ built and smoke-tested both SDK archives. The run retained them for 30 days as
 `ci-sdk-aarch64-unknown-linux-gnu` and
 `ci-sdk-armv7-unknown-linux-gnueabihf`, with checksums and build provenance.
 GitHub release asset names are `plasmite_<version>_linux_arm64.tar.gz` and
-`plasmite_<version>_linux_armv7.tar.gz`; no GitHub release has published these
-assets yet.
+`plasmite_<version>_linux_armv7.tar.gz`; the 1.0.0 release introduces these
+preview assets.
 
 ARM64 uses Ubuntu 22.04 with glibc 2.35 as its runtime baseline. ARMv7 uses an
 Ubuntu 22.04 glibc 2.35 sysroot and pins Armv7-A, VFPv3-D16 hard-float, and
@@ -291,3 +291,21 @@ For every release, the following versions must be identical:
 - CI/local checks must fail when any mapped version drifts.
 - Do not manually edit one manifest in isolation for release bumps.
 - If policy changes away from lockstep, update this document and `scripts/check-version-alignment.sh` in the same change.
+
+### Build identity
+
+Every product-version surface reports one build identity: CLI flags, the
+`version` command, and Model Context Protocol (MCP) server metadata. A clean
+Git checkout at `v<package-version>` reports the bare package version. Other
+source builds report `<package-version>-dev+g<commit>`, with `.dirty` when
+tracked files have local changes. The package version supplies the base; this does not
+select the next release number. Source archives without Git provenance report
+`-dev+unknown`. Cargo registry packages retain their package version.
+
+The compiler's release profile controls optimization; it does not mark a
+build as an official release.
+
+Cargo watches tracked files and Git state to refresh build identity when
+source, commits, or tags change. Unchanged builds reuse their artifacts.
+The `.dirty` marker follows Git's tracked-file convention: stage new files
+to include them in the build identity.

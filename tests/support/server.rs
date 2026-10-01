@@ -14,7 +14,9 @@ pub struct TestServer {
     pub remote_url: String,
     pub local_url: String,
     access_key: String,
-    _ready_dir: tempfile::TempDir,
+    /// Holds the ready file and the server's home, so a test server never registers
+    /// itself or saves state in the real user's home.
+    _scratch: tempfile::TempDir,
 }
 
 impl TestServer {
@@ -35,11 +37,22 @@ impl TestServer {
         Self::try_start_with_options(pool_dir, &[], "https")
     }
 
+    /// OAuth needs the shared address to name the server's port before it starts, so
+    /// the test picks a free port and releases it. A parallel test can take it in
+    /// between; then the start fails to bind, and another free port is tried.
     pub fn try_start_oauth(pool_dir: &Path) -> TestResult<Self> {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
-        let port = listener.local_addr()?.port();
-        drop(listener);
-        Self::try_start_oauth_at(pool_dir, port)
+        let mut failure = None;
+        for _ in 0..5 {
+            let port = std::net::TcpListener::bind("127.0.0.1:0")?
+                .local_addr()?
+                .port();
+            match Self::try_start_oauth_at(pool_dir, port) {
+                Ok(server) => return Ok(server),
+                Err(err) if err.to_string().contains("bind") => failure = Some(err),
+                Err(err) => return Err(err),
+            }
+        }
+        Err(failure.expect("five failed starts"))
     }
 
     pub fn try_start_oauth_at(pool_dir: &Path, port: u16) -> TestResult<Self> {
@@ -73,8 +86,10 @@ impl TestServer {
         remote_bind: &str,
         shared_address: &str,
     ) -> TestResult<Self> {
-        let ready_dir = tempfile::tempdir()?;
-        let ready_path = ready_dir.path().join("address");
+        let scratch = tempfile::tempdir()?;
+        let ready_path = scratch.path().join("address");
+        let home = scratch.path().join("home");
+        std::fs::create_dir(&home)?;
         let mut command = Command::new(env!("CARGO_BIN_EXE_plasmite"));
         command
             .arg("--dir")
@@ -88,6 +103,8 @@ impl TestServer {
             .arg(shared_address)
             .args(extra_args)
             .env("PLASMITE_SERVE_READY_FILE", &ready_path)
+            .env("HOME", &home)
+            .env("PLASMITE_ACCESS_HOME", &home)
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
         let mut child = command.spawn()?;
@@ -118,7 +135,9 @@ impl TestServer {
                     let invite = Command::new(env!("CARGO_BIN_EXE_plasmite"))
                         .arg("--dir")
                         .arg(pool_dir)
-                        .args(["access", "invite", "--name", "integration-test"])
+                        .args(["access", "invite", "--name", "integration-test", "--json"])
+                        .env("HOME", &home)
+                        .env("PLASMITE_ACCESS_HOME", &home)
                         .output()?;
                     if !invite.status.success() {
                         return Err(format!(
@@ -138,7 +157,7 @@ impl TestServer {
                         remote_url,
                         local_url,
                         access_key,
-                        _ready_dir: ready_dir,
+                        _scratch: scratch,
                     });
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}

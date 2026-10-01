@@ -846,8 +846,8 @@ fn parse_tags(tags: *const *const c_char, len: usize) -> Result<Vec<String>, Err
     Ok(out)
 }
 
-fn message_from_frame(frame: &crate::api::FrameRef<'_>) -> Result<crate::api::Message, Error> {
-    let doc = crate::api::Lite3DocRef::new(frame.payload);
+fn message_from_frame(frame: &crate::api::FrameRef) -> Result<crate::api::Message, Error> {
+    let doc = crate::api::Lite3DocRef::new(&frame.payload);
     let meta_type = doc
         .type_at_key(0, "meta")
         .map_err(|err| err.with_message("missing meta"))?;
@@ -928,14 +928,14 @@ fn write_message_buf(
 
 fn write_lite3_frame(
     out_frame: *mut plsm_lite3_frame,
-    frame: crate::api::FrameRef<'_>,
+    frame: crate::api::FrameRef,
 ) -> Result<(), Error> {
     if out_frame.is_null() {
         return Err(Error::new(ErrorKind::Usage).with_message("out_frame is null"));
     }
     unsafe {
         let out_frame = &mut *out_frame;
-        let mut data = frame.payload.to_vec().into_boxed_slice();
+        let mut data = frame.payload.into_boxed_slice();
         out_frame.payload.len = data.len();
         out_frame.payload.data = data.as_mut_ptr();
         out_frame.seq = frame.seq;

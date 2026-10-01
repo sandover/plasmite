@@ -30,7 +30,7 @@ pub(crate) fn emit_feed_receipt_human(receipt: &Value) {
     let time = receipt
         .get("time")
         .and_then(|value| value.as_str())
-        .map(format_timestamp_human)
+        .map(|value| human_literal(&format_timestamp_human(value)))
         .unwrap_or_else(|| "-".to_string());
     let tags = receipt
         .get("meta")
@@ -40,6 +40,7 @@ pub(crate) fn emit_feed_receipt_human(receipt: &Value) {
             values
                 .iter()
                 .filter_map(|value| value.as_str())
+                .map(human_literal)
                 .collect::<Vec<_>>()
                 .join(",")
         })
@@ -51,11 +52,11 @@ pub(crate) fn emit_feed_receipt_human(receipt: &Value) {
     }
 }
 
-pub(crate) fn emit_feed_receipt(value: Value, color_mode: ColorMode) {
-    if io::stdout().is_terminal() {
-        emit_feed_receipt_human(&value);
-    } else {
+pub(crate) fn emit_feed_receipt(value: Value, color_mode: ColorMode, json_output: bool) {
+    if json_output {
         emit_json(value, color_mode);
+    } else {
+        emit_feed_receipt_human(&value);
     }
 }
 
@@ -81,6 +82,10 @@ pub(crate) fn render_table(headers: &[&str], rows: &[Vec<String>]) -> String {
     if headers.is_empty() {
         return String::new();
     }
+    let headers = headers
+        .iter()
+        .map(|header| human_literal(header))
+        .collect::<Vec<_>>();
     let column_count = headers.len();
     let mut sanitized_rows = Vec::with_capacity(rows.len());
     let mut widths = headers
@@ -92,7 +97,7 @@ pub(crate) fn render_table(headers: &[&str], rows: &[Vec<String>]) -> String {
         let mut sanitized = Vec::with_capacity(column_count);
         for (idx, width) in widths.iter_mut().enumerate() {
             let value = row.get(idx).map(String::as_str).unwrap_or("");
-            let cleaned = sanitize_table_cell(value);
+            let cleaned = human_literal(value);
             *width = (*width).max(cleaned.chars().count());
             sanitized.push(cleaned);
         }
@@ -100,21 +105,24 @@ pub(crate) fn render_table(headers: &[&str], rows: &[Vec<String>]) -> String {
     }
 
     let mut lines = Vec::with_capacity(sanitized_rows.len() + 1);
-    lines.push(format_table_line(
-        &headers
-            .iter()
-            .map(|header| header.to_string())
-            .collect::<Vec<_>>(),
-        &widths,
-    ));
+    lines.push(format_table_line(&headers, &widths));
     for row in sanitized_rows {
         lines.push(format_table_line(&row, &widths));
     }
     lines.join("\n")
 }
 
-pub(crate) fn sanitize_table_cell(value: &str) -> String {
-    value.replace('\n', "\\n").replace('\r', "\\r")
+/// Render untrusted text literally before adding trusted terminal styling.
+pub(crate) fn human_literal(value: &str) -> String {
+    let mut literal = String::with_capacity(value.len());
+    for character in value.chars() {
+        if character.is_control() {
+            literal.extend(character.escape_debug());
+        } else {
+            literal.push(character);
+        }
+    }
+    literal
 }
 
 pub(crate) fn format_table_line(cells: &[String], widths: &[usize]) -> String {
@@ -171,9 +179,9 @@ pub(crate) fn emit_message(value: serde_json::Value, pretty: bool, color_mode: C
     println!("{json}");
 }
 
-pub(crate) fn emit_error(err: &Error, color_mode: ColorMode) {
+pub(crate) fn emit_error(err: &Error, color_mode: ColorMode, json_output: bool) {
     let is_tty = io::stderr().is_terminal();
-    if is_tty {
+    if !json_output {
         eprintln!("{}", error_text(err, color_mode.use_color(is_tty)));
         return;
     }
@@ -192,14 +200,15 @@ pub(crate) fn notice_time_now() -> Option<String> {
     ts.format(&Rfc3339).ok()
 }
 
-pub(crate) fn emit_notice(notice: &Notice, color_mode: ColorMode) {
+pub(crate) fn emit_notice(notice: &Notice, color_mode: ColorMode, json_output: bool) {
     let is_tty = io::stderr().is_terminal();
-    if is_tty {
+    if !json_output {
         let label = colorize_label("notice:", color_mode.use_color(is_tty), AnsiColor::Yellow);
+        let message = human_literal(&notice.message);
         if notice.cmd == "feed" {
-            eprintln!("{label} {}", notice.message);
+            eprintln!("{label} {message}");
         } else {
-            eprintln!("{label} {} (pool: {})", notice.message, notice.pool);
+            eprintln!("{label} {message} (pool: {})", human_literal(&notice.pool));
         }
         return;
     }
@@ -278,10 +287,11 @@ pub(crate) fn error_text(err: &Error, use_color: bool) -> String {
     lines.push(format!(
         "{} {}",
         colorize_label("error:", use_color, AnsiColor::Red),
-        error_message(err)
+        human_literal(&error_message(err))
     ));
 
     if let Some(hint) = err.hint() {
+        let hint = human_literal(hint);
         lines.push(format!(
             "{} {hint}",
             colorize_label("hint:", use_color, AnsiColor::Yellow)
@@ -291,7 +301,7 @@ pub(crate) fn error_text(err: &Error, use_color: bool) -> String {
         lines.push(format!(
             "{} {}",
             colorize_label("path:", use_color, AnsiColor::Yellow),
-            display_handoff_path_from_path(path)
+            human_literal(&display_handoff_path_from_path(path))
         ));
     }
     if let Some(seq) = err.seq() {
@@ -309,6 +319,7 @@ pub(crate) fn error_text(err: &Error, use_color: bool) -> String {
 
     let causes = error_causes(err);
     if let Some(cause) = causes.first() {
+        let cause = human_literal(cause);
         lines.push(format!(
             "{} {cause}",
             colorize_label("caused by:", use_color, AnsiColor::Yellow)
@@ -520,9 +531,62 @@ pub(crate) fn display_pool_dir_for_humans(pool_dir: &Path) -> String {
     } else {
         pool_dir.display().to_string()
     };
+    let rendered = human_literal(&rendered);
     if rendered.ends_with('/') {
         rendered
     } else {
         format!("{rendered}/")
+    }
+}
+
+#[cfg(test)]
+mod literal_tests {
+    use super::{error_text, human_literal, render_table};
+    use plasmite::api::{Error, ErrorKind};
+
+    #[test]
+    fn human_literals_escape_terminal_controls_and_preserve_unicode() {
+        assert_eq!(
+            human_literal("雪\x1b]52;c;SGVsbG8=\x07\trow\nnext\r\0\x7f\u{85}"),
+            "雪\\u{1b}]52;c;SGVsbG8=\\u{7}\\trow\\nnext\\r\\0\\u{7f}\\u{85}"
+        );
+    }
+
+    #[test]
+    fn table_widths_use_literal_headers_and_cells() {
+        let table = render_table(
+            &["NAME", "DETAIL"],
+            &[
+                vec!["x\x1b\t".into(), "safe".into()],
+                vec!["雪".into(), "ok".into()],
+            ],
+        );
+        assert_eq!(
+            table,
+            "NAME       DETAIL\nx\\u{1b}\\t  safe  \n雪          ok    "
+        );
+        assert!(
+            !table
+                .chars()
+                .any(|character| character.is_control() && character != '\n')
+        );
+    }
+
+    #[test]
+    fn human_errors_escape_fields_before_adding_label_color() {
+        let error = Error::new(ErrorKind::Io)
+            .with_message("bad\x1b]52;c;value\x07")
+            .with_hint("try\tpath\nnext")
+            .with_path("evil\x1b\t.plasmite")
+            .with_source(std::io::Error::other("cause\x1b\r"));
+        let plain = error_text(&error, false);
+        assert!(plain.contains("bad\\u{1b}]52;c;value\\u{7}"));
+        assert!(plain.contains("try\\tpath\\nnext"));
+        assert!(plain.contains("evil\\u{1b}\\t.plasmite"));
+        assert!(plain.contains("cause\\u{1b}\\r"));
+        assert!(!plain.contains('\x1b'));
+        let styled = error_text(&error, true);
+        assert!(styled.contains("\x1b[31merror:\x1b[0m"));
+        assert!(!styled.contains("\x1b]52"));
     }
 }

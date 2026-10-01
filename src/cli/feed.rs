@@ -7,14 +7,13 @@ use super::feed_support::{
     FeedIngestContext, RemoteFeedIngestContext, ingest_from_stdin, ingest_from_stdin_remote,
     missing_feed_data_error, open_feed_reader, parse_inline_json,
 };
-use super::output::emit_json;
-use super::output_support::emit_feed_receipt;
+use super::output_support::{emit_feed_receipt, emit_message};
 use super::result::CommandResult;
 use super::support::{
     DEFAULT_POOL_SIZE, FeedExactCreateHint, add_missing_pool_create_hint, add_missing_pool_hint,
     add_missing_seq_hint, ensure_pool_dir, feed_exact_create_command_hint,
-    feed_receipt_from_message, feed_receipt_json, message_from_frame, now_ns, parse_durability,
-    parse_retry_config, parse_size, remote_client, resolve_pool_target, resolve_poolref,
+    feed_receipt_from_message, feed_receipt_json, message_from_frame, message_to_json, now_ns,
+    parse_durability, parse_retry_config, parse_size, remote_client, resolve_pool_target,
     retry_with_config,
 };
 use crate::{ErrorPolicyCli, InputMode, PoolTarget};
@@ -110,6 +109,7 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                 emit_feed_receipt(
                     feed_receipt_json(seq, timestamp_ns, &args.tags)?,
                     context.color_mode(),
+                    context.json_output(),
                 );
             } else {
                 let pool_path_label = path.display().to_string();
@@ -125,6 +125,7 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                             retry_config,
                             pool_handle: &mut pool_handle,
                             color_mode: context.color_mode(),
+                            json_output: context.json_output(),
                             input: args.input,
                             errors: args.errors,
                         },
@@ -141,6 +142,7 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                             retry_config,
                             pool_handle: &mut pool_handle,
                             color_mode: context.color_mode(),
+                            json_output: context.json_output(),
                             input: args.input,
                             errors: args.errors,
                         },
@@ -175,7 +177,11 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                 let message = retry_with_config(retry_config, || {
                     remote_pool.append_json_now(&data, &args.tags, durability)
                 })?;
-                emit_feed_receipt(feed_receipt_from_message(&message), context.color_mode());
+                emit_feed_receipt(
+                    feed_receipt_from_message(&message),
+                    context.color_mode(),
+                    context.json_output(),
+                );
             } else {
                 let pool_path_label = format!("{}/{}", client.base_url(), name);
                 let outcome = if let Some(file) = file {
@@ -190,6 +196,7 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                             retry_config,
                             remote_pool: &remote_pool,
                             color_mode: context.color_mode(),
+                            json_output: context.json_output(),
                             input: args.input,
                             errors: args.errors,
                         },
@@ -206,6 +213,7 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                             retry_config,
                             remote_pool: &remote_pool,
                             color_mode: context.color_mode(),
+                            json_output: context.json_output(),
                             input: args.input,
                             errors: args.errors,
                         },
@@ -227,11 +235,29 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
 }
 
 pub(super) fn fetch(pool: &str, seq: u64, context: &CliContext) -> Result<CommandResult, Error> {
-    let path = resolve_poolref(pool, context.pool_dir())?;
-    let pool_handle = Pool::open(&path).map_err(|err| add_missing_pool_hint(err, pool, pool))?;
-    let frame = pool_handle
-        .get(seq)
-        .map_err(|err| add_missing_seq_hint(err, pool))?;
-    emit_json(message_from_frame(&frame)?, context.color_mode());
+    let message = match resolve_pool_target(pool, context.pool_dir())? {
+        PoolTarget::LocalPath(path) => {
+            let pool_handle =
+                Pool::open(&path).map_err(|err| add_missing_pool_hint(err, pool, pool))?;
+            let frame = pool_handle
+                .get(seq)
+                .map_err(|err| add_missing_seq_hint(err, pool))?;
+            message_from_frame(&frame)?
+        }
+        PoolTarget::Remote {
+            base_url,
+            pool: name,
+        } => {
+            let client = remote_client(base_url)?;
+            let remote_pool = client
+                .open_pool(&PoolRef::name(name))
+                .map_err(|err| add_missing_pool_hint(err, pool, pool))?;
+            let message = remote_pool
+                .get_message(seq)
+                .map_err(|err| add_missing_seq_hint(err, pool))?;
+            message_to_json(&message)
+        }
+    };
+    emit_message(message, !context.json_output(), context.color_mode());
     Ok(CommandResult::ok())
 }

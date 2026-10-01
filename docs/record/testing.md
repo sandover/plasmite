@@ -21,8 +21,10 @@ There are three top-level commands, ordered by cost and coverage:
 - `just check`: formatting, linting, Rust tests, version alignment, and Lite3
   integrity. Run it when handing work off and before every push; pull requests
   run the same command.
-- `just integration`: cookbook, ABI, conformance, cross-artifact, and language
+- `just integration`: cookbook, ABI, conformance, cross-artifact, browser-script, and language
   binding checks. It requires Go, Node, Python, and `uv`.
+- `just ui-smoke`: exact browser sequence IDs, bounded history loading,
+  session/clipboard recovery, and access setup guidance in a deterministic Node harness.
 - `just release-gate`: `check` + `integration` + Python wheel installation
   smoke. Run it before merging, tagging, or publishing; main and scheduled CI
   run it on Linux and macOS.

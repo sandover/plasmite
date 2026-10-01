@@ -23,6 +23,7 @@ pub(crate) fn emit_doctor_human(report: &ValidationReport) {
             .pool_ref
             .clone()
             .unwrap_or_else(|| report.path.to_string_lossy().to_string());
+        let label = super::output_support::human_literal(&label);
         match report.status {
             ValidationStatus::Ok => {
                 println!("OK: {label}");
@@ -35,7 +36,12 @@ pub(crate) fn emit_doctor_human(report: &ValidationReport) {
                 let issue = report
                     .issues
                     .first()
-                    .map(|issue| format!(" issue={}", issue.message))
+                    .map(|issue| {
+                        format!(
+                            " issue={}",
+                            super::output_support::human_literal(&issue.message)
+                        )
+                    })
                     .unwrap_or_default();
                 println!("CORRUPT: {label}{last_good}{issue}");
             }
@@ -62,7 +68,10 @@ pub(crate) fn emit_doctor_human(report: &ValidationReport) {
                 "  checked:   header, index, ring — {} issues",
                 report.issues.len()
             );
-            println!("  detail:    {issue}");
+            println!(
+                "  detail:    {}",
+                super::output_support::human_literal(&issue)
+            );
         }
     }
 }
@@ -128,13 +137,13 @@ pub(crate) fn doctor_display_label(report: &ValidationReport) -> String {
     if let Some(pool_ref) = report.pool_ref.as_deref() {
         let looks_like_path = pool_ref.contains('/') || pool_ref.contains('\\');
         if !looks_like_path {
-            return pool_ref.to_string();
+            return super::output_support::human_literal(pool_ref);
         }
     }
     if let Some(stem) = report.path.file_stem().and_then(|value| value.to_str()) {
-        return stem.to_string();
+        return super::output_support::human_literal(stem);
     }
-    short_display_path(&report.path, report.path.parent())
+    super::output_support::human_literal(&short_display_path(&report.path, report.path.parent()))
 }
 
 pub(crate) fn doctor_messages_summary(report: &ValidationReport) -> String {

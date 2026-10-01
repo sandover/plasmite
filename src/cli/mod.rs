@@ -30,7 +30,7 @@ use plasmite::api::Error;
 
 pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandResult, Error> {
     match command {
-        Command::Version => utility::run(utility::UtilityCommand::Version, &context),
+        Command::Version { .. } => utility::run(utility::UtilityCommand::Version, &context),
         Command::Doctor { pool, all, json } => {
             doctor::run(doctor::DoctorArgs { pool, all, json }, &context)
         }
@@ -47,6 +47,7 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             retry_delay,
             input,
             errors,
+            json: _,
         } => feed::run(
             feed::FeedArgs {
                 pool,
@@ -63,7 +64,7 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             },
             &context,
         ),
-        Command::Fetch { pool, seq } => feed::fetch(&pool, seq, &context),
+        Command::Fetch { pool, seq, .. } => feed::fetch(&pool, seq, &context),
         Command::Follow {
             pool,
             create,
@@ -79,6 +80,8 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             quiet_drops,
             no_notify,
             replay,
+            no_follow,
+            json: _,
         } => stream::follow(
             stream::FollowArgs {
                 pool,
@@ -95,6 +98,7 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
                 quiet_drops,
                 no_notify,
                 replay,
+                no_follow,
             },
             &context,
         ),
@@ -108,6 +112,7 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             format,
             since,
             echo_self,
+            json: _,
         } => stream::duplex(
             stream::DuplexArgs {
                 pool,
@@ -142,15 +147,9 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             },
             &context,
         ),
-        Command::Serve { run } => server::run(run, &context),
+        Command::Serve { command, run } => server::run(command, run, &context),
         Command::Access { command } => access::run(command, &context),
-        Command::Mcp { dir, remote } => utility::run(
-            utility::UtilityCommand::Mcp {
-                pool_dir: dir,
-                remote,
-            },
-            &context,
-        ),
+        Command::Mcp { remote } => utility::run(utility::UtilityCommand::Mcp { remote }, &context),
         Command::Completion { shell } => {
             utility::run(utility::UtilityCommand::Completion { shell }, &context)
         }

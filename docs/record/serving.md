@@ -15,12 +15,13 @@ share a smaller set of pools, serve a separate directory.
 - [Connect an AI client](#connect-an-ai-client)
 - [Manage access](#manage-access)
 - [Deploy a server](#deploy-a-server)
+- [Use Tailscale](#use-tailscale)
 - [Troubleshoot a connection](#troubleshoot-a-connection)
 
 ## Share your first pool
 
-These instructions cover the upcoming access-key release. Until it ships,
-[build Plasmite from source](../building.md#install-the-cli-from-source).
+These instructions require Plasmite 1.0 or newer. See the
+[installation guide](distribution.md) for supported channels.
 You need it on the server and recipient machines; `plasmite access --help`
 checks that your installation includes this workflow. The commands below
 work in macOS and Linux shells and Windows PowerShell.
@@ -241,7 +242,10 @@ routes to the server.
 
 Use `--bind` and `--remote-bind` to change the listening addresses. Restrict
 network access to intended recipients. Keep the local HTTP listener on
-loopback and keep it out of any public proxy.
+loopback and keep it out of every network proxy, including a tailnet-only proxy.
+`--remote-bind` takes a numeric IP and port; bracket an IPv6 address.
+`--shared-address` advertises an origin and sets certificate names; it does
+not restrict the listener. Its default remote bind still covers all IPv4 interfaces.
 
 ### Use a trusted certificate
 
@@ -282,6 +286,88 @@ If an HTTPS proxy presents a different certificate, pass its certificate
 to Plasmite with `--front-cert`. New access keys then identify that public
 key. Configure the proxy to verify Plasmite's backend HTTPS certificate,
 and forward the remote listener only.
+Preserve the client's Host header: browser writes check Origin against Host,
+and `X-Forwarded-Host` does not replace it. The frontend pin persists in the
+server identity; omitting `--front-cert` later does not clear it. Before
+switching to direct TLS, configure the certificate clients will actually
+see as the frontend identity and issue keys for that identity. Check native
+access before revoking old keys. Protect and retain the server state.
+
+### Use Tailscale
+
+Install and connect Tailscale on both machines. Use the owner's real numeric
+tailnet IP and full MagicDNS name in place of the examples below. Find them
+in the Tailscale client; keep the same full name and port in every Plasmite
+command. [MagicDNS](https://tailscale.com/docs/features/magicdns) resolves
+node names; it does not discover Plasmite pools.
+
+Bind the authenticated HTTPS listener directly to that tailnet interface:
+
+```console
+plasmite --dir ./shared pool create events
+plasmite --dir ./shared serve --remote-bind 100.101.102.103:9743 --shared-address https://node.tail123.ts.net:9743
+```
+
+In another owner terminal, create a key:
+
+```console
+plasmite --dir ./shared access invite --name laptop
+```
+
+Send the address and key privately. On the recipient, paste the key at the
+hidden prompt, then check the connection and send/read a message:
+
+```console
+plasmite access connect https://node.tail123.ts.net:9743
+plasmite access status https://node.tail123.ts.net:9743
+echo '{"text":"hello over the tailnet"}' | plasmite feed https://node.tail123.ts.net:9743/events
+plasmite follow https://node.tail123.ts.net:9743/events --tail 1 --no-follow --json
+```
+
+For IPv6, use a bind such as `[fd7a:115c:a1e0::abcd]:9743`. Plasmite runs one
+remote listener per server. Tailnet permission rules must allow the port;
+Plasmite still requires its directory access key. Those rules do not grant
+per-pool permissions or protect a separate LAN listener. Generated
+certificates work with native access-key clients; browser and direct MCP
+trust still require [browser setup](#open-pools-in-a-browser).
+
+If direct interface binding is unavailable, an optional
+[raw TCP Serve forwarder](https://tailscale.com/docs/reference/tailscale-cli/serve)
+can preserve Plasmite's TLS:
+
+```console
+plasmite --dir ./shared serve --remote-bind 127.0.0.1:9743 --shared-address https://node.tail123.ts.net:9743
+# In a separate terminal; this exposes the authenticated listener to the tailnet:
+tailscale serve --tcp=9743 tcp://127.0.0.1:9743
+```
+
+Use the same recipient commands. Raw forwarding needs no `--front-cert`
+and does not provide a browser-trusted certificate. Stop this foreground
+forwarder with Ctrl+C, then inspect `tailscale serve status`. For a saved
+route, remove only this route with `tailscale serve --tcp=9743 off`; keep
+unrelated Serve routes intact. Revoke the Plasmite key separately to end
+application access.
+
+Never forward the credential-free local HTTP port, normally `9700`.
+[Funnel](https://tailscale.com/docs/features/tailscale-funnel) exposes a
+service to the public internet; it needs a separate deployment review.
+An HTTPS-terminating Serve setup also needs separate verification: the
+actual frontend certificate must match the access-key pin, backend TLS
+must be verified, and Host must be preserved. A certificate obtained
+separately through `tailscale cert` need not have Serve's public key.
+
+Validation for 1.0 covered certificate names, native authentication and
+revocation, a local raw TCP relay, and a local HTTPS proxy. A real two-node
+tailnet test, MagicDNS routing, and Tailscale Serve renewal were not run.
+Verify connect/feed/follow/revoke from a recipient before relying on a deployment.
+
+| Symptom | Check |
+| --- | --- |
+| Cannot reach the server | Both Tailscale clients are connected; full name resolves; actual IP, port, listener and tailnet permissions agree. Use `tailscale ping` for network diagnosis and `access status` for application access. |
+| Certificate or pin mismatch | Exact advertised name and presented certificate; a TLS-terminating proxy or retained frontend identity can change the expected key. Keep certificate verification enabled. |
+| Native access works; browser does not | Complete browser trust setup or supply a trusted certificate. Raw forwarding does not terminate TLS. |
+| Server reachable outside the tailnet | Check `--remote-bind`; choosing only `--shared-address` leaves the wildcard default. |
+| Access survives a Tailscale disconnect | Check other network routes to the listener. Revoke the Plasmite key to withdraw application permission. |
 
 ### Protect server and client state
 
@@ -355,12 +441,14 @@ cannot reach its pool API.
 The map draws each pool's message buffer as a spiral. Byte 0 starts at 12
 o'clock on the outside. Each stored message takes its real share of the track;
 new messages wrap to the outside when they reach the end. Older messages are
-dimmer, and the newest is near white. The number beside the newest message,
-such as `#505`, is its sequence number. Larger buffers get more turns, up to
-the map's width limit. When a pool has more than 4,096 messages, the map draws
-its used space as a continuous track instead of individual segments.
-Click a pool to follow its newest messages; hover a message to find it on the
-spiral. The link at the bottom of that card opens the full pool page.
+dimmer, the newest is near white, and dark track is unused space. The number
+beside the newest message, such as `#505`, is its sequence number, written in
+full. Larger buffers get more turns, up to the map's width limit. When a pool
+has more than 4,096 messages, the map draws its used space as a continuous
+track instead of individual segments.
+Click a pool to follow its newest messages; the card above them gives the
+pool's message count and capacity. Hover a message to find it on the spiral.
+The link at the bottom of that card opens the full pool page.
 
 The pool page shows the pool's last 400 messages, one line each, and adds new
 ones as they arrive. Each line has the message's sequence number, time, and
@@ -370,16 +458,30 @@ start and an ellipsis; a long string also shows its size. Tags such as
 `error` and `warn` color a line; no field inside the data does. Click a line
 to open the whole message below the list, with nested fields indented under
 their keys, and a `plasmite fetch` command that reads the same message from a
-terminal. There a string longer than 2,000 characters shows its start, its
-size, and a button that copies all of it.
+terminal. There a string longer than 2,000 characters shows its start and
+size, with buttons to show all of it or copy it. Click a field's key there to
+pin it: every line then shows that field first. This browser remembers pins
+for each pool. Load earlier, above the oldest line, reads the 400 messages
+before it, as far back as the ring holds.
 Type in Filter to keep lines that contain that text, as `path: value` or in a
-tag, and mark it; a match in a cut-off part marks the ellipsis. `j` and `k` move
-between lines, `/` focuses the filter, and Esc closes the open message. The
+tag, and mark it; a match in a cut-off part marks the ellipsis. `j` and `k`, or
+the arrow keys, move between lines, `/` focuses the filter, and Esc closes the
+open message; a hint beside the filter says so. The
 Feed box takes JSON, as `plasmite feed` does, or plain text, which it sends
 as `{"text": ...}`.
 
-On the local map, the small marks beneath each pool's size open its activity
-card. It lists live browser, HTTP, and MCP requests for that pool, with peer
+Each open message has an address, such as `/ui/pools/alerts#592`, that opens
+the page on it, even when it is older than the messages shown; Copy link copies
+it. Click a value or tag in the open message to filter by it. Click the time
+column's heading to switch between this machine's time zone and UTC. On any
+page, `g` opens a jump to a pool by name. The Pools list moves between pools
+with `j` and `k` and opens one with Enter. Each of its rows, and the map's card,
+copies the `plasmite follow` command for that pool.
+
+On the local map, the line beneath each pool's capacity says what is using it,
+such as "1 following, 1 process", and opens its activity card. The map's own
+preview of the open pool is left out of that count. The card lists live
+browser, HTTP, and MCP requests for that pool, with peer
 IP addresses and client headers when available. The server shares these
 observations across its local and HTTPS listeners. It does not resolve peer
 addresses through DNS or identify a VM from an address.

@@ -10,6 +10,8 @@ SERVE_PID=""
 cleanup() {
   if [[ -n "${SERVE_PID}" ]]; then
     kill "${SERVE_PID}" 2>/dev/null || true
+    wait "${SERVE_PID}" 2>/dev/null || true
+    SERVE_PID=""
   fi
   rm -rf "${WORK_DIR}"
 }
@@ -227,7 +229,7 @@ multi_out="${WORK_DIR}/multi_writer_follow.jsonl"
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" feed events '{"service":"api","sha":"f4e5d6"}' --tag deploy >/dev/null
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" feed events '{"service":"api","msg":"latency spike"}' --tag alert >/dev/null
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" feed events '{"service":"web","rps":1420}' --tag metric >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow events --tag alert --tail 1 --one --jsonl >"${multi_out}"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow events --tag alert --tail 3 --no-follow --json >"${multi_out}"
 assert_contains "${multi_out}" '"msg":"latency spike"' "Multi-Writer Event Bus"
 
 # Replay & Debug
@@ -251,7 +253,7 @@ remote_url="http://127.0.0.1:${remote_port}"
 remote_follow_out="${WORK_DIR}/remote_follow.jsonl"
 
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" pool create remote-events >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" serve --bind "127.0.0.1:${remote_port}" >"${WORK_DIR}/remote-serve.log" 2>&1 &
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" serve --bind "127.0.0.1:${remote_port}" --remote-bind 127.0.0.1:0 >"${WORK_DIR}/remote-serve.log" 2>&1 &
 SERVE_PID=$!
 
 for _ in $(seq 1 60); do
@@ -274,6 +276,8 @@ fi
 "${PLASMITE_BIN}" follow "${remote_url}/remote-events" --tail 1 --one --jsonl >"${remote_follow_out}"
 assert_contains "${remote_follow_out}" '"sensor":"temp"' "Remote Pool Access"
 
+kill "${SERVE_PID}"
+wait "${SERVE_PID}"
 SERVE_PID=""
 
 run_binding_fixtures

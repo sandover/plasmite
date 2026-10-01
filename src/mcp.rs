@@ -154,7 +154,7 @@ impl Default for ServerMetadata {
     fn default() -> Self {
         Self {
             name: "plasmite".to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: env!("PLASMITE_BUILD_VERSION").to_string(),
             protocol_version: MCP_PROTOCOL_VERSION.to_string(),
         }
     }

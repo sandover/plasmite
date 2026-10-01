@@ -64,6 +64,7 @@ fn create_feed_fetch_follow_flow() {
             "--tag",
             "ping",
         ])
+        .arg("--json")
         .output()
         .expect("feed");
     assert!(feed_out.status.success());
@@ -81,6 +82,7 @@ fn create_feed_fetch_follow_flow() {
             "testpool",
             &seq.to_string(),
         ])
+        .arg("--json")
         .output()
         .expect("fetch");
     assert!(get.status.success());
@@ -99,6 +101,7 @@ fn create_feed_fetch_follow_flow() {
             "--jsonl",
         ])
         .stdout(Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("follow");
     let stdout = follower.stdout.take().expect("stdout");
@@ -111,7 +114,7 @@ fn create_feed_fetch_follow_flow() {
 }
 
 #[test]
-fn emit_emits_json_by_default() {
+fn emit_json_emits_receipt() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -123,6 +126,7 @@ fn emit_emits_json_by_default() {
             "create",
             "testpool",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -135,6 +139,7 @@ fn emit_emits_json_by_default() {
             "testpool",
             "{\"x\":1}",
         ])
+        .arg("--json")
         .output()
         .expect("feed");
     assert!(emit_out.status.success());
@@ -156,6 +161,7 @@ fn emit_short_file_flag_reads_single_json_file() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -172,6 +178,7 @@ fn emit_short_file_flag_reads_single_json_file() {
             "-f",
             input_file.to_str().unwrap(),
         ])
+        .arg("--json")
         .output()
         .expect("feed");
     assert!(
@@ -184,6 +191,7 @@ fn emit_short_file_flag_reads_single_json_file() {
 
     let get = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "fetch", "demo", "1"])
+        .arg("--json")
         .output()
         .expect("fetch");
     assert!(get.status.success());
@@ -204,6 +212,7 @@ fn emit_file_jsonl_ingests_multiple_records() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -220,6 +229,7 @@ fn emit_file_jsonl_ingests_multiple_records() {
             "--file",
             input_file.to_str().unwrap(),
         ])
+        .arg("--json")
         .output()
         .expect("feed");
     assert!(
@@ -234,6 +244,7 @@ fn emit_file_jsonl_ingests_multiple_records() {
 
     let get_one = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "fetch", "demo", "1"])
+        .arg("--json")
         .output()
         .expect("fetch one");
     assert!(get_one.status.success());
@@ -242,6 +253,7 @@ fn emit_file_jsonl_ingests_multiple_records() {
 
     let get_two = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "fetch", "demo", "2"])
+        .arg("--json")
         .output()
         .expect("fetch two");
     assert!(get_two.status.success());
@@ -262,6 +274,7 @@ fn emit_file_auto_handles_multiline_json() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -278,6 +291,7 @@ fn emit_file_auto_handles_multiline_json() {
             "--file",
             input_file.to_str().unwrap(),
         ])
+        .arg("--json")
         .output()
         .expect("feed");
     assert!(
@@ -291,6 +305,7 @@ fn emit_file_auto_handles_multiline_json() {
 
     let get = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "fetch", "demo", "1"])
+        .arg("--json")
         .output()
         .expect("fetch");
     assert!(get.status.success());
@@ -312,6 +327,7 @@ fn emit_retries_when_pool_is_busy() {
             "create",
             "busy",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -335,6 +351,7 @@ fn emit_retries_when_pool_is_busy() {
                 "--retry-delay",
                 "50ms",
             ])
+            .arg("--json")
             .output()
             .expect("feed");
         let _ = tx.send(output);
@@ -366,6 +383,7 @@ fn emit_auto_handles_pretty_json() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -374,6 +392,7 @@ fn emit_auto_handles_pretty_json() {
         .args(["--dir", pool_dir.to_str().unwrap(), "feed", "demo"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("feed");
     {
@@ -403,6 +422,7 @@ fn emit_auto_handles_event_stream() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -411,6 +431,7 @@ fn emit_auto_handles_event_stream() {
         .args(["--dir", pool_dir.to_str().unwrap(), "feed", "demo"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("feed");
     {
@@ -440,6 +461,7 @@ fn emit_auto_detects_json_seq() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -448,6 +470,7 @@ fn emit_auto_detects_json_seq() {
         .args(["--dir", pool_dir.to_str().unwrap(), "feed", "demo"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("feed");
     {
@@ -477,6 +500,7 @@ fn emit_auto_skip_reports_oversize() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -493,6 +517,7 @@ fn emit_auto_skip_reports_oversize() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("feed");
     {
@@ -568,6 +593,7 @@ fn emit_seq_mode_parses_rs_records() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -583,6 +609,7 @@ fn emit_seq_mode_parses_rs_records() {
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("feed");
     {
@@ -612,6 +639,7 @@ fn emit_errors_skip_emits_notices_and_nonzero() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -630,6 +658,7 @@ fn emit_errors_skip_emits_notices_and_nonzero() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("feed");
     {
@@ -679,6 +708,7 @@ fn emit_errors_skip_reports_oversize() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -697,6 +727,7 @@ fn emit_errors_skip_reports_oversize() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("feed");
     {
@@ -733,6 +764,7 @@ fn emit_in_json_accepts_pretty_json() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -748,6 +780,7 @@ fn emit_in_json_accepts_pretty_json() {
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("feed");
     {
@@ -777,6 +810,7 @@ fn emit_in_json_errors_skip_returns_nonzero() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -794,6 +828,7 @@ fn emit_in_json_errors_skip_returns_nonzero() {
         ])
         .stdin(Stdio::piped())
         .stderr(Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("feed");
     {
@@ -825,6 +860,7 @@ fn emit_event_stream_flushes_trailing_event() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -840,6 +876,7 @@ fn emit_event_stream_flushes_trailing_event() {
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("feed");
     {
@@ -867,6 +904,7 @@ fn emit_jq_mode_rejects_skip() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -884,6 +922,7 @@ fn emit_jq_mode_rejects_skip() {
         ])
         .stdin(Stdio::piped())
         .stderr(Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("feed");
     {
@@ -914,6 +953,7 @@ fn emit_create_flag_creates_missing_pool() {
             "{\"x\":1}",
             "--create",
         ])
+        .arg("--json")
         .output()
         .expect("feed");
     assert!(emit_out.status.success());
@@ -937,6 +977,7 @@ fn emit_missing_pool_hint_suggests_create() {
             "missing",
             "{\"x\":1}",
         ])
+        .arg("--json")
         .output()
         .expect("feed");
     assert_eq!(output.status.code(), Some(3));
@@ -963,6 +1004,7 @@ fn emit_remote_url_happy_path_appends_message() {
             "create",
             "demo",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -973,6 +1015,7 @@ fn emit_remote_url_happy_path_appends_message() {
         .args(["access", "connect", &server.remote_url])
         .env("PLASMITE_ACCESS_HOME", &access_home)
         .stdin(std::process::Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("connect");
     use std::io::Write;
@@ -996,6 +1039,7 @@ fn emit_remote_url_happy_path_appends_message() {
             "ping",
         ])
         .env("PLASMITE_ACCESS_HOME", &access_home)
+        .arg("--json")
         .output()
         .expect("feed");
     assert!(emit_out.status.success());
@@ -1016,6 +1060,7 @@ fn emit_remote_url_rejects_api_shaped_path() {
             "http://localhost:9170/v0/pools/demo/append",
             "{\"x\":1}",
         ])
+        .arg("--json")
         .output()
         .expect("feed");
     assert!(!output.status.success());
@@ -1032,6 +1077,7 @@ fn emit_remote_url_rejects_api_shaped_path() {
 fn emit_remote_url_rejects_trailing_slash() {
     let output = cmd()
         .args(["feed", "http://localhost:9170/demo/", "{\"x\":1}"])
+        .arg("--json")
         .output()
         .expect("feed");
     assert!(!output.status.success());
@@ -1053,6 +1099,7 @@ fn emit_remote_url_rejects_create_flag() {
             "--create",
             "{\"x\":1}",
         ])
+        .arg("--json")
         .output()
         .expect("feed");
     assert!(!output.status.success());
@@ -1086,6 +1133,7 @@ fn emit_remote_create_rejected() {
             "--create",
             "{\"x\":1}",
         ])
+        .arg("--json")
         .output()
         .expect("feed");
     assert_eq!(output.status.code(), Some(2));
@@ -1112,6 +1160,7 @@ fn emit_streams_json_values_from_stdin() {
             "create",
             "testpool",
         ])
+        .arg("--json")
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -1120,6 +1169,7 @@ fn emit_streams_json_values_from_stdin() {
         .args(["--dir", pool_dir.to_str().unwrap(), "feed", "testpool"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("feed");
     {
@@ -1148,6 +1198,7 @@ fn emit_streams_json_values_from_stdin() {
             "--jsonl",
         ])
         .stdout(Stdio::piped())
+        .arg("--json")
         .spawn()
         .expect("follow");
     let stdout = follower.stdout.take().expect("stdout");

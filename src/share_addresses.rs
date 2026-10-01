@@ -11,6 +11,10 @@ pub(super) struct Candidate {
     pub host: String,
     /// What kind of network the address is on: vm, local, vpn, public, or name.
     pub kind: &'static str,
+    /// The network interface the address is on, which tells two of a kind apart,
+    /// such as two VM networks. The machine's name has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interface: Option<String>,
 }
 
 pub(super) fn candidates() -> Vec<Candidate> {
@@ -19,14 +23,16 @@ pub(super) fn candidates() -> Vec<Candidate> {
         .map(|(interface, ip)| Candidate {
             host: ip.to_string(),
             kind: kind_of(&interface, ip),
+            interface: Some(interface),
         })
         .collect();
     found.sort_by_key(|candidate| rank(candidate.kind));
-    found.dedup();
+    found.dedup_by(|a, b| a.host == b.host);
     if let Some(name) = super::activity::hostname() {
         found.push(Candidate {
             host: name,
             kind: "name",
+            interface: None,
         });
     }
     found

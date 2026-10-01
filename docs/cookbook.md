@@ -16,6 +16,12 @@
 
 ---
 
+A pool retains a bounded history, and readers keep their own checkpoints.
+`--tail N` selects the last N retained messages before filters. Use
+`--no-follow` for a finite history read and `--json` whenever a script parses
+output. See the [CLI guide](cli.md) for shared rules and the
+[1.0 upgrade guide](record/upgrading-1.0.md) for changed defaults.
+
 ## CI Gate
 
 A deploy script needs to wait until the test runner says "green". No polling loops, no lock files, no shared database.
@@ -120,7 +126,7 @@ done
 pls follow telemetry --tag sensor --where '.data.value > 80000'
 
 # replay the last hour of readings to see the trend
-pls follow telemetry --tag sensor --since 1h --replay 0 \
+pls follow telemetry --tag sensor --since 1h --no-follow --json \
   | jq '.data | [.ts, .value]'
 ```
 
@@ -134,10 +140,11 @@ pls feed telemetry --tag alert  '{"service": "api", "msg": "latency spike"}'
 pls feed telemetry --tag metric '{"service": "web", "rps": 1420}'
 
 # on-call — show only api alerts
-pls follow telemetry --tag alert --where '.data.service == "api"'
+pls follow telemetry --tail 100 --tag alert --where '.data.service == "api"'
 
 # postmortem — what happened in the 10 minutes before the alert?
-pls follow telemetry --since 10m --replay 0 --jsonl > tmp/timeline.jsonl
+mkdir -p tmp
+pls follow telemetry --since 10m --no-follow --json > tmp/timeline.jsonl
 ```
 
 ### Import external API events
@@ -151,13 +158,14 @@ curl -fsS -G https://api.stripe.com/v1/events \
   | jq -c '.data[]' | pls feed stripe-events --create --in jsonl
 
 # filter imported completed payments
-pls follow stripe-events --tail 100 --replay 0 --where '.data.type == "payment_intent.succeeded"'
+pls follow stripe-events --tail 100 --no-follow --where '.data.type == "payment_intent.succeeded"'
 
 # replay messages imported in the last 20 minutes
 pls follow stripe-events --since 20m --replay 1
 
 # export the last 500 events for offline analysis, then exit
-pls follow stripe-events --tail 500 --replay 0 --jsonl > tmp/stripe-dump.jsonl
+mkdir -p tmp
+pls follow stripe-events --tail 500 --no-follow --json > tmp/stripe-dump.jsonl
 ```
 
 ### Build progress
@@ -177,10 +185,10 @@ pls feed build --tag done '{"step": "finished", "ok": true}'
 pls follow build
 
 # a deploy script — ship only when the completed build succeeded
-pls follow build --tag done --tail 1 --one --jsonl | jq -e '.data.ok == true' > /dev/null && ./deploy.sh
+pls follow build --tag done --tail 100 --one --json | jq -e '.data.ok == true' > /dev/null && ./deploy.sh
 
 # next morning — what happened overnight?
-pls follow build --since 12h --replay 0
+pls follow build --since 12h --no-follow
 ```
 
 <details>
@@ -336,7 +344,7 @@ Pipe system logs into a pool. The ring buffer caps disk usage, and anything in t
 
 ```bash
 # Linux — journald
-journalctl -o json-seq -f | pls feed syslog --create
+journalctl -o json -f | pls feed syslog --create
 
 # macOS — unified log
 /usr/bin/log stream --style ndjson | pls feed syslog --create
@@ -346,7 +354,7 @@ Default pool size is 1 MB. For busier systems, make a bigger buffer:
 
 ```bash
 pls pool create syslog --size 8M
-journalctl -o json-seq -f | pls feed syslog
+journalctl -o json -f | pls feed syslog
 ```
 
 Then, when something crashes:
@@ -356,10 +364,10 @@ Then, when something crashes:
 pls follow syslog --since 30m --replay 1
 
 # find kernel panics
-pls follow syslog --since 1h --where '.data.MESSAGE | test("panic")'
+pls follow syslog --since 1h --no-follow --where '.data.MESSAGE | test("panic")'
 
 # pipe to jq for further analysis
-pls follow syslog --since 10m --replay 0 | jq '.data | {SYSLOG_IDENTIFIER, MESSAGE}'
+pls follow syslog --since 10m --no-follow --json | jq '.data | {SYSLOG_IDENTIFIER, MESSAGE}'
 ```
 
 ---
@@ -378,14 +386,14 @@ pls follow incidents --since 1h --replay 10
 pls follow incidents --since 1h --replay 1
 
 # narrow down: only sev1 events with a 503 code
-pls follow incidents --since 2h --tag sev1 --where '.data.code == 503'
+pls follow incidents --since 2h --no-follow --tag sev1 --where '.data.code == 503'
 
 # show just the last 20 messages
-pls follow incidents --tail 20
+pls follow incidents --tail 20 --no-follow
 
 # export the evidence for a postmortem
 mkdir -p tmp
-pls follow incidents --tag error --tail 100 --jsonl > tmp/errors.jsonl
+pls follow incidents --tag error --tail 100 --no-follow --json > tmp/errors.jsonl
 ```
 
 ---
@@ -596,7 +604,7 @@ Important v1 limits:
 ### CI split pattern (writer outside MCP, reader via MCP)
 
 For CI status, a simple split works well:
-- CI pipeline writes with CLI/API (`plasmite feed` or HTTP `/v0/pools/.../messages`).
+- CI pipeline writes with CLI/API (`plasmite feed` or HTTP `POST /v0/pools/POOL/append`).
 - Agents read with MCP (`plasmite_read`, `count: 1`, optional `after_seq` polling).
 
 For browser access, open the server's HTTPS address and enter the access key on
@@ -621,8 +629,10 @@ Non-gated sections in this pass:
 
 Operational notes:
 - For an HTTPS page, use HTTPS on the pool endpoint too (browser mixed-content rules).
-- `--cors-origin` is exact-match only and repeatable for multiple origins.
-- If bearer auth is required, avoid putting long-lived tokens in public frontend code.
+- The served browser UI uses a same-origin session cookie. Browser login and
+  writes require an Origin that matches the shared HTTPS address; separate
+  cross-origin frontend access is unsupported.
+- Keep access keys and native Bearer secrets out of frontend source code and URLs.
 - See `docs/record/serving.md` for complete deployment and troubleshooting guidance.
 
 ---

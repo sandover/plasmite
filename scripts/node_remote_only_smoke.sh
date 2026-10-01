@@ -19,14 +19,21 @@ if [[ -d "$NODE_DIR/native" ]]; then
 fi
 
 restore_native() {
+  local status=$?
   rm -rf "$NODE_DIR/native"
   if [[ -d "$backup_dir" ]]; then
     cp -R "$backup_dir" "$NODE_DIR/native"
   fi
+  if [[ "$status" -eq 0 ]]; then
+    rm -rf "$WORKDIR"
+  else
+    echo "[smoke] retained diagnostics: $WORKDIR" >&2
+  fi
+  return "$status"
 }
 trap restore_native EXIT
 
-rm -rf "$NODE_DIR/native/linux-x64" "$NODE_DIR/native/linux-arm64" "$NODE_DIR/native/darwin-x64" "$NODE_DIR/native/darwin-arm64"
+rm -rf "$NODE_DIR/native/linux-x64" "$NODE_DIR/native/linux-arm64" "$NODE_DIR/native/darwin-x64" "$NODE_DIR/native/darwin-arm64" "$NODE_DIR/native/win32-x64"
 
 (
   cd "$NODE_DIR"

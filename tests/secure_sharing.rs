@@ -48,6 +48,7 @@ fn native_key_connects_and_reuses_server_identity()
             "--name",
             "laptop",
         ])
+        .arg("--json")
         .output()?;
     assert!(
         invite.status.success(),
@@ -73,7 +74,15 @@ fn native_key_connects_and_reuses_server_identity()
     );
     let secret = key.rsplit('.').next().ok_or("missing secret")?;
     let wrong_pin = format!("pk1.{}.{}", "0".repeat(64), secret);
-    assert!(access::connect(&url, &wrong_pin).is_err());
+    let wrong_pin_error = access::connect(&url, &wrong_pin).expect_err("wrong pin rejected");
+    let hint = wrong_pin_error.hint().expect("actionable TLS guidance");
+    assert!(hint.contains("MagicDNS"));
+    assert!(hint.contains("--front-cert"));
+    assert!(hint.contains("withheld"));
+    assert_eq!(
+        std::fs::read(client_home.join("connections.json"))?,
+        saved_before_reconnect
+    );
     let bad_secret = format!("pk1.{}.{}", &key[4..68], "0".repeat(64));
     assert!(access::connect(&url, &bad_secret).is_err());
     let unauthorised = RemoteClient::with_access_key(&url, &bad_secret)?;
@@ -89,6 +98,7 @@ fn native_key_connects_and_reuses_server_identity()
             "--name",
             "replacement",
         ])
+        .arg("--json")
         .output()?;
     assert!(
         replacement_invite.status.success(),
@@ -121,6 +131,7 @@ fn native_key_connects_and_reuses_server_identity()
     let replacement_snapshot = RemoteClient::with_access_key(&url, replacement_key)?;
     let access_keys = std::process::Command::new(env!("CARGO_BIN_EXE_plasmite"))
         .args(["--dir", pool_dir.to_str().unwrap(), "access", "keys"])
+        .arg("--json")
         .output()?;
     assert!(
         access_keys.status.success(),
@@ -144,6 +155,7 @@ fn native_key_connects_and_reuses_server_identity()
             "revoke",
             original_id,
         ])
+        .arg("--json")
         .output()?;
     assert!(
         revoke.status.success(),
@@ -201,6 +213,7 @@ fn native_key_connects_and_reuses_server_identity()
     let cli_disconnect = std::process::Command::new(env!("CARGO_BIN_EXE_plasmite"))
         .args(["access", "disconnect", &url])
         .env("PLASMITE_ACCESS_HOME", &client_home)
+        .arg("--json")
         .output()?;
     assert!(
         cli_disconnect.status.success(),

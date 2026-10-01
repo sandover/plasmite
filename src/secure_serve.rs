@@ -25,7 +25,11 @@ pub(crate) fn run(pool_dir: &Path, run: &ServeRunArgs) -> Result<(), Error> {
     let remote_bind: SocketAddr = run
         .remote_bind
         .parse()
-        .map_err(|_| Error::new(ErrorKind::Usage).with_message("invalid remote bind address"))?;
+        .map_err(|_| {
+            Error::new(ErrorKind::Usage)
+                .with_message("invalid remote bind address")
+                .with_hint("Use a numeric IP:port, such as 100.101.102.103:9743 or [fd7a:115c:a1e0::abcd]:9743. Put the full DNS name in --shared-address.")
+        })?;
     if !local_bind.ip().is_loopback() {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("local administration must bind to a loopback address"));
@@ -48,7 +52,8 @@ pub(crate) fn run(pool_dir: &Path, run: &ServeRunArgs) -> Result<(), Error> {
                 || url.fragment().is_some()
             {
                 return Err(Error::new(ErrorKind::Usage)
-                    .with_message("--shared-address must be an HTTPS origin"));
+                    .with_message("--shared-address must be an HTTPS origin")
+                    .with_hint("Use https://HOST:PORT without a pool path, credentials, query, or fragment. This advertises an address; --remote-bind controls the listening interface."));
             }
             Ok(url.origin().ascii_serialization())
         })
@@ -80,8 +85,17 @@ pub(crate) fn run(pool_dir: &Path, run: &ServeRunArgs) -> Result<(), Error> {
         tls_key: Some(store.key_path()),
         ..base.clone()
     };
-    eprintln!("Serving {}", pool_dir.display());
+    eprintln!(
+        "Serving {}",
+        crate::cli::output_support::human_literal(&pool_dir.display().to_string())
+    );
     eprintln!("Local: http://{local_bind}/ui");
+    eprintln!("Remote listener: {remote_bind}");
+    if remote_bind.ip().is_unspecified() {
+        eprintln!(
+            "Remote listener accepts connections on all interfaces; use --remote-bind to select an interface."
+        );
+    }
     if let Some(address) = shared_address {
         eprintln!("Remote HTTPS: {address}");
     } else if remote_bind.ip().is_unspecified() {
@@ -91,7 +105,7 @@ pub(crate) fn run(pool_dir: &Path, run: &ServeRunArgs) -> Result<(), Error> {
     }
     eprintln!(
         "Create access: plasmite --dir {} access invite --name NAME",
-        pool_dir.display()
+        crate::cli::output_support::human_literal(&pool_dir.display().to_string())
     );
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -183,5 +197,8 @@ fn local_admin_endpoint(pool_dir: &Path, operation: &str) -> Result<(String, Str
 }
 
 fn local_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new().redirects(0).build()
+    ureq::AgentBuilder::new()
+        .redirects(0)
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
 }

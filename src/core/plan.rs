@@ -40,6 +40,9 @@ pub fn plan_append(
         return Err(Error::new(ErrorKind::Usage).with_message("payload too large"));
     }
     header.validate(storage.len() as u64)?;
+    let seq = header.newest_seq.checked_add(1).ok_or_else(|| {
+        Error::new(ErrorKind::Usage).with_message("sequence space exhausted; create another pool")
+    })?;
     let ring_offset = header.ring_offset as usize;
     let ring_size = header.ring_size as usize;
     let max_payload = frame::max_payload(ring_size, FRAME_HEADER_LEN);
@@ -59,7 +62,6 @@ pub fn plan_append(
     let mut tail = original_tail;
     let mut tail_next_off = original_tail_next_off;
     let mut oldest_seq = header.oldest_seq;
-    let mut newest_seq = header.newest_seq;
     if head >= ring_size || tail >= ring_size {
         return Err(Error::new(ErrorKind::Corrupt).with_message("head/tail out of range"));
     }
@@ -136,11 +138,9 @@ pub fn plan_append(
     }
     let appending_into_empty = oldest_seq == 0;
 
-    let seq = if newest_seq == 0 { 1 } else { newest_seq + 1 };
     if oldest_seq == 0 {
         oldest_seq = seq;
     }
-    newest_seq = seq;
 
     let mut new_head = head + frame_len;
     if new_head == ring_size {
@@ -159,7 +159,7 @@ pub fn plan_append(
         tail_off: tail as u64,
         tail_next_off,
         oldest_seq,
-        newest_seq,
+        newest_seq: seq,
         ..header
     };
 

@@ -32,6 +32,7 @@ pub(super) struct FollowArgs {
     pub(super) create: bool,
     pub(super) tail: u64,
     pub(super) one: bool,
+    pub(super) no_follow: bool,
     pub(super) jsonl: bool,
     pub(super) timeout: Option<String>,
     pub(super) data_only: bool,
@@ -62,22 +63,29 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
             .with_message("conflicting output options")
             .with_hint("Use --format jsonl (or --jsonl), but not both."));
     }
+    if context.json_output() && matches!(args.format, Some(FollowFormat::Pretty)) {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("--json conflicts with --format pretty")
+            .with_hint("Use --json for JSONL, or omit it for human-readable output."));
+    }
     let format_flag = args.format;
-    let format = args.format.unwrap_or(if args.jsonl {
-        FollowFormat::Jsonl
-    } else {
-        FollowFormat::Pretty
-    });
+    let format = args
+        .format
+        .unwrap_or(if args.jsonl || context.json_output() {
+            FollowFormat::Jsonl
+        } else {
+            FollowFormat::Pretty
+        });
     let pretty = matches!(format, FollowFormat::Pretty);
     let now = now_ns()?;
-    let since_ns = args
+    let _validated_since = args
         .since
         .as_deref()
         .map(|value| parse_since(value, now))
         .transpose()?;
     let timeout_input = args.timeout.as_deref();
     let timeout = timeout_input.map(parse_duration).transpose()?;
-    let exact_follow_create_hint = follow_exact_create_command_hint(
+    let mut exact_follow_create_hint = follow_exact_create_command_hint(
         &args.pool,
         args.tail,
         args.one,
@@ -92,18 +100,34 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
         args.no_notify,
         args.replay,
     );
+    if args.no_follow {
+        exact_follow_create_hint.push_str(" --no-follow");
+    }
+    if context.json_output() && !args.jsonl && format_flag.is_none() {
+        exact_follow_create_hint.push_str(" --json");
+    }
+    if args.no_follow && args.tail == 0 && args.since.is_none() {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("--no-follow requires --tail or --since")
+            .with_hint("Select retained history with --tail N or --since TIME."));
+    }
     let cfg = FollowConfig {
         tail: args.tail,
         pretty,
         one: args.one,
         timeout,
         data_only: args.data_only,
-        since_ns,
+        since_input: args.since.clone(),
+        no_follow: args.no_follow || args.replay.is_some(),
         required_tags: args.tags,
         where_predicates: compile_filters(&args.where_expr)?,
         quiet_drops: args.quiet_drops,
         notify: !args.no_notify,
-        color_mode: context.color_mode(),
+        color_mode: if pretty {
+            context.color_mode()
+        } else {
+            crate::ColorMode::Never
+        },
         replay_speed: args.replay,
         suppress_sender: None,
         stop: None,
@@ -146,11 +170,8 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
                     ));
                 }
             };
-            if since_ns.is_some_and(|since_ns| since_ns > now) {
-                return Ok(CommandResult::ok());
-            }
             let outcome = follow_pool(&pool_handle, &args.pool, &path, cfg)?;
-            if outcome.exit_code == 124 {
+            if outcome.exit_code == 124 && pretty {
                 if let Some(timeout_input) = timeout_input {
                     emit_follow_timeout_human(timeout_input);
                 }
@@ -167,7 +188,7 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
             }
             let client = remote_client(base_url)?;
             let outcome = follow_remote(&client, &pool, &cfg)?;
-            if outcome.exit_code == 124 {
+            if outcome.exit_code == 124 && pretty {
                 if let Some(timeout_input) = timeout_input {
                     emit_follow_timeout_human(timeout_input);
                 }
@@ -189,22 +210,29 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
             .with_message("TTY input requires --me for duplex")
             .with_hint("Provide --me NAME to send TTY line-mode messages."));
     }
+    if context.json_output() && matches!(args.format, Some(FollowFormat::Pretty)) {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("--json conflicts with --format pretty")
+            .with_hint("Use --json for JSONL, or omit it for human-readable output."));
+    }
     let format_flag = args.format;
-    let format = args.format.unwrap_or(if args.jsonl {
-        FollowFormat::Jsonl
-    } else {
-        FollowFormat::Pretty
-    });
+    let format = args
+        .format
+        .unwrap_or(if args.jsonl || context.json_output() {
+            FollowFormat::Jsonl
+        } else {
+            FollowFormat::Pretty
+        });
     let pretty = matches!(format, FollowFormat::Pretty);
     let now = now_ns()?;
-    let since_ns = args
+    let _validated_since = args
         .since
         .as_deref()
         .map(|value| parse_since(value, now))
         .transpose()?;
     let timeout_input = args.timeout.as_deref();
     let timeout = timeout_input.map(parse_duration).transpose()?;
-    let exact_follow_create_hint = follow_exact_create_command_hint(
+    let mut exact_follow_create_hint = follow_exact_create_command_hint(
         &args.pool,
         args.tail,
         false,
@@ -219,6 +247,9 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
         false,
         None,
     );
+    if context.json_output() && !args.jsonl && format_flag.is_none() {
+        exact_follow_create_hint.push_str(" --json");
+    }
     let stop = Arc::new(AtomicBool::new(false));
     let cfg = FollowConfig {
         tail: args.tail,
@@ -226,12 +257,17 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
         one: false,
         timeout,
         data_only: false,
-        since_ns,
+        since_input: args.since.clone(),
+        no_follow: false,
         required_tags: Vec::new(),
         where_predicates: compile_filters(&[])?,
         quiet_drops: false,
         notify: true,
-        color_mode: context.color_mode(),
+        color_mode: if pretty {
+            context.color_mode()
+        } else {
+            crate::ColorMode::Never
+        },
         replay_speed: None,
         suppress_sender: if args.echo_self {
             None
@@ -267,9 +303,6 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                     ));
                 }
             };
-            if since_ns.is_some_and(|since_ns| since_ns > now) {
-                return Ok(CommandResult::ok());
-            }
             let mut send_pool = Pool::open(&path)?;
             let follow_tx = event_tx.clone();
             let follow_cfg = cfg.clone();
@@ -290,6 +323,7 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
             let me_for_send = args.me.clone();
             let pool_ref = args.pool.clone();
             let color_mode = context.color_mode();
+            let context_json_output = !pretty;
             let _ = std::thread::spawn(move || {
                 if stdin_is_terminal {
                     let outcome = send_tty_lines(
@@ -323,6 +357,7 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                             retry_config: None,
                             pool_handle: &mut send_pool,
                             color_mode,
+                            json_output: context_json_output,
                             input: InputMode::Auto,
                             errors: ErrorPolicyCli::Stop,
                         },
@@ -344,13 +379,6 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                         "Create remote pools with server-side tooling, then rerun duplex.",
                     ));
             }
-            if args.since.is_some() {
-                return Err(Error::new(ErrorKind::Usage)
-                    .with_message("remote duplex does not support --since")
-                    .with_hint(
-                        "Use --tail N for remote refs, or run --since against a local pool path.",
-                    ));
-            }
             let client = remote_client(base_url)?;
             let remote_pool = client.open_pool(&PoolRef::name(name.clone()))?;
             let follow_tx = event_tx.clone();
@@ -370,6 +398,7 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
             let stop_for_send = stop.clone();
             let me_for_send = args.me.clone();
             let color_mode = context.color_mode();
+            let context_json_output = !pretty;
             let _ = std::thread::spawn(move || {
                 if stdin_is_terminal {
                     let outcome = send_tty_lines(
@@ -394,6 +423,7 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                             retry_config: None,
                             remote_pool: &remote_pool,
                             color_mode,
+                            json_output: context_json_output,
                             input: InputMode::Auto,
                             errors: ErrorPolicyCli::Stop,
                         },

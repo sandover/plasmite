@@ -12,18 +12,15 @@ fn top_level_help_orients_and_routes_readers() {
     assert!(stdout.contains("feed` appends"));
     assert!(stdout.contains("FIRST LOCAL WORKFLOW"));
     assert!(stdout.contains("plasmite pool create chat"));
-    assert!(stdout.contains("Use --json or --format jsonl"));
-    assert!(stdout.contains("Top-level options precede the command"));
+    assert!(stdout.contains("Use --json on reports and message commands"));
+    assert!(stdout.contains("Global options work before or after commands"));
     assert!(stdout.contains("plasmite <command> --help"));
     assert!(stdout.contains("/blob/main/docs/cli.md"));
     assert!(stdout.contains("/blob/main/docs/cookbook.md"));
-    assert!(
-        stdout.lines().any(|l| {
-            let t = l.trim();
-            t.starts_with("pool") && t.ends_with("Manage pool files")
-        }),
-        "expected the generated command inventory"
-    );
+    assert!(stdout.contains("pool create NAME... [--size SIZE]"));
+    assert!(stdout.contains("access list"));
+    assert!(stdout.find("Send and read").unwrap() < stdout.find("Manage pools").unwrap());
+    assert!(stdout.find("Manage pools").unwrap() < stdout.find("Share and connect").unwrap());
     for command in [
         "feed",
         "serve",
@@ -50,16 +47,17 @@ fn top_level_help_orients_and_routes_readers() {
 fn every_public_command_has_usable_help() {
     let cases: &[(&[&str], &str)] = &[
         (&["--help"], "plasmite [OPTIONS] <COMMAND>"),
-        (&["pool", "--help"], "plasmite pool <COMMAND>"),
+        (&["pool", "--help"], "plasmite pool"),
         (&["pool", "create", "--help"], "plasmite pool create"),
         (&["pool", "info", "--help"], "plasmite pool info"),
         (&["pool", "delete", "--help"], "plasmite pool delete"),
         (&["pool", "list", "--help"], "plasmite pool list"),
         (&["feed", "--help"], "plasmite feed"),
         (&["serve", "--help"], "plasmite serve"),
-        (&["access", "--help"], "plasmite access <COMMAND>"),
+        (&["access", "--help"], "plasmite access"),
         (&["access", "invite", "--help"], "plasmite access invite"),
         (&["access", "connect", "--help"], "plasmite access connect"),
+        (&["access", "list", "--help"], "plasmite access list"),
         (&["access", "status", "--help"], "plasmite access status"),
         (
             &["access", "disconnect", "--help"],
@@ -110,7 +108,7 @@ fn short_help_exposes_material_command_constraints() {
             &[
                 "finite SPEED >= 0",
                 "requires --tail or --since",
-                "They reject --create",
+                "Remote refs reject --create",
                 "Exit 124",
             ],
         ),
@@ -171,31 +169,31 @@ fn help_pool_lists_pool_subcommands() {
     let output = cmd().args(["help", "pool"]).output().expect("help pool");
     assert!(output.status.success());
     let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
-    assert!(stdout.contains("Usage: plasmite pool <COMMAND>"));
-    assert!(stdout.contains("list    List pools in the pool directory"));
+    assert!(stdout.contains("plasmite pool"));
+    assert!(stdout.contains("List local pools or a remote server directory"));
 }
 
 #[test]
-fn version_help_describes_adaptive_output() {
+fn version_help_describes_explicit_structured_output() {
     let output = cmd()
         .args(["version", "--help"])
         .output()
         .expect("version help");
     assert!(output.status.success());
     let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
-    assert!(stdout.contains("human-readable version information on a terminal"));
-    assert!(stdout.contains("stdout is redirected or piped"));
+    assert!(stdout.contains("human-readable version information by default"));
+    assert!(stdout.contains("--json"));
     assert!(stdout.contains("machine-readable JSON"));
 }
 
 #[test]
-fn version_non_tty_emits_machine_readable_json() {
-    let output = cmd().arg("version").output().expect("version");
+fn version_json_emits_machine_readable_json() {
+    let output = cmd().args(["version", "--json"]).output().expect("version");
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     let value = parse_json(std::str::from_utf8(&output.stdout).expect("utf8"));
     assert_eq!(value["name"], "plasmite");
-    assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(value["version"], env!("PLASMITE_BUILD_VERSION"));
 }
 
 #[test]
@@ -222,6 +220,7 @@ fn not_found_exit_code() {
             "fetch",
             "testpool",
             "999",
+            "--json",
         ])
         .output()
         .expect("fetch");
@@ -258,7 +257,13 @@ fn usage_exit_code() {
     assert!(create.status.success());
 
     let emit_out = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "feed", "testpool"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "feed",
+            "testpool",
+            "--json",
+        ])
         .output()
         .expect("feed");
     assert_eq!(emit_out.status.code().unwrap(), 2);
@@ -273,7 +278,7 @@ fn usage_exit_code() {
 }
 
 #[test]
-fn color_always_colorizes_pretty_stdout() {
+fn color_always_does_not_color_structured_stdout() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -304,7 +309,8 @@ fn color_always_colorizes_pretty_stdout() {
         .expect("info");
     assert!(info.status.success());
     let stdout = String::from_utf8_lossy(&info.stdout);
-    assert!(stdout.contains("\u{1b}[36m\"name\"\u{1b}[0m"));
+    assert!(!stdout.contains("\u{1b}["));
+    let _ = parse_json(&stdout);
 }
 
 #[test]
@@ -398,7 +404,7 @@ fn color_always_does_not_color_jsonl() {
 }
 
 #[test]
-fn errors_are_json_on_non_tty_stderr() {
+fn errors_are_json_when_explicitly_requested() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -410,6 +416,7 @@ fn errors_are_json_on_non_tty_stderr() {
             pool_dir.to_str().unwrap(),
             "follow",
             "missing",
+            "--json",
         ])
         .output()
         .expect("follow");
@@ -453,6 +460,7 @@ fn clap_errors_are_concise_in_json() {
             pool_dir.to_str().unwrap(),
             "follow",
             "demo",
+            "--json",
             "--definitely-not-a-flag",
         ])
         .output()
@@ -495,11 +503,10 @@ fn misuse_feedback_matrix_is_actionable_across_command_families() {
 
     for (args, expected_message_fragment, expected_hint_fragment) in cases {
         let output = cmd().args(args).output().expect("command");
-        assert_actionable_usage_feedback(
-            &output,
-            expected_message_fragment,
-            expected_hint_fragment,
-        );
+        assert_eq!(output.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(expected_message_fragment), "{stderr}");
+        assert!(stderr.contains(expected_hint_fragment), "{stderr}");
     }
 }
 

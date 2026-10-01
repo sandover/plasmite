@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -52,19 +53,31 @@ var (
 	ErrInvalidArgument = api.ErrInvalidArgument
 )
 
+// Client serializes native handle access, including Close.
+// A Client must not be copied.
 type Client struct {
+	mu  sync.Mutex
 	ptr *C.plsm_client_t
 }
 
+// Pool serializes native handle access, including Close and stream creation.
+// A Pool must not be copied; streams own separate handles.
 type Pool struct {
+	mu  sync.Mutex
 	ptr *C.plsm_pool_t
 }
 
+// Stream serializes native reads and Close. A Stream must not be copied.
+// Close waits for an active read; use a finite stream timeout for bounded shutdown.
 type Stream struct {
+	mu  sync.Mutex
 	ptr *C.plsm_stream_t
 }
 
+// Lite3Stream serializes native reads and Close. A Lite3Stream must not be copied.
+// Close waits for an active read; use a finite stream timeout for bounded shutdown.
 type Lite3Stream struct {
+	mu  sync.Mutex
 	ptr *C.plsm_lite3_stream_t
 }
 
@@ -129,7 +142,12 @@ func DefaultPoolDir() string {
 }
 
 func (c *Client) Close() {
-	if c == nil || c.ptr == nil {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ptr == nil {
 		return
 	}
 	C.plsm_client_free(c.ptr)
@@ -137,7 +155,12 @@ func (c *Client) Close() {
 }
 
 func (c *Client) CreatePool(ref PoolRef, sizeBytes uint64) (api.Pool, error) {
-	if c == nil || c.ptr == nil {
+	if c == nil {
+		return nil, closedError("client")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ptr == nil {
 		return nil, closedError("client")
 	}
 	if ref == "" {
@@ -159,7 +182,12 @@ func (c *Client) CreatePool(ref PoolRef, sizeBytes uint64) (api.Pool, error) {
 }
 
 func (c *Client) OpenPool(ref PoolRef) (api.Pool, error) {
-	if c == nil || c.ptr == nil {
+	if c == nil {
+		return nil, closedError("client")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ptr == nil {
 		return nil, closedError("client")
 	}
 	if ref == "" {
@@ -190,7 +218,12 @@ func (c *Client) Pool(ref PoolRef, sizeBytes uint64) (api.Pool, error) {
 }
 
 func (p *Pool) Close() {
-	if p == nil || p.ptr == nil {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ptr == nil {
 		return
 	}
 	C.plsm_pool_free(p.ptr)
@@ -198,7 +231,12 @@ func (p *Pool) Close() {
 }
 
 func (p *Pool) AppendJSON(payload []byte, tags []string, durability Durability) ([]byte, error) {
-	if p == nil || p.ptr == nil {
+	if p == nil {
+		return nil, closedError("pool")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ptr == nil {
 		return nil, closedError("pool")
 	}
 	if len(payload) == 0 {
@@ -244,7 +282,12 @@ func (p *Pool) Append(value any, tags []string, opts ...AppendOption) (*api.Mess
 
 // AppendLite3 appends a pre-encoded Lite3 payload without JSON encoding.
 func (p *Pool) AppendLite3(payload []byte, durability Durability) (uint64, error) {
-	if p == nil || p.ptr == nil {
+	if p == nil {
+		return 0, closedError("pool")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ptr == nil {
 		return 0, closedError("pool")
 	}
 	if len(payload) == 0 {
@@ -271,7 +314,12 @@ func (p *Pool) AppendLite3(payload []byte, durability Durability) (uint64, error
 }
 
 func (p *Pool) GetJSON(seq uint64) ([]byte, error) {
-	if p == nil || p.ptr == nil {
+	if p == nil {
+		return nil, closedError("pool")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ptr == nil {
 		return nil, closedError("pool")
 	}
 	var cBuf C.plsm_buf_t
@@ -293,7 +341,12 @@ func (p *Pool) Get(seq uint64) (*api.Message, error) {
 
 // GetLite3 returns the raw Lite3 payload and metadata for the given sequence.
 func (p *Pool) GetLite3(seq uint64) (*Lite3Frame, error) {
-	if p == nil || p.ptr == nil {
+	if p == nil {
+		return nil, closedError("pool")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ptr == nil {
 		return nil, closedError("pool")
 	}
 	var cFrame C.plsm_lite3_frame_t
@@ -310,7 +363,12 @@ func (p *Pool) OpenStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint
 }
 
 func (p *Pool) openStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64, errorOnGap bool) (api.Stream, error) {
-	if p == nil || p.ptr == nil {
+	if p == nil {
+		return nil, closedError("pool")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ptr == nil {
 		return nil, closedError("pool")
 	}
 	var sinceVal C.uint64_t
@@ -371,7 +429,12 @@ func (p *Pool) OpenLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs 
 }
 
 func (p *Pool) openLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64, errorOnGap bool) (api.Lite3Stream, error) {
-	if p == nil || p.ptr == nil {
+	if p == nil {
+		return nil, closedError("pool")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ptr == nil {
 		return nil, closedError("pool")
 	}
 	var sinceVal C.uint64_t
@@ -428,7 +491,12 @@ func (p *Pool) openLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs 
 }
 
 func (s *Stream) NextJSON() ([]byte, error) {
-	if s == nil || s.ptr == nil {
+	if s == nil {
+		return nil, closedError("stream")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ptr == nil {
 		return nil, closedError("stream")
 	}
 	var cBuf C.plsm_buf_t
@@ -445,7 +513,12 @@ func (s *Stream) NextJSON() ([]byte, error) {
 }
 
 func (s *Lite3Stream) Next() (*Lite3Frame, error) {
-	if s == nil || s.ptr == nil {
+	if s == nil {
+		return nil, closedError("stream")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ptr == nil {
 		return nil, closedError("stream")
 	}
 	var cFrame C.plsm_lite3_frame_t
@@ -462,7 +535,12 @@ func (s *Lite3Stream) Next() (*Lite3Frame, error) {
 }
 
 func (s *Stream) Close() {
-	if s == nil || s.ptr == nil {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ptr == nil {
 		return
 	}
 	C.plsm_stream_free(s.ptr)
@@ -470,7 +548,12 @@ func (s *Stream) Close() {
 }
 
 func (s *Lite3Stream) Close() {
-	if s == nil || s.ptr == nil {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ptr == nil {
 		return
 	}
 	C.plsm_lite3_stream_free(s.ptr)
@@ -645,8 +728,8 @@ func (p *Pool) TailLite3(ctx context.Context, opts TailOptions) (<-chan *Lite3Fr
 	return out, errs
 }
 
-// Replay collects all messages from the pool, then yields them with inter-message delays
-// scaled by the speed multiplier. Unlike Tail, Replay is bounded — it does not follow live writes.
+// Replay collects messages until Timeout or MaxMessages, then yields them with
+// inter-message delays scaled by Speed. Collection can include concurrent appends.
 func (p *Pool) Replay(ctx context.Context, opts ReplayOptions) (<-chan *api.Message, <-chan error) {
 	out := make(chan *api.Message, 64)
 	errs := make(chan error, 1)

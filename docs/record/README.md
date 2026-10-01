@@ -11,6 +11,7 @@ For task guides and specifications, start with the [docs index](../README.md).
 - Testing: `testing.md`
 - Releasing (includes versioning policy): `releasing.md`
 - Distribution contract: `distribution.md`
+- [Upgrade to 1.0](upgrading-1.0.md): script and Rust source migration.
 - [Secure sharing](serving.md): read when sharing pools, managing access,
   setting browser trust, or operating a server.
 - C ABI header + stability contract: `../../include/plasmite.h`

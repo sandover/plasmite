@@ -1,11 +1,11 @@
 # plasmite
 
-Persistent JSON message queues for Node.js. No broker, no daemon — just files on disk.
+Persistent, bounded JSON message streams for Node.js. Local use needs no broker or daemon.
 
-Plasmite gives you fast, crash-safe, disk-backed ring buffers ("pools") that
-multiple processes can read and write concurrently. Use it for IPC, event
-sourcing, job queues, or anywhere you'd reach for Redis but don't want to run
-a server.
+Plasmite gives you disk-backed ring buffers ("pools") that multiple processes
+can read and write concurrently. Use them for IPC, recent event history,
+and process output. The ring overwrites old messages when full; it does not
+acknowledge consumption or retain work until a consumer finishes.
 
 ## Install
 
@@ -13,8 +13,10 @@ a server.
 npm install plasmite
 ```
 
-Requires Node 24+. The package ships pre-built native binaries — no Rust
-toolchain or compile step needed.
+Requires **Node.js 24 or newer**, including the npm CLI. Published packages
+include native binaries on macOS x64/arm64, Linux x64, and Windows x64, so
+those platforms need no Rust toolchain or compile step. See
+[platform support](#platform-support) before installing on another target.
 
 ## Quick start
 
@@ -58,15 +60,21 @@ try {
 
 ### Remote pools (HTTP/JSON)
 
-Connect to a Plasmite server (`npx plasmite serve` or `pls serve`) to read
-and write pools over the network.
+This example uses a server's credential-free loopback HTTP listener on the
+same machine. Create `events` and start `npx plasmite --dir ./data serve`
+first. The JavaScript HTTP client works without the native addon.
+
+It does not load connections saved by `access connect`, parse full `pk1`
+access keys, or verify their certificate pins. Use Rust or the CLI for the
+secure native access-key workflow. The optional `token`/`withToken` API sends
+a supplied Bearer value through ordinary Node fetch; it provides no key-based
+server verification. Do not put a full access key in that field.
 
 ```js
 const { RemoteClient } = require("plasmite");
 
 (async () => {
   const client = new RemoteClient("http://127.0.0.1:9700");
-  // With auth: new RemoteClient("http://...", { token: "secret" })
 
   const pool = await client.openPool("events");
 
@@ -75,14 +83,14 @@ const { RemoteClient } = require("plasmite");
     { kind: "deploy", sha: "abc123" },
     ["ops"],
   );
-  console.log(message.seq); // => 1n
+  console.log(message.seq); // bigint sequence allocated by this pool
 
   // Read by sequence number
-  const got = await pool.get(1);
+  const got = await pool.get(message.seq);
   console.log(got.data); // => { kind: "deploy", sha: "abc123" }
 
   // Tail — live-stream new messages (JSONL under the hood)
-  for await (const msg of pool.tail({ sinceSeq: 0, tags: ["ops"], maxMessages: 1 })) {
+  for await (const msg of pool.tail({ sinceSeq: message.seq, tags: ["ops"], maxMessages: 1 })) {
     console.log(msg.seq, msg.tags, msg.data);
   }
 })();
@@ -127,7 +135,9 @@ const { RemoteClient } = require("plasmite");
 - `Durability.Fast` — buffered writes (higher throughput)
 - `Durability.Flush` — fsync after write (crash-safe)
 
-Sequence numbers accept `number` or `bigint`.
+Sequence numbers accept `number` or `bigint`; use `bigint` when they exceed
+JavaScript's safe-integer range. `sinceSeq` is inclusive: to resume after the
+last handled message, save `message.seq + 1n` as the next checkpoint.
 
 Local tails continue from the next retained message by default when their
 cursor has fallen behind the ring buffer. Set `errorOnGap: true` when losing
@@ -144,8 +154,8 @@ for await (const message of pool.tail({
 
 The tail throws `PlasmiteNativeError` with
 `kind === ErrorKind.RetentionGap` before delivering a message after the gap.
-Persist the last successfully handled sequence and restart from a suitable
-checkpoint after deciding how to recover.
+Persist the next sequence to read (`message.seq + 1n`) after handling each
+message, and restart from a suitable checkpoint after deciding how to recover.
 
 ### Remote client
 
@@ -166,13 +176,18 @@ checkpoint after deciding how to recover.
 
 ```js
 const options = {
-  sinceSeq: 0,         // start after this sequence number
+  sinceSeq: 1n,        // start at this sequence number (inclusive)
   maxMessages: 100,    // stop after N messages
-  timeoutMs: 5000,     // stop after N ms of inactivity
+  timeoutMs: 5000,     // stream timeout; see local/remote distinction below
   tags: ["signup"],    // filter by exact tag match (AND across tags)
   errorOnGap: true,    // fail before delivering a message after a retention gap
 };
 ```
+
+Local `tail()` reopens timed streams while following; `timeoutMs` controls
+its polling interval, not a total deadline. Use `maxMessages` to stop after
+a chosen number of matching messages. Remote `tail()` makes one request and
+ends when that server stream closes or times out. Breaking out of either async iterator closes its stream.
 
 Remote JSON tails surface a fail-closed gap as `RemoteError` with
 `kind === ErrorKind.RetentionGap`. Remote Lite3 tails do not support this
@@ -193,8 +208,10 @@ try {
 }
 ```
 
-Remote operations throw `RemoteError` with `status`, `kind`, and optional
-`hint`.
+HTTP error responses throw `RemoteError` with `status`, `kind`, and optional
+`hint`. Connection and TLS failures may throw Node fetch errors, and malformed
+response bodies may throw parse errors; do not assume every remote failure
+is an HTTP error response.
 
 ### CLI
 
@@ -232,11 +249,20 @@ node cmd/plasmite-conformance.js ../../conformance/sample-v0.json
 ## Platform support
 
 Pre-built binaries are included for:
-- Linux: `x64`, `arm64`
+- Linux: `x64`
 - macOS: `x64`, `arm64`
 - Windows: `x64`
 
-If your platform/architecture is not listed, install the SDK (`libplasmite`) and build from source.
+Linux ARM64 and ARMv7 have [preview SDK archives](https://github.com/sandover/plasmite/blob/main/docs/record/distribution.md#linux-arm-sdk-preview-install)
+for the native CLI/server, but no published npm addon or CLI. Installing an
+SDK archive does not supply a Node addon. The HTTP `RemoteClient` remains
+available without native binaries for the loopback workflow above.
+
+For source development, build the addon and stage its native assets with
+`npm run build` and `npm run prepare-native` on a compatible host.
+See the [distribution guide](https://github.com/sandover/plasmite/blob/main/docs/record/distribution.md) for channel
+support and the [1.0 upgrade guide](https://github.com/sandover/plasmite/blob/main/docs/record/upgrading-1.0.md) for CLI
+and remote-access changes.
 
 ## License
 

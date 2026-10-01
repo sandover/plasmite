@@ -162,7 +162,8 @@ impl LocalClient {
             }
             Err(err) => return Err(err),
         };
-        let header = pool.header_from_mmap()?;
+        let _lock = pool.read_lock()?;
+        let header = pool.header_locked()?;
         let report = validate_pool_state_report(header, pool.mmap(), &path)
             .with_pool_ref(pool_ref.describe());
         Ok(report)
