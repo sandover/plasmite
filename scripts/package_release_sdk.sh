@@ -40,6 +40,7 @@ mkdir -p "$sdk_dir/bin" "$sdk_dir/include" "$sdk_dir/lib/pkgconfig" "$root_dir/d
 cp "$release_dir/plasmite" "$sdk_dir/bin/plasmite"
 cp "$release_dir/pls" "$sdk_dir/bin/pls"
 cp "$root_dir/include/plasmite.h" "$sdk_dir/include/plasmite.h"
+cp "$root_dir/LICENSE" "$root_dir/THIRD_PARTY_NOTICES.md" "$sdk_dir/"
 
 if [[ -f "$release_dir/libplasmite.dylib" ]]; then
   cp "$release_dir/libplasmite.dylib" "$sdk_dir/lib/libplasmite.dylib"
