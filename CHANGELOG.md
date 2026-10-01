@@ -61,8 +61,16 @@ and Rust source changes.
   storage, treats zero speed as immediate playback, and rejects invalid speeds.
 - Backpressured HTTP tails release their concurrency permit at the configured
   absolute deadline, including when the output queue is full.
+- Successful append and requested flush complete before optional reader
+  notifications are posted outside the writer lock, reducing contention
+  without changing publication order or the fallback polling behavior.
+- Remote one-shot requests use a 30-second network deadline while live tail
+  bodies retain their caller and server streaming limits.
 - Node preserves the full unsigned 64-bit sequence range as `bigint` in native
   and HTTP message envelopes without changing user payload number semantics.
+- Browser pool lists, maps, message links, history cursors and copied message
+  envelopes preserve exact unsigned 64-bit sequences. Earlier history loads
+  have bounded waits and report retention, session and network failures.
 - The Python CLI fallback skips its own console wrapper and finds a native
   system SDK executable, preventing recursive launches after source installs.
 - Go and Python serialize each native handle's calls and close, preventing

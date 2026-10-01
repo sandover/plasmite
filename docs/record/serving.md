@@ -20,8 +20,8 @@ share a smaller set of pools, serve a separate directory.
 
 ## Share your first pool
 
-These instructions cover the upcoming access-key release. Until it ships,
-[build Plasmite from source](../building.md#install-the-cli-from-source).
+These instructions require Plasmite 1.0 or newer. See the
+[installation guide](distribution.md) for supported channels.
 You need it on the server and recipient machines; `plasmite access --help`
 checks that your installation includes this workflow. The commands below
 work in macOS and Linux shells and Windows PowerShell.
