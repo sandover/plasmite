@@ -27,6 +27,35 @@ There are three top-level commands, ordered by cost and coverage:
   smoke. Run it before merging, tagging, or publishing; main and scheduled CI
   run it on Linux and macOS.
 
+### Linux ARM release archives
+
+The GitHub SDK preview targets are `aarch64-unknown-linux-gnu` and
+`armv7-unknown-linux-gnueabihf`. The passing
+[ARM SDK CI run](https://github.com/sandover/plasmite/actions/runs/36803923793)
+built and packaged both targets, then extracted each archive, compiled and
+linked a C SDK consumer, and exercised the CLI and HTTPS restart path. It ran
+the `cli_pool`, `secure_serving`, `secure_sharing`, `oauth_access`,
+`access_lifecycle`, and `remote_integration` suites on each target. ARM64 ran on
+`ubuntu-22.04-arm` with glibc 2.35. ARMv7 cross-built on Ubuntu 22.04 against a
+glibc 2.35 hard-float sysroot and ran under QEMU; the target requires Armv7-A,
+VFPv3-D16 hard-float, and Thumb-2, with NEON optional. The run also passed
+64-bit to ARMv7 and ARMv7 to 64-bit shared-pool handoffs. These CI checks do not
+establish behavior on physical Raspberry Pi hardware.
+
+The run retains the verified archives for 30 days as
+`ci-sdk-aarch64-unknown-linux-gnu` and
+`ci-sdk-armv7-unknown-linux-gnueabihf`. Each includes `sha256sums.txt` and
+`ci-build.json` with the SDK tarball. No GitHub release currently publishes
+these ARM assets.
+
+Record physical Raspberry Pi checks separately from CI results. Include the
+Pi model, OS and architecture, archive version, CLI/server commands, and the
+pool sizes exercised. On ARMv7, the maximum pool file length is 2,147,483,647
+bytes (2 GiB minus one byte); Plasmite rejects creation of a larger pool or
+mapping of a larger existing pool. A smaller mapping can still fail under
+memory pressure. Do not describe an archive as built, published, or Pi-validated
+until evidence exists for that specific boundary.
+
 The main CI gate gives Go a stable runner-local build cache that
 `actions/setup-go` restores and saves. Test scripts honor an existing
 `GOCACHE`; local runs default to repository-local scratch directories.

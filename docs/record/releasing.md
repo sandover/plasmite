@@ -69,7 +69,8 @@ Costs below are intentionally qualitative; exact runtimes vary by machine and Gi
    - Gate: every build + packaging + smoke test job must succeed for the matrix targets.
    - Cost: expensive (multi-platform compilation + packaging; typically the longest stage).
    - Output (high-level):
-     - “SDK tarballs” for macOS (Intel + Apple Silicon) and Linux (x86_64)
+     - “SDK tarballs” for macOS (Intel + Apple Silicon) and Linux (x86_64,
+       plus the Linux ARM64 and ARMv7 preview targets)
      - Python distributions (sdist + wheels for supported platforms)
      - Node publish artifact (an npm tarball)
 
@@ -157,6 +158,28 @@ Failure policy:
 - Post-release delivery smoke is mandatory for release completion: run `post-release-smoke.yml` (or the script locally) and archive results.
 - Homebrew tap is updated locally from `../homebrew-tap` using `scripts/update_homebrew_formula.sh` and pushed before live publish dispatch. The `sync-homebrew-tap` CI job verifies alignment.
 - Publish-only retry after credential fixes must target the same release tag (or explicit successful `build_run_id`) without rebuilding matrix artifacts.
+
+### Linux ARM SDK preview
+
+The GitHub SDK preview supports CI-built `aarch64-unknown-linux-gnu`
+(`linux_arm64`) and `armv7-unknown-linux-gnueabihf` (`linux_armv7`) archives for
+manual CLI/server installation without Rust. The passing
+[ARM SDK CI run](https://github.com/sandover/plasmite/actions/runs/36803923793)
+built and smoke-tested both SDK archives. The run retained them for 30 days as
+`ci-sdk-aarch64-unknown-linux-gnu` and
+`ci-sdk-armv7-unknown-linux-gnueabihf`, with checksums and build provenance.
+GitHub release asset names are `plasmite_<version>_linux_arm64.tar.gz` and
+`plasmite_<version>_linux_armv7.tar.gz`; no GitHub release has published these
+assets yet.
+
+ARM64 uses Ubuntu 22.04 with glibc 2.35 as its runtime baseline. ARMv7 uses an
+Ubuntu 22.04 glibc 2.35 sysroot and pins Armv7-A, VFPv3-D16 hard-float, and
+Thumb-2, with NEON optional. The ARMv7 target is 32-bit hard-float; ARMv6 is
+outside the preview. These targets do not add npm, PyPI, or Homebrew support.
+
+The release workflow builds these archives and checks for both before
+attaching them to a GitHub Release. Physical Raspberry Pi validation remains
+separate from CI evidence.
 
 ## Support-tier enforcement
 

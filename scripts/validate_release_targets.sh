@@ -43,6 +43,17 @@ jq -e '
         .sdk_platform == "linux_amd64")
      else true end) and
     (if .channels.cargo_binstall != null then .build_sdk else true end)
+    and (if .channels.npm != null then .node_platform != "linux-arm64" and .node_platform != "linux-armv7" else true end)
+    and (if .channels.pypi != null then .upload_wheel else true end)
+    and (if .channels.github_sdk == "preview" and (.rust_target == "aarch64-unknown-linux-gnu" or .rust_target == "armv7-unknown-linux-gnueabihf") then
+      .channels.homebrew == null and .channels.npm == null and .channels.pypi == null and .channels.cargo_binstall == null and
+      (.upload_sdist | not) and (.upload_wheel | not)
+    else true end)
+    and (if .rust_target == "aarch64-unknown-linux-gnu" then
+      .runner == "ubuntu-22.04-arm" and .sdk_platform == "linux_arm64" and .channels.github_sdk == "preview"
+    elif .rust_target == "armv7-unknown-linux-gnueabihf" then
+      .runner == "ubuntu-22.04" and .sdk_platform == "linux_armv7" and .channels.github_sdk == "preview"
+    else true end)
   )) and
   (.targets | unique_by_field("rust_target")) and
   (.targets | unique_by_field("sdk_platform")) and
