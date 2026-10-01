@@ -6,96 +6,71 @@ All notable changes to this project will be documented in this file.
 
 ## [1.0.0] - 2026-10-01
 
-Plasmite 1.0 makes local and shared pools easier to discover and read, replaces
-remote token configuration with named, pinned connections, and corrects the
-lifetime of message snapshots. Existing pool files and the C ABI remain
-compatible. See [Upgrade to 1.0](docs/record/upgrading-1.0.md) for CLI scripts
-and Rust source changes.
+Plasmite 1.0 brings a redesigned CLI, named connections for secure sharing, and a safer foundation for concurrent readers and writers. You can inspect local and remote pools with the same commands, read a finite slice of history, and browse messages without losing large sequence numbers.
 
-### Share pools through verified connections
+**This is a breaking CLI and Rust API release. Existing pool files and the C ABI remain compatible.** Read the [upgrade guide](https://github.com/sandover/plasmite/blob/v1.0.0/docs/record/upgrading-1.0.md) before updating scripts or shared servers.
 
-- Servers provide credential-free loopback HTTP and authenticated HTTPS for
-  remote use. Named access keys bind a directory's authority to its server's
-  public key; verification occurs before sending credentials.
-- Invite, connect, inspect, revoke, disconnect, and browser trust are separate
-  operations. Saved connections coexist by destination, and offline
-  `access list` inventories them without probing servers or revealing keys.
-- Browser sessions and independently revocable MCP grants support shared
-  pools. Windows protects server state with filesystem access control and
-  saved credentials with the current user's DPAPI encryption.
-- `serve status` discovers running servers for the current OS user and reports
-  their directories and known local/remote addresses.
-- The serving guide covers direct Tailscale binding and raw TCP forwarding
-  with existing authentication. Endpoint and certificate guidance distinguishes
-  advertised names, actual listeners, and terminating proxy pins. Real two-node
-  tailnet verification remains outstanding.
+Install or update using the [supported distribution channels](https://github.com/sandover/plasmite/blob/v1.0.0/docs/record/distribution.md#install-matrix).
 
-### Use one CLI operating model
+### Before you upgrade
 
-- Root help presents a compact, task-ordered command inventory. Global
-  directory and color options work before or after commands, including MCP;
-  conflicting repeated directories fail with actionable guidance.
-- Commands produce readable output by default, including when piped. Scripts
-  select stable, uncolored output and errors explicitly with `--json`.
-  Streaming `--jsonl` and `--format jsonl` aliases remain available.
-- `fetch` and `pool info` accept remote pool URLs, and `pool list` accepts a
-  server URL using saved native connections. Local and remote reports share
-  their presentation and fields.
-- `follow --tail N` selects retained history before filters. `--no-follow`
-  reads a fixed snapshot and exits; local and remote `--since` use the same
-  starting-time rules. `--one` returns the first matching message.
-- Local replay uses bounded cursor state rather than collecting all messages,
-  reports overwritten history, and honors output deadlines during playback.
+- **Scripts must request JSON explicitly.** Commands now use readable output even when piped. Add `--json` wherever you parse output. Streaming `--jsonl` and `--format jsonl` remain supported.
+- **Remote access must be set up again.** Old token configuration and insecure TLS options are removed, with no automatic conversion. Update shared servers and recipients together, then use `access invite` and `access connect`.
+- **Access keys grant full access to a served directory, including future pools.** The old read-only mode has no replacement in 1.0. Separate directories can isolate groups of pools, but do not provide read-only access.
+- **Node.js 24 or later is required.**
+- **Rust callers may need source changes.** Remote-client builders and frame lifetimes changed; see the [Rust migration steps](https://github.com/sandover/plasmite/blob/v1.0.0/docs/record/upgrading-1.0.md#update-rust-clients).
 
-### Preserve message values and recovery behavior
+### A more consistent CLI
 
-- Core reads copy payloads into owned snapshots under the writer-compatible
-  file lock. Retained Rust frames cannot change after a later append, and
-  Rust/FFI consumers decode stable bytes.
-- Stable malformed ring frames return corruption errors instead of retrying
-  forever; readers still recover from legal overwrite and report retention
-  gaps. Wrap and tail-position regressions have targeted coverage.
-- Impossible Lite3 array counts fail before allocation. Appending after the
-  final unsigned 64-bit sequence returns an error without changing pool storage.
-- Public Rust replay fixes its initial history boundary, bounds requested-tail
-  storage, treats zero speed as immediate playback, and rejects invalid speeds.
-- Backpressured HTTP tails release their concurrency permit at the configured
-  absolute deadline, including when the output queue is full.
-- Successful append and requested flush complete before optional reader
-  notifications are posted outside the writer lock, reducing contention
-  without changing publication order or the fallback polling behavior.
-- Remote one-shot requests use a 30-second network deadline while live tail
-  bodies retain their caller and server streaming limits.
-- Node preserves the full unsigned 64-bit sequence range as `bigint` in native
-  and HTTP message envelopes without changing user payload number semantics.
-- Browser pool lists, maps, message links, history cursors and copied message
-  envelopes preserve exact unsigned 64-bit sequences. Earlier history loads
-  have bounded waits and report retention, session and network failures.
-- The Python CLI fallback skips its own console wrapper and finds a native
-  system SDK executable, preventing recursive launches after source installs.
-- Go and Python serialize each native handle's calls and close, preventing
-  foreground operations and stream workers from aliasing or freeing live handles.
-- Tap bounds each captured line by the pool capacity and stops its wrapped
-  child promptly on reader errors, so newline-free output cannot accumulate
-  without limit. Human labels escape terminal control characters.
-- Atomic acknowledgments and deterministic process/stream handshakes reduce
-  test flakiness without weakening assertions.
+Readable defaults and explicit JSON make interactive use and scripting predictable. Help is organized around tasks, global directory and color options work before or after commands, and errors explain how to recover.
 
-### Delivery and support
+- Use `fetch` and `pool info` with local pools or remote pool URLs. Use `pool list` with a server URL to inspect a saved connection.
+- Use `follow --tail N --no-follow` to read a fixed history snapshot and exit. New messages cannot keep the command running.
+- `--tail N` now selects the last N retained messages **before** applying filters. Increase N when you need to search a larger history. `--one` returns the first match.
+- Use `serve status` to find running servers for your OS user, including their pool directories and addresses.
+- Use `access list` to inspect saved destinations offline, without contacting servers or printing keys.
 
-- Node now requires version 24 or newer. Secure native connection APIs are
-  available in Rust and the CLI; other bindings retain their documented
-  capabilities rather than implying identical transport support.
-- Linux ARM64 and ARMv7 GitHub SDK archives are preview targets with checked
-  portability and cross-architecture pool compatibility. Physical Raspberry
-  Pi installation/reboot qualification remains outstanding; ARMv6 is unsupported.
-- Release artifacts attest the checked-out tag's source identity. Packaging,
-  target selection, Homebrew parity, and delivery verification remain
-  fail-closed across the supported channels.
-- HTTP/TLS dependencies and memmap2 were updated for security advisories;
-  vendored Lite3 uses pinned upstream provenance and sanitizer checks.
-- Guides and examples now describe bounded retention, explicit JSON,
-  connection scope, and supported install paths consistently.
+For example:
+
+```console
+plasmite follow events --tail 100 --no-follow --json
+plasmite pool list https://pools.example.net:9743
+plasmite fetch https://pools.example.net:9743/events 42 --json
+```
+
+The remote examples require a saved connection. See [upgrading](https://github.com/sandover/plasmite/blob/v1.0.0/docs/record/upgrading-1.0.md) for setup and the complete list of removed options.
+
+### Secure sharing and Tailscale guidance
+
+Named connections verify the server's identity before sending credentials. Local administration stays on loopback HTTP; remote clients use authenticated HTTPS. Invitations, saved connections, revocation, and browser trust have separate commands.
+
+The [serving guide](https://github.com/sandover/plasmite/blob/v1.0.0/docs/record/serving.md) now covers direct Tailscale connections and optional raw TCP forwarding that preserves Plasmite's TLS identity. Startup messages distinguish the advertised address from the actual listener, and connection errors give clearer hostname, port, and certificate guidance.
+
+**Do not forward the unauthenticated local HTTP port.** An HTTPS-terminating proxy also changes the certificate clients see and needs explicit frontend-identity configuration. Tailscale remains optional; no new network service or policy is enabled automatically.
+
+### Correctness and reliability
+
+- Retained Rust message frames now own stable payload snapshots. Later writes can no longer change data a reader already holds.
+- Malformed retained frames return corruption errors instead of hanging. Legal ring-buffer wrap padding remains readable, and impossible array lengths are rejected before allocation.
+- Go and Python synchronize native-handle operations and close, preventing overlapping reads, writes, and cleanup from using invalid handles.
+- Browser views and Node message envelopes preserve the full 64-bit sequence range. Message links, history cursors, maps, and copied envelopes keep exact IDs.
+- Python source installs no longer recursively launch their own CLI wrapper while searching for the native executable.
+- `tap` bounds captured lines and terminates its child on reader failure. Terminal output escapes control characters in labels.
+- One-shot remote requests use a 30-second network deadline. System DNS resolution is not interruptible, and OS scheduling can extend wall-clock completion. Live streams retain their caller and server limits; backpressured HTTP tails release concurrency capacity when their absolute deadline is observed.
+
+### Performance
+
+Reader notifications now happen after committed writes release the writer lock. This substantially reduces reader delays in the measured concurrent-write workloads while preserving publication order.
+
+Same-host, three-run comparisons with 0.8.0 measured **3–14% lower median time per append and 35–66% lower median time per message with multiple writers**. These are workload-specific results, not a claim that every operation is faster: stable snapshots add copying and locking costs, and very small indexed reads are slower. See the [benchmark methodology and results](https://github.com/sandover/plasmite/blob/v1.0.0/docs/performance/1.0-release.md), including the measured read costs and consumer latency.
+
+### Platform support and limits
+
+- Linux ARM64 and ARMv7 GitHub SDK archives remain **preview** targets. Physical Raspberry Pi installation and reboot qualification is still pending; ARMv6 is unsupported.
+- Secure native connections and certificate pinning are available in Rust and the CLI. Other bindings retain their documented capabilities; matching package versions do not imply identical remote-access support.
+- Tailscale guidance was checked against current documentation and local TLS/TCP-relay tests. A real two-device tailnet deployment has not been verified.
+
+[Full changes since 0.8.0](https://github.com/sandover/plasmite/compare/v0.8.0...v1.0.0)
 
 ## [0.8.0] - 2026-07-28
 

@@ -100,6 +100,29 @@ to withdraw permission. Browser trust is separate and uses `access untrust`.
 
 Restart servers with the new executable so `serve status` can discover them.
 
+## Keep Node message sequences exact
+
+`Message.seq` and `Lite3Frame.seq` were already `bigint` in 0.8. Version 1.0
+fixes precision loss while parsing numeric sequence tokens from message bytes;
+it does not introduce a new sequence result type. User payload numbers retain
+ordinary JSON number behavior.
+
+Pass raw message bytes directly to `parseMessage`, rather than parsing them
+with ordinary `JSON.parse` first. Manually constructed envelopes must use a
+`bigint` or decimal string for sequences above `Number.MAX_SAFE_INTEGER`;
+unsafe numeric inputs are rejected instead of silently rounded.
+
+```javascript
+const { parseMessage } = require("plasmite");
+const message = parseMessage(rawMessageBuffer); // a Buffer from getJson/nextJson
+const checkpoint = JSON.stringify({ seq: message.seq.toString() });
+const restoredSeq = BigInt(JSON.parse(checkpoint).seq);
+console.log(message.raw.toString("utf8")); // serialize the message envelope
+```
+
+The checkpoint deliberately stores a decimal string. Do not convert a large
+sequence to `Number`, or pass a `bigint` directly to `JSON.stringify`.
+
 ## Update Rust clients
 
 The Rust builders `with_token`, `with_tls_ca_file` and `with_tls_skip_verify`

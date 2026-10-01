@@ -11,6 +11,8 @@ docs/
 ├── cli.md                                     — CLI operating model; read when resolving pool refs, input/output modes, or exits
 ├── cookbook.md                                — Task-oriented examples; read when you want copy/paste CLI workflows
 ├── performance/transport-comparison.md        — Measured transport throughput; read when comparing native API and MCP paths
+├── performance/1.0-release.md                  — Read when assessing 1.0 read costs, writer contention, or benchmark results
+├── performance/consumer-latency.rs             — Read when reproducing the full-consumer latency measurements
 │
 │   Design audits and proposals
 ├── proposals/cli-help-system.md               — CLI/help audit and reform model; read before redesigning command discovery
