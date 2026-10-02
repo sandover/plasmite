@@ -106,18 +106,23 @@ class HttpsMcp:
             self.host, self.port, context=self.context, timeout=60
         )
         self.next_id = 1
-        self.client_id, self.resource, self.refresh_token = self.authorize(access_key)
-        self.expires_at = time.monotonic() + 840
-        self.refresh_count = 0
-        initialized = self.call("initialize", {
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {},
-            "clientInfo": {"name": "plasmite-transport-benchmark", "version": "1"},
-        })
-        if initialized.get("protocolVersion") != PROTOCOL_VERSION:
-            raise RuntimeError(f"HTTPS MCP negotiated unexpected protocol version: {initialized.get('protocolVersion')}")
-        self.notify_initialized()
-        self.server_info = initialized.get("serverInfo", {})
+        self.refresh_token = ""
+        try:
+            self.client_id, self.resource, self.refresh_token = self.authorize(access_key)
+            self.expires_at = time.monotonic() + 840
+            self.refresh_count = 0
+            initialized = self.call("initialize", {
+                "protocolVersion": PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "plasmite-transport-benchmark", "version": "1"},
+            })
+            if initialized.get("protocolVersion") != PROTOCOL_VERSION:
+                raise RuntimeError(f"HTTPS MCP negotiated unexpected protocol version: {initialized.get('protocolVersion')}")
+            self.notify_initialized()
+            self.server_info = initialized.get("serverInfo", {})
+        except BaseException:
+            self.close()
+            raise
 
     def request_json(self, path: str, method: str, payload: dict[str, object],
                      headers: dict[str, str] | None = None) -> tuple[int, dict[str, object], http.client.HTTPResponse]:
@@ -262,14 +267,16 @@ class HttpsMcp:
         return result["structuredContent"]
 
     def close(self) -> None:
-        if self.refresh_token:
-            try:
-                self.request_form(
+        try:
+            if self.refresh_token:
+                status, _, _ = self.request_form(
                     "/oauth/revoke", {"client_id": self.client_id, "token": self.refresh_token}
                 )
-            except (OSError, http.client.HTTPException):
-                pass
-        self.connection.close()
+                if status != 200:
+                    raise RuntimeError(f"OAuth token revocation failed with HTTP {status}")
+                self.refresh_token = ""
+        finally:
+            self.connection.close()
 
 
 class AuthorizationRequestId(HTMLParser):
@@ -469,15 +476,31 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                                  "lanes": run_records})
                 print(f"Completed {size}-byte repeat {repeat}/{args.repeats}", file=sys.stderr)
     finally:
-        if direct is not None:
-            direct.close()
-        if local is not None:
-            local.close()
-        if native.poll() is None:
-            native.stdin.close()
-            native.wait(timeout=5)
-        subprocess.run([str(binary), "access", "disconnect", args.server], cwd=root,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        cleanup_errors = []
+        for name, client in (("HTTPS MCP", direct), ("local MCP", local)):
+            if client is not None:
+                try:
+                    client.close()
+                except Exception as error:
+                    cleanup_errors.append(f"{name}: {error}")
+        try:
+            if native.poll() is None:
+                native.stdin.close()
+                try:
+                    native.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    native.kill()
+                    native.wait(timeout=5)
+                    raise
+        except Exception as error:
+            cleanup_errors.append(f"native worker: {error}")
+        try:
+            subprocess.run([str(binary), "access", "disconnect", args.server], cwd=root,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        except Exception as error:
+            cleanup_errors.append(f"saved connection: {error}")
+        if cleanup_errors:
+            raise RuntimeError("client cleanup failed: " + "; ".join(cleanup_errors))
 
     return {
         "schema_version": 1,

@@ -243,6 +243,8 @@ describe the 1.0 snapshot implementation.
 
 See the [1.0 performance measurements](docs/performance/1.0-release.md) for
 workloads, results, and their limits.
+See the [Windows access measurements](docs/performance/windows-access-1.0.md)
+for local, HTTP, and MCP costs and verified Codex CLI and Claude Code access.
 
 ## Platforms and installation
 
