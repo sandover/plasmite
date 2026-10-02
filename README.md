@@ -30,6 +30,11 @@ fill it. Local messaging needs no daemon or broker. Payloads use
 take owned message snapshots so a concurrent write cannot alter a message
 while they inspect it.
 
+Watch messages arrive in the web UI. Click a pool to read its messages;
+hover a message to find its place on the ring.
+
+[![Live pool traffic and message highlighting in Plasmite’s web map](docs/images/ui/pool-map.gif)](docs/record/serving.md#browse-pools)
+
 For IPC across machines, `pls serve` exposes local pools over HTTPS. Native
 clients and browsers connect with an access key. A local MCP process can use a
 saved native connection; a remote MCP harness can authorize in the browser.
