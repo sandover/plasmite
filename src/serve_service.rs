@@ -541,7 +541,12 @@ fn native_status(setup: &Setup) -> Result<(Option<u32>, String, bool), Error> {
                     },
                 )
             }
-            Err(_) => (None, "stopped"),
+            Err(error) => {
+                if loaded(setup)? {
+                    return Err(error);
+                }
+                (None, "stopped")
+            }
         };
         Ok((pid, state.into(), startup))
     } else {
@@ -745,15 +750,17 @@ fn ownership_script(setup: &Setup, owners: &[&Setup]) -> String {
     )
 }
 
-fn stop_script(setup: &Setup) -> String {
-    if cfg!(target_os = "macos") {
+fn stop_script(setup: &Setup, macos: bool) -> String {
+    // ownership_script already classified presence in this privileged shell.
+    // Do not make a second fallible query that could silently skip stopping.
+    if macos {
         format!(
-            "if /bin/launchctl print {target} >/dev/null 2>&1; then /bin/launchctl bootout {target}; fi\n",
+            "if [ \"$plasmite_loaded\" -eq 1 ]; then /bin/launchctl bootout {target}; fi\n",
             target = shell_quote(&setup.target())
         )
     } else {
         format!(
-            "plasmite_load=$(/usr/bin/systemctl show {unit} --property=LoadState --value)\nif [ \"$plasmite_load\" != not-found ]; then /usr/bin/systemctl stop {unit}; fi\n",
+            "if [ \"$plasmite_loaded\" -eq 1 ]; then /usr/bin/systemctl stop {unit}; fi\n",
             unit = shell_quote(&setup.unit())
         )
     }
@@ -768,7 +775,7 @@ fn stop_native(setup: &Setup, owners: &[&Setup]) -> Result<(), Error> {
             &format!(
                 "set -eu\n{}{}",
                 ownership_script(setup, owners),
-                stop_script(setup)
+                stop_script(setup, cfg!(target_os = "macos"))
             ),
         ],
     )
@@ -779,9 +786,7 @@ fn start_native(setup: &Setup, restart: bool) -> Result<(), Error> {
     let mut script = format!("set -eu\n{}", ownership_script(setup, &[setup]));
     if cfg!(target_os = "macos") {
         let target = shell_quote(&setup.target());
-        script.push_str(&format!(
-            "if /bin/launchctl print {target} >/dev/null 2>&1; then\n"
-        ));
+        script.push_str("if [ \"$plasmite_loaded\" -eq 1 ]; then\n");
         if restart {
             script.push_str(&format!("/bin/launchctl kickstart -k {target}\n"));
         } else {
@@ -821,7 +826,7 @@ fn install_native(setup: &Setup, owners: &[&Setup]) -> Result<(), Error> {
         shell_quote(&definition(setup, cfg!(target_os = "macos")))
     );
     if cfg!(target_os = "macos") {
-        script.push_str(&stop_script(setup));
+        script.push_str(&stop_script(setup, true));
     }
     script.push_str(&format!(
         "/bin/mv -f \"$plasmite_definition\" {}\n",
@@ -850,7 +855,7 @@ fn uninstall_native(setup: &Setup, owners: &[&Setup]) -> Result<(), Error> {
         return Ok(());
     }
     let mut script = format!("set -eu\n{}", ownership_script(setup, owners));
-    script.push_str(&stop_script(setup));
+    script.push_str(&stop_script(setup, cfg!(target_os = "macos")));
     if !cfg!(target_os = "macos") {
         script.push_str(&format!(
             "if [ -f {job} ]; then /usr/bin/systemctl disable {unit}; fi\n",
@@ -1523,6 +1528,89 @@ mod tests {
             invoke().status.success(),
             "matching unit and link stay operable"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_reuses_confirmed_presence_and_failure_preserves_recovery_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let setup = setup();
+        let job = temp.path().join("native-job");
+        let queries = temp.path().join("queries");
+        let stopped = temp.path().join("stopped");
+        let manager = temp.path().join("manager.sh");
+        let preserved = [
+            "setup.json",
+            "plasmite",
+            "plasmite.previous",
+            "identity.previous.json",
+        ]
+        .map(|name| temp.path().join(name));
+        for path in &preserved {
+            fs::write(path, b"recovery data").unwrap();
+        }
+        for macos in [false, true] {
+            let expected = definition(&setup, macos);
+            for (presence, stop_exit) in [(0, 0), (0, 42), (42, 0)] {
+                fs::write(&job, &expected).unwrap();
+                fs::write(&queries, b"").unwrap();
+                fs::write(&stopped, b"").unwrap();
+                // A second query fails, reproducing the former raw-print path.
+                // The exact stop script must use the first validated result.
+                fs::write(&manager, format!(
+                    "case \"$1\" in inspect|print|show)\nif [ -s {} ]; then exit 42; fi\n/usr/bin/printf x >> {}\nexit {presence};;\nbootout|stop) /usr/bin/printf x >> {}; exit {stop_exit};;\n*) exit 43;; esac\n",
+                    shell_quote(&queries.to_string_lossy()),
+                    shell_quote(&queries.to_string_lossy()),
+                    shell_quote(&stopped.to_string_lossy())
+                )).unwrap();
+                let fake = format!("/bin/sh {}", shell_quote(&manager.to_string_lossy()));
+                let stop = stop_script(&setup, macos).replace(
+                    if macos {
+                        "/bin/launchctl"
+                    } else {
+                        "/usr/bin/systemctl"
+                    },
+                    &fake,
+                );
+                let output = Command::new("/bin/sh")
+                    .args([
+                        "-c",
+                        &format!(
+                            "set -eu\n{}{}\n/bin/rm {}",
+                            ownership_check_script(
+                                &job,
+                                std::slice::from_ref(&expected),
+                                &format!("{fake} inspect"),
+                                None
+                            ),
+                            stop,
+                            shell_quote(&job.to_string_lossy())
+                        ),
+                    ])
+                    .output()
+                    .unwrap();
+                assert_eq!(fs::read(&queries).unwrap(), b"x", "query exactly once");
+                if presence == 0 && stop_exit == 0 {
+                    assert!(output.status.success());
+                    assert_eq!(fs::read(&stopped).unwrap(), b"x", "stop before removal");
+                    assert!(!job.exists());
+                } else {
+                    assert!(!output.status.success());
+                    assert_eq!(fs::read_to_string(&job).unwrap(), expected);
+                    assert_eq!(
+                        fs::read(&stopped).unwrap(),
+                        if presence == 0 {
+                            b"x".as_slice()
+                        } else {
+                            b"".as_slice()
+                        }
+                    );
+                }
+                for path in &preserved {
+                    assert_eq!(fs::read(path).unwrap(), b"recovery data");
+                }
+            }
+        }
     }
 
     #[cfg(unix)]
