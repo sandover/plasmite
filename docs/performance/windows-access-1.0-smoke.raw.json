@@ -1,0 +1,3575 @@
+{
+  "schema_version": 1,
+  "benchmark": "plasmite-all-access-windows",
+  "started_at_utc": "2026-10-02T18:38:53Z",
+  "versions": {
+    "python": "3.14.7 (main, Aug  7 2026, 02:26:22) [MSC v.1944 64 bit (AMD64)]",
+    "os": "Windows-11-10.0.26200-SP0",
+    "machine": "ARM64",
+    "plasmite": "plasmite 1.0.0-dev+unknown"
+  },
+  "configuration": {
+    "pool_dir": "C:\\Users\\sando\\builds\\plasmite-access-bench-20261002\\tmp\\access-bench\\pools-1",
+    "pool": "access-bench",
+    "server": "https://127.0.0.1:58389",
+    "local_server": "http://127.0.0.1:58388",
+    "sizes": [
+      512,
+      4096
+    ],
+    "messages": 3,
+    "repeats": 2,
+    "durability": "fast",
+    "concurrency": 1,
+    "lanes": [
+      "local_rust",
+      "local_lite3",
+      "local_c",
+      "local_python",
+      "local_node",
+      "local_http_cli",
+      "local_cli",
+      "local_mcp",
+      "local_http",
+      "local_http_rust",
+      "https_rust_key",
+      "https_lite3_key",
+      "https_rust",
+      "https_lite3",
+      "https_json",
+      "https_browser_api",
+      "local_http_node",
+      "https_node",
+      "https_cli",
+      "remote_stdio_mcp",
+      "direct_https_mcp"
+    ],
+    "timing": "Warm single append/exact-fetch calls. CLI includes a fresh process per call. Other clients persist. Excludes authorization, model time, and UI rendering. Lite3 encode/decode occurs outside individual call latency.",
+    "credential_store": "Fresh private directory for this run; removed after all clients stop. Existing saved connections remain untouched."
+  },
+  "setup_ms": {
+    "local_rust": 205.535,
+    "local_lite3": 35.752875,
+    "local_c": 25.858042,
+    "local_python": 15.3735,
+    "local_node": 136.014625,
+    "local_http_cli": 113.518625,
+    "local_cli": 100.907458,
+    "local_mcp": 28.827083,
+    "local_http": 7.502958,
+    "local_http_rust": 45.535667,
+    "https_rust_key": 67.124291,
+    "https_lite3_key": 68.5345,
+    "https_rust": 97.617416,
+    "https_lite3": 95.093416,
+    "https_json": 34.433084,
+    "https_browser_api": 33.977791,
+    "local_http_node": 294.664375,
+    "https_node": 321.1065,
+    "https_cli": 158.859625,
+    "remote_stdio_mcp": 47.268583,
+    "direct_https_mcp": 45.820917
+  },
+  "runs": [
+    {
+      "payload_bytes": 512,
+      "repeat": 1,
+      "lane_order": [
+        "local_http",
+        "local_http_rust",
+        "https_rust_key",
+        "https_lite3_key",
+        "https_rust",
+        "https_lite3",
+        "https_json",
+        "https_browser_api",
+        "local_http_node",
+        "https_node",
+        "https_cli",
+        "remote_stdio_mcp",
+        "direct_https_mcp",
+        "local_rust",
+        "local_lite3",
+        "local_c",
+        "local_python",
+        "local_node",
+        "local_http_cli",
+        "local_cli",
+        "local_mcp"
+      ],
+      "lanes": {
+        "local_http": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1865333,
+            "throughput_ops_s": 1608.29,
+            "latency_ms": {
+              "median": 0.513,
+              "p95": 0.878,
+              "min": 0.47,
+              "max": 0.878
+            },
+            "latencies_ns": [
+              878333,
+              513167,
+              469833
+            ]
+          },
+          "sequences": [
+            43,
+            44,
+            45
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1466333,
+            "throughput_ops_s": 2045.92,
+            "latency_ms": {
+              "median": 0.416,
+              "p95": 0.646,
+              "min": 0.398,
+              "max": 0.646
+            },
+            "latencies_ns": [
+              646458,
+              397500,
+              415917
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_http_rust": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 9476208,
+            "throughput_ops_s": 316.58,
+            "latency_ms": {
+              "median": 1.494,
+              "p95": 6.491,
+              "min": 1.486,
+              "max": 6.491
+            },
+            "latencies_ns": [
+              6491417,
+              1493667,
+              1485875
+            ]
+          },
+          "sequences": [
+            46,
+            47,
+            48
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 3784500,
+            "throughput_ops_s": 792.71,
+            "latency_ms": {
+              "median": 1.195,
+              "p95": 1.453,
+              "min": 1.13,
+              "max": 1.453
+            },
+            "latencies_ns": [
+              1452667,
+              1130333,
+              1194833
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_rust_key": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1564500,
+            "throughput_ops_s": 1917.55,
+            "latency_ms": {
+              "median": 0.442,
+              "p95": 0.695,
+              "min": 0.424,
+              "max": 0.695
+            },
+            "latencies_ns": [
+              694750,
+              442083,
+              424333
+            ]
+          },
+          "sequences": [
+            49,
+            50,
+            51
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1141167,
+            "throughput_ops_s": 2628.89,
+            "latency_ms": {
+              "median": 0.354,
+              "p95": 0.443,
+              "min": 0.338,
+              "max": 0.443
+            },
+            "latencies_ns": [
+              442500,
+              338167,
+              354083
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_lite3_key": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1843583,
+            "throughput_ops_s": 1627.27,
+            "latency_ms": {
+              "median": 0.592,
+              "p95": 0.772,
+              "min": 0.451,
+              "max": 0.772
+            },
+            "latencies_ns": [
+              771667,
+              591666,
+              451083
+            ]
+          },
+          "sequences": [
+            52,
+            53,
+            54
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1154334,
+            "throughput_ops_s": 2598.9,
+            "latency_ms": {
+              "median": 0.353,
+              "p95": 0.416,
+              "min": 0.344,
+              "max": 0.416
+            },
+            "latencies_ns": [
+              416500,
+              352750,
+              344000
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_rust": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 5301250,
+            "throughput_ops_s": 565.9,
+            "latency_ms": {
+              "median": 1.614,
+              "p95": 2.13,
+              "min": 1.554,
+              "max": 2.13
+            },
+            "latencies_ns": [
+              2129625,
+              1613583,
+              1554375
+            ]
+          },
+          "sequences": [
+            55,
+            56,
+            57
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 4442833,
+            "throughput_ops_s": 675.24,
+            "latency_ms": {
+              "median": 1.439,
+              "p95": 1.634,
+              "min": 1.363,
+              "max": 1.634
+            },
+            "latencies_ns": [
+              1633583,
+              1438875,
+              1362584
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_lite3": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 5713917,
+            "throughput_ops_s": 525.03,
+            "latency_ms": {
+              "median": 1.863,
+              "p95": 2.079,
+              "min": 1.742,
+              "max": 2.079
+            },
+            "latencies_ns": [
+              2078750,
+              1741542,
+              1862500
+            ]
+          },
+          "sequences": [
+            58,
+            59,
+            60
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 4923750,
+            "throughput_ops_s": 609.29,
+            "latency_ms": {
+              "median": 1.478,
+              "p95": 2.044,
+              "min": 1.347,
+              "max": 2.044
+            },
+            "latencies_ns": [
+              2044417,
+              1478291,
+              1346500
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_json": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1655167,
+            "throughput_ops_s": 1812.51,
+            "latency_ms": {
+              "median": 0.504,
+              "p95": 0.673,
+              "min": 0.471,
+              "max": 0.673
+            },
+            "latencies_ns": [
+              672875,
+              471500,
+              504417
+            ]
+          },
+          "sequences": [
+            61,
+            62,
+            63
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1490750,
+            "throughput_ops_s": 2012.41,
+            "latency_ms": {
+              "median": 0.469,
+              "p95": 0.612,
+              "min": 0.394,
+              "max": 0.612
+            },
+            "latencies_ns": [
+              612375,
+              468667,
+              394292
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_browser_api": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1423875,
+            "throughput_ops_s": 2106.93,
+            "latency_ms": {
+              "median": 0.478,
+              "p95": 0.481,
+              "min": 0.462,
+              "max": 0.481
+            },
+            "latencies_ns": [
+              477958,
+              461916,
+              480959
+            ]
+          },
+          "sequences": [
+            64,
+            65,
+            66
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1255375,
+            "throughput_ops_s": 2389.72,
+            "latency_ms": {
+              "median": 0.398,
+              "p95": 0.459,
+              "min": 0.392,
+              "max": 0.459
+            },
+            "latencies_ns": [
+              391833,
+              459250,
+              398292
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_http_node": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 46572750,
+            "throughput_ops_s": 64.42,
+            "latency_ms": {
+              "median": 16.501,
+              "p95": 17.472,
+              "min": 12.492,
+              "max": 17.472
+            },
+            "latencies_ns": [
+              17471917,
+              12492375,
+              16501292
+            ]
+          },
+          "sequences": [
+            67,
+            68,
+            69
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 57767333,
+            "throughput_ops_s": 51.93,
+            "latency_ms": {
+              "median": 20.293,
+              "p95": 32.897,
+              "min": 4.517,
+              "max": 32.897
+            },
+            "latencies_ns": [
+              32897291,
+              4517292,
+              20292833
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_node": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 38718375,
+            "throughput_ops_s": 77.48,
+            "latency_ms": {
+              "median": 14.905,
+              "p95": 15.512,
+              "min": 8.206,
+              "max": 15.512
+            },
+            "latencies_ns": [
+              15512500,
+              14905291,
+              8205833
+            ]
+          },
+          "sequences": [
+            70,
+            71,
+            72
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 47186083,
+            "throughput_ops_s": 63.58,
+            "latency_ms": {
+              "median": 19.508,
+              "p95": 22.172,
+              "min": 5.374,
+              "max": 22.172
+            },
+            "latencies_ns": [
+              22171875,
+              5374375,
+              19508042
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_cli": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 110266209,
+            "throughput_ops_s": 27.21,
+            "latency_ms": {
+              "median": 36.455,
+              "p95": 38.259,
+              "min": 35.536,
+              "max": 38.259
+            },
+            "latencies_ns": [
+              38259125,
+              36454500,
+              35536250
+            ]
+          },
+          "sequences": [
+            73,
+            74,
+            75
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 110043875,
+            "throughput_ops_s": 27.26,
+            "latency_ms": {
+              "median": 36.465,
+              "p95": 37.543,
+              "min": 36.012,
+              "max": 37.543
+            },
+            "latencies_ns": [
+              36011625,
+              36464875,
+              37542625
+            ]
+          },
+          "readback_verified": 3
+        },
+        "remote_stdio_mcp": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 10661500,
+            "throughput_ops_s": 281.39,
+            "latency_ms": {
+              "median": 3.707,
+              "p95": 3.958,
+              "min": 2.986,
+              "max": 3.958
+            },
+            "latencies_ns": [
+              3707417,
+              3957666,
+              2985875
+            ]
+          },
+          "sequences": [
+            76,
+            77,
+            78
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 10496292,
+            "throughput_ops_s": 285.82,
+            "latency_ms": {
+              "median": 3.502,
+              "p95": 3.874,
+              "min": 3.103,
+              "max": 3.874
+            },
+            "latencies_ns": [
+              3501791,
+              3874167,
+              3102666
+            ]
+          },
+          "readback_verified": 3
+        },
+        "direct_https_mcp": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 3072166,
+            "throughput_ops_s": 976.51,
+            "latency_ms": {
+              "median": 1.018,
+              "p95": 1.169,
+              "min": 0.881,
+              "max": 1.169
+            },
+            "latencies_ns": [
+              1017542,
+              881334,
+              1168667
+            ]
+          },
+          "sequences": [
+            79,
+            80,
+            81
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 2619500,
+            "throughput_ops_s": 1145.26,
+            "latency_ms": {
+              "median": 0.867,
+              "p95": 0.914,
+              "min": 0.832,
+              "max": 0.914
+            },
+            "latencies_ns": [
+              913916,
+              867417,
+              832000
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_rust": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 213416,
+            "throughput_ops_s": 14057.05,
+            "latency_ms": {
+              "median": 0.047,
+              "p95": 0.12,
+              "min": 0.042,
+              "max": 0.12
+            },
+            "latencies_ns": [
+              120458,
+              47416,
+              42208
+            ]
+          },
+          "sequences": [
+            82,
+            83,
+            84
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 59250,
+            "throughput_ops_s": 50632.91,
+            "latency_ms": {
+              "median": 0.008,
+              "p95": 0.039,
+              "min": 0.007,
+              "max": 0.039
+            },
+            "latencies_ns": [
+              38667,
+              7875,
+              6542
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_lite3": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 236583,
+            "throughput_ops_s": 12680.54,
+            "latency_ms": {
+              "median": 0.056,
+              "p95": 0.104,
+              "min": 0.046,
+              "max": 0.104
+            },
+            "latencies_ns": [
+              103709,
+              56333,
+              46042
+            ]
+          },
+          "sequences": [
+            85,
+            86,
+            87
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 59667,
+            "throughput_ops_s": 50279.05,
+            "latency_ms": {
+              "median": 0.006,
+              "p95": 0.014,
+              "min": 0.004,
+              "max": 0.014
+            },
+            "latencies_ns": [
+              14084,
+              5625,
+              4458
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_c": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 236458,
+            "throughput_ops_s": 12687.24,
+            "latency_ms": {
+              "median": 0.052,
+              "p95": 0.138,
+              "min": 0.046,
+              "max": 0.138
+            },
+            "latencies_ns": [
+              138000,
+              52166,
+              45791
+            ]
+          },
+          "sequences": [
+            88,
+            89,
+            90
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 66333,
+            "throughput_ops_s": 45226.36,
+            "latency_ms": {
+              "median": 0.011,
+              "p95": 0.047,
+              "min": 0.009,
+              "max": 0.047
+            },
+            "latencies_ns": [
+              46666,
+              10500,
+              8500
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_python": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 841875,
+            "throughput_ops_s": 3563.47,
+            "latency_ms": {
+              "median": 0.295,
+              "p95": 0.451,
+              "min": 0.091,
+              "max": 0.451
+            },
+            "latencies_ns": [
+              294833,
+              90750,
+              450958
+            ]
+          },
+          "sequences": [
+            91,
+            92,
+            93
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 410542,
+            "throughput_ops_s": 7307.41,
+            "latency_ms": {
+              "median": 0.172,
+              "p95": 0.173,
+              "min": 0.058,
+              "max": 0.173
+            },
+            "latencies_ns": [
+              173083,
+              57625,
+              172208
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_node": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1290750,
+            "throughput_ops_s": 2324.23,
+            "latency_ms": {
+              "median": 0.406,
+              "p95": 0.638,
+              "min": 0.151,
+              "max": 0.638
+            },
+            "latencies_ns": [
+              405500,
+              150958,
+              638042
+            ]
+          },
+          "sequences": [
+            94,
+            95,
+            96
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 652833,
+            "throughput_ops_s": 4595.36,
+            "latency_ms": {
+              "median": 0.238,
+              "p95": 0.26,
+              "min": 0.112,
+              "max": 0.26
+            },
+            "latencies_ns": [
+              260417,
+              111667,
+              237666
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_http_cli": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 105325500,
+            "throughput_ops_s": 28.48,
+            "latency_ms": {
+              "median": 34.94,
+              "p95": 35.865,
+              "min": 34.506,
+              "max": 35.865
+            },
+            "latencies_ns": [
+              35864833,
+              34505625,
+              34940083
+            ]
+          },
+          "sequences": [
+            97,
+            98,
+            99
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 103891834,
+            "throughput_ops_s": 28.88,
+            "latency_ms": {
+              "median": 34.977,
+              "p95": 36.641,
+              "min": 32.254,
+              "max": 36.641
+            },
+            "latencies_ns": [
+              34976542,
+              36641208,
+              32253833
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_cli": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 75598417,
+            "throughput_ops_s": 39.68,
+            "latency_ms": {
+              "median": 25.452,
+              "p95": 25.624,
+              "min": 24.508,
+              "max": 25.624
+            },
+            "latencies_ns": [
+              25624292,
+              25451917,
+              24507500
+            ]
+          },
+          "sequences": [
+            100,
+            101,
+            102
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 71737375,
+            "throughput_ops_s": 41.82,
+            "latency_ms": {
+              "median": 23.66,
+              "p95": 24.506,
+              "min": 23.553,
+              "max": 24.506
+            },
+            "latencies_ns": [
+              23660375,
+              23552750,
+              24506250
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_mcp": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 978708,
+            "throughput_ops_s": 3065.27,
+            "latency_ms": {
+              "median": 0.302,
+              "p95": 0.418,
+              "min": 0.253,
+              "max": 0.418
+            },
+            "latencies_ns": [
+              418333,
+              301917,
+              253208
+            ]
+          },
+          "sequences": [
+            103,
+            104,
+            105
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 892125,
+            "throughput_ops_s": 3362.76,
+            "latency_ms": {
+              "median": 0.257,
+              "p95": 0.388,
+              "min": 0.225,
+              "max": 0.388
+            },
+            "latencies_ns": [
+              388125,
+              224583,
+              257375
+            ]
+          },
+          "readback_verified": 3
+        }
+      }
+    },
+    {
+      "payload_bytes": 512,
+      "repeat": 2,
+      "lane_order": [
+        "local_http_rust",
+        "https_rust_key",
+        "https_lite3_key",
+        "https_rust",
+        "https_lite3",
+        "https_json",
+        "https_browser_api",
+        "local_http_node",
+        "https_node",
+        "https_cli",
+        "remote_stdio_mcp",
+        "direct_https_mcp",
+        "local_rust",
+        "local_lite3",
+        "local_c",
+        "local_python",
+        "local_node",
+        "local_http_cli",
+        "local_cli",
+        "local_mcp",
+        "local_http"
+      ],
+      "lanes": {
+        "local_http_rust": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 5471125,
+            "throughput_ops_s": 548.33,
+            "latency_ms": {
+              "median": 1.811,
+              "p95": 1.92,
+              "min": 1.732,
+              "max": 1.92
+            },
+            "latencies_ns": [
+              1920416,
+              1732292,
+              1810750
+            ]
+          },
+          "sequences": [
+            106,
+            107,
+            108
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 5004209,
+            "throughput_ops_s": 599.5,
+            "latency_ms": {
+              "median": 1.436,
+              "p95": 2.303,
+              "min": 1.257,
+              "max": 2.303
+            },
+            "latencies_ns": [
+              2302541,
+              1436167,
+              1257041
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_rust_key": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1748875,
+            "throughput_ops_s": 1715.39,
+            "latency_ms": {
+              "median": 0.562,
+              "p95": 0.707,
+              "min": 0.476,
+              "max": 0.707
+            },
+            "latencies_ns": [
+              706750,
+              475667,
+              562333
+            ]
+          },
+          "sequences": [
+            109,
+            110,
+            111
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1248916,
+            "throughput_ops_s": 2402.08,
+            "latency_ms": {
+              "median": 0.42,
+              "p95": 0.49,
+              "min": 0.332,
+              "max": 0.49
+            },
+            "latencies_ns": [
+              489875,
+              419583,
+              332125
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_lite3_key": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1476959,
+            "throughput_ops_s": 2031.2,
+            "latency_ms": {
+              "median": 0.461,
+              "p95": 0.549,
+              "min": 0.435,
+              "max": 0.549
+            },
+            "latencies_ns": [
+              548542,
+              461000,
+              435459
+            ]
+          },
+          "sequences": [
+            112,
+            113,
+            114
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1153417,
+            "throughput_ops_s": 2600.97,
+            "latency_ms": {
+              "median": 0.332,
+              "p95": 0.459,
+              "min": 0.326,
+              "max": 0.459
+            },
+            "latencies_ns": [
+              459375,
+              331625,
+              326417
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_rust": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 6478833,
+            "throughput_ops_s": 463.05,
+            "latency_ms": {
+              "median": 1.798,
+              "p95": 2.942,
+              "min": 1.735,
+              "max": 2.942
+            },
+            "latencies_ns": [
+              2942250,
+              1797583,
+              1734959
+            ]
+          },
+          "sequences": [
+            115,
+            116,
+            117
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 4892709,
+            "throughput_ops_s": 613.16,
+            "latency_ms": {
+              "median": 1.666,
+              "p95": 1.743,
+              "min": 1.476,
+              "max": 1.743
+            },
+            "latencies_ns": [
+              1665750,
+              1476167,
+              1742833
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_lite3": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 6250208,
+            "throughput_ops_s": 479.98,
+            "latency_ms": {
+              "median": 1.975,
+              "p95": 2.389,
+              "min": 1.855,
+              "max": 2.389
+            },
+            "latencies_ns": [
+              2389333,
+              1854750,
+              1974833
+            ]
+          },
+          "sequences": [
+            118,
+            119,
+            120
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 4649667,
+            "throughput_ops_s": 645.21,
+            "latency_ms": {
+              "median": 1.541,
+              "p95": 1.707,
+              "min": 1.357,
+              "max": 1.707
+            },
+            "latencies_ns": [
+              1706875,
+              1356792,
+              1541209
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_json": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1904208,
+            "throughput_ops_s": 1575.46,
+            "latency_ms": {
+              "median": 0.58,
+              "p95": 0.797,
+              "min": 0.52,
+              "max": 0.797
+            },
+            "latencies_ns": [
+              797250,
+              579750,
+              520458
+            ]
+          },
+          "sequences": [
+            121,
+            122,
+            123
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1455250,
+            "throughput_ops_s": 2061.5,
+            "latency_ms": {
+              "median": 0.469,
+              "p95": 0.589,
+              "min": 0.388,
+              "max": 0.589
+            },
+            "latencies_ns": [
+              588916,
+              469166,
+              387958
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_browser_api": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1539583,
+            "throughput_ops_s": 1948.58,
+            "latency_ms": {
+              "median": 0.499,
+              "p95": 0.553,
+              "min": 0.484,
+              "max": 0.553
+            },
+            "latencies_ns": [
+              553250,
+              484000,
+              498875
+            ]
+          },
+          "sequences": [
+            124,
+            125,
+            126
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1205125,
+            "throughput_ops_s": 2489.37,
+            "latency_ms": {
+              "median": 0.41,
+              "p95": 0.411,
+              "min": 0.379,
+              "max": 0.411
+            },
+            "latencies_ns": [
+              410500,
+              411167,
+              379042
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_http_node": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 37389708,
+            "throughput_ops_s": 80.24,
+            "latency_ms": {
+              "median": 12.531,
+              "p95": 20.972,
+              "min": 3.688,
+              "max": 20.972
+            },
+            "latencies_ns": [
+              20971583,
+              3688459,
+              12531083
+            ]
+          },
+          "sequences": [
+            127,
+            128,
+            129
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 28282541,
+            "throughput_ops_s": 106.07,
+            "latency_ms": {
+              "median": 11.607,
+              "p95": 12.267,
+              "min": 3.667,
+              "max": 12.267
+            },
+            "latencies_ns": [
+              11606916,
+              3666583,
+              12266792
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_node": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 49112333,
+            "throughput_ops_s": 61.08,
+            "latency_ms": {
+              "median": 16.274,
+              "p95": 17.299,
+              "min": 15.449,
+              "max": 17.299
+            },
+            "latencies_ns": [
+              15448792,
+              17299167,
+              16273708
+            ]
+          },
+          "sequences": [
+            130,
+            131,
+            132
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 31629583,
+            "throughput_ops_s": 94.85,
+            "latency_ms": {
+              "median": 9.147,
+              "p95": 17.865,
+              "min": 3.931,
+              "max": 17.865
+            },
+            "latencies_ns": [
+              3930792,
+              9146583,
+              17865209
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_cli": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 104852708,
+            "throughput_ops_s": 28.61,
+            "latency_ms": {
+              "median": 35.089,
+              "p95": 35.178,
+              "min": 34.571,
+              "max": 35.178
+            },
+            "latencies_ns": [
+              35177625,
+              34571125,
+              35088542
+            ]
+          },
+          "sequences": [
+            133,
+            134,
+            135
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 120962583,
+            "throughput_ops_s": 24.8,
+            "latency_ms": {
+              "median": 39.205,
+              "p95": 43.434,
+              "min": 38.233,
+              "max": 43.434
+            },
+            "latencies_ns": [
+              38232625,
+              43433792,
+              39204500
+            ]
+          },
+          "readback_verified": 3
+        },
+        "remote_stdio_mcp": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 9776625,
+            "throughput_ops_s": 306.85,
+            "latency_ms": {
+              "median": 3.079,
+              "p95": 3.766,
+              "min": 2.924,
+              "max": 3.766
+            },
+            "latencies_ns": [
+              3765541,
+              3079042,
+              2923875
+            ]
+          },
+          "sequences": [
+            136,
+            137,
+            138
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 10516625,
+            "throughput_ops_s": 285.26,
+            "latency_ms": {
+              "median": 3.308,
+              "p95": 3.962,
+              "min": 3.228,
+              "max": 3.962
+            },
+            "latencies_ns": [
+              3961500,
+              3308083,
+              3227625
+            ]
+          },
+          "readback_verified": 3
+        },
+        "direct_https_mcp": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 3445292,
+            "throughput_ops_s": 870.75,
+            "latency_ms": {
+              "median": 1.145,
+              "p95": 1.202,
+              "min": 1.093,
+              "max": 1.202
+            },
+            "latencies_ns": [
+              1145250,
+              1201959,
+              1093042
+            ]
+          },
+          "sequences": [
+            139,
+            140,
+            141
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 2668250,
+            "throughput_ops_s": 1124.33,
+            "latency_ms": {
+              "median": 0.837,
+              "p95": 1.059,
+              "min": 0.766,
+              "max": 1.059
+            },
+            "latencies_ns": [
+              1059333,
+              837375,
+              765541
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_rust": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 205209,
+            "throughput_ops_s": 14619.24,
+            "latency_ms": {
+              "median": 0.043,
+              "p95": 0.118,
+              "min": 0.039,
+              "max": 0.118
+            },
+            "latencies_ns": [
+              117542,
+              42875,
+              39083
+            ]
+          },
+          "sequences": [
+            142,
+            143,
+            144
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 58125,
+            "throughput_ops_s": 51612.9,
+            "latency_ms": {
+              "median": 0.008,
+              "p95": 0.038,
+              "min": 0.006,
+              "max": 0.038
+            },
+            "latencies_ns": [
+              38208,
+              7625,
+              6292
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_lite3": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 229375,
+            "throughput_ops_s": 13079.02,
+            "latency_ms": {
+              "median": 0.077,
+              "p95": 0.087,
+              "min": 0.038,
+              "max": 0.087
+            },
+            "latencies_ns": [
+              87041,
+              77458,
+              38000
+            ]
+          },
+          "sequences": [
+            145,
+            146,
+            147
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 50500,
+            "throughput_ops_s": 59405.94,
+            "latency_ms": {
+              "median": 0.005,
+              "p95": 0.013,
+              "min": 0.004,
+              "max": 0.013
+            },
+            "latencies_ns": [
+              13292,
+              4708,
+              4333
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_c": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 180833,
+            "throughput_ops_s": 16589.89,
+            "latency_ms": {
+              "median": 0.044,
+              "p95": 0.093,
+              "min": 0.043,
+              "max": 0.093
+            },
+            "latencies_ns": [
+              92833,
+              43000,
+              44500
+            ]
+          },
+          "sequences": [
+            148,
+            149,
+            150
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 59708,
+            "throughput_ops_s": 50244.52,
+            "latency_ms": {
+              "median": 0.01,
+              "p95": 0.041,
+              "min": 0.008,
+              "max": 0.041
+            },
+            "latencies_ns": [
+              41458,
+              9750,
+              7875
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_python": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 568750,
+            "throughput_ops_s": 5274.73,
+            "latency_ms": {
+              "median": 0.097,
+              "p95": 0.387,
+              "min": 0.081,
+              "max": 0.387
+            },
+            "latencies_ns": [
+              387292,
+              97250,
+              80542
+            ]
+          },
+          "sequences": [
+            151,
+            152,
+            153
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 131708,
+            "throughput_ops_s": 22777.66,
+            "latency_ms": {
+              "median": 0.03,
+              "p95": 0.075,
+              "min": 0.023,
+              "max": 0.075
+            },
+            "latencies_ns": [
+              75292,
+              29750,
+              22917
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_node": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 2698291,
+            "throughput_ops_s": 1111.81,
+            "latency_ms": {
+              "median": 0.141,
+              "p95": 2.342,
+              "min": 0.086,
+              "max": 2.342
+            },
+            "latencies_ns": [
+              2342125,
+              141292,
+              86000
+            ]
+          },
+          "sequences": [
+            154,
+            155,
+            156
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1242667,
+            "throughput_ops_s": 2414.16,
+            "latency_ms": {
+              "median": 0.069,
+              "p95": 0.556,
+              "min": 0.039,
+              "max": 0.556
+            },
+            "latencies_ns": [
+              555834,
+              69000,
+              39458
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_http_cli": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 101121917,
+            "throughput_ops_s": 29.67,
+            "latency_ms": {
+              "median": 33.877,
+              "p95": 33.971,
+              "min": 33.26,
+              "max": 33.971
+            },
+            "latencies_ns": [
+              33970750,
+              33876916,
+              33260250
+            ]
+          },
+          "sequences": [
+            157,
+            158,
+            159
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 108177958,
+            "throughput_ops_s": 27.73,
+            "latency_ms": {
+              "median": 35.989,
+              "p95": 36.251,
+              "min": 35.914,
+              "max": 36.251
+            },
+            "latencies_ns": [
+              35914250,
+              36251250,
+              35988750
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_cli": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 76588458,
+            "throughput_ops_s": 39.17,
+            "latency_ms": {
+              "median": 25.26,
+              "p95": 26.491,
+              "min": 24.819,
+              "max": 26.491
+            },
+            "latencies_ns": [
+              25259917,
+              26491125,
+              24818834
+            ]
+          },
+          "sequences": [
+            160,
+            161,
+            162
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 77583458,
+            "throughput_ops_s": 38.67,
+            "latency_ms": {
+              "median": 26.563,
+              "p95": 26.874,
+              "min": 24.127,
+              "max": 26.874
+            },
+            "latencies_ns": [
+              26873709,
+              26562791,
+              24126541
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_mcp": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1037875,
+            "throughput_ops_s": 2890.52,
+            "latency_ms": {
+              "median": 0.312,
+              "p95": 0.424,
+              "min": 0.296,
+              "max": 0.424
+            },
+            "latencies_ns": [
+              423792,
+              295750,
+              311917
+            ]
+          },
+          "sequences": [
+            163,
+            164,
+            165
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 862042,
+            "throughput_ops_s": 3480.11,
+            "latency_ms": {
+              "median": 0.24,
+              "p95": 0.387,
+              "min": 0.226,
+              "max": 0.387
+            },
+            "latencies_ns": [
+              387000,
+              240083,
+              226167
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_http": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1983250,
+            "throughput_ops_s": 1512.67,
+            "latency_ms": {
+              "median": 0.67,
+              "p95": 0.845,
+              "min": 0.464,
+              "max": 0.845
+            },
+            "latencies_ns": [
+              844500,
+              670208,
+              464292
+            ]
+          },
+          "sequences": [
+            166,
+            167,
+            168
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1445125,
+            "throughput_ops_s": 2075.94,
+            "latency_ms": {
+              "median": 0.434,
+              "p95": 0.643,
+              "min": 0.363,
+              "max": 0.643
+            },
+            "latencies_ns": [
+              643000,
+              433959,
+              362584
+            ]
+          },
+          "readback_verified": 3
+        }
+      }
+    },
+    {
+      "payload_bytes": 4096,
+      "repeat": 1,
+      "lane_order": [
+        "local_lite3",
+        "local_c",
+        "local_python",
+        "local_node",
+        "local_http_cli",
+        "local_cli",
+        "local_mcp",
+        "local_http",
+        "local_http_rust",
+        "https_rust_key",
+        "https_lite3_key",
+        "https_rust",
+        "https_lite3",
+        "https_json",
+        "https_browser_api",
+        "local_http_node",
+        "https_node",
+        "https_cli",
+        "remote_stdio_mcp",
+        "direct_https_mcp",
+        "local_rust"
+      ],
+      "lanes": {
+        "local_lite3": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 286417,
+            "throughput_ops_s": 10474.24,
+            "latency_ms": {
+              "median": 0.048,
+              "p95": 0.119,
+              "min": 0.048,
+              "max": 0.119
+            },
+            "latencies_ns": [
+              118833,
+              48417,
+              48000
+            ]
+          },
+          "sequences": [
+            169,
+            170,
+            171
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 92375,
+            "throughput_ops_s": 32476.32,
+            "latency_ms": {
+              "median": 0.012,
+              "p95": 0.014,
+              "min": 0.005,
+              "max": 0.014
+            },
+            "latencies_ns": [
+              14167,
+              11834,
+              4542
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_c": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 393666,
+            "throughput_ops_s": 7620.67,
+            "latency_ms": {
+              "median": 0.141,
+              "p95": 0.169,
+              "min": 0.083,
+              "max": 0.169
+            },
+            "latencies_ns": [
+              141291,
+              82500,
+              169416
+            ]
+          },
+          "sequences": [
+            172,
+            173,
+            174
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 166458,
+            "throughput_ops_s": 18022.56,
+            "latency_ms": {
+              "median": 0.061,
+              "p95": 0.081,
+              "min": 0.024,
+              "max": 0.081
+            },
+            "latencies_ns": [
+              81000,
+              61208,
+              23541
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_python": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 392000,
+            "throughput_ops_s": 7653.06,
+            "latency_ms": {
+              "median": 0.096,
+              "p95": 0.209,
+              "min": 0.084,
+              "max": 0.209
+            },
+            "latencies_ns": [
+              208917,
+              95917,
+              83666
+            ]
+          },
+          "sequences": [
+            175,
+            176,
+            177
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 152833,
+            "throughput_ops_s": 19629.27,
+            "latency_ms": {
+              "median": 0.035,
+              "p95": 0.084,
+              "min": 0.029,
+              "max": 0.084
+            },
+            "latencies_ns": [
+              84041,
+              34667,
+              29250
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_node": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1089000,
+            "throughput_ops_s": 2754.82,
+            "latency_ms": {
+              "median": 0.193,
+              "p95": 0.413,
+              "min": 0.179,
+              "max": 0.413
+            },
+            "latencies_ns": [
+              413125,
+              179125,
+              193041
+            ]
+          },
+          "sequences": [
+            178,
+            179,
+            180
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1256834,
+            "throughput_ops_s": 2386.95,
+            "latency_ms": {
+              "median": 0.148,
+              "p95": 0.365,
+              "min": 0.088,
+              "max": 0.365
+            },
+            "latencies_ns": [
+              147875,
+              87833,
+              364791
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_http_cli": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 98648667,
+            "throughput_ops_s": 30.41,
+            "latency_ms": {
+              "median": 32.964,
+              "p95": 33.22,
+              "min": 32.449,
+              "max": 33.22
+            },
+            "latencies_ns": [
+              32964042,
+              32449125,
+              33219709
+            ]
+          },
+          "sequences": [
+            181,
+            182,
+            183
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 98982917,
+            "throughput_ops_s": 30.31,
+            "latency_ms": {
+              "median": 33.603,
+              "p95": 33.622,
+              "min": 31.741,
+              "max": 33.622
+            },
+            "latencies_ns": [
+              33602750,
+              31740667,
+              33622083
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_cli": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 72563167,
+            "throughput_ops_s": 41.34,
+            "latency_ms": {
+              "median": 24.545,
+              "p95": 25.455,
+              "min": 22.549,
+              "max": 25.455
+            },
+            "latencies_ns": [
+              24545167,
+              22549000,
+              25455166
+            ]
+          },
+          "sequences": [
+            184,
+            185,
+            186
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 78423209,
+            "throughput_ops_s": 38.25,
+            "latency_ms": {
+              "median": 26.282,
+              "p95": 26.942,
+              "min": 25.179,
+              "max": 26.942
+            },
+            "latencies_ns": [
+              25179292,
+              26281750,
+              26941792
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_mcp": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1100208,
+            "throughput_ops_s": 2726.76,
+            "latency_ms": {
+              "median": 0.315,
+              "p95": 0.488,
+              "min": 0.292,
+              "max": 0.488
+            },
+            "latencies_ns": [
+              487583,
+              315292,
+              292125
+            ]
+          },
+          "sequences": [
+            187,
+            188,
+            189
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 890208,
+            "throughput_ops_s": 3370.0,
+            "latency_ms": {
+              "median": 0.257,
+              "p95": 0.406,
+              "min": 0.218,
+              "max": 0.406
+            },
+            "latencies_ns": [
+              405875,
+              257458,
+              218375
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_http": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1714583,
+            "throughput_ops_s": 1749.7,
+            "latency_ms": {
+              "median": 0.516,
+              "p95": 0.742,
+              "min": 0.453,
+              "max": 0.742
+            },
+            "latencies_ns": [
+              742208,
+              516416,
+              452875
+            ]
+          },
+          "sequences": [
+            190,
+            191,
+            192
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1536292,
+            "throughput_ops_s": 1952.75,
+            "latency_ms": {
+              "median": 0.453,
+              "p95": 0.664,
+              "min": 0.413,
+              "max": 0.664
+            },
+            "latencies_ns": [
+              664042,
+              452542,
+              412542
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_http_rust": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 4753958,
+            "throughput_ops_s": 631.05,
+            "latency_ms": {
+              "median": 1.645,
+              "p95": 1.825,
+              "min": 1.281,
+              "max": 1.825
+            },
+            "latencies_ns": [
+              1824625,
+              1644666,
+              1280834
+            ]
+          },
+          "sequences": [
+            193,
+            194,
+            195
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 4648959,
+            "throughput_ops_s": 645.31,
+            "latency_ms": {
+              "median": 1.531,
+              "p95": 1.664,
+              "min": 1.444,
+              "max": 1.664
+            },
+            "latencies_ns": [
+              1444500,
+              1531125,
+              1664333
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_rust_key": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1722125,
+            "throughput_ops_s": 1742.03,
+            "latency_ms": {
+              "median": 0.505,
+              "p95": 0.762,
+              "min": 0.452,
+              "max": 0.762
+            },
+            "latencies_ns": [
+              761542,
+              505125,
+              452333
+            ]
+          },
+          "sequences": [
+            196,
+            197,
+            198
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1322709,
+            "throughput_ops_s": 2268.07,
+            "latency_ms": {
+              "median": 0.412,
+              "p95": 0.501,
+              "min": 0.399,
+              "max": 0.501
+            },
+            "latencies_ns": [
+              501167,
+              411791,
+              398792
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_lite3_key": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1978792,
+            "throughput_ops_s": 1516.08,
+            "latency_ms": {
+              "median": 0.569,
+              "p95": 0.792,
+              "min": 0.546,
+              "max": 0.792
+            },
+            "latencies_ns": [
+              545667,
+              568875,
+              792375
+            ]
+          },
+          "sequences": [
+            199,
+            200,
+            201
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1314333,
+            "throughput_ops_s": 2282.53,
+            "latency_ms": {
+              "median": 0.362,
+              "p95": 0.505,
+              "min": 0.326,
+              "max": 0.505
+            },
+            "latencies_ns": [
+              505083,
+              361959,
+              326375
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_rust": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 5576917,
+            "throughput_ops_s": 537.93,
+            "latency_ms": {
+              "median": 2.006,
+              "p95": 2.042,
+              "min": 1.526,
+              "max": 2.042
+            },
+            "latencies_ns": [
+              2006000,
+              2041792,
+              1525708
+            ]
+          },
+          "sequences": [
+            202,
+            203,
+            204
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 4609667,
+            "throughput_ops_s": 650.81,
+            "latency_ms": {
+              "median": 1.438,
+              "p95": 1.771,
+              "min": 1.392,
+              "max": 1.771
+            },
+            "latencies_ns": [
+              1771459,
+              1438208,
+              1392292
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_lite3": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 4775167,
+            "throughput_ops_s": 628.25,
+            "latency_ms": {
+              "median": 1.509,
+              "p95": 1.728,
+              "min": 1.468,
+              "max": 1.728
+            },
+            "latencies_ns": [
+              1728375,
+              1468375,
+              1509166
+            ]
+          },
+          "sequences": [
+            205,
+            206,
+            207
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 4756583,
+            "throughput_ops_s": 630.7,
+            "latency_ms": {
+              "median": 1.428,
+              "p95": 1.795,
+              "min": 1.398,
+              "max": 1.795
+            },
+            "latencies_ns": [
+              1794917,
+              1428417,
+              1397792
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_json": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 2005458,
+            "throughput_ops_s": 1495.92,
+            "latency_ms": {
+              "median": 0.658,
+              "p95": 0.728,
+              "min": 0.613,
+              "max": 0.728
+            },
+            "latencies_ns": [
+              727583,
+              613167,
+              657667
+            ]
+          },
+          "sequences": [
+            208,
+            209,
+            210
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1447292,
+            "throughput_ops_s": 2072.84,
+            "latency_ms": {
+              "median": 0.472,
+              "p95": 0.572,
+              "min": 0.395,
+              "max": 0.572
+            },
+            "latencies_ns": [
+              571667,
+              471541,
+              395250
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_browser_api": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 2780500,
+            "throughput_ops_s": 1078.94,
+            "latency_ms": {
+              "median": 0.8,
+              "p95": 1.446,
+              "min": 0.53,
+              "max": 1.446
+            },
+            "latencies_ns": [
+              1446208,
+              800417,
+              529750
+            ]
+          },
+          "sequences": [
+            211,
+            212,
+            213
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1225000,
+            "throughput_ops_s": 2448.98,
+            "latency_ms": {
+              "median": 0.416,
+              "p95": 0.416,
+              "min": 0.387,
+              "max": 0.416
+            },
+            "latencies_ns": [
+              415917,
+              386583,
+              416166
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_http_node": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 40798125,
+            "throughput_ops_s": 73.53,
+            "latency_ms": {
+              "median": 12.132,
+              "p95": 16.042,
+              "min": 11.954,
+              "max": 16.042
+            },
+            "latencies_ns": [
+              11954000,
+              12132166,
+              16041625
+            ]
+          },
+          "sequences": [
+            214,
+            215,
+            216
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 27714542,
+            "throughput_ops_s": 108.25,
+            "latency_ms": {
+              "median": 11.337,
+              "p95": 11.924,
+              "min": 2.504,
+              "max": 11.924
+            },
+            "latencies_ns": [
+              11337125,
+              2504416,
+              11923833
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_node": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 46624875,
+            "throughput_ops_s": 64.34,
+            "latency_ms": {
+              "median": 16.807,
+              "p95": 17.578,
+              "min": 11.904,
+              "max": 17.578
+            },
+            "latencies_ns": [
+              17578292,
+              11904000,
+              16806875
+            ]
+          },
+          "sequences": [
+            217,
+            218,
+            219
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 47378000,
+            "throughput_ops_s": 63.32,
+            "latency_ms": {
+              "median": 15.885,
+              "p95": 16.172,
+              "min": 14.88,
+              "max": 16.172
+            },
+            "latencies_ns": [
+              14880166,
+              16172083,
+              15884667
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_cli": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 99750792,
+            "throughput_ops_s": 30.07,
+            "latency_ms": {
+              "median": 32.594,
+              "p95": 34.603,
+              "min": 32.54,
+              "max": 34.603
+            },
+            "latencies_ns": [
+              34602667,
+              32539709,
+              32593875
+            ]
+          },
+          "sequences": [
+            220,
+            221,
+            222
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 115330167,
+            "throughput_ops_s": 26.01,
+            "latency_ms": {
+              "median": 36.929,
+              "p95": 42.077,
+              "min": 36.302,
+              "max": 42.077
+            },
+            "latencies_ns": [
+              42076875,
+              36302166,
+              36928833
+            ]
+          },
+          "readback_verified": 3
+        },
+        "remote_stdio_mcp": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 11824291,
+            "throughput_ops_s": 253.72,
+            "latency_ms": {
+              "median": 3.521,
+              "p95": 4.97,
+              "min": 3.323,
+              "max": 4.97
+            },
+            "latencies_ns": [
+              3323042,
+              3521292,
+              4970083
+            ]
+          },
+          "sequences": [
+            223,
+            224,
+            225
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 11681458,
+            "throughput_ops_s": 256.82,
+            "latency_ms": {
+              "median": 3.672,
+              "p95": 4.564,
+              "min": 3.42,
+              "max": 4.564
+            },
+            "latencies_ns": [
+              3419833,
+              3671667,
+              4563792
+            ]
+          },
+          "readback_verified": 3
+        },
+        "direct_https_mcp": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 2905042,
+            "throughput_ops_s": 1032.69,
+            "latency_ms": {
+              "median": 0.893,
+              "p95": 1.139,
+              "min": 0.869,
+              "max": 1.139
+            },
+            "latencies_ns": [
+              1138750,
+              869292,
+              892875
+            ]
+          },
+          "sequences": [
+            226,
+            227,
+            228
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 2865708,
+            "throughput_ops_s": 1046.86,
+            "latency_ms": {
+              "median": 0.929,
+              "p95": 1.065,
+              "min": 0.863,
+              "max": 1.065
+            },
+            "latencies_ns": [
+              1064750,
+              928875,
+              863166
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_rust": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 241792,
+            "throughput_ops_s": 12407.36,
+            "latency_ms": {
+              "median": 0.052,
+              "p95": 0.138,
+              "min": 0.048,
+              "max": 0.138
+            },
+            "latencies_ns": [
+              138041,
+              52500,
+              47542
+            ]
+          },
+          "sequences": [
+            229,
+            230,
+            231
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 76000,
+            "throughput_ops_s": 39473.68,
+            "latency_ms": {
+              "median": 0.011,
+              "p95": 0.05,
+              "min": 0.009,
+              "max": 0.05
+            },
+            "latencies_ns": [
+              49708,
+              10625,
+              8708
+            ]
+          },
+          "readback_verified": 3
+        }
+      }
+    },
+    {
+      "payload_bytes": 4096,
+      "repeat": 2,
+      "lane_order": [
+        "local_c",
+        "local_python",
+        "local_node",
+        "local_http_cli",
+        "local_cli",
+        "local_mcp",
+        "local_http",
+        "local_http_rust",
+        "https_rust_key",
+        "https_lite3_key",
+        "https_rust",
+        "https_lite3",
+        "https_json",
+        "https_browser_api",
+        "local_http_node",
+        "https_node",
+        "https_cli",
+        "remote_stdio_mcp",
+        "direct_https_mcp",
+        "local_rust",
+        "local_lite3"
+      ],
+      "lanes": {
+        "local_c": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 376083,
+            "throughput_ops_s": 7976.96,
+            "latency_ms": {
+              "median": 0.156,
+              "p95": 0.161,
+              "min": 0.058,
+              "max": 0.161
+            },
+            "latencies_ns": [
+              161375,
+              155875,
+              58291
+            ]
+          },
+          "sequences": [
+            232,
+            233,
+            234
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 110000,
+            "throughput_ops_s": 27272.73,
+            "latency_ms": {
+              "median": 0.025,
+              "p95": 0.06,
+              "min": 0.023,
+              "max": 0.06
+            },
+            "latencies_ns": [
+              60291,
+              25458,
+              23458
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_python": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 393292,
+            "throughput_ops_s": 7627.92,
+            "latency_ms": {
+              "median": 0.105,
+              "p95": 0.19,
+              "min": 0.093,
+              "max": 0.19
+            },
+            "latencies_ns": [
+              189916,
+              104875,
+              93041
+            ]
+          },
+          "sequences": [
+            235,
+            236,
+            237
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 170041,
+            "throughput_ops_s": 17642.8,
+            "latency_ms": {
+              "median": 0.046,
+              "p95": 0.087,
+              "min": 0.032,
+              "max": 0.087
+            },
+            "latencies_ns": [
+              87209,
+              45833,
+              32000
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_node": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 721125,
+            "throughput_ops_s": 4160.17,
+            "latency_ms": {
+              "median": 0.12,
+              "p95": 0.473,
+              "min": 0.11,
+              "max": 0.473
+            },
+            "latencies_ns": [
+              473250,
+              120375,
+              110292
+            ]
+          },
+          "sequences": [
+            238,
+            239,
+            240
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 515459,
+            "throughput_ops_s": 5820.06,
+            "latency_ms": {
+              "median": 0.07,
+              "p95": 0.245,
+              "min": 0.04,
+              "max": 0.245
+            },
+            "latencies_ns": [
+              244750,
+              69583,
+              39791
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_http_cli": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 98338583,
+            "throughput_ops_s": 30.51,
+            "latency_ms": {
+              "median": 33.015,
+              "p95": 33.382,
+              "min": 31.929,
+              "max": 33.382
+            },
+            "latencies_ns": [
+              33014792,
+              33381500,
+              31929084
+            ]
+          },
+          "sequences": [
+            241,
+            242,
+            243
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 105010500,
+            "throughput_ops_s": 28.57,
+            "latency_ms": {
+              "median": 34.475,
+              "p95": 38.965,
+              "min": 31.549,
+              "max": 38.965
+            },
+            "latencies_ns": [
+              34475041,
+              31549083,
+              38964625
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_cli": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 67100625,
+            "throughput_ops_s": 44.71,
+            "latency_ms": {
+              "median": 22.308,
+              "p95": 22.663,
+              "min": 22.117,
+              "max": 22.663
+            },
+            "latencies_ns": [
+              22307833,
+              22662958,
+              22116833
+            ]
+          },
+          "sequences": [
+            244,
+            245,
+            246
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 78897709,
+            "throughput_ops_s": 38.02,
+            "latency_ms": {
+              "median": 25.927,
+              "p95": 27.02,
+              "min": 25.924,
+              "max": 27.02
+            },
+            "latencies_ns": [
+              27019958,
+              25924083,
+              25927375
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_mcp": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1069875,
+            "throughput_ops_s": 2804.07,
+            "latency_ms": {
+              "median": 0.305,
+              "p95": 0.471,
+              "min": 0.289,
+              "max": 0.471
+            },
+            "latencies_ns": [
+              470750,
+              305334,
+              289375
+            ]
+          },
+          "sequences": [
+            247,
+            248,
+            249
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 874583,
+            "throughput_ops_s": 3430.21,
+            "latency_ms": {
+              "median": 0.264,
+              "p95": 0.369,
+              "min": 0.226,
+              "max": 0.369
+            },
+            "latencies_ns": [
+              369375,
+              264000,
+              225959
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_http": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1752666,
+            "throughput_ops_s": 1711.68,
+            "latency_ms": {
+              "median": 0.535,
+              "p95": 0.763,
+              "min": 0.451,
+              "max": 0.763
+            },
+            "latencies_ns": [
+              762625,
+              535417,
+              451333
+            ]
+          },
+          "sequences": [
+            250,
+            251,
+            252
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1653500,
+            "throughput_ops_s": 1814.33,
+            "latency_ms": {
+              "median": 0.448,
+              "p95": 0.759,
+              "min": 0.439,
+              "max": 0.759
+            },
+            "latencies_ns": [
+              759416,
+              438833,
+              447541
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_http_rust": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 3980458,
+            "throughput_ops_s": 753.68,
+            "latency_ms": {
+              "median": 1.277,
+              "p95": 1.433,
+              "min": 1.268,
+              "max": 1.433
+            },
+            "latencies_ns": [
+              1432500,
+              1276917,
+              1268208
+            ]
+          },
+          "sequences": [
+            253,
+            254,
+            255
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 4246625,
+            "throughput_ops_s": 706.44,
+            "latency_ms": {
+              "median": 1.407,
+              "p95": 1.482,
+              "min": 1.348,
+              "max": 1.482
+            },
+            "latencies_ns": [
+              1407292,
+              1482209,
+              1347584
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_rust_key": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1403084,
+            "throughput_ops_s": 2138.15,
+            "latency_ms": {
+              "median": 0.488,
+              "p95": 0.516,
+              "min": 0.396,
+              "max": 0.516
+            },
+            "latencies_ns": [
+              515875,
+              488083,
+              395875
+            ]
+          },
+          "sequences": [
+            256,
+            257,
+            258
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1319750,
+            "throughput_ops_s": 2273.16,
+            "latency_ms": {
+              "median": 0.395,
+              "p95": 0.52,
+              "min": 0.395,
+              "max": 0.52
+            },
+            "latencies_ns": [
+              519833,
+              395334,
+              394750
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_lite3_key": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1420875,
+            "throughput_ops_s": 2111.38,
+            "latency_ms": {
+              "median": 0.435,
+              "p95": 0.504,
+              "min": 0.403,
+              "max": 0.504
+            },
+            "latencies_ns": [
+              504083,
+              434667,
+              402500
+            ]
+          },
+          "sequences": [
+            259,
+            260,
+            261
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1527292,
+            "throughput_ops_s": 1964.26,
+            "latency_ms": {
+              "median": 0.41,
+              "p95": 0.642,
+              "min": 0.344,
+              "max": 0.642
+            },
+            "latencies_ns": [
+              642375,
+              410375,
+              343708
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_rust": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 4489125,
+            "throughput_ops_s": 668.28,
+            "latency_ms": {
+              "median": 1.418,
+              "p95": 1.708,
+              "min": 1.36,
+              "max": 1.708
+            },
+            "latencies_ns": [
+              1708333,
+              1418167,
+              1359542
+            ]
+          },
+          "sequences": [
+            262,
+            263,
+            264
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 4928750,
+            "throughput_ops_s": 608.67,
+            "latency_ms": {
+              "median": 1.625,
+              "p95": 1.885,
+              "min": 1.41,
+              "max": 1.885
+            },
+            "latencies_ns": [
+              1884959,
+              1410083,
+              1624708
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_lite3": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 4375667,
+            "throughput_ops_s": 685.61,
+            "latency_ms": {
+              "median": 1.429,
+              "p95": 1.522,
+              "min": 1.35,
+              "max": 1.522
+            },
+            "latencies_ns": [
+              1522083,
+              1428667,
+              1349541
+            ]
+          },
+          "sequences": [
+            265,
+            266,
+            267
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 4402709,
+            "throughput_ops_s": 681.4,
+            "latency_ms": {
+              "median": 1.368,
+              "p95": 1.561,
+              "min": 1.296,
+              "max": 1.561
+            },
+            "latencies_ns": [
+              1560709,
+              1368000,
+              1295500
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_json": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1667791,
+            "throughput_ops_s": 1798.79,
+            "latency_ms": {
+              "median": 0.522,
+              "p95": 0.639,
+              "min": 0.502,
+              "max": 0.639
+            },
+            "latencies_ns": [
+              638583,
+              502125,
+              521916
+            ]
+          },
+          "sequences": [
+            268,
+            269,
+            270
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1510167,
+            "throughput_ops_s": 1986.54,
+            "latency_ms": {
+              "median": 0.455,
+              "p95": 0.615,
+              "min": 0.43,
+              "max": 0.615
+            },
+            "latencies_ns": [
+              615250,
+              429958,
+              455083
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_browser_api": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 1464542,
+            "throughput_ops_s": 2048.42,
+            "latency_ms": {
+              "median": 0.496,
+              "p95": 0.498,
+              "min": 0.468,
+              "max": 0.498
+            },
+            "latencies_ns": [
+              495667,
+              498375,
+              467833
+            ]
+          },
+          "sequences": [
+            271,
+            272,
+            273
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 1324333,
+            "throughput_ops_s": 2265.29,
+            "latency_ms": {
+              "median": 0.457,
+              "p95": 0.468,
+              "min": 0.393,
+              "max": 0.468
+            },
+            "latencies_ns": [
+              468334,
+              457042,
+              393083
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_http_node": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 38756167,
+            "throughput_ops_s": 77.41,
+            "latency_ms": {
+              "median": 15.166,
+              "p95": 18.212,
+              "min": 5.356,
+              "max": 18.212
+            },
+            "latencies_ns": [
+              5356333,
+              18212167,
+              15166125
+            ]
+          },
+          "sequences": [
+            274,
+            275,
+            276
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 20684584,
+            "throughput_ops_s": 145.04,
+            "latency_ms": {
+              "median": 3.662,
+              "p95": 14.893,
+              "min": 1.977,
+              "max": 14.893
+            },
+            "latencies_ns": [
+              3661792,
+              1976833,
+              14893500
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_node": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 46921250,
+            "throughput_ops_s": 63.94,
+            "latency_ms": {
+              "median": 15.992,
+              "p95": 16.372,
+              "min": 14.535,
+              "max": 16.372
+            },
+            "latencies_ns": [
+              15991958,
+              16371750,
+              14534583
+            ]
+          },
+          "sequences": [
+            277,
+            278,
+            279
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 19714000,
+            "throughput_ops_s": 152.18,
+            "latency_ms": {
+              "median": 2.563,
+              "p95": 15.094,
+              "min": 1.751,
+              "max": 15.094
+            },
+            "latencies_ns": [
+              15093792,
+              2562958,
+              1750959
+            ]
+          },
+          "readback_verified": 3
+        },
+        "https_cli": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 99825292,
+            "throughput_ops_s": 30.05,
+            "latency_ms": {
+              "median": 31.804,
+              "p95": 36.306,
+              "min": 31.699,
+              "max": 36.306
+            },
+            "latencies_ns": [
+              36305625,
+              31699083,
+              31803917
+            ]
+          },
+          "sequences": [
+            280,
+            281,
+            282
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 112288667,
+            "throughput_ops_s": 26.72,
+            "latency_ms": {
+              "median": 37.214,
+              "p95": 37.941,
+              "min": 37.11,
+              "max": 37.941
+            },
+            "latencies_ns": [
+              37214000,
+              37941417,
+              37110167
+            ]
+          },
+          "readback_verified": 3
+        },
+        "remote_stdio_mcp": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 9866875,
+            "throughput_ops_s": 304.05,
+            "latency_ms": {
+              "median": 3.05,
+              "p95": 3.758,
+              "min": 3.047,
+              "max": 3.758
+            },
+            "latencies_ns": [
+              3758375,
+              3047167,
+              3050292
+            ]
+          },
+          "sequences": [
+            283,
+            284,
+            285
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 10740792,
+            "throughput_ops_s": 279.31,
+            "latency_ms": {
+              "median": 3.713,
+              "p95": 3.801,
+              "min": 3.207,
+              "max": 3.801
+            },
+            "latencies_ns": [
+              3801250,
+              3713125,
+              3207084
+            ]
+          },
+          "readback_verified": 3
+        },
+        "direct_https_mcp": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 3621916,
+            "throughput_ops_s": 828.29,
+            "latency_ms": {
+              "median": 0.996,
+              "p95": 1.68,
+              "min": 0.94,
+              "max": 1.68
+            },
+            "latencies_ns": [
+              1680208,
+              996416,
+              940208
+            ]
+          },
+          "sequences": [
+            286,
+            287,
+            288
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 2982792,
+            "throughput_ops_s": 1005.77,
+            "latency_ms": {
+              "median": 0.851,
+              "p95": 1.295,
+              "min": 0.828,
+              "max": 1.295
+            },
+            "latencies_ns": [
+              1295292,
+              827875,
+              851458
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_rust": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 296208,
+            "throughput_ops_s": 10128.02,
+            "latency_ms": {
+              "median": 0.085,
+              "p95": 0.147,
+              "min": 0.06,
+              "max": 0.147
+            },
+            "latencies_ns": [
+              147000,
+              85459,
+              59916
+            ]
+          },
+          "sequences": [
+            289,
+            290,
+            291
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 113375,
+            "throughput_ops_s": 26460.86,
+            "latency_ms": {
+              "median": 0.047,
+              "p95": 0.05,
+              "min": 0.01,
+              "max": 0.05
+            },
+            "latencies_ns": [
+              50250,
+              46667,
+              9834
+            ]
+          },
+          "readback_verified": 3
+        },
+        "local_lite3": {
+          "append": {
+            "count": 3,
+            "elapsed_ns": 266542,
+            "throughput_ops_s": 11255.26,
+            "latency_ms": {
+              "median": 0.043,
+              "p95": 0.082,
+              "min": 0.042,
+              "max": 0.082
+            },
+            "latencies_ns": [
+              82292,
+              42167,
+              43042
+            ]
+          },
+          "sequences": [
+            292,
+            293,
+            294
+          ],
+          "read": {
+            "count": 3,
+            "elapsed_ns": 81125,
+            "throughput_ops_s": 36979.97,
+            "latency_ms": {
+              "median": 0.005,
+              "p95": 0.018,
+              "min": 0.005,
+              "max": 0.018
+            },
+            "latencies_ns": [
+              17584,
+              4917,
+              4750
+            ]
+          },
+          "readback_verified": 3
+        }
+      }
+    }
+  ],
+  "provenance": {
+    "source_commit": "4fe156a126175ff73732414f68a22f851af53001",
+    "source_description": "Committed Plasmite 1.0.0 plus benchmark-only helpers",
+    "source_archive_sha256": "b86e17cd87acc9856b57a8b3ac4771a425cdba17e44aa5837c8a68606e07f271",
+    "target": "x86_64-pc-windows-msvc",
+    "vm_architecture": "ARM64",
+    "virtual_cpus": 1,
+    "memory_bytes": 7510704128,
+    "node": "v24.18.0 x64",
+    "artifact_sha256": {
+      "target\\release\\plasmite.exe": "135f4dc230dfaa02ae963b299408f34896f81ec8bbb98b84419bc911ec1b4e3d",
+      "target\\release\\plasmite.dll": "1234bd093ac01253d99d87026f1ed7ab2b00c6a188601d9a4751c9a952540f9b",
+      "target\\release\\examples\\bench_transport_native.exe": "5286bf36c62d440680f068446929499757703730a83266d8dfb47dfa39f1ef3a",
+      "target\\release\\bench_access_c.exe": "f30adfa3efb8c46692b03238f2cb2e26e6780f8610df0049cd57e529b9ab4ac6",
+      "bindings\\node\\native\\win32-x64\\index.node": "0403d7bc2537fdced621ec5693d501ba009e9a3c405c8eca672ac620a800348e"
+    },
+    "harness_sha256": {
+      "scripts\\bench_access_comparison.py": "f263a13a586d9ab63bc1b357e35d3d8cf1b1fbb679da069e4869cf42ce6441c8",
+      "scripts\\bench_access_node.cjs": "c5a97f45dced6e7c6fba6bfee3aec810dd784614d37b6d605cb8b5ac99ba9d41",
+      "scripts\\bench_access_c.c": "2fcf2f8494c1ba545a7a9a0dad65e65eed8cf73caf68385d7cab7811e5ec2a4c",
+      "scripts\\bench_access_streaming.py": "46e2ab74b7bb0bb2810ca1cbe1fea88d214c3a16710d3b95adaef80a57eeffce",
+      "examples\\bench_transport_native.rs": "a168a15c1a31e1b483842ca948f3fad92d67efb7c8dfb2fe85dc55e1a051cc42"
+    }
+  }
+}

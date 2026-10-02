@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-02",
+  "server": {
+    "pid": 4420,
+    "version": "plasmite 1.0.0-dev+unknown",
+    "sha256": "135F4DC230DFAA02AE963B299408F34896F81EC8BBB98B84419BC911EC1B4E3D",
+    "computer": "BBOOK-WIN",
+    "pools": "C:\\Users\\sando\\mcp-interop-20261002\\pools",
+    "endpoint": "https://192.168.175.130:19743/mcp",
+    "started": "2026-10-02T20:02:27.2895175+00:00"
+  },
+  "clients": {
+    "codex": {
+      "version": "0.159.2"
+    },
+    "claude": {
+      "version": "2.1.287"
+    }
+  },
+  "method": {
+    "transport": "Direct HTTPS Streamable HTTP MCP",
+    "client_machine": "macOS",
+    "pool_machine": "Windows VM",
+    "certificate_trust": "Temporary CA through process environment; TLS verification enabled; OS trust stores unchanged",
+    "authorization": "Harness OAuth login with DCR, PKCE, and supported no-browser callback entry; test driver submits disposable keys to server approval page",
+    "plasmite_client_dependency": "Harness commands use HTTPS and do not invoke local Plasmite",
+    "refresh_scope": "New CLI processes reuse stored grants and refresh expired credentials; no continuously open 15-minute harness session"
+  },
+  "checks": {
+    "codex": {
+      "oauth_login": "passed",
+      "feed_fetch_read": {
+        "passed": true,
+        "sequence": 1,
+        "tools": [
+          "plasmite_pool_list",
+          "plasmite_feed",
+          "plasmite_fetch",
+          "plasmite_read"
+        ]
+      },
+      "saved_grant_reuse": "passed in fresh CLI processes",
+      "wait_delivery_and_timeout": "passed",
+      "large": [
+        {
+          "bytes": 4096,
+          "end_marker": "END-4096",
+          "padding_characters": 4009,
+          "sha256": "04f58260191095a469372e4d5e53013deac17e9ed5a651661d3dad328a01df9e",
+          "transport_complete": true,
+          "inline_model_context": true
+        },
+        {
+          "bytes": 65536,
+          "end_marker": "END-65536",
+          "padding_characters": 65447,
+          "sha256": "cd35ad0c1617eeff001af9360e37b307b02c2181d4a5603ff01cc54e4d6889b4",
+          "transport_complete": true,
+          "inline_model_context": true
+        }
+      ],
+      "automatic_refresh": {
+        "passed": true,
+        "same_grant": true,
+        "original_access_token_expires_at": "2026-10-02T20:20:35+00:00",
+        "renewed_access_token_expires_at": "2026-10-02T20:38:52+00:00",
+        "observed_at": "2026-10-02T20:24:15.5102948+00:00"
+      },
+      "revocation": {
+        "passed": true,
+        "observed_active_wait_age_ms": 36927,
+        "revoked_at": "2026-10-02T20:26:09.7148664+00:00",
+        "wait_error": "access key was revoked",
+        "subsequent_call_denied": true
+      }
+    },
+    "claude": {
+      "oauth_login": "passed",
+      "feed_fetch_read": {
+        "passed": true,
+        "sequence": 2,
+        "tools": [
+          "mcp__plasmite_win_test__plasmite_pool_list",
+          "mcp__plasmite_win_test__plasmite_feed",
+          "mcp__plasmite_win_test__plasmite_fetch",
+          "mcp__plasmite_win_test__plasmite_read"
+        ]
+      },
+      "saved_grant_reuse": "passed in fresh CLI processes",
+      "wait_delivery_and_timeout": "passed",
+      "large": [
+        {
+          "bytes": 4096,
+          "end_marker": "END-4096",
+          "padding_characters": 4009,
+          "sha256": "04f58260191095a469372e4d5e53013deac17e9ed5a651661d3dad328a01df9e",
+          "transport_complete": true,
+          "inline_model_context": true
+        },
+        {
+          "bytes": 65536,
+          "end_marker": "END-65536",
+          "padding_characters": 65447,
+          "sha256": "cd35ad0c1617eeff001af9360e37b307b02c2181d4a5603ff01cc54e4d6889b4",
+          "transport_complete": true,
+          "inline_model_context": false
+        }
+      ],
+      "automatic_refresh": {
+        "passed": true,
+        "same_grant": true,
+        "original_access_token_expires_at": "2026-10-02T20:20:52+00:00",
+        "renewed_access_token_expires_at": "2026-10-02T20:38:07+00:00",
+        "observed_at": "2026-10-02T20:24:15.5102948+00:00"
+      },
+      "revocation": {
+        "passed": true,
+        "observed_active_wait_age_ms": 1139,
+        "revoked_at": "2026-10-02T20:26:44.4850640+00:00",
+        "wait_error": "access key was revoked",
+        "subsequent_call_denied": true
+      },
+      "large_file_query": {
+        "passed": true,
+        "tool": "Bash running jq",
+        "bytes": 65536,
+        "end_marker": "END-65536",
+        "padding_characters": 65447,
+        "read_tool_alone": "Cannot reach tail of a large single-line JSON result after line truncation"
+      }
+    }
+  },
+  "limitations": [
+    "Initial approval page used an HTTPS test driver and no-browser CLI modes; public-CA deployment and an ordinary browser login were not tested.",
+    "OpenCode and Gemini CLI were not exercised.",
+    "No new latency benchmark; model response time belongs outside the earlier transport measurements.",
+    "An initial shared SSL_CERT_FILE setting caused Codex model WebSocket certificate failures with HTTPS fallback; corrected client-specific environment removes that setting from Codex."
+  ]
+}
