@@ -200,7 +200,7 @@ impl<'a> Lite3DocRef<'a> {
                 self.bytes.as_ptr(),
                 self.bytes.len(),
                 ofs,
-                c_key(key).as_ptr(),
+                c_key(key)?.as_ptr(),
                 &mut out as *mut bool,
             )
         };
@@ -217,7 +217,7 @@ impl<'a> Lite3DocRef<'a> {
                 self.bytes.as_ptr(),
                 self.bytes.len(),
                 ofs,
-                c_key(key).as_ptr(),
+                c_key(key)?.as_ptr(),
                 &mut out as *mut i64,
             )
         };
@@ -233,7 +233,7 @@ impl<'a> Lite3DocRef<'a> {
                 self.bytes.as_ptr(),
                 self.bytes.len(),
                 ofs,
-                c_key(key).as_ptr(),
+                c_key(key)?.as_ptr(),
             )
         };
         if value == sys::LITE3_TYPE_INVALID {
@@ -254,7 +254,7 @@ impl<'a> Lite3DocRef<'a> {
                 self.bytes.as_ptr(),
                 self.bytes.len(),
                 0,
-                c_key("meta").as_ptr(),
+                c_key("meta")?.as_ptr(),
             )
         };
         if meta_type != sys::LITE3_TYPE_OBJECT {
@@ -266,7 +266,7 @@ impl<'a> Lite3DocRef<'a> {
                 self.bytes.as_ptr(),
                 self.bytes.len(),
                 0,
-                c_key("data").as_ptr(),
+                c_key("data")?.as_ptr(),
             )
         };
         if data_type != sys::LITE3_TYPE_OBJECT {
@@ -283,7 +283,7 @@ impl<'a> Lite3DocRef<'a> {
                 self.bytes.as_ptr(),
                 self.bytes.len(),
                 meta_ofs,
-                c_key("tags").as_ptr(),
+                c_key("tags")?.as_ptr(),
             )
         };
         if tags_type != sys::LITE3_TYPE_ARRAY {
@@ -295,12 +295,8 @@ impl<'a> Lite3DocRef<'a> {
 
         let count = array_count(self.bytes, tags_ofs)?;
         for index in 0..count {
-            let item_type = array_item_type(self.bytes, tags_ofs, index)?;
-            if item_type != sys::LITE3_TYPE_STRING {
-                return Err(
-                    Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
-                );
-            }
+            self.array_string_at(tags_ofs, index)
+                .map_err(|err| err.with_message("meta.tags must be string array"))?;
         }
 
         Ok(())
@@ -340,8 +336,12 @@ pub fn validate_bytes(buf: &[u8]) -> Result<(), Error> {
     Lite3DocRef::new(buf).validate()
 }
 
-fn c_key(key: &str) -> CString {
-    CString::new(key).expect("c key")
+fn c_key(key: &str) -> Result<CString, Error> {
+    CString::new(key).map_err(|err| {
+        Error::new(ErrorKind::Usage)
+            .with_message("key contains null")
+            .with_source(err)
+    })
 }
 
 fn get_key_offset(bytes: &[u8], key: &str) -> Result<usize, Error> {
@@ -355,7 +355,7 @@ fn get_key_offset_at(bytes: &[u8], ofs: usize, key: &str) -> Result<usize, Error
             bytes.as_ptr(),
             bytes.len(),
             ofs,
-            c_key(key).as_ptr(),
+            c_key(key)?.as_ptr(),
             &mut out_ofs as *mut usize,
         )
     };
@@ -420,7 +420,7 @@ pub(crate) fn json_counter_snapshot() -> (usize, usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Lite3Buf, encode_message, validate_bytes};
+    use super::{Lite3Buf, Lite3DocRef, encode_message, validate_bytes};
     use serde_json::json;
 
     #[test]
@@ -452,6 +452,110 @@ mod tests {
         let buf = [0u8; 8];
         let err = validate_bytes(&buf).expect_err("should fail");
         assert_eq!(err.kind(), crate::core::error::ErrorKind::Corrupt);
+    }
+
+    #[test]
+    fn short_buffers_and_invalid_offsets_are_rejected() {
+        let bytes = [0u8; 96];
+        for len in 0..bytes.len() {
+            let doc = Lite3DocRef::new(&bytes[..len]);
+            assert!(doc.key_offset_at(0, "x").is_err(), "key at length {len}");
+            assert!(doc.count_at(0).is_err(), "count at length {len}");
+            assert!(doc.array_item_type(0, 0).is_err(), "type at length {len}");
+            assert!(doc.array_string_at(0, 0).is_err(), "string at length {len}");
+            assert!(doc.to_json(false).is_err(), "json at length {len}");
+            assert!(doc.to_json(true).is_err(), "pretty json at length {len}");
+            assert!(doc.bool_at_key(0, "x").is_err(), "bool at length {len}");
+            assert!(doc.i64_at_key(0, "x").is_err(), "i64 at length {len}");
+            assert!(doc.type_at_key(0, "x").is_err(), "type at length {len}");
+            assert!(doc.validate().is_err(), "validate at length {len}");
+        }
+
+        let buf = encode_message(&["event".to_string()], &json!({"x": true})).expect("encode");
+        let doc = buf.as_doc();
+        for ofs in [buf.len(), usize::MAX] {
+            assert!(doc.key_offset_at(ofs, "x").is_err());
+            assert!(doc.count_at(ofs).is_err());
+            assert!(doc.array_item_type(ofs, 0).is_err());
+            assert!(doc.array_string_at(ofs, 0).is_err());
+            assert!(doc.to_json_at(ofs, false).is_err());
+            assert!(doc.bool_at_key(ofs, "x").is_err());
+            assert!(doc.i64_at_key(ofs, "x").is_err());
+            assert!(doc.type_at_key(ofs, "x").is_err());
+        }
+    }
+
+    #[test]
+    fn misaligned_buffer_is_rejected() {
+        let buf = encode_message(&["event".to_string()], &json!({})).expect("encode");
+        let mut bytes = Vec::with_capacity(buf.len() + 1);
+        bytes.push(0);
+        bytes.extend_from_slice(buf.as_slice());
+        let doc = Lite3DocRef::new(&bytes[1..]);
+        assert!(doc.key_offset("meta").is_err());
+        assert!(doc.count_at(0).is_err());
+        assert!(doc.to_json(false).is_err());
+        assert!(doc.validate().is_err());
+    }
+
+    #[test]
+    fn null_byte_in_lookup_key_returns_usage_error() {
+        let buf = encode_message(&[], &json!({})).expect("encode");
+        let doc = buf.as_doc();
+        for result in [
+            doc.key_offset("x\0y").map(|_| ()),
+            doc.type_at_key(0, "x\0y").map(|_| ()),
+            doc.bool_at_key(0, "x\0y").map(|_| ()),
+            doc.i64_at_key(0, "x\0y").map(|_| ()),
+        ] {
+            assert_eq!(
+                result.expect_err("invalid key").kind(),
+                crate::core::error::ErrorKind::Usage
+            );
+        }
+    }
+
+    #[test]
+    fn zero_length_encoded_string_is_rejected() {
+        let buf = encode_message(&["event".to_string()], &json!({})).expect("encode");
+        let doc = buf.as_doc();
+        let meta = doc.key_offset("meta").expect("meta");
+        let tags = doc.key_offset_at(meta, "tags").expect("tags");
+        let mut bytes = buf.as_slice().to_vec();
+        let value_ofs = u32::from_le_bytes(bytes[tags + 36..tags + 40].try_into().expect("offset"));
+        let len_ofs = value_ofs as usize + 1;
+        bytes[len_ofs..len_ofs + 4].copy_from_slice(&0u32.to_le_bytes());
+
+        let doc = Lite3DocRef::new(&bytes);
+        assert!(doc.array_string_at(tags, 0).is_err());
+        assert!(doc.to_json(false).is_err());
+        assert!(doc.validate().is_err());
+    }
+
+    #[test]
+    fn malformed_key_terminator_is_rejected_before_json_encoding() {
+        let buf = Lite3Buf::from_json_str(r#"{"x":true}"#).expect("encode");
+        let mut bytes = buf.as_slice().to_vec();
+        let suffix = bytes.len() - 4;
+        assert_eq!(&bytes[suffix..], &[b'x', 0, 1, 1]);
+        bytes[suffix + 1] = 0xff;
+
+        let doc = Lite3DocRef::new(&bytes);
+        assert!(doc.to_json(false).is_err());
+        assert!(doc.to_json(true).is_err());
+    }
+
+    #[test]
+    fn malformed_string_terminator_is_rejected_before_json_encoding() {
+        let buf = Lite3Buf::from_json_str(r#"{"x":"y"}"#).expect("encode");
+        let mut bytes = buf.as_slice().to_vec();
+        let suffix = bytes.len() - 7;
+        assert_eq!(&bytes[suffix..], &[5, 2, 0, 0, 0, b'y', 0]);
+        bytes[suffix + 6] = 0xff;
+
+        let doc = Lite3DocRef::new(&bytes);
+        assert!(doc.to_json(false).is_err());
+        assert!(doc.to_json(true).is_err());
     }
 
     #[test]
