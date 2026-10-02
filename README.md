@@ -12,8 +12,8 @@
 
 Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and
 receiving JSON messages through persistent, disk-backed channels called
-**pools**. Each pool is one file containing a bounded ring buffer: old messages
-disappear when writers fill it. Local messaging needs no daemon or broker.
+**pools**. Each pool is one file that keeps a bounded history of messages,
+overwriting the oldest when it fills. Local messaging needs no daemon or broker.
 
 ![Independent writers append JSON to one pool file; each reader follows its own place in the retained history](docs/images/ipc/pool-model.svg)
 
@@ -128,10 +128,10 @@ pins. Python, Go, C, and local Node bindings operate on local pools. See the
 Start the optional server against the same directory:
 
 ```bash
-pls --dir ./pools serve
+pls --dir ./pools serve --remote-bind 127.0.0.1:9743
 ```
 
-Open `http://127.0.0.1:9700/ui/map` on this machine.
+Both listeners stay on this machine. Open `http://127.0.0.1:9700/ui/map`.
 
 Watch messages arrive in the web UI. Click a pool to read its messages;
 hover a message to find its place on the ring.
@@ -241,8 +241,7 @@ Run [`scripts/bench_runtime_lanes.sh`](scripts/bench_runtime_lanes.sh) for a
 reproducible local measurement. The earlier lock-free read measurements do not
 describe the 1.0 snapshot implementation.
 
-See the [1.0 performance measurements](docs/performance/1.0-release.md) and
-[Windows access measurements](docs/performance/windows-access-1.0.md) for
+See the [1.0 performance measurements](docs/performance/1.0-release.md) for
 workloads, results, and their limits.
 
 ## Platforms and installation
