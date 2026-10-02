@@ -14,7 +14,7 @@ Start with the task you want to do:
 | Fix a connection | [Troubleshooting](record/serving.md#troubleshoot-a-connection) |
 | Upgrade from an earlier release | [Upgrade to 1.0](record/upgrading-1.0.md) |
 | Install Plasmite | [Install channels](record/distribution.md#install-matrix) |
-| Install on Raspberry Pi or Linux ARM | [ARM preview installation](record/distribution.md#linux-arm-sdk-preview-install) |
+| Install on Raspberry Pi or Linux ARM | [Published ARM SDK installation (preview)](record/distribution.md#linux-arm-sdk-preview-install) |
 | Build from this checkout | [Source installation](building.md#install-the-cli-from-source) |
 
 ## Guides and reference

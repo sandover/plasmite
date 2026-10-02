@@ -228,63 +228,18 @@ pkg-config --cflags --libs plasmite
 
 ### Install a Linux ARM preview
 
-The ARM SDK archives include `plasmite`, `pls`, libraries, and headers. You can
-run the CLI and server without installing Rust or a desktop. Both targets
-passed [hosted CI](https://github.com/sandover/plasmite/actions/runs/36803923793).
-CI retains the verified downloads for 30 days. A published release will use
-`plasmite_<version>_linux_arm64.tar.gz` and
-`plasmite_<version>_linux_armv7.tar.gz`; the ARM release assets have not shipped
-yet.
+The published [1.0.0 release](https://github.com/sandover/plasmite/releases/tag/v1.0.0)
+includes ARM64 and ARMv7 SDK archives with `plasmite`, `pls`, libraries, and
+headers. You can run the CLI and server without installing Rust or a desktop.
+Use the [ARM installation guide](record/distribution.md#linux-arm-sdk-preview-install)
+for public downloads, checksum verification, extraction, `PATH`, and pkg-config
+setup. It selects the archive by Linux userland width, not kernel architecture;
+both targets require glibc 2.35 or newer.
 
-First, check the installed Linux userland on the Pi:
-
-```bash
-getconf LONG_BIT
-getconf GNU_LIBC_VERSION
-```
-
-Use `linux_armv7` for a 32-bit userland, including Raspberry Pi 2 with
-Raspberry Pi OS Lite (32-bit). Use `linux_arm64` for a 64-bit ARM userland.
-Both require glibc 2.35 or newer. A 64-bit kernel can run a 32-bit userland,
-so the kernel architecture alone does not select the archive.
-
-On your laptop, open the CI run above, download the matching artifact, and
-unzip it:
-
-| Userland | CI artifact |
-| --- | --- |
-| 32-bit ARMv7 | `ci-sdk-armv7-unknown-linux-gnueabihf` |
-| 64-bit ARM | `ci-sdk-aarch64-unknown-linux-gnu` |
-
-If you use GitHub CLI on the laptop, this command downloads and unpacks the
-ARMv7 artifact:
-
-```bash
-gh run download 36803923793 --repo sandover/plasmite \
-  --name ci-sdk-armv7-unknown-linux-gnueabihf --dir arm-sdk
-```
-
-Copy the SDK tarball, `sha256sums.txt`, and `ci-build.json` to `~/arm-sdk` on
-the Pi. The metadata identifies the source commit and target. This CI run
-contains version 0.8.0 test archives.
-
-On the Pi, verify and install the ARMv7 archive:
-
-```bash
-cd "$HOME/arm-sdk"
-sha256sum -c sha256sums.txt
-mkdir -p "$HOME/.local/share/plasmite"
-tar -xzf plasmite_0.8.0_linux_armv7.tar.gz -C "$HOME/.local/share/plasmite"
-export PATH="$HOME/.local/share/plasmite/bin:$PATH"
-plasmite --version
-```
-
-For ARM64, download the ARM64 artifact and extract
-`plasmite_0.8.0_linux_arm64.tar.gz`. Add the `PATH` line to your shell's startup
-file to keep the commands available after login. Run the server as the account
-that owns the pool directory, and follow the
-[serving guide](record/serving.md#share-your-first-pool) for setup and recovery.
-Physical Pi installation and OS-service reboot checks remain pending.
+The earlier [hosted CI run](https://github.com/sandover/plasmite/actions/runs/36803923793)
+is historical validation evidence. Use the published 1.0.0 assets for current
+installation. Physical Pi installation and OS-service reboot checks remain
+pending, so both targets retain the preview tier. ARMv6 is unsupported.
 
 On ARMv7, a pool file can be at most 2,147,483,647 bytes (2 GiB minus one
 byte). Plasmite rejects creation of a larger pool or mapping of a larger
@@ -350,12 +305,12 @@ If you need to force a specific build run (for example, during incident recovery
   targets for Raspberry Pi CLI/server use.
 - The archives contain the CLI and SDK layout. Users can install and run them
   without Rust.
-- CI builds, packages, and smoke-tests both targets. The passing
+- The [1.0.0 release](https://github.com/sandover/plasmite/releases/tag/v1.0.0)
+  publishes both archives and `sha256sums.txt`. The earlier
   [ARM SDK CI run](https://github.com/sandover/plasmite/actions/runs/36803923793)
-  retains verified archives for 30 days under `ci-sdk-aarch64-unknown-linux-gnu`
-  and `ci-sdk-armv7-unknown-linux-gnueabihf`; each includes checksums and build
-  provenance. Physical Raspberry Pi testing and published-release verification
-  remain separate checks.
+  remains historical validation evidence. Physical Raspberry Pi installation
+  and reboot checks remain pending; publication does not promote the preview
+  tier.
 - ARMv6 is outside this preview. npm, PyPI, and Homebrew remain unchanged.
 
 ## Windows support policy

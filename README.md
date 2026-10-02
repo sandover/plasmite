@@ -33,10 +33,8 @@ while they inspect it.
 For IPC across machines, `pls serve` exposes local pools over HTTPS. Native
 clients and browsers connect with an access key. A local MCP process can use a
 saved native connection; a remote MCP harness can authorize in the browser.
-The access-key workflow is part of the upcoming 1.0 release. To try the
-candidate before publication, use a
-[Linux ARM preview archive](docs/record/distribution.md#linux-arm-sdk-preview-install)
-or [build from source](docs/building.md#install-the-cli-from-source), then follow
+The access-key workflow is available in Plasmite 1.0. Install through the
+channels below, then follow
 [Share your first pool](docs/record/serving.md#share-your-first-pool).
 
 #### Local IPC
@@ -143,7 +141,8 @@ Installs the CLI (`plasmite` + `pls`) and the full SDK (`libplasmite`, C header,
 
 ### Linux ARM / Raspberry Pi (preview)
 
-Prebuilt ARM archives include `plasmite`, `pls`, and the full SDK. You can run
+The published [1.0.0 release](https://github.com/sandover/plasmite/releases/tag/v1.0.0)
+includes ARM archives with `plasmite`, `pls`, and the full SDK. You can run
 local pools and the HTTPS server without installing Rust or a desktop.
 
 | Linux userland | Archive suffix | Minimum |
@@ -155,14 +154,13 @@ A Raspberry Pi 2 running Raspberry Pi OS Lite (32-bit) uses `linux_armv7`.
 Choose the archive for the installed userland; a 64-bit kernel can run a
 32-bit userland.
 
-Both targets passed [hosted CI](https://github.com/sandover/plasmite/actions/runs/36803923793),
+Both targets passed [earlier hosted CI](https://github.com/sandover/plasmite/actions/runs/36803923793),
 including extracted CLI/library checks and HTTPS recovery. ARMv7 uses QEMU
 emulation. Physical Pi installation and reboot checks remain pending.
 
-Until a release publishes the ARM archives, use the verified CI artifacts.
 See the [ARM installation guide](docs/record/distribution.md#linux-arm-sdk-preview-install)
-for downloads, checksums, and setup. ARMv7 pools can be at most 2 GiB minus one
-byte. ARMv6 falls outside this preview.
+for published downloads, checksums, and setup. ARMv7 pools can be at most
+2,147,483,647 bytes (2 GiB minus one byte). ARMv6 is unsupported.
 
 ### Rust
 
