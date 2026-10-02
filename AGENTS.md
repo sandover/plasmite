@@ -12,6 +12,7 @@ docs/
 ├── cookbook.md                                — Task-oriented examples; read when you want copy/paste CLI workflows
 ├── performance/transport-comparison.md        — Measured transport throughput; read when comparing native API and MCP paths
 ├── performance/1.0-release.md                  — Read when assessing 1.0 read costs, writer contention, or benchmark results
+├── performance/windows-access-1.0.md          — Read when comparing local, HTTP, and MCP access costs on Windows
 ├── performance/consumer-latency.rs             — Read when reproducing the full-consumer latency measurements
 │
 │   Design audits and proposals

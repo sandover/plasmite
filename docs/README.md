@@ -26,6 +26,8 @@ Start with the task you want to do:
   channels, and software development kit (SDK) layout.
 - [Transport measurements](performance/transport-comparison.md): compare
   native and Model Context Protocol (MCP) performance.
+- [Windows access measurements](performance/windows-access-1.0.md): compare
+  local libraries, command-line tools, HTTP, and MCP in Plasmite 1.0.0.
 - [1.0 performance measurements](performance/1.0-release.md): measured writer
   improvements, small-read costs and consumer latency on one Mac.
 
