@@ -515,26 +515,24 @@ For pools on this machine, configure the harness to launch Plasmite directly:
 }
 ```
 
-For a shared server, first run `plasmite access connect SERVER_URL` on this
-machine. After it saves the native connection, Plasmite prints setup commands
-for Claude Code and Codex CLI. Run the command for the harness you use. Each
-command starts a local stdio process that connects to the saved HTTPS
-destination:
+For a shared server, configure the harness to connect directly to its HTTPS
+`/mcp` address. The harness opens the server's OAuth authorization flow when
+you add or log in to the server:
 
 ```console
-claude mcp add --scope user --transport stdio plasmite -- /path/to/plasmite mcp --remote https://pools.example.com:8443
-codex mcp add plasmite -- /path/to/plasmite mcp --remote https://pools.example.com:8443
+claude mcp add --scope user --transport http plasmite https://pools.example.com:8443/mcp
+claude mcp login plasmite
+codex mcp add plasmite --url https://pools.example.com:8443/mcp --oauth-client-registration dcr --oauth-resource https://pools.example.com:8443/mcp
+codex mcp login plasmite --oauth-client-registration dcr
 ```
 
-Restart Claude Code after adding the server. See the
+Complete the OAuth login in your harness. See the
 [Claude Code MCP guide](https://code.claude.com/docs/en/mcp)
 and [Codex CLI MCP guide](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
 for current command options.
 
-The harness stores the command and server address, not the access key. Plasmite
-loads the saved key before each remote request, so disconnecting, replacing, or
-revoking that key affects the next tool call without restarting the process.
-The same tools, schemas, and write behavior apply to local and remote pools.
+The harness stores its OAuth credentials for that server. The same tools,
+schemas, and write behavior apply to local and remote pools.
 The MCP protocol contract is versioned in
 [`spec/mcp/2025-11-25/SPEC.md`](../spec/mcp/2025-11-25/SPEC.md). See the
 [serving guide](record/serving.md) for direct HTTP MCP setup.

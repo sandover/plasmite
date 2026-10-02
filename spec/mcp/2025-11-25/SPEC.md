@@ -2,8 +2,9 @@
 
 Plasmite implements the [Model Context Protocol (MCP) specification dated
 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25). Local
-standard input and output (stdio) and remote HTTPS expose the same tools,
-resources, inputs, and results through one dispatcher.
+standard input and output (stdio) exposes local pools. Direct HTTPS exposes
+shared pools. Both transports provide the same tools, resources, inputs, and
+results through one dispatcher.
 
 ## Lifecycle and methods
 
@@ -21,12 +22,9 @@ results do not add protocol-specific cache fields.
 
 ## Local stdio
 
-`plasmite mcp` uses local pools. `plasmite mcp --remote SERVER_URL` uses the
-saved native connection for that exact HTTPS destination. Plasmite reads the
-current saved credential before each tool operation, so disconnecting,
-replacing, or revoking the credential affects the next call. Harness
-configuration contains the command and server address, not the access key.
-Local MCP does not use OAuth.
+`plasmite mcp` uses local pools. It does not connect to remote servers. Harnesses
+that need shared pools connect directly to the server's HTTPS MCP endpoint and
+complete OAuth authorization. Local MCP does not use OAuth.
 
 The process reads newline-delimited JSON-RPC from standard input, writes only
 JSON-RPC messages to standard output, and exits when standard input closes.
@@ -76,9 +74,9 @@ family when given either its access or current refresh token. Both token kinds
 are stored as hashes in the owner's private serving state. Their records name
 an access key ID, never the key secret.
 
-Every MCP operation checks the access key's current revocation state. Key
-revocation stops new work and idle waits for browser, native, local MCP, and
-direct MCP clients that share it. Refresh and code exchange also fail after
+Every direct MCP operation checks the access key's current revocation state.
+Key revocation stops new work and idle waits for browser, native, and direct
+MCP clients that share it. Refresh and code exchange also fail after
 revocation. Token revocation blocks new MCP calls; an already admitted wait may
 complete within its 60-second cap. Key revocation cancels active waits. An
 access key for another server cannot approve this one.

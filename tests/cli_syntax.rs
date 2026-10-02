@@ -14,7 +14,6 @@ fn serve_and_invite_accept_positional_values() {
             "--help",
         ],
         &["access", "invite", "laptop", "--help"],
-        &["mcp", "https://pools.example.com:9743", "--help"],
     ];
 
     for args in cases {
@@ -37,12 +36,6 @@ fn legacy_server_and_invite_flags_remain_accepted() {
             "--help",
         ],
         &["access", "invite", "--name", "laptop", "--help"],
-        &[
-            "mcp",
-            "--remote",
-            "https://pools.example.com:9743",
-            "--help",
-        ],
     ];
 
     for args in cases {
@@ -72,18 +65,6 @@ fn positional_and_legacy_destination_inputs_cannot_be_combined() {
             "https://two.example.com:9743",
         ],
         &["access", "invite", "one", "--name", "two"],
-        &[
-            "mcp",
-            "https://one.example.com:9743",
-            "--remote",
-            "https://two.example.com:9743",
-        ],
-        &[
-            "mcp",
-            "https://pools.example.com:9743",
-            "--dir",
-            "/tmp/plasmite-cli-syntax",
-        ],
     ];
 
     for args in cases {

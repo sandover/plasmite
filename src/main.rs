@@ -117,26 +117,6 @@ fn run() -> Result<RunOutcome, (Error, ColorMode, bool)> {
             json_output,
         ));
     }
-    if !cli.dir.is_empty()
-        && matches!(
-            &cli.command,
-            cli::args::Command::Mcp {
-                server: Some(_),
-                ..
-            } | cli::args::Command::Mcp {
-                remote: Some(_),
-                ..
-            }
-        )
-    {
-        return Err((
-            Error::new(ErrorKind::Usage)
-                .with_message("SERVER cannot be combined with --dir")
-                .with_hint("Use --dir for local MCP or SERVER for a saved server connection."),
-            color_mode,
-            json_output,
-        ));
-    }
     let pool_dir = cli.dir.into_iter().next().unwrap_or_else(default_pool_dir);
     let result = cli::dispatch(
         cli.command,
@@ -344,7 +324,7 @@ mod tests {
                 ],
             ),
             ("plasmite help", vec![]),
-            ("plasmite mcp", vec!["help", "remote"]),
+            ("plasmite mcp", vec!["help"]),
             ("plasmite pool", vec!["help"]),
             (
                 "plasmite pool create",

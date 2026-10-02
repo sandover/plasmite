@@ -69,7 +69,7 @@ fn global_version_has_one_product_identity_at_every_position() {
 }
 
 #[test]
-fn mcp_uses_shared_directory_and_rejects_remote_server_combination() {
+fn mcp_uses_shared_directory_and_rejects_removed_remote_forms() {
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("pools");
     let path = dir.to_str().unwrap();
@@ -82,6 +82,8 @@ fn mcp_uses_shared_directory_and_rejects_remote_server_combination() {
         );
     }
     for args in [
+        vec!["mcp", "https://localhost:9743"],
+        vec!["mcp", "--remote", "https://localhost:9743"],
         vec!["--dir", path, "mcp", "--remote", "https://localhost:9743"],
         vec!["mcp", "--remote", "https://localhost:9743", "--dir", path],
         vec!["--dir", path, "mcp", "https://localhost:9743"],
@@ -89,10 +91,7 @@ fn mcp_uses_shared_directory_and_rejects_remote_server_combination() {
     ] {
         let output = cmd().args(args).output().unwrap();
         assert_eq!(output.status.code(), Some(2));
-        assert!(
-            String::from_utf8_lossy(&output.stderr)
-                .contains("SERVER cannot be combined with --dir")
-        );
+        assert!(String::from_utf8_lossy(&output.stderr).contains("unexpected argument"));
     }
 }
 

@@ -1,6 +1,7 @@
 # Sharing Plasmite Pools Securely
 
-Status: proposal
+Status: historical design proposal. For current setup and behavior, see the
+[serving guide](../record/serving.md) and [MCP contract](../../spec/mcp/2025-11-25/SPEC.md).
 
 Implementation note: the tested MCP wire contract uses 2025-11-25. The
 installed Claude Code and Codex CLI harnesses still start with `initialize`,

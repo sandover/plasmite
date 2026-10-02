@@ -1,7 +1,7 @@
 # Proposed CLI surface
 
-This records the CLI design chosen across 1.0 and the additive 1.1 server
-startup work. The [CLI contract](../../spec/v0/SPEC.md) governs shipped behavior.
+Historical design proposal. Current command behavior is documented in the
+[CLI guide](../cli.md) and [CLI contract](../../spec/v0/SPEC.md).
 
 A pool is a persistent, bounded stream of JSON messages. Multiple processes
 can append and read independently. Local use requires no server. Remote use
@@ -49,7 +49,7 @@ Share and connect
   access untrust SHA256                     remove trust for one exact certificate
 
 Integrate and learn
-  mcp [SERVER]                              run Model Context Protocol over stdin/stdout
+  mcp                                      run Model Context Protocol over stdin/stdout
   completion SHELL                          print a shell completion script
   version                                   print the build version
   help [COMMAND...]                         show root or command help
@@ -133,8 +133,7 @@ Both `-h` and `--help` contain essential facts. The CLI guide owns shared rules;
 the cookbook owns recipes. `pls` uses the same interface as `plasmite`.
 
 Plasmite 1.0 shipped the shared output, target, and history rules.
-Plasmite 1.1 adds positional `serve SERVER`, `access invite NAME`, and
-`mcp SERVER`, with the prior option spellings still accepted. The
+Plasmite 1.1 adds positional `serve SERVER` and `access invite NAME`, with the prior option spellings still accepted. The
 positional server URL has a new listener-port default; the older
 `--shared-address` form keeps its 1.0 meaning. The two forms are not
 exact aliases for listener selection.

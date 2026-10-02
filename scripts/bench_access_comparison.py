@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from bench_transport_comparison import HttpsMcp, StdioMcp, native_request, serialized_payload, summary
+from bench_transport_comparison import HttpsMcp, PROTOCOL_VERSION, native_request, serialized_payload, summary
 
 
 class Worker:
@@ -117,6 +117,65 @@ class McpPool:
 
     def close(self):
         self.client.close()
+
+
+class LocalDiskMcp:
+    def __init__(self, executable, directory):
+        self.process = subprocess.Popen([str(executable), "--dir", directory, "mcp"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1)
+        self.next_id = 1
+        try:
+            response = self.call("initialize", {"protocolVersion": PROTOCOL_VERSION, "capabilities": {},
+                "clientInfo": {"name": "access-benchmark", "version": "1"}})
+            if response.get("protocolVersion") != PROTOCOL_VERSION:
+                raise RuntimeError("unexpected local MCP protocol")
+            self.notify_initialized()
+        except BaseException:
+            self.close()
+            raise
+
+    def call(self, method, params):
+        if self.process.poll() is not None:
+            raise RuntimeError(f"local MCP process exited with {self.process.returncode}")
+        request_id = self.next_id
+        self.next_id += 1
+        request = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+        self.process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
+        self.process.stdin.flush()
+        line = self.process.stdout.readline()
+        if not line:
+            raise RuntimeError("local MCP closed stdout before replying")
+        response = json.loads(line)
+        if "error" in response:
+            raise RuntimeError(f"local MCP {method} failed: {response['error']}")
+        if response.get("id") != request_id:
+            raise RuntimeError(f"local MCP returned mismatched request id for {method}")
+        return response["result"]
+
+    def notify_initialized(self):
+        notification = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+        self.process.stdin.write(json.dumps(notification, separators=(",", ":")) + "\n")
+        self.process.stdin.flush()
+
+    def tool(self, name, arguments):
+        result = self.call("tools/call", {"name": name, "arguments": arguments})
+        if result.get("isError"):
+            raise RuntimeError(f"local MCP tool {name} failed: {result.get('content')}")
+        return result["structuredContent"]
+
+    def close(self):
+        if self.process.poll() is not None:
+            return
+        try:
+            self.process.stdin.close()
+        except OSError:
+            pass
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=5)
+            raise RuntimeError("local MCP process did not stop after stdin closed")
 
 
 class CliPool:
@@ -234,7 +293,6 @@ def main():
         "local_http_node": lambda: Worker([args.node, str(root / "scripts" / "bench_access_node.cjs"), "http", str(root), args.local_server, args.pool]),
         "https_node": lambda: Worker([args.node, str(root / "scripts" / "bench_access_node.cjs"), "https", str(root), args.server, args.pool, args.access_key_file]),
         "https_cli": lambda: CliPool(binary, args.pool_dir, args.server + "/" + args.pool),
-        "remote_stdio_mcp": lambda: McpPool(StdioMcp(binary, args.server), args.pool),
         "direct_https_mcp": lambda: McpPool(HttpsMcp(args.server + "/mcp", key, args.ca_file), args.pool),
     }
     lanes = args.lanes or list(factories)
@@ -292,19 +350,5 @@ def main():
         if cleanup_errors:
             raise RuntimeError("client cleanup failed: " + "; ".join(cleanup_errors))
     print(f"Wrote {args.output}", file=sys.stderr)
-
-
-class LocalDiskMcp(StdioMcp):
-    def __init__(self, executable, directory):
-        self.process = subprocess.Popen([str(executable), "--dir", directory, "mcp"],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1)
-        self.next_id = 1
-        response = self.call("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
-            "clientInfo": {"name": "access-benchmark", "version": "1"}})
-        if response.get("protocolVersion") != "2025-11-25":
-            raise RuntimeError("unexpected local MCP protocol")
-        self.notify_initialized()
-
-
 if __name__ == "__main__":
     main()

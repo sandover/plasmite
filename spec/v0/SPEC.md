@@ -13,11 +13,13 @@ It keeps only script-level guarantees; signatures, walkthroughs, and examples li
 ## Versioning + Compatibility
 
 - The CLI surface follows the package major version: `1.x`.
-- Within 1.x, compatibility is additive-only.
+- Within 1.x, compatibility is additive-only, except for the one-time 1.1.0
+  correction that removes the remote MCP bridge, which was added in 1.0.0.
 - Existing commands, machine-readable flags, and field meanings must not be removed or redefined.
 - New commands/flags/fields may be added when existing behavior remains stable.
-- Any breaking change requires a new major version. Plasmite 1.0 removes superseded secure connection commands and options and
-  changes default output and history selection. See
+- Any other breaking change requires a new major version. Plasmite 1.0 removes
+  superseded secure connection commands and options and changes default output
+  and history selection. See
   [the upgrade guide](../../docs/record/upgrading-1.0.md).
 
 ## Stable Surface
@@ -178,9 +180,9 @@ Plasmite 1.0 provides native access-key sharing. It keeps the existing spec path
   fields; successful `uninstall` reports `state: "uninstalled"`, `startup: false`, and
   `setup: null`. `serve logs --json` streams JSON Lines with one
   `message` field per installed server log line.
-- `mcp SERVER` uses a saved native HTTPS connection. The older
-  `mcp --remote SERVER` form remains accepted; neither remote form can
-  combine with local `--dir`.
+- Local `mcp` exposes local pools over stdio. Shared pools use direct HTTPS
+  MCP with harness OAuth. MCP methods and messages follow the separately
+  versioned [MCP contract](../mcp/2025-11-25/SPEC.md).
 
 ## Data + Error Contract
 
@@ -242,7 +244,9 @@ Plasmite 1.0 provides native access-key sharing. It keeps the existing spec path
 
 The following details are outside the stable machine contract:
 
-- `plasmite mcp --remote SERVER_URL` uses a saved native HTTPS connection for a local stdio MCP process. MCP methods and messages follow the separately versioned [MCP contract](../mcp/2025-11-25/SPEC.md).
+- Local `plasmite mcp` uses local pools over stdio. Shared servers use direct
+  HTTPS MCP with harness OAuth. MCP methods and messages follow the separately
+  versioned [MCP contract](../mcp/2025-11-25/SPEC.md).
 - Remote shorthand refs in CLI commands
 - Notice payload details and frequency controls
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare the long-lived native API, saved-connection MCP, and HTTPS MCP."""
+"""Compare the long-lived native API and direct HTTPS MCP."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 
 PROTOCOL_VERSION = "2025-11-25"
-LANES = ("native_api", "local_mcp", "https_mcp")
+LANES = ("native_api", "https_mcp")
 
 
 def command_output(*command: str) -> str:
@@ -31,64 +31,6 @@ def command_output(*command: str) -> str:
         return subprocess.run(command, check=True, capture_output=True, text=True).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         return "unavailable"
-
-
-class StdioMcp:
-    def __init__(self, executable: Path, server: str):
-        self.process = subprocess.Popen(
-            [str(executable), "mcp", "--remote", server],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=None,
-            text=True,
-            bufsize=1,
-        )
-        self.next_id = 1
-        initialized = self.call("initialize", {
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {},
-            "clientInfo": {"name": "plasmite-transport-benchmark", "version": "1"},
-        })
-        if initialized.get("protocolVersion") != PROTOCOL_VERSION:
-            raise RuntimeError(f"local MCP negotiated unexpected protocol version: {initialized.get('protocolVersion')}")
-        self.notify_initialized()
-        self.server_info = initialized.get("serverInfo", {})
-
-    def call(self, method: str, params: dict[str, object]) -> dict[str, object]:
-        if self.process.poll() is not None:
-            raise RuntimeError(f"local MCP process exited with {self.process.returncode}")
-        request_id = self.next_id
-        self.next_id += 1
-        payload = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
-        assert self.process.stdin is not None and self.process.stdout is not None
-        self.process.stdin.write(json.dumps(payload, separators=(",", ":")) + "\n")
-        self.process.stdin.flush()
-        line = self.process.stdout.readline()
-        if not line:
-            raise RuntimeError("local MCP closed stdout before replying")
-        response = json.loads(line)
-        if "error" in response:
-            raise RuntimeError(f"local MCP {method} failed: {response['error']}")
-        if response.get("id") != request_id:
-            raise RuntimeError(f"local MCP returned mismatched request id for {method}")
-        return response["result"]
-
-    def notify_initialized(self) -> None:
-        assert self.process.stdin is not None
-        payload = {"jsonrpc": "2.0", "method": "notifications/initialized"}
-        self.process.stdin.write(json.dumps(payload, separators=(",", ":")) + "\n")
-        self.process.stdin.flush()
-
-    def tool(self, name: str, arguments: dict[str, object]) -> dict[str, object]:
-        result = self.call("tools/call", {"name": name, "arguments": arguments})
-        if result.get("isError"):
-            raise RuntimeError(f"local MCP tool {name} failed: {result.get('content')}")
-        return result["structuredContent"]
-
-    def close(self) -> None:
-        if self.process.poll() is None:
-            self.process.stdin.close()
-            self.process.wait(timeout=5)
 
 
 class HttpsMcp:
@@ -341,7 +283,7 @@ def native_request(process: subprocess.Popen[str], request: dict[str, object]) -
 
 
 def append_batch(lane: str, data: list[dict[str, str]], native: subprocess.Popen[str],
-                 local: StdioMcp, direct: HttpsMcp, pool: str) -> dict[str, object]:
+                 direct: HttpsMcp, pool: str) -> dict[str, object]:
     started = time.perf_counter_ns()
     if lane == "native_api":
         response = native_request(native, {"op": "append", "items": data})
@@ -349,12 +291,11 @@ def append_batch(lane: str, data: list[dict[str, str]], native: subprocess.Popen
         sequences = response["result"]["sequences"]
         total = response["elapsed_ns"]
     else:
-        client = local if lane == "local_mcp" else direct
         latencies = []
         sequences = []
         for item in data:
             call_started = time.perf_counter_ns()
-            result = client.tool("plasmite_feed", {"pool": pool, "data": item, "create": False})
+            result = direct.tool("plasmite_feed", {"pool": pool, "data": item, "create": False})
             latencies.append(time.perf_counter_ns() - call_started)
             sequences.append(result["message"]["seq"])
         total = time.perf_counter_ns() - started
@@ -364,18 +305,17 @@ def append_batch(lane: str, data: list[dict[str, str]], native: subprocess.Popen
 
 
 def read_batch(lane: str, sequences: list[int], expected: list[dict[str, str]], native: subprocess.Popen[str],
-               local: StdioMcp, direct: HttpsMcp, pool: str) -> tuple[list[int], int]:
+               direct: HttpsMcp, pool: str) -> tuple[list[int], int]:
     started = time.perf_counter_ns()
     if lane == "native_api":
         response = native_request(native, {"op": "read", "sequences": sequences, "expected": expected})
         if response["result"]["verified_count"] != len(sequences):
             raise RuntimeError("native API helper verified the wrong read count")
         return response["latencies_ns"], response["elapsed_ns"]
-    client = local if lane == "local_mcp" else direct
     latencies = []
     for sequence, data in zip(sequences, expected, strict=True):
         call_started = time.perf_counter_ns()
-        result = client.tool("plasmite_fetch", {"pool": pool, "seq": sequence})
+        result = direct.tool("plasmite_fetch", {"pool": pool, "seq": sequence})
         latencies.append(time.perf_counter_ns() - call_started)
         message = result["message"]
         if message["seq"] != sequence or message["data"] != data:
@@ -404,14 +344,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         raise RuntimeError("access-key file did not contain an access key")
     native = subprocess.Popen([str(helper), args.server, args.pool, str(access_key_path)], stdin=subprocess.PIPE,
                               stdout=subprocess.PIPE, stderr=None, text=True, bufsize=1)
-    local: StdioMcp | None = None
     direct: HttpsMcp | None = None
     raw_runs: list[dict[str, object]] = []
     try:
         native_info = native_request(native, {"op": "info"})["result"]["file_size"]
-        local = StdioMcp(binary, args.server)
         direct = HttpsMcp(args.mcp_url, access_key, args.ca_file)
-        clients = {"native_api": native, "local_mcp": local, "https_mcp": direct}
+        clients = {"native_api": native, "https_mcp": direct}
         versions = {
             "plasmite_cli": command_output(str(binary), "--version"),
             "cargo": command_output("cargo", "--version"),
@@ -423,18 +361,16 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "cpu": platform.processor() or "unavailable",
             "server_mcp": direct.server_info,
         }
-        local_info = local.tool("plasmite_pool_info", {"pool": args.pool})["pool"]["file_size"]
         direct_info = direct.tool("plasmite_pool_info", {"pool": args.pool})["pool"]["file_size"]
-        if len({native_info, local_info, direct_info}) != 1:
-            raise RuntimeError("the three transports reported different pool sizes")
-        required = (
-            args.messages * args.repeats * len(LANES) + len(args.sizes) * len(LANES)
-        ) * (max(args.sizes) + 128) + 1_048_576
+        if native_info != direct_info:
+            raise RuntimeError("the native API and HTTPS MCP reported different pool sizes")
+        retained_messages = (args.messages * args.repeats + len(args.sizes)) * len(LANES)
+        required = retained_messages * (max(args.sizes) + 128) + 1_048_576
         if native_info < required:
             raise RuntimeError(
                 f"pool is {native_info} bytes; this run needs at least {required} bytes to retain every measured message"
             )
-        # Warm append and exact fetch through all three initialized clients for each size.
+        # Warm append and exact fetch through both clients for each size.
         for size in args.sizes:
             for lane, client in clients.items():
                 warm = serialized_payload(size, 0, 0, lane)
@@ -461,7 +397,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 }
                 run_records: dict[str, dict[str, object]] = {}
                 for lane in order:
-                    append = append_batch(lane, data_by_lane[lane], native, local, direct, args.pool)
+                    append = append_batch(lane, data_by_lane[lane], native, direct, args.pool)
                     run_records[lane] = {
                         "append": summary(append["latencies"], append["total"]),
                         "sequences": append["sequences"],
@@ -469,7 +405,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                     }
                 for lane in order:
                     sequences = run_records[lane]["sequences"]
-                    latency, elapsed = read_batch(lane, sequences, data_by_lane[lane], native, local, direct, args.pool)
+                    latency, elapsed = read_batch(lane, sequences, data_by_lane[lane], native, direct, args.pool)
                     run_records[lane]["read"] = summary(latency, elapsed)
                     run_records[lane]["readback_verified"] = len(latency)
                 raw_runs.append({"payload_bytes": size, "repeat": repeat, "lane_order": order,
@@ -477,12 +413,11 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 print(f"Completed {size}-byte repeat {repeat}/{args.repeats}", file=sys.stderr)
     finally:
         cleanup_errors = []
-        for name, client in (("HTTPS MCP", direct), ("local MCP", local)):
-            if client is not None:
-                try:
-                    client.close()
-                except Exception as error:
-                    cleanup_errors.append(f"{name}: {error}")
+        if direct is not None:
+            try:
+                direct.close()
+            except Exception as error:
+                cleanup_errors.append(f"HTTPS MCP: {error}")
         try:
             if native.poll() is None:
                 native.stdin.close()
@@ -504,7 +439,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 
     return {
         "schema_version": 1,
-        "benchmark": "plasmite-native-local-mcp-https-mcp",
+        "benchmark": "plasmite-native-api-https-mcp",
         "started_at_utc": started_at,
         "versions": versions,
         "configuration": {
@@ -519,11 +454,11 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "repeats": args.repeats,
             "concurrency": 1,
             "durability": "fast",
-            "warmup": "Each lane performed an MCP initialize/initialized handshake, pool-info request, and an untimed append and exact fetch for every payload size before timing.",
+            "warmup": "HTTPS MCP completed initialize/initialized and pool-info checks. Both lanes performed an untimed append and exact fetch for every payload size before timing.",
             "oauth": "Registered a dynamic public client, approved the exact MCP resource with the protected key file, exchanged a PKCE code, and revoked the grant at exit; bearer and refresh tokens stayed in memory.",
             "oauth_refreshes": direct.refresh_count,
             "timed_calls": "One append or one exact fetch per operation; no batching and no model provider.",
-            "limitations": "Native API uses the saved-connection RemoteClient. Timing excludes process startup and measures client calls; direct MCP uses a persistent HTTPS connection and local MCP uses one initialized stdio process.",
+            "limitations": "Native API uses the saved-connection RemoteClient. Timing excludes process startup and measures client calls; HTTPS MCP uses one persistent HTTPS connection.",
         },
         "runs": raw_runs,
     }

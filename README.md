@@ -202,9 +202,9 @@ A local Model Context Protocol (MCP) process can work directly with local pools:
 pls --dir ./pools mcp
 ```
 
-A local MCP process can use a saved native connection; a remote MCP harness
-can authorize in the browser. See [AI client setup](docs/record/serving.md#connect-an-ai-client)
-for Claude Code and Codex CLI.
+For shared pools, Claude Code and Codex CLI connect directly to the server's
+HTTPS MCP endpoint and authorize in the browser. They do not need a local
+Plasmite installation. See [AI client setup](docs/record/serving.md#connect-an-ai-client).
 
 ## How it works
 
@@ -370,7 +370,7 @@ for output flags, history rules, and secure-sharing migration.
 
 | | |
 |---|---|
-| `mcp` [*server*] | Run local or saved remote Model Context Protocol over stdin/stdout |
+| `mcp` | Run local Model Context Protocol over stdin/stdout |
 | `version` | Print version information |
 | `completion` *shell* | Generate shell completion |
 

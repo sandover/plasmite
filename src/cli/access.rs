@@ -38,7 +38,12 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
             let access_key = crate::secure_serve::invite(context.pool_dir(), &name)?;
             if !json_output {
                 println!("Access key for {}: {access_key}", human_literal(&name));
-                println!("On the client machine, run `plasmite access connect <server-address>`.");
+                println!(
+                    "Use this key to sign in through the server's web page or approve your MCP client."
+                );
+                println!(
+                    "For Plasmite CLI access, run `plasmite access connect <server-address>` on the client machine."
+                );
             } else {
                 println!("{}", json!({ "name": name, "access_key": access_key }));
             }
@@ -237,6 +242,14 @@ fn emit_status(
             println!("\nAdd Plasmite to your MCP client:");
             println!("Claude Code: {}", human_literal(&commands[0]));
             println!("Codex CLI:  {}", human_literal(&commands[1]));
+            #[cfg(windows)]
+            println!("Run these commands in PowerShell.");
+            println!(
+                "Then sign in from the MCP client and enter the access key in its browser approval page."
+            );
+            println!(
+                "The saved native connection is for Plasmite commands; it does not sign in the MCP client."
+            );
         }
     } else {
         println!(
@@ -335,24 +348,24 @@ fn format_expiry(timestamp: i64) -> String {
 }
 
 fn setup_commands(destination: &str) -> [String; 2] {
-    let executable = std::env::current_exe()
-        .ok()
-        .and_then(|path| path.into_os_string().into_string().ok())
-        .unwrap_or_else(|| "plasmite".to_string());
-    let executable = shell_quote(&executable);
-    let destination = shell_quote(destination);
+    let endpoint = format!("{}/mcp", destination.trim_end_matches('/'));
+    let endpoint = shell_quote(&endpoint);
     [
+        format!("claude mcp add --scope user --transport http plasmite {endpoint}"),
         format!(
-            "claude mcp add --scope user --transport stdio plasmite -- {executable} mcp --remote {destination}"
+            "codex mcp add plasmite --url {endpoint} --oauth-client-registration dcr --oauth-resource {endpoint}"
         ),
-        format!("codex mcp add plasmite -- {executable} mcp --remote {destination}"),
     ]
 }
 
 fn shell_quote(value: &str) -> String {
-    if cfg!(windows) {
-        format!("\"{value}\"")
-    } else {
+    #[cfg(windows)]
+    {
+        // PowerShell treats doubled apostrophes as one literal apostrophe.
+        format!("'{}'", value.replace('\'', "''"))
+    }
+    #[cfg(not(windows))]
+    {
         format!("'{}'", value.replace('\'', "'\\''"))
     }
 }
@@ -476,5 +489,40 @@ impl TerminalEcho {
     fn disable() -> Result<Self, Error> {
         Err(Error::new(plasmite::api::ErrorKind::Io)
             .with_message("hidden access key input is unsupported on this platform"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{setup_commands, shell_quote};
+
+    #[test]
+    fn setup_commands_use_direct_http_mcp_with_oauth() {
+        let commands = setup_commands("https://pools.example.net/");
+        let endpoint = shell_quote("https://pools.example.net/mcp");
+        assert_eq!(
+            commands,
+            [
+                format!("claude mcp add --scope user --transport http plasmite {endpoint}"),
+                format!(
+                    "codex mcp add plasmite --url {endpoint} --oauth-client-registration dcr --oauth-resource {endpoint}"
+                ),
+            ]
+        );
+        assert!(
+            commands
+                .iter()
+                .all(|command| !command.contains("mcp --remote"))
+        );
+    }
+
+    #[test]
+    fn shell_quote_handles_quotes_and_shell_metacharacters() {
+        let expected = if cfg!(windows) {
+            "'pool''s & address'"
+        } else {
+            "'pool'\\''s & address'"
+        };
+        assert_eq!(shell_quote("pool's & address"), expected);
     }
 }

@@ -1,5 +1,10 @@
 # Plasmite 1.0.0 access on Windows
 
+The timing tables measure the 1.0.0 interfaces. Rows named "Remote MCP process
+over HTTPS" use the local bridge removed in 1.1.0. Current shared-pool MCP
+setup uses direct HTTPS; see the
+[serving guide](../record/serving.md#connect-an-ai-client).
+
 ## Executive summary
 
 Plasmite’s local libraries handle small writes in tens of microseconds, with reads faster still. Direct Model Context Protocol (MCP) access needs no Plasmite install on the client and our median call took under a millisecond, about half a millisecond more than native HTTPS with a key in memory. If you’re moving lots of messages, keep your client connection open or stream them through the CLI, because starting the CLI for every message costs tens of milliseconds. Our Windows VM runs x64 software on Arm, and these figures leave out login, model response time, and Internet latency.
@@ -114,6 +119,8 @@ A separate direct-MCP check rejects every client subprocess and every import of 
 
 Use a dedicated pool and disposable access key. Keep the key file owner-only. The request runner creates a private saved-connection store and removes it after clients stop, so it leaves existing saved connections alone. It accepts a JSON key file with an `access_key` field or a plain-text key. Use a CA file that trusts the server's certificate. See [serving](../record/serving.md) for server and trust setup and [building](../building.md) for the Windows compiler prerequisites.
 
+The historical tables include 21 request paths, including the `remote_stdio_mcp` bridge. To reproduce those rows, check out source commit `4fe156a126175ff73732414f68a22f851af53001` listed above. The current runner covers 20 paths and omits that removed bridge.
+
 From an x64 Visual Studio developer terminal with `clang-cl` on `PATH`, build the CLI, library, and native helpers:
 
 ```powershell
@@ -140,7 +147,7 @@ python scripts\bench_access_comparison.py `
   --node $NodeX64 --output access-session1.raw.json
 ```
 
-The defaults cover all 21 request paths with 100 messages, five repeats, and both sizes. Select individual paths with `--lanes`; for example, `--lanes https_rust_key https_rust remote_stdio_mcp direct_https_mcp` reproduces the principal remote comparison. For direct MCP alone, select `--lanes direct_https_mcp`; that path needs no local CLI, library, or Node build, and `--root` may point at a directory without Plasmite binaries. The common argument parser still accepts the unused pool-directory and local-server values.
+The current defaults cover all 20 request paths with 100 messages, five repeats, and both sizes. Select individual paths with `--lanes`; for example, `--lanes https_rust_key https_rust direct_https_mcp` compares the in-memory key, saved connection, and direct MCP paths. For direct MCP alone, select `--lanes direct_https_mcp`; that path needs no local CLI, library, or Node build, and `--root` may point at a directory without Plasmite binaries. The common argument parser still accepts the unused pool-directory and local-server values.
 
 The batch runner uses the current saved-connection store. Point `PLASMITE_ACCESS_HOME` at a disposable directory, run `plasmite access connect $SecureServer` with the test key, and then run:
 

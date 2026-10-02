@@ -130,14 +130,13 @@ revoke the server key. See [Share your first pool](record/serving.md#share-your-
 for setup, and the [serving guide](record/serving.md) for access recovery and
 browser or MCP connections.
 
-After `access connect`, Plasmite prints setup commands for Claude Code and
-Codex CLI. Each command starts `plasmite mcp SERVER_URL` over stdio.
-The older `mcp --remote SERVER_URL` form still works.
-The MCP process reads the saved connection before each remote request, so a
-later disconnect, replacement, or server-side revocation takes effect on the
-next tool call. Local and remote MCP follow the 2025-11-25 handshake and share
-the same tools and resources. See the [MCP contract](../spec/mcp/2025-11-25/SPEC.md)
-for the message and HTTP details.
+For shared pools, configure the harness to connect directly to the server's
+HTTPS `/mcp` address. The harness completes OAuth authorization in the browser;
+the local Plasmite CLI and its saved native connections are not involved. Local
+and direct HTTPS MCP follow the 2025-11-25 handshake and share the same tools
+and resources. See the [serving guide](record/serving.md#connect-an-ai-client)
+for setup and the [MCP contract](../spec/mcp/2025-11-25/SPEC.md) for message
+and HTTP details.
 
 ## Input
 
@@ -150,9 +149,9 @@ for the message and HTTP details.
 - `duplex` reads line-oriented chat from a terminal (requiring `--me`) and a
   JSON stream from non-terminal stdin.
 - `mcp` reads newline-delimited JSON-RPC from stdin until EOF and writes
-  JSON-RPC to stdout. Use `--dir DIR mcp` (or `mcp --dir DIR`) for local pools or
-  `mcp SERVER_URL` for a saved native HTTPS connection. A remote SERVER
-  cannot be combined with local `--dir`.
+  JSON-RPC to stdout. Use `--dir DIR mcp` (or `mcp --dir DIR`) to expose local
+  pools over stdio. For shared pools, connect the harness directly to the
+  server's HTTPS `/mcp` address.
 
 ## Output
 

@@ -47,12 +47,13 @@ policies. Start with [vision](record/vision.md) for product scope and
 [building](building.md), [testing](record/testing.md), and
 [releasing](record/releasing.md) when changing or shipping code.
 
-Design history lives in the proposals:
+Proposals record design history. Current setup and behavior live in the guides
+and specifications above:
 
-- [Secure sharing](proposals/serve-mcp-native.md)
+- [Secure sharing design history](proposals/serve-mcp-native.md)
 - [Earlier invitation design](proposals/serve-access-mvp.md)
 - [MCP server design](proposals/mcp-server.md)
 - [CLI and help audit](proposals/cli-help-system.md)
-- [Proposed CLI surface](proposals/cli-surface.md)
+- [Proposed CLI surface design history](proposals/cli-surface.md)
 
 The repository's `.ergo/` backlog and journal track planned work and results.

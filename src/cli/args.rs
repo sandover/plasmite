@@ -48,7 +48,7 @@ COMMANDS
     access untrust SHA256                Remove trust for one certificate
 
   Integrate and learn
-    mcp [SERVER]                        Run Model Context Protocol on stdio
+    mcp                                 Run local Model Context Protocol on stdin/stdout
     completion SHELL                    Print shell completion code
     version                             Print the build version
     help [COMMAND...]                   Show root or command help
@@ -269,40 +269,22 @@ CONSTRAINTS
     },
     #[command(
         display_order = 9,
-        about = "Serve local or remote MCP tools and resources on stdio",
-        long_about = r#"Start an MCP process on stdio.
-
-With no server, the process exposes local pools. Pass a SERVER to connect to a
-Plasmite server through this machine's saved native connection. Credentials stay
-in Plasmite's access store and are reloaded before each remote request.
+        about = "Serve local MCP tools and resources on stdin/stdout",
+        long_about = r#"Start an MCP process that exposes local pools.
 
 The process reads newline-delimited JSON-RPC requests from stdin and writes
-responses to stdout. It exits when stdin closes."#,
+responses to stdout. It exits when stdin closes. Use `--dir` to select the
+local pool directory.
+
+For a remote server, configure your MCP client with its HTTPS /mcp URL."#,
         after_help = r#"EXAMPLES
   $ plasmite mcp
   $ plasmite mcp --dir /path/to/pools
-  $ plasmite mcp https://pools.example.com:8443
 
 INPUT AND OUTPUT
-  Reads JSON-RPC on stdin and writes JSON-RPC on stdout until stdin closes.
-  --dir selects local pools. A remote SERVER uses a saved connection and cannot be combined with --dir.
-  The --remote option remains available for existing scripts."#
+  Reads JSON-RPC on stdin and writes JSON-RPC on stdout until stdin closes."#
     )]
-    Mcp {
-        #[arg(
-            value_name = "SERVER",
-            conflicts_with = "remote",
-            help = "Use a saved HTTPS connection to a Plasmite server"
-        )]
-        server: Option<String>,
-        #[arg(
-            long,
-            value_name = "SERVER_URL",
-            conflicts_with = "server",
-            help = "Legacy spelling for SERVER"
-        )]
-        remote: Option<String>,
-    },
+    Mcp,
     #[command(
         arg_required_else_help = true,
         display_order = 8,
@@ -310,7 +292,9 @@ INPUT AND OUTPUT
         long_about = r#"Create access keys and connect to a shared pool server.
 
 An access key grants access to every pool in the server’s pool directory.
-Create a key with `invite` on the server machine. Use `connect` and `status` on a client machine.
+Create a key with `invite` on the server machine. For Plasmite CLI access, use
+`connect` and `status` on the client machine. Remote MCP clients connect directly
+to the server's HTTPS /mcp URL and authorize through OAuth.
 `connect` asks for the key without displaying it."#
     )]
     Access {

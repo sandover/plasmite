@@ -35,6 +35,25 @@ to readable stderr; explicit JSON selects the structured error envelope.
 the whole invocation, including `mcp`; conflicting repeated values fail.
 Options after `tap`'s `--` belong to the child process.
 
+## Connect MCP clients to shared pools
+
+Plasmite 1.1.0 removes the remote MCP bridge introduced in 1.0.0. The removed
+forms are `plasmite mcp --remote SERVER_URL` and `plasmite mcp SERVER_URL`.
+This is a one-time correction to the 1.x CLI compatibility promise. Keep using
+`plasmite mcp` over stdio for local pools. For a shared server, configure the
+MCP harness to connect directly to `https://HOST[:PORT]/mcp` and complete its
+OAuth login. For example:
+
+```console
+claude mcp add --scope user --transport http plasmite https://pools.example.net:9743/mcp
+claude mcp login plasmite
+codex mcp add plasmite --url https://pools.example.net:9743/mcp --oauth-client-registration dcr --oauth-resource https://pools.example.net:9743/mcp
+codex mcp login plasmite --oauth-client-registration dcr
+```
+
+The harness and its authorization browser must trust the server certificate.
+The local Plasmite CLI does not need a saved connection for direct MCP access.
+
 ## Read history deliberately
 
 `--tail N` counts the last N retained messages before applying `--tag` and

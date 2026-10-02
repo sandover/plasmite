@@ -3,8 +3,9 @@
 pub mod support;
 
 use serde_json::{Value, json};
+use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 fn command(home: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_plasmite"));
@@ -19,6 +20,27 @@ fn success(output: Output) -> Output {
         String::from_utf8_lossy(&output.stderr)
     );
     output
+}
+
+fn access_connect(home: &Path, destination: &str, access_key: &str, json_output: bool) -> Output {
+    let mut cmd = command(home);
+    cmd.args(["access", "connect", destination]);
+    if json_output {
+        cmd.arg("--json");
+    }
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(format!("{access_key}\n").as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
 }
 
 #[test]
@@ -198,6 +220,59 @@ fn disconnect_reports_local_result_in_selected_format() {
     assert_eq!(
         serde_json::from_slice::<Value>(&machine.stdout).unwrap(),
         json!({"destination": destination, "credentials_saved": false})
+    );
+}
+
+#[test]
+fn access_connect_prints_direct_http_oauth_setup_for_humans_and_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let server = support::server::TestServer::try_start_oauth(temp.path()).unwrap();
+    let destination = format!("{}/", server.remote_url.trim_end_matches('/'));
+    let endpoint = format!("{}/mcp", server.remote_url.trim_end_matches('/'));
+    let human = success(access_connect(
+        &temp.path().join("human"),
+        &destination,
+        server.access_key(),
+        false,
+    ));
+    let human_text = String::from_utf8(human.stdout).unwrap();
+    assert!(human_text.contains("claude mcp add --scope user --transport http plasmite"));
+    assert!(human_text.contains("codex mcp add plasmite --url"));
+    assert!(human_text.contains(&endpoint));
+    assert!(human_text.contains("enter the access key in its browser approval page"));
+    assert!(human_text.contains("does not sign in the MCP client"));
+    assert!(!human_text.contains("mcp --remote"));
+
+    let machine = success(access_connect(
+        &temp.path().join("machine"),
+        &destination,
+        server.access_key(),
+        true,
+    ));
+    let value: Value = serde_json::from_slice(&machine.stdout).unwrap();
+    let commands = value["mcp_setup_commands"].as_array().unwrap();
+    assert_eq!(commands.len(), 2);
+    assert!(
+        commands[0]
+            .as_str()
+            .unwrap()
+            .contains("claude mcp add --scope user --transport http plasmite")
+    );
+    assert!(
+        commands[1]
+            .as_str()
+            .unwrap()
+            .contains("codex mcp add plasmite --url")
+    );
+    assert!(
+        commands
+            .iter()
+            .all(|command| command.as_str().unwrap().contains(&endpoint))
+    );
+    assert!(
+        commands
+            .iter()
+            .all(|command| !command.as_str().unwrap().contains("mcp --remote"))
     );
 }
 

@@ -168,6 +168,20 @@ fn short_help_exposes_material_command_constraints() {
 }
 
 #[test]
+fn mcp_help_distinguishes_local_pools_from_remote_https() {
+    let output = cmd().args(["mcp", "--help"]).output().expect("MCP help");
+    assert!(output.status.success());
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+    assert!(stdout.contains("exposes local pools"));
+    assert!(stdout.contains("stdin"));
+    assert!(stdout.contains("stdout"));
+    assert!(stdout.contains("HTTPS /mcp URL"));
+    assert!(!stdout.contains("--remote"));
+    let output = cmd().arg("--help").output().expect("root help");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("mcp [SERVER]"));
+}
+
+#[test]
 fn help_subcommand_is_enabled() {
     let output = cmd().arg("help").output().expect("help");
     assert!(output.status.success());

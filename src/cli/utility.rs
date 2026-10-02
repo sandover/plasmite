@@ -16,7 +16,7 @@ use std::io;
 pub(super) enum UtilityCommand {
     Version,
     Completion { shell: Shell },
-    Mcp { remote: Option<String> },
+    Mcp,
 }
 
 pub(super) fn run(command: UtilityCommand, context: &CliContext) -> Result<CommandResult, Error> {
@@ -40,13 +40,8 @@ pub(super) fn run(command: UtilityCommand, context: &CliContext) -> Result<Comma
             clap_complete::aot::generate(shell, &mut command, "plasmite", &mut io::stdout());
             Ok(CommandResult::ok())
         }
-        UtilityCommand::Mcp { remote } => {
-            if let Some(remote) = remote {
-                mcp_stdio::serve_remote(remote)?;
-            } else {
-                let pool_dir = context.pool_dir().to_path_buf();
-                mcp_stdio::serve(pool_dir)?;
-            }
+        UtilityCommand::Mcp => {
+            mcp_stdio::serve(context.pool_dir().to_path_buf())?;
             Ok(CommandResult::ok())
         }
     }

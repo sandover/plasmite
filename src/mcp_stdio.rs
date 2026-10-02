@@ -1,4 +1,4 @@
-//! Purpose: Run the experimental MCP server over stdio transport.
+//! Purpose: Run the local MCP server over stdin/stdout.
 //! Exports: `serve`.
 //! Role: Bridge newline-delimited JSON-RPC lines to the shared MCP dispatcher.
 //! Invariants: stdout only emits JSON-RPC messages (one JSON value per line).
@@ -16,11 +16,6 @@ use serde_json::{Map, Value, json};
 
 pub(super) fn serve(pool_dir: PathBuf) -> Result<(), Error> {
     serve_handler(PlasmiteMcpHandler::new(pool_dir))
-}
-
-pub(super) fn serve_remote(base_url: String) -> Result<(), Error> {
-    let handler = PlasmiteMcpHandler::with_remote_url(&base_url).map_err(|err| *err)?;
-    serve_handler(handler)
 }
 
 fn serve_handler<H: McpHandler>(handler: H) -> Result<(), Error> {

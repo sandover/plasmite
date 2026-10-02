@@ -1,10 +1,12 @@
 # Native and MCP transport performance
 
-On one macOS host with a warm saved connection, the long-lived native API was fastest. Across ten runs per condition, local Model Context Protocol (MCP) delivered 45–51% of native exact-read and append throughput. Direct Hypertext Transfer Protocol Secure (HTTPS) MCP delivered 71–78%.
+The measurements below are historical. They were collected on 2026-09-26 on one macOS host and compare three lanes: the native API, local Model Context Protocol (MCP) over the stdio bridge, and direct Hypertext Transfer Protocol Secure (HTTPS) MCP. The stdio bridge used `plasmite mcp --remote` and has since been removed. The table and raw sessions preserve those measurements; the current harness compares only the native API and direct HTTPS MCP.
 
-These results compare one client and server build on loopback. Each lane used the same pool, 100 individual operations per phase, sequential concurrency, and the same JSON application content. Append and exact-read timings were separate. The results do not include process startup, interactive login, or model response time.
+In those historical runs, the long-lived native API was fastest. Across ten runs per condition, local MCP delivered 45–51% of native exact-read and append throughput, while direct HTTPS MCP delivered 71–78%.
 
-## Results
+The measurements compare one client and server build on loopback. Each lane used the same pool, 100 individual operations per phase, sequential concurrency, and the same JSON application content. Append and exact-read timings were separate. The results do not include process startup, interactive login, or model response time.
+
+## Historical results from 2026-09-26
 
 Throughput is the median across ten timed runs; the range shows the slowest and fastest run. Latency shows the median of the per-run median and p95 call latency. The percentage compares each MCP lane's median throughput with the native API median for the same payload and operation.
 
@@ -25,21 +27,23 @@ Throughput is the median across ten timed runs; the range shows the slowest and 
 
 ## Workload and limits
 
-Each application value was a compact JSON object shaped like `{"payload":"…"}`. The byte count includes the braces, property name, quotes, and string, but excludes MCP and HTTPS fields. Each lane made 100 separate append calls, then fetched those exact sequence numbers with 100 separate read calls and checked every returned value. The pool used fast durability, had 64 MiB capacity, and held all messages. Concurrency was one.
+For the historical three-lane comparison, each application value was a compact JSON object shaped like `{"payload":"…"}`. The byte count includes the braces, property name, quotes, and string, but excludes MCP and HTTPS fields. Each lane made 100 separate append calls, then fetched those exact sequence numbers with 100 separate read calls and checked every returned value. The pool used fast durability, had 64 MiB capacity, and held all messages. Concurrency was one.
 
-The native lane kept one Rust `RemoteClient` alive over the saved connection. Its pinned TLS agent stayed warm across requests, while the client reloaded the saved credential for each call. Local MCP kept one initialized `plasmite mcp --remote` process alive. Direct MCP kept one HTTPS connection alive and sent individual tool calls. Each lane warmed up with an untimed append and exact fetch at each size; MCP clients also completed `initialize` and `notifications/initialized` before timing. All lanes checked their pool capacity before the timed runs.
+The native lane kept one Rust `RemoteClient` alive over the saved connection. Its pinned TLS agent stayed warm across requests, while the client reloaded the saved credential for each call. Local MCP kept one initialized `plasmite mcp --remote` process alive. Direct MCP kept one HTTPS connection alive and sent individual tool calls. Each lane warmed up with an untimed append and exact fetch at each size; MCP clients also completed `initialize` and `notifications/initialized` before timing. All three lanes checked their pool capacity before the timed runs.
 
 All clients and the server ran on the same Mac, so HTTPS used loopback. Both reported Plasmite 0.8.0. The client ran macOS 26.6.2 on arm64 with Rust 1.88.0 and CPython 3.14.7. The direct MCP lane used the `2025-11-25` handshake. This measures request paths without a model. Direct MCP calls ran through a Python HTTP client; native calls ran in a Rust helper, so the table includes the interface work required by each client as well as the server path.
 
-The direct lane remained slower than the native API after the native TLS connection was kept warm. Each lane performed one append or one exact read per operation; the native helper did not batch API operations. The remaining gap reflects the complete client and protocol paths measured here, including MCP tool dispatch and its client framing. These figures describe this host and build, not performance over other networks or servers.
+The direct lane remained slower than the native API after the native TLS connection was kept warm. Each lane performed one append or one exact read per operation; the native helper did not batch API operations. The remaining gap reflects the complete client and protocol paths measured in this historical comparison, including MCP tool dispatch and client framing. These figures describe that host and build, not performance over other networks or servers.
 
 ## Reproduction
 
-The harness builds the release CLI and a small persistent native API helper. It records every operation latency and sequence number, run order, verification count, versions, machine information, and configuration in JSON. The raw output never includes the access key or OAuth tokens.
+The current harness compares the long-lived native API client with direct HTTPS MCP. It builds the release CLI and a small persistent native API helper. It records operation latencies and sequence numbers, run order, verification counts, versions, machine information, and configuration in JSON. The raw output never includes the access key or OAuth tokens.
 
-Prepare a dedicated pool with enough capacity for the retained messages, a disposable test access key, and a certificate authority (CA) file trusted by the test server. Keep the key in an owner-readable file (`chmod 600`); the harness accepts either a JSON object with an `access_key` field or the key as plain text. For direct MCP, the harness registers a throwaway public client, creates a Proof Key for Code Exchange (PKCE) verifier, requests a grant for the exact `/mcp` resource, and approves it through `/oauth/approve` using the protected key file. It exchanges and revokes the grant itself. Tokens stay in memory. No browser, model provider, or unexplained bearer token is required.
+The command requires `--server` (an HTTPS origin), `--mcp-url` (the exact `/mcp` URL on that host and port), `--pool`, `--access-key-file`, and `--output`. Optional settings are `--messages`, `--repeats`, `--sizes`, and `--ca-file`. Defaults are 100 messages per phase, five repeats, and payload sizes of 512 and 4,096 bytes. Use at least two repeats and payloads of at least 128 bytes.
 
-Run the command twice, changing the output path for the second session:
+Prepare a dedicated pool with enough capacity for the retained messages, a disposable test access key, and a certificate authority (CA) file that lets the test client verify the server. Keep the key in an owner-readable file (`chmod 600`); the harness accepts either a JSON object with an `access_key` field or the key as plain text. For direct MCP, the harness registers a throwaway public client, creates a Proof Key for Code Exchange (PKCE) verifier, requests a grant for the exact `/mcp` resource, and approves it through `/oauth/approve` using the protected key file. It exchanges and revokes the grant itself. Tokens stay in memory. No browser, model provider, or unexplained bearer token is required.
+
+Run the command twice, changing the output path for the second session. These paths keep new measurements separate from the historical files below.
 
 ```console
 python3 scripts/bench_transport_comparison.py \
@@ -48,10 +52,10 @@ python3 scripts/bench_transport_comparison.py \
   --pool transport-bench \
   --access-key-file "$KEY_FILE" \
   --ca-file "$CA_FILE" \
-  --output docs/performance/transport-comparison-2026-09-26.raw.json
+  --output /tmp/transport-comparison-current-1.raw.json
 ```
 
-The default run performs five repeats at each of 512 and 4,096 bytes, with 100 appends and 100 exact reads per lane in each repeat. The retained raw sessions contain all 10 repeats per condition:
+The default run performs five repeats at each size, with 100 appends and 100 exact reads per lane in each repeat. For the second session, change the output to `/tmp/transport-comparison-current-2.raw.json`. The historical raw sessions contain ten repeats per condition across the three lanes:
 
 - [First final-profile raw session](transport-comparison-2026-09-26.raw.json)
 - [Independent final-profile repeat](transport-comparison-2026-09-26-repeat2.raw.json)

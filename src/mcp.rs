@@ -14,7 +14,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::api::{
     Durability, Error, ErrorKind, LocalClient, Pool, PoolApiExt, PoolInfo, PoolOptions, PoolRef,
-    RemoteClient, RemotePool,
 };
 use crate::interface_wire::{ErrorKindWire, MessageWire, error_policy};
 use crate::since::{parse_rfc3339_ns, parse_since_ns as parse_shared_since_ns};
@@ -627,158 +626,8 @@ impl<H: McpHandler> McpDispatcher<H> {
 
 #[derive(Clone, Debug)]
 pub struct PlasmiteMcpHandler {
-    client: McpClient,
+    client: LocalClient,
     cancel: Option<Arc<AtomicBool>>,
-}
-
-#[derive(Clone)]
-enum McpClient {
-    Local(LocalClient),
-    Remote(RemoteClient),
-}
-
-enum McpPool {
-    Local(Pool),
-    Remote(RemotePool),
-}
-
-impl std::fmt::Debug for McpClient {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Local(_) => "Local",
-            Self::Remote(_) => "Remote",
-        })
-    }
-}
-
-impl McpClient {
-    fn remote(base_url: &str) -> Result<Self, Box<Error>> {
-        let client = RemoteClient::new(base_url).map_err(Box::new)?;
-        if client.base_url().scheme() != "https" {
-            return Err(Box::new(Error::new(ErrorKind::Usage)
-                .with_message("remote MCP requires an HTTPS server URL")
-                .with_hint("Save the server with `plasmite access connect https://…`, then retry with that URL.")));
-        }
-        Ok(Self::Remote(client))
-    }
-
-    fn list_pools(&self) -> Result<Vec<PoolInfo>, Box<Error>> {
-        match self {
-            Self::Local(client) => client.list_pools().map_err(Box::new),
-            Self::Remote(client) => client.list_pools().map_err(Box::new),
-        }
-    }
-
-    fn create_pool(
-        &self,
-        pool_ref: &PoolRef,
-        options: PoolOptions,
-    ) -> Result<PoolInfo, Box<Error>> {
-        match self {
-            Self::Local(client) => client.create_pool(pool_ref, options).map_err(Box::new),
-            Self::Remote(client) => client.create_pool(pool_ref, options).map_err(Box::new),
-        }
-    }
-
-    fn pool_info(&self, pool_ref: &PoolRef) -> Result<PoolInfo, Box<Error>> {
-        match self {
-            Self::Local(client) => client.pool_info(pool_ref).map_err(Box::new),
-            Self::Remote(client) => client.pool_info(pool_ref).map_err(Box::new),
-        }
-    }
-
-    fn delete_pool(&self, pool_ref: &PoolRef) -> Result<(), Box<Error>> {
-        match self {
-            Self::Local(client) => client.delete_pool(pool_ref).map_err(Box::new),
-            Self::Remote(client) => client.delete_pool(pool_ref).map_err(Box::new),
-        }
-    }
-
-    fn open_pool(&self, pool_ref: &PoolRef) -> Result<McpPool, Box<Error>> {
-        match self {
-            Self::Local(client) => client
-                .open_pool(pool_ref)
-                .map(McpPool::Local)
-                .map_err(Box::new),
-            Self::Remote(client) => client
-                .open_pool(pool_ref)
-                .map(McpPool::Remote)
-                .map_err(Box::new),
-        }
-    }
-
-    fn add_remote_hint(&self, err: Error) -> Error {
-        let Self::Remote(client) = self else {
-            return err;
-        };
-        let destination = client.base_url().as_str().trim_end_matches('/');
-        let advice = match err.kind() {
-            ErrorKind::Permission => format!(
-                "Access to {destination} was denied. Check it with `plasmite access status {destination}`. If the connection was disconnected or the key was revoked, reconnect with a current key from the server owner."
-            ),
-            ErrorKind::Io => format!(
-                "Could not reach {destination}. Check the URL, network, and HTTPS certificate, then check the saved connection with `plasmite access status {destination}`."
-            ),
-            _ => format!("This request used the saved connection to {destination}."),
-        };
-        let hint = err
-            .hint()
-            .map(|hint| format!("{hint} {advice}"))
-            .unwrap_or(advice);
-        err.with_hint(hint)
-    }
-}
-
-impl McpPool {
-    fn info(&self) -> Result<PoolInfo, Box<Error>> {
-        match self {
-            Self::Local(pool) => pool.info().map_err(Box::new),
-            Self::Remote(pool) => pool.info().map_err(Box::new),
-        }
-    }
-
-    fn append_json_now(
-        &mut self,
-        data: &Value,
-        tags: &[String],
-        durability: Durability,
-    ) -> Result<crate::api::Message, Box<Error>> {
-        match self {
-            Self::Local(pool) => pool
-                .append_json_now(data, tags, durability)
-                .map_err(Box::new),
-            Self::Remote(pool) => pool
-                .append_json_now(data, tags, durability)
-                .map_err(Box::new),
-        }
-    }
-
-    #[cfg(test)]
-    fn append_json(
-        &mut self,
-        data: &Value,
-        tags: &[String],
-        options: crate::api::AppendOptions,
-    ) -> Result<crate::api::Message, Box<Error>> {
-        match self {
-            Self::Local(pool) => pool.append_json(data, tags, options).map_err(Box::new),
-            Self::Remote(pool) => pool.append_json(data, tags, options).map_err(Box::new),
-        }
-    }
-
-    fn get_message(&self, seq: u64) -> Result<crate::api::Message, Box<Error>> {
-        match self {
-            Self::Local(pool) => pool.get_message(seq).map_err(Box::new),
-            Self::Remote(pool) => pool.get_message(seq).map_err(Box::new),
-        }
-    }
-
-    fn local_path(&self) -> Option<&Path> {
-        match self {
-            Self::Local(pool) => Some(pool.path()),
-            Self::Remote(_) => None,
-        }
-    }
 }
 
 impl PlasmiteMcpHandler {
@@ -788,29 +637,14 @@ impl PlasmiteMcpHandler {
 
     pub fn with_client(client: LocalClient) -> Self {
         Self {
-            client: McpClient::Local(client),
+            client,
             cancel: None,
         }
-    }
-
-    pub fn with_remote_url(base_url: &str) -> Result<Self, Box<Error>> {
-        Ok(Self {
-            client: McpClient::remote(base_url)?,
-            cancel: None,
-        })
     }
 
     pub fn with_cancel(mut self, cancel: Option<Arc<AtomicBool>>) -> Self {
         self.cancel = cancel;
         self
-    }
-
-    fn api_error_tool_result(&self, tool: &str, err: impl Into<Box<Error>>) -> ToolCallResult {
-        api_error_tool_result(tool, self.client.add_remote_hint(*err.into()))
-    }
-
-    fn api_error_jsonrpc(&self, err: impl Into<Box<Error>>) -> JsonRpcError {
-        api_error_jsonrpc(self.client.add_remote_hint(*err.into()))
     }
 
     fn tool_pool_list(&self, args: &Map<String, Value>) -> ToolCallResult {
@@ -819,7 +653,7 @@ impl PlasmiteMcpHandler {
         }
         let pools = match self.client.list_pools() {
             Ok(pools) => pools,
-            Err(err) => return self.api_error_tool_result("plasmite_pool_list", err),
+            Err(err) => return api_error_tool_result("plasmite_pool_list", err),
         };
         let mut entries = pools
             .into_iter()
@@ -860,14 +694,14 @@ impl PlasmiteMcpHandler {
         let info = match self.client.create_pool(&pool_ref, PoolOptions::new(size)) {
             Ok(info) => info,
             Err(err) if err.kind() == ErrorKind::AlreadyExists => {
-                return self.api_error_tool_result(
+                return api_error_tool_result(
                     "plasmite_pool_create",
-                    (*err).with_hint(format!(
+                    err.with_hint(format!(
                         "Pool `{name}` already exists and its messages are unchanged; use it as-is."
                     )),
                 );
             }
-            Err(err) => return self.api_error_tool_result("plasmite_pool_create", err),
+            Err(err) => return api_error_tool_result("plasmite_pool_create", err),
         };
 
         ToolCallResult::success_with_structured(
@@ -888,9 +722,9 @@ impl PlasmiteMcpHandler {
         let info = match self.client.pool_info(&pool_ref) {
             Ok(info) => info,
             Err(err) => {
-                return self.api_error_tool_result(
+                return api_error_tool_result(
                     "plasmite_pool_info",
-                    with_missing_pool_hint(*err, &pool, false),
+                    with_missing_pool_hint(err, &pool, false),
                 );
             }
         };
@@ -910,9 +744,9 @@ impl PlasmiteMcpHandler {
         };
         let pool_ref = PoolRef::name(pool.clone());
         if let Err(err) = self.client.delete_pool(&pool_ref) {
-            return self.api_error_tool_result(
+            return api_error_tool_result(
                 "plasmite_pool_delete",
-                with_missing_pool_hint(*err, &pool, false),
+                with_missing_pool_hint(err, &pool, false),
             );
         }
         ToolCallResult::success_with_structured(
@@ -959,29 +793,29 @@ impl PlasmiteMcpHandler {
                     .create_pool(&pool_ref, PoolOptions::new(DEFAULT_POOL_SIZE_BYTES))
                     && create_err.kind() != ErrorKind::AlreadyExists
                 {
-                    return self.api_error_tool_result("plasmite_feed", create_err);
+                    return api_error_tool_result("plasmite_feed", create_err);
                 }
                 match self.client.open_pool(&pool_ref) {
                     Ok(pool) => pool,
                     Err(open_err) => {
-                        return self.api_error_tool_result(
+                        return api_error_tool_result(
                             "plasmite_feed",
-                            with_missing_pool_hint(*open_err, &pool, true),
+                            with_missing_pool_hint(open_err, &pool, true),
                         );
                     }
                 }
             }
             Err(err) => {
-                return self.api_error_tool_result(
+                return api_error_tool_result(
                     "plasmite_feed",
-                    with_missing_pool_hint(*err, &pool, true),
+                    with_missing_pool_hint(err, &pool, true),
                 );
             }
         };
 
         let message = match opened.append_json_now(&data, &tags, Durability::Fast) {
             Ok(message) => message,
-            Err(err) => return self.api_error_tool_result("plasmite_feed", err),
+            Err(err) => return api_error_tool_result("plasmite_feed", err),
         };
 
         ToolCallResult::success_with_structured(
@@ -1006,9 +840,9 @@ impl PlasmiteMcpHandler {
         let opened = match self.client.open_pool(&pool_ref) {
             Ok(pool) => pool,
             Err(err) => {
-                return self.api_error_tool_result(
+                return api_error_tool_result(
                     "plasmite_fetch",
-                    with_missing_pool_hint(*err, &pool, false),
+                    with_missing_pool_hint(err, &pool, false),
                 );
             }
         };
@@ -1016,13 +850,13 @@ impl PlasmiteMcpHandler {
             Ok(message) => message,
             Err(err) => {
                 let err = if err.kind() == ErrorKind::NotFound && err.hint().is_none() {
-                    (*err).with_hint(format!(
+                    err.with_hint(format!(
                         "Sequence {seq} is not retained in `{pool}`; call plasmite_read to inspect the available range."
                     ))
                 } else {
-                    *err
+                    err
                 };
-                return self.api_error_tool_result("plasmite_fetch", err);
+                return api_error_tool_result("plasmite_fetch", err);
             }
         };
         ToolCallResult::success_with_structured(
@@ -1079,20 +913,20 @@ impl PlasmiteMcpHandler {
         let opened = match self.client.open_pool(&pool_ref) {
             Ok(pool) => pool,
             Err(err) => {
-                return self.api_error_tool_result(
+                return api_error_tool_result(
                     "plasmite_read",
-                    with_missing_pool_hint(*err, &pool, false),
+                    with_missing_pool_hint(err, &pool, false),
                 );
             }
         };
         let info = match opened.info() {
             Ok(info) => info,
-            Err(err) => return self.api_error_tool_result("plasmite_read", err),
+            Err(err) => return api_error_tool_result("plasmite_read", err),
         };
         let batch = match read_messages_for_tool(&opened, &info, count, after_seq, since_ns, &tags)
         {
             Ok(batch) => batch,
-            Err(err) => return self.api_error_tool_result("plasmite_read", *err),
+            Err(err) => return api_error_tool_result("plasmite_read", *err),
         };
         let message_count = batch.messages.len();
 
@@ -1152,9 +986,9 @@ impl PlasmiteMcpHandler {
         let opened = match self.client.open_pool(&pool_ref) {
             Ok(pool) => pool,
             Err(err) => {
-                return self.api_error_tool_result(
+                return api_error_tool_result(
                     "plasmite_wait",
-                    with_missing_pool_hint(*err, &pool, false),
+                    with_missing_pool_hint(err, &pool, false),
                 );
             }
         };
@@ -1162,13 +996,11 @@ impl PlasmiteMcpHandler {
             Some(cursor) => cursor,
             None => match opened.info() {
                 Ok(info) => info.bounds.newest_seq.unwrap_or(0),
-                Err(err) => return self.api_error_tool_result("plasmite_wait", err),
+                Err(err) => return api_error_tool_result("plasmite_wait", err),
             },
         };
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-        let mut notify = opened
-            .local_path()
-            .and_then(crate::api::notify::open_for_path);
+        let mut notify = crate::api::notify::open_for_path(opened.path());
         let mut fell_behind = false;
 
         loop {
@@ -1181,12 +1013,12 @@ impl PlasmiteMcpHandler {
             }
             let info = match opened.info() {
                 Ok(info) => info,
-                Err(err) => return self.api_error_tool_result("plasmite_wait", err),
+                Err(err) => return api_error_tool_result("plasmite_wait", err),
             };
             let mut batch =
                 match read_messages_for_tool(&opened, &info, count, Some(cursor), None, &tags) {
                     Ok(batch) => batch,
-                    Err(err) => return self.api_error_tool_result("plasmite_wait", *err),
+                    Err(err) => return api_error_tool_result("plasmite_wait", *err),
                 };
             fell_behind |= batch.fell_behind;
             batch.fell_behind = fell_behind;
@@ -1404,10 +1236,7 @@ impl McpHandler for PlasmiteMcpHandler {
     }
 
     fn list_resources(&mut self) -> Result<Vec<McpResource>, JsonRpcError> {
-        let pools = self
-            .client
-            .list_pools()
-            .map_err(|err| self.api_error_jsonrpc(err))?;
+        let pools = self.client.list_pools().map_err(api_error_jsonrpc)?;
         let mut resources = pools
             .into_iter()
             .map(|info| {
@@ -1437,10 +1266,10 @@ impl McpHandler for PlasmiteMcpHandler {
         let opened = self
             .client
             .open_pool(&pool_ref)
-            .map_err(|err| self.api_error_jsonrpc(err))?;
-        let info = opened.info().map_err(|err| self.api_error_jsonrpc(err))?;
+            .map_err(api_error_jsonrpc)?;
+        let info = opened.info().map_err(api_error_jsonrpc)?;
         let batch = read_messages_for_tool(&opened, &info, DEFAULT_READ_COUNT, None, None, &[])
-            .map_err(|err| self.api_error_jsonrpc(*err))?;
+            .map_err(|err| api_error_jsonrpc(*err))?;
         let payload = read_batch_json_value(batch, None);
         let text = serde_json::to_string(&payload)
             .map_err(|_| JsonRpcError::internal_error("failed to encode resource payload"))?;
@@ -1746,7 +1575,7 @@ fn read_batch_json_value(batch: ReadBatch, timed_out: Option<bool>) -> Value {
 }
 
 fn read_messages_for_tool(
-    pool: &McpPool,
+    pool: &Pool,
     info: &PoolInfo,
     count: usize,
     after_seq: Option<u64>,
@@ -1800,7 +1629,7 @@ fn read_messages_for_tool(
         let message = match pool.get_message(seq) {
             Ok(message) => message,
             Err(err) if err.kind() == ErrorKind::NotFound => continue,
-            Err(err) => return Err(err),
+            Err(err) => return Err(Box::new(err)),
         };
         if !message_has_tags(&message.meta.tags, required_tags) {
             continue;

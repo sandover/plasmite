@@ -108,6 +108,12 @@ record_case() {
         mismatch=1
       fi
       ;;
+    reject:*)
+      local expected_text="${expected#reject:}"
+      if [[ "${status}" -eq 0 || "${output}" != *"${expected_text}"* ]]; then
+        mismatch=1
+      fi
+      ;;
     any)
       mismatch=0
       ;;
@@ -176,12 +182,13 @@ record_case "serve status" zero run_plasmite serve status
 record_case "serve status JSON" zero run_plasmite serve status --json
 record_case "access help" zero run_plasmite access --help
 record_case "access connect help" zero run_plasmite access connect --help
+record_case "local MCP help" zero run_plasmite mcp --help
 record_case "saved destinations" zero run_plasmite access list
 record_case "saved destinations JSON" zero run_plasmite access list --json
 record_case "unsaved destination status" zero run_plasmite access status https://127.0.0.1:1
 record_case "forget unsaved destination" zero run_plasmite access disconnect https://127.0.0.1:1
 record_case "invalid certificate fingerprint" nonzero run_plasmite access untrust invalid
-record_case "MCP remote conflicts with directory" nonzero run_plasmite --dir "${POOL_DIR}" mcp --remote https://127.0.0.1:1
+record_case "removed MCP --remote option is rejected" "reject:unexpected argument '--remote'" run_plasmite mcp --remote https://127.0.0.1:1
 
 record_case "delete existing aux pool" zero run_plasmite --dir "${POOL_DIR}" pool delete "${POOL_AUX}"
 record_case "delete missing pool" nonzero run_plasmite --dir "${POOL_DIR}" pool delete "${MISSING_POOL}"

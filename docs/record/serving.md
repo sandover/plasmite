@@ -140,28 +140,13 @@ still uses cached trust. Keep certificate verification enabled.
 
 ## Connect an AI client
 
-Both MCP connection methods expose the same pool tools and use the same
-access-key authority. Choose according to where you installed Plasmite:
+Local stdio MCP exposes pools on the machine running Plasmite. For a shared
+server, connect the harness directly to its HTTPS MCP endpoint:
 
 | Method | What the recipient needs | Server certificate trust |
 | --- | --- | --- |
-| Local MCP process over standard input and output (stdio) | Plasmite and a saved native connection | Plasmite verifies the public key through the access key. |
+| Local MCP over standard input and output (stdio) | Plasmite and local pools | No network certificate is involved. |
 | Direct HTTPS MCP | Claude Code or Codex CLI; no local Plasmite needed | Both the AI client and its authorization browser must trust the certificate. |
-
-### Use a saved native connection
-
-Run `access connect` first. It prints setup commands for Claude Code and
-Codex CLI using your installed Plasmite path. Run the command for your client.
-The configured process runs:
-
-```console
-plasmite mcp https://pools.example.net:9743
-```
-
-Restart Claude Code after adding the server. Ask the client to list pools
-and read `events` to check the connection. The client configuration stores
-the executable path and address. Plasmite reads the saved credential before
-each tool call, so a disconnect or key revocation affects the next call.
 
 ### Connect directly over HTTPS
 
@@ -169,7 +154,7 @@ First [deploy a certificate](#use-a-trusted-certificate) that both the AI
 client and browser trust. Add the exact `/mcp` address to your client:
 
 ```console
-claude mcp add --transport http pools https://pools.example.net:9743/mcp
+claude mcp add --scope user --transport http pools https://pools.example.net:9743/mcp
 claude mcp login pools
 ```
 
@@ -180,17 +165,17 @@ codex mcp add pools --url https://pools.example.net:9743/mcp --oauth-client-regi
 codex mcp login pools --oauth-client-registration dcr
 ```
 
-The login command opens the authorization page. Check the server
-address, named client, requested `/mcp` address, and callback. Enter the key
-and approve the client. Plasmite issues renewable credentials to that client.
-Ask it to list pools and read `events` to confirm access.
+Complete OAuth login in the harness. The authorization page shows the server,
+client, requested `/mcp` address, and callback. Enter the access key and
+approve the client. Plasmite issues renewable credentials to that client. Ask
+it to list pools and read `events` to confirm access.
 
 Check `claude mcp --help` or `codex mcp --help` if your client's options
 differ. Claude Code also offers login through `/mcp` in an interactive session.
 
-An AI client may use a different certificate store from your browser.
-Use the local MCP process if it rejects the generated certificate.
-Changing the shared address requires fresh direct authorization.
+An AI client may use a different certificate store from your browser. Use a
+certificate trusted by both before connecting. Changing the shared address
+requires fresh authorization.
 
 ## Manage access
 
@@ -211,7 +196,7 @@ and MCP access. Other keys keep working.
 | Action | Where to do it | Effect |
 | --- | --- | --- |
 | Sign out | Recipient's browser | Ends that browser session. |
-| `access disconnect SERVER_URL` | Recipient's machine | Removes that OS account's saved native connection, including use by local MCP. Works offline. |
+| `access disconnect SERVER_URL` | Recipient's machine | Removes that OS account's saved native connection. Works offline. |
 | `access untrust CERTIFICATE_SHA256` | Recipient's machine | Removes that exact OS browser trust entry. Keeps the native connection. Works offline. |
 | `access revoke KEY_ID` | Owner's machine | Ends access everywhere that uses the key. |
 
@@ -478,11 +463,11 @@ your Root store; browser or device policy can still reject it.
 | Symptom | What to check or do |
 | --- | --- |
 | Server unreachable | Check the hostname, port, running server, and network/firewall route from the recipient machine. |
-| No saved credentials | Run `access connect` as the OS account that runs the CLI or local MCP process. |
+| Native CLI reports no saved credentials | Run `access connect` as the OS account that runs the CLI. |
 | Key rejected | Ask the owner to check `access keys` for revocation and confirm the key belongs to this server. |
 | Certificate name, expiry, or public-key mismatch | Check the exact shared address and ask the owner to correct the certificate or issue a key for its new public key. Keep verification enabled. |
 | Native access works; browser rejects the certificate | Reconnect in an interactive terminal and complete browser trust setup, or use a certificate the browser already trusts. Check expiry and device policy. |
-| Browser works; direct MCP fails before login | The AI client also needs certificate trust. Use a trusted server certificate or the local MCP process. |
+| Browser works; direct MCP fails before login | The AI client also needs certificate trust. Use a certificate trusted by both the AI client and its browser. |
 | Browser setup fails or you decline its prompt | The saved native connection remains usable. Retry in a signed-in interactive terminal when you want browser access. |
 | Windows reports unsafe state permissions | Use NTFS and inspect the named state directory. Keep Plasmite's private ownership and permissions. |
 

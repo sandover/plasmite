@@ -6,8 +6,7 @@ use rustls::RootCertStore;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::pem::PemObject;
 use serde_json::{Value, json};
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use url::Url;
 
@@ -394,31 +393,6 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
         .get(&format!("{issuer}/v0/pools"))
         .set("Cookie", &browser_cookie)
         .call()?;
-    let mut local_mcp = Command::new(env!("CARGO_BIN_EXE_plasmite"))
-        .args(["mcp", "--remote", &issuer])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let mut mcp_input = local_mcp.stdin.take().ok_or("missing MCP stdin")?;
-    let mut mcp_output = BufReader::new(local_mcp.stdout.take().ok_or("missing MCP stdout")?);
-    mcp_initialize_local(&mut mcp_input, &mut mcp_output)?;
-    let local_read = local_mcp_read(&mut mcp_input, &mut mcp_output, 30)?;
-    assert_eq!(
-        local_read["result"]["structuredContent"]["messages"][0]["data"]["text"],
-        "through direct MCP"
-    );
-    let local_write = local_mcp_call(
-        &mut mcp_input,
-        &mut mcp_output,
-        31,
-        "plasmite_feed",
-        json!({"pool":"oauth-flow","data":{"text":"through local stdio MCP"}}),
-    )?;
-    assert_eq!(
-        local_write["result"]["structuredContent"]["message"]["data"]["text"],
-        "through local stdio MCP"
-    );
 
     // Ending one direct harness grant must leave other uses of its key intact.
     let second_client: Value = agent
@@ -465,20 +439,8 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
         .get(&format!("{issuer}/v0/pools"))
         .set("Cookie", &browser_cookie)
         .call()?;
-    assert_eq!(
-        local_mcp_read(&mut mcp_input, &mut mcp_output, 38)?["result"]["isError"],
-        Value::Null
-    );
 
     access::disconnect(&issuer)?;
-    let disconnected = local_mcp_read(&mut mcp_input, &mut mcp_output, 32)?;
-    assert!(disconnected["result"]["isError"] == true);
-    assert!(
-        disconnected["result"]["structuredContent"]["hint"]
-            .as_str()
-            .is_some_and(|hint| hint.contains("plasmite access connect")),
-        "disconnected MCP should tell the user how to reconnect: {disconnected}"
-    );
     let replacement = Command::new(env!("CARGO_BIN_EXE_plasmite"))
         .args([
             "--dir",
@@ -498,11 +460,6 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
             .as_str()
             .ok_or("missing replacement key")?,
     )?;
-    let replaced = local_mcp_read(&mut mcp_input, &mut mcp_output, 33)?;
-    assert_eq!(
-        replaced["result"]["structuredContent"]["messages"][0]["data"]["text"],
-        "through direct MCP"
-    );
     access::connect(&issuer, &shared_key)?;
 
     let keys: Value = ureq::get(&format!("{}/v0/access/keys", server.local_url))
@@ -526,13 +483,6 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
         Err(error) if matches!(*error, ureq::Error::Status(401, _))
     ));
     assert!(native.list_pools().is_err());
-    let local_revoked = local_mcp_read(&mut mcp_input, &mut mcp_output, 34)?;
-    assert!(
-        local_revoked["result"]["isError"] == true || local_revoked.get("error").is_some(),
-        "local MCP must reject the revoked saved connection: {local_revoked}"
-    );
-    drop(mcp_input);
-    local_mcp.wait()?;
     assert!(matches!(
         agent
             .get(&format!("{issuer}/v0/pools"))
@@ -615,27 +565,6 @@ fn address_change_requires_new_direct_authorization() -> Result<(), Box<dyn std:
     ));
     access::connect(new_issuer, &key)?;
     RemoteClient::new(new_issuer)?.list_pools()?;
-    let mut local_mcp = Command::new(env!("CARGO_BIN_EXE_plasmite"))
-        .args(["mcp", "--remote", new_issuer])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let mut mcp_input = local_mcp.stdin.take().ok_or("missing MCP stdin")?;
-    let mut mcp_output = BufReader::new(local_mcp.stdout.take().ok_or("missing MCP stdout")?);
-    mcp_initialize_local(&mut mcp_input, &mut mcp_output)?;
-    assert_eq!(
-        local_mcp_call(
-            &mut mcp_input,
-            &mut mcp_output,
-            4,
-            "plasmite_pool_list",
-            json!({}),
-        )?["result"]["isError"],
-        Value::Null
-    );
-    drop(mcp_input);
-    local_mcp.wait()?;
 
     let metadata: Value = agent
         .get(&format!(
@@ -773,35 +702,6 @@ fn mcp_initialize_http(
     Ok(())
 }
 
-fn mcp_initialize_local(
-    input: &mut impl Write,
-    output: &mut impl BufRead,
-) -> Result<(), Box<dyn std::error::Error>> {
-    writeln!(
-        input,
-        "{}",
-        json!({
-            "jsonrpc":"2.0", "id":1, "method":"initialize",
-            "params": {
-                "protocolVersion":"2025-11-25", "capabilities":{},
-                "clientInfo":{"name":"integration-test","version":"1"}
-            }
-        })
-    )?;
-    input.flush()?;
-    let mut line = String::new();
-    output.read_line(&mut line)?;
-    let reply: Value = serde_json::from_str(&line)?;
-    assert_eq!(reply["result"]["protocolVersion"], "2025-11-25");
-    writeln!(
-        input,
-        "{}",
-        json!({"jsonrpc":"2.0","method":"notifications/initialized"})
-    )?;
-    input.flush()?;
-    Ok(())
-}
-
 fn mcp_list(
     agent: &ureq::Agent,
     resource: &str,
@@ -840,43 +740,6 @@ fn mcp_call(
             }
         }))?
         .into_json()?)
-}
-
-fn local_mcp_read(
-    input: &mut impl Write,
-    output: &mut impl BufRead,
-    id: i64,
-) -> Result<Value, Box<dyn std::error::Error>> {
-    local_mcp_call(
-        input,
-        output,
-        id,
-        "plasmite_read",
-        json!({"pool":"oauth-flow"}),
-    )
-}
-
-fn local_mcp_call(
-    input: &mut impl Write,
-    output: &mut impl BufRead,
-    id: i64,
-    name: &str,
-    arguments: Value,
-) -> Result<Value, Box<dyn std::error::Error>> {
-    let request = json!({
-        "jsonrpc": "2.0", "id": id, "method": "tools/call",
-        "params": {
-            "name": name,
-            "arguments": arguments
-        }
-    });
-    writeln!(input, "{request}")?;
-    input.flush()?;
-    let mut line = String::new();
-    if output.read_line(&mut line)? == 0 {
-        return Err("local MCP process ended before replying".into());
-    }
-    Ok(serde_json::from_str(&line)?)
 }
 
 fn trusted_agent(pool_dir: &std::path::Path) -> Result<ureq::Agent, Box<dyn std::error::Error>> {

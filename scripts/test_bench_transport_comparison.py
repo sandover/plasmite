@@ -102,15 +102,13 @@ class RunnerCleanupTests(unittest.TestCase):
                                        pool="test", mcp_url="https://example.invalid/mcp", ca_file=None)
         self.native = Mock()
         self.native.poll.return_value = None
-        self.local = Mock()
-        self.local.tool.side_effect = RuntimeError("injected benchmark failure")
         self.direct = Mock()
         self.direct.server_info = {}
+        self.direct.tool.side_effect = RuntimeError("injected benchmark failure")
         self.commands = self.patches.enter_context(patch("subprocess.run"))
         self.patches.enter_context(patch("subprocess.Popen", return_value=self.native))
         self.patches.enter_context(patch("bench_transport_comparison.native_request",
                                         return_value={"result": {"file_size": 2_097_152}}))
-        self.patches.enter_context(patch("bench_transport_comparison.StdioMcp", return_value=self.local))
         self.patches.enter_context(patch("bench_transport_comparison.HttpsMcp", return_value=self.direct))
         self.patches.enter_context(patch("bench_transport_comparison.command_output", return_value="test"))
 
@@ -118,11 +116,11 @@ class RunnerCleanupTests(unittest.TestCase):
         command = self.commands.call_args.args[0]
         self.assertEqual(command[1:], ["access", "disconnect", self.args.server])
 
-    def test_failed_revocation_does_not_skip_other_cleanup(self):
+    def test_failed_revocation_does_not_skip_worker_and_saved_connection_cleanup(self):
         self.direct.close.side_effect = RuntimeError("revocation failed")
         with self.assertRaisesRegex(RuntimeError, "cleanup failed: HTTPS MCP: revocation failed"):
             run(self.args)
-        self.local.close.assert_called_once()
+        self.direct.close.assert_called_once()
         self.native.stdin.close.assert_called_once()
         self.native.wait.assert_called_once_with(timeout=5)
         self.assert_disconnected()
@@ -132,7 +130,6 @@ class RunnerCleanupTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "cleanup failed: native worker"):
             run(self.args)
         self.direct.close.assert_called_once()
-        self.local.close.assert_called_once()
         self.native.kill.assert_called_once()
         self.assertEqual(self.native.wait.call_count, 2)
         self.assert_disconnected()
