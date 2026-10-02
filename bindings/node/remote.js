@@ -112,6 +112,7 @@ class RemoteClient {
   }
 
   async _requestJson(method, url, body) {
+    assertSafeTransport(url, this.token);
     const headers = { Accept: "application/json" };
     if (this.token) {
       headers.Authorization = `Bearer ${this.token}`;
@@ -126,7 +127,9 @@ class RemoteClient {
       method,
       headers,
       body: payload,
+      redirect: "manual",
     });
+    rejectRedirect(response);
 
     if (!response.ok) {
       throw await parseRemoteError(response);
@@ -139,6 +142,7 @@ class RemoteClient {
   }
 
   async _requestStream(url, controller) {
+    assertSafeTransport(url, this.token);
     const headers = { Accept: "application/json" };
     if (this.token) {
       headers.Authorization = `Bearer ${this.token}`;
@@ -148,7 +152,9 @@ class RemoteClient {
       method: "GET",
       headers,
       signal: controller.signal,
+      redirect: "manual",
     });
+    rejectRedirect(response);
 
     if (!response.ok) {
       throw await parseRemoteError(response);
@@ -272,6 +278,26 @@ function normalizeBaseUrl(raw) {
   url.search = "";
   url.hash = "";
   return url;
+}
+
+function assertSafeTransport(rawUrl, token) {
+  if (!token) return;
+
+  const url = new URL(rawUrl.toString());
+  if (url.protocol === "http:" && !isLoopbackHost(url.hostname)) {
+    throw new Error("remote bearer tokens require HTTPS outside loopback");
+  }
+}
+
+function isLoopbackHost(hostname) {
+  const host = hostname.toLowerCase();
+  return host === "localhost" || host === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(host);
+}
+
+function rejectRedirect(response) {
+  if ([301, 302, 303, 307, 308].includes(response.status)) {
+    throw new Error(`remote server redirected the request (HTTP ${response.status}); redirects are not followed`);
+  }
 }
 
 function buildUrl(baseUrl, segments) {

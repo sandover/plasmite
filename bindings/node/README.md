@@ -67,8 +67,11 @@ first. The JavaScript HTTP client works without the native addon.
 It does not load connections saved by `access connect`, parse full `pk1`
 access keys, or verify their certificate pins. Use Rust or the CLI for the
 secure native access-key workflow. The optional `token`/`withToken` API sends
-a supplied Bearer value through ordinary Node fetch; it provides no key-based
-server verification. Do not put a full access key in that field.
+a supplied Bearer value only over HTTPS, except for loopback HTTP destinations
+such as `localhost` and `127.0.0.1`. Requests without a token may use HTTP.
+Redirects fail with an error and are never followed. HTTPS uses Node's normal
+certificate checks and does not provide key pinning. Do not put a full access
+key in the token field.
 
 ```js
 const { RemoteClient } = require("plasmite");
