@@ -24,6 +24,7 @@ use std::time::Duration;
 /// How long a one-shot request may take, start to finish. Streams have no deadline: a
 /// follower on a quiet pool waits as long as the pool stays quiet.
 pub(super) const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_REMOTE_RESPONSE_BYTES: usize = 256 * 1024 * 1024;
 use url::{Host, Url};
 
 type ApiResult<T> = Result<T, Error>;
@@ -542,16 +543,7 @@ impl RemotePool {
             .set("Accept", "application/x-plasmite-lite3")
             .call();
         match response {
-            Ok(resp) => {
-                let mut reader = resp.into_reader();
-                let mut out = Vec::new();
-                reader.read_to_end(&mut out).map_err(|err| {
-                    Error::new(ErrorKind::Io)
-                        .with_message("failed to read lite3 response")
-                        .with_source(err)
-                })?;
-                Ok(out)
-            }
+            Ok(resp) => read_lite3_response(resp.into_reader(), MAX_REMOTE_RESPONSE_BYTES),
             Err(ureq::Error::Status(code, resp)) => Err(parse_error_response(code, resp)),
             Err(ureq::Error::Transport(err)) => Err(Error::new(ErrorKind::Io)
                 .with_message("request failed")
@@ -624,43 +616,40 @@ impl RemotePool {
 
 impl RemoteTail {
     pub fn next_message(&mut self) -> ApiResult<Option<Message>> {
-        let Some(reader) = self.reader.as_mut() else {
-            return Ok(None);
-        };
-        loop {
-            let mut line = String::new();
-            let bytes = reader.read_line(&mut line).map_err(|err| {
-                Error::new(ErrorKind::Io)
-                    .with_message("failed to read tail stream")
-                    .with_source(err)
-            })?;
-            if bytes == 0 {
-                return Ok(None);
-            }
-            if line.trim().is_empty() {
-                continue;
-            }
-            let value: Value = serde_json::from_str(&line).map_err(|err| {
-                Error::new(ErrorKind::Internal)
-                    .with_message("invalid tail message json")
-                    .with_source(err)
-            })?;
-            if value.get("error").is_some() {
-                let envelope: ErrorEnvelope = serde_json::from_value(value).map_err(|err| {
+        let message = (|| {
+            loop {
+                let Some(line) = read_jsonl_line(&mut self.reader, MAX_REMOTE_RESPONSE_BYTES)?
+                else {
+                    return Ok(None);
+                };
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let value: Value = serde_json::from_str(&line).map_err(|err| {
                     Error::new(ErrorKind::Internal)
-                        .with_message("invalid tail error json")
+                        .with_message("invalid tail message json")
                         .with_source(err)
                 })?;
-                self.reader = None;
-                return Err(error_from_remote(envelope.error));
+                if value.get("error").is_some() {
+                    let envelope: ErrorEnvelope = serde_json::from_value(value).map_err(|err| {
+                        Error::new(ErrorKind::Internal)
+                            .with_message("invalid tail error json")
+                            .with_source(err)
+                    })?;
+                    return Err(error_from_remote(envelope.error));
+                }
+                let message: MessageWire = serde_json::from_value(value).map_err(|err| {
+                    Error::new(ErrorKind::Internal)
+                        .with_message("invalid tail message json")
+                        .with_source(err)
+                })?;
+                return Ok(Some(message_from_remote(message)));
             }
-            let message: MessageWire = serde_json::from_value(value).map_err(|err| {
-                Error::new(ErrorKind::Internal)
-                    .with_message("invalid tail message json")
-                    .with_source(err)
-            })?;
-            return Ok(Some(message_from_remote(message)));
+        })();
+        if message.is_err() {
+            self.reader = None;
         }
+        message
     }
 
     pub fn cancel(&mut self) {
@@ -670,27 +659,38 @@ impl RemoteTail {
 
 impl RemoteLite3Tail {
     pub fn next_frame(&mut self) -> ApiResult<Option<RemoteLite3Frame>> {
-        let Some(reader) = self.reader.as_mut() else {
-            return Ok(None);
-        };
-        let mut header = [0u8; 20];
-        if !read_exact_or_eof(reader, &mut header)? {
-            return Ok(None);
+        let frame = (|| {
+            let Some(reader) = self.reader.as_mut() else {
+                return Ok(None);
+            };
+            let mut header = [0u8; 20];
+            if !read_exact_or_eof(reader, &mut header)? {
+                return Ok(None);
+            }
+            let seq = u64::from_be_bytes(header[0..8].try_into().expect("seq header"));
+            let timestamp_ns =
+                u64::from_be_bytes(header[8..16].try_into().expect("timestamp header"));
+            let len = u32::from_be_bytes(header[16..20].try_into().expect("len header")) as usize;
+            if len > MAX_REMOTE_RESPONSE_BYTES {
+                return Err(Error::new(ErrorKind::Io)
+                    .with_message("lite3 frame exceeded maximum response size"));
+            }
+            let mut payload = vec![0u8; len];
+            reader.read_exact(&mut payload).map_err(|err| {
+                Error::new(ErrorKind::Io)
+                    .with_message("failed to read lite3 payload")
+                    .with_source(err)
+            })?;
+            Ok(Some(RemoteLite3Frame {
+                seq,
+                timestamp_ns,
+                payload,
+            }))
+        })();
+        if frame.is_err() {
+            self.reader = None;
         }
-        let seq = u64::from_be_bytes(header[0..8].try_into().expect("seq header"));
-        let timestamp_ns = u64::from_be_bytes(header[8..16].try_into().expect("timestamp header"));
-        let len = u32::from_be_bytes(header[16..20].try_into().expect("len header")) as usize;
-        let mut payload = vec![0u8; len];
-        reader.read_exact(&mut payload).map_err(|err| {
-            Error::new(ErrorKind::Io)
-                .with_message("failed to read lite3 payload")
-                .with_source(err)
-        })?;
-        Ok(Some(RemoteLite3Frame {
-            seq,
-            timestamp_ns,
-            payload,
-        }))
+        frame
     }
 
     pub fn cancel(&mut self) {
@@ -838,6 +838,56 @@ where
             .with_message("invalid response json")
             .with_source(err)
     })
+}
+
+fn read_lite3_response(reader: impl Read, max_bytes: usize) -> ApiResult<Vec<u8>> {
+    let mut out = Vec::new();
+    reader
+        .take(max_bytes.saturating_add(1) as u64)
+        .read_to_end(&mut out)
+        .map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_message("failed to read lite3 response")
+                .with_source(err)
+        })?;
+    if out.len() > max_bytes {
+        return Err(
+            Error::new(ErrorKind::Io).with_message("lite3 response exceeded maximum response size")
+        );
+    }
+    Ok(out)
+}
+
+fn read_jsonl_line(
+    reader: &mut Option<BufReader<Box<dyn Read + Send + Sync>>>,
+    max_bytes: usize,
+) -> ApiResult<Option<String>> {
+    let Some(stream) = reader.as_mut() else {
+        return Ok(None);
+    };
+    let mut line = String::new();
+    let result = stream
+        .take(max_bytes.saturating_add(1) as u64)
+        .read_line(&mut line)
+        .map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_message("failed to read tail stream")
+                .with_source(err)
+        })
+        .and_then(|bytes| {
+            if bytes == 0 {
+                return Ok(None);
+            }
+            if bytes > max_bytes {
+                return Err(Error::new(ErrorKind::Io)
+                    .with_message("tail line exceeded maximum response size"));
+            }
+            Ok(Some(line))
+        });
+    if result.is_err() {
+        *reader = None;
+    }
+    result
 }
 
 fn parse_error_response(status: u16, response: ureq::Response) -> Error {
@@ -989,11 +1039,13 @@ fn durability_to_str(durability: Durability) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        RemoteClient, extract_pool_from_url, normalize_base_url, parse_error_kind, parse_pool_uri,
+        RemoteClient, RemoteLite3Tail, RemoteTail, extract_pool_from_url, normalize_base_url,
+        parse_error_kind, parse_pool_uri, read_jsonl_line, read_lite3_response,
     };
     use crate::api::PoolRef;
     use crate::core::error::ErrorKind;
     use crate::core::pool::PoolOptions;
+    use std::io::{BufReader, Cursor, Read};
 
     #[test]
     fn normalize_base_url_strips_path() {
@@ -1039,5 +1091,111 @@ mod tests {
             .create_pool(&pool_ref, PoolOptions::new(1024))
             .expect_err("err");
         assert_eq!(err.kind(), ErrorKind::Usage);
+    }
+
+    #[test]
+    fn lite3_response_reader_enforces_limit() {
+        assert_eq!(
+            read_lite3_response(Cursor::new(b"1234"), 4).expect("response"),
+            b"1234"
+        );
+        let err = read_lite3_response(Cursor::new(b"12345"), 4).expect_err("oversized response");
+        assert_eq!(err.kind(), ErrorKind::Io);
+    }
+
+    #[test]
+    fn jsonl_line_reader_enforces_limit() {
+        let mut reader: Option<BufReader<Box<dyn Read + Send + Sync>>> = Some(BufReader::new(
+            Box::new(Cursor::new(b"123\n1234\n".to_vec())),
+        ));
+        assert_eq!(
+            read_jsonl_line(&mut reader, 4).expect("line"),
+            Some("123\n".into())
+        );
+        let err = read_jsonl_line(&mut reader, 4).expect_err("oversized line");
+        assert_eq!(err.kind(), ErrorKind::Io);
+        assert!(reader.is_none());
+    }
+
+    #[test]
+    fn jsonl_tail_closes_after_malformed_line() {
+        const VALID: &str =
+            "{\"seq\":1,\"time\":\"2026-01-01T00:00:00Z\",\"meta\":{\"tags\":[]},\"data\":{}}\n";
+        let mut valid_tail = RemoteTail {
+            reader: Some(BufReader::new(Box::new(Cursor::new(VALID.as_bytes())))),
+        };
+        assert_eq!(
+            valid_tail.next_message().expect("valid line").unwrap().seq,
+            1
+        );
+
+        for malformed in ["not json\n", "{}\n", "{\"error\":{}}\n"] {
+            let mut tail = RemoteTail {
+                reader: Some(BufReader::new(Box::new(Cursor::new(format!(
+                    "{malformed}{VALID}"
+                ))))),
+            };
+            assert_eq!(
+                tail.next_message().expect_err("malformed line").kind(),
+                ErrorKind::Internal
+            );
+            assert!(
+                tail.reader.is_none(),
+                "stream stayed open after {malformed:?}"
+            );
+            assert!(tail.next_message().expect("closed stream").is_none());
+        }
+    }
+
+    #[test]
+    fn lite3_tail_rejects_large_frame_before_reading_payload_and_closes() {
+        struct HeaderThenPanic {
+            header: [u8; 20],
+            sent_header: bool,
+        }
+
+        impl Read for HeaderThenPanic {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                assert!(
+                    !self.sent_header,
+                    "read the frame payload after its oversized header"
+                );
+                let len = buf.len().min(self.header.len());
+                buf[..len].copy_from_slice(&self.header[..len]);
+                self.sent_header = true;
+                Ok(len)
+            }
+        }
+
+        let mut header = [0u8; 20];
+        header[16..20].copy_from_slice(&u32::MAX.to_be_bytes());
+        let reader = HeaderThenPanic {
+            header,
+            sent_header: false,
+        };
+        let mut tail = RemoteLite3Tail {
+            reader: Some(BufReader::new(Box::new(reader))),
+        };
+
+        let err = tail.next_frame().expect_err("oversized frame");
+        assert_eq!(err.kind(), ErrorKind::Io);
+        assert!(tail.next_frame().expect("closed stream").is_none());
+    }
+
+    #[test]
+    fn lite3_tail_closes_after_truncated_frame() {
+        let mut header = [0u8; 20];
+        header[16..20].copy_from_slice(&2u32.to_be_bytes());
+        let mut bytes = header.to_vec();
+        bytes.push(1);
+        let mut tail = RemoteLite3Tail {
+            reader: Some(BufReader::new(Box::new(Cursor::new(bytes)))),
+        };
+
+        assert_eq!(
+            tail.next_frame().expect_err("truncated payload").kind(),
+            ErrorKind::Io
+        );
+        assert!(tail.next_frame().expect("closed stream").is_none());
     }
 }

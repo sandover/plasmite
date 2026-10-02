@@ -122,6 +122,9 @@ Stable error kinds:
   an HTTP error response retains its status-based error mapping. System DNS
   resolution is not interruptible. Live tail bodies have no client request
   deadline; caller `TailOptions` and server limits still apply.
+- The Rust remote client caps Lite3 responses, Lite3 tail frames, and individual
+  JSONL tail lines at 256 MiB. It rejects an oversized Lite3 frame before
+  reading its payload and ends a stream after a framing or size error.
 
 Pools use bounded retention, so a stream cursor can be overtaken when writers
 wrap the ring buffer. Every tail tracks an expected sequence:
