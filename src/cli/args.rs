@@ -606,7 +606,7 @@ pub(crate) enum ServeSubcommand {
     #[command(about = "Install this server as a service that starts at boot")]
     Install {
         #[command(flatten)]
-        run: ServeRunArgs,
+        run: Box<ServeRunArgs>,
         #[arg(long, help = "Emit a JSON report")]
         json: bool,
     },

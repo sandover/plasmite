@@ -262,16 +262,13 @@ fn required(pool_dir: &Path) -> Result<Setup, Error> {
     })
 }
 
-fn lock(pool_dir: &Path) -> Result<File, Error> {
-    let directory = directory()?;
-    fs::create_dir_all(directory.parent().unwrap())
-        .map_err(|error| io_error("failed to create service directory", &directory, error))?;
-    create_private_dir(&directory)?;
-    ensure_private(&directory)?;
-    let job_dir = directory.join(id(pool_dir));
-    create_private_dir(&job_dir)?;
-    ensure_private(&job_dir)?;
-    let path = job_dir.join("lock");
+fn pool_operation_lock(pool_dir: &Path) -> Result<File, Error> {
+    // Native labels depend on the canonical pool, so their operation lock must
+    // also be independent of HOME. Keep it separate from the live server lock.
+    let state = pool_dir.join(".plasmite-serve");
+    create_private_dir(&state)?;
+    ensure_private(&state)?;
+    let path = state.join("service.lock");
     let mut options = OpenOptions::new();
     options.read(true).write(true).create(true).truncate(false);
     #[cfg(unix)]
@@ -283,8 +280,25 @@ fn lock(pool_dir: &Path) -> Result<File, Error> {
         .open(&path)
         .map_err(|error| io_error("failed to open service lock", &path, error))?;
     ensure_private(&path)?;
-    file.try_lock_exclusive()
-        .map_err(|error| io_error("another command is changing this service", &path, error))?;
+    file.try_lock_exclusive().map_err(|error| {
+        Error::new(ErrorKind::Busy)
+            .with_message("another command is changing this service")
+            .with_path(&path)
+            .with_source(error)
+    })?;
+    Ok(file)
+}
+
+fn lock(pool_dir: &Path) -> Result<File, Error> {
+    let file = pool_operation_lock(pool_dir)?;
+    let directory = directory()?;
+    fs::create_dir_all(directory.parent().unwrap())
+        .map_err(|error| io_error("failed to create service directory", &directory, error))?;
+    create_private_dir(&directory)?;
+    ensure_private(&directory)?;
+    let job_dir = directory.join(id(pool_dir));
+    create_private_dir(&job_dir)?;
+    ensure_private(&job_dir)?;
     Ok(file)
 }
 
@@ -562,16 +576,56 @@ fn native_status(setup: &Setup) -> Result<(Option<u32>, String, bool), Error> {
 fn registered(setup: &Setup) -> Result<bool, Error> {
     Ok(native_status(setup)?.2)
 }
-fn loaded(setup: &Setup) -> bool {
+// Exit 0 means present, 1 means confirmed absent, and 2 means unknown.
+// Keep the same query/classification in both user and privileged checks.
+fn native_presence_script(setup: &Setup) -> String {
     if cfg!(target_os = "macos") {
-        capture("launchctl", &["print", &setup.target()]).is_ok()
-    } else {
-        capture(
-            "systemctl",
-            &["show", &setup.unit(), "--property=LoadState", "--value"],
+        let absent = shell_quote(&format!(
+            "Could not find service \"{}\" in domain for system",
+            id(&setup.pool_dir)
+        ));
+        format!(
+            "if plasmite_report=$(/bin/launchctl print {} 2>&1); then exit 0; else\nplasmite_exit=$?\ncase \"$plasmite_exit:$plasmite_report\" in 113:*{absent}*) exit 1;; *) /usr/bin/printf '%s\\n' \"$plasmite_report\" >&2; exit 2;; esac\nfi",
+            shell_quote(&setup.target())
         )
-        .is_ok_and(|state| !state.is_empty() && state != "not-found")
+    } else {
+        format!(
+            "if plasmite_report=$(/usr/bin/systemctl show {} --property=LoadState --value 2>&1); then\ncase \"$plasmite_report\" in not-found) exit 1;; '') exit 2;; *) exit 0;; esac\nelse\n/usr/bin/printf '%s\\n' \"$plasmite_report\" >&2; exit 2\nfi",
+            shell_quote(&setup.unit())
+        )
     }
+}
+
+fn loaded(setup: &Setup) -> Result<bool, Error> {
+    inspect_native_presence(setup, &native_presence_script(setup))
+}
+
+fn inspect_native_presence(setup: &Setup, query: &str) -> Result<bool, Error> {
+    let output = Command::new("/bin/sh")
+        .args(["-c", query])
+        .output()
+        .map_err(|error| {
+            io_error(
+                "failed to inspect native service manager",
+                &setup.job_path(),
+                error,
+            )
+        })?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(Error::new(ErrorKind::Io)
+            .with_message("could not verify native startup job ownership")
+            .with_path(setup.job_path())
+            .with_hint(format!(
+                "Check the native service manager before retrying; its query failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ))),
+    }
+}
+
+fn startup_link(setup: &Setup) -> PathBuf {
+    PathBuf::from("/etc/systemd/system/multi-user.target.wants").join(setup.unit())
 }
 
 fn ownership_error(setup: &Setup) -> Error {
@@ -618,11 +672,25 @@ fn verify_native_ownership(setup: &Setup, owners: &[&Setup]) -> Result<(), Error
             ));
         }
     };
+    if cfg!(target_os = "linux") {
+        let wants = startup_link(setup);
+        match fs::symlink_metadata(&wants) {
+            Ok(metadata) if metadata.file_type().is_symlink() && current.is_some() => {
+                let target = fs::canonicalize(&wants).map_err(|_| ownership_error(setup))?;
+                if target != fs::canonicalize(&path).map_err(|_| ownership_error(setup))? {
+                    return Err(ownership_error(setup));
+                }
+            }
+            Ok(_) => return Err(ownership_error(setup)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(error) => return Err(io_error("failed to inspect startup link", &wants, error)),
+        }
+    }
     verify_job_definition(
         setup,
         owners,
         current.as_deref(),
-        loaded(setup),
+        loaded(setup)?,
         cfg!(target_os = "macos"),
     )
 }
@@ -630,7 +698,12 @@ fn verify_native_ownership(setup: &Setup, owners: &[&Setup]) -> Result<(), Error
 // Repeat the ownership check inside the privileged operation. Definitions come
 // from validated saved settings and are passed in memory, never in owner-writable
 // staging files. Refuse to mutate jobs when the definition or saved setup differs.
-fn ownership_check_script(job: &Path, definitions: &[String], loaded_command: &str) -> String {
+fn ownership_check_script(
+    job: &Path,
+    definitions: &[String],
+    loaded_command: &str,
+    wants: Option<&Path>,
+) -> String {
     let reject = "{ /usr/bin/printf '%s\n' 'The native startup job does not match this saved setup. Use the original HOME and its saved setup.' >&2; exit 1; }";
     let comparison = if definitions.is_empty() {
         reject.to_owned()
@@ -647,29 +720,29 @@ fn ownership_check_script(job: &Path, definitions: &[String], loaded_command: &s
                 .join(" || ")
         )
     };
+    let link_check = wants.map(|wants| format!(
+        "plasmite_wants={}\nif [ -e \"$plasmite_wants\" ] || [ -L \"$plasmite_wants\" ]; then\n[ -f \"$plasmite_job\" ] && [ -L \"$plasmite_wants\" ] || {reject}\nplasmite_link=$(/usr/bin/readlink \"$plasmite_wants\")\n[ \"$plasmite_link\" = \"$plasmite_job\" ] || [ \"$plasmite_link\" = {} ] || {reject}\nfi\n",
+        shell_quote(&wants.to_string_lossy()),
+        shell_quote(&format!("../{}", job.file_name().unwrap().to_string_lossy()))
+    )).unwrap_or_default();
     format!(
-        "plasmite_job={}\n[ ! -L \"$plasmite_job\" ] || {reject}\nif [ -e \"$plasmite_job\" ]; then\n[ -f \"$plasmite_job\" ] || {reject}\n{comparison}\nelif {{ {loaded_command}; }}; then\n{reject}\nfi\n",
+        "plasmite_job={}\nif plasmite_state=$({{ {loaded_command}; }} 2>&1); then\nplasmite_loaded=1\nelse\nplasmite_exit=$?\nif [ \"$plasmite_exit\" -ne 1 ]; then\n/usr/bin/printf '%s\\n' 'Could not verify native startup job ownership: manager query failed.' \"$plasmite_state\" >&2; exit 1\nfi\nplasmite_loaded=0\nfi\n[ ! -L \"$plasmite_job\" ] || {reject}\n{link_check}if [ -e \"$plasmite_job\" ]; then\n[ -f \"$plasmite_job\" ] || {reject}\n{comparison}\nelse\n[ \"$plasmite_loaded\" -eq 0 ] || {reject}\nfi\n",
         shell_quote(&job.to_string_lossy())
     )
 }
 
 fn ownership_script(setup: &Setup, owners: &[&Setup]) -> String {
-    let loaded = if cfg!(target_os = "macos") {
-        format!(
-            "/bin/launchctl print {} >/dev/null 2>&1",
-            shell_quote(&setup.target())
-        )
-    } else {
-        format!(
-            "plasmite_load=$(/usr/bin/systemctl show {} --property=LoadState --value); [ -n \"$plasmite_load\" ] && [ \"$plasmite_load\" != not-found ]",
-            shell_quote(&setup.unit())
-        )
-    };
     let definitions = owners
         .iter()
         .map(|owner| definition(owner, cfg!(target_os = "macos")))
         .collect::<Vec<_>>();
-    ownership_check_script(&setup.job_path(), &definitions, &loaded)
+    let wants = cfg!(target_os = "linux").then(|| startup_link(setup));
+    ownership_check_script(
+        &setup.job_path(),
+        &definitions,
+        &native_presence_script(setup),
+        wants.as_deref(),
+    )
 }
 
 fn stop_script(setup: &Setup) -> String {
@@ -769,9 +842,9 @@ fn install_native(setup: &Setup, owners: &[&Setup]) -> Result<(), Error> {
 
 fn uninstall_native(setup: &Setup, owners: &[&Setup]) -> Result<(), Error> {
     verify_native_ownership(setup, owners)?;
-    let wants = PathBuf::from("/etc/systemd/system/multi-user.target.wants").join(setup.unit());
+    let wants = startup_link(setup);
     if !setup.job_path().exists()
-        && !loaded(setup)
+        && !loaded(setup)?
         && (cfg!(target_os = "macos") || wants.symlink_metadata().is_err())
     {
         return Ok(());
@@ -1344,7 +1417,7 @@ mod tests {
                         "-c",
                         &format!(
                             "set -eu\n{}\n/usr/bin/printf '%s' 'stop replace remove' >> {}",
-                            ownership_check_script(&job, expected, loaded),
+                            ownership_check_script(&job, expected, loaded, None),
                             shell_quote(&events.to_string_lossy())
                         ),
                     ])
@@ -1381,7 +1454,145 @@ mod tests {
             assert!(!invoke(&[], "true").status.success());
             assert!(fs::read(&events).unwrap().is_empty());
             assert!(invoke(&[], "false").status.success());
+            for matching_file in [false, true] {
+                fs::write(&events, b"").unwrap();
+                if matching_file {
+                    fs::write(&job, &definition_a).unwrap();
+                }
+                let result = invoke(std::slice::from_ref(&definition_a), "exit 42");
+                assert!(!result.status.success());
+                assert!(String::from_utf8_lossy(&result.stderr).contains("manager query failed"));
+                assert!(fs::read(&events).unwrap().is_empty());
+                assert_eq!(fs::read(&saved).unwrap(), saved_bytes);
+                if matching_file {
+                    assert_eq!(fs::read_to_string(&job).unwrap(), definition_a);
+                }
+            }
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn orphan_or_foreign_startup_links_never_allow_mutation() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let job = temp.path().join("native-job");
+        let wants = temp.path().join("wants");
+        let events = temp.path().join("events");
+        let expected = definition(&setup(), false);
+        let invoke = || {
+            Command::new("/bin/sh")
+                .args([
+                    "-c",
+                    &format!(
+                        "set -eu\n{}\n/usr/bin/printf '%s' 'stop replace remove' >> {}",
+                        ownership_check_script(
+                            &job,
+                            std::slice::from_ref(&expected),
+                            "false",
+                            Some(&wants)
+                        ),
+                        shell_quote(&events.to_string_lossy())
+                    ),
+                ])
+                .output()
+                .unwrap()
+        };
+        symlink(&job, &wants).unwrap();
+        fs::write(&events, b"").unwrap();
+        assert!(
+            !invoke().status.success(),
+            "missing unit cannot establish ownership of an orphan enablement link"
+        );
+        assert!(fs::read(&events).unwrap().is_empty());
+        assert!(wants.symlink_metadata().unwrap().file_type().is_symlink());
+        fs::write(&job, &expected).unwrap();
+        fs::remove_file(&wants).unwrap();
+        let foreign = temp.path().join("foreign-unit");
+        fs::write(&foreign, "foreign").unwrap();
+        symlink(&foreign, &wants).unwrap();
+        assert!(
+            !invoke().status.success(),
+            "wrong-target link cannot be removed"
+        );
+        assert!(fs::read(&events).unwrap().is_empty());
+        assert_eq!(fs::read_link(&wants).unwrap(), foreign);
+        fs::remove_file(&wants).unwrap();
+        symlink(&job, &wants).unwrap();
+        assert!(
+            invoke().status.success(),
+            "matching unit and link stay operable"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inspection_failures_are_not_confirmed_native_absence() {
+        let setup = setup();
+        for query in [
+            "exit 42",
+            "/definitely/missing/service-manager",
+            "kill -TERM $$",
+        ] {
+            let result = inspect_native_presence(&setup, query);
+            let error = result.expect_err("unknown inspection cannot report an absent job");
+            assert_eq!(error.kind(), ErrorKind::Io);
+            assert!(error.to_string().contains("could not verify"));
+        }
+        assert!(inspect_native_presence(&setup, "exit 0").unwrap());
+        assert!(!inspect_native_presence(&setup, "exit 1").unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cross_home_install_serializes_inspection_mutation_and_rollback() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut original = setup();
+        original.pool_dir = temp.path().join("pools");
+        fs::create_dir(&original.pool_dir).unwrap();
+        original.home = temp.path().join("home-a");
+        original.program = original.home.join("plasmite");
+        let mut alternate = original.clone();
+        alternate.home = temp.path().join("home-b");
+        alternate.program = alternate.home.join("plasmite");
+        assert_eq!(original.job_path(), alternate.job_path());
+        let lease = pool_operation_lock(&original.pool_dir).unwrap();
+        verify_job_definition(&original, &[], None, false, true).unwrap();
+        // Pause A after inspection. B cannot inspect/adopt the same global label
+        // while A holds the actual filesystem lock through mutation and recovery.
+        let other_pool = alternate.pool_dir.clone();
+        let blocked = std::thread::spawn(move || {
+            pool_operation_lock(&other_pool)
+                .expect_err("another HOME must not enter the same operation")
+                .kind()
+        })
+        .join()
+        .unwrap();
+        assert_eq!(blocked, ErrorKind::Busy);
+        let job = temp.path().join("native-job");
+        let definition_a = definition(&original, true);
+        fs::write(&job, &definition_a).unwrap();
+        let saved = temp.path().join("a-setup.json");
+        write_atomic_json(&saved, &original).unwrap();
+        let saved_bytes = fs::read(&saved).unwrap();
+        assert!(
+            pool_operation_lock(&alternate.pool_dir).is_err(),
+            "rollback still holds the shared lease"
+        );
+        drop(lease);
+        let _other_lease = pool_operation_lock(&alternate.pool_dir).unwrap();
+        assert!(
+            verify_job_definition(
+                &alternate,
+                &[],
+                Some(&fs::read_to_string(&job).unwrap()),
+                true,
+                true
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read_to_string(&job).unwrap(), definition_a);
+        assert_eq!(fs::read(&saved).unwrap(), saved_bytes);
     }
 
     fn fixture() -> (tempfile::TempDir, Setup, PathBuf, PathBuf) {
