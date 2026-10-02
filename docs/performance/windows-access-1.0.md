@@ -1,6 +1,8 @@
 # Plasmite 1.0.0 access on Windows
 
-Direct HTTPS Model Context Protocol (MCP) lets a client use shared pools without installing Plasmite. The host runs Plasmite; the client supplies MCP and trusts the host's certificate. On this Windows VM, direct MCP added **0.44–0.50 ms per call** over native HTTPS with an in-memory access key. Its median latency reached **2.1–2.5 times** that native client's latency, while it delivered **39–48%** of its throughput. Direct MCP ran faster than the default saved-connection native client and the remote MCP process.
+## Executive summary
+
+Plasmite’s local libraries handle small writes in tens of microseconds, with reads faster still. Direct Model Context Protocol (MCP) access needs no Plasmite install on the client and our median call took under a millisecond, about half a millisecond more than native HTTPS with a key in memory. If you’re moving lots of messages, keep your client connection open or stream them through the CLI, because starting the CLI for every message costs tens of milliseconds. Our Windows VM runs x64 software on Arm, and these figures leave out login, model response time, and Internet latency.
 
 ## Environment and method
 
@@ -49,6 +51,8 @@ Each cell shows the median of ten per-run median call latencies, in milliseconds
 Direct HTTPS MCP costs less than one millisecond per call here. Local file access costs much less because it avoids the server and network stack. The Node remote interface and single-call CLI have larger client costs in this environment; these results do not establish a general HTTP or HTTPS floor.
 
 ## Matched native and MCP comparison
+
+On this Windows VM, direct MCP added **0.44–0.50 ms per call** over native HTTPS with an in-memory access key. Its median latency reached **2.1–2.5 times** that native client's latency, while it delivered **39–48%** of its throughput. Direct MCP ran faster than the default saved-connection native client and the remote MCP process.
 
 Throughput shows the median phase rate across ten repeats; the range shows the slowest and fastest repeat. Latency shows the median of the per-run median and 95th-percentile call latencies.
 
