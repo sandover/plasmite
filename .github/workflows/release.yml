@@ -142,6 +142,8 @@ jobs:
           toolchain: ${{ env.RELEASE_RUST_TOOLCHAIN }}
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.os }}-${{ matrix.target }}
       - name: Install smoke-test tooling
         if: matrix.sdk
         shell: bash

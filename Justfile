@@ -46,6 +46,7 @@ check-version-alignment:
 check-release-targets:
 	./scripts/test_release_targets.sh
 	./scripts/validate_distribution_targets.sh
+	bash scripts/test_post_release_delivery_smoke.sh
 
 # Run Go bindings tests with repo-local caches.
 bindings-go-test:

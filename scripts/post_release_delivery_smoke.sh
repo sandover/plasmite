@@ -123,6 +123,8 @@ is_required_channel() {
   esac
 }
 
+# Retry calls these checks conditionally, which disables Bash's errexit within
+# them. Each setup, install, and runtime step must therefore propagate failure.
 check_npm_channel() {
   if ! command -v npm >/dev/null 2>&1; then
     echo "[npm] npm is required" >&2
@@ -130,14 +132,15 @@ check_npm_channel() {
   fi
 
   local npm_dir="$scratch_root/npm"
-  rm -rf "$npm_dir"
-  mkdir -p "$npm_dir"
+  rm -rf "$npm_dir" || return 1
+  mkdir -p "$npm_dir" || return 1
   (
-    cd "$npm_dir"
-    npm init -y >/dev/null 2>&1
-    npm install --silent --no-audit --no-fund "plasmite@$VERSION" >/dev/null
-    ./node_modules/.bin/plasmite --version | grep -q "$VERSION"
-  )
+    cd "$npm_dir" || exit 1
+    npm init -y >/dev/null 2>&1 || exit 1
+    npm install --silent --no-audit --no-fund "plasmite@$VERSION" >/dev/null || exit 1
+    actual="$(./node_modules/.bin/plasmite --version)" || exit 1
+    [[ "$actual" == "plasmite $VERSION" ]] || exit 1
+  ) || return 1
 
   local -a pnpm_cmd=()
   if command -v pnpm >/dev/null 2>&1; then
@@ -150,14 +153,15 @@ check_npm_channel() {
   fi
 
   local pnpm_dir="$scratch_root/pnpm"
-  rm -rf "$pnpm_dir"
-  mkdir -p "$pnpm_dir"
+  rm -rf "$pnpm_dir" || return 1
+  mkdir -p "$pnpm_dir" || return 1
   (
-    cd "$pnpm_dir"
-    npm init -y >/dev/null 2>&1
-    "${pnpm_cmd[@]}" add "plasmite@$VERSION" >/dev/null
-    ./node_modules/.bin/plasmite --version | grep -q "$VERSION"
-  )
+    cd "$pnpm_dir" || exit 1
+    npm init -y >/dev/null 2>&1 || exit 1
+    "${pnpm_cmd[@]}" add "plasmite@$VERSION" >/dev/null || exit 1
+    actual="$(./node_modules/.bin/plasmite --version)" || exit 1
+    [[ "$actual" == "plasmite $VERSION" ]] || exit 1
+  ) || return 1
 }
 
 check_pypi_channel() {
@@ -166,8 +170,10 @@ check_pypi_channel() {
     return 1
   fi
   local uv_cache_dir="$scratch_root/uv-cache"
-  mkdir -p "$uv_cache_dir"
-  UV_CACHE_DIR="$uv_cache_dir" uv tool run --python 3.11 --from "plasmite==$VERSION" plasmite --version | grep -q "$VERSION"
+  mkdir -p "$uv_cache_dir" || return 1
+  local actual
+  actual="$(UV_CACHE_DIR="$uv_cache_dir" uv tool run --python 3.11 --from "plasmite==$VERSION" plasmite --version)" || return 1
+  [[ "$actual" == "plasmite $VERSION" ]] || return 1
 }
 
 check_crates_channel() {
@@ -177,9 +183,11 @@ check_crates_channel() {
   fi
   local cargo_home="$scratch_root/cargo-home"
   local cargo_root="$scratch_root/cargo-root"
-  mkdir -p "$cargo_home" "$cargo_root"
-  CARGO_HOME="$cargo_home" cargo install plasmite --version "$VERSION" --locked --force --root "$cargo_root" >/dev/null
-  "$cargo_root/bin/plasmite" --version | grep -q "$VERSION"
+  mkdir -p "$cargo_home" "$cargo_root" || return 1
+  CARGO_HOME="$cargo_home" cargo install plasmite --version "$VERSION" --locked --force --root "$cargo_root" >/dev/null || return 1
+  local actual
+  actual="$("$cargo_root/bin/plasmite" --version)" || return 1
+  [[ "$actual" == "plasmite $VERSION" ]] || return 1
 }
 
 run_channel_with_retry() {
