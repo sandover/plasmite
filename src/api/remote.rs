@@ -306,7 +306,9 @@ impl RemoteClient {
         R: DeserializeOwned,
     {
         let request = self.request(method, url)?.set("Accept", "application/json");
-        let response = if method == "GET" {
+        // These endpoints have no request body. An unread DELETE body can make
+        // the server close the connection while the client reads its response.
+        let response = if method == "GET" || method == "DELETE" {
             request.call()
         } else {
             let payload = serde_json::to_string(body).map_err(|err| {
