@@ -3,7 +3,7 @@
 //! The access key remains the authority. OAuth records hold only its stable key ID,
 //! so a key revocation stops every token and an in-flight MCP operation.
 
-use axum::extract::{ConnectInfo, Form, RawQuery, State};
+use axum::extract::{ConnectInfo, Form, FromRequest, RawQuery, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
@@ -28,7 +28,9 @@ const CODE_LIFETIME: u64 = 600;
 const ACCESS_LIFETIME: u64 = 900;
 const MAX_CLIENTS: usize = 1024;
 const MAX_PENDING: usize = 1024;
-const REGISTRATIONS_PER_MINUTE: u16 = 30;
+const MAX_PENDING_PER_SOURCE: usize = 32;
+const MAX_PENDING_PER_CLIENT: usize = 8;
+const PUBLIC_REQUESTS_PER_MINUTE: u16 = 30;
 
 #[derive(Clone)]
 pub(crate) struct OauthService {
@@ -38,7 +40,7 @@ pub(crate) struct OauthService {
     path: PathBuf,
     state: Arc<Mutex<OAuthState>>,
     pending: Arc<Mutex<HashMap<String, Pending>>>,
-    registration_windows: Arc<Mutex<HashMap<IpAddr, (u64, u16)>>>,
+    request_windows: Arc<Mutex<HashMap<IpAddr, (u64, u16)>>>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -87,6 +89,7 @@ struct AccessToken {
 }
 
 struct Pending {
+    source: IpAddr,
     client_id: String,
     client_name: String,
     redirect_uri: String,
@@ -149,7 +152,7 @@ impl OauthService {
             path,
             state: Arc::new(Mutex::new(state)),
             pending: Arc::new(Mutex::new(HashMap::new())),
-            registration_windows: Arc::new(Mutex::new(HashMap::new())),
+            request_windows: Arc::new(Mutex::new(HashMap::new())),
         })))
     }
 
@@ -241,14 +244,17 @@ impl OauthService {
         Ok(result)
     }
 
-    fn admit_registration(&self, source: IpAddr) -> bool {
+    fn admit_public_request(&self, source: IpAddr) -> bool {
         let minute = now() / 60;
-        let Ok(mut windows) = self.registration_windows.lock() else {
+        let Ok(mut windows) = self.request_windows.lock() else {
             return false;
         };
         windows.retain(|_, (seen_minute, _)| *seen_minute == minute);
+        if !windows.contains_key(&source) && windows.len() >= MAX_CLIENTS {
+            return false;
+        }
         let window = windows.entry(source).or_insert((minute, 0));
-        if window.1 >= REGISTRATIONS_PER_MINUTE {
+        if window.1 >= PUBLIC_REQUESTS_PER_MINUTE {
             return false;
         }
         window.1 += 1;
@@ -285,11 +291,15 @@ async fn server_metadata(State(oauth): State<Arc<OauthService>>) -> Response {
 async fn register(
     State(oauth): State<Arc<OauthService>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    Json(request): Json<RegisterRequest>,
+    request: Request,
 ) -> Response {
-    if !oauth.admit_registration(peer.ip()) {
+    if !oauth.admit_public_request(peer.ip()) {
         return oauth_error(StatusCode::TOO_MANY_REQUESTS, "temporarily_unavailable");
     }
+    let Json(request) = match Json::<RegisterRequest>::from_request(request, &()).await {
+        Ok(request) => request,
+        Err(err) => return err.into_response(),
+    };
     if request.redirect_uris.is_empty()
         || request.redirect_uris.len() > 8
         || request
@@ -346,8 +356,12 @@ async fn register(
 
 async fn authorize_page(
     State(oauth): State<Arc<OauthService>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     RawQuery(raw): RawQuery,
 ) -> Response {
+    if !oauth.admit_public_request(peer.ip()) {
+        return oauth_error(StatusCode::TOO_MANY_REQUESTS, "temporarily_unavailable");
+    }
     let Some(raw) = raw else {
         return oauth_error(StatusCode::BAD_REQUEST, "invalid_request");
     };
@@ -419,6 +433,7 @@ async fn authorize_page(
         Err(response) => return response,
     };
     let pending = Pending {
+        source: peer.ip(),
         client_id: client.id,
         client_name: client.name,
         redirect_uri: redirect_uri.to_owned(),
@@ -433,7 +448,18 @@ async fn authorize_page(
         Err(_) => return server_error(),
     };
     state.retain(|_, pending| pending.expires_at > now());
-    if state.len() >= MAX_PENDING {
+    if state.len() >= MAX_PENDING
+        || state
+            .values()
+            .filter(|pending| pending.source == peer.ip())
+            .count()
+            >= MAX_PENDING_PER_SOURCE
+        || state
+            .values()
+            .filter(|entry| entry.client_id == pending.client_id)
+            .count()
+            >= MAX_PENDING_PER_CLIENT
+    {
         return oauth_error(StatusCode::TOO_MANY_REQUESTS, "temporarily_unavailable");
     }
     let name = html(&pending.client_name);
@@ -812,4 +838,162 @@ fn html(value: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use tower_service::Service;
+
+    const VALID_REGISTRATION: &str = r#"{"client_name":"Security regression","redirect_uris":["https://client.example/callback"]}"#;
+
+    fn registration_request(peer: SocketAddr, body: &str) -> Request {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/oauth/register")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_owned()))
+            .unwrap();
+        request.extensions_mut().insert(ConnectInfo(peer));
+        request
+    }
+
+    fn service() -> (tempfile::TempDir, Arc<OauthService>) {
+        let directory = tempfile::tempdir().unwrap();
+        let access = Arc::new(
+            AccessStore::open(directory.path(), Some("https://localhost:9743"), None, None)
+                .unwrap(),
+        );
+        let service = OauthService::open(access).unwrap().unwrap();
+        (directory, service)
+    }
+
+    async fn register_client(oauth: &Arc<OauthService>, peer: SocketAddr) -> String {
+        let response = register(
+            State(oauth.clone()),
+            ConnectInfo(peer),
+            registration_request(peer, VALID_REGISTRATION),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let bytes = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["client_id"]
+            .as_str()
+            .unwrap()
+            .into()
+    }
+
+    async fn page(oauth: &Arc<OauthService>, peer: SocketAddr, client: &str) -> Response {
+        let query = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("response_type", "code")
+            .append_pair("client_id", client)
+            .append_pair("redirect_uri", "https://client.example/callback")
+            .append_pair("code_challenge", &"A".repeat(43))
+            .append_pair("code_challenge_method", "S256")
+            .append_pair("resource", &oauth.resource)
+            .finish();
+        authorize_page(
+            State(oauth.clone()),
+            ConnectInfo(peer),
+            RawQuery(Some(query)),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn one_public_client_cannot_fill_the_authorization_queue() {
+        let (_directory, oauth) = service();
+        let peer = "192.0.2.1:1234".parse().unwrap();
+        let client = register_client(&oauth, peer).await;
+        for _ in 0..MAX_PENDING_PER_CLIENT {
+            assert_eq!(page(&oauth, peer, &client).await.status(), StatusCode::OK);
+        }
+        assert_eq!(
+            page(&oauth, peer, &client).await.status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        let other_client = register_client(&oauth, peer).await;
+        assert_eq!(
+            page(&oauth, peer, &other_client).await.status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            oauth.pending.lock().unwrap().len(),
+            MAX_PENDING_PER_CLIENT + 1
+        );
+    }
+
+    #[tokio::test]
+    async fn one_source_cannot_fill_the_queue_with_many_clients() {
+        let (_directory, oauth) = service();
+        let peer = "192.0.2.1:1234".parse().unwrap();
+        for _ in 0..MAX_PENDING_PER_SOURCE / MAX_PENDING_PER_CLIENT {
+            // Model requests in later rate-limit windows without waiting minutes.
+            oauth.request_windows.lock().unwrap().clear();
+            let client = register_client(&oauth, peer).await;
+            for _ in 0..MAX_PENDING_PER_CLIENT {
+                assert_eq!(page(&oauth, peer, &client).await.status(), StatusCode::OK);
+            }
+        }
+        oauth.request_windows.lock().unwrap().clear();
+        let client = register_client(&oauth, peer).await;
+        assert_eq!(
+            page(&oauth, peer, &client).await.status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        let other_peer = "192.0.2.2:1234".parse().unwrap();
+        assert_eq!(
+            page(&oauth, other_peer, &client).await.status(),
+            StatusCode::OK
+        );
+    }
+
+    #[tokio::test]
+    async fn public_registration_and_authorization_share_a_rate_limit() {
+        let (_directory, oauth) = service();
+        let peer = "192.0.2.1:1234".parse().unwrap();
+        // Even malformed requests consume the public endpoint budget.
+        for _ in 0..PUBLIC_REQUESTS_PER_MINUTE {
+            assert_eq!(
+                authorize_page(State(oauth.clone()), ConnectInfo(peer), RawQuery(None))
+                    .await
+                    .status(),
+                StatusCode::BAD_REQUEST
+            );
+        }
+        assert_eq!(
+            authorize_page(State(oauth.clone()), ConnectInfo(peer), RawQuery(None))
+                .await
+                .status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        let response = register(
+            State(oauth),
+            ConnectInfo(peer),
+            registration_request(peer, VALID_REGISTRATION),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn malformed_registration_requests_use_the_public_rate_limit() {
+        let (_directory, oauth) = service();
+        let peer = "192.0.2.1:1234".parse().unwrap();
+        let mut router = oauth.router();
+
+        for _ in 0..PUBLIC_REQUESTS_PER_MINUTE {
+            let response = Service::call(&mut router, registration_request(peer, "{"))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        }
+        let response = Service::call(&mut router, registration_request(peer, "{"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
 }

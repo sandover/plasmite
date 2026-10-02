@@ -229,6 +229,9 @@ your network routes to the server.
 Use `--bind` and `--remote-bind` to change the listening addresses. Restrict
 network access to intended recipients. Keep the local HTTP listener on
 loopback and keep it out of every network proxy, including a tailnet-only proxy.
+Every OS user who can reach that loopback port can read and change pools and
+create access keys. Use a host or container whose local users you trust with
+the whole served directory.
 `--remote-bind` takes a numeric IP and port; bracket an IPv6 address.
 A positional `serve SERVER` URL advertises the origin, sets certificate
 names, and sets the default HTTPS listener port. With no explicit URL port,
@@ -287,6 +290,21 @@ server starts, inspect launchd or systemd for that job.
 On a host that mounts the required storage without sign-in, a real reboot
 with the owner signed out checks pre-login startup. A local restart does not
 prove it. A FileVault unlock check proves recovery after that unlock.
+
+The HTTPS listener holds at most 128 connections. It closes incomplete TLS
+handshakes after five seconds, waits at most ten seconds for HTTP/1 headers,
+and times out request bodies after 30 seconds without incoming data. For
+HTTP/2, it sends a ping every 15 seconds and closes the connection if the
+client does not answer within ten seconds. Clients that answer can keep idle
+HTTP/2 connections open. Those connections count toward the limit, so requests
+above it must retry. These limits apply before access-key checks. Put an
+Internet-facing server behind a proxy or firewall that also limits connection
+rates.
+
+OAuth registration and authorization pages share a limit of 30 requests per
+minute for each TCP source address. One client can hold eight pending
+approvals; one source address can hold 32. A reverse proxy shares its source
+address among clients, so account for those limits when deploying direct MCP.
 
 ### Use a trusted certificate
 

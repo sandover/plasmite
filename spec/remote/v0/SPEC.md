@@ -161,6 +161,10 @@ It captures stable wire-level compatibility guarantees only.
 - Servers may enforce max tail timeout (`400` when exceeded).
 - Servers may cap concurrent tails (`423`).
 - Body/size limits should be applied consistently to JSON and Lite3 append paths.
+- The server bounds HTTPS connections before authentication and expires
+  incomplete TLS handshakes, HTTP/1 headers, and idle request bodies. HTTP/2
+  uses keepalive pings to check connection liveness. It releases completed
+  connection tasks during normal service.
 
 ## Non-Contract Surface
 

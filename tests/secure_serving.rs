@@ -153,6 +153,38 @@ fn remote_tls_health_uses_the_configured_certificate() -> Result<(), Box<dyn std
     Ok(())
 }
 
+#[test]
+fn idle_tls_connections_expire_without_stopping_the_server()
+-> Result<(), Box<dyn std::error::Error>> {
+    let temp = tempfile::tempdir()?;
+    let server = TestServer::try_start(temp.path())?;
+    let url = url::Url::parse(&server.remote_url)?;
+    let address = ("127.0.0.1", url.port().ok_or("missing TLS port")?);
+    let mut connections = Vec::new();
+    for _ in 0..160 {
+        connections.push(std::net::TcpStream::connect(address)?);
+    }
+    // Local administration remains available even while the remote budget fills.
+    assert_eq!(
+        ureq::get(&format!("{}/healthz", server.local_url))
+            .call()?
+            .status(),
+        200
+    );
+    // The server must close idle handshakes even when the peer keeps its socket open.
+    connections[0].set_read_timeout(Some(Duration::from_secs(7)))?;
+    let mut byte = [0u8; 1];
+    match std::io::Read::read(&mut connections[0], &mut byte) {
+        Ok(0) => {}
+        Err(error) if matches!(error.kind(), std::io::ErrorKind::ConnectionReset) => {}
+        result => return Err(format!("idle TLS socket did not expire: {result:?}").into()),
+    }
+    drop(connections);
+    // A fresh authenticated request succeeds after the held sockets expire.
+    server.client()?.list_pools()?;
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn serve_exits_successfully_after_sigterm() -> Result<(), Box<dyn std::error::Error>> {

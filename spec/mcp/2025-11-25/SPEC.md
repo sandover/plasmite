@@ -55,8 +55,11 @@ metadata lives at `/.well-known/oauth-authorization-server`.
 The server accepts dynamic public-client registration at `/oauth/register`.
 The client supplies a name and exact redirect URIs. The name is a label, not
 proof of client identity. Redirects use HTTPS or loopback HTTP. Unapproved
-registrations expire after ten minutes. The registration endpoint limits each
-source address to 30 attempts per minute.
+registrations expire after ten minutes. Registration and authorization-page
+requests share a limit of 30 attempts per minute for each source address.
+The server permits at most eight pending approvals for one client and 32
+for one source address, so one caller cannot fill the shared approval queue.
+The source address comes from the TCP connection, not forwarded headers.
 
 Authorization requires an exact MCP resource URL and an S256 Proof Key for
 Code Exchange (PKCE) challenge. The server presents a browser page at

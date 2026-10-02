@@ -17,7 +17,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Extension, Json, Router};
 use bytes::Bytes;
-use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use hyper_util::server::conn::auto::Builder as AutoBuilder;
 use hyper_util::service::TowerToHyperService;
 use rustls::ServerConfig;
@@ -38,6 +38,7 @@ use tokio::time::Duration;
 use tokio_rustls::TlsAcceptor;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
+use tower_http::timeout::RequestBodyTimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tower_service::Service;
 use tracing_subscriber::EnvFilter;
@@ -76,6 +77,11 @@ const UI_COMMON_JS: &str = include_str!("../ui/common.js");
 const UI_INCONSOLATA_WOFF2: &[u8] =
     include_bytes!("../ui/fonts/inconsolata-latin-wght-normal.woff2");
 const READY_FILE_ENV: &str = "PLASMITE_SERVE_READY_FILE";
+// Bound sockets before authentication, including incomplete TLS handshakes.
+const MAX_TLS_CONNECTIONS: usize = 128;
+const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+const REQUEST_HEADER_TIMEOUT: Duration = Duration::from_secs(10);
+const REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug)]
 pub struct ServeConfig {
@@ -366,8 +372,7 @@ async fn prepare_server_with_access(
             state.clone(),
             observe_activity,
         ))
-        .with_state(state)
-        .layer(DefaultBodyLimit::max(max_body_bytes))
+        .with_state(state.clone())
         .layer(TraceLayer::new_for_http());
 
     if let Some(oauth) = oauth {
@@ -377,8 +382,12 @@ async fn prepare_server_with_access(
     if local_admin {
         app = app.layer(middleware::from_fn(local_request_guard));
     } else {
-        app = app.layer(middleware::from_fn(remote_browser_guard));
+        app = app.layer(middleware::from_fn_with_state(state, remote_browser_guard));
     }
+
+    app = app
+        .layer(DefaultBodyLimit::max(max_body_bytes))
+        .layer(RequestBodyTimeoutLayer::new(REQUEST_BODY_TIMEOUT));
 
     Ok(PreparedServer { app, tls_config })
 }
@@ -483,7 +492,11 @@ async fn local_request_guard(request: Request<Body>, next: Next) -> Response {
     next.run(request).await
 }
 
-async fn remote_browser_guard(request: Request<Body>, next: Next) -> Response {
+async fn remote_browser_guard(
+    State(state): State<Arc<AppState>>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
     let browser_login =
         request.uri().path() == "/v0/browser/session" && request.method() != Method::GET;
     let cookie_write = !matches!(*request.method(), Method::GET | Method::HEAD)
@@ -495,6 +508,29 @@ async fn remote_browser_guard(request: Request<Body>, next: Next) -> Response {
             Error::new(ErrorKind::Permission).with_message("untrusted browser request origin"),
         )
         .await;
+    }
+    // Check permission before the extractors buffer or parse the body.
+    let path = request.uri().path();
+    let protected_pool = path == "/v0/pools"
+        || path.starts_with("/v0/pools/")
+        || path == "/v0/ui/pools"
+        || path.starts_with("/v0/ui/pools/");
+    if protected_pool && let Err(err) = authorize(request.headers(), &state) {
+        drain_rejected_body(request).await;
+        return error_response(err);
+    }
+    if path == "/mcp" && request.method() == Method::POST {
+        if let Some(oauth) = &state.oauth {
+            let bearer = request
+                .headers()
+                .get(header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.strip_prefix("Bearer "));
+            if bearer.and_then(|value| oauth.grant(value)).is_none() {
+                drain_rejected_body(request).await;
+                return oauth.challenge();
+            }
+        }
     }
     next.run(request).await
 }
@@ -509,8 +545,17 @@ const REJECTED_BODY_DRAIN_BYTES: usize = 64 * 1024;
 /// it. The reset can destroy the response before the client reads it. Reading
 /// the body first keeps the connection open. Bodies over the cap still close it.
 async fn reject_after_body(request: Request<Body>, err: Error) -> Response {
-    let _ = axum::body::to_bytes(request.into_body(), REJECTED_BODY_DRAIN_BYTES).await;
+    drain_rejected_body(request).await;
     error_response_with_status(err, StatusCode::FORBIDDEN)
+}
+
+async fn drain_rejected_body(request: Request<Body>) {
+    // A client must not keep a rejected request alive by withholding its body.
+    let _ = tokio::time::timeout(
+        Duration::from_secs(1),
+        axum::body::to_bytes(request.into_body(), REJECTED_BODY_DRAIN_BYTES),
+    )
+    .await;
 }
 
 fn same_origin(headers: &HeaderMap, uri: &Uri, scheme: &str) -> bool {
@@ -703,7 +748,16 @@ async fn serve_tls(
     shutdown: impl Future<Output = ()>,
 ) -> Result<(), Error> {
     let acceptor = TlsAcceptor::from(tls_config);
-    let builder = AutoBuilder::new(TokioExecutor::new());
+    let mut builder = AutoBuilder::new(TokioExecutor::new());
+    builder
+        .http1()
+        .timer(TokioTimer::new())
+        .header_read_timeout(REQUEST_HEADER_TIMEOUT);
+    builder
+        .http2()
+        .timer(TokioTimer::new())
+        .keep_alive_interval(Duration::from_secs(15))
+        .keep_alive_timeout(Duration::from_secs(10));
     let mut make_service = app.into_make_service_with_connect_info::<SocketAddr>();
     let mut tasks = JoinSet::new();
 
@@ -712,15 +766,21 @@ async fn serve_tls(
     loop {
         tokio::select! {
             _ = &mut shutdown => break,
+            _ = tasks.join_next(), if !tasks.is_empty() => {},
             accept = listener.accept() => {
                 let (stream, peer_addr) = match accept {
                     Ok(result) => result,
                     Err(err) => {
-                        return Err(Error::new(ErrorKind::Io)
-                            .with_message("failed to accept TLS connection")
-                            .with_source(err));
+                        tracing::warn!("failed to accept TLS connection: {err}");
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        continue;
                     }
                 };
+
+                if tasks.len() >= MAX_TLS_CONNECTIONS {
+                    drop(stream);
+                    continue;
+                }
 
                 let service = match make_service.call(peer_addr).await {
                     Ok(service) => service,
@@ -730,9 +790,11 @@ async fn serve_tls(
                 let acceptor = acceptor.clone();
                 let builder = builder.clone();
                 tasks.spawn(async move {
-                    let tls_stream = match acceptor.accept(stream).await {
-                        Ok(stream) => stream,
-                        Err(_) => return,
+                    let tls_stream = match tokio::time::timeout(
+                        TLS_HANDSHAKE_TIMEOUT, acceptor.accept(stream),
+                    ).await {
+                        Ok(Ok(stream)) => stream,
+                        _ => return,
                     };
                     let io = TokioIo::new(tls_stream);
                     let service = TowerToHyperService::new(service);
