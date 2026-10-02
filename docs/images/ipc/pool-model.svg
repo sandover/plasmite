@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="210" viewBox="0 0 720 210" role="img" aria-labelledby="title description">
+  <title id="title">Local processes share one pool file</title>
+  <desc id="description">Two writers append JSON messages to channel.plasmite. Two readers follow independently. The file holds bounded recent history; reading does not remove messages.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8" fill="#64a6a8"/></marker>
+  </defs>
+  <rect width="720" height="210" rx="12" fill="#0f181e"/>
+  <g fill="#182228" stroke="#578081" stroke-width="1.5">
+    <rect x="18" y="28" width="136" height="54" rx="7"/>
+    <rect x="18" y="128" width="136" height="54" rx="7"/>
+    <rect x="250" y="22" width="220" height="166" rx="9"/>
+    <rect x="566" y="28" width="136" height="54" rx="7"/>
+    <rect x="566" y="128" width="136" height="54" rx="7"/>
+  </g>
+  <g fill="none" stroke="#64a6a8" stroke-width="2" marker-end="url(#arrow)">
+    <path d="M154 55H204L245 85"/>
+    <path d="M154 155H204L245 125"/>
+    <path d="M470 85L514 55H561"/>
+    <path d="M470 125L514 155H561"/>
+  </g>
+  <g font-family="system-ui, -apple-system, sans-serif" font-size="18" fill="#e7ead7" text-anchor="middle">
+    <text x="86" y="62">Writer A</text>
+    <text x="86" y="162">Writer B</text>
+    <text x="634" y="62">Reader 1</text>
+    <text x="634" y="162">Reader 2</text>
+    <text x="360" y="81">bounded history</text>
+  </g>
+  <text x="360" y="54" font-family="monospace" font-size="18" fill="#e7ead7" text-anchor="middle">channel.plasmite</text>
+  <g font-family="system-ui, -apple-system, sans-serif" font-size="15" fill="#a4a9ad" text-anchor="middle">
+    <text x="202" y="105">append</text>
+    <text x="518" y="105">follow</text>
+    <text x="360" y="168">one local file</text>
+  </g>
+  <g fill="#2d464c" stroke="#64a6a8">
+    <rect x="272" y="98" width="56" height="38" rx="3"/>
+    <rect x="332" y="98" width="56" height="38" rx="3"/>
+    <rect x="392" y="98" width="56" height="38" rx="3"/>
+  </g>
+  <g font-family="monospace" font-size="16" fill="#e7ead7" text-anchor="middle">
+    <text x="300" y="122">JSON</text><text x="360" y="122">JSON</text><text x="420" y="122">JSON</text>
+  </g>
+</svg>

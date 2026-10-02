@@ -32,6 +32,7 @@ docs/
 ├── ../include/plasmite.h                       — C ABI header; read for stability contract, ownership rules, linking
 ├── record/serving.md                           — Read when sharing pools, setting browser trust, or operating a secure server
 │
+├── images/README.md                            — Read when reproducing README diagrams or terminal/browser recordings
 └── images/ui/                                  — UI screenshots; read when updating docs/UI references
 
 spec/
