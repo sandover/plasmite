@@ -33,20 +33,39 @@ jobs:
       build_run_id: ${{ steps.resolve.outputs.build_run_id }}
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
+      source_sha: ${{ steps.resolve.outputs.source_sha }}
       rehearsal: ${{ steps.resolve.outputs.rehearsal }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - id: resolve
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_BUILD_RUN_ID_INPUT: ${{ inputs.build_run_id }}
+          RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
+          RELEASE_REHEARSAL_INPUT: ${{ inputs.rehearsal }}
         run: |
           set -euo pipefail
 
-          requested_build_run_id="${{ inputs.build_run_id }}"
-          requested_release_tag="${{ inputs.release_tag }}"
-          rehearsal="${{ inputs.rehearsal }}"
+          requested_build_run_id="${RELEASE_BUILD_RUN_ID_INPUT:-}"
+          requested_release_tag="${RELEASE_TAG_INPUT:-}"
+          rehearsal="${RELEASE_REHEARSAL_INPUT:-false}"
           tmp_dir="$(mktemp -d)"
           trap 'rm -rf "$tmp_dir"' EXIT
+
+          if [[ "$rehearsal" != "true" && "$rehearsal" != "false" ]]; then
+            echo "error: rehearsal must be true or false." >&2
+            exit 1
+          fi
+          if [[ -n "$requested_build_run_id" && ! "$requested_build_run_id" =~ ^[1-9][0-9]*$ ]]; then
+            echo "error: build_run_id must contain only decimal digits and be greater than zero." >&2
+            exit 1
+          fi
+          if [[ -n "$requested_release_tag" ]]; then
+            ./scripts/validate_release_tag.sh "$requested_release_tag"
+          fi
 
           resolve_build_run_by_tag() {
             local expected_tag="$1"
@@ -92,10 +111,6 @@ jobs:
           fi
 
           if [[ -n "$requested_release_tag" ]]; then
-            if [[ "$requested_release_tag" != v* ]]; then
-              echo "error: release_tag must use vX.Y.Z format (got '$requested_release_tag')." >&2
-              exit 1
-            fi
             if ! build_run_id="$(resolve_build_run_by_tag "$requested_release_tag" "$tmp_dir/tag-lookup")"; then
               echo "error: no successful release workflow run found for tag '$requested_release_tag'." >&2
               echo "hint: run release.yml for that tag, or pass build_run_id explicitly." >&2
@@ -106,6 +121,11 @@ jobs:
             echo "warning: build_run_id path is for incident recovery; prefer release_tag for routine publishes." >&2
             echo "::warning::build_run_id path is for incident recovery; prefer release_tag for routine publishes."
             echo "⚠️ Using build_run_id incident-recovery path. Prefer release_tag for routine publishes." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [[ ! "$build_run_id" =~ ^[1-9][0-9]*$ ]]; then
+            echo "error: resolved build run ID is not a positive decimal integer." >&2
+            exit 1
           fi
 
           run_json="$(gh run view "$build_run_id" --repo "$GITHUB_REPOSITORY" --json workflowName,conclusion,url)"
@@ -121,17 +141,43 @@ jobs:
           fi
 
           # Extract tag/version from build run metadata.
-          gh run download "$build_run_id" --repo "$GITHUB_REPOSITORY" --name release-metadata --dir "$tmp_dir"
-          metadata_file="$(find "$tmp_dir" -name metadata.json | head -n 1)"
+          selected_run_dir="$tmp_dir/selected-run"
+          mkdir -p "$selected_run_dir"
+          gh run download "$build_run_id" --repo "$GITHUB_REPOSITORY" --name release-metadata --dir "$selected_run_dir"
+          metadata_file="$(find "$selected_run_dir" -name metadata.json -print -quit)"
           if [[ -z "$metadata_file" ]]; then
             echo "error: release-metadata artifact missing metadata.json for run $build_run_id." >&2
             exit 1
           fi
 
-          tag="$(jq -r '.tag' "$metadata_file")"
-          version="$(jq -r '.version' "$metadata_file")"
-          if [[ -z "$tag" || "$tag" == "null" || "$tag" != v* ]]; then
-            echo "error: invalid tag in release metadata: '$tag'." >&2
+          tag="$(jq -er '.tag | select(type == "string")' "$metadata_file")"
+          version="$(jq -er '.version | select(type == "string")' "$metadata_file")"
+          source_sha="$(jq -er '.source_sha | select(type == "string")' "$metadata_file")"
+          source_ref="$(jq -er '.source_ref | select(type == "string")' "$metadata_file")"
+          source_run_id="$(jq -er '.source_run_id | select(type == "string")' "$metadata_file")"
+          source_workflow="$(jq -er '.source_workflow | select(type == "string")' "$metadata_file")"
+          ./scripts/validate_release_tag.sh "$tag"
+          expected_version="${tag#v}"
+          if [[ "$version" != "$expected_version" ]]; then
+            echo "error: release metadata version '$version' does not match tag '$tag'." >&2
+            exit 1
+          fi
+          if [[ ! "$source_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "error: invalid source_sha in release metadata: '$source_sha'." >&2
+            exit 1
+          fi
+          if [[ "$source_ref" != "refs/tags/${tag}" ]]; then
+            echo "error: release metadata source_ref '$source_ref' does not match tag '$tag'." >&2
+            exit 1
+          fi
+          if [[ "$source_run_id" != "$build_run_id" || "$source_workflow" != "release" ]]; then
+            echo "error: release metadata does not belong to build run $build_run_id." >&2
+            exit 1
+          fi
+
+          tag_source_sha="$(./scripts/resolve_release_tag_sha.sh "$GITHUB_REPOSITORY" "$tag")"
+          if [[ "$source_sha" != "$tag_source_sha" ]]; then
+            echo "error: release build source $source_sha does not match current tag target $tag_source_sha for '$tag'." >&2
             exit 1
           fi
 
@@ -139,6 +185,7 @@ jobs:
             echo "build_run_id=$build_run_id"
             echo "tag=$tag"
             echo "version=$version"
+            echo "source_sha=$source_sha"
             echo "rehearsal=$rehearsal"
           } >> "$GITHUB_OUTPUT"
 
@@ -186,7 +233,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.resolve-build-run.outputs.tag }}
+          ref: ${{ needs.resolve-build-run.outputs.source_sha }}
       - name: Download and verify artifacts from release build run
         env:
           GH_TOKEN: ${{ github.token }}
@@ -261,7 +308,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.resolve-build-run.outputs.tag }}
+          ref: ${{ needs.resolve-build-run.outputs.source_sha }}
       - uses: actions/download-artifact@v4
         with:
           name: release-inputs
@@ -336,7 +383,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.resolve-build-run.outputs.tag }}
+          ref: ${{ needs.resolve-build-run.outputs.source_sha }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RELEASE_RUST_TOOLCHAIN }}
@@ -436,7 +483,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.resolve-build-run.outputs.tag }}
+          ref: ${{ needs.resolve-build-run.outputs.source_sha }}
           sparse-checkout: CHANGELOG.md
       - uses: actions/download-artifact@v4
         with:

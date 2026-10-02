@@ -38,6 +38,13 @@ We split the work into two big stages so that “building” and “publishing�
 - **Build stage (GitHub)**: compile + package everything, and upload the results as artifacts.
 - **Publish stage (GitHub)**: manually dispatch `release-publish.yml` with `release_tag=vX.Y.Z` (or an explicit `build_run_id`), verify provenance, sync/verify Homebrew alignment, then publish to registries and create the GitHub Release.
 
+The build accepts stable `vX.Y.Z` tags. It resolves the tag to a commit SHA
+before building, then checks out that SHA in each build job. Each build job
+fetches the tag and checks that it still names the same commit, so the built
+CLI reports the release version. Publish reads the recorded SHA from the
+successful build metadata and checks that the release tag still points to that
+commit before it collects artifacts or publishes.
+
 This split is intentional: if a registry token is expired (or a policy check fails), we can re-run the publish stage without rebuilding the entire multi-platform build.
 
 ### Where the work happens

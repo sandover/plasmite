@@ -22,40 +22,45 @@ jobs:
     outputs:
       tag: ${{ steps.ctx.outputs.tag }}
       version: ${{ steps.ctx.outputs.version }}
+      source_sha: ${{ steps.ctx.outputs.source_sha }}
       matrix: ${{ steps.targets.outputs.matrix }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - id: ctx
         shell: bash
+        env:
+          RELEASE_TAG_INPUT: ${{ inputs.tag }}
         run: |
           set -euo pipefail
 
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            tag="${{ inputs.tag }}"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            tag="$RELEASE_TAG_INPUT"
           else
             tag="${GITHUB_REF_NAME}"
           fi
 
-          if [[ -z "$tag" || "$tag" != v* ]]; then
-            echo "error: release tag must use vX.Y.Z format, got '$tag'." >&2
-            exit 1
-          fi
-
-          if ! git ls-remote --exit-code --tags "https://github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${tag}" >/dev/null; then
-            echo "error: requested tag '${tag}' does not exist on origin." >&2
-            echo "hint: create/push the tag first, then rerun release build." >&2
+          source_sha="$(./scripts/resolve_release_tag_sha.sh "$GITHUB_REPOSITORY" "$tag")"
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_SHA" != "$source_sha" ]]; then
+            echo "error: pushed tag '${tag}' no longer points to event commit $GITHUB_SHA." >&2
             exit 1
           fi
 
           version="${tag#v}"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "source_sha=$source_sha"
+          } >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
-          ref: ${{ steps.ctx.outputs.tag }}
-      - id: source
-        name: Resolve checked-out release source
+          ref: ${{ steps.ctx.outputs.source_sha }}
+      - name: Verify checked-out release source
         shell: bash
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        env:
+          RELEASE_SOURCE_SHA: ${{ steps.ctx.outputs.source_sha }}
+        run: test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE_SHA"
       - id: targets
         name: Validate and render release targets
         shell: bash
@@ -65,26 +70,27 @@ jobs:
           echo "matrix=$(./scripts/render_release_matrix.sh)" >> "$GITHUB_OUTPUT"
       - name: Record release metadata
         shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.ctx.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.ctx.outputs.version }}
+          RELEASE_SOURCE_SHA: ${{ steps.ctx.outputs.source_sha }}
         run: |
           set -euo pipefail
-          tag="${{ steps.ctx.outputs.tag }}"
-          version="${{ steps.ctx.outputs.version }}"
           mkdir -p .scratch/release-metadata
-          cat > .scratch/release-metadata/metadata.json <<META
-          {
-            "tag": "${tag}",
-            "version": "${version}",
-            "source_sha": "${{ steps.source.outputs.sha }}",
-            "source_ref": "refs/tags/${tag}",
-            "source_run_id": "${GITHUB_RUN_ID}",
-            "source_workflow": "${GITHUB_WORKFLOW}"
-          }
-          META
+          jq -n \
+            --arg tag "$RELEASE_TAG" \
+            --arg version "$RELEASE_VERSION" \
+            --arg source_sha "$RELEASE_SOURCE_SHA" \
+            --arg source_ref "refs/tags/${RELEASE_TAG}" \
+            --arg source_run_id "$GITHUB_RUN_ID" \
+            --arg source_workflow "$GITHUB_WORKFLOW" \
+            '{tag:$tag,version:$version,source_sha:$source_sha,source_ref:$source_ref,source_run_id:$source_run_id,source_workflow:$source_workflow}' \
+            > .scratch/release-metadata/metadata.json
       - name: Require green ci.yml for release SHA
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          RELEASE_SOURCE_SHA: ${{ steps.ctx.outputs.source_sha }}
         run: |
           set -euo pipefail
           ci_runs="$(gh run list \
@@ -136,7 +142,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release-context.outputs.tag }}
+          ref: ${{ needs.release-context.outputs.source_sha }}
+      - name: Restore and verify release tag for build identity
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.release-context.outputs.tag }}
+          RELEASE_SOURCE_SHA: ${{ needs.release-context.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE_SHA"
+          test "$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")" = "$RELEASE_SOURCE_SHA"
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RELEASE_RUST_TOOLCHAIN }}
@@ -297,7 +313,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release-context.outputs.tag }}
+          ref: ${{ needs.release-context.outputs.source_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
