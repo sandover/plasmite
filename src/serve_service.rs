@@ -262,7 +262,18 @@ fn required(pool_dir: &Path) -> Result<Setup, Error> {
     })
 }
 
-fn pool_operation_lock(pool_dir: &Path) -> Result<File, Error> {
+#[derive(Debug)]
+struct ServiceLock(File);
+
+impl Drop for ServiceLock {
+    fn drop(&mut self) {
+        // A concurrently forked child can inherit this descriptor until exec.
+        // Unlock the shared description now rather than awaiting its last close.
+        let _ = FileExt::unlock(&self.0);
+    }
+}
+
+fn pool_operation_lock(pool_dir: &Path) -> Result<ServiceLock, Error> {
     // Native labels depend on the canonical pool, so their operation lock must
     // also be independent of HOME. Keep it separate from the live server lock.
     let state = pool_dir.join(".plasmite-serve");
@@ -286,10 +297,10 @@ fn pool_operation_lock(pool_dir: &Path) -> Result<File, Error> {
             .with_path(&path)
             .with_source(error)
     })?;
-    Ok(file)
+    Ok(ServiceLock(file))
 }
 
-fn lock(pool_dir: &Path) -> Result<File, Error> {
+fn lock(pool_dir: &Path) -> Result<ServiceLock, Error> {
     let file = pool_operation_lock(pool_dir)?;
     let directory = directory()?;
     fs::create_dir_all(directory.parent().unwrap())
@@ -1629,6 +1640,37 @@ mod tests {
         }
         assert!(inspect_native_presence(&setup, "exit 0").unwrap());
         assert!(!inspect_native_presence(&setup, "exit 1").unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dropping_service_lock_releases_lease_with_an_inherited_descriptor() {
+        let temp = tempfile::tempdir().unwrap();
+        let raw_path = temp.path().join("close-only.lock");
+        let raw = File::create(&raw_path).unwrap();
+        raw.try_lock_exclusive().unwrap();
+        let raw_inherited = raw.try_clone().unwrap();
+        drop(raw);
+        let contender = File::open(raw_path).unwrap();
+        assert!(
+            contender.try_lock_exclusive().is_err(),
+            "closing only the parent descriptor leaves the duplicated lease held"
+        );
+        drop(raw_inherited);
+        contender.try_lock_exclusive().unwrap();
+        FileExt::unlock(&contender).unwrap();
+
+        let lease = pool_operation_lock(temp.path()).unwrap();
+        // dup shares the same open-file description as a descriptor inherited
+        // by fork. Keep it alive after the operation guard is dropped.
+        let inherited = lease.0.try_clone().unwrap();
+        assert!(pool_operation_lock(temp.path()).is_err());
+        drop(lease);
+        let next = pool_operation_lock(temp.path()).unwrap();
+        drop(inherited);
+        assert!(pool_operation_lock(temp.path()).is_err());
+        drop(next);
+        assert!(pool_operation_lock(temp.path()).is_ok());
     }
 
     #[cfg(unix)]
