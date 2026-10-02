@@ -283,6 +283,21 @@ impl AccessStore {
         })
     }
 
+    pub(crate) fn restore_identity(pool_dir: &Path, bytes: &[u8]) -> Result<(), Error> {
+        let dir = pool_dir.join(".plasmite-serve");
+        #[cfg(windows)]
+        let _directory = private_directory(&dir)?;
+        ensure_private(&dir)?;
+        let lock = open_private(&dir.join("lock"))?;
+        lock.try_lock_exclusive().map_err(|err| {
+            Error::new(ErrorKind::Busy)
+                .with_message("another server owns this pool directory")
+                .with_path(&dir)
+                .with_source(err)
+        })?;
+        write_atomic_bytes(&dir.join("identity.json"), bytes)
+    }
+
     pub(crate) fn cert_path(&self) -> PathBuf {
         self.cert_path.clone()
     }

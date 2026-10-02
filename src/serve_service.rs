@@ -131,13 +131,16 @@ pub(crate) fn effective_args(run: &ServeRunArgs) -> Result<ServeRunArgs, Error> 
             "local administration must bind to a loopback address",
         ));
     }
-    let _: SocketAddr = run
+    let remote_bind: SocketAddr = run
         .remote_bind
         .as_deref()
         .unwrap()
         .parse()
         .map_err(|_| usage("invalid remote bind address")
             .with_hint("Use a numeric IP:port, such as 100.101.102.103:9743 or [fd7a:115c:a1e0::abcd]:9743. Pass the public DNS name as SERVER."))?;
+    if bind == remote_bind && bind.port() != 0 {
+        return Err(usage("local and remote listeners need different addresses"));
+    }
     run.max_body_bytes.get_or_insert(DEFAULT_MAX_BODY_BYTES);
     run.max_tail_timeout_ms
         .get_or_insert(DEFAULT_MAX_TAIL_TIMEOUT_MS);
@@ -810,70 +813,161 @@ pub(crate) fn install(pool_dir: &Path, options: &ServeRunArgs) -> Result<Status,
             error,
         )
     })?;
+    update_program(
+        &setup,
+        previous.as_ref(),
+        &path,
+        &source,
+        |candidate, restoring| {
+            install_native(candidate)?;
+            if restoring && !was_running {
+                stop_native(candidate)?;
+            } else {
+                wait_ready(candidate)?;
+            }
+            if !registered(candidate)? {
+                return Err(usage("the service manager did not enable startup at boot"));
+            }
+            status(candidate)
+        },
+        |candidate, uninstall| {
+            if uninstall {
+                uninstall_native(candidate)
+            } else {
+                stop_native(candidate)
+            }
+        },
+    )
+}
+
+// Keep the filesystem transaction independent of the native manager so failure
+// paths can exercise real files without installing a persistent native job.
+fn update_program(
+    setup: &Setup,
+    previous: Option<&Setup>,
+    path: &Path,
+    source: &Path,
+    mut activate: impl FnMut(&Setup, bool) -> Result<Status, Error>,
+    deactivate: impl FnOnce(&Setup, bool) -> Result<(), Error>,
+) -> Result<Status, Error> {
     let temporary = setup.program.with_extension("new");
     let backup = setup.program.with_extension("previous");
-    if setup.program.exists() {
-        fs::copy(&setup.program, &backup)
-            .map_err(|error| io_error("failed to preserve installed program", &backup, error))?;
-    }
-    fs::copy(source, &temporary)
-        .map_err(|error| io_error("failed to copy Plasmite executable", &temporary, error))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o700)).map_err(|error| {
-            io_error("failed to protect installed executable", &temporary, error)
-        })?;
-    }
-    fs::rename(&temporary, &setup.program)
-        .map_err(|error| io_error("failed to install executable", &setup.program, error))?;
-    let result = (|| {
-        // Keep a recoverable setup if the native manager fails partway through installation.
-        write_atomic_json(&path, &setup)?;
-        install_native(&setup)?;
-        wait_ready(&setup)?;
-        if !registered(&setup)? {
-            return Err(usage("the service manager did not enable startup at boot"));
+    let settings_backup = path.with_extension("previous.json");
+    let identity = setup.pool_dir.join(".plasmite-serve/identity.json");
+    let identity_backup = path.with_file_name("identity.previous.json");
+    let recovery_files = [&backup, &settings_backup, &identity_backup];
+    for recovery in recovery_files {
+        if recovery.exists() {
+            return Err(usage("a previous service update needs recovery")
+                .with_path(recovery)
+                .with_hint("Preserved recovery files must be recovered before another install."));
         }
-        status(&setup)
+    }
+    let preparation = (|| {
+        fs::copy(source, &temporary)
+            .map_err(|error| io_error("failed to copy Plasmite executable", &temporary, error))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&temporary, fs::Permissions::from_mode(0o700)).map_err(
+                |error| io_error("failed to protect installed executable", &temporary, error),
+            )?;
+        }
+        if let Some(old) = previous {
+            write_atomic_json(&settings_backup, old)?;
+        }
+        if identity.exists() {
+            ensure_private(&identity)?;
+            fs::copy(&identity, &identity_backup).map_err(|error| {
+                io_error(
+                    "failed to preserve server identity",
+                    &identity_backup,
+                    error,
+                )
+            })?;
+        }
+        if setup.program.exists() {
+            fs::copy(&setup.program, &backup).map_err(|error| {
+                io_error("failed to preserve installed program", &backup, error)
+            })?;
+        }
+        fs::rename(&temporary, &setup.program)
+            .map_err(|error| io_error("failed to install executable", &setup.program, error))
     })();
-    if result.is_err() {
-        if let Some(old) = &previous {
-            if backup.exists() {
-                fs::rename(&backup, &setup.program).map_err(|error| {
+    if let Err(preparation_error) = preparation {
+        // Until replacement succeeds the old service is untouched; discard only
+        // this attempt's staging files so ordinary preparation errors are retryable.
+        for staging in [&temporary, &backup, &settings_backup, &identity_backup] {
+            if staging.exists() {
+                fs::remove_file(staging).map_err(|error| {
+                    io_error("failed to clean service staging file", staging, error)
+                        .with_hint(format!("Preparation failed: {preparation_error}"))
+                })?;
+            }
+        }
+        return Err(preparation_error);
+    }
+    let result = write_atomic_json(path, setup).and_then(|()| activate(setup, false));
+    if let Err(update_error) = &result {
+        let recovery = (|| {
+            // Stop the replacement before restoring its identity or program.
+            // A failed stop must leave all recovery data intact.
+            deactivate(setup, previous.is_none())?;
+            if identity_backup.exists() {
+                let bytes = fs::read(&identity_backup).map_err(|error| {
                     io_error(
-                        "could not restore the previous service executable",
-                        &setup.program,
+                        "failed to read previous server identity",
+                        &identity_backup,
                         error,
                     )
                 })?;
+                crate::access_store::AccessStore::restore_identity(&setup.pool_dir, &bytes)?;
             }
-            let restore = install_native(old)
-                .and_then(|()| {
-                    if was_running {
-                        wait_ready(old)
-                    } else {
-                        stop_native(old)
+            if let Some(old) = previous {
+                if !backup.exists() {
+                    return Err(usage("the previous executable is missing").with_path(&backup));
+                }
+                fs::copy(&backup, &temporary).map_err(|error| {
+                    io_error("failed to stage previous executable", &backup, error)
+                })?;
+                fs::rename(&temporary, &setup.program).map_err(|error| {
+                    io_error("failed to restore previous executable", &backup, error)
+                })?;
+                write_atomic_json(path, old)?;
+                activate(old, true)?;
+            } else {
+                for failed in [path, &setup.program] {
+                    match fs::remove_file(failed) {
+                        Ok(()) => (),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                        Err(error) => {
+                            return Err(io_error(
+                                "failed to remove failed installation",
+                                failed,
+                                error,
+                            ));
+                        }
                     }
-                })
-                .and_then(|()| write_atomic_json(&path, old));
-            if let Err(restore) = restore {
-                return Err(Error::new(ErrorKind::Io)
-                    .with_message(
-                        "service update failed and the previous service could not restart",
-                    )
-                    .with_hint(format!("Inspect `serve logs`; recovery failed: {restore}")));
+                }
             }
-        } else {
-            if let Err(cleanup) = uninstall_native(&setup) {
-                return Err(Error::new(ErrorKind::Io).with_message("service installation failed and cleanup needs attention")
-                    .with_path(setup.job_path()).with_hint(format!("The saved setup remains recoverable. Run `plasmite --dir '{}' serve uninstall`. Cleanup failed: {cleanup}", setup.pool_dir.display())));
-            }
-            let _ = fs::remove_file(&path);
-            let _ = fs::remove_file(&setup.program);
+            Ok::<_, Error>(())
+        })();
+        if let Err(recovery_error) = recovery {
+            return Err(Error::new(ErrorKind::Io)
+                .with_message("service update failed and recovery needs attention")
+                .with_path(path)
+                .with_hint(format!(
+                    "Recovery files remain beside the saved setup. Update failed: {update_error}. Recovery failed: {recovery_error}"
+                )));
         }
     }
-    let _ = fs::remove_file(backup);
+    for recovery in recovery_files {
+        if recovery.exists() {
+            fs::remove_file(recovery).map_err(|error| {
+                io_error("failed to remove completed recovery file", recovery, error)
+            })?;
+        }
+    }
     result
 }
 
@@ -1055,6 +1149,385 @@ mod tests {
             run: effective_args(&ServeRunArgs::default()).unwrap(),
         }
     }
+    fn fixture() -> (tempfile::TempDir, Setup, PathBuf, PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let service = temp.path().join("service");
+        create_private_dir(&service).unwrap();
+        let mut setup = setup();
+        setup.pool_dir = temp.path().join("pools");
+        fs::create_dir(&setup.pool_dir).unwrap();
+        setup.program = service.join("plasmite");
+        setup.home = temp.path().to_path_buf();
+        let path = service.join("setup.json");
+        let source = temp.path().join("new-program");
+        fs::write(&source, b"new executable").unwrap();
+        fs::write(&setup.program, b"old executable").unwrap();
+        write_atomic_json(&path, &setup).unwrap();
+        (temp, setup, path, source)
+    }
+
+    fn ready(setup: &Setup) -> Status {
+        Status {
+            pool_dir: setup.pool_dir.clone(),
+            pid: Some(123),
+            local_url: "http://127.0.0.1:9700".into(),
+            remote_url: None,
+            managed: true,
+            startup: true,
+            state: "running".into(),
+            problem: None,
+            setup: Some(setup.clone()),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preparation_failure_leaves_old_service_unchanged_and_retryable() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_temp, setup, path, source) = fixture();
+        let store =
+            crate::access_store::AccessStore::open(&setup.pool_dir, None, None, None).unwrap();
+        drop(store);
+        let identity = setup.pool_dir.join(".plasmite-serve/identity.json");
+        fs::set_permissions(&identity, fs::Permissions::from_mode(0o644)).unwrap();
+        let settings = fs::read(&path).unwrap();
+        let result = update_program(
+            &setup,
+            Some(&setup),
+            &path,
+            &source,
+            |_, _| panic!("preparation failure must not activate"),
+            |_, _| panic!("preparation failure must not stop old service"),
+        );
+        assert!(result.is_err());
+        fs::set_permissions(&identity, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(fs::read(&setup.program).unwrap(), b"old executable");
+        assert_eq!(fs::read(&path).unwrap(), settings);
+        assert!(!setup.program.with_extension("previous").exists());
+        assert!(!setup.program.with_extension("new").exists());
+        assert!(!path.with_extension("previous.json").exists());
+        update_program(
+            &setup,
+            Some(&setup),
+            &path,
+            &source,
+            |candidate, _| Ok(ready(candidate)),
+            |_, _| panic!("successful retry needs no recovery"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn failed_first_setup_write_removes_new_executable() {
+        let (_temp, setup, _path, source) = fixture();
+        fs::remove_file(&setup.program).unwrap();
+        let path = setup
+            .program
+            .parent()
+            .unwrap()
+            .join("missing-directory/setup.json");
+        let uninstalled = std::cell::Cell::new(false);
+        let result = update_program(
+            &setup,
+            None,
+            &path,
+            &source,
+            |_, _| panic!("failed setup write must not activate"),
+            |_, uninstall| {
+                assert!(uninstall);
+                uninstalled.set(true);
+                Ok(())
+            },
+        );
+        let error = result.err().unwrap().to_string();
+        assert!(!error.contains("recovery needs attention"), "{error}");
+        assert!(uninstalled.get());
+        assert!(!setup.program.exists());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn unchanged_reinstall_activates_stopped_service_and_refreshes_executable() {
+        let (_temp, setup, path, source) = fixture();
+        let running = std::cell::Cell::new(false);
+        let result = update_program(
+            &setup,
+            Some(&setup),
+            &path,
+            &source,
+            |candidate, restoring| {
+                assert!(!restoring);
+                assert_eq!(fs::read(&candidate.program).unwrap(), b"new executable");
+                running.set(true);
+                Ok(ready(candidate))
+            },
+            |_, _| panic!("successful reinstall needs no recovery"),
+        )
+        .unwrap();
+        assert!(running.get());
+        assert_eq!(result.state, "running");
+        assert!(!setup.program.with_extension("previous").exists());
+    }
+
+    #[test]
+    fn failed_readiness_restores_exact_identity_and_program_without_rewinding_keys() {
+        use crate::access_store::AccessStore;
+        let (temp, setup, path, source) = fixture();
+        let old = AccessStore::open(&setup.pool_dir, None, None, None).unwrap();
+        let key = old.issue("saved client").unwrap();
+        let fingerprint = old.fingerprint().to_owned();
+        let cert_bytes = fs::read(old.cert_path()).unwrap();
+        let key_bytes = fs::read(old.key_path()).unwrap();
+        let identity = setup.pool_dir.join(".plasmite-serve/identity.json");
+        let identity_bytes = fs::read(&identity).unwrap();
+        drop(old);
+        fs::create_dir(temp.path().join("replacement")).unwrap();
+        let replacement =
+            AccessStore::open(&temp.path().join("replacement"), None, None, None).unwrap();
+        let cert = replacement.cert_path();
+        let tls_key = replacement.key_path();
+        let replacement_fingerprint = replacement.fingerprint().to_owned();
+        drop(replacement);
+        let keys_path = setup.pool_dir.join(".plasmite-serve/keys.json");
+        let updated_keys = std::cell::RefCell::new(Vec::new());
+        let stopped = std::cell::Cell::new(false);
+        let result = update_program(
+            &setup,
+            Some(&setup),
+            &path,
+            &source,
+            |candidate, restoring| {
+                if !restoring {
+                    let store =
+                        AccessStore::open(&candidate.pool_dir, None, Some((&cert, &tls_key)), None)
+                            .unwrap();
+                    assert_eq!(store.fingerprint(), replacement_fingerprint);
+                    // Model an access mutation committed before readiness fails.
+                    store.issue("during update").unwrap();
+                    *updated_keys.borrow_mut() = fs::read(&keys_path).unwrap();
+                    return Err(usage("injected readiness failure"));
+                }
+                assert!(stopped.get(), "stop before restoring identity");
+                assert_eq!(fs::read(&candidate.program).unwrap(), b"old executable");
+                assert_eq!(fs::read(&identity).unwrap(), identity_bytes);
+                let store = AccessStore::open(&candidate.pool_dir, None, None, None).unwrap();
+                assert_eq!(store.fingerprint(), fingerprint);
+                assert_eq!(fs::read(store.cert_path()).unwrap(), cert_bytes);
+                assert_eq!(fs::read(store.key_path()).unwrap(), key_bytes);
+                assert!(store.authorize_key(&key).is_some());
+                assert_eq!(store.list().unwrap().len(), 2);
+                Ok(ready(candidate))
+            },
+            |_, uninstall| {
+                assert!(!uninstall);
+                stopped.set(true);
+                Ok(())
+            },
+        );
+        assert!(
+            result
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("injected readiness failure")
+        );
+        assert_eq!(fs::read(keys_path).unwrap(), *updated_keys.borrow());
+        assert!(!setup.program.with_extension("previous").exists());
+        assert!(!path.with_file_name("identity.previous.json").exists());
+    }
+
+    #[test]
+    fn failed_first_install_restores_manual_identity_and_keeps_committed_keys() {
+        use crate::access_store::AccessStore;
+        let (temp, setup, path, source) = fixture();
+        fs::remove_file(&path).unwrap();
+        fs::remove_file(&setup.program).unwrap();
+        let old = AccessStore::open(&setup.pool_dir, None, None, None).unwrap();
+        let key = old.issue("manual client").unwrap();
+        let fingerprint = old.fingerprint().to_owned();
+        let identity = setup.pool_dir.join(".plasmite-serve/identity.json");
+        let identity_bytes = fs::read(&identity).unwrap();
+        let old_cert = old.cert_path();
+        let old_tls_key = old.key_path();
+        let cert_bytes = fs::read(&old_cert).unwrap();
+        let tls_key_bytes = fs::read(&old_tls_key).unwrap();
+        drop(old);
+        fs::create_dir(temp.path().join("replacement")).unwrap();
+        let replacement =
+            AccessStore::open(&temp.path().join("replacement"), None, None, None).unwrap();
+        let cert = replacement.cert_path();
+        let tls_key = replacement.key_path();
+        let replacement_fingerprint = replacement.fingerprint().to_owned();
+        drop(replacement);
+        let keys_path = setup.pool_dir.join(".plasmite-serve/keys.json");
+        let updated_keys = std::cell::RefCell::new(Vec::new());
+        let deactivated = std::cell::Cell::new(false);
+        let result = update_program(
+            &setup,
+            None,
+            &path,
+            &source,
+            |candidate, restoring| {
+                assert!(!restoring, "no previous managed service to restart");
+                let store =
+                    AccessStore::open(&candidate.pool_dir, None, Some((&cert, &tls_key)), None)
+                        .unwrap();
+                assert_eq!(store.fingerprint(), replacement_fingerprint);
+                store.issue("during first install").unwrap();
+                *updated_keys.borrow_mut() = fs::read(&keys_path).unwrap();
+                Err(usage("injected first-install readiness failure"))
+            },
+            |_, uninstall| {
+                assert!(uninstall);
+                deactivated.set(true);
+                Ok(())
+            },
+        );
+        assert!(
+            result
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("first-install readiness failure")
+        );
+        assert!(deactivated.get());
+        assert_eq!(fs::read(&identity).unwrap(), identity_bytes);
+        assert_eq!(fs::read(old_cert).unwrap(), cert_bytes);
+        assert_eq!(fs::read(old_tls_key).unwrap(), tls_key_bytes);
+        assert_eq!(fs::read(keys_path).unwrap(), *updated_keys.borrow());
+        let restarted = AccessStore::open(&setup.pool_dir, None, None, None).unwrap();
+        assert_eq!(restarted.fingerprint(), fingerprint);
+        assert!(restarted.authorize_key(&key).is_some());
+        assert_eq!(restarted.list().unwrap().len(), 2);
+        assert!(!path.exists());
+        assert!(!setup.program.exists());
+        assert!(!path.with_file_name("identity.previous.json").exists());
+    }
+
+    #[test]
+    fn executable_restore_failure_retains_backup_and_saved_recovery_settings() {
+        let (_temp, setup, path, source) = fixture();
+        let result = update_program(
+            &setup,
+            Some(&setup),
+            &path,
+            &source,
+            |_, restoring| {
+                assert!(!restoring, "never restart after failed program restore");
+                Err(usage("injected readiness failure"))
+            },
+            |candidate, _| {
+                fs::remove_file(&candidate.program).unwrap();
+                fs::create_dir(&candidate.program).unwrap();
+                Ok(())
+            },
+        );
+        let error = result.err().unwrap().to_string();
+        assert!(error.contains("recovery needs attention"), "{error}");
+        assert_eq!(
+            fs::read(setup.program.with_extension("previous")).unwrap(),
+            b"old executable"
+        );
+        assert!(path.with_extension("previous.json").exists());
+        let again = update_program(
+            &setup,
+            Some(&setup),
+            &path,
+            &source,
+            |_, _| panic!("pending recovery must block activation"),
+            |_, _| panic!("pending recovery must block native mutations"),
+        );
+        assert!(again.err().unwrap().to_string().contains("needs recovery"));
+        assert_eq!(
+            fs::read(setup.program.with_extension("previous")).unwrap(),
+            b"old executable"
+        );
+    }
+
+    #[test]
+    fn concurrent_owner_blocks_identity_recovery_and_preserves_backups() {
+        use crate::access_store::AccessStore;
+        let (_temp, setup, path, source) = fixture();
+        let store = AccessStore::open(&setup.pool_dir, None, None, None).unwrap();
+        let identity = setup.pool_dir.join(".plasmite-serve/identity.json");
+        let old_identity = fs::read(&identity).unwrap();
+        drop(store);
+        let owner = std::cell::RefCell::new(None);
+        let result = update_program(
+            &setup,
+            Some(&setup),
+            &path,
+            &source,
+            |_, restoring| {
+                assert!(!restoring);
+                Err(usage("injected readiness failure"))
+            },
+            |candidate, _| {
+                // A foreground owner acquires the actual AccessStore lock after
+                // the replacement stops. Recovery must not alter its identity.
+                let store = AccessStore::open(
+                    &candidate.pool_dir,
+                    Some("https://new-owner.local"),
+                    None,
+                    None,
+                )
+                .unwrap();
+                *owner.borrow_mut() = Some(store);
+                Ok(())
+            },
+        );
+        let error = result.err().unwrap();
+        assert!(error.hint().unwrap().contains("another server owns"));
+        assert_ne!(fs::read(&identity).unwrap(), old_identity);
+        assert_eq!(
+            fs::read(path.with_file_name("identity.previous.json")).unwrap(),
+            old_identity
+        );
+        assert_eq!(
+            fs::read(setup.program.with_extension("previous")).unwrap(),
+            b"old executable"
+        );
+        assert!(path.with_extension("previous.json").exists());
+    }
+
+    #[test]
+    fn failed_stop_preserves_recovery_data_without_restoring_active_identity() {
+        use crate::access_store::AccessStore;
+        let (_temp, setup, path, source) = fixture();
+        let store = AccessStore::open(&setup.pool_dir, None, None, None).unwrap();
+        drop(store);
+        let identity = setup.pool_dir.join(".plasmite-serve/identity.json");
+        let bytes = fs::read(&identity).unwrap();
+        let result = update_program(
+            &setup,
+            Some(&setup),
+            &path,
+            &source,
+            |_, restoring| {
+                assert!(!restoring);
+                Err(usage("injected startup failure"))
+            },
+            |_, _| Err(usage("injected stop failure")),
+        );
+        assert!(
+            result
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("recovery needs attention")
+        );
+        assert_eq!(
+            fs::read(path.with_file_name("identity.previous.json")).unwrap(),
+            bytes
+        );
+        assert_eq!(fs::read(identity).unwrap(), bytes);
+        assert_eq!(
+            fs::read(setup.program.with_extension("previous")).unwrap(),
+            b"old executable"
+        );
+        assert_eq!(fs::read(&setup.program).unwrap(), b"new executable");
+    }
+
     #[test]
     fn public_url_sets_listener_port_and_explicit_bind_overrides_it() {
         let run = effective_args(&ServeRunArgs {
@@ -1113,6 +1586,28 @@ mod tests {
             setup.run.bind
         );
     }
+    #[test]
+    fn duplicate_fixed_listeners_fail_before_identity_mutation() {
+        assert!(
+            effective_args(&ServeRunArgs {
+                bind: Some("127.0.0.1:9700".into()),
+                remote_bind: Some("127.0.0.1:9700".into()),
+                ..Default::default()
+            })
+            .unwrap_err()
+            .to_string()
+            .contains("different addresses")
+        );
+        assert!(
+            effective_args(&ServeRunArgs {
+                bind: Some("127.0.0.1:0".into()),
+                remote_bind: Some("127.0.0.1:0".into()),
+                ..Default::default()
+            })
+            .is_ok()
+        );
+    }
+
     #[test]
     fn invalid_addresses_and_duplicate_spelling_fail_before_setup() {
         for server in [
