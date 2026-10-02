@@ -54,6 +54,8 @@ Direct HTTPS MCP costs less than one millisecond per call here. Local file acces
 
 On this Windows VM, direct MCP added **0.44–0.50 ms per call** over native HTTPS with an in-memory access key. Its median latency reached **2.1–2.5 times** that native client's latency, while it delivered **39–48%** of its throughput. Direct MCP ran faster than the default saved-connection native client and the remote MCP process.
 
+Each MCP feed or fetch opens the pool through the remote API before its message request. The native helper opens its pool once before timing and keeps it open. The gap therefore includes that extra pool-open request; it measures the complete interfaces rather than isolated MCP framing overhead.
+
 Throughput shows the median phase rate across ten repeats; the range shows the slowest and fastest repeat. Latency shows the median of the per-run median and 95th-percentile call latencies.
 
 | Bytes | Operation | Client | Operations/s (range) | Median / p95, ms |
@@ -213,7 +215,7 @@ revocation. The transport timing tables exclude these model connections.
 
 For these two harnesses, use direct HTTPS MCP for remote pools. The tested
 login, renewal, and tool calls give developers a working direct path. A
-trusted public certificate remains part of deploying that path. OpenCode
+certificate trusted by each client remains part of deploying that path. OpenCode
 and Gemini CLI still need their own interoperability checks.
 
 These checks add compatibility evidence. The transport timing tables above

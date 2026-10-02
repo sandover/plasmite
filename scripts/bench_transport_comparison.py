@@ -106,18 +106,23 @@ class HttpsMcp:
             self.host, self.port, context=self.context, timeout=60
         )
         self.next_id = 1
-        self.client_id, self.resource, self.refresh_token = self.authorize(access_key)
-        self.expires_at = time.monotonic() + 840
-        self.refresh_count = 0
-        initialized = self.call("initialize", {
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {},
-            "clientInfo": {"name": "plasmite-transport-benchmark", "version": "1"},
-        })
-        if initialized.get("protocolVersion") != PROTOCOL_VERSION:
-            raise RuntimeError(f"HTTPS MCP negotiated unexpected protocol version: {initialized.get('protocolVersion')}")
-        self.notify_initialized()
-        self.server_info = initialized.get("serverInfo", {})
+        self.refresh_token = ""
+        try:
+            self.client_id, self.resource, self.refresh_token = self.authorize(access_key)
+            self.expires_at = time.monotonic() + 840
+            self.refresh_count = 0
+            initialized = self.call("initialize", {
+                "protocolVersion": PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "plasmite-transport-benchmark", "version": "1"},
+            })
+            if initialized.get("protocolVersion") != PROTOCOL_VERSION:
+                raise RuntimeError(f"HTTPS MCP negotiated unexpected protocol version: {initialized.get('protocolVersion')}")
+            self.notify_initialized()
+            self.server_info = initialized.get("serverInfo", {})
+        except BaseException:
+            self.close()
+            raise
 
     def request_json(self, path: str, method: str, payload: dict[str, object],
                      headers: dict[str, str] | None = None) -> tuple[int, dict[str, object], http.client.HTTPResponse]:
@@ -262,14 +267,16 @@ class HttpsMcp:
         return result["structuredContent"]
 
     def close(self) -> None:
-        if self.refresh_token:
-            try:
-                self.request_form(
+        try:
+            if self.refresh_token:
+                status, _, _ = self.request_form(
                     "/oauth/revoke", {"client_id": self.client_id, "token": self.refresh_token}
                 )
-            except (OSError, http.client.HTTPException):
-                pass
-        self.connection.close()
+                if status != 200:
+                    raise RuntimeError(f"OAuth token revocation failed with HTTP {status}")
+                self.refresh_token = ""
+        finally:
+            self.connection.close()
 
 
 class AuthorizationRequestId(HTMLParser):
