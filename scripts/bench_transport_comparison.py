@@ -476,15 +476,31 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                                  "lanes": run_records})
                 print(f"Completed {size}-byte repeat {repeat}/{args.repeats}", file=sys.stderr)
     finally:
-        if direct is not None:
-            direct.close()
-        if local is not None:
-            local.close()
-        if native.poll() is None:
-            native.stdin.close()
-            native.wait(timeout=5)
-        subprocess.run([str(binary), "access", "disconnect", args.server], cwd=root,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        cleanup_errors = []
+        for name, client in (("HTTPS MCP", direct), ("local MCP", local)):
+            if client is not None:
+                try:
+                    client.close()
+                except Exception as error:
+                    cleanup_errors.append(f"{name}: {error}")
+        try:
+            if native.poll() is None:
+                native.stdin.close()
+                try:
+                    native.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    native.kill()
+                    native.wait(timeout=5)
+                    raise
+        except Exception as error:
+            cleanup_errors.append(f"native worker: {error}")
+        try:
+            subprocess.run([str(binary), "access", "disconnect", args.server], cwd=root,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        except Exception as error:
+            cleanup_errors.append(f"saved connection: {error}")
+        if cleanup_errors:
+            raise RuntimeError("client cleanup failed: " + "; ".join(cleanup_errors))
 
     return {
         "schema_version": 1,

@@ -83,7 +83,7 @@ ui-smoke:
 
 # Check benchmark OAuth cleanup without live credentials or a server.
 benchmark-harness-test:
-	python3 scripts/test_bench_transport_comparison.py
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_bench_transport_comparison.py
 
 # Core, deterministic checks for every local change and pull request.
 check: _trim-target fmt clippy test benchmark-harness-test check-version-alignment check-release-targets verify-lite3
