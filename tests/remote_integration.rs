@@ -40,6 +40,85 @@ fn remote_append_and_get() -> TestResult<()> {
 }
 
 #[test]
+fn remote_delete_sends_no_body_and_reuses_connection() -> TestResult<()> {
+    use std::io::{Read, Write};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let client = RemoteClient::new(format!("http://{}", listener.local_addr()?))?;
+    let (done_tx, done_rx) = mpsc::channel();
+    let server = std::thread::spawn(move || -> std::io::Result<Vec<usize>> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut socket = loop {
+            match listener.accept() {
+                Ok((socket, _)) => break socket,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline || done_rx.try_recv().is_ok() {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            "client did not connect to the wire server",
+                        ));
+                    }
+                    sleep(Duration::from_millis(5));
+                }
+                Err(error) => return Err(error),
+            }
+        };
+        socket.set_nonblocking(false)?;
+        socket.set_read_timeout(Some(Duration::from_secs(5)))?;
+        socket.set_write_timeout(Some(Duration::from_secs(5)))?;
+        let mut body_lengths = Vec::new();
+        for (request_line, response) in [
+            ("DELETE /v0/pools/shared HTTP/1.1", "{\"ok\":true}"),
+            ("GET /v0/pools HTTP/1.1", "{\"pools\":[]}"),
+        ] {
+            let mut headers = Vec::new();
+            while !headers.ends_with(b"\r\n\r\n") {
+                assert!(headers.len() < 8192, "request headers exceed test limit");
+                let mut byte = [0];
+                socket.read_exact(&mut byte)?;
+                headers.push(byte[0]);
+            }
+            let headers = String::from_utf8(headers).expect("UTF-8 request headers");
+            assert_eq!(headers.lines().next(), Some(request_line));
+            let headers = headers.to_ascii_lowercase();
+            assert!(!headers.contains("transfer-encoding:"));
+            let length = headers
+                .lines()
+                .find_map(|line| line.strip_prefix("content-length:"))
+                .map(|value| value.trim().parse::<usize>().expect("content length"))
+                .unwrap_or(0);
+            assert!(length <= 1024, "request body exceeds test limit");
+            // Drain any unexpected body so the final framing assertion fails
+            // deterministically instead of racing a socket close.
+            socket.read_exact(&mut vec![0; length])?;
+            body_lengths.push(length);
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{response}",
+                response.len()
+            )?;
+            socket.flush()?;
+        }
+        // Keep the connection open until the client consumes the last response.
+        done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .map_err(std::io::Error::other)?;
+        Ok(body_lengths)
+    });
+
+    let result: TestResult<bool> = (|| {
+        client.delete_pool(&PoolRef::name("shared"))?;
+        Ok(client.list_pools()?.is_empty())
+    })();
+    let _ = done_tx.send(());
+    let body_lengths = server.join().expect("wire server")?;
+    assert!(result?);
+    assert_eq!(body_lengths, [0, 0], "DELETE and GET must send no body");
+    Ok(())
+}
+
+#[test]
 fn remote_append_get_tail_lite3() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let server = TestServer::try_start(temp_dir.path())?;
