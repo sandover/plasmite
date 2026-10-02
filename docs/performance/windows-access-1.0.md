@@ -161,3 +161,65 @@ The timed runs complete 138,000 verified operations: 72,000 in the broad compari
 - CLI batches: [session 1](windows-access-1.0-stream-session1.raw.json), [session 2](windows-access-1.0-stream-session2.raw.json)
 - Separate server: [VM network](windows-access-1.0-network.raw.json), [no-install proof](windows-access-1.0-noinstall.raw.json)
 - Final runner: [all-path smoke check](windows-access-1.0-smoke.raw.json)
+
+## Direct MCP in Codex CLI and Claude Code
+
+On October 2, 2026, Codex CLI 0.159.2 and Claude Code 2.1.287 on macOS
+connected directly to the Windows VM's Plasmite 1.0.0 server. The Windows
+binary hash matches the benchmark artifact above. Pools lived only on Windows.
+Neither harness invoked a local Plasmite process or library.
+
+Both clients completed their own OAuth login with dynamic client registration
+and Proof Key for Code Exchange, then made actual agent tool calls. Each used
+a separate disposable access key. The harness commands used their supported
+no-browser login mode; a test driver submitted the keys to the server's
+authorization page and returned the callback URLs to the harnesses.
+
+| Check | Codex CLI | Claude Code |
+|---|---|---|
+| Authorize and discover pool tools | Passed | Passed |
+| Append, fetch, and read matching data | Passed | Passed |
+| Reuse authorization in a fresh CLI process | Passed | Passed |
+| Wait for a matching message; handle an empty timeout | Passed | Passed |
+| Receive complete 4 KiB and 64 KiB results | Passed | Passed |
+| Renew expired authorization without another login | Passed | Passed |
+| Stop an active wait after key revocation | Passed | Passed |
+| Deny a later call after key revocation | Passed | Passed |
+
+The original access tokens expired at 20:20:35 and 20:20:52 UTC. Fresh CLI
+processes made successful calls after those deadlines. The server retained
+both grant IDs and issued tokens with later expiry times. This checks
+automatic renewal after restarting a client; it does not check one harness
+process held open across the full fifteen minutes.
+
+Both clients received the complete 64 KiB message. Codex supplied it to the
+model directly. Claude saved the 65,629-character result envelope to a file
+after it exceeded the client's tool-output limit. Claude's Read tool could
+not reach the tail of that single-line JSON file after truncation. With its
+normal Bash tool available, Claude used `jq` to extract the sequence, payload
+size, marker, and exact padding length. Large data can therefore require a
+file query in Claude even when the MCP call succeeds.
+
+TLS verification stayed enabled. A temporary certificate authority supplied
+through each process's certificate settings established trust; the test left
+OS trust stores unchanged. The test did not exercise an ordinary browser
+login or deployment with a public certificate issuer. Codex's first MCP calls used only
+`CODEX_CA_CERTIFICATE` and completed without issuer retries. Later runs also
+set `SSL_CERT_FILE` to the test CA and logged model WebSocket certificate
+failures before falling back to HTTPS; their MCP calls still succeeded.
+The corrected launcher supplies only `CODEX_CA_CERTIFICATE` to Codex. A
+final startup probe had no issuer retries, but found no MCP tools after key
+revocation. The transport timing tables exclude these model connections.
+
+For these two harnesses, use direct HTTPS MCP for remote pools. The tested
+login, renewal, and tool calls give developers a working direct path. A
+trusted public certificate remains part of deploying that path. OpenCode
+and Gemini CLI still need their own interoperability checks.
+
+These checks add compatibility evidence. The transport timing tables above
+keep their original measurements. The
+[verified harness results](windows-access-1.0-harnesses.raw.json) record
+client versions, payload hashes, token expiry times, and revocation outcomes
+without credentials. The test revoked both keys, removed the saved MCP
+credentials and temporary firewall rule, stopped the server, and shut down
+Windows.
