@@ -574,6 +574,104 @@ fn loaded(setup: &Setup) -> bool {
     }
 }
 
+fn ownership_error(setup: &Setup) -> Error {
+    Error::new(ErrorKind::Busy)
+        .with_message("the native startup job does not match this saved setup")
+        .with_path(setup.job_path())
+        .with_hint("Use the original HOME and its saved setup to manage this server. Do not adopt or overwrite an existing startup job.")
+}
+
+fn verify_job_definition(
+    setup: &Setup,
+    owners: &[&Setup],
+    current: Option<&str>,
+    native_loaded: bool,
+    macos: bool,
+) -> Result<(), Error> {
+    match current {
+        Some(current)
+            if owners
+                .iter()
+                .any(|owner| current == definition(owner, macos)) =>
+        {
+            Ok(())
+        }
+        None if !native_loaded => Ok(()),
+        _ => Err(ownership_error(setup)),
+    }
+}
+
+fn verify_native_ownership(setup: &Setup, owners: &[&Setup]) -> Result<(), Error> {
+    let path = setup.job_path();
+    let current = match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_file() => Some(
+            fs::read_to_string(&path)
+                .map_err(|error| io_error("failed to inspect native startup job", &path, error))?,
+        ),
+        Ok(_) => return Err(ownership_error(setup)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(io_error(
+                "failed to inspect native startup job",
+                &path,
+                error,
+            ));
+        }
+    };
+    verify_job_definition(
+        setup,
+        owners,
+        current.as_deref(),
+        loaded(setup),
+        cfg!(target_os = "macos"),
+    )
+}
+
+// Repeat the ownership check inside the privileged operation. Definitions come
+// from validated saved settings and are passed in memory, never in owner-writable
+// staging files. Refuse to mutate jobs when the definition or saved setup differs.
+fn ownership_check_script(job: &Path, definitions: &[String], loaded_command: &str) -> String {
+    let reject = "{ /usr/bin/printf '%s\n' 'The native startup job does not match this saved setup. Use the original HOME and its saved setup.' >&2; exit 1; }";
+    let comparison = if definitions.is_empty() {
+        reject.to_owned()
+    } else {
+        format!(
+            "plasmite_current=$(/bin/cat \"$plasmite_job\")\n{} || {reject}",
+            definitions
+                .iter()
+                .map(|definition| format!(
+                    "[ \"$plasmite_current\" = {} ]",
+                    shell_quote(definition.trim_end_matches('\n'))
+                ))
+                .collect::<Vec<_>>()
+                .join(" || ")
+        )
+    };
+    format!(
+        "plasmite_job={}\n[ ! -L \"$plasmite_job\" ] || {reject}\nif [ -e \"$plasmite_job\" ]; then\n[ -f \"$plasmite_job\" ] || {reject}\n{comparison}\nelif {{ {loaded_command}; }}; then\n{reject}\nfi\n",
+        shell_quote(&job.to_string_lossy())
+    )
+}
+
+fn ownership_script(setup: &Setup, owners: &[&Setup]) -> String {
+    let loaded = if cfg!(target_os = "macos") {
+        format!(
+            "/bin/launchctl print {} >/dev/null 2>&1",
+            shell_quote(&setup.target())
+        )
+    } else {
+        format!(
+            "plasmite_load=$(/usr/bin/systemctl show {} --property=LoadState --value); [ -n \"$plasmite_load\" ] && [ \"$plasmite_load\" != not-found ]",
+            shell_quote(&setup.unit())
+        )
+    };
+    let definitions = owners
+        .iter()
+        .map(|owner| definition(owner, cfg!(target_os = "macos")))
+        .collect::<Vec<_>>();
+    ownership_check_script(&setup.job_path(), &definitions, &loaded)
+}
+
 fn stop_script(setup: &Setup) -> String {
     if cfg!(target_os = "macos") {
         format!(
@@ -588,39 +686,54 @@ fn stop_script(setup: &Setup) -> String {
     }
 }
 
-fn stop_native(setup: &Setup) -> Result<(), Error> {
+fn stop_native(setup: &Setup, owners: &[&Setup]) -> Result<(), Error> {
+    verify_native_ownership(setup, owners)?;
     admin(
         "/bin/sh",
-        &["-c", &format!("set -eu\n{}", stop_script(setup))],
+        &[
+            "-c",
+            &format!(
+                "set -eu\n{}{}",
+                ownership_script(setup, owners),
+                stop_script(setup)
+            ),
+        ],
     )
 }
 
 fn start_native(setup: &Setup, restart: bool) -> Result<(), Error> {
+    verify_native_ownership(setup, &[setup])?;
+    let mut script = format!("set -eu\n{}", ownership_script(setup, &[setup]));
     if cfg!(target_os = "macos") {
-        if loaded(setup) {
-            if restart {
-                admin("launchctl", &["kickstart", "-k", &setup.target()])?;
-            }
-            Ok(())
+        let target = shell_quote(&setup.target());
+        script.push_str(&format!(
+            "if /bin/launchctl print {target} >/dev/null 2>&1; then\n"
+        ));
+        if restart {
+            script.push_str(&format!("/bin/launchctl kickstart -k {target}\n"));
         } else {
-            admin(
-                "launchctl",
-                &["bootstrap", "system", &setup.job_path().to_string_lossy()],
-            )
+            script.push_str(":\n");
         }
+        script.push_str(&format!(
+            "else\n/bin/launchctl bootstrap system {}\nfi\n",
+            shell_quote(&setup.job_path().to_string_lossy())
+        ));
     } else {
-        admin(
-            "systemctl",
-            &[if restart { "restart" } else { "start" }, &setup.unit()],
-        )
+        script.push_str(&format!(
+            "/usr/bin/systemctl {} {}\n",
+            if restart { "restart" } else { "start" },
+            shell_quote(&setup.unit())
+        ));
     }
+    admin("/bin/sh", &["-c", &script])
 }
 
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn install_native(setup: &Setup) -> Result<(), Error> {
+fn install_native(setup: &Setup, owners: &[&Setup]) -> Result<(), Error> {
+    verify_native_ownership(setup, owners)?;
     // Pass the definition in memory; an unprivileged process must not replace a staging
     // file while the owner approves the administrator request.
     let job = setup.job_path();
@@ -629,7 +742,8 @@ fn install_native(setup: &Setup) -> Result<(), Error> {
         .unwrap()
         .join(format!(".{}.XXXXXX", id(&setup.pool_dir)));
     let mut script = format!(
-        "set -eu\numask 077\nplasmite_definition=$(/usr/bin/mktemp {})\ntrap '/bin/rm -f \"$plasmite_definition\"' EXIT\n/usr/bin/printf '%s' {} > \"$plasmite_definition\"\n/bin/chmod 644 \"$plasmite_definition\"\n",
+        "set -eu\n{}umask 077\nplasmite_definition=$(/usr/bin/mktemp {})\ntrap '/bin/rm -f \"$plasmite_definition\"' EXIT\n/usr/bin/printf '%s' {} > \"$plasmite_definition\"\n/bin/chmod 644 \"$plasmite_definition\"\n",
+        ownership_script(setup, owners),
         shell_quote(&template.to_string_lossy()),
         shell_quote(&definition(setup, cfg!(target_os = "macos")))
     );
@@ -653,7 +767,8 @@ fn install_native(setup: &Setup) -> Result<(), Error> {
     admin("/bin/sh", &["-c", &script])
 }
 
-fn uninstall_native(setup: &Setup) -> Result<(), Error> {
+fn uninstall_native(setup: &Setup, owners: &[&Setup]) -> Result<(), Error> {
+    verify_native_ownership(setup, owners)?;
     let wants = PathBuf::from("/etc/systemd/system/multi-user.target.wants").join(setup.unit());
     if !setup.job_path().exists()
         && !loaded(setup)
@@ -661,7 +776,7 @@ fn uninstall_native(setup: &Setup) -> Result<(), Error> {
     {
         return Ok(());
     }
-    let mut script = String::from("set -eu\n");
+    let mut script = format!("set -eu\n{}", ownership_script(setup, owners));
     script.push_str(&stop_script(setup));
     if !cfg!(target_os = "macos") {
         script.push_str(&format!(
@@ -789,6 +904,12 @@ pub(crate) fn install(pool_dir: &Path, options: &ServeRunArgs) -> Result<Status,
         home: owner_home,
         run: merge(previous.as_ref(), options)?,
     };
+    let owners = previous.iter().collect::<Vec<_>>();
+    verify_native_ownership(&setup, &owners)?;
+    let recovery_owners = previous
+        .iter()
+        .chain(std::iter::once(&setup))
+        .collect::<Vec<_>>();
     preflight(&setup, previous.as_ref())?;
     let was_running = match &previous {
         Some(old) => live(old)?.is_some(),
@@ -819,9 +940,12 @@ pub(crate) fn install(pool_dir: &Path, options: &ServeRunArgs) -> Result<Status,
         &path,
         &source,
         |candidate, restoring| {
-            install_native(candidate)?;
+            install_native(
+                candidate,
+                if restoring { &recovery_owners } else { &owners },
+            )?;
             if restoring && !was_running {
-                stop_native(candidate)?;
+                stop_native(candidate, &[candidate])?;
             } else {
                 wait_ready(candidate)?;
             }
@@ -832,9 +956,9 @@ pub(crate) fn install(pool_dir: &Path, options: &ServeRunArgs) -> Result<Status,
         },
         |candidate, uninstall| {
             if uninstall {
-                uninstall_native(candidate)
+                uninstall_native(candidate, &recovery_owners)
             } else {
-                stop_native(candidate)
+                stop_native(candidate, &recovery_owners)
             }
         },
     )
@@ -982,10 +1106,10 @@ pub(crate) fn control(pool_dir: &Path, action: &str) -> Result<Status, Error> {
             wait_ready(&setup)?;
         }
         "stop" => {
-            stop_native(&setup)?;
+            stop_native(&setup, &[&setup])?;
         }
         "uninstall" => {
-            uninstall_native(&setup)?;
+            uninstall_native(&setup, &[&setup])?;
             fs::remove_file(setup_path(&pool_dir)?)
                 .map_err(|error| io_error("failed to remove service setup", &pool_dir, error))?;
             let _ = fs::remove_file(&setup.program);
@@ -1094,6 +1218,15 @@ pub(crate) fn all() -> Result<(Vec<Status>, Vec<Error>), Error> {
     Ok((rows, errors))
 }
 
+struct LogChild(std::process::Child);
+
+impl Drop for LogChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 pub(crate) fn logs(pool_dir: &Path, tail: usize, follow: bool, json: bool) -> Result<(), Error> {
     supported()?;
     let setup = required(&absolute(pool_dir)?)?;
@@ -1104,21 +1237,29 @@ pub(crate) fn logs(pool_dir: &Path, tail: usize, follow: bool, json: bool) -> Re
     }
     command.arg(setup.log_path());
     let exit = if json {
-        use std::io::BufRead;
-        let mut child = command.stdout(Stdio::piped()).spawn().map_err(|error| {
+        use std::io::{BufRead, Write};
+        let child = command.stdout(Stdio::piped()).spawn().map_err(|error| {
             Error::new(ErrorKind::Io)
                 .with_message("failed to read service logs")
                 .with_source(error)
         })?;
-        for line in std::io::BufReader::new(child.stdout.take().unwrap()).lines() {
+        let mut child = LogChild(child);
+        let mut stdout = std::io::stdout().lock();
+        for line in std::io::BufReader::new(child.0.stdout.take().unwrap()).lines() {
             let line = line.map_err(|error| {
                 Error::new(ErrorKind::Io)
                     .with_message("failed to read log line")
                     .with_source(error)
             })?;
-            println!("{}", serde_json::json!({"message": line}));
+            writeln!(stdout, "{}", serde_json::json!({"message": line}))
+                .and_then(|()| stdout.flush())
+                .map_err(|error| {
+                    Error::new(ErrorKind::Io)
+                        .with_message("failed to write service logs")
+                        .with_source(error)
+                })?;
         }
-        child.wait()
+        child.0.wait()
     } else {
         command.status()
     };
@@ -1149,6 +1290,100 @@ mod tests {
             run: effective_args(&ServeRunArgs::default()).unwrap(),
         }
     }
+    #[test]
+    fn native_job_requires_saved_setup_matching_every_owner_field() {
+        let original = setup();
+        for macos in [false, true] {
+            let current = definition(&original, macos);
+            assert!(
+                verify_job_definition(&original, &[&original], Some(&current), true, macos).is_ok()
+            );
+            assert!(verify_job_definition(&original, &[], Some(&current), true, macos).is_err());
+            assert!(verify_job_definition(&original, &[], None, true, macos).is_err());
+            assert!(verify_job_definition(&original, &[], None, false, macos).is_ok());
+            for field in ["account", "home", "program", "pool"] {
+                let mut other = original.clone();
+                match field {
+                    "account" => other.account = "other".into(),
+                    "home" => other.home = "/another/home".into(),
+                    "program" => other.program = "/another/program".into(),
+                    "pool" => other.pool_dir = "/another/pool".into(),
+                    _ => unreachable!(),
+                }
+                assert!(
+                    verify_job_definition(&other, &[&other], Some(&current), true, macos).is_err(),
+                    "{field}"
+                );
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn alternate_home_and_stale_privileged_checks_never_mutate_foreign_job() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut original = setup();
+        original.home = temp.path().join("home-a");
+        original.program = original.home.join("plasmite");
+        let mut alternate = original.clone();
+        alternate.home = temp.path().join("home-b");
+        alternate.program = alternate.home.join("plasmite");
+        assert_eq!(original.job_path(), alternate.job_path());
+        let saved = temp.path().join("original-setup.json");
+        write_atomic_json(&saved, &original).unwrap();
+        let saved_bytes = fs::read(&saved).unwrap();
+        let job = temp.path().join("native-job");
+        let events = temp.path().join("manager-events");
+        for macos in [false, true] {
+            let definition_a = definition(&original, macos);
+            fs::write(&job, &definition_a).unwrap();
+            fs::write(&events, b"").unwrap();
+            let invoke = |expected: &[String], loaded: &str| {
+                Command::new("/bin/sh")
+                    .args([
+                        "-c",
+                        &format!(
+                            "set -eu\n{}\n/usr/bin/printf '%s' 'stop replace remove' >> {}",
+                            ownership_check_script(&job, expected, loaded),
+                            shell_quote(&events.to_string_lossy())
+                        ),
+                    ])
+                    .output()
+                    .unwrap()
+            };
+            // HOME B has no matching saved setup. No manager mutation can run.
+            let result = invoke(&[], "true");
+            assert!(!result.status.success());
+            assert!(String::from_utf8_lossy(&result.stderr).contains("original HOME"));
+            assert!(fs::read(&events).unwrap().is_empty());
+            assert_eq!(fs::read_to_string(&job).unwrap(), definition_a);
+            assert_eq!(fs::read(&saved).unwrap(), saved_bytes);
+            // Validated ownership becomes stale while approval is pending.
+            verify_job_definition(&original, &[&original], Some(&definition_a), true, macos)
+                .unwrap();
+            let definition_b = definition(&alternate, macos);
+            fs::write(&job, &definition_b).unwrap();
+            let result = invoke(std::slice::from_ref(&definition_a), "true");
+            assert!(!result.status.success());
+            assert!(fs::read(&events).unwrap().is_empty());
+            assert_eq!(fs::read_to_string(&job).unwrap(), definition_b);
+            assert_eq!(fs::read(&saved).unwrap(), saved_bytes);
+            // Matching definitions remain operable; an unloaded missing job can
+            // be installed, but a loaded job without a definition cannot be adopted.
+            fs::write(&job, &definition_a).unwrap();
+            assert!(
+                invoke(std::slice::from_ref(&definition_a), "true")
+                    .status
+                    .success()
+            );
+            fs::write(&events, b"").unwrap();
+            fs::remove_file(&job).unwrap();
+            assert!(!invoke(&[], "true").status.success());
+            assert!(fs::read(&events).unwrap().is_empty());
+            assert!(invoke(&[], "false").status.success());
+        }
+    }
+
     fn fixture() -> (tempfile::TempDir, Setup, PathBuf, PathBuf) {
         let temp = tempfile::tempdir().unwrap();
         let service = temp.path().join("service");
