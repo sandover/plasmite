@@ -32,6 +32,52 @@ is for credential-free use on the server machine.
 | `duplex` | yes | yes |
 | `doctor` | yes | no |
 
+## Serving and startup
+
+`plasmite --dir ./shared serve https://pools.example.net:9743` runs in the
+foreground. The positional URL names the public HTTPS origin and sets the
+default remote listener port. Without a URL, the HTTPS listener remains at
+`0.0.0.0:9743`. A URL without an explicit port uses HTTPS port 443.
+`--remote-bind` overrides the listener when a proxy uses a different
+backend port or a specific interface. The URL hostname never selects the
+bind interface. The local administration listener stays on loopback.
+
+The older `--shared-address SERVER` form still names the public origin but
+keeps the 1.0 listener default of `0.0.0.0:9743`. Use `--remote-bind` to
+change its listener. Supply the public origin through one form only.
+
+On Linux or macOS, the command below installs startup before login and
+starts the server under the account that owns its pools and keys:
+
+```console
+plasmite --dir ./shared serve install https://pools.example.net:9743
+```
+
+The command may request administrator approval to register the native
+service. Windows supports foreground serving and reports that boot
+installation is unsupported. Boot startup requires the home, service files,
+and pool directory to be available before login. An encrypted or removable
+volume that unlocks or mounts only after login delays the server. Use an
+absolute `--dir` path for lifecycle commands run from another working
+directory:
+
+```console
+plasmite --dir ./shared serve start
+plasmite --dir ./shared serve stop
+plasmite --dir ./shared serve restart
+plasmite --dir ./shared serve logs
+plasmite --dir ./shared serve uninstall
+```
+
+`stop` leaves startup enabled. `uninstall` stops the service and removes
+startup without deleting pools, access keys, or certificates. These commands
+target the installed setup; they do not control a foreground server. Run
+`serve install` with new options to update a saved setup. The positional
+URL chooses the default listener port on first install. Later URL changes
+keep the saved listener unless you supply `--remote-bind`. With no new
+options, `install` keeps the saved settings, installs the current Plasmite
+executable, and starts the service.
+
 ## Server status
 
 `plasmite serve status` shows Plasmite servers running for your current OS
@@ -49,10 +95,19 @@ plasmite serve status --json
 ```
 
 The JSON form is an array. Each object has `pid`, `pool_dir` (an absolute
-path), `local_url`, and `remote_url`. `remote_url` uses `--shared-address` or
-a loopback HTTPS bind. It is `null` when the client-facing HTTPS address is
-unknown; a non-loopback bind needs `--shared-address`, even with a TLS
-certificate configured. Secure serving still has a remote listener.
+path), `local_url`, and `remote_url`. `remote_url` uses the positional server
+URL, `--shared-address`, or a loopback HTTPS bind. It is `null` when the
+client-facing HTTPS address is unknown. Secure serving still has a remote
+listener.
+
+`serve status --all` also lists installed setups that stopped or failed.
+It remains global: `--dir` does not narrow it. Its JSON rows have
+`pool_dir`, nullable `pid`, `local_url`, nullable `remote_url`,
+`managed`, `startup`, `state`, nullable `problem`, and nullable `setup`.
+States include `running`, `starting`, `stopped`, and `failed`.
+The setup object holds the saved directory, executable, account, home, and
+serve options. An installed setup's addresses may describe saved settings
+rather than live listeners.
 
 ## Saved connections
 
@@ -64,7 +119,7 @@ says access failed; scripts should inspect the JSON fields.
 
 An access key grants full access to every pool in the server’s pool directory:
 it can list, read, and append messages, and create or delete pools. For native
-remote access, the owner creates a key with `access invite`; the recipient runs
+remote access, the owner creates a key with `access invite NAME`; the recipient runs
 `access connect SERVER_URL` and enters the key at the hidden prompt. The client
 saves the connection for the current OS user. Remote `feed`, `follow`, and
 `duplex`, remote `fetch`, and remote pool inspection use saved credentials
@@ -76,7 +131,8 @@ for setup, and the [serving guide](record/serving.md) for access recovery and
 browser or MCP connections.
 
 After `access connect`, Plasmite prints setup commands for Claude Code and
-Codex CLI. Each command starts `plasmite mcp --remote SERVER_URL` over stdio.
+Codex CLI. Each command starts `plasmite mcp SERVER_URL` over stdio.
+The older `mcp --remote SERVER_URL` form still works.
 The MCP process reads the saved connection before each remote request, so a
 later disconnect, replacement, or server-side revocation takes effect on the
 next tool call. Local and remote MCP follow the 2025-11-25 handshake and share
@@ -95,7 +151,8 @@ for the message and HTTP details.
   JSON stream from non-terminal stdin.
 - `mcp` reads newline-delimited JSON-RPC from stdin until EOF and writes
   JSON-RPC to stdout. Use `--dir DIR mcp` (or `mcp --dir DIR`) for local pools or
-  `mcp --remote SERVER_URL` for a saved native HTTPS connection.
+  `mcp SERVER_URL` for a saved native HTTPS connection. A remote SERVER
+  cannot be combined with local `--dir`.
 
 ## Output
 

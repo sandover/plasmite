@@ -147,9 +147,14 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             },
             &context,
         ),
-        Command::Serve { command, run } => server::run(command, run, &context),
+        Command::Serve { command, run } => server::run(command, *run, &context),
         Command::Access { command } => access::run(command, &context),
-        Command::Mcp { remote } => utility::run(utility::UtilityCommand::Mcp { remote }, &context),
+        Command::Mcp { server, remote } => utility::run(
+            utility::UtilityCommand::Mcp {
+                remote: server.or(remote),
+            },
+            &context,
+        ),
         Command::Completion { shell } => {
             utility::run(utility::UtilityCommand::Completion { shell }, &context)
         }

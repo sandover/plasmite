@@ -352,9 +352,12 @@ for output flags, history rules, and secure-sharing migration.
 
 | | |
 |---|---|
-| `serve` | Serve local pools over loopback HTTP and remote HTTPS |
-| `serve status` | List this user's running servers |
-| `access invite` | Create an access key for another client |
+| `serve` [*server*] | Serve local pools over loopback HTTP and remote HTTPS |
+| `serve install` [*server*] | Start the server and arrange boot startup on Linux or macOS |
+| `serve start/stop/restart/uninstall` | Control the installed server for `--dir` |
+| `serve logs` | Read the installed server log |
+| `serve status` [`--all`] | List live servers, or include installed stopped setups |
+| `access invite` *name* | Create an access key for another client |
 | `access connect` | Verify a server and save its access key |
 | `access list` | List saved server destinations |
 | `access status` | Check a saved server connection |
@@ -365,7 +368,7 @@ for output flags, history rules, and secure-sharing migration.
 
 | | |
 |---|---|
-| `mcp` | Run the Model Context Protocol server over stdin/stdout |
+| `mcp` [*server*] | Run local or saved remote Model Context Protocol over stdin/stdout |
 | `version` | Print version information |
 | `completion` *shell* | Generate shell completion |
 

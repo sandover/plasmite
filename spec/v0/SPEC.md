@@ -57,6 +57,9 @@ owns its protocol guarantees.
 
 ### Secure Sharing
 
+Plasmite 1.1 adds native server startup commands without changing the
+live-only `serve status` report or its JSON shape.
+
 Plasmite 1.0 provides native access-key sharing. It keeps the existing spec paths and
 `/v0` HTTP route prefix. Local pool use remains credential-free.
 
@@ -64,20 +67,27 @@ Plasmite 1.0 provides native access-key sharing. It keeps the existing spec path
   OS user. Top-level `--dir` does not limit discovery. `--json` emits a JSON
   array of server objects with stable fields: `pid` (process ID), `pool_dir`
   (absolute pool directory), `local_url`, and `remote_url`. `remote_url` uses
-  `--shared-address` or a loopback HTTPS bind. It is `null` when the
-  client-facing HTTPS address is unknown; for example, a non-loopback bind
-  needs `--shared-address`, even with a TLS certificate configured. Secure
+  positional `SERVER`, `--shared-address`, or a loopback HTTPS bind. It is
+  `null` when the client-facing HTTPS address is unknown. A non-loopback
+  bind needs a public origin even with a TLS certificate configured. Secure
   serving still has a remote listener. Only servers started with this version
   register; restart older running servers to make them discoverable. Stopped
   servers do not appear in the list. With no running servers, the
   human-readable output says `No Plasmite servers running.`
 - `plasmite --dir DIR serve` starts the server for the selected pool directory.
   `--bind` and `--remote-bind` set listener addresses; `--shared-address`
-  names the client-facing HTTPS origin. `--tls-cert` and `--tls-key` supply a
-  server certificate; `--front-cert` identifies a TLS proxy's public
-  certificate for access-key pinning.
-- `plasmite --dir DIR access invite --name NAME` creates a directory-wide
-  access key and displays it only after the server commits it.
+  names the client-facing HTTPS origin while retaining the default HTTPS
+  listener `0.0.0.0:9743`. Starting in 1.1, positional `serve SERVER`
+  also names the public origin and uses its HTTPS port as the default
+  listener port. An origin without an explicit port uses 443. `--remote-bind`
+  overrides either default for a proxy or selected interface. The two
+  public-origin spellings cannot appear together. `--tls-cert` and
+  `--tls-key` supply a server certificate; `--front-cert` identifies
+  a TLS proxy's public certificate for access-key pinning.
+- `plasmite --dir DIR access invite NAME` creates a directory-wide
+  access key and displays it only after the server commits it. The earlier
+  `--name NAME` spelling remains accepted; the two forms cannot appear
+  together.
 - `plasmite access connect SERVER_URL` prompts for the access key without
   echoing it, verifies the server, and saves the connection for the current OS
   user. In an interactive macOS or Windows terminal, it then offers browser
@@ -134,6 +144,43 @@ Plasmite 1.0 provides native access-key sharing. It keeps the existing spec path
 - Connection and status errors identify the destination and failed step and
   provide an actionable next step. Machine-readable errors have stable kinds;
   background commands do not wait for interactive repair.
+
+### Installed server lifecycle (1.1)
+
+- `serve install [SERVER]` saves the selected pool directory's serve
+  options, registers startup before login under its owning OS account, and
+  starts it. Linux and macOS support this path when the home, service files,
+  certificates, and pool directory are available before login. Startup
+  cannot bypass a disk unlock or mount that requires a person. Windows
+  reports an actionable unsupported error; foreground `serve` still works
+  there.
+- `serve start`, `stop`, `restart`, `logs`, and `uninstall` target the
+  installed setup selected by `--dir`. They do not control a foreground
+  server. `stop` leaves startup enabled. `uninstall` stops the service and
+  removes startup without deleting pools, access keys, or certificates.
+  `install` without new options keeps saved settings, installs the current
+  executable, and starts the service. On first install,
+  positional `SERVER` sets the default HTTPS listener port. A later URL
+  change preserves the saved listener unless `--remote-bind` explicitly
+  changes it. An update validates the replacement and preserves the
+  previous setup on failure.
+- `serve status --all` lists installed stopped or failed setups as well as
+  live servers for the current OS user. Like plain status, `--dir` does not
+  narrow it. `--all --json` emits an array whose rows have `pool_dir`,
+  nullable `pid`, `local_url`, nullable `remote_url`, `managed`,
+  `startup`, `state`, nullable `problem`, and nullable `setup`.
+  `state` is `running`, `starting`, `stopped`, or `failed` for
+  reported setups. A stopped setup's addresses describe saved settings,
+  not live listeners. `setup` holds `pool_dir`, executable `program`,
+  owning `account`, `home`, and effective `run` options. A foreground
+  server has `managed: false` and `setup: null`. Install, start, stop,
+  restart, and uninstall with `--json` emit one status object with these
+  fields; successful `uninstall` reports `state: "uninstalled"`, `startup: false`, and
+  `setup: null`. `serve logs --json` streams JSON Lines with one
+  `message` field per installed server log line.
+- `mcp SERVER` uses a saved native HTTPS connection. The older
+  `mcp --remote SERVER` form remains accepted; neither remote form can
+  combine with local `--dir`.
 
 ## Data + Error Contract
 
