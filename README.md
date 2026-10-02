@@ -79,9 +79,9 @@ channels below, then follow
   <tr>
     <td valign="top">
       <b>Alice starts the server</b><br/>
-      <code>pls --dir ./pools serve --shared-address https://alice.example.test:9743</code><br/>
+      <code>pls --dir ./pools serve https://alice.example.test:9743</code><br/>
       <br/>In another terminal on the server:<br/>
-      <code>pls --dir ./pools access invite --name Carol</code>
+      <code>pls --dir ./pools access invite Carol</code>
       <br/><br/>
       Alice sends Carol the HTTPS address and access key privately. The key grants full access to <code>./pools</code>, including creating and deleting pools.
       <br/><br/><br/>
@@ -239,9 +239,12 @@ Windows builds (`x86_64-pc-windows-msvc`) are available via npm and PyPI. See th
 
 | | |
 |---|---|
-| `serve` | Serve local pools over loopback HTTP and remote HTTPS |
-| `serve status` | List this user's running servers |
-| `access invite` | Create an access key for another client |
+| `serve` [*server*] | Serve local pools over loopback HTTP and remote HTTPS |
+| `serve install` [*server*] | Start the server and arrange boot startup on Linux or macOS |
+| `serve start/stop/restart/uninstall` | Control the installed server for `--dir` |
+| `serve logs` | Read the installed server log |
+| `serve status` [`--all`] | List live servers, or include installed stopped setups |
+| `access invite` *name* | Create an access key for another client |
 | `access connect` | Verify a server and save its access key |
 | `access list` | List saved server destinations |
 | `access status` | Check a saved server connection |
@@ -252,7 +255,7 @@ Windows builds (`x86_64-pc-windows-msvc`) are available via npm and PyPI. See th
 
 | | |
 |---|---|
-| `mcp` | Run the Model Context Protocol server over stdin/stdout |
+| `mcp` [*server*] | Run local or saved remote Model Context Protocol over stdin/stdout |
 | `version` | Print version information |
 | `completion` *shell* | Generate shell completion |
 

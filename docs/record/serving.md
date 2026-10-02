@@ -15,6 +15,7 @@ share a smaller set of pools, serve a separate directory.
 - [Connect an AI client](#connect-an-ai-client)
 - [Manage access](#manage-access)
 - [Deploy a server](#deploy-a-server)
+- [Start a server at boot](#start-a-server-at-boot)
 - [Use Tailscale](#use-tailscale)
 - [Troubleshoot a connection](#troubleshoot-a-connection)
 
@@ -35,7 +36,7 @@ network and firewall. Keep the local administration port `9700` private.
 
 ```console
 plasmite --dir ./shared pool create events
-plasmite --dir ./shared serve --shared-address https://pools.example.net:9743
+plasmite --dir ./shared serve https://pools.example.net:9743
 ```
 
 Keep this terminal running. Plasmite creates and retains its server
@@ -48,7 +49,7 @@ generated certificate.
 Open another terminal on the server machine, in the same working directory:
 
 ```console
-plasmite --dir ./shared access invite --name Alex
+plasmite --dir ./shared access invite Alex
 ```
 
 The command displays the key. Send Alex the HTTPS address and key through a
@@ -154,7 +155,7 @@ Codex CLI using your installed Plasmite path. Run the command for your client.
 The configured process runs:
 
 ```console
-plasmite mcp --remote https://pools.example.net:9743
+plasmite mcp https://pools.example.net:9743
 ```
 
 Restart Claude Code after adding the server. Ask the client to list pools
@@ -230,10 +231,10 @@ before retrying. Review access after restoring server state from a backup.
 
 ## Deploy a server
 
-Secure serving runs on macOS, Linux, and Windows. The shared address names
-the HTTPS origin recipients use: scheme, hostname or IP, and port, with no
-pool path. It must match the certificate's name and the address your network
-routes to the server.
+Secure serving runs on macOS, Linux, and Windows. The public server URL
+names the HTTPS origin recipients use: scheme, hostname or IP, and port,
+with no pool path. It must match the certificate's name and the address
+your network routes to the server.
 
 | Listener | Default | Purpose |
 | --- | --- | --- |
@@ -244,8 +245,63 @@ Use `--bind` and `--remote-bind` to change the listening addresses. Restrict
 network access to intended recipients. Keep the local HTTP listener on
 loopback and keep it out of every network proxy, including a tailnet-only proxy.
 `--remote-bind` takes a numeric IP and port; bracket an IPv6 address.
-`--shared-address` advertises an origin and sets certificate names; it does
-not restrict the listener. Its default remote bind still covers all IPv4 interfaces.
+A positional `serve SERVER` URL advertises the origin, sets certificate
+names, and sets the default HTTPS listener port. With no explicit URL port,
+HTTPS uses 443. Its hostname does not select a bind interface. The older
+`--shared-address SERVER` form still advertises the origin and sets
+certificate names, but keeps the 1.0 listener default of `0.0.0.0:9743`.
+Use `--remote-bind` to override either form, such as for a proxy with a
+different backend port. Supply the public origin through one form only.
+
+### Start a server at boot
+
+Plasmite 1.1 can register the ordinary server with the native service
+manager on Linux or macOS. Run the command as the account that owns its
+pools and access keys:
+
+```console
+plasmite --dir ./shared serve install https://pools.example.net:9743
+plasmite serve status --all
+```
+
+`install` saves the setup, starts it, and arranges startup before that
+account signs in. Plasmite may request administrator approval to register
+the native job. Use an absolute `--dir` path for later commands from
+another working directory.
+Windows supports foreground `serve` but reports that boot installation
+is unsupported. The home, installed executable, certificates, and pool
+directory must be available before login. An encrypted or removable volume
+that unlocks or mounts only after login delays the server. On a FileVault
+Mac, someone must first unlock the startup disk so macOS can boot; this
+service cannot bypass that step.
+
+```console
+plasmite --dir ./shared serve logs
+plasmite --dir ./shared serve stop
+plasmite --dir ./shared serve start
+plasmite --dir ./shared serve restart
+plasmite --dir ./shared serve uninstall
+```
+
+`stop` leaves startup enabled for the next boot. `uninstall` stops the
+service and removes startup without deleting pools, keys, or certificates.
+These commands target the installed setup, not a foreground server. Run
+`install` again with new options to update saved settings. A positional
+URL sets the listener port on first install; later URL changes keep the
+saved listener unless you supply `--remote-bind`. With no new options,
+`install` keeps the saved settings, installs the current Plasmite executable,
+and starts the service.
+
+Plain `serve status` still lists only live servers across this user's pool
+directories. `serve status --all` also shows installed setups that stopped
+or failed. Its JSON rows include `managed`, `startup`, `state`, `problem`,
+and the saved `setup`; stopped rows have a null PID. `--dir` does not
+narrow either status report. `serve logs` reads the installed server's
+private stdout and stderr file. If the service manager fails before the
+server starts, inspect launchd or systemd for that job.
+On a host that mounts the required storage without sign-in, a real reboot
+with the owner signed out checks pre-login startup. A local restart does not
+prove it. A FileVault unlock check proves recovery after that unlock.
 
 ### Use a trusted certificate
 
@@ -254,7 +310,7 @@ issuer your recipients' browsers and AI clients trust. Its Subject
 Alternative Name must cover that name. Keep the private key on the server:
 
 ```console
-plasmite --dir ./shared serve --shared-address https://pools.example.net:9743 --tls-cert /secure/path/fullchain.pem --tls-key /secure/path/privkey.pem
+plasmite --dir ./shared serve https://pools.example.net:9743 --tls-cert /secure/path/fullchain.pem --tls-key /secure/path/privkey.pem
 ```
 
 Replace the certificate paths with your own; Windows accepts Windows paths.
@@ -305,13 +361,13 @@ Bind the authenticated HTTPS listener directly to that tailnet interface:
 
 ```console
 plasmite --dir ./shared pool create events
-plasmite --dir ./shared serve --remote-bind 100.101.102.103:9743 --shared-address https://node.tail123.ts.net:9743
+plasmite --dir ./shared serve https://node.tail123.ts.net:9743 --remote-bind 100.101.102.103:9743
 ```
 
 In another owner terminal, create a key:
 
 ```console
-plasmite --dir ./shared access invite --name laptop
+plasmite --dir ./shared access invite laptop
 ```
 
 Send the address and key privately. On the recipient, paste the key at the
@@ -336,7 +392,7 @@ If direct interface binding is unavailable, an optional
 can preserve Plasmite's TLS:
 
 ```console
-plasmite --dir ./shared serve --remote-bind 127.0.0.1:9743 --shared-address https://node.tail123.ts.net:9743
+plasmite --dir ./shared serve https://node.tail123.ts.net:9743 --remote-bind 127.0.0.1:9743
 # In a separate terminal; this exposes the authenticated listener to the tailnet:
 tailscale serve --tcp=9743 tcp://127.0.0.1:9743
 ```
@@ -366,7 +422,7 @@ Verify connect/feed/follow/revoke from a recipient before relying on a deploymen
 | Cannot reach the server | Both Tailscale clients are connected; full name resolves; actual IP, port, listener and tailnet permissions agree. Use `tailscale ping` for network diagnosis and `access status` for application access. |
 | Certificate or pin mismatch | Exact advertised name and presented certificate; a TLS-terminating proxy or retained frontend identity can change the expected key. Keep certificate verification enabled. |
 | Native access works; browser does not | Complete browser trust setup or supply a trusted certificate. Raw forwarding does not terminate TLS. |
-| Server reachable outside the tailnet | Check `--remote-bind`; choosing only `--shared-address` leaves the wildcard default. |
+| Server reachable outside the tailnet | Check `--remote-bind`; a public URL alone leaves a wildcard listener; set `--remote-bind` to the tailnet IP or loopback proxy. |
 | Access survives a Tailscale disconnect | Check other network routes to the listener. Revoke the Plasmite key to withdraw application permission. |
 
 ### Protect server and client state

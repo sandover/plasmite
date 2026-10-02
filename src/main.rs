@@ -22,6 +22,7 @@ mod pool_paths;
 mod secure_serve;
 mod serve;
 mod serve_registry;
+mod serve_service;
 mod since;
 #[cfg(windows)]
 mod windows_private;
@@ -116,11 +117,22 @@ fn run() -> Result<RunOutcome, (Error, ColorMode, bool)> {
             json_output,
         ));
     }
-    if !cli.dir.is_empty() && matches!(&cli.command, cli::args::Command::Mcp { remote: Some(_) }) {
+    if !cli.dir.is_empty()
+        && matches!(
+            &cli.command,
+            cli::args::Command::Mcp {
+                server: Some(_),
+                ..
+            } | cli::args::Command::Mcp {
+                remote: Some(_),
+                ..
+            }
+        )
+    {
         return Err((
             Error::new(ErrorKind::Usage)
-                .with_message("--remote cannot be used with --dir")
-                .with_hint("Use --dir for local MCP or --remote for a saved server connection."),
+                .with_message("SERVER cannot be combined with --dir")
+                .with_hint("Use --dir for local MCP or SERVER for a saved server connection."),
             color_mode,
             json_output,
         ));
@@ -356,7 +368,31 @@ mod tests {
                     "tls-key",
                 ],
             ),
-            ("plasmite serve status", vec!["help", "json"]),
+            (
+                "plasmite serve install",
+                vec![
+                    "bind",
+                    "front-cert",
+                    "help",
+                    "json",
+                    "max-body-bytes",
+                    "max-tail-concurrency",
+                    "max-tail-timeout-ms",
+                    "remote-bind",
+                    "shared-address",
+                    "tls-cert",
+                    "tls-key",
+                ],
+            ),
+            (
+                "plasmite serve logs",
+                vec!["follow", "help", "json", "tail"],
+            ),
+            ("plasmite serve restart", vec!["help", "json"]),
+            ("plasmite serve start", vec!["help", "json"]),
+            ("plasmite serve status", vec!["all", "help", "json"]),
+            ("plasmite serve stop", vec!["help", "json"]),
+            ("plasmite serve uninstall", vec!["help", "json"]),
             (
                 "plasmite tap",
                 vec![

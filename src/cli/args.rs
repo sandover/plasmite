@@ -2,9 +2,6 @@
 //! Exports: `Cli`, command enums, and command argument structures.
 //! Role: Parse syntax only; command execution belongs to sibling CLI modules.
 
-use crate::cli::support::{
-    DEFAULT_MAX_BODY_BYTES, DEFAULT_MAX_TAIL_CONCURRENCY, DEFAULT_MAX_TAIL_TIMEOUT_MS,
-};
 use clap::{Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::aot::Shell;
 use std::path::PathBuf;
@@ -36,9 +33,12 @@ COMMANDS
     doctor <POOL | --all>                Check local pool integrity
 
   Share and connect
-    serve [--shared-address SERVER]      Run a server for this directory
-    serve status                        List this user's local servers
-    access invite --name NAME            Create a full-access directory key
+    serve [SERVER]                      Run a server for this directory
+    serve install [SERVER]              Install this server as a background service
+    serve start|stop|restart|uninstall  Control the installed service
+    serve logs [--follow]               Read or follow service logs
+    serve status [--all]                List running servers or all saved setups
+    access invite NAME                  Create a full-access directory key
     access keys                         List server-side keys
     access revoke ID                    Revoke a server-side key
     access connect SERVER               Verify a key and save a connection
@@ -48,7 +48,7 @@ COMMANDS
     access untrust SHA256                Remove trust for one certificate
 
   Integrate and learn
-    mcp [--remote SERVER]                Run Model Context Protocol on stdio
+    mcp [SERVER]                        Run Model Context Protocol on stdio
     completion SHELL                    Print shell completion code
     version                             Print the build version
     help [COMMAND...]                   Show root or command help
@@ -250,12 +250,12 @@ INPUT AND OUTPUT
         about = "Share pools securely with named access keys",
         long_about = r#"Serve pools locally and share them over HTTPS with named access keys.
 
-Run `plasmite access invite --name <name>` in another terminal to create a key."#,
+Run `plasmite access invite <name>` in another terminal to create a key."#,
         after_help = r#"EXAMPLES
   $ plasmite --dir ./pools serve
-  $ plasmite serve status
-  $ plasmite serve status --json
-  $ plasmite --dir ./pools access invite --name laptop
+  $ plasmite serve install https://pools.example.com:9743
+  $ plasmite serve status --all --json
+  $ plasmite --dir ./pools access invite laptop
 
 CONSTRAINTS
   - Request body, tail timeout, and tail concurrency limits must be positive
@@ -265,14 +265,14 @@ CONSTRAINTS
         #[command(subcommand)]
         command: Option<ServeSubcommand>,
         #[command(flatten)]
-        run: ServeRunArgs,
+        run: Box<ServeRunArgs>,
     },
     #[command(
         display_order = 9,
         about = "Serve local or remote MCP tools and resources on stdio",
         long_about = r#"Start an MCP process on stdio.
 
-With no options, the process exposes local pools. Use `--remote` to connect to a
+With no server, the process exposes local pools. Pass a SERVER to connect to a
 Plasmite server through this machine's saved native connection. Credentials stay
 in Plasmite's access store and are reloaded before each remote request.
 
@@ -281,18 +281,25 @@ responses to stdout. It exits when stdin closes."#,
         after_help = r#"EXAMPLES
   $ plasmite mcp
   $ plasmite mcp --dir /path/to/pools
-  $ plasmite mcp --remote https://pools.example.com:8443
+  $ plasmite mcp https://pools.example.com:8443
 
 INPUT AND OUTPUT
   Reads JSON-RPC on stdin and writes JSON-RPC on stdout until stdin closes.
-  --dir selects local pools; --remote uses a saved connection and conflicts with --dir."#
+  --dir selects local pools. A remote SERVER uses a saved connection and cannot be combined with --dir.
+  The --remote option remains available for existing scripts."#
     )]
     Mcp {
         #[arg(
+            value_name = "SERVER",
+            conflicts_with = "remote",
+            help = "Use a saved HTTPS connection to a Plasmite server"
+        )]
+        server: Option<String>,
+        #[arg(
             long,
             value_name = "SERVER_URL",
-            conflicts_with = "dir",
-            help = "Use a saved HTTPS connection to a Plasmite server"
+            conflicts_with = "server",
+            help = "Legacy spelling for SERVER"
         )]
         remote: Option<String>,
     },
@@ -596,9 +603,47 @@ to enable tab completion."#,
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ServeSubcommand {
-    #[command(about = "Show all running Plasmite servers for this user")]
+    #[command(about = "Install this server as a service that starts at boot")]
+    Install {
+        #[command(flatten)]
+        run: ServeRunArgs,
+        #[arg(long, help = "Emit a JSON report")]
+        json: bool,
+    },
+    #[command(about = "Start the installed background service")]
+    Start {
+        #[arg(long, help = "Emit a JSON report")]
+        json: bool,
+    },
+    #[command(about = "Stop the background service")]
+    Stop {
+        #[arg(long, help = "Emit a JSON report")]
+        json: bool,
+    },
+    #[command(about = "Restart the background service")]
+    Restart {
+        #[arg(long, help = "Emit a JSON report")]
+        json: bool,
+    },
+    #[command(about = "Remove the background service")]
+    Uninstall {
+        #[arg(long, help = "Emit a JSON report")]
+        json: bool,
+    },
+    #[command(about = "Show recent server logs")]
+    Logs {
+        #[arg(long, value_name = "N", help = "Number of recent lines to show")]
+        tail: Option<usize>,
+        #[arg(long, help = "Continue following new log lines")]
+        follow: bool,
+        #[arg(long, help = "Emit one JSON object per log line")]
+        json: bool,
+    },
+    #[command(about = "Show running servers for this user")]
     Status {
-        #[arg(long, help = "Print server details as a JSON array")]
+        #[arg(long, help = "Include installed servers that are stopped or failed")]
+        all: bool,
+        #[arg(long, help = "Emit a JSON report")]
         json: bool,
     },
 }
@@ -713,8 +758,21 @@ pub(crate) enum AccessSubcommand {
     Invite {
         #[arg(long, help = "Emit a JSON report")]
         json: bool,
-        #[arg(long, value_name = "NAME", help = "Name to identify this client")]
-        name: String,
+        #[arg(
+            value_name = "NAME",
+            required_unless_present = "legacy_name",
+            conflicts_with = "legacy_name",
+            help = "Name to identify this client"
+        )]
+        name: Option<String>,
+        #[arg(
+            long = "name",
+            value_name = "NAME",
+            required_unless_present = "name",
+            conflicts_with = "name",
+            help = "Legacy spelling for the client name"
+        )]
+        legacy_name: Option<String>,
     },
     #[command(
         display_order = 3,
@@ -798,26 +856,33 @@ pub(crate) enum AccessSubcommand {
     },
 }
 
-#[derive(Args)]
+#[derive(Args, Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ServeRunArgs {
     #[arg(
+        value_name = "SERVER",
+        conflicts_with = "shared_address",
+        help = "Client-facing HTTPS origin"
+    )]
+    pub(crate) server: Option<String>,
+    #[arg(
         long,
-        default_value = "127.0.0.1:9700",
+        value_name = "ADDRESS",
         help = "Local loopback bind address for credential-free administration",
         help_heading = "Connection"
     )]
-    pub(crate) bind: String,
+    pub(crate) bind: Option<String>,
     #[arg(
         long = "remote-bind",
-        default_value = "0.0.0.0:9743",
+        value_name = "ADDRESS",
         help = "Numeric IP:port for authenticated HTTPS (bracket IPv6)",
         help_heading = "Connection"
     )]
-    pub(crate) remote_bind: String,
+    pub(crate) remote_bind: Option<String>,
     #[arg(
         long = "shared-address",
         value_name = "URL",
-        help = "Public HTTPS URL clients use to connect, including any proxy port",
+        conflicts_with = "server",
+        help = "Legacy public HTTPS URL option",
         help_heading = "Connection"
     )]
     pub(crate) shared_address: Option<String>,
@@ -835,25 +900,25 @@ pub(crate) struct ServeRunArgs {
     pub(crate) tls_key: Option<PathBuf>,
     #[arg(
         long,
-        default_value_t = DEFAULT_MAX_BODY_BYTES,
+        value_name = "BYTES",
         help = "Max request body size in bytes (must be positive)",
         help_heading = "Safety"
     )]
-    pub(crate) max_body_bytes: u64,
+    pub(crate) max_body_bytes: Option<u64>,
     #[arg(
         long,
-        default_value_t = DEFAULT_MAX_TAIL_TIMEOUT_MS,
+        value_name = "MILLISECONDS",
         help = "Max tail timeout in milliseconds (must be positive)",
         help_heading = "Safety"
     )]
-    pub(crate) max_tail_timeout_ms: u64,
+    pub(crate) max_tail_timeout_ms: Option<u64>,
     #[arg(
         long,
-        default_value_t = DEFAULT_MAX_TAIL_CONCURRENCY,
+        value_name = "N",
         help = "Max concurrent tail streams (must be positive)",
         help_heading = "Safety"
     )]
-    pub(crate) max_tail_concurrency: usize,
+    pub(crate) max_tail_concurrency: Option<usize>,
 }
 
 impl Command {
@@ -892,9 +957,17 @@ impl Command {
                 | AccessSubcommand::Revoke { json, .. } => *json,
             },
             Self::Serve {
-                command: Some(ServeSubcommand::Status { json }),
+                command: Some(command),
                 ..
-            } => *json,
+            } => match command {
+                ServeSubcommand::Install { json, .. }
+                | ServeSubcommand::Start { json }
+                | ServeSubcommand::Stop { json }
+                | ServeSubcommand::Restart { json }
+                | ServeSubcommand::Uninstall { json }
+                | ServeSubcommand::Logs { json, .. }
+                | ServeSubcommand::Status { json, .. } => *json,
+            },
             _ => false,
         }
     }

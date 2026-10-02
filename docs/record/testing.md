@@ -58,6 +58,35 @@ mapping of a larger existing pool. A smaller mapping can still fail under
 memory pressure. Do not describe an archive as built, published, or Pi-validated
 until evidence exists for that specific boundary.
 
+### Boot-installed servers
+
+Unit and integration tests can check saved settings, command scope,
+status output, and error recovery. They do not prove startup before login.
+Record a separate check on each supported host:
+
+1. Install as the account that owns the pools and access keys. Check
+   `serve status --all`, the public URL, the listener, and a client request.
+2. On a host whose storage mounts without sign-in, reboot and leave the
+   owner signed out. From another machine, reach the HTTPS server and read
+   a pool through a saved connection. If a disk requires a person to unlock
+   it, test recovery after that unlock and record the narrower result.
+3. Sign in as the owner. Check `serve status --all` and `serve logs`;
+   exercise `stop`, `start`, `restart`, and `uninstall` for that directory.
+
+Run this on physical Raspberry Pi hardware for the Pi claim, and on macOS
+for the LaunchDaemon claim. Keep Windows boot installation unsupported
+until its service and account setup passes the same pre-login check.
+Hosted Linux CI, a local service restart, and a physical reboot establish
+different facts.
+
+On 2026-10-02, a live macOS trial ran the installed LaunchDaemon through
+`install`, `stop`, `start`, `restart`, `logs`, and `uninstall` under the owning
+account. The server wrote its private log as that account; uninstall removed
+the native job and saved setup. Grouped install and uninstall each needed one
+administrator approval. This trial did not reboot the Mac or verify service
+availability before login. No physical Linux or Raspberry Pi boot trial has
+passed yet.
+
 The main CI gate gives Go a stable runner-local build cache that
 `actions/setup-go` restores and saves. Test scripts honor an existing
 `GOCACHE`; local runs default to repository-local scratch directories.

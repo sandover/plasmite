@@ -590,7 +590,7 @@ fn certificate_params(shared_address: Option<&str>) -> Result<CertificateParams,
     Ok(params)
 }
 
-fn cert_fingerprint(path: &Path) -> Result<String, Error> {
+pub(crate) fn cert_fingerprint(path: &Path) -> Result<String, Error> {
     let pem = std::fs::read(path).map_err(|err| {
         Error::new(ErrorKind::Io)
             .with_message("failed to read certificate")

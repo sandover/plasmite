@@ -8,56 +8,22 @@ use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
-use url::Url;
 
 pub(crate) fn run(pool_dir: &Path, run: &ServeRunArgs) -> Result<(), Error> {
-    if run.tls_cert.is_some() != run.tls_key.is_some() {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("--tls-cert and --tls-key must be supplied together"));
-    }
-    if let (Some(cert), Some(key)) = (&run.tls_cert, &run.tls_key) {
-        serve::validate_tls_files(cert, key)?;
-    }
+    let run = crate::serve_service::effective_args(run)?;
     let local_bind: SocketAddr = run
         .bind
+        .as_deref()
+        .unwrap()
         .parse()
-        .map_err(|_| Error::new(ErrorKind::Usage).with_message("invalid local bind address"))?;
+        .expect("validated bind");
     let remote_bind: SocketAddr = run
         .remote_bind
-        .parse()
-        .map_err(|_| {
-            Error::new(ErrorKind::Usage)
-                .with_message("invalid remote bind address")
-                .with_hint("Use a numeric IP:port, such as 100.101.102.103:9743 or [fd7a:115c:a1e0::abcd]:9743. Put the full DNS name in --shared-address.")
-        })?;
-    if !local_bind.ip().is_loopback() {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("local administration must bind to a loopback address"));
-    }
-    let shared_address = run
-        .shared_address
         .as_deref()
-        .map(|value| {
-            let url = Url::parse(value).map_err(|err| {
-                Error::new(ErrorKind::Usage)
-                    .with_message("invalid shared HTTPS address")
-                    .with_source(err)
-            })?;
-            if url.scheme() != "https"
-                || url.host().is_none()
-                || !url.username().is_empty()
-                || url.password().is_some()
-                || url.path() != "/"
-                || url.query().is_some()
-                || url.fragment().is_some()
-            {
-                return Err(Error::new(ErrorKind::Usage)
-                    .with_message("--shared-address must be an HTTPS origin")
-                    .with_hint("Use https://HOST:PORT without a pool path, credentials, query, or fragment. This advertises an address; --remote-bind controls the listening interface."));
-            }
-            Ok(url.origin().ascii_serialization())
-        })
-        .transpose()?;
+        .unwrap()
+        .parse()
+        .expect("validated bind");
+    let shared_address = run.server.clone();
     std::fs::create_dir_all(pool_dir).map_err(|err| {
         Error::new(ErrorKind::Io)
             .with_message("failed to create pool directory")
@@ -75,9 +41,9 @@ pub(crate) fn run(pool_dir: &Path, run: &ServeRunArgs) -> Result<(), Error> {
         pool_dir: pool_dir.to_path_buf(),
         tls_cert: None,
         tls_key: None,
-        max_body_bytes: run.max_body_bytes,
-        max_tail_timeout_ms: run.max_tail_timeout_ms,
-        max_concurrent_tails: run.max_tail_concurrency,
+        max_body_bytes: run.max_body_bytes.unwrap(),
+        max_tail_timeout_ms: run.max_tail_timeout_ms.unwrap(),
+        max_concurrent_tails: run.max_tail_concurrency.unwrap(),
     };
     let remote = ServeConfig {
         bind: remote_bind,
@@ -99,12 +65,12 @@ pub(crate) fn run(pool_dir: &Path, run: &ServeRunArgs) -> Result<(), Error> {
     if let Some(address) = shared_address {
         eprintln!("Remote HTTPS: {address}");
     } else if remote_bind.ip().is_unspecified() {
-        eprintln!("Remote address: set --shared-address to the HTTPS URL clients will use");
+        eprintln!("Remote address: pass SERVER as the HTTPS URL clients will use");
     } else {
         eprintln!("Remote HTTPS: https://{remote_bind}");
     }
     eprintln!(
-        "Create access: plasmite --dir {} access invite --name NAME",
+        "Create access: plasmite --dir {} access invite NAME",
         crate::cli::output_support::human_literal(&pool_dir.display().to_string())
     );
     let runtime = tokio::runtime::Builder::new_multi_thread()

@@ -19,6 +19,8 @@ fn top_level_help_orients_and_routes_readers() {
     assert!(stdout.contains("/blob/main/docs/cookbook.md"));
     assert!(stdout.contains("pool create NAME... [--size SIZE]"));
     assert!(stdout.contains("access list"));
+    assert!(stdout.contains("serve start|stop|restart|uninstall"));
+    assert!(stdout.contains("serve logs [--follow]"));
     assert!(stdout.find("Send and read").unwrap() < stdout.find("Manage pools").unwrap());
     assert!(stdout.find("Manage pools").unwrap() < stdout.find("Share and connect").unwrap());
     for command in [
@@ -54,6 +56,16 @@ fn every_public_command_has_usable_help() {
         (&["pool", "list", "--help"], "plasmite pool list"),
         (&["feed", "--help"], "plasmite feed"),
         (&["serve", "--help"], "plasmite serve"),
+        (&["serve", "install", "--help"], "plasmite serve install"),
+        (&["serve", "start", "--help"], "plasmite serve start"),
+        (&["serve", "stop", "--help"], "plasmite serve stop"),
+        (&["serve", "restart", "--help"], "plasmite serve restart"),
+        (
+            &["serve", "uninstall", "--help"],
+            "plasmite serve uninstall",
+        ),
+        (&["serve", "logs", "--help"], "plasmite serve logs"),
+        (&["serve", "status", "--help"], "plasmite serve status"),
         (&["access", "--help"], "plasmite access"),
         (&["access", "invite", "--help"], "plasmite access invite"),
         (&["access", "connect", "--help"], "plasmite access connect"),

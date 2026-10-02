@@ -1,7 +1,7 @@
 # Proposed CLI surface
 
-Draft for joint editing. This describes the proposed interface; the current
-[CLI contract](../../spec/v0/SPEC.md) governs shipped behavior.
+This records the CLI design chosen across 1.0 and the additive 1.1 server
+startup work. The [CLI contract](../../spec/v0/SPEC.md) governs shipped behavior.
 
 A pool is a persistent, bounded stream of JSON messages. Multiple processes
 can append and read independently. Local use requires no server. Remote use
@@ -34,9 +34,12 @@ Manage pools
   doctor <POOL | --all>                     check local pool integrity
 
 Share and connect
-  serve [--shared-address SERVER]           run a server for the selected pool directory
-  serve status                              list this user's running local servers
-  access invite --name NAME                 create a full-access key for this directory
+  serve [SERVER]                            run a server for the selected pool directory
+  serve install [SERVER]                    start it and arrange boot startup
+  serve start|stop|restart|uninstall        manage its installed server
+  serve logs                                read the installed server log
+  serve status [--all]                      list live servers; include installed setups with --all
+  access invite NAME                        create a full-access key for this directory
   access keys                               list this directory's server-side keys
   access revoke ID                          revoke a server-side key
   access connect SERVER                     verify a key and save a connection
@@ -46,7 +49,7 @@ Share and connect
   access untrust SHA256                     remove trust for one exact certificate
 
 Integrate and learn
-  mcp [--remote SERVER]                     run Model Context Protocol over stdin/stdout
+  mcp [SERVER]                              run Model Context Protocol over stdin/stdout
   completion SHELL                          print a shell completion script
   version                                   print the build version
   help [COMMAND...]                         show root or command help
@@ -72,6 +75,23 @@ Integrate and learn
   listener. `pool list SERVER` lists a remote directory. `pool create`,
   `pool delete`, `tap`, and `doctor` operate locally. `--create` and its size
   option remain local conveniences for messaging commands that support them.
+- **Serving:** Positional `serve SERVER` names the public HTTPS origin and
+  uses its port for the default HTTPS listener. Without an explicit port,
+  that default is 443; without SERVER it stays 9743. The older
+  `--shared-address SERVER` spelling keeps its 1.0 listener default of
+  9743. Both forms accept `--remote-bind` to override the listener, but
+  they cannot appear together. `serve install` registers the ordinary
+  server to start before login under the owning account on Linux or macOS.
+  Windows reports boot installation as unsupported. Lifecycle commands
+  target the installed setup selected by `--dir`. Plain `serve status`
+  stays global and live-only; `--all` includes installed stopped or
+  failed setups.
+- **Reconfiguration:** `serve install` without new values keeps the
+  saved settings, installs the current executable, and starts the
+  service. On first install, the positional URL sets the listener port. Later URL changes keep the saved listener unless the caller
+  supplies `--remote-bind`. New options replace saved values after
+  validation. `stop` keeps boot startup; `uninstall` removes startup
+  and stops the service while preserving pools, keys, and certificates.
 - **Input:** `feed` accepts exactly one source: inline JSON, a file, or stdin.
   `--file -` means stdin. Keep `--in` and `--errors` for stream parsing.
   `duplex` reads JSON from piped stdin; terminal input requires `--me` and
@@ -112,9 +132,9 @@ cookbook. Command help owns syntax, input/output, target scope, and constraints.
 Both `-h` and `--help` contain essential facts. The CLI guide owns shared rules;
 the cookbook owns recipes. `pls` uses the same interface as `plasmite`.
 
-Retain other existing command options. Additions include `access list`, finite
-reads, remote inspection and time selection, and explicit structured output
-where it is missing. Ship the proposed changes to output defaults, global
-`--dir` interpretation, and history/filter semantics in a major release.
-Existing machine-output spellings (`--jsonl`, `--format jsonl`) retain their
-meanings as compatibility aliases; new help and examples teach `--json`.
+Plasmite 1.0 shipped the shared output, target, and history rules.
+Plasmite 1.1 adds positional `serve SERVER`, `access invite NAME`, and
+`mcp SERVER`, with the prior option spellings still accepted. The
+positional server URL has a new listener-port default; the older
+`--shared-address` form keeps its 1.0 meaning. The two forms are not
+exact aliases for listener selection.

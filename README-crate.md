@@ -242,7 +242,12 @@ match report.status {
 
 ## CLI
 
-`cargo install plasmite` also installs the `plasmite` (and `pls`) CLI. See the [full README](https://github.com/sandover/plasmite) for CLI docs, cookbook, and language bindings ([Node](https://www.npmjs.com/package/plasmite), [Python](https://pypi.org/project/plasmite/), [Go](https://github.com/sandover/plasmite/tree/main/bindings/go)).
+`cargo install plasmite` also installs the `plasmite` (and `pls`) CLI.
+Local pools need no server. `plasmite serve SERVER` shares them over HTTPS;
+`plasmite serve install SERVER` arranges boot startup on Linux or macOS.
+See the [full README](https://github.com/sandover/plasmite) for CLI docs,
+cookbook, and language bindings ([Node](https://www.npmjs.com/package/plasmite),
+[Python](https://pypi.org/project/plasmite/), [Go](https://github.com/sandover/plasmite/tree/main/bindings/go)).
 
 ## License
 

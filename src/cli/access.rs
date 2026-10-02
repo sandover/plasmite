@@ -31,7 +31,10 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
             }
             Ok(CommandResult::ok())
         }
-        AccessSubcommand::Invite { name, .. } => {
+        AccessSubcommand::Invite {
+            name, legacy_name, ..
+        } => {
+            let name = name.or(legacy_name).expect("clap requires one client name");
             let access_key = crate::secure_serve::invite(context.pool_dir(), &name)?;
             if !json_output {
                 println!("Access key for {}: {access_key}", human_literal(&name));
