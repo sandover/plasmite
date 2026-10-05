@@ -258,7 +258,9 @@ Current remote shorthand constraints (documented, non-frozen):
 - `follow` remote refs reject `--replay`.
 - `fetch` and `pool info` accept local or remote pool refs. `pool list` accepts
   an optional server URL. Remote results use the same report fields; unknown
-  remote modification time is `null`.
+  remote modification time is `null`. A missing local pool directory yields an
+  empty list. A directory scan failure fails the command; errors opening individual
+  pools remain visible as error rows alongside the other pools.
 
 ## References
 

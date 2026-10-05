@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -38,7 +39,9 @@ def main() -> None:
     if manifest.get("conformance_version") != 0:
         raise RuntimeError(f"unsupported conformance_version: {manifest.get('conformance_version')}")
 
-    workdir = manifest.get("workdir") or "work"
+    workdir = manifest.get("workdir", "work")
+    if not isinstance(workdir, str) or re.fullmatch(r"work(?:-[A-Za-z0-9_-]+)?", workdir) is None:
+        raise RuntimeError("workdir must be 'work' or a work- name with ASCII letters, digits, underscores, or hyphens")
     workdir_path = manifest_dir / workdir
     reset_workdir(workdir_path)
 
@@ -70,6 +73,8 @@ def main() -> None:
 
 
 def reset_workdir(path: Path) -> None:
+    if path.is_symlink():
+        raise RuntimeError(f"workdir must not be a symlink: {path}")
     if path.exists():
         shutil.rmtree(path)
     path.mkdir(parents=True, exist_ok=True)
@@ -78,7 +83,12 @@ def reset_workdir(path: Path) -> None:
 def run_create_pool(client: Client, step: dict[str, Any], index: int, step_id: str | None) -> None:
     pool = require_pool(step, index, step_id)
     size_bytes = step.get("input", {}).get("size_bytes", 1024 * 1024)
-    err = try_call(lambda: client.create_pool(pool, int(size_bytes))).error
+
+    def create_and_close() -> None:
+        with client.create_pool(pool, int(size_bytes)):
+            pass
+
+    err = try_call(create_and_close).error
     validate_expect_error(step.get("expect"), err, index, step_id)
 
 
@@ -161,14 +171,14 @@ def run_tail(client: Client, step: dict[str, Any], index: int, step_id: str | No
             return
 
         messages = []
-        while True:
-            payload = stream.value.next_json()
-            if payload is None:
-                break
-            messages.append(parse_message(payload))
-            if max_messages is not None and len(messages) >= int(max_messages):
-                break
-        stream.value.close()
+        with stream.value:
+            while True:
+                payload = stream.value.next_json()
+                if payload is None:
+                    break
+                messages.append(parse_message(payload))
+                if max_messages is not None and len(messages) >= int(max_messages):
+                    break
 
         validate_expect_error(step.get("expect"), None, index, step_id)
 

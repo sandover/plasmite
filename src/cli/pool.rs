@@ -7,7 +7,7 @@ use super::output::emit_json;
 use super::output_support::display_pool_dir_for_humans;
 use super::output_support::{emit_table, error_json, short_display_path};
 use super::pool_support::{
-    emit_pool_create_table, emit_pool_info_pretty, emit_pool_list_table, list_pools,
+    PoolListRow, emit_pool_create_table, emit_pool_info_pretty, emit_pool_list_table, list_pools,
 };
 use super::result::CommandResult;
 use super::support::{
@@ -299,24 +299,25 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                             let path = info.path.to_string_lossy();
                             let file = path.rsplit(['/', '\\']).next().unwrap_or("unknown");
                             let name = file.strip_suffix(".plasmite").unwrap_or(file);
-                            json!({
-                                "name": name,
-                                "path": info.path.display().to_string(),
-                                "file_size": info.file_size,
-                                "bounds": crate::pool_info_json::bounds_json(info.bounds),
-                                "mtime": null,
-                            })
+                            PoolListRow::Pool {
+                                name: name.to_string(),
+                                path: info.path.display().to_string(),
+                                file_size: info.file_size,
+                                bounds: info.bounds,
+                                mtime: None,
+                            }
                         })
                         .collect::<Vec<_>>();
-                    pools.sort_by_key(super::pool_support::pool_list_name);
+                    pools.sort_by(|a, b| a.name().cmp(b.name()));
                     pools
                 }
                 None => {
                     let client = LocalClient::new().with_pool_dir(pool_dir);
-                    list_pools(pool_dir, &client)
+                    list_pools(pool_dir, &client)?
                 }
             };
             if json_output {
+                let pools = pools.iter().map(PoolListRow::json).collect::<Vec<_>>();
                 emit_json(json!({ "pools": pools }), context.color_mode());
             } else {
                 emit_pool_list_table(&pools, pool_dir, server.as_deref());

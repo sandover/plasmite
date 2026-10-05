@@ -4,7 +4,10 @@
 
 - `conformance_version` (number, required): Must be `0`.
 - `name` (string, required): Human-friendly name for the manifest.
-- `workdir` (string, optional): Relative working directory name (default: `work`).
+- `workdir` (string, optional): Scratch directory name (default: `work`).
+  Use `work` or `work-` followed by one or more ASCII letters, digits,
+  underscores, or hyphens. Runners clear this child of the manifest directory
+  before executing steps. They reject an existing symlink at this path.
 - `steps` (array, required): Ordered list of operations.
 
 ## Step Format

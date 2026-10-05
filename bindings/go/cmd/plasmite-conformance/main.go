@@ -70,8 +70,15 @@ func run() error {
 	}
 
 	workdir := "work"
-	if raw, ok := manifest["workdir"].(string); ok && raw != "" {
-		workdir = raw
+	if value, exists := manifest["workdir"]; exists {
+		var ok bool
+		workdir, ok = value.(string)
+		if !ok {
+			return errors.New("workdir must be a directory name")
+		}
+	}
+	if err := validateWorkdirName(workdir); err != nil {
+		return err
 	}
 	workdirPath := filepath.Join(manifestDir, workdir)
 	if err := resetWorkdir(workdirPath); err != nil {
@@ -153,7 +160,32 @@ func run() error {
 	return nil
 }
 
+func validateWorkdirName(name string) error {
+	if name == "work" {
+		return nil
+	}
+	suffix, prefixed := strings.CutPrefix(name, "work-")
+	valid := prefixed && suffix != ""
+	for _, char := range suffix {
+		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_' || char == '-') {
+			valid = false
+			break
+		}
+	}
+	if !valid {
+		return errors.New("workdir must be work or work- followed by ASCII letters, digits, _ or -")
+	}
+	return nil
+}
+
 func resetWorkdir(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("workdir must not be a symlink")
+	}
 	if err := os.RemoveAll(path); err != nil {
 		return fmt.Errorf("failed to clear workdir %s: %w", path, err)
 	}

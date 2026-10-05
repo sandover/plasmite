@@ -34,7 +34,10 @@ async function main() {
     throw new Error(`unsupported conformance_version: ${manifest.conformance_version}`);
   }
 
-  const workdir = manifest.workdir || "work";
+  const workdir = manifest.workdir === undefined ? "work" : manifest.workdir;
+  if (typeof workdir !== "string" || !/^work(?:-[A-Za-z0-9_-]+)?$/.test(workdir)) {
+    throw new Error("workdir must be work or a work- name");
+  }
   const workdirPath = path.join(manifestDir, workdir);
   resetWorkdir(workdirPath);
 
@@ -72,6 +75,9 @@ async function main() {
 }
 
 function resetWorkdir(dir) {
+  if (fs.lstatSync(dir, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    throw new Error(`workdir must not be a symbolic link: ${dir}`);
+  }
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
 }
@@ -368,13 +374,8 @@ function runPoolInfo(repoRoot, workdirPath, step, index, stepId) {
   );
   if (result.status !== 0) {
     let err = parseErrorJSON(result.stderr);
-    const parsed = parseError(err);
-    if (!parsed.hasPath && parsed.kind === "NotFound") {
-      err = makePlasmiteError({
-        kind: parsed.kind,
-        message: parsed.message,
-        path: resolvePoolPath(workdirPath, pool),
-      });
+    if (err.path == null && err.kind === "NotFound") {
+      err = { ...err, path: resolvePoolPath(workdirPath, pool) };
     }
     validateExpectError(step.expect, err, index, stepId);
     return;
@@ -415,7 +416,7 @@ async function runSpawnPoke(repoRoot, workdirPath, step, index, stepId) {
 
   const plasmiteBin = resolvePlasmiteBin(repoRoot);
 
-  const tasks = messages.map((message) => {
+  const commands = messages.map((message) => {
     if (!message || message.data === undefined) {
       throw stepError(index, stepId, "message.data is required");
     }
@@ -424,12 +425,12 @@ async function runSpawnPoke(repoRoot, workdirPath, step, index, stepId) {
     if (!Array.isArray(tags)) {
       throw stepError(index, stepId, "message.tags must be array");
     }
-    return new Promise((resolve, reject) => {
-      const child = spawn(
-        plasmiteBin,
-        ["--dir", workdirPath, "feed", pool, payload, ...flattenTags(tags)],
-        { stdio: "inherit" }
-      );
+    return ["--dir", workdirPath, "feed", pool, payload, ...flattenTags(tags)];
+  });
+
+  const tasks = commands.map((args) =>
+    new Promise((resolve, reject) => {
+      const child = spawn(plasmiteBin, args, { stdio: "inherit" });
       child.on("error", reject);
       child.on("exit", (code) => {
         if (code === 0) {
@@ -438,13 +439,13 @@ async function runSpawnPoke(repoRoot, workdirPath, step, index, stepId) {
         }
         reject(new Error(`feed process failed: ${code}`));
       });
-    });
-  });
+    })
+  );
 
-  try {
-    await Promise.all(tasks);
-  } catch (err) {
-    throw stepError(index, stepId, err.message ?? String(err));
+  const outcomes = await Promise.allSettled(tasks);
+  const failed = outcomes.find((outcome) => outcome.status === "rejected");
+  if (failed) {
+    throw stepError(index, stepId, failed.reason?.message ?? String(failed.reason));
   }
 }
 
@@ -489,35 +490,27 @@ function mapFsError(err, targetPath, message) {
   } else if (code === "EACCES" || code === "EPERM") {
     kind = "Permission";
   }
-  return makePlasmiteError({ kind, message, path: targetPath });
+  return { kind, message, path: targetPath };
 }
 
 function parseErrorJSON(output) {
   if (!output) {
-    return new Error("plasmite error: kind=Internal; message=error");
+    return { kind: "Internal", message: "error" };
   }
   let payload = {};
   try {
     payload = JSON.parse(output);
   } catch (err) {
-    return new Error(`plasmite error: kind=Internal; message=${String(err)}`);
+    return { kind: "Internal", message: String(err) };
   }
   const errObj = payload.error ?? {};
-  return makePlasmiteError({
+  return {
     kind: errObj.kind ?? "Internal",
     message: errObj.message ?? "error",
     path: errObj.path,
     seq: errObj.seq,
     offset: errObj.offset,
-  });
-}
-
-function makePlasmiteError({ kind, message, path, seq, offset }) {
-  const details = [`kind=${kind}`, `message=${message}`];
-  if (path) details.push(`path=${path}`);
-  if (seq !== undefined && seq !== null) details.push(`seq=${seq}`);
-  if (offset !== undefined && offset !== null) details.push(`offset=${offset}`);
-  return new Error(`plasmite error: ${details.join("; ")}`);
+  };
 }
 
 function expectBounds(expected, actual, index, stepId) {
@@ -555,7 +548,7 @@ function validateExpectError(expect, err, index, stepId) {
   if (!err) {
     throw stepError(index, stepId, "expected error but operation succeeded");
   }
-  const parsed = parseError(err);
+  const parsed = errorDetails(err);
   if (!parsed.kind) {
     throw stepError(index, stepId, "unexpected error type");
   }
@@ -576,19 +569,16 @@ function validateExpectError(expect, err, index, stepId) {
   }
 }
 
-function parseError(err) {
-  const message = err?.message ?? String(err);
-  const kindMatch = message.match(/kind=([^;]+)/);
-  const msgMatch = message.match(/message=([^;]+)/);
-  const pathMatch = message.match(/path=([^;]+)/);
-  const seqMatch = message.match(/seq=([^;]+)/);
-  const offsetMatch = message.match(/offset=([^;]+)/);
+function errorDetails(err) {
+  const kind = err instanceof PlasmiteNativeError
+    ? Object.entries(ErrorKind).find(([, value]) => value === err.kind)?.[0]
+    : err?.kind;
   return {
-    kind: kindMatch?.[1],
-    message: msgMatch?.[1] ?? message,
-    hasPath: Boolean(pathMatch),
-    hasSeq: Boolean(seqMatch),
-    hasOffset: Boolean(offsetMatch),
+    kind,
+    message: err?.message ?? String(err),
+    hasPath: err?.path != null,
+    hasSeq: err?.seq != null,
+    hasOffset: err?.offset != null,
   };
 }
 

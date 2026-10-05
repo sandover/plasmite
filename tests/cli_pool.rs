@@ -525,6 +525,64 @@ fn pool_list_lists_pools_sorted_by_name() {
 }
 
 #[test]
+fn pool_list_fails_when_pool_dir_is_a_file() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    std::fs::write(&pool_dir, b"not a directory").expect("write file");
+
+    let list = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().expect("pool directory"),
+            "pool",
+            "list",
+            "--json",
+        ])
+        .output()
+        .expect("list");
+
+    assert_eq!(list.status.code(), Some(8));
+    assert!(list.stdout.is_empty());
+    let error = parse_error_json(&list.stderr);
+    assert_eq!(error["error"]["kind"], "Io");
+    assert_eq!(error["error"]["message"], "failed to read pool directory");
+    assert_eq!(error["error"]["path"], pool_dir.display().to_string());
+}
+
+#[test]
+fn pool_list_keeps_missing_directory_empty_and_corrupt_pool_visible() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let directory = pool_dir.to_str().expect("pool directory");
+
+    let missing = cmd()
+        .args(["--dir", directory, "pool", "list", "--json"])
+        .output()
+        .expect("list missing directory");
+    assert!(missing.status.success());
+    let empty = parse_json(std::str::from_utf8(&missing.stdout).expect("utf8"));
+    assert_eq!(empty, serde_json::json!({"pools": []}));
+
+    std::fs::create_dir(&pool_dir).expect("create pool directory");
+    std::fs::write(pool_dir.join("bad.plasmite"), b"NOPE").expect("write bad pool");
+    let corrupt = cmd()
+        .args(["--dir", directory, "pool", "list", "--json"])
+        .output()
+        .expect("list corrupt pool");
+    assert!(corrupt.status.success());
+    let output = parse_json(std::str::from_utf8(&corrupt.stdout).expect("utf8"));
+    let rows = output["pools"].as_array().expect("pool rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["name"], "bad");
+    assert_eq!(
+        rows[0]["path"],
+        pool_dir.join("bad.plasmite").display().to_string()
+    );
+    assert_eq!(rows[0]["error"]["error"]["kind"], "Corrupt");
+    assert!(rows[0]["error"]["error"]["message"].is_string());
+}
+
+#[test]
 fn pool_list_defaults_to_table_output() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
