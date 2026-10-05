@@ -839,7 +839,13 @@ async fn shutdown_signal() {
         _ = ctrl_c => {}
         _ = terminate => {}
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    if crate::serve_service::windows::registry_directory().is_some() {
+        crate::serve_service::windows::shutdown_requested().await;
+    } else {
+        ctrl_c.await;
+    }
+    #[cfg(not(any(unix, windows)))]
     ctrl_c.await;
 }
 

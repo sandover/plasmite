@@ -259,7 +259,9 @@ Run `plasmite access invite <name>` in another terminal to create a key."#,
 
 CONSTRAINTS
   - Request body, tail timeout, and tail concurrency limits must be positive
-  - The local admin listener stays on loopback; remote clients use HTTPS"#
+  - The local admin listener stays on loopback; remote clients use HTTPS
+  - Installed servers start at boot
+  - On Windows, install, update, and uninstall need approval from the pool-owning administrator"#
     )]
     Serve {
         #[command(subcommand)]

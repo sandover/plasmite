@@ -31,6 +31,7 @@ docs/
 ├── record/upgrading-1.0.md                     — Read when updating scripts, remote configuration, or Rust clients to 1.0
 ├── record/distribution.md                      — Supported platforms, install channels, and SDK layout; read when adding a channel or platform
 ├── ../include/plasmite.h                       — C ABI header; read for stability contract, ownership rules, linking
+├── record/windows-boot-validation.md           — Read when assessing native Windows service checks and their support boundary
 ├── record/serving.md                           — Read when sharing pools, setting browser trust, or operating a secure server
 │
 ├── images/README.md                            — Read when reproducing README diagrams or terminal/browser recordings

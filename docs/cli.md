@@ -46,20 +46,31 @@ The older `--shared-address SERVER` form still names the public origin but
 keeps the 1.0 listener default of `0.0.0.0:9743`. Use `--remote-bind` to
 change its listener. Supply the public origin through one form only.
 
-On Linux or macOS, the command below installs startup before login and
-starts the server under the account that owns its pools and keys:
+The command below installs startup before login and starts the server for
+the selected pool:
 
 ```console
 plasmite --dir ./shared serve install https://pools.example.net:9743
 ```
 
-The command may request administrator approval to register the native
-service. Windows supports foreground serving and reports that boot
-installation is unsupported. Boot startup requires the home, service files,
-and pool directory to be available before login. An encrypted or removable
-volume that unlocks or mounts only after login delays the server. Use an
-absolute `--dir` path for lifecycle commands run from another working
-directory:
+On Linux and macOS, the service runs under the account that owns the pool.
+On Windows, Plasmite registers an automatic Windows service under a
+pool-specific virtual account. Install, update, and uninstall need approval
+through User Account Control (UAC) from the administrator who owns the pool. Plasmite stores
+no login password. The executable and service setup live under
+`Program Files\Plasmite\Services`; shared service state and retained logs
+live in `.plasmite-serve` inside the pool directory. Saved client credentials
+remain private to the account that saved them.
+
+The service can list parent-folder names along its pool path so Windows can
+prevent those folders from moving during private-state access.
+
+The service can start before an interactive sign-in when Windows can access
+the pool and its storage at boot. If the server uses Tailscale, enable
+Tailscale unattended mode for network access before sign-in. An encrypted or
+removable volume that unlocks or mounts only after sign-in delays the server.
+Pool paths may contain spaces or Unicode. Use an absolute `--dir` path for
+lifecycle commands run from another working directory:
 
 ```console
 plasmite --dir ./shared serve start
@@ -70,13 +81,17 @@ plasmite --dir ./shared serve uninstall
 ```
 
 `stop` leaves startup enabled. `uninstall` stops the service and removes
-startup without deleting pools, access keys, or certificates. These commands
-target the installed setup; they do not control a foreground server. Run
+startup without deleting pools, access keys, or certificates. On Windows,
+updates stop the service before replacing its executable and setup; a failed
+update restores the prior service while preserving its identity, certificates,
+and keys. These commands target the installed setup; they do not control a
+foreground server. Run
 `serve install` with new options to update a saved setup. The positional
 URL chooses the default listener port on first install. Later URL changes
 keep the saved listener unless you supply `--remote-bind`. With no new
 options, `install` keeps the saved settings, installs the current Plasmite
-executable, and starts the service.
+executable, and starts the service. Updates retain the installed listener
+addresses unless `--remote-bind` changes them.
 
 ## Server status
 

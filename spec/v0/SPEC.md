@@ -135,7 +135,8 @@ Plasmite 1.0 provides native access-key sharing. It keeps the existing spec path
   requires authentication for remote pool operations. Both ports can be
   configured. Secure serving supports macOS, Linux, and Windows. Windows state
   requires a filesystem that enforces access control lists and restricts access
-  to the current user, SYSTEM, and administrators. Startup rejects unsafe
+  to the owner, SYSTEM, and administrators; installed services also grant
+  access to their virtual account. Startup rejects unsafe
   existing state and paths through junctions or other reparse points.
 - `access connect` verifies the destination hostname, certificate validity,
   TLS proof of possession, and the certificate public-key fingerprint from
@@ -150,28 +151,44 @@ Plasmite 1.0 provides native access-key sharing. It keeps the existing spec path
 ### Installed server lifecycle (1.1)
 
 - `serve install [SERVER]` saves the selected pool directory's serve
-  options, registers startup before login under its owning OS account, and
-  starts it. Linux and macOS support this path when the home, service files,
-  certificates, and pool directory are available before login. Startup
-  cannot bypass a disk unlock or mount that requires a person. Windows
-  reports an actionable unsupported error; foreground `serve` still works
-  there.
+  options, registers startup before sign-in, and starts it. Linux and macOS
+  run the service under the account that owns the pool. Windows registers an
+  automatic Windows Service Control Manager service under the pool-specific
+  virtual account `NT SERVICE\net.plasmite.<hash>`. Install, update, and
+  uninstall require approval through User Account Control (UAC) from an
+  administrator account that owns the pool. Plasmite stores no login
+  password. Its executable and service setup live under
+  `Program Files\Plasmite\Services\<id>`. The pool owner and service account
+  share access to `.plasmite-serve` inside the pool directory for service
+  state and retained logs. Saved client credentials remain private to the
+  account that saved them.
+  The service can list parent-folder names along its pool path so Windows
+  can prevent those folders from moving during private-state access. Windows
+  pool paths may contain spaces or Unicode.
+  Startup requires the pool and its storage to be available at boot; it
+  cannot bypass a disk unlock or mount that requires a person. If the server
+  uses Tailscale, unattended mode must provide network access before sign-in.
 - `serve start`, `stop`, `restart`, `logs`, and `uninstall` target the
   installed setup selected by `--dir`. They do not control a foreground
   server. `stop` leaves startup enabled. `uninstall` stops the service and
   removes startup without deleting pools, access keys, or certificates.
+  Windows enables native crash recovery after the installed server becomes
+  ready. A Windows restart already queued before `stop` can still occur.
   `install` without new options keeps saved settings, installs the current
   executable, and starts the service. On first install,
   positional `SERVER` sets the default HTTPS listener port. A later URL
   change preserves the saved listener unless `--remote-bind` explicitly
   changes it. An update validates the replacement and preserves the
-  previous setup on failure.
+  previous setup on failure. On Windows, update stops the service before
+  replacing its executable and setup; rollback preserves service identity,
+  certificates, and keys. Updates retain the installed listener addresses
+  unless `--remote-bind` changes them.
 - `serve status --all` lists installed stopped or failed setups as well as
   live servers for the current OS user. Like plain status, `--dir` does not
   narrow it. `--all --json` emits an array whose rows have `pool_dir`,
   nullable `pid`, `local_url`, nullable `remote_url`, `managed`,
   `startup`, `state`, nullable `problem`, and nullable `setup`.
-  `state` is `running`, `starting`, `stopped`, or `failed` for
+  `state` is `running`, `starting`, `stopping`, `stopped`, or `failed` for
   reported setups. A stopped setup's addresses describe saved settings,
   not live listeners. `setup` holds `pool_dir`, executable `program`,
   owning `account`, `home`, and effective `run` options. A foreground

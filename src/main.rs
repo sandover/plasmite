@@ -23,6 +23,8 @@ mod secure_serve;
 mod serve;
 mod serve_registry;
 mod serve_service;
+#[cfg(windows)]
+mod server_private;
 mod since;
 #[cfg(windows)]
 mod windows_private;
@@ -43,6 +45,10 @@ enum PoolTarget {
 }
 
 fn main() {
+    #[cfg(windows)]
+    if let Some(code) = serve_service::windows::entry() {
+        std::process::exit(code);
+    }
     let exit_code = match run() {
         Ok(outcome) => outcome.exit_code,
         Err((err, color_mode, json_output)) => {

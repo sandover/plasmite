@@ -294,6 +294,7 @@ impl AccessStore {
         })
     }
 
+    #[cfg(not(windows))]
     pub(crate) fn restore_identity(pool_dir: &Path, bytes: &[u8]) -> Result<(), Error> {
         let dir = pool_dir.join(".plasmite-serve");
         #[cfg(windows)]
@@ -678,7 +679,7 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 
 pub(crate) fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Error> {
     #[cfg(windows)]
-    let read = crate::windows_private::read(path);
+    let read = crate::server_private::read(path);
     #[cfg(not(windows))]
     let read = std::fs::read(path);
     let bytes = read.map_err(|err| {
@@ -727,7 +728,7 @@ fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<(), Error> {
     // Windows cannot replace a file while our non-delete-sharing handle is open.
     drop(file);
     #[cfg(windows)]
-    let replacement = crate::windows_private::replace(&temp, path);
+    let replacement = crate::server_private::replace(&temp, path);
     #[cfg(not(windows))]
     let replacement = std::fs::rename(&temp, path);
     if let Err(err) = replacement {
@@ -764,7 +765,7 @@ fn write_new_private(path: &Path, bytes: &[u8]) -> Result<(), Error> {
 
 fn open_private(path: &Path) -> Result<File, Error> {
     #[cfg(windows)]
-    let opened = crate::windows_private::open_lock(path);
+    let opened = crate::server_private::open_lock(path);
     #[cfg(not(windows))]
     let opened = {
         let mut options = OpenOptions::new();
@@ -789,7 +790,7 @@ fn open_private(path: &Path) -> Result<File, Error> {
 
 fn create_private(path: &Path) -> Result<File, Error> {
     #[cfg(windows)]
-    let created = crate::windows_private::create_file(path);
+    let created = crate::server_private::create_file(path);
     #[cfg(not(windows))]
     let created = {
         let mut options = OpenOptions::new();
@@ -836,7 +837,7 @@ pub(crate) fn create_private_dir(path: &Path) -> Result<DirectoryGuard, Error> {
     }
     #[cfg(windows)]
     {
-        crate::windows_private::create_dir_all(path).map_err(|err| {
+        crate::server_private::create_dir_all(path).map_err(|err| {
             Error::new(ErrorKind::Permission)
                 .with_message("failed to create private Windows server state")
                 .with_path(path)
@@ -855,7 +856,7 @@ pub(crate) fn create_private_dir(path: &Path) -> Result<DirectoryGuard, Error> {
 
 #[cfg(windows)]
 fn private_directory(path: &Path) -> Result<crate::windows_private::Directory, Error> {
-    crate::windows_private::open_directory(path).map_err(|err| {
+    crate::server_private::open_directory(path).map_err(|err| {
         Error::new(ErrorKind::Permission)
             .with_message("Windows server state must use a private directory")
             .with_path(path)
@@ -876,7 +877,7 @@ pub(crate) fn ensure_private(path: &Path) -> Result<(), Error> {
             .with_path(path));
     }
     #[cfg(windows)]
-    crate::windows_private::ensure_private(path).map_err(|err| {
+    crate::server_private::ensure_private(path).map_err(|err| {
         Error::new(ErrorKind::Permission)
             .with_message("Windows server state must be private to its owner")
             .with_path(path)

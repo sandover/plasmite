@@ -143,9 +143,11 @@ Python's Linux source installation can
 use `PLASMITE_LIB_DIR="$HOME/.local/share/plasmite/1.0.0/lib"` with the same
 `bin` path on `PATH`; the archive does not add an npm addon or an ARM wheel.
 
-For a server, run the executable as the operating-system account that owns the
-pool directory. Follow the [serving guide](serving.md#share-your-first-pool)
-for directory setup and server operation. On ARMv7, pool files can be at most
+Run a foreground server as the operating-system account that owns the pool
+directory. Installed servers use that account on Linux and macOS; Windows
+uses a virtual service account with access to the selected pool directory.
+Follow the [serving guide](serving.md#share-your-first-pool) for directory
+setup and server operation. On ARMv7, pool files can be at most
 2,147,483,647 bytes (2 GiB minus one byte); Plasmite rejects creation of a
 larger pool or mapping of a larger existing pool. Smaller pools can still fail
 to map when system memory is insufficient.
