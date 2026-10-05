@@ -47,8 +47,9 @@ establish behavior on physical Raspberry Pi hardware.
 The run retains the verified archives for 30 days as
 `ci-sdk-aarch64-unknown-linux-gnu` and
 `ci-sdk-armv7-unknown-linux-gnueabihf`. Each includes `sha256sums.txt` and
-`ci-build.json` with the SDK tarball. No GitHub release currently publishes
-these ARM assets.
+`ci-build.json` with the SDK tarball. The 1.0.0 GitHub release publishes both
+ARM archives as preview assets; see [distribution](distribution.md) for
+installation.
 
 Record physical Raspberry Pi checks separately from CI results. Include the
 Pi model, OS and architecture, archive version, CLI/server commands, and the
@@ -85,8 +86,14 @@ On 2026-10-02, a live macOS trial ran the installed LaunchDaemon through
 account. The server wrote its private log as that account; uninstall removed
 the native job and saved setup. Grouped install and uninstall each needed one
 administrator approval. This trial did not reboot the Mac or verify service
-availability before login. No physical Linux or Raspberry Pi boot trial has
-passed yet.
+availability before login. On 2026-10-05, the Mac recovered its installed
+server after the owner restarted and signed in normally with FileVault
+enabled. This establishes recovery after disk unlock and login. The Windows
+service also passed a fresh guest reboot before interactive sign-in, including
+automatic recovery when its selected network address appeared late. See the
+[Windows and Mac validation report](windows-boot-validation.md) for source,
+artifact and environment boundaries. No physical Linux or Raspberry Pi boot
+trial has passed yet.
 
 The main CI gate gives Go a stable runner-local build cache that
 `actions/setup-go` restores and saves. Test scripts honor an existing

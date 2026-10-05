@@ -54,6 +54,18 @@ codex mcp login plasmite --oauth-client-registration dcr
 The harness and its authorization browser must trust the server certificate.
 The local Plasmite CLI does not need a saved connection for direct MCP access.
 
+Rust callers: `PlasmiteMcpHandler::with_remote_url` has also been removed.
+Use `with_client` with a `LocalClient` for an embedded local MCP handler;
+remote MCP clients should connect to the server's HTTPS endpoint.
+
+## Delete pools after releasing append locks
+
+Plasmite 1.1 waits for active writes before deleting a pool. Rust callers
+holding an explicit append lock must release it before calling `delete_pool`.
+Deletion also requires permission to open the pool file. Handles to a deleted
+or replaced pool return `NotFound` on append; reopen the replacement before
+writing to it.
+
 ## Read history deliberately
 
 `--tail N` counts the last N retained messages before applying `--tag` and
