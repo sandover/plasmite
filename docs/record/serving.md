@@ -295,6 +295,9 @@ and starts the service. On Windows, updates stop the service before replacing
 its executable and setup. A failed update restores the prior service while
 preserving its identity, certificates, and keys. Updates retain the installed
 listener addresses unless `--remote-bind` changes them.
+If Windows refuses executable replacement while the service runs, the update
+restores the prior service. Run `serve stop`, then repeat `serve install` from
+the new Plasmite executable.
 If rollback cannot finish, the error names the retained recovery files.
 Complete recovery in an administrator terminal before installing again.
 
