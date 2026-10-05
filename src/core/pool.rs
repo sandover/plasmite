@@ -2411,6 +2411,36 @@ mod tests {
     }
 
     #[test]
+    fn append_rejects_damaged_sequence_when_advancing_tail() {
+        for damaged_seq in [u64::MAX, 0, 3] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = dir.path().join("damaged-tail.plasmite");
+            let mut pool = Pool::create(
+                &path,
+                PoolOptions::new((HEADER_SIZE + 240) as u64).with_index_capacity(0),
+            )
+            .expect("create");
+            for _ in 0..3 {
+                pool.append(b"original").expect("append");
+            }
+            let second = pool.header.ring_offset as usize + 80;
+            let mut frame = FrameHeader::decode(&pool.mmap[second..second + FRAME_HEADER_LEN])
+                .expect("second frame");
+            frame.seq = damaged_seq;
+            pool.mmap[second..second + FRAME_HEADER_LEN].copy_from_slice(&frame.encode());
+            let before = pool.mmap.to_vec();
+
+            let error = pool.append(&[b'x'; 88]).expect_err("damaged sequence");
+            assert_eq!(error.kind(), ErrorKind::Corrupt);
+            assert_eq!(&pool.mmap[..], before.as_slice());
+            assert_eq!(
+                pool.get(1).expect("first retained frame").payload,
+                b"original"
+            );
+        }
+    }
+
+    #[test]
     fn public_append_guard_is_not_downgraded_by_same_pool_reads() {
         use std::sync::{Arc, mpsc};
         let dir = tempfile::tempdir().expect("tempdir");

@@ -332,6 +332,30 @@ class BindingTests(unittest.TestCase):
             with self.assertRaises(PlasmiteError):
                 pool.get_json(1)
 
+    def test_unsigned_64_bit_arguments_do_not_wrap(self) -> None:
+        overflow = (1 << 64) + 1
+        with self._new_client() as client:
+            with self.assertRaisesRegex(ValueError, "size_bytes must fit"):
+                client.create_pool("wrapped-size", 1 << 64)
+            self.assertFalse((self.pool_dir / "wrapped-size.plasmite").exists())
+
+            with client.create_pool("no-wrap", TEST_POOL_SIZE_BYTES) as pool:
+                message = pool.append({"kind": "first"}, [])
+                self.assertEqual(message.seq, 1)
+                with self.assertRaisesRegex(ValueError, "seq must fit"):
+                    pool.get(overflow)
+                with self.assertRaisesRegex(ValueError, "seq must fit"):
+                    pool.get_lite3(overflow)
+
+                for open_stream in (pool.open_stream, pool.open_lite3_stream):
+                    for argument in ("since_seq", "max_messages", "timeout_ms"):
+                        with self.subTest(stream=open_stream.__name__, argument=argument):
+                            with self.assertRaisesRegex(ValueError, f"{argument} must fit"):
+                                open_stream(**{argument: overflow})
+
+                with self.assertRaises(NotFoundError):
+                    pool.get_json((1 << 64) - 1)
+
     def test_error_subclasses_are_raised(self) -> None:
         with self._new_client() as client:
             self.assertIs(plasmite._ERROR_KIND_TO_CLASS[ErrorKind.ALREADY_EXISTS], AlreadyExistsError)
