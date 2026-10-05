@@ -59,6 +59,7 @@ test("HTTP remains available without credentials and with loopback credentials",
 
 test("HTTPS bearer requests use the requested origin and reject redirects", async () => {
   await withFetchStub((url, options) => {
+    assert.equal(url, "https://service.example:9700/v0/pools");
     assert.equal(options.redirect, "manual");
     assert.equal(options.headers.Authorization, "Bearer secret");
     return new Response(null, {
@@ -83,6 +84,8 @@ test("stream requests also enforce transport security and reject redirects", asy
       remote._requestStream(new URL("https://service.example:9700/v0/pools/p/tail"), controller),
       /redirected the request \(HTTP 307\); redirects are not followed/,
     );
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://service.example:9700/v0/pools/p/tail");
     assert.equal(calls[0].options.redirect, "manual");
     assert.equal(calls[0].options.headers.Authorization, "Bearer secret");
   });

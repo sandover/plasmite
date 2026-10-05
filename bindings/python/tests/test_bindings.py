@@ -82,7 +82,7 @@ class BindingTests(unittest.TestCase):
 
     def test_append_get_large_payload(self) -> None:
         with self._client_pool("big") as (_, pool):
-            payload = {"blob": "x" * (64 * 1024)}
+            payload = {"blob": "0123456789abcdef" * 4096}
             tags = ["alpha", "beta", "gamma"]
             msg_bytes = pool.append_json(
                 json.dumps(payload).encode("utf-8"), tags, Durability.FAST
@@ -90,7 +90,7 @@ class BindingTests(unittest.TestCase):
             message = parse_message(msg_bytes)
             self.assertIsInstance(message, Message)
             self.assertIsInstance(message.meta, MessageMeta)
-            self.assertEqual(len(message.data["blob"]), len(payload["blob"]))
+            self.assertEqual(message.data, payload)
             self.assertEqual(message.meta.tags, tags)
             self.assertEqual(message.tags, tags)
             self.assertEqual(message.raw, msg_bytes)
@@ -98,7 +98,7 @@ class BindingTests(unittest.TestCase):
 
             get_bytes = pool.get_json(message.seq)
             fetched = parse_message(get_bytes)
-            self.assertEqual(len(fetched.data["blob"]), len(payload["blob"]))
+            self.assertEqual(fetched.data, payload)
             get_alias = pool.get(message.seq)
             self.assertIsInstance(get_alias, Message)
             self.assertEqual(get_alias.seq, fetched.seq)

@@ -1308,8 +1308,18 @@ mod tests {
 
     #[test]
     fn snippet_truncates() {
-        let snippet = truncate_snippet("abcdefghijklmnopqrstuvwxyz", 8);
-        assert!(snippet.ends_with("..."));
+        for (input, max, expected) in [
+            ("abcdefghijklmnopqrstuvwxyz", 8, "abcde..."),
+            ("abcdef", 3, "..."),
+            ("abcdef", 2, ".."),
+            ("abcdef", 0, ""),
+            ("abc", 3, "abc"),
+            ("abc", 8, "abc"),
+        ] {
+            let snippet = truncate_snippet(input, max);
+            assert_eq!(snippet, expected);
+            assert!(snippet.len() <= max);
+        }
     }
 
     #[test]

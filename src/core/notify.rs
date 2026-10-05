@@ -283,20 +283,28 @@ mod tests {
     }
 
     #[test]
-    fn semaphore_name_is_stable() {
-        let path = Path::new(".scratch/pools/test.plasmite");
-        let first = pool_semaphore_name(path);
-        let second = pool_semaphore_name(path);
-        assert_eq!(first, second);
-        assert!(first.starts_with("plsm-"));
-    }
-
-    #[test]
-    fn semaphore_name_fallback_is_stable() {
-        let path = Path::new("does-not-exist.plasmite");
-        let first = pool_semaphore_name(path);
-        let second = pool_semaphore_name(path);
-        assert_eq!(first, second);
+    fn semaphore_names_are_stable_and_distinct_for_existing_and_missing_pools() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let existing = temp.path().join("first.plasmite");
+        let other_existing = temp.path().join("second.plasmite");
+        std::fs::write(&existing, []).expect("first pool path");
+        std::fs::write(&other_existing, []).expect("second pool path");
+        for (first_path, second_path) in [
+            (existing.clone(), other_existing),
+            (
+                temp.path().join("missing-first"),
+                temp.path().join("missing-second"),
+            ),
+        ] {
+            let first = pool_semaphore_name(&first_path);
+            assert_eq!(first, pool_semaphore_name(&first_path));
+            assert_ne!(first, pool_semaphore_name(&second_path));
+            assert!(first.starts_with("plsm-"));
+        }
+        assert_eq!(
+            pool_semaphore_name(&existing),
+            pool_semaphore_name(&temp.path().join(".").join("first.plasmite"))
+        );
     }
 
     #[test]
