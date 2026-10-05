@@ -244,24 +244,37 @@ different backend port. Supply the public origin through one form only.
 ### Start a server at boot
 
 Plasmite 1.1 can register the ordinary server with the native service
-manager on Linux or macOS. Run the command as the account that owns its
-pools and access keys:
+manager. Run the command for the pool you want to serve:
 
 ```console
 plasmite --dir ./shared serve install https://pools.example.net:9743
 plasmite serve status --all
 ```
 
-`install` saves the setup, starts it, and arranges startup before that
-account signs in. Plasmite may request administrator approval to register
-the native job. Use an absolute `--dir` path for later commands from
-another working directory.
-Windows supports foreground `serve` but reports that boot installation
-is unsupported. The home, installed executable, certificates, and pool
-directory must be available before login. An encrypted or removable volume
-that unlocks or mounts only after login delays the server. On a FileVault
-Mac, someone must first unlock the startup disk so macOS can boot; this
-service cannot bypass that step.
+`install` saves the setup, starts it, and arranges startup before sign-in.
+On Linux and macOS, it runs under the account that owns the pool. Plasmite
+may request administrator approval to register the native service. On
+Windows, the Service Control Manager starts an automatic service under a
+pool-specific virtual account named `NT SERVICE\net.plasmite.<hash>`. The
+pool-owning administrator approves install, update, or uninstall through
+User Account Control (UAC); Plasmite stores no login password. The
+executable and service setup live under
+`Program Files\Plasmite\Services\<id>`. The owner and service account share
+access to `.plasmite-serve` inside the pool directory for service state and
+retained logs. Saved client credentials remain private to the account that
+saved them.
+
+The service can list parent-folder names along its pool path so Windows can
+prevent those folders from moving during private-state access.
+
+Windows pool paths may contain spaces or Unicode. The service can start
+before interactive sign-in when Windows can access the pool and storage at
+boot. If the server uses Tailscale, enable unattended mode for network access
+before sign-in. An encrypted or removable volume that unlocks or mounts only
+after sign-in delays startup. On a FileVault Mac, someone must first unlock
+the startup disk so macOS can boot; this service cannot bypass that step.
+Use an absolute `--dir` path for later commands from another working
+directory.
 
 ```console
 plasmite --dir ./shared serve logs
@@ -278,15 +291,30 @@ These commands target the installed setup, not a foreground server. Run
 URL sets the listener port on first install; later URL changes keep the
 saved listener unless you supply `--remote-bind`. With no new options,
 `install` keeps the saved settings, installs the current Plasmite executable,
-and starts the service.
+and starts the service. On Windows, updates stop the service before replacing
+its executable and setup. A failed update restores the prior service while
+preserving its identity, certificates, and keys. Updates retain the installed
+listener addresses unless `--remote-bind` changes them.
+If rollback cannot finish, the error names the retained recovery files.
+Complete recovery in an administrator terminal before installing again.
 
 Plain `serve status` still lists only live servers across this user's pool
 directories. `serve status --all` also shows installed setups that stopped
 or failed. Its JSON rows include `managed`, `startup`, `state`, `problem`,
 and the saved `setup`; stopped rows have a null PID. `--dir` does not
 narrow either status report. `serve logs` reads the installed server's
-private stdout and stderr file. If the service manager fails before the
-server starts, inspect launchd or systemd for that job.
+retained stdout and stderr log. On Windows, those logs live in
+`.plasmite-serve` inside the pool directory. If the service manager fails
+before the server starts, inspect the native service manager. Windows also
+records errors that precede log access in Event Viewer’s Application log
+under the `Plasmite` source.
+
+After a crash, Windows restarts the service after 2 seconds, then 5 seconds, then
+10 seconds, repeating the last delay. Updates enable this recovery only
+after the candidate server becomes ready. Windows can still run a restart
+it queued before a `stop` request; let crash recovery finish before stopping
+the service.
+
 On a host that mounts the required storage without sign-in, a real reboot
 with the owner signed out checks pre-login startup. A local restart does not
 prove it. A FileVault unlock check proves recovery after that unlock.
@@ -437,6 +465,7 @@ the backup.
 
 On Windows, use a filesystem with access control lists, such as NTFS.
 Plasmite restricts private state to your account, SYSTEM, and administrators.
+An installed service also grants access to its pool-specific virtual account.
 It rejects unsafe existing permissions, hard links, junctions, and other
 reparse points. It keeps the state directory and its ancestors open while
 the server runs to prevent path replacement.
@@ -450,8 +479,12 @@ connect again.
 
 ### Change the certificate or address
 
-Renew owner-supplied certificates before expiry and restart the server to
-load the new files. Plasmite retains its generated identity between starts;
+Renew owner-supplied certificates before expiry. Installed Windows servers
+retain private copies: run `serve install --tls-cert PATH --tls-key PATH`
+with the renewed files to replace those copies and restart the service.
+Supply a renewed `--front-cert PATH` the same way when using a terminating
+proxy. Foreground servers and installed macOS/Linux servers load their
+configured files on restart. Plasmite retains its generated identity between starts;
 it also upgrades older generated certificates to include `CA:false` while
 keeping their public key.
 

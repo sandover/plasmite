@@ -64,8 +64,10 @@ Unit and integration tests can check saved settings, command scope,
 status output, and error recovery. They do not prove startup before login.
 Record a separate check on each supported host:
 
-1. Install as the account that owns the pools and access keys. Check
-   `serve status --all`, the public URL, the listener, and a client request.
+1. Install as the account that owns the pool and access keys. On Windows,
+   approve the User Account Control prompt with that pool-owning administrator
+   account. Check `serve status --all`, the public URL, the listener, and a
+   client request.
 2. On a host whose storage mounts without sign-in, reboot and leave the
    owner signed out. From another machine, reach the HTTPS server and read
    a pool through a saved connection. If a disk requires a person to unlock
@@ -73,11 +75,10 @@ Record a separate check on each supported host:
 3. Sign in as the owner. Check `serve status --all` and `serve logs`;
    exercise `stop`, `start`, `restart`, and `uninstall` for that directory.
 
-Run this on physical Raspberry Pi hardware for the Pi claim, and on macOS
-for the LaunchDaemon claim. Keep Windows boot installation unsupported
-until its service and account setup passes the same pre-login check.
-Hosted Linux CI, a local service restart, and a physical reboot establish
-different facts.
+Run this on physical Raspberry Pi hardware for the Pi claim, on macOS for
+the LaunchDaemon claim, and on Windows for the Windows Service Control
+Manager claim. Hosted Linux CI, a local service restart, and a physical reboot
+establish different facts.
 
 On 2026-10-02, a live macOS trial ran the installed LaunchDaemon through
 `install`, `stop`, `start`, `restart`, `logs`, and `uninstall` under the owning

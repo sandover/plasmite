@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Windows boot services through `serve install`, with a virtual account per
+  pool directory, native start/stop control, crash recovery, owner-readable
+  logs, and safe executable updates. Uninstall preserves pools, keys, and
+  certificates.
+
 ## [1.0.0] - 2026-10-01
 
 Plasmite 1.0 brings a redesigned CLI, named connections for secure sharing, and a safer foundation for concurrent readers and writers. You can inspect local and remote pools with the same commands, read a finite slice of history, and browse messages without losing large sequence numbers.
