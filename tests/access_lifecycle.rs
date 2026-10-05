@@ -103,6 +103,8 @@ fn contains_pool(client: &RemoteClient, pool: &str) -> TestResult<bool> {
 
 #[test]
 fn copied_local_address_cannot_administer_another_directory() -> TestResult<()> {
+    use std::io::Write;
+
     let temp = tempfile::tempdir()?;
     let original = temp.path().join("original");
     let copied = temp.path().join("copied");
@@ -118,21 +120,30 @@ fn copied_local_address_cannot_administer_another_directory() -> TestResult<()> 
     // before testing the directory ownership check.
     drop(TestServer::start(&copied));
     let identity: Value = serde_json::from_slice(&fs::read(original_state.join("identity.json"))?)?;
-    for name in [
-        "identity.json",
-        "local.json",
-        identity["cert_file"]
-            .as_str()
-            .ok_or("identity omitted certificate")?,
-    ] {
-        fs::copy(original_state.join(name), copied_state.join(name))?;
+    let copied_identity: Value =
+        serde_json::from_slice(&fs::read(copied_state.join("identity.json"))?)?;
+    let original_cert = identity["front_cert_file"]
+        .as_str()
+        .or(identity["cert_file"].as_str())
+        .ok_or("identity omitted certificate")?;
+    let copied_cert = copied_identity["front_cert_file"]
+        .as_str()
+        .or(copied_identity["cert_file"].as_str())
+        .ok_or("copied identity omitted certificate")?;
+    // Overwrite existing private files; new copies receive default Windows ACLs.
+    for (source, destination) in [(original_cert, copied_cert), ("local.json", "local.json")] {
+        let bytes = fs::read(original_state.join(source))?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(copied_state.join(destination))?;
+        file.write_all(&bytes)?;
     }
-    if let Some(front_cert) = identity["front_cert_file"].as_str() {
-        fs::copy(
-            original_state.join(front_cert),
-            copied_state.join(front_cert),
-        )?;
-    }
+    assert_eq!(
+        fs::read(copied_state.join(copied_cert))?,
+        fs::read(original_state.join(original_cert))?,
+        "copied state must identify the original server"
+    );
 
     for args in [
         vec!["invite", "unexpected"],
