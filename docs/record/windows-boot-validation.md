@@ -79,6 +79,40 @@ Cleanup removed the exact temporary startup task, scoped firewall rule and test
 files. The adapter retained its original enabled DHCP configuration. The primary
 service, pools, keys, certificates, source and evidence remained intact.
 
+## Mac reboot and persistent operation
+
+The follow-up installed a Mac launchd service for a dedicated shared-pool
+directory. Its startup definition enables `RunAtLoad` and `KeepAlive`. The
+installed executable matches the tested release build; installer fix `127668f`
+passed the full release gate and reached main.
+
+The owner restarted the Mac on October 5 at 14:17:24 Pacific time and logged in
+normally. The Mac service returned automatically with PID 1530. VMware Fusion
+opened through macOS Login Items and restored the Windows VM. Windows resumed
+its existing session with the same running service PID 3488; this host restart
+checks VM recovery, while the earlier Windows reboot checks fresh guest startup.
+Neither server needed a manual start.
+
+After the host reboot, Windows verified the Mac certificate and hostname,
+appended and read sequence 2 in the shared test pool over HTTPS, and completed
+OAuth and a direct MCP tool call. The Mac's saved native client connection
+verified Windows access, then appended and fetched sequence 13. Before the host
+reboot, both directions also passed HTTPS and direct MCP checks.
+
+Both servers remain running on the private VMware network. The Mac server
+shares only the dedicated test directory; existing agent pools remain private.
+The retained Windows firewall rule permits only the Mac's VMware address to
+reach the selected HTTPS listener. No private TLS key crossed machines.
+
+FileVault remains enabled. The owner must enter the normal Mac login password
+after a host restart. Fusion and the VM start after Mac login. This check does
+not establish access before Mac login or disk unlock.
+
+Windows could reach the Mac but could not save its native client connection
+through the SSH session: Windows credential encryption returned access denied
+(error 5). HTTPS and direct MCP checks passed with the private invitation.
+An interactive Windows client connection still needs a separate check.
+
 ## Review and gates
 
 Sol-high reviewed correctness, service ownership, permissions, rollback and
