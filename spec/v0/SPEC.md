@@ -219,6 +219,13 @@ Plasmite 1.0 provides native access-key sharing. It keeps the existing spec path
 - Incompatible on-disk changes must bump format version.
 - Older binaries must refuse newer incompatible formats with actionable guidance.
 
+### Append Retries
+
+- `feed --retry N` retries `Busy` at most N times after the initial attempt,
+  for local and remote pools.
+- Append retries do not repeat I/O failures. A flush or connection failure can
+  occur after the message becomes visible. Check the pool before resending.
+
 ### History and Time Filters
 
 - Bare `follow` starts with new messages. `--tail N` selects the newest N

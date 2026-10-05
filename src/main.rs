@@ -204,7 +204,7 @@ mod tests {
         duplex_requires_me_when_tty, matches_required_tags, parse_duplex_tty_line,
     };
     use crate::cli::support::{
-        RetryConfig, parse_duration, parse_size, resolve_pool_target, retry_with_config,
+        RetryConfig, parse_duration, parse_size, resolve_pool_target, retry_append,
     };
     use clap::CommandFactory;
     use serde_json::json;
@@ -681,9 +681,9 @@ mod tests {
     }
 
     #[test]
-    fn retry_with_config_retries_until_success() {
+    fn retry_append_retries_until_success() {
         let mut attempts = 0u32;
-        let value = retry_with_config(
+        let value = retry_append(
             Some(RetryConfig {
                 retries: 2,
                 delay: Duration::from_millis(0),
@@ -702,9 +702,9 @@ mod tests {
     }
 
     #[test]
-    fn retry_with_config_exhausts_when_still_retryable() {
+    fn retry_append_exhausts_when_still_retryable() {
         let mut attempts = 0u32;
-        let result: Result<u8, Error> = retry_with_config(
+        let result: Result<u8, Error> = retry_append(
             Some(RetryConfig {
                 retries: 1,
                 delay: Duration::from_millis(0),

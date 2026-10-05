@@ -809,18 +809,10 @@ impl Pool {
                     .with_path(&self.path)
                     .with_source(err)
             })?;
-        let same = same_file_identity(&self.file, &file).map_err(|err| {
-            Error::new(ErrorKind::Io)
-                .with_path(&self.path)
-                .with_source(err)
-        })?;
-        if !same {
-            return Err(Error::new(ErrorKind::NotFound)
-                .with_message("pool path now refers to a different file")
-                .with_path(&self.path)
-                .with_hint("Open the pool again before acquiring an explicit append lock."));
-        }
-        lock_for_append(file, &self.path)
+        let lock = lock_for_append(file, &self.path)?;
+        require_same_file(&self.file, &lock.file, &self.path)?;
+        require_current_path(&lock.file, &self.path)?;
+        Ok(lock)
     }
 
     // Ordinary append has exclusive Rust access to Pool, so its original file
@@ -832,7 +824,9 @@ impl Pool {
                 .with_path(&self.path)
                 .with_source(err)
         })?;
-        lock_for_append(file, &self.path)
+        let lock = lock_for_append(file, &self.path)?;
+        require_current_path(&lock.file, &self.path)?;
+        Ok(lock)
     }
 
     pub fn append(&mut self, payload: &[u8]) -> Result<u64, Error> {
@@ -1021,6 +1015,45 @@ impl Drop for AppendLock {
     fn drop(&mut self) {
         let _ = FileExt::unlock(&self.file);
     }
+}
+
+// Deletion uses the writer lock even for damaged pools, so users can still
+// remove corrupt storage without racing an append to the same file.
+pub(crate) fn delete_pool_file(path: &Path) -> Result<(), Error> {
+    let file = File::open(path).map_err(|err| {
+        Error::new(map_io_error_kind(&err))
+            .with_path(path)
+            .with_source(err)
+    })?;
+    let lock = lock_for_append(file, path)?;
+    require_current_path(&lock.file, path)?;
+    std::fs::remove_file(path).map_err(|err| {
+        Error::new(map_io_error_kind(&err))
+            .with_message("failed to delete pool")
+            .with_path(path)
+            .with_source(err)
+    })
+}
+
+fn require_current_path(file: &File, path: &Path) -> Result<(), Error> {
+    let current = File::open(path).map_err(|err| {
+        Error::new(map_io_error_kind(&err))
+            .with_path(path)
+            .with_source(err)
+    })?;
+    require_same_file(file, &current, path)
+}
+
+fn require_same_file(expected: &File, current: &File, path: &Path) -> Result<(), Error> {
+    let same = same_file_identity(expected, current)
+        .map_err(|err| Error::new(ErrorKind::Io).with_path(path).with_source(err))?;
+    if !same {
+        return Err(Error::new(ErrorKind::NotFound)
+            .with_message("pool path now refers to a different file")
+            .with_path(path)
+            .with_hint("Open the pool again before writing."));
+    }
+    Ok(())
 }
 
 fn lock_for_append(file: File, path: &Path) -> Result<AppendLock, Error> {
@@ -2926,17 +2959,81 @@ mod tests {
                 |_mmap, _offset, _len, path, _message| {
                     Err(Error::new(ErrorKind::Io)
                         .with_message("injected flush failure")
+                        .with_source(std::io::Error::from(std::io::ErrorKind::Interrupted))
                         .with_path(path))
                 },
             )
             .expect_err("flush failure must be returned");
         assert_eq!(err.kind(), ErrorKind::Io);
         assert!(err.to_string().contains("injected flush failure"));
+        // The failed flush does not roll back publication. Retrying the append
+        // would create another message even though the caller saw an I/O error.
+        assert_eq!(
+            pool.get(1).expect("published frame").payload,
+            b"not-acknowledged"
+        );
         drop(pool);
 
         let reopened = Pool::open(&path).expect("pool remains reopenable");
         let header = reopened.header_from_mmap().expect("header");
         crate::core::validate::validate_pool_state(header, &reopened.mmap).expect("valid state");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deleted_and_replaced_paths_reject_stale_writers() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut old = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
+        super::delete_pool_file(&path).expect("delete while handle remains open");
+        assert_eq!(
+            old.append(b"lost").expect_err("deleted").kind(),
+            ErrorKind::NotFound
+        );
+        let replacement = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("replace");
+        assert_eq!(
+            old.append(b"lost").expect_err("replaced").kind(),
+            ErrorKind::NotFound
+        );
+        assert_eq!(
+            old.append_lock().err().expect("stale guard").kind(),
+            ErrorKind::NotFound
+        );
+        assert_eq!(
+            replacement.bounds().expect("replacement bounds").newest_seq,
+            None
+        );
+        assert_eq!(old.bounds().expect("old bounds").newest_seq, None);
+    }
+
+    #[test]
+    fn deletion_waits_for_the_writer_lock() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
+        let guard = pool.append_lock().expect("writer lock");
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let delete_path = path.clone();
+        let deletion = std::thread::spawn(move || {
+            started_tx.send(()).expect("started");
+            done_tx
+                .send(super::delete_pool_file(&delete_path))
+                .expect("done");
+        });
+        started_rx.recv().expect("deletion started");
+        assert!(matches!(
+            done_rx.recv_timeout(std::time::Duration::from_millis(50)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+        assert!(path.exists());
+        drop(guard);
+        done_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("deletion finishes")
+            .expect("delete");
+        deletion.join().expect("join");
+        assert!(!path.exists());
     }
 
     #[test]

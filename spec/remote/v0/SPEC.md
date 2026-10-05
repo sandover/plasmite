@@ -35,6 +35,11 @@ It captures stable wire-level compatibility guarantees only.
 
 ### Native Access
 
+- `GET /v0/access/status` is local-only. Its `pool_dir` field gives the display
+  path; `pool_dir_identity` gives opaque canonical path bytes for equality checks
+  on the same host. Clients must not decode or persist this identity. The CLI
+  checks it before issuing access-key commands so copied listener settings
+  cannot select a different directory's server.
 - `POST /v0/access/invite` accepts `{ "name": "...", "server_fingerprint": "..." }` on the local
   administration listener and returns `200 { "access_key": "..." }`.
   The fingerprint must match the owner state for that listener. The route is

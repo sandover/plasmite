@@ -14,7 +14,7 @@ use super::support::{
     add_missing_seq_hint, ensure_pool_dir, feed_exact_create_command_hint,
     feed_receipt_from_message, feed_receipt_json, message_from_frame, message_to_json, now_ns,
     parse_durability, parse_retry_config, parse_size, remote_client, resolve_pool_target,
-    retry_remote_append, retry_with_config,
+    retry_append,
 };
 use crate::{ErrorPolicyCli, InputMode, PoolTarget};
 use plasmite::api::{AppendOptions, Error, ErrorKind, Pool, PoolOptions, PoolRef, lite3};
@@ -100,7 +100,7 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
             if let Some(data) = args.data.as_deref() {
                 let data = parse_inline_json(data)?;
                 let payload = lite3::encode_message(&args.tags, &data)?;
-                let (seq, timestamp_ns) = retry_with_config(retry_config, || {
+                let (seq, timestamp_ns) = retry_append(retry_config, || {
                     let timestamp_ns = now_ns()?;
                     let options = AppendOptions::new(timestamp_ns, durability);
                     let seq = pool_handle.append_with_options(payload.as_slice(), options)?;
@@ -174,7 +174,7 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                 .map_err(|err| add_missing_pool_hint(err, &args.pool, &args.pool))?;
             if let Some(data) = args.data.as_deref() {
                 let data = parse_inline_json(data)?;
-                let message = retry_remote_append(retry_config, || {
+                let message = retry_append(retry_config, || {
                     remote_pool.append_json_now(&data, &args.tags, durability)
                 })?;
                 emit_feed_receipt(

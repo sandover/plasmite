@@ -145,6 +145,12 @@ Invariants:
 - A frame in `Writing` state that is never committed must not be returned to readers.
 - `plan.rs` must remain pure and side-effect-free. It must not write to the pool file. Its output must be fully determined by its inputs.
 
+Deletion acquires the same writer lock before removing the file. An append
+checks that its path still names the locked file before it changes storage.
+An open handle to a deleted or replaced pool therefore cannot acknowledge a
+write that new readers would miss. These checks coordinate Plasmite operations;
+other programs that rename files without the pool lock can still race them.
+
 Get-by-seq path:
 
 1. Acquire a shared file lock and capture visible bounds.

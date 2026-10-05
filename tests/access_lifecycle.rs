@@ -2,6 +2,7 @@
 
 use plasmite::api::{Durability, PoolOptions, PoolRef, RemoteClient, TailOptions};
 use serde_json::{Value, json};
+use std::fs;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -98,6 +99,94 @@ fn contains_pool(client: &RemoteClient, pool: &str) -> TestResult<bool> {
         .list_pools()?
         .iter()
         .any(|info| info.path.file_stem().and_then(|name| name.to_str()) == Some(pool)))
+}
+
+#[test]
+fn copied_local_address_cannot_administer_another_directory() -> TestResult<()> {
+    let temp = tempfile::tempdir()?;
+    let original = temp.path().join("original");
+    let copied = temp.path().join("copied");
+    let _server = TestServer::start(&original);
+    let before = access_cli(&original, &["keys"])?;
+    let id = before["keys"][0]["id"]
+        .as_str()
+        .ok_or("first key omitted id")?;
+
+    let original_state = original.join(".plasmite-serve");
+    let copied_state = copied.join(".plasmite-serve");
+    fs::create_dir_all(&copied_state)?;
+    let identity: Value = serde_json::from_slice(&fs::read(original_state.join("identity.json"))?)?;
+    for name in [
+        "identity.json",
+        "local.json",
+        identity["cert_file"]
+            .as_str()
+            .ok_or("identity omitted certificate")?,
+    ] {
+        fs::copy(original_state.join(name), copied_state.join(name))?;
+    }
+    if let Some(front_cert) = identity["front_cert_file"].as_str() {
+        fs::copy(
+            original_state.join(front_cert),
+            copied_state.join(front_cert),
+        )?;
+    }
+
+    for args in [
+        vec!["invite", "unexpected"],
+        vec!["keys"],
+        vec!["revoke", id],
+    ] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_plasmite"))
+            .arg("--dir")
+            .arg(&copied)
+            .arg("access")
+            .args(&args)
+            .arg("--json")
+            .output()?;
+        assert!(
+            !output.status.success(),
+            "{} unexpectedly succeeded",
+            args.join(" ")
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("local server does not own the selected pool directory"),
+            "{} failed for the wrong reason: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    assert_eq!(access_cli(&original, &["keys"])?, before);
+    let alias = original.join("..").join("original");
+    assert_eq!(access_cli(&alias, &["keys"])?, before);
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn access_commands_accept_non_utf8_directory_names() -> TestResult<()> {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let temp = tempfile::tempdir()?;
+    let pool_dir = temp.path().join(OsStr::from_bytes(b"pool-\xff"));
+    let _server = TestServer::start(&pool_dir);
+    let before = access_cli(&pool_dir, &["keys"])?;
+    assert_eq!(before["keys"].as_array().map(Vec::len), Some(1));
+
+    let key = invite(&pool_dir, "non-utf8 owner")?;
+    assert!(key.starts_with("pk1."));
+    let after_invite = access_cli(&pool_dir, &["keys"])?;
+    let id = after_invite["keys"]
+        .as_array()
+        .ok_or("missing keys")?
+        .iter()
+        .find(|row| row["name"] == "non-utf8 owner")
+        .and_then(|row| row["id"].as_str())
+        .ok_or("invited key omitted id")?;
+    revoke(&pool_dir, id)?;
+    Ok(())
 }
 
 #[test]

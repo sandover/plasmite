@@ -68,6 +68,14 @@ fn io_error(path: &Path, err: std::io::Error) -> Error {
         .with_source(err)
 }
 
+// Compare canonical OS path bytes without using the display spelling, which
+// replaces invalid UTF-8 on Unix. This value is local to this host.
+pub(crate) fn directory_identity(path: &Path) -> Result<Vec<u8>, Error> {
+    std::fs::canonicalize(path)
+        .map(|path| path.as_os_str().as_encoded_bytes().to_vec())
+        .map_err(|err| io_error(path, err))
+}
+
 pub(crate) fn register(
     pool_dir: &Path,
     local: SocketAddr,

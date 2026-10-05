@@ -16,7 +16,7 @@ use super::stream_support::{
 use super::support::{
     DEFAULT_POOL_SIZE, add_missing_pool_create_hint, ensure_pool_dir,
     follow_exact_create_command_hint, now_ns, parse_duration, parse_since, remote_client,
-    resolve_pool_target, retry_with_config,
+    resolve_pool_target,
 };
 use crate::jq_filter::compile_filters;
 use crate::{ErrorPolicyCli, FollowFormat, InputMode, PoolTarget};
@@ -333,13 +333,11 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                                 Ok(payload) => payload,
                                 Err(err) => return Err(err),
                             };
-                            retry_with_config(None, || {
-                                let timestamp_ns = now_ns()?;
-                                let options = AppendOptions::new(timestamp_ns, Durability::Fast);
-                                send_pool
-                                    .append_with_options(payload.as_slice(), options)
-                                    .map(|_| ())
-                            })
+                            let timestamp_ns = now_ns()?;
+                            let options = AppendOptions::new(timestamp_ns, Durability::Fast);
+                            send_pool
+                                .append_with_options(payload.as_slice(), options)
+                                .map(|_| ())
                         },
                     );
                     let _ = send_tx.send((DuplexSide::Send, outcome));

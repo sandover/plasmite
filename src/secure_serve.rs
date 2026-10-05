@@ -7,7 +7,7 @@ use crate::serve::{self, ServeConfig};
 use plasmite::api::{Error, ErrorKind};
 use serde::Deserialize;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub(crate) fn run(pool_dir: &Path, run: &ServeRunArgs) -> Result<(), Error> {
@@ -219,7 +219,46 @@ fn local_admin_endpoint(pool_dir: &Path, operation: &str) -> Result<(String, Str
             Error::new(ErrorKind::Corrupt).with_message("saved local listener is not loopback")
         );
     }
+    let status_url = format!("http://{bind}/v0/access/status");
+    let response = local_agent()
+        .get(&status_url)
+        .call()
+        .map_err(|err| local_admin_error(err, "failed to check the selected local server"))?;
+    let status: LocalAccessStatus =
+        serde_json::from_reader(response.into_reader()).map_err(|err| {
+            Error::new(ErrorKind::Corrupt)
+                .with_message("invalid local server status")
+                .with_source(err)
+        })?;
+    let selected = crate::serve_registry::directory_identity(pool_dir)?;
+    let serving = status.directory_identity()?;
+    if selected != serving {
+        return Err(Error::new(ErrorKind::Permission)
+            .with_message("local server does not own the selected pool directory"));
+    }
     Ok((format!("http://{bind}/v0/access/{operation}"), fingerprint))
+}
+
+#[derive(Deserialize)]
+struct LocalAccessStatus {
+    pool_dir: PathBuf,
+    pool_dir_identity: Option<Vec<u8>>,
+}
+
+impl LocalAccessStatus {
+    fn directory_identity(self) -> Result<Vec<u8>, Error> {
+        if let Some(identity) = self.pool_dir_identity {
+            return Ok(identity);
+        }
+        // Earlier servers expose only a display spelling. A replacement
+        // character could name a different directory, so do not guess.
+        if self.pool_dir.as_os_str().to_string_lossy().contains('�') {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("local server cannot identify this pool directory exactly")
+                .with_hint("Restart the server with the current Plasmite version."));
+        }
+        crate::serve_registry::directory_identity(&self.pool_dir)
+    }
 }
 
 fn local_agent() -> ureq::Agent {
@@ -232,6 +271,38 @@ fn local_agent() -> ureq::Agent {
 #[cfg(test)]
 mod admin_error_tests {
     use super::*;
+
+    #[test]
+    fn legacy_display_path_cannot_select_a_different_unicode_directory() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("pool-�");
+        std::fs::create_dir(&path).expect("create displayed directory");
+        let status = LocalAccessStatus {
+            pool_dir: path.clone(),
+            pool_dir_identity: None,
+        };
+        assert_eq!(
+            status
+                .directory_identity()
+                .expect_err("ambiguous display")
+                .kind(),
+            ErrorKind::Usage
+        );
+        let exact = crate::serve_registry::directory_identity(&path).expect("exact path");
+        let status = LocalAccessStatus {
+            pool_dir: path,
+            pool_dir_identity: Some(exact.clone()),
+        };
+        assert_eq!(status.directory_identity().expect("current server"), exact);
+        let legacy = LocalAccessStatus {
+            pool_dir: temp.path().to_owned(),
+            pool_dir_identity: None,
+        };
+        assert_eq!(
+            legacy.directory_identity().expect("ordinary legacy path"),
+            crate::serve_registry::directory_identity(temp.path()).expect("identity")
+        );
+    }
 
     #[test]
     fn preserves_domain_error_instead_of_suggesting_server_start() {

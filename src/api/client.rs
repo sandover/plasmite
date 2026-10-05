@@ -128,12 +128,7 @@ impl LocalClient {
 
     pub fn delete_pool(&self, pool_ref: &PoolRef) -> ApiResult<()> {
         let path = pool_ref.resolve_local_path(&self.pool_dir)?;
-        std::fs::remove_file(&path).map_err(|err| {
-            Error::new(map_io_error_kind(&err))
-                .with_message("failed to delete pool")
-                .with_path(&path)
-                .with_source(err)
-        })
+        crate::core::pool::delete_pool_file(&path)
     }
 
     pub fn validate_pool(&self, pool_ref: &PoolRef) -> ApiResult<ValidationReport> {
