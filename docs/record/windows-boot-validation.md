@@ -108,10 +108,15 @@ FileVault remains enabled. The owner must enter the normal Mac login password
 after a host restart. Fusion and the VM start after Mac login. This check does
 not establish access before Mac login or disk unlock.
 
-Windows could reach the Mac but could not save its native client connection
-through the SSH session: Windows credential encryption returned access denied
-(error 5). HTTPS and direct MCP checks passed with the private invitation.
-An interactive Windows client connection still needs a separate check.
+An initial Windows native client connection through SSH reached the Mac but
+failed to save its credential: Windows encryption returned access denied
+(error 5). A later direct Windows encryption/decryption check through SSH passed.
+Repeating the native connection also saved the credential and appended/fetched
+sequence 3 through the saved connection. The same check in the signed-in Windows
+desktop session saved the credential and appended/fetched sequence 4. Both
+reported accepted credentials and a reachable server. The earlier failure was
+transient; these checks did not establish its cause. No product or Windows
+security-policy change preceded the successful repeats.
 
 ## Review and gates
 

@@ -116,8 +116,7 @@ fn copied_local_address_cannot_administer_another_directory() -> TestResult<()> 
 
     let original_state = original.join(".plasmite-serve");
     let copied_state = copied.join(".plasmite-serve");
-    // Initialize private state through the server so Windows permissions are valid
-    // before testing the directory ownership check.
+    // Initialize valid private state so the copied address reaches the ownership check.
     drop(TestServer::start(&copied));
     let identity: Value = serde_json::from_slice(&fs::read(original_state.join("identity.json"))?)?;
     let copied_identity: Value =
