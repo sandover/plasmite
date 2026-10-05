@@ -428,6 +428,8 @@ pub struct PoolAgeMetrics {
 pub struct Pool {
     path: PathBuf,
     file: File,
+    #[cfg(unix)]
+    file_identity: (u64, u64),
     mmap: MmapMut,
     header: PoolHeader,
     snapshot_lock: Mutex<()>,
@@ -504,6 +506,8 @@ impl Pool {
         };
 
         let mut pool = Self {
+            #[cfg(unix)]
+            file_identity: unix_file_identity(&file, &path)?,
             path,
             file,
             mmap,
@@ -533,10 +537,10 @@ impl Pool {
                 error
             })?;
 
-        let actual_size = file
+        let metadata = file
             .metadata()
-            .map(|meta| meta.len())
             .map_err(|err| Error::new(ErrorKind::Io).with_path(&path).with_source(err))?;
+        let actual_size = metadata.len();
 
         validate_mapped_size(actual_size).map_err(|err| err.with_path(&path))?;
         FileExt::lock_shared(&file).map_err(|err| {
@@ -562,6 +566,11 @@ impl Pool {
         unlock?;
 
         Ok(Self {
+            #[cfg(unix)]
+            file_identity: {
+                use std::os::unix::fs::MetadataExt;
+                (metadata.dev(), metadata.ino())
+            },
             path,
             file,
             mmap,
@@ -825,6 +834,12 @@ impl Pool {
                 .with_source(err)
         })?;
         let lock = lock_for_append(file, &self.path)?;
+        // A duplicated descriptor still refers to the held file object. Its
+        // identity cannot change while Pool owns it; the mutable path is checked
+        // freshly after every lock acquisition.
+        #[cfg(unix)]
+        require_path_identity(self.file_identity, &self.path)?;
+        #[cfg(windows)]
         require_current_path(&lock.file, &self.path)?;
         Ok(lock)
     }
@@ -1035,6 +1050,34 @@ pub(crate) fn delete_pool_file(path: &Path) -> Result<(), Error> {
     })
 }
 
+#[cfg(unix)]
+fn require_current_path(file: &File, path: &Path) -> Result<(), Error> {
+    require_path_identity(unix_file_identity(file, path)?, path)
+}
+
+#[cfg(unix)]
+fn unix_file_identity(file: &File, path: &Path) -> Result<(u64, u64), Error> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file
+        .metadata()
+        .map_err(|err| Error::new(ErrorKind::Io).with_path(path).with_source(err))?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(unix)]
+fn require_path_identity(expected: (u64, u64), path: &Path) -> Result<(), Error> {
+    use std::os::unix::fs::MetadataExt;
+    // Check the path under the writer lock without opening another descriptor
+    // inside every append's critical section. metadata follows symlinks, as open does.
+    let current = std::fs::metadata(path).map_err(|err| {
+        Error::new(map_io_error_kind(&err))
+            .with_path(path)
+            .with_source(err)
+    })?;
+    require_identity_matches(expected == (current.dev(), current.ino()), path)
+}
+
+#[cfg(windows)]
 fn require_current_path(file: &File, path: &Path) -> Result<(), Error> {
     let current = File::open(path).map_err(|err| {
         Error::new(map_io_error_kind(&err))
@@ -1047,6 +1090,10 @@ fn require_current_path(file: &File, path: &Path) -> Result<(), Error> {
 fn require_same_file(expected: &File, current: &File, path: &Path) -> Result<(), Error> {
     let same = same_file_identity(expected, current)
         .map_err(|err| Error::new(ErrorKind::Io).with_path(path).with_source(err))?;
+    require_identity_matches(same, path)
+}
+
+fn require_identity_matches(same: bool, path: &Path) -> Result<(), Error> {
     if !same {
         return Err(Error::new(ErrorKind::NotFound)
             .with_message("pool path now refers to a different file")
@@ -3034,6 +3081,90 @@ mod tests {
             None
         );
         assert_eq!(old.bounds().expect("old bounds").newest_seq, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_writers_follow_identity_and_reject_replaced_targets() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let link = dir.path().join("pool-link.plasmite");
+        let original = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
+        std::os::unix::fs::symlink(&path, &link).expect("symlink");
+        let mut writer = Pool::open(&link).expect("open through symlink");
+        assert_eq!(writer.append(b"first").expect("append through symlink"), 1);
+        super::delete_pool_file(&path).expect("delete target");
+        let replacement = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("replace");
+        assert_eq!(
+            writer
+                .append(b"lost")
+                .expect_err("stale symlink writer")
+                .kind(),
+            ErrorKind::NotFound
+        );
+        assert_eq!(original.bounds().expect("old bounds").newest_seq, Some(1));
+        assert_eq!(replacement.bounds().expect("new bounds").newest_seq, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_identity_checks_preserve_lookup_errors() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
+        let missing_parent = dir.path().join("missing/pool.plasmite");
+        let error =
+            super::require_current_path(&pool.file, &missing_parent).expect_err("missing parent");
+        assert_eq!(error.kind(), ErrorKind::NotFound);
+        let loop_path = dir.path().join("loop.plasmite");
+        std::os::unix::fs::symlink(&loop_path, &loop_path).expect("self symlink");
+        assert_eq!(
+            super::require_current_path(&pool.file, &loop_path)
+                .expect_err("symlink loop")
+                .kind(),
+            ErrorKind::Io
+        );
+        // Existing writable descriptors keep their Unix rights after chmod.
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o0)).expect("chmod");
+        assert_eq!(pool.append(b"retained rights").expect("open descriptor"), 1);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).expect("restore");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_replacement_is_checked_after_waiting_for_writer_lock() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pool.plasmite");
+        let original = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
+        let mut waiter = Pool::open(&path).expect("open before writer lock");
+        let guard = original.append_lock().expect("writer lock");
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            started_tx.send(()).expect("started");
+            done_tx.send(waiter.append(b"lost")).expect("done");
+        });
+        started_rx.recv().expect("waiter started");
+        assert!(matches!(
+            done_rx.recv_timeout(std::time::Duration::from_millis(50)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+        // Model an external replacement that does not participate in Plasmite's lock.
+        std::fs::rename(&path, dir.path().join("old.plasmite")).expect("move old path");
+        let replacement = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("replace");
+        drop(guard);
+        assert_eq!(
+            done_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("waiter finishes")
+                .expect_err("stale path")
+                .kind(),
+            ErrorKind::NotFound
+        );
+        thread.join().expect("join");
+        assert_eq!(original.bounds().expect("old bounds").newest_seq, None);
+        assert_eq!(replacement.bounds().expect("new bounds").newest_seq, None);
     }
 
     #[test]
