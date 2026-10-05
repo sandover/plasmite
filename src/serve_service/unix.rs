@@ -391,8 +391,8 @@ fn registered(setup: &Setup) -> Result<bool, Error> {
 }
 // Exit 0 means present, 1 means confirmed absent, and 2 means unknown.
 // Keep the same query/classification in both user and privileged checks.
-fn native_presence_script(setup: &Setup) -> String {
-    if cfg!(target_os = "macos") {
+fn native_presence_script(setup: &Setup, macos: bool) -> String {
+    if macos {
         let absent = shell_quote(&format!(
             "Could not find service \"{}\" in domain for system",
             id(&setup.pool_dir)
@@ -410,7 +410,10 @@ fn native_presence_script(setup: &Setup) -> String {
 }
 
 fn loaded(setup: &Setup) -> Result<bool, Error> {
-    inspect_native_presence(setup, &native_presence_script(setup))
+    inspect_native_presence(
+        setup,
+        &native_presence_script(setup, cfg!(target_os = "macos")),
+    )
 }
 
 fn inspect_native_presence(setup: &Setup, query: &str) -> Result<bool, Error> {
@@ -538,9 +541,12 @@ fn ownership_check_script(
         shell_quote(&wants.to_string_lossy()),
         shell_quote(&format!("../{}", job.file_name().unwrap().to_string_lossy()))
     )).unwrap_or_default();
+    // Keep the manager query in its own shell. macOS /bin/sh misparses a case
+    // statement when it appears inline inside this command substitution.
     format!(
-        "plasmite_job={}\nif plasmite_state=$({{ {loaded_command}; }} 2>&1); then\nplasmite_loaded=1\nelse\nplasmite_exit=$?\nif [ \"$plasmite_exit\" -ne 1 ]; then\n/usr/bin/printf '%s\\n' 'Could not verify native startup job ownership: manager query failed.' \"$plasmite_state\" >&2; exit 1\nfi\nplasmite_loaded=0\nfi\n[ ! -L \"$plasmite_job\" ] || {reject}\n{link_check}if [ -e \"$plasmite_job\" ]; then\n[ -f \"$plasmite_job\" ] || {reject}\n{comparison}\nelse\n[ \"$plasmite_loaded\" -eq 0 ] || {reject}\nfi\n",
-        shell_quote(&job.to_string_lossy())
+        "plasmite_job={}\nif plasmite_state=$(/bin/sh -c {} 2>&1); then\nplasmite_loaded=1\nelse\nplasmite_exit=$?\nif [ \"$plasmite_exit\" -ne 1 ]; then\n/usr/bin/printf '%s\\n' 'Could not verify native startup job ownership: manager query failed.' \"$plasmite_state\" >&2; exit 1\nfi\nplasmite_loaded=0\nfi\n[ ! -L \"$plasmite_job\" ] || {reject}\n{link_check}if [ -e \"$plasmite_job\" ]; then\n[ -f \"$plasmite_job\" ] || {reject}\n{comparison}\nelse\n[ \"$plasmite_loaded\" -eq 0 ] || {reject}\nfi\n",
+        shell_quote(&job.to_string_lossy()),
+        shell_quote(loaded_command)
     )
 }
 
@@ -553,7 +559,7 @@ fn ownership_script(setup: &Setup, owners: &[&Setup]) -> String {
     ownership_check_script(
         &setup.job_path(),
         &definitions,
-        &native_presence_script(setup),
+        &native_presence_script(setup, cfg!(target_os = "macos")),
         wants.as_deref(),
     )
 }
@@ -1191,6 +1197,34 @@ mod tests {
             run: effective_args(&ServeRunArgs::default()).unwrap(),
         }
     }
+
+    #[test]
+    fn privileged_presence_queries_parse_for_both_service_managers() {
+        let setup = setup();
+        for macos in [false, true] {
+            let script = format!(
+                "set -eu\n{}{}",
+                ownership_check_script(
+                    &setup.job_path(),
+                    &[definition(&setup, macos)],
+                    &native_presence_script(&setup, macos),
+                    None,
+                ),
+                stop_script(&setup, macos),
+            );
+            let output = Command::new("/bin/sh")
+                .args(["-n", "-c", &script])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{} service script: {}",
+                if macos { "launchd" } else { "systemd" },
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
     #[test]
     fn native_job_requires_saved_setup_matching_every_owner_field() {
         let original = setup();
