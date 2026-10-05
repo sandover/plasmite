@@ -164,7 +164,11 @@ fn capture(program: &str, arguments: &[&str]) -> Result<String, Error> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
-fn admin(program: &str, arguments: &[&str]) -> Result<(), Error> {
+fn admin(
+    program: &str,
+    arguments: &[&str],
+    native_may_have_started: &mut bool,
+) -> Result<(), Error> {
     let root = unsafe_euid_is_root();
     let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
     let native = native_program(program);
@@ -203,6 +207,9 @@ fn admin(program: &str, arguments: &[&str]) -> Result<(), Error> {
         return Err(Error::new(ErrorKind::Permission).with_message("administrator approval is required to manage startup")
             .with_hint("Run this Plasmite command in an interactive terminal and approve its administrator request. Run Plasmite as the account that owns the pools."));
     };
+    // A failed command can leave partial native changes. Approval failures above
+    // cannot, so callers may restore local files without stopping the old job.
+    *native_may_have_started = true;
     let output = command.stdin(Stdio::inherit()).output().map_err(|error| {
         Error::new(ErrorKind::Io)
             .with_message("could not request the startup service change")
@@ -569,6 +576,7 @@ fn stop_script(setup: &Setup, macos: bool) -> String {
 
 fn stop_native(setup: &Setup, owners: &[&Setup]) -> Result<(), Error> {
     verify_native_ownership(setup, owners)?;
+    let mut native_may_have_started = false;
     admin(
         "/bin/sh",
         &[
@@ -579,6 +587,7 @@ fn stop_native(setup: &Setup, owners: &[&Setup]) -> Result<(), Error> {
                 stop_script(setup, cfg!(target_os = "macos"))
             ),
         ],
+        &mut native_may_have_started,
     )
 }
 
@@ -604,14 +613,19 @@ fn start_native(setup: &Setup, restart: bool) -> Result<(), Error> {
             shell_quote(&setup.unit())
         ));
     }
-    admin("/bin/sh", &["-c", &script])
+    let mut native_may_have_started = false;
+    admin("/bin/sh", &["-c", &script], &mut native_may_have_started)
 }
 
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn install_native(setup: &Setup, owners: &[&Setup]) -> Result<(), Error> {
+fn install_native(
+    setup: &Setup,
+    owners: &[&Setup],
+    native_may_have_started: &mut bool,
+) -> Result<(), Error> {
     verify_native_ownership(setup, owners)?;
     // Pass the definition in memory; an unprivileged process must not replace a staging
     // file while the owner approves the administrator request.
@@ -643,7 +657,7 @@ fn install_native(setup: &Setup, owners: &[&Setup]) -> Result<(), Error> {
         script.push_str(&format!("/usr/bin/systemctl daemon-reload\n/usr/bin/systemctl enable {}\n/usr/bin/systemctl restart {}\n",
             shell_quote(&setup.unit()), shell_quote(&setup.unit())));
     }
-    admin("/bin/sh", &["-c", &script])
+    admin("/bin/sh", &["-c", &script], native_may_have_started)
 }
 
 fn uninstall_native(setup: &Setup, owners: &[&Setup]) -> Result<(), Error> {
@@ -674,7 +688,8 @@ fn uninstall_native(setup: &Setup, owners: &[&Setup]) -> Result<(), Error> {
             shell_quote(&wants.to_string_lossy())
         ));
     }
-    admin("/bin/sh", &["-c", &script])
+    let mut native_may_have_started = false;
+    admin("/bin/sh", &["-c", &script], &mut native_may_have_started)
 }
 
 fn live(setup: &Setup) -> Result<Option<ServerDetails>, Error> {
@@ -818,10 +833,11 @@ pub(crate) fn install(pool_dir: &Path, options: &ServeRunArgs) -> Result<Status,
         previous.as_ref(),
         &path,
         &source,
-        |candidate, restoring| {
+        |candidate, restoring, native_may_have_started| {
             install_native(
                 candidate,
                 if restoring { &recovery_owners } else { &owners },
+                native_may_have_started,
             )?;
             if restoring && !was_running {
                 stop_native(candidate, &[candidate])?;
@@ -850,7 +866,7 @@ fn update_program(
     previous: Option<&Setup>,
     path: &Path,
     source: &Path,
-    mut activate: impl FnMut(&Setup, bool) -> Result<Status, Error>,
+    mut activate: impl FnMut(&Setup, bool, &mut bool) -> Result<Status, Error>,
     deactivate: impl FnOnce(&Setup, bool) -> Result<(), Error>,
 ) -> Result<Status, Error> {
     let temporary = setup.program.with_extension("new");
@@ -910,13 +926,17 @@ fn update_program(
         }
         return Err(preparation_error);
     }
-    let result = write_atomic_json(path, setup).and_then(|()| activate(setup, false));
+    let mut native_may_have_started = false;
+    let result = write_atomic_json(path, setup)
+        .and_then(|()| activate(setup, false, &mut native_may_have_started));
     if let Err(update_error) = &result {
         let recovery = (|| {
             // Stop the replacement before restoring its identity or program.
             // A failed stop must leave all recovery data intact.
-            deactivate(setup, previous.is_none())?;
-            if identity_backup.exists() {
+            if native_may_have_started {
+                deactivate(setup, previous.is_none())?;
+            }
+            if native_may_have_started && identity_backup.exists() {
                 let bytes = fs::read(&identity_backup).map_err(|error| {
                     io_error(
                         "failed to read previous server identity",
@@ -937,7 +957,9 @@ fn update_program(
                     io_error("failed to restore previous executable", &backup, error)
                 })?;
                 write_atomic_json(path, old)?;
-                activate(old, true)?;
+                if native_may_have_started {
+                    activate(old, true, &mut native_may_have_started)?;
+                }
             } else {
                 for failed in [path, &setup.program] {
                     match fs::remove_file(failed) {
@@ -1447,7 +1469,21 @@ mod tests {
             "closing only the parent descriptor leaves the duplicated lease held"
         );
         drop(raw_inherited);
-        contender.try_lock_exclusive().unwrap();
+        // A parallel test can fork while the raw descriptor is open. Its child
+        // releases that inherited copy on exec, so allow that brief delay here.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match contender.try_lock_exclusive() {
+                Ok(()) => break,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        && Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("raw lock remained held after close: {error}"),
+            }
+        }
         FileExt::unlock(&contender).unwrap();
 
         let lease = pool_operation_lock(temp.path()).unwrap();
@@ -1562,7 +1598,7 @@ mod tests {
             Some(&setup),
             &path,
             &source,
-            |_, _| panic!("preparation failure must not activate"),
+            |_, _, _| panic!("preparation failure must not activate"),
             |_, _| panic!("preparation failure must not stop old service"),
         );
         assert!(result.is_err());
@@ -1577,7 +1613,7 @@ mod tests {
             Some(&setup),
             &path,
             &source,
-            |candidate, _| Ok(ready(candidate)),
+            |candidate, _, _| Ok(ready(candidate)),
             |_, _| panic!("successful retry needs no recovery"),
         )
         .unwrap();
@@ -1592,24 +1628,46 @@ mod tests {
             .parent()
             .unwrap()
             .join("missing-directory/setup.json");
-        let uninstalled = std::cell::Cell::new(false);
         let result = update_program(
             &setup,
             None,
             &path,
             &source,
-            |_, _| panic!("failed setup write must not activate"),
-            |_, uninstall| {
-                assert!(uninstall);
-                uninstalled.set(true);
-                Ok(())
-            },
+            |_, _, _| panic!("failed setup write must not activate"),
+            |_, _| panic!("failed setup write must not change the native job"),
         );
         let error = result.err().unwrap().to_string();
         assert!(!error.contains("recovery needs attention"), "{error}");
-        assert!(uninstalled.get());
         assert!(!setup.program.exists());
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn failed_approval_restores_old_files_without_stopping_old_service() {
+        let (_temp, old, path, source) = fixture();
+        let old_settings = fs::read(&path).unwrap();
+        let mut replacement = old.clone();
+        replacement.run.bind = Some("127.0.0.1:12345".into());
+        let result = update_program(
+            &replacement,
+            Some(&old),
+            &path,
+            &source,
+            |candidate, restoring, native_may_have_started| {
+                assert!(!restoring);
+                assert!(!*native_may_have_started);
+                assert_eq!(fs::read(&candidate.program).unwrap(), b"new executable");
+                Err(usage(
+                    "administrator approval was denied before native command launch",
+                ))
+            },
+            |_, _| panic!("approval failure must not stop the old service"),
+        );
+        assert!(result.is_err());
+        assert_eq!(fs::read(&old.program).unwrap(), b"old executable");
+        assert_eq!(fs::read(&path).unwrap(), old_settings);
+        assert!(!old.program.with_extension("previous").exists());
+        assert!(!path.with_extension("previous.json").exists());
     }
 
     #[test]
@@ -1621,7 +1679,7 @@ mod tests {
             Some(&setup),
             &path,
             &source,
-            |candidate, restoring| {
+            |candidate, restoring, _| {
                 assert!(!restoring);
                 assert_eq!(fs::read(&candidate.program).unwrap(), b"new executable");
                 running.set(true);
@@ -1662,8 +1720,9 @@ mod tests {
             Some(&setup),
             &path,
             &source,
-            |candidate, restoring| {
+            |candidate, restoring, native_may_have_started| {
                 if !restoring {
+                    *native_may_have_started = true;
                     let store =
                         AccessStore::open(&candidate.pool_dir, None, Some((&cert, &tls_key)), None)
                             .unwrap();
@@ -1733,8 +1792,9 @@ mod tests {
             None,
             &path,
             &source,
-            |candidate, restoring| {
+            |candidate, restoring, native_may_have_started| {
                 assert!(!restoring, "no previous managed service to restart");
+                *native_may_have_started = true;
                 let store =
                     AccessStore::open(&candidate.pool_dir, None, Some((&cert, &tls_key)), None)
                         .unwrap();
@@ -1778,8 +1838,9 @@ mod tests {
             Some(&setup),
             &path,
             &source,
-            |_, restoring| {
+            |_, restoring, native_may_have_started| {
                 assert!(!restoring, "never restart after failed program restore");
+                *native_may_have_started = true;
                 Err(usage("injected readiness failure"))
             },
             |candidate, _| {
@@ -1800,7 +1861,7 @@ mod tests {
             Some(&setup),
             &path,
             &source,
-            |_, _| panic!("pending recovery must block activation"),
+            |_, _, _| panic!("pending recovery must block activation"),
             |_, _| panic!("pending recovery must block native mutations"),
         );
         assert!(again.err().unwrap().to_string().contains("needs recovery"));
@@ -1824,8 +1885,9 @@ mod tests {
             Some(&setup),
             &path,
             &source,
-            |_, restoring| {
+            |_, restoring, native_may_have_started| {
                 assert!(!restoring);
+                *native_may_have_started = true;
                 Err(usage("injected readiness failure"))
             },
             |candidate, _| {
@@ -1869,8 +1931,9 @@ mod tests {
             Some(&setup),
             &path,
             &source,
-            |_, restoring| {
+            |_, restoring, native_may_have_started| {
                 assert!(!restoring);
+                *native_may_have_started = true;
                 Err(usage("injected startup failure"))
             },
             |_, _| Err(usage("injected stop failure")),

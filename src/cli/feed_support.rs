@@ -34,7 +34,7 @@ use super::support::RetryConfig;
 use super::support::feed_receipt_from_message;
 use super::support::feed_receipt_json;
 use super::support::now_ns;
-use super::support::retry_with_config;
+use super::support::retry_append;
 
 pub(crate) fn parse_inline_json(data: &str) -> Result<Value, Error> {
     serde_json::from_str(data).map_err(|err| {
@@ -259,7 +259,7 @@ pub(crate) fn ingest_from_stdin<R: Read>(
         emit_receipt,
         |data, emit_receipt| {
             let payload = lite3::encode_message(ctx.tags, &data)?;
-            let (seq, timestamp_ns) = retry_with_config(ctx.retry_config, || {
+            let (seq, timestamp_ns) = retry_append(ctx.retry_config, || {
                 let timestamp_ns = now_ns()?;
                 let options = AppendOptions::new(timestamp_ns, ctx.durability);
                 let seq = ctx
@@ -291,7 +291,7 @@ pub(crate) fn ingest_from_stdin_remote<R: Read>(
         },
         emit_receipt,
         |data, emit_receipt| {
-            let message = retry_with_config(ctx.retry_config, || {
+            let message = retry_append(ctx.retry_config, || {
                 ctx.remote_pool
                     .append_json_now(&data, ctx.tags, ctx.durability)
             })?;

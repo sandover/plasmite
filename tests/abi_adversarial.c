@@ -57,6 +57,15 @@ int main(int argc, char **argv) {
     CHECK(plsm_client_new(argv[1], &client, &err) == 0, "create client");
     CHECK(client != NULL, "client output initialized");
 
+    require_usage_error(
+        plsm_pool_create(client, "null-output", 1024 * 1024, NULL, &err),
+        &err, "null create output");
+    plsm_pool_t *unexpected = NULL;
+    CHECK(plsm_pool_open(client, "null-output", &unexpected, &err) != 0,
+          "invalid create leaves no pool");
+    if (err != NULL) { plsm_error_free(err); err = NULL; }
+    plsm_pool_free(unexpected);
+
     plsm_pool_t *pool = NULL;
     CHECK(plsm_pool_create(client, "abi-adversarial", 1024 * 1024, &pool, &err) == 0,
           "create pool");
@@ -82,6 +91,9 @@ int main(int argc, char **argv) {
         "invalid JSON bytes");
 
     const uint8_t json[] = "{\"kind\":\"abi-adversarial\"}";
+    require_usage_error(
+        plsm_pool_append_json(pool, json, sizeof(json) - 1, NULL, 0, 0, NULL, &err),
+        &err, "null append output");
     CHECK(plsm_pool_append_json(pool,
                                 json,
                                 sizeof(json) - 1,
@@ -92,6 +104,8 @@ int main(int argc, char **argv) {
                                 &err) == 0,
           "append flushed JSON");
     CHECK(message.data != NULL && message.len != 0, "message output populated");
+    CHECK(message.len >= 9 && memcmp(message.data, "{\"seq\":1,", 9) == 0,
+          "invalid append consumes no sequence");
     plsm_buf_free(&message);
     CHECK(message.data == NULL && message.len == 0, "message cleanup resets output");
     plsm_buf_free(&message);
@@ -125,9 +139,22 @@ int main(int argc, char **argv) {
     options.max_messages = 1;
     CHECK(plsm_stream_open_ex(pool, &options, &stream, &err) == 0, "open stream");
     CHECK(stream != NULL, "stream output initialized");
-    CHECK(plsm_stream_next(stream, &message, &err) == 1, "read stream message");
+    require_usage_error(plsm_stream_next(stream, NULL, &err), &err, "null stream output");
+    CHECK(plsm_stream_next(stream, &message, &err) == 1,
+          "invalid stream read leaves first message available");
     plsm_buf_free(&message);
     plsm_stream_free(stream);
+
+    plsm_lite3_stream_t *lite3_stream = NULL;
+    CHECK(plsm_lite3_stream_open_ex(pool, &options, &lite3_stream, &err) == 0,
+          "open Lite3 stream");
+    require_usage_error(plsm_lite3_stream_next(lite3_stream, NULL, &err), &err,
+                        "null Lite3 stream output");
+    CHECK(plsm_lite3_stream_next(lite3_stream, &empty_frame, &err) == 1,
+          "invalid Lite3 stream read leaves first message available");
+    CHECK(empty_frame.seq == 1, "Lite3 stream starts at first message");
+    plsm_lite3_frame_free(&empty_frame);
+    plsm_lite3_stream_free(lite3_stream);
 
     plsm_pool_free(pool);
     plsm_client_free(client);

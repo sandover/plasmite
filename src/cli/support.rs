@@ -16,8 +16,6 @@ use plasmite::api::RemoteClient;
 use plasmite::api::lite3;
 use serde_json::Value;
 use serde_json::json;
-use std::error::Error as StdError;
-use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -492,24 +490,6 @@ pub(crate) fn parse_duration(input: &str) -> Result<Duration, Error> {
     Ok(Duration::from_millis(millis))
 }
 
-pub(crate) fn is_retryable(err: &Error) -> bool {
-    match err.kind() {
-        ErrorKind::Busy => true,
-        ErrorKind::Io => err
-            .source()
-            .and_then(|source| source.downcast_ref::<io::Error>())
-            .is_some_and(|io_err| {
-                matches!(
-                    io_err.kind(),
-                    io::ErrorKind::Interrupted
-                        | io::ErrorKind::WouldBlock
-                        | io::ErrorKind::TimedOut
-                )
-            }),
-        _ => false,
-    }
-}
-
 pub(crate) fn add_retry_hint(err: Error, attempts: u32, waited: Duration) -> Error {
     let info = format!(
         "Retry attempts: {attempts} (waited {}ms).",
@@ -522,7 +502,9 @@ pub(crate) fn add_retry_hint(err: Error, attempts: u32, waited: Duration) -> Err
     }
 }
 
-pub(crate) fn retry_with_config<T, F>(config: Option<RetryConfig>, mut f: F) -> Result<T, Error>
+/// Busy occurs before an append commits. I/O failures may follow publication,
+/// so repeating them could append the same message twice.
+pub(crate) fn retry_append<T, F>(config: Option<RetryConfig>, mut f: F) -> Result<T, Error>
 where
     F: FnMut() -> Result<T, Error>,
 {
@@ -536,7 +518,7 @@ where
         match f() {
             Ok(value) => return Ok(value),
             Err(err) => {
-                if attempts <= config.retries && is_retryable(&err) {
+                if attempts <= config.retries && err.kind() == ErrorKind::Busy {
                     std::thread::sleep(config.delay);
                     waited += config.delay;
                     continue;
@@ -694,4 +676,60 @@ pub(crate) fn decode_payload(payload: &[u8]) -> Result<(Value, Value), Error> {
             .with_source(err)
     })?;
     Ok((meta, data))
+}
+
+#[cfg(test)]
+mod append_retry_tests {
+    use super::*;
+    use std::io;
+
+    #[test]
+    fn append_does_not_repeat_a_write_after_an_io_failure() {
+        for kind in [
+            io::ErrorKind::Interrupted,
+            io::ErrorKind::WouldBlock,
+            io::ErrorKind::TimedOut,
+        ] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let mut pool = plasmite::api::Pool::create(
+                dir.path().join("pool.plasmite"),
+                plasmite::api::PoolOptions::new(1024 * 1024),
+            )
+            .expect("create");
+            let payload = lite3::encode_message(&[], &json!({"n": 1})).expect("encode");
+            let result: Result<(), Error> = retry_append(
+                Some(RetryConfig {
+                    retries: 3,
+                    delay: Duration::ZERO,
+                }),
+                || {
+                    pool.append(payload.as_slice())?;
+                    Err(Error::new(ErrorKind::Io).with_source(io::Error::from(kind)))
+                },
+            );
+            assert!(result.is_err());
+            assert_eq!(pool.bounds().expect("bounds").newest_seq, Some(1));
+        }
+    }
+
+    #[test]
+    fn append_retries_a_busy_response() {
+        let mut attempts = 0;
+        let result = retry_append(
+            Some(RetryConfig {
+                retries: 1,
+                delay: Duration::ZERO,
+            }),
+            || {
+                attempts += 1;
+                if attempts == 1 {
+                    Err(Error::new(ErrorKind::Busy))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert!(result.is_ok());
+        assert_eq!(attempts, 2);
+    }
 }

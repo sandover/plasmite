@@ -30,12 +30,22 @@ pub(crate) struct AccessStore {
     dir: PathBuf,
     cert_path: PathBuf,
     key_path: PathBuf,
-    _lock: File,
+    _lock: OwnerLock,
     #[cfg(windows)]
     _directory: crate::windows_private::Directory,
     records: Mutex<AccessState>,
     fingerprint: String,
     shared_address: Option<String>,
+}
+
+// Own the lease from acquisition through startup and shutdown, including
+// failed initialization. Closing alone can leave a forked child's copy locked.
+struct OwnerLock(File);
+
+impl Drop for OwnerLock {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.0);
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -113,6 +123,7 @@ impl AccessStore {
                 .with_path(&dir)
                 .with_source(err)
         })?;
+        let lock = OwnerLock(lock);
         let identity_path = dir.join("identity.json");
         let previous = if identity_path.exists() {
             ensure_private(&identity_path)?;
@@ -295,6 +306,7 @@ impl AccessStore {
                 .with_path(&dir)
                 .with_source(err)
         })?;
+        let _lock = OwnerLock(lock);
         write_atomic_bytes(&dir.join("identity.json"), bytes)
     }
 
@@ -920,6 +932,27 @@ mod tests {
             .expect("upgraded identity");
         assert_eq!(upgraded.fingerprint(), fingerprint);
         assert_ne!(std::fs::read(upgraded.cert_path()).unwrap(), old_cert);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dropping_owner_releases_lock_with_an_inherited_descriptor() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let owner = AccessStore::open(temp.path(), None, None, None).expect("owner");
+        let inherited = owner._lock.0.try_clone().expect("inherited descriptor");
+        drop(owner);
+        let next = AccessStore::open(temp.path(), None, None, None).expect("immediate restart");
+        // Closing the inherited copy must not release the new owner's lease.
+        drop(inherited);
+        assert_eq!(
+            AccessStore::open(temp.path(), None, None, None)
+                .err()
+                .expect("new owner remains exclusive")
+                .kind(),
+            ErrorKind::Busy
+        );
+        drop(next);
+        AccessStore::open(temp.path(), None, None, None).expect("next restart");
     }
 
     #[test]

@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -61,5 +64,39 @@ func TestDrainBeforeRetentionGap(t *testing.T) {
 				t.Fatalf("error = %v, wantError = %v", err, test.wantError)
 			}
 		})
+	}
+}
+
+func TestWorkdirBoundary(t *testing.T) {
+	for _, name := range []string{"src", "work-", "work.", "work-..", "", ".", "..", "../pools", "/tmp/pools", "a/b", "a\\b", "C:pools", "a\x00b"} {
+		if err := validateWorkdirName(name); err == nil {
+			t.Fatalf("accepted %q", name)
+		}
+	}
+	if err := validateWorkdirName("work-retention-gap"); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires privileges on Windows")
+	}
+	temp := t.TempDir()
+	target := filepath.Join(temp, "target")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(target, "keep")
+	if err := os.WriteFile(marker, []byte("unchanged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	work := filepath.Join(temp, "work")
+	if err := os.Symlink(target, work); err != nil {
+		t.Fatal(err)
+	}
+	if err := resetWorkdir(work); err == nil {
+		t.Fatal("accepted workdir symlink")
+	}
+	content, err := os.ReadFile(marker)
+	if err != nil || string(content) != "unchanged" {
+		t.Fatalf("target changed: %q, %v", content, err)
 	}
 }

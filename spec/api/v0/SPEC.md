@@ -103,7 +103,11 @@ Stable error kinds:
 - `create_pool` creates a new pool and returns `AlreadyExists` if one already exists.
 - Local create paths must create parent directories as needed (equivalent to `mkdir -p`).
 - `open_pool` returns `NotFound` when target is missing.
-- `delete_pool` may return `Busy` when the pool cannot be removed safely.
+- `delete_pool` waits for an active append to finish before removing the pool.
+  Deletion requires permission to open the target for locking. It may return
+  `Busy` when the pool cannot be removed safely.
+- An append through an open handle returns `NotFound` if its path no longer
+  names that pool. Open the replacement pool before writing to it.
 - `append` is atomic with respect to pool ordering and returns the committed envelope.
 - `get` returns `NotFound` when `seq` is absent/out of range.
 - `tail` preserves pool ordering by `seq`.

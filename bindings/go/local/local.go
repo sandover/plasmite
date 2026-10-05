@@ -560,6 +560,16 @@ func (s *Lite3Stream) Close() {
 	s.ptr = nil
 }
 
+func streamTimeoutMillis(timeout time.Duration) uint64 {
+	if timeout <= 0 {
+		timeout = time.Second
+	}
+	if timeout < time.Millisecond {
+		return 1
+	}
+	return uint64(timeout.Milliseconds())
+}
+
 // Tail streams JSON messages on a buffered channel.
 // Backpressure: when the buffer is full, tailing blocks until the caller drains it.
 // Cancellation: the stream is reopened after Timeout to check ctx; set Timeout for responsiveness.
@@ -589,11 +599,7 @@ func (p *Pool) Tail(ctx context.Context, opts TailOptions) (<-chan *api.Message,
 			default:
 			}
 
-			timeoutMs := opts.Timeout
-			if timeoutMs <= 0 {
-				timeoutMs = time.Second
-			}
-			timeoutValue := uint64(timeoutMs.Milliseconds())
+			timeoutValue := streamTimeoutMillis(opts.Timeout)
 			var remaining *uint64
 			if opts.MaxMessages != nil {
 				left := *opts.MaxMessages - delivered
@@ -675,11 +681,7 @@ func (p *Pool) TailLite3(ctx context.Context, opts TailOptions) (<-chan *Lite3Fr
 			default:
 			}
 
-			timeoutMs := opts.Timeout
-			if timeoutMs <= 0 {
-				timeoutMs = time.Second
-			}
-			timeoutValue := uint64(timeoutMs.Milliseconds())
+			timeoutValue := streamTimeoutMillis(opts.Timeout)
 			var remaining *uint64
 			if opts.MaxMessages != nil {
 				left := *opts.MaxMessages - delivered
@@ -738,11 +740,7 @@ func (p *Pool) Replay(ctx context.Context, opts ReplayOptions) (<-chan *api.Mess
 		defer close(out)
 		defer close(errs)
 
-		timeoutMs := opts.Timeout
-		if timeoutMs <= 0 {
-			timeoutMs = time.Second
-		}
-		timeoutValue := uint64(timeoutMs.Milliseconds())
+		timeoutValue := streamTimeoutMillis(opts.Timeout)
 
 		stream, err := p.OpenStream(opts.SinceSeq, opts.MaxMessages, &timeoutValue)
 		if err != nil {

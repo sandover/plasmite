@@ -15,8 +15,7 @@ async function main() {
     throw new Error("usage: cookbook_smoke_fixture.js <pool-dir>");
   }
   const poolDir = process.argv[2];
-  await fs.rm(poolDir, { recursive: true, force: true });
-  await fs.mkdir(poolDir, { recursive: true });
+  await fs.mkdir(poolDir);
 
   const client = new Client(poolDir);
   let pool = null;

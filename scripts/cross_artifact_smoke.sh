@@ -212,7 +212,7 @@ cat > "$WORKDIR/go-smoke.json" <<'JSON'
 {
   "conformance_version": 0,
   "name": "go-create-smoke",
-  "workdir": "go-work",
+  "workdir": "work-go",
   "steps": [
     {
       "op": "create_pool",
@@ -231,7 +231,7 @@ JSON
     CGO_LDFLAGS="-L$LIB_DIR" \
     go run ./cmd/plasmite-conformance "$WORKDIR/go-smoke.json"
 )
-check_pool_version "$WORKDIR/go-work/go-pool.plasmite"
-"$PLASMITE_BIN" --dir "$WORKDIR/go-work" pool info go-pool --json >/dev/null
+check_pool_version "$WORKDIR/work-go/go-pool.plasmite"
+"$PLASMITE_BIN" --dir "$WORKDIR/work-go" pool info go-pool --json >/dev/null
 
 echo "[smoke] complete"

@@ -79,43 +79,15 @@ class PlasmiteNativeError extends Error {
 }
 
 function parseNativeError(err) {
-  if (!(err instanceof Error) || typeof err.message !== "string") {
+  if (!(err instanceof Error) || !Object.hasOwn(err, "kind")) {
     return null;
   }
-  const prefix = "plasmite error:";
-  if (!err.message.startsWith(prefix)) {
-    return null;
-  }
-  const parts = err.message
-    .slice(prefix.length)
-    .split(";")
-    .map((part) => part.trim())
-    .filter(Boolean);
-  if (parts.length === 0) {
-    return null;
-  }
-  const details = {};
-  for (const part of parts) {
-    const [key, ...valueParts] = part.split("=");
-    if (!key || valueParts.length === 0) {
-      continue;
-    }
-    const value = valueParts.join("=");
-    if (key === "seq" || key === "offset") {
-      const parsed = Number(value);
-      details[key] = Number.isFinite(parsed) ? parsed : undefined;
-      continue;
-    }
-    if (key === "kind") {
-      details.kind = mapErrorKind(value);
-      continue;
-    }
-    details[key] = value;
-  }
-  if (details.kind === undefined) {
-    details.kind = ErrorKind.Io;
-  }
-  return new PlasmiteNativeError(err.message, details, err);
+  return new PlasmiteNativeError(err.message, {
+    kind: mapErrorKind(err.kind, ErrorKind.Io),
+    path: err.path,
+    seq: err.seq,
+    offset: err.offset,
+  }, err);
 }
 
 function wrapNativeError(err) {

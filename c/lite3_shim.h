@@ -79,6 +79,7 @@ int plasmite_lite3_arr_get_type(
         uint32_t index,
         uint8_t *out_type);
 
+/* out_ptr borrows bytes from buf; keep buf alive and do not free out_ptr. */
 int plasmite_lite3_arr_get_str(
         const unsigned char *buf,
         size_t buf_len,

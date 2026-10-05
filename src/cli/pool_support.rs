@@ -1,11 +1,11 @@
 //! CLI helpers for pool commands.
 
 use crate::pool_info_json::bounds_json;
+use plasmite::api::Bounds;
 use plasmite::api::Error;
 use plasmite::api::ErrorKind;
 use plasmite::api::LocalClient;
 use plasmite::api::PoolRef;
-use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
 use std::io;
@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use super::output_support::display_pool_dir_for_humans;
 use super::output_support::emit_table;
 use super::output_support::error_json;
+use super::output_support::error_message;
 use super::output_support::format_bytes;
 use super::output_support::format_relative_from_timestamp;
 use super::output_support::format_relative_time;
@@ -57,25 +58,78 @@ pub(crate) fn list_pool_paths(pool_dir: &Path) -> Result<Vec<PathBuf>, Error> {
     Ok(pools)
 }
 
-pub(crate) fn list_pools(pool_dir: &Path, client: &LocalClient) -> Vec<Value> {
+pub(crate) enum PoolListRow {
+    Pool {
+        name: String,
+        path: String,
+        file_size: u64,
+        bounds: Bounds,
+        mtime: Option<String>,
+    },
+    Error {
+        name: String,
+        path: String,
+        error: Error,
+    },
+}
+
+impl PoolListRow {
+    pub(crate) fn name(&self) -> &str {
+        match self {
+            Self::Pool { name, .. } | Self::Error { name, .. } => name,
+        }
+    }
+
+    pub(crate) fn path(&self) -> &str {
+        match self {
+            Self::Pool { path, .. } | Self::Error { path, .. } => path,
+        }
+    }
+
+    pub(crate) fn json(&self) -> Value {
+        match self {
+            Self::Pool {
+                name,
+                path,
+                file_size,
+                bounds,
+                mtime,
+            } => json!({
+                "name": name,
+                "path": path,
+                "file_size": file_size,
+                "bounds": bounds_json(*bounds),
+                "mtime": mtime,
+            }),
+            Self::Error { name, path, error } => json!({
+                "name": name,
+                "path": path,
+                "error": error_json(error),
+            }),
+        }
+    }
+}
+
+pub(crate) fn list_pools(pool_dir: &Path, client: &LocalClient) -> Result<Vec<PoolListRow>, Error> {
     let mut pools = Vec::new();
     let entries = match std::fs::read_dir(pool_dir) {
         Ok(entries) => entries,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return pools,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(pools),
         Err(err) => {
-            pools.push(pool_list_error(
-                "pools",
-                pool_dir,
-                Error::new(ErrorKind::Io)
-                    .with_message("failed to read pool directory")
-                    .with_path(pool_dir)
-                    .with_source(err),
-            ));
-            return pools;
+            return Err(Error::new(ErrorKind::Io)
+                .with_message("failed to read pool directory")
+                .with_path(pool_dir)
+                .with_source(err));
         }
     };
 
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry.map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_message("failed to read pool directory entry")
+                .with_path(pool_dir)
+                .with_source(err)
+        })?;
         let path = entry.path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("plasmite") {
             continue;
@@ -99,22 +153,17 @@ pub(crate) fn list_pools(pool_dir: &Path, client: &LocalClient) -> Vec<Value> {
                 continue;
             }
         };
-        let mtime = meta
-            .modified()
-            .ok()
-            .and_then(format_system_time)
-            .map(Value::String)
-            .unwrap_or(Value::Null);
+        let mtime = meta.modified().ok().and_then(format_system_time);
         let pool_ref = PoolRef::path(path.clone());
         match client.pool_info(&pool_ref) {
             Ok(info) => {
-                let mut map = Map::new();
-                map.insert("name".to_string(), json!(name));
-                map.insert("path".to_string(), json!(path.display().to_string()));
-                map.insert("file_size".to_string(), json!(info.file_size));
-                map.insert("bounds".to_string(), bounds_json(info.bounds));
-                map.insert("mtime".to_string(), mtime);
-                pools.push(Value::Object(map));
+                pools.push(PoolListRow::Pool {
+                    name,
+                    path: path.display().to_string(),
+                    file_size: info.file_size,
+                    bounds: info.bounds,
+                    mtime,
+                });
             }
             Err(err) => {
                 pools.push(pool_list_error(
@@ -126,11 +175,11 @@ pub(crate) fn list_pools(pool_dir: &Path, client: &LocalClient) -> Vec<Value> {
         }
     }
 
-    pools.sort_by_key(pool_list_name);
-    pools
+    pools.sort_by(|a, b| a.name().cmp(b.name()));
+    Ok(pools)
 }
 
-pub(crate) fn emit_pool_list_table(pools: &[Value], pool_dir: &Path, server: Option<&str>) {
+pub(crate) fn emit_pool_list_table(pools: &[PoolListRow], pool_dir: &Path, server: Option<&str>) {
     let interactive = io::stdout().is_terminal();
     if interactive && pools.is_empty() {
         if let Some(server) = server {
@@ -146,11 +195,9 @@ pub(crate) fn emit_pool_list_table(pools: &[Value], pool_dir: &Path, server: Opt
         return;
     }
 
-    let has_errors = pools.iter().any(|pool| {
-        pool.get("error")
-            .and_then(|value| value.get("error"))
-            .is_some()
-    });
+    let has_errors = pools
+        .iter()
+        .any(|pool| matches!(pool, PoolListRow::Error { .. }));
     let headers = if interactive && !has_errors {
         vec!["NAME", "SIZE", "MSGS", "MODIFIED", "PATH"]
     } else {
@@ -161,31 +208,15 @@ pub(crate) fn emit_pool_list_table(pools: &[Value], pool_dir: &Path, server: Opt
     let rows = pools
         .iter()
         .map(|pool| {
-            let name = pool
-                .get("name")
-                .and_then(|value| value.as_str())
-                .unwrap_or("-")
-                .to_string();
-            let path_value = pool
-                .get("path")
-                .and_then(|value| value.as_str())
-                .unwrap_or("-");
-            let display_path = if path_value == "-" {
-                "-".to_string()
-            } else if server.is_some() {
-                path_value.to_string()
+            let name = pool.name().to_string();
+            let display_path = if server.is_some() {
+                pool.path().to_string()
             } else {
-                short_display_path(Path::new(path_value), Some(pool_dir))
+                short_display_path(Path::new(pool.path()), Some(pool_dir))
             };
 
-            if let Some(error) = pool.get("error").and_then(|value| value.get("error")) {
-                let detail = error
-                    .get("message")
-                    .and_then(|value| value.as_str())
-                    .or_else(|| error.get("kind").and_then(|value| value.as_str()))
-                    .unwrap_or("error")
-                    .to_string();
-                vec![
+            match pool {
+                PoolListRow::Error { error, .. } => vec![
                     name,
                     "ERR".to_string(),
                     "-".to_string(),
@@ -193,62 +224,52 @@ pub(crate) fn emit_pool_list_table(pools: &[Value], pool_dir: &Path, server: Opt
                     "-".to_string(),
                     "-".to_string(),
                     display_path,
-                    detail,
-                ]
-            } else {
-                let oldest = pool
-                    .get("bounds")
-                    .and_then(|value| value.get("oldest"))
-                    .and_then(|value| value.as_u64());
-                let newest = pool
-                    .get("bounds")
-                    .and_then(|value| value.get("newest"))
-                    .and_then(|value| value.as_u64());
-                let msg_count = match (oldest, newest) {
-                    (Some(a), Some(b)) => b.saturating_sub(a).saturating_add(1),
-                    _ => 0,
-                };
-                let size = pool
-                    .get("file_size")
-                    .and_then(|value| value.as_u64())
-                    .map(|value| {
-                        if interactive {
-                            format_bytes(value)
-                        } else {
-                            value.to_string()
-                        }
-                    })
-                    .unwrap_or_else(|| "-".to_string());
-                let oldest_str = oldest
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| "-".to_string());
-                let newest_str = newest
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| "-".to_string());
-                let mtime = pool
-                    .get("mtime")
-                    .and_then(|value| value.as_str())
-                    .map(|value| {
-                        if interactive {
-                            format_relative_from_timestamp(value)
-                        } else {
-                            value.to_string()
-                        }
-                    })
-                    .unwrap_or_else(|| "-".to_string());
-                if interactive && !has_errors {
-                    vec![name, size, msg_count.to_string(), mtime, display_path]
-                } else {
-                    vec![
-                        name,
-                        "OK".to_string(),
-                        size,
-                        oldest_str,
-                        newest_str,
-                        mtime,
-                        display_path,
-                        String::new(),
-                    ]
+                    error_message(error),
+                ],
+                PoolListRow::Pool {
+                    file_size,
+                    bounds,
+                    mtime,
+                    ..
+                } => {
+                    let oldest = bounds.oldest_seq;
+                    let newest = bounds.newest_seq;
+                    let msg_count = message_count_from_bounds(oldest, newest);
+                    let size = if interactive {
+                        format_bytes(*file_size)
+                    } else {
+                        file_size.to_string()
+                    };
+                    let oldest_str = oldest
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_string());
+                    let newest_str = newest
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_string());
+                    let mtime = mtime
+                        .as_deref()
+                        .map(|value| {
+                            if interactive {
+                                format_relative_from_timestamp(value)
+                            } else {
+                                value.to_string()
+                            }
+                        })
+                        .unwrap_or_else(|| "-".to_string());
+                    if interactive && !has_errors {
+                        vec![name, size, msg_count.to_string(), mtime, display_path]
+                    } else {
+                        vec![
+                            name,
+                            "OK".to_string(),
+                            size,
+                            oldest_str,
+                            newest_str,
+                            mtime,
+                            display_path,
+                            String::new(),
+                        ]
+                    }
                 }
             }
         })
@@ -341,20 +362,12 @@ pub(crate) fn emit_pool_create_table(created: &[Value], pool_dir: &Path) {
     emit_table(&headers, &rows);
 }
 
-pub(crate) fn pool_list_error(name: &str, path: &Path, err: Error) -> Value {
-    let mut map = Map::new();
-    map.insert("name".to_string(), json!(name));
-    map.insert("path".to_string(), json!(path.display().to_string()));
-    map.insert("error".to_string(), error_json(&err));
-    Value::Object(map)
-}
-
-pub(crate) fn pool_list_name(value: &Value) -> String {
-    value
-        .get("name")
-        .and_then(|name| name.as_str())
-        .unwrap_or("")
-        .to_string()
+fn pool_list_error(name: &str, path: &Path, error: Error) -> PoolListRow {
+    PoolListRow::Error {
+        name: name.to_string(),
+        path: path.display().to_string(),
+        error,
+    }
 }
 
 pub(crate) fn emit_pool_info_pretty(pool_ref: &str, info: &plasmite::api::PoolInfo) {

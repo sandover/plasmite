@@ -13,7 +13,7 @@ pub(crate) fn parse_since_ns(input: &str, now_ns: u64) -> Result<u64, Parse> {
 
 pub(crate) fn parse_rfc3339_ns(input: &str) -> Result<u64, Parse> {
     let timestamp = OffsetDateTime::parse(input.trim(), &Rfc3339)?;
-    Ok(timestamp.unix_timestamp_nanos().max(0) as u64)
+    Ok(timestamp.unix_timestamp_nanos().clamp(0, u64::MAX as i128) as u64)
 }
 
 fn parse_relative_ns(input: &str) -> Option<u64> {
@@ -52,5 +52,9 @@ mod tests {
             300_000_000_000
         );
         assert!(parse_since_ns("5é", 0).is_err());
+        assert_eq!(
+            parse_since_ns("9999-12-31T23:59:59Z", 0).expect("far future"),
+            u64::MAX
+        );
     }
 }

@@ -24,6 +24,28 @@ import (
 
 const testPoolSizeBytes uint64 = 1024 * 1024
 
+func TestStreamTimeoutMillis(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		timeout time.Duration
+		want    uint64
+	}{
+		{"default zero", 0, 1000},
+		{"default negative", -time.Nanosecond, 1000},
+		{"smallest positive", time.Nanosecond, 1},
+		{"just below one millisecond", time.Millisecond - time.Nanosecond, 1},
+		{"one millisecond", time.Millisecond, 1},
+		{"whole milliseconds", 1500 * time.Microsecond, 1},
+		{"larger timeout", 2 * time.Second, 2000},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := streamTimeoutMillis(test.timeout); got != test.want {
+				t.Fatalf("timeout %s: got %d ms, want %d ms", test.timeout, got, test.want)
+			}
+		})
+	}
+}
+
 func newTestClient(t *testing.T) *Client {
 	t.Helper()
 	poolDir := filepath.Join(t.TempDir(), "pools")

@@ -38,12 +38,12 @@ class BuildPyWithNativeBundle(build_py):
     )
 
     def run(self) -> None:
-        self._bundle_native_assets()
         super().run()
+        self._bundle_native_assets()
 
     def _bundle_native_assets(self) -> None:
         project_root = Path(__file__).resolve().parent
-        package_native_dir = project_root / "plasmite" / "_native"
+        package_native_dir = Path(self.build_lib) / "plasmite" / "_native"
         package_native_dir.mkdir(parents=True, exist_ok=True)
 
         for filename in self._NATIVE_FILES:
@@ -52,34 +52,35 @@ class BuildPyWithNativeBundle(build_py):
                 candidate.unlink()
 
         for src in self._native_candidates(project_root):
-            if src.exists():
+            if src.is_file():
                 dst = package_native_dir / src.name
                 shutil.copy2(src, dst)
                 if src.name == "plasmite":
                     dst.chmod(0o755)
 
     def _native_candidates(self, project_root: Path) -> list[Path]:
+        if sys.platform == "win32":
+            lib_name, cli_name = "plasmite.dll", "plasmite.exe"
+        elif sys.platform == "darwin":
+            lib_name, cli_name = "libplasmite.dylib", "plasmite"
+        elif sys.platform.startswith("linux"):
+            lib_name, cli_name = "libplasmite.so", "plasmite"
+        else:
+            return []
+
         sdk_dir_env = os.environ.get("PLASMITE_SDK_DIR")
         if sdk_dir_env:
             sdk_dir = Path(sdk_dir_env)
             return [
-                sdk_dir / "lib" / "plasmite.dll",
-                sdk_dir / "lib" / "libplasmite.dylib",
-                sdk_dir / "lib" / "libplasmite.so",
-                sdk_dir / "lib" / "libplasmite.a",
-                sdk_dir / "bin" / "plasmite.exe",
-                sdk_dir / "bin" / "plasmite",
+                sdk_dir / "lib" / lib_name,
+                sdk_dir / "bin" / cli_name,
             ]
 
         repo_root = project_root.parent.parent
         target_debug = repo_root / "target" / "debug"
         return [
-            target_debug / "plasmite.dll",
-            target_debug / "libplasmite.dylib",
-            target_debug / "libplasmite.so",
-            target_debug / "libplasmite.a",
-            target_debug / "plasmite.exe",
-            target_debug / "plasmite",
+            target_debug / lib_name,
+            target_debug / cli_name,
         ]
 
 

@@ -16,7 +16,7 @@ use super::stream_support::{
 use super::support::{
     DEFAULT_POOL_SIZE, add_missing_pool_create_hint, ensure_pool_dir,
     follow_exact_create_command_hint, now_ns, parse_duration, parse_since, remote_client,
-    resolve_pool_target, retry_with_config,
+    resolve_pool_target,
 };
 use crate::jq_filter::compile_filters;
 use crate::{ErrorPolicyCli, FollowFormat, InputMode, PoolTarget};
@@ -77,11 +77,10 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
             FollowFormat::Pretty
         });
     let pretty = matches!(format, FollowFormat::Pretty);
-    let now = now_ns()?;
-    let _validated_since = args
+    let since_ns = args
         .since
         .as_deref()
-        .map(|value| parse_since(value, now))
+        .map(|value| parse_since(value, now_ns()?))
         .transpose()?;
     let timeout_input = args.timeout.as_deref();
     let timeout = timeout_input.map(parse_duration).transpose()?;
@@ -117,7 +116,7 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
         one: args.one,
         timeout,
         data_only: args.data_only,
-        since_input: args.since.clone(),
+        since_ns,
         no_follow: args.no_follow || args.replay.is_some(),
         required_tags: args.tags,
         where_predicates: compile_filters(&args.where_expr)?,
@@ -224,11 +223,10 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
             FollowFormat::Pretty
         });
     let pretty = matches!(format, FollowFormat::Pretty);
-    let now = now_ns()?;
-    let _validated_since = args
+    let since_ns = args
         .since
         .as_deref()
-        .map(|value| parse_since(value, now))
+        .map(|value| parse_since(value, now_ns()?))
         .transpose()?;
     let timeout_input = args.timeout.as_deref();
     let timeout = timeout_input.map(parse_duration).transpose()?;
@@ -257,7 +255,7 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
         one: false,
         timeout,
         data_only: false,
-        since_input: args.since.clone(),
+        since_ns,
         no_follow: false,
         required_tags: Vec::new(),
         where_predicates: compile_filters(&[])?,
@@ -335,13 +333,11 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                                 Ok(payload) => payload,
                                 Err(err) => return Err(err),
                             };
-                            retry_with_config(None, || {
-                                let timestamp_ns = now_ns()?;
-                                let options = AppendOptions::new(timestamp_ns, Durability::Fast);
-                                send_pool
-                                    .append_with_options(payload.as_slice(), options)
-                                    .map(|_| ())
-                            })
+                            let timestamp_ns = now_ns()?;
+                            let options = AppendOptions::new(timestamp_ns, Durability::Fast);
+                            send_pool
+                                .append_with_options(payload.as_slice(), options)
+                                .map(|_| ())
                         },
                     );
                     let _ = send_tx.send((DuplexSide::Send, outcome));

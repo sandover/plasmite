@@ -335,10 +335,28 @@ test("native errors expose structured metadata", () => {
   });
 });
 
+test("native error paths do not become error metadata", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "plasmite-native-error-"));
+  const poolDir = path.join(directory, "pools; seq=99; message=injected");
+  const client = new Client(poolDir);
+  try {
+    assert.throws(() => client.openPool("missing"), (err) => {
+      assert.ok(err instanceof PlasmiteNativeError);
+      assert.equal(err.kind, ErrorKind.NotFound);
+      assert.equal(err.path, path.join(poolDir, "missing.plasmite"));
+      assert.equal(err.seq, undefined);
+      return true;
+    });
+  } finally {
+    client.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("native errors with unknown kind default to Io", () => {
   const pool = new Pool({
     appendJson() {
-      throw new Error("plasmite error: kind=NoSuchKind; message=bad");
+      throw Object.assign(new Error("plasmite error: kind=NoSuchKind; message=bad"), { kind: "NoSuchKind" });
     },
   });
 

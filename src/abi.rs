@@ -151,6 +151,12 @@ pub extern "C" fn plsm_pool_create(
     out_pool: *mut *mut plsm_pool,
     out_err: *mut *mut plsm_error,
 ) -> i32 {
+    if out_pool.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("out_pool is null"),
+        );
+    }
     let client = match borrow_client(client, out_err) {
         Ok(client) => client,
         Err(code) => return code,
@@ -172,12 +178,6 @@ pub extern "C" fn plsm_pool_create(
         },
         Err(err) => return fail(out_err, err),
     };
-    if out_pool.is_null() {
-        return fail(
-            out_err,
-            Error::new(ErrorKind::Usage).with_message("out_pool is null"),
-        );
-    }
     let handle = Box::new(plsm_pool { pool });
     unsafe {
         *out_pool = Box::into_raw(handle);
@@ -238,6 +238,12 @@ pub extern "C" fn plsm_pool_append_json(
     out_message: *mut plsm_buf,
     out_err: *mut *mut plsm_error,
 ) -> i32 {
+    if out_message.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("out_message is null"),
+        );
+    }
     let pool = match borrow_pool(pool, out_err) {
         Ok(pool) => pool,
         Err(code) => return code,
@@ -437,6 +443,12 @@ pub extern "C" fn plsm_stream_next(
     out_message: *mut plsm_buf,
     out_err: *mut *mut plsm_error,
 ) -> i32 {
+    if out_message.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("out_message is null"),
+        );
+    }
     let stream = match borrow_stream(stream, out_err) {
         Ok(stream) => stream,
         Err(code) => return code,
@@ -565,6 +577,12 @@ pub extern "C" fn plsm_lite3_stream_next(
     out_frame: *mut plsm_lite3_frame,
     out_err: *mut *mut plsm_error,
 ) -> i32 {
+    if out_frame.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("out_frame is null"),
+        );
+    }
     let stream = match borrow_lite3_stream(stream, out_err) {
         Ok(stream) => stream,
         Err(code) => return code,

@@ -213,7 +213,7 @@ INPUT AND OUTPUT
             help = "Pool size when creating (bytes or K/M/G; requires --create)"
         )]
         create_size: Option<String>,
-        #[arg(long, default_value_t = 0, help = "Retry count for transient failures")]
+        #[arg(long, default_value_t = 0, help = "Retry count for Busy errors")]
         retry: u32,
         #[arg(
             long,

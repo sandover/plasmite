@@ -966,6 +966,11 @@ async fn access_status(State(state): State<Arc<AppState>>) -> Response {
             Error::new(ErrorKind::Permission).with_message("access administration is local only"),
         );
     }
+    let pool_dir_identity = match crate::serve_registry::directory_identity(state.client.pool_dir())
+    {
+        Ok(identity) => identity,
+        Err(err) => return error_response(err),
+    };
     // The pool directory and this machine's addresses let the page show the
     // exact command to start sharing.
     let pool_dir = state.client.pool_dir().display().to_string();
@@ -974,6 +979,7 @@ async fn access_status(State(state): State<Arc<AppState>>) -> Response {
         return json_response(json!({
             "ready": false,
             "pool_dir": pool_dir,
+        "pool_dir_identity": pool_dir_identity,
             "addresses": addresses,
             "next_action": "Start secure serving with --shared-address to invite others."
         }));
@@ -981,6 +987,7 @@ async fn access_status(State(state): State<Arc<AppState>>) -> Response {
     json_response(json!({
         "ready": access.shared_address().is_some(),
         "pool_dir": pool_dir,
+        "pool_dir_identity": pool_dir_identity,
         "addresses": addresses,
         "server_fingerprint": access.fingerprint(),
         "shared_address": access.shared_address(),

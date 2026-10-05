@@ -7,7 +7,7 @@ use super::output::emit_json;
 use super::output_support::display_pool_dir_for_humans;
 use super::output_support::{emit_table, error_json, short_display_path};
 use super::pool_support::{
-    emit_pool_create_table, emit_pool_info_pretty, emit_pool_list_table, list_pools,
+    PoolListRow, emit_pool_create_table, emit_pool_info_pretty, emit_pool_list_table, list_pools,
 };
 use super::result::CommandResult;
 use super::support::{
@@ -18,6 +18,7 @@ use crate::pool_info_json::pool_info_json;
 use crate::{PoolCommand, PoolTarget};
 use plasmite::api::{Error, ErrorKind, LocalClient, PoolOptions, PoolRef, to_exit_code};
 use serde_json::json;
+use std::collections::HashSet;
 use std::io::{self, IsTerminal};
 
 pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandResult, Error> {
@@ -40,28 +41,34 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                 .map(parse_size)
                 .transpose()?
                 .unwrap_or(DEFAULT_POOL_SIZE);
-            ensure_pool_dir(pool_dir)?;
-            let mut results = Vec::new();
-            for name in names {
-                let path = resolve_poolref(&name, pool_dir)?;
-                if path.exists() {
+            let mut options = PoolOptions::new(size);
+            if let Some(index_capacity) = index_capacity {
+                let index_size_bytes = index_capacity as u64 * 16;
+                if index_size_bytes > size / 2 {
+                    return Err(Error::new(ErrorKind::Usage)
+                        .with_message("index capacity is too large for pool size")
+                        .with_hint(
+                            "Reduce --index-capacity or increase --size (index region must be <= 50% of the pool file).",
+                        ));
+                }
+                options = options.with_index_capacity(index_capacity);
+            }
+            let paths = names
+                .iter()
+                .map(|name| resolve_poolref(name, pool_dir))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut seen = HashSet::new();
+            for path in &paths {
+                if !seen.insert(path) || path.exists() {
                     return Err(Error::new(ErrorKind::AlreadyExists)
                         .with_message("pool already exists")
-                        .with_path(&path)
+                        .with_path(path)
                         .with_hint("Choose a different name or remove the existing pool file."));
                 }
-                let mut options = PoolOptions::new(size);
-                if let Some(index_capacity) = index_capacity {
-                    let index_size_bytes = index_capacity as u64 * 16;
-                    if index_size_bytes > size / 2 {
-                        return Err(Error::new(ErrorKind::Usage)
-                            .with_message("index capacity is too large for pool size")
-                            .with_hint(
-                                "Reduce --index-capacity or increase --size (index region must be <= 50% of the pool file).",
-                            ));
-                    }
-                    options = options.with_index_capacity(index_capacity);
-                }
+            }
+            ensure_pool_dir(pool_dir)?;
+            let mut results = Vec::new();
+            for (name, path) in names.into_iter().zip(paths) {
                 let pool_ref = PoolRef::path(path);
                 let info = client.create_pool(&pool_ref, options)?;
                 results.push(pool_info_json(&name, &info));
@@ -299,24 +306,25 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                             let path = info.path.to_string_lossy();
                             let file = path.rsplit(['/', '\\']).next().unwrap_or("unknown");
                             let name = file.strip_suffix(".plasmite").unwrap_or(file);
-                            json!({
-                                "name": name,
-                                "path": info.path.display().to_string(),
-                                "file_size": info.file_size,
-                                "bounds": crate::pool_info_json::bounds_json(info.bounds),
-                                "mtime": null,
-                            })
+                            PoolListRow::Pool {
+                                name: name.to_string(),
+                                path: info.path.display().to_string(),
+                                file_size: info.file_size,
+                                bounds: info.bounds,
+                                mtime: None,
+                            }
                         })
                         .collect::<Vec<_>>();
-                    pools.sort_by_key(super::pool_support::pool_list_name);
+                    pools.sort_by(|a, b| a.name().cmp(b.name()));
                     pools
                 }
                 None => {
                     let client = LocalClient::new().with_pool_dir(pool_dir);
-                    list_pools(pool_dir, &client)
+                    list_pools(pool_dir, &client)?
                 }
             };
             if json_output {
+                let pools = pools.iter().map(PoolListRow::json).collect::<Vec<_>>();
                 emit_json(json!({ "pools": pools }), context.color_mode());
             } else {
                 emit_pool_list_table(&pools, pool_dir, server.as_deref());

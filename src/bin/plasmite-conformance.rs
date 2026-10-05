@@ -49,10 +49,11 @@ fn run() -> Result<(), String> {
         return Err(format!("unsupported conformance_version: {version}"));
     }
 
-    let workdir = manifest
-        .get("workdir")
-        .and_then(Value::as_str)
-        .unwrap_or("work");
+    let workdir = match manifest.get("workdir") {
+        None => "work",
+        Some(value) => value.as_str().ok_or("workdir must be a directory name")?,
+    };
+    validate_workdir_name(workdir)?;
     let workdir_path = manifest_dir.join(workdir);
     reset_workdir(&workdir_path)?;
 
@@ -245,7 +246,26 @@ fn expect_retention_gap(
     }
 }
 
+fn validate_workdir_name(name: &str) -> Result<(), String> {
+    let scratch_name = name == "work"
+        || name.strip_prefix("work-").is_some_and(|suffix| {
+            !suffix.is_empty()
+                && suffix
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        });
+    if !scratch_name {
+        return Err(
+            "workdir must be work or work- followed by ASCII letters, digits, _ or -".to_string(),
+        );
+    }
+    Ok(())
+}
+
 fn reset_workdir(path: &Path) -> Result<(), String> {
+    if path.is_symlink() {
+        return Err("workdir must not be a symlink".to_string());
+    }
     if path.exists() {
         fs::remove_dir_all(path)
             .map_err(|err| format!("failed to clear workdir {}: {err}", path.display()))?;
@@ -901,4 +921,45 @@ fn step_err(index: usize, step_id: &Option<String>, message: &str) -> String {
     out.push_str(": ");
     out.push_str(message);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_workdirs_that_can_escape_the_manifest_directory() {
+        for name in [
+            "src",
+            "work-",
+            "work.",
+            "work-..",
+            "",
+            ".",
+            "..",
+            "../pools",
+            "/tmp/pools",
+            "a/b",
+            "a\\b",
+            "C:pools",
+            "a\0b",
+        ] {
+            assert!(validate_workdir_name(name).is_err(), "accepted {name:?}");
+        }
+        assert!(validate_workdir_name("work-retention-gap").is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_workdir_symlink_without_changing_its_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("keep"), b"unchanged").unwrap();
+        let work = temp.path().join("work");
+        std::os::unix::fs::symlink(&target, &work).unwrap();
+        assert!(reset_workdir(&work).is_err());
+        assert!(work.is_symlink());
+        assert_eq!(fs::read(target.join("keep")).unwrap(), b"unchanged");
+    }
 }

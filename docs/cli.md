@@ -214,3 +214,10 @@ also have specific meanings:
 
 For examples, see the [cookbook](cookbook.md). For stable scripting contracts,
 see the [CLI specification](../spec/v0/SPEC.md).
+
+### Retrying writes
+
+With `feed --retry`, local and remote appends retry `Busy` errors.
+An I/O failure ends the command: a local flush or remote connection can fail
+while the message already exists in the pool. Check the pool before sending
+it again.
