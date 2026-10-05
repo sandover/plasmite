@@ -182,6 +182,7 @@ pub(super) fn merge(previous: Option<&Setup>, new: &ServeRunArgs) -> Result<Serv
     effective_args(&run)
 }
 
+#[cfg(not(windows))]
 impl Setup {
     fn argv(&self) -> Vec<String> {
         let mut argv = vec![
@@ -220,5 +221,12 @@ impl Setup {
     }
 }
 
+#[cfg(not(windows))]
 mod unix;
+#[cfg(not(windows))]
 pub(crate) use unix::{all, control, install, logs};
+
+#[cfg(windows)]
+pub(crate) mod windows;
+#[cfg(windows)]
+pub(crate) use windows::{all, control, install, logs};

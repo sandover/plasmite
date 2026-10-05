@@ -358,6 +358,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $PSNativeCommandUseErrorActionPreference = $true
           cargo test --release --lib windows_private::tests -- --test-threads=1
+          cargo test --release --bin plasmite serve_service::windows::tests -- --test-threads=1
           cargo test --release --test secure_sharing --test access_lifecycle --test browser_access --test oauth_access -- --test-threads=1
       - name: Local pool roundtrip smoke
         shell: pwsh

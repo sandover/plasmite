@@ -48,6 +48,10 @@ impl Drop for RegisteredServer {
 }
 
 fn directory() -> Result<PathBuf, Error> {
+    #[cfg(windows)]
+    if let Some(directory) = crate::serve_service::windows::registry_directory() {
+        return Ok(directory);
+    }
     let home = std::env::var_os("HOME");
     #[cfg(windows)]
     let home = home.or_else(|| std::env::var_os("USERPROFILE"));
@@ -116,10 +120,17 @@ pub(crate) fn register(
 }
 
 pub(crate) fn running() -> Result<Vec<ServerDetails>, Error> {
-    running_in(&directory()?)
+    let mut servers = running_in(&directory()?)?;
+    #[cfg(windows)]
+    if crate::serve_service::windows::registry_directory().is_none() {
+        servers.extend(crate::serve_service::windows::running()?);
+    }
+    servers.sort_by(|a, b| (&a.pool_dir, a.pid).cmp(&(&b.pool_dir, b.pid)));
+    servers.dedup();
+    Ok(servers)
 }
 
-fn running_in(directory: &Path) -> Result<Vec<ServerDetails>, Error> {
+pub(crate) fn running_in(directory: &Path) -> Result<Vec<ServerDetails>, Error> {
     let entries = match std::fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -127,8 +138,8 @@ fn running_in(directory: &Path) -> Result<Vec<ServerDetails>, Error> {
     };
     crate::access_store::ensure_private(directory)?;
     #[cfg(windows)]
-    let _guard = crate::windows_private::open_directory(directory)
-        .map_err(|err| io_error(directory, err))?;
+    let _guard =
+        crate::server_private::open_directory(directory).map_err(|err| io_error(directory, err))?;
     let agent = ureq::AgentBuilder::new()
         .redirects(0)
         .try_proxy_from_env(false)

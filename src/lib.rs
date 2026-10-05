@@ -12,4 +12,8 @@ pub mod notice;
 mod pool_paths;
 mod since;
 #[cfg(windows)]
+#[expect(
+    dead_code,
+    reason = "The CLI also compiles this module and uses its server-only Windows service policies."
+)]
 mod windows_private;
