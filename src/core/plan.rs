@@ -252,6 +252,9 @@ fn plan_drop_step(
             Ok(Some((step, 0, oldest_seq)))
         }
         FrameState::Committed => {
+            if frame.seq != oldest_seq {
+                return Err(Error::new(ErrorKind::Corrupt).with_message("tail seq mismatch"));
+            }
             let frame_len = frame::frame_total_len(FRAME_HEADER_LEN, frame.payload_len as usize)
                 .ok_or_else(|| {
                     Error::new(ErrorKind::Corrupt).with_message("frame length overflow")

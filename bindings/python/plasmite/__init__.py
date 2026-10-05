@@ -214,6 +214,7 @@ _LIB = _load_lib()
 
 DEFAULT_POOL_SIZE_BYTES = 1024 * 1024
 DEFAULT_POOL_SIZE = DEFAULT_POOL_SIZE_BYTES
+_UINT64_MAX = (1 << 64) - 1
 
 
 def default_pool_dir() -> str:
@@ -466,6 +467,8 @@ def _ensure_non_negative_int(value: int, name: str) -> int:
         raise TypeError(f"{name} must be an int")
     if value < 0:
         raise ValueError(f"{name} must be >= 0")
+    if value > _UINT64_MAX:
+        raise ValueError(f"{name} must fit an unsigned 64-bit integer")
     return value
 
 
