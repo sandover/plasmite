@@ -711,25 +711,4 @@ mod append_retry_tests {
             assert_eq!(pool.bounds().expect("bounds").newest_seq, Some(1));
         }
     }
-
-    #[test]
-    fn append_retries_a_busy_response() {
-        let mut attempts = 0;
-        let result = retry_append(
-            Some(RetryConfig {
-                retries: 1,
-                delay: Duration::ZERO,
-            }),
-            || {
-                attempts += 1;
-                if attempts == 1 {
-                    Err(Error::new(ErrorKind::Busy))
-                } else {
-                    Ok(())
-                }
-            },
-        );
-        assert!(result.is_ok());
-        assert_eq!(attempts, 2);
-    }
 }

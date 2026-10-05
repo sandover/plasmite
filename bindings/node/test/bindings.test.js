@@ -86,7 +86,7 @@ async function withPoolAsync(poolName, run, sizeBytes = TEST_POOL_SIZE_BYTES) {
 
 test("append/get supports large payload and tags", () => {
   withPool("big", ({ pool }) => {
-    const payload = { blob: "x".repeat(64 * 1024) };
+    const payload = { blob: "0123456789abcdef".repeat(4096) };
     const tags = ["alpha", "beta", "gamma"];
     const messageBuf = pool.appendJson(
       Buffer.from(JSON.stringify(payload)),
@@ -94,12 +94,12 @@ test("append/get supports large payload and tags", () => {
       Durability.Fast
     );
     const message = JSON.parse(messageBuf.toString("utf8"));
-    assert.equal(message.data.blob.length, payload.blob.length);
+    assert.deepEqual(message.data, payload);
     assert.deepEqual(message.meta.tags, tags);
 
     const fetchedBuf = pool.getJson(BigInt(message.seq));
     const fetched = JSON.parse(fetchedBuf.toString("utf8"));
-    assert.equal(fetched.data.blob.length, payload.blob.length);
+    assert.deepEqual(fetched.data, payload);
   });
 });
 
