@@ -290,3 +290,4 @@
 {"version":1,"task_id":"4YBGSG","kind":"done","at":"2026-10-05T20:40:22.563072Z","agent":"codex@mac","text":"Verified real reboot before sign-in, late selected-IP recovery, Mac HTTPS/MCP, docs/help, review and gates. Merged and pushed main at 977b3e7; native proof and limitations in docs/record/windows-boot-validation.md."}
 {"version":1,"task_id":"7545PD","kind":"created","at":"2026-10-05T22:40:20.284532Z"}
 {"version":1,"task_id":"GBHADE","kind":"created","at":"2026-10-05T22:40:20.284555Z"}
+{"version":1,"task_id":"GBHADE","kind":"done","at":"2026-10-05T22:56:26.197261Z","text":"Resolved by 150053e. Independent Sol-high review approved exact source. Canonical three-run benchmark: 66 comparable scenarios, zero blocking regressions. Full just release-gate passed; evidence under .scratch/release."}
