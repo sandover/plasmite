@@ -3,13 +3,13 @@ Purpose: Provide a Node N-API binding over the libplasmite C ABI.
 Key Exports: Client, Pool, Stream, Durability, ErrorKind.
 Role: Official Node/TypeScript binding that mirrors the v0 API contract.
 Invariants: Calls into C ABI only; JSON bytes in/out; explicit Close methods.
-Invariants: Errors include stable kinds and context in message text.
+Invariants: Errors carry stable kinds and context as own JavaScript properties.
 Notes: The addon links against libplasmite and does not re-implement internals.
 */
 
 use libc::{c_char, c_int};
 use napi::bindgen_prelude::{BigInt, Buffer, Either, Status};
-use napi::{Error, Result};
+use napi::{Env, Error, Result};
 use napi_derive::napi;
 use std::ffi::{CStr, CString};
 use std::ptr;
@@ -214,38 +214,38 @@ pub struct Client {
 #[napi]
 impl Client {
     #[napi(constructor)]
-    pub fn new(pool_dir: String) -> Result<Self> {
+    pub fn new(env: Env, pool_dir: String) -> Result<Self> {
         let pool_dir = CString::new(pool_dir).map_err(|_| Error::new(Status::InvalidArg, "pool_dir contains NUL"))?;
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
         let rc = unsafe { plsm_client_new(pool_dir.as_ptr(), &mut out, &mut err) };
         if rc != 0 {
-            return Err(take_error(err));
+            return Err(take_error(env, err)?);
         }
         Ok(Self { ptr: out })
     }
 
     #[napi]
-    pub fn create_pool(&self, pool_ref: String, size_bytes: Either<u32, BigInt>) -> Result<Pool> {
+    pub fn create_pool(&self, env: Env, pool_ref: String, size_bytes: Either<u32, BigInt>) -> Result<Pool> {
         let pool_ref = CString::new(pool_ref).map_err(|_| Error::new(Status::InvalidArg, "pool_ref contains NUL"))?;
         let size_bytes = to_u64(size_bytes, "size_bytes")?;
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
         let rc = unsafe { plsm_pool_create(self.ptr, pool_ref.as_ptr(), size_bytes, &mut out, &mut err) };
         if rc != 0 {
-            return Err(take_error(err));
+            return Err(take_error(env, err)?);
         }
         Ok(Pool { ptr: out })
     }
 
     #[napi]
-    pub fn open_pool(&self, pool_ref: String) -> Result<Pool> {
+    pub fn open_pool(&self, env: Env, pool_ref: String) -> Result<Pool> {
         let pool_ref = CString::new(pool_ref).map_err(|_| Error::new(Status::InvalidArg, "pool_ref contains NUL"))?;
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
         let rc = unsafe { plsm_pool_open(self.ptr, pool_ref.as_ptr(), &mut out, &mut err) };
         if rc != 0 {
-            return Err(take_error(err));
+            return Err(take_error(env, err)?);
         }
         Ok(Pool { ptr: out })
     }
@@ -282,7 +282,7 @@ pub struct Lite3Frame {
 #[napi]
 impl Pool {
     #[napi]
-    pub fn append_json(&self, payload: Buffer, tags: Vec<String>, durability: Durability) -> Result<Buffer> {
+    pub fn append_json(&self, env: Env, payload: Buffer, tags: Vec<String>, durability: Durability) -> Result<Buffer> {
         let c_tags = CStringArray::new(&tags)?;
         let mut out = plsm_buf_t { data: ptr::null_mut(), len: 0 };
         let mut err = ptr::null_mut();
@@ -299,13 +299,13 @@ impl Pool {
             )
         };
         if rc != 0 {
-            return Err(take_error(err));
+            return Err(take_error(env, err)?);
         }
         Ok(copy_and_free_buf(out))
     }
 
     #[napi]
-    pub fn append_lite3(&self, payload: Buffer, durability: Durability) -> Result<BigInt> {
+    pub fn append_lite3(&self, env: Env, payload: Buffer, durability: Durability) -> Result<BigInt> {
         let mut seq = 0u64;
         let mut err = ptr::null_mut();
         let rc = unsafe {
@@ -319,25 +319,25 @@ impl Pool {
             )
         };
         if rc != 0 {
-            return Err(take_error(err));
+            return Err(take_error(env, err)?);
         }
         Ok(BigInt::from(seq))
     }
 
     #[napi]
-    pub fn get_json(&self, seq: Either<u32, BigInt>) -> Result<Buffer> {
+    pub fn get_json(&self, env: Env, seq: Either<u32, BigInt>) -> Result<Buffer> {
         let seq = to_u64(seq, "seq")?;
         let mut out = plsm_buf_t { data: ptr::null_mut(), len: 0 };
         let mut err = ptr::null_mut();
         let rc = unsafe { plsm_pool_get_json(self.ptr, seq, &mut out, &mut err) };
         if rc != 0 {
-            return Err(take_error(err));
+            return Err(take_error(env, err)?);
         }
         Ok(copy_and_free_buf(out))
     }
 
     #[napi]
-    pub fn get_lite3(&self, seq: Either<u32, BigInt>) -> Result<Lite3Frame> {
+    pub fn get_lite3(&self, env: Env, seq: Either<u32, BigInt>) -> Result<Lite3Frame> {
         let seq = to_u64(seq, "seq")?;
         let mut out = plsm_lite3_frame_t {
             seq: 0,
@@ -348,7 +348,7 @@ impl Pool {
         let mut err = ptr::null_mut();
         let rc = unsafe { plsm_pool_get_lite3(self.ptr, seq, &mut out, &mut err) };
         if rc != 0 {
-            return Err(take_error(err));
+            return Err(take_error(env, err)?);
         }
         Ok(copy_and_free_lite3_frame(out))
     }
@@ -356,6 +356,7 @@ impl Pool {
     #[napi]
     pub fn open_stream(
         &self,
+        env: Env,
         since_seq: Option<Either<u32, BigInt>>,
         max_messages: Option<Either<u32, BigInt>>,
         timeout_ms: Option<Either<u32, BigInt>>,
@@ -385,7 +386,7 @@ impl Pool {
             }
         };
         if rc != 0 {
-            return Err(take_error(err));
+            return Err(take_error(env, err)?);
         }
         Ok(Stream { ptr: out })
     }
@@ -393,6 +394,7 @@ impl Pool {
     #[napi]
     pub fn open_lite3_stream(
         &self,
+        env: Env,
         since_seq: Option<Either<u32, BigInt>>,
         max_messages: Option<Either<u32, BigInt>>,
         timeout_ms: Option<Either<u32, BigInt>>,
@@ -422,7 +424,7 @@ impl Pool {
             }
         };
         if rc != 0 {
-            return Err(take_error(err));
+            return Err(take_error(env, err)?);
         }
         Ok(Lite3Stream { ptr: out })
     }
@@ -450,14 +452,14 @@ pub struct Stream {
 #[napi]
 impl Stream {
     #[napi]
-    pub fn next_json(&self) -> Result<Option<Buffer>> {
+    pub fn next_json(&self, env: Env) -> Result<Option<Buffer>> {
         let mut out = plsm_buf_t { data: ptr::null_mut(), len: 0 };
         let mut err = ptr::null_mut();
         let rc = unsafe { plsm_stream_next(self.ptr, &mut out, &mut err) };
         match rc {
             1 => Ok(Some(copy_and_free_buf(out))),
             0 => Ok(None),
-            _ => Err(take_error(err)),
+            _ => Err(take_error(env, err)?),
         }
     }
 
@@ -484,7 +486,7 @@ pub struct Lite3Stream {
 #[napi]
 impl Lite3Stream {
     #[napi]
-    pub fn next(&self) -> Result<Option<Lite3Frame>> {
+    pub fn next(&self, env: Env) -> Result<Option<Lite3Frame>> {
         let mut out = plsm_lite3_frame_t {
             seq: 0,
             timestamp_ns: 0,
@@ -496,7 +498,7 @@ impl Lite3Stream {
         match rc {
             1 => Ok(Some(copy_and_free_lite3_frame(out))),
             0 => Ok(None),
-            _ => Err(take_error(err)),
+            _ => Err(take_error(env, err)?),
         }
     }
 
@@ -572,31 +574,33 @@ fn copy_and_free_lite3_frame(mut frame: plsm_lite3_frame_t) -> Lite3Frame {
     }
 }
 
-fn take_error(err: *mut plsm_error_t) -> Error {
+fn take_error(env: Env, err: *mut plsm_error_t) -> Result<Error> {
     if err.is_null() {
-        return Error::new(Status::GenericFailure, "plasmite: unknown error");
+        return Ok(Error::new(Status::GenericFailure, "plasmite: unknown error"));
     }
     let owned = unsafe { &*err };
     let mut message = unsafe { cstring_to_string(owned.message) };
     let path = unsafe { cstring_to_string(owned.path) };
-    let mut details = Vec::new();
-    let kind_label = error_kind_label(owned.kind);
-    details.push(format!("kind={}", kind_label));
-    if message.is_empty() {
-        message = default_error_message(kind_label).to_string();
-    }
-    details.push(format!("message={}", message));
-    if !path.is_empty() {
-        details.push(format!("path={}", path));
-    }
-    if owned.has_seq != 0 {
-        details.push(format!("seq={}", owned.seq));
-    }
-    if owned.has_offset != 0 {
-        details.push(format!("offset={}", owned.offset));
-    }
+    let kind = error_kind_label(owned.kind);
+    let seq = (owned.has_seq != 0).then_some(owned.seq);
+    let offset = (owned.has_offset != 0).then_some(owned.offset);
     unsafe { plsm_error_free(err) };
-    Error::new(Status::GenericFailure, format!("plasmite error: {}", details.join("; ")))
+    if message.is_empty() {
+        message = default_error_message(kind).to_string();
+    }
+    // Human formatting does not define the machine error fields.
+    let mut details = vec![format!("kind={kind}"), format!("message={message}")];
+    if !path.is_empty() { details.push(format!("path={path}")); }
+    if let Some(seq) = seq { details.push(format!("seq={seq}")); }
+    if let Some(offset) = offset { details.push(format!("offset={offset}")); }
+    let mut object = env.create_error(Error::new(
+        Status::GenericFailure, format!("plasmite error: {}", details.join("; ")),
+    ))?;
+    object.set_named_property("kind", kind)?;
+    if !path.is_empty() { object.set_named_property("path", path)?; }
+    if let Some(seq) = seq { object.set_named_property("seq", seq as f64)?; }
+    if let Some(offset) = offset { object.set_named_property("offset", offset as f64)?; }
+    Ok(Error::from(object.into_unknown()))
 }
 
 fn default_error_message(kind: &str) -> &'static str {

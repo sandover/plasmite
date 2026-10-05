@@ -26,14 +26,11 @@ const DURABILITY_VALUES = Object.freeze({
 });
 
 function mapErrorKind(value, fallback = undefined) {
-  if (typeof value === "number" && Number.isFinite(value)) {
+  if (typeof value === "number" && Object.values(ERROR_KIND_VALUES).includes(value)) {
     return value;
   }
-  if (typeof value === "string") {
-    const mapped = ERROR_KIND_VALUES[value];
-    if (mapped !== undefined) {
-      return mapped;
-    }
+  if (typeof value === "string" && Object.hasOwn(ERROR_KIND_VALUES, value)) {
+    return ERROR_KIND_VALUES[value];
   }
   return fallback;
 }
@@ -42,9 +39,9 @@ function mapDurability(value) {
   if (value === undefined || value === null) {
     return "fast";
   }
-  const mapped = DURABILITY_VALUES[String(value).toLowerCase()];
-  if (mapped) {
-    return mapped;
+  const key = String(value).toLowerCase();
+  if (Object.hasOwn(DURABILITY_VALUES, key)) {
+    return DURABILITY_VALUES[key];
   }
   throw new TypeError("durability must be Durability.Fast or Durability.Flush");
 }

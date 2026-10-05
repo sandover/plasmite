@@ -230,6 +230,41 @@ where
     }
 }
 
+/// Keep a bounded prefix while consuming one complete line. Skip mode can then
+/// resume at the next record instead of parsing the tail of an oversized line.
+fn read_bounded_line(
+    reader: &mut impl BufRead,
+    line: &mut String,
+    limit: usize,
+) -> io::Result<(usize, bool)> {
+    let mut prefix = Vec::new();
+    let mut read = 0usize;
+    let mut oversized = false;
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            break;
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let consumed = newline.map_or(available.len(), |index| index + 1);
+        let retained = consumed.min(limit.saturating_sub(prefix.len()));
+        prefix.extend_from_slice(&available[..retained]);
+        oversized |= retained < consumed;
+        reader.consume(consumed);
+        read = read.saturating_add(consumed);
+        if newline.is_some() {
+            break;
+        }
+    }
+    *line = if oversized {
+        String::from_utf8_lossy(&prefix).into_owned()
+    } else {
+        String::from_utf8(prefix)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
+    };
+    Ok((read, oversized))
+}
+
 fn ingest_jsonl<R, F, N>(
     reader: R,
     config: IngestConfig,
@@ -248,19 +283,22 @@ where
     let mut line_no = 0u64;
     loop {
         line.clear();
-        let read = reader
-            .read_line(&mut line)
-            .map_err(|err| io_error(err, "failed to read stdin"))?;
+        let (read, oversized) = read_bounded_line(
+            &mut reader,
+            &mut line,
+            config.max_record_bytes.saturating_add(2),
+        )
+        .map_err(|err| io_error(err, "failed to read stdin"))?;
         if read == 0 {
             break;
         }
         line_no += 1;
         let trimmed = line.trim_end_matches(['\n', '\r']);
-        if trimmed.trim().is_empty() {
+        if !oversized && trimmed.trim().is_empty() {
             continue;
         }
         index += 1;
-        if trimmed.len() > config.max_record_bytes {
+        if oversized || trimmed.len() > config.max_record_bytes {
             on_failure(
                 index,
                 IngestMode::Jsonl,
@@ -309,9 +347,12 @@ where
                         break;
                     }
                     line.clear();
-                    let read = reader
-                        .read_line(&mut line)
-                        .map_err(|err| io_error(err, "failed to read stdin"))?;
+                    let (read, oversized) = read_bounded_line(
+                        &mut reader,
+                        &mut line,
+                        config.max_record_bytes.saturating_add(2),
+                    )
+                    .map_err(|err| io_error(err, "failed to read stdin"))?;
                     if read == 0 {
                         on_failure(
                             index,
@@ -336,8 +377,30 @@ where
                         )?;
                         index += 1;
                         record_line = line_no;
+                        if oversized || next_trimmed.len() > config.max_record_bytes {
+                            on_failure(
+                                index,
+                                IngestMode::Jsonl,
+                                Some(record_line),
+                                "record exceeds size limit",
+                                "Oversize",
+                                Some(truncate_snippet(next_trimmed, config.max_snippet_bytes)),
+                            )?;
+                            break;
+                        }
                         buf = next_trimmed.to_string();
                         continue;
+                    }
+                    if oversized || buf.len().saturating_add(line.len()) > config.max_record_bytes {
+                        on_failure(
+                            index,
+                            IngestMode::Jsonl,
+                            Some(record_line),
+                            "record exceeds size limit",
+                            "Oversize",
+                            Some(truncate_snippet(&buf, config.max_snippet_bytes)),
+                        )?;
+                        break;
                     }
                     buf.push_str(line.as_str());
                 }
@@ -359,7 +422,7 @@ where
 }
 
 fn ingest_single_json<R, F, N>(
-    mut reader: R,
+    reader: R,
     config: IngestConfig,
     on_value: &mut F,
     on_failure: &mut N,
@@ -369,14 +432,26 @@ where
     F: FnMut(Value, u64) -> Result<(), Error>,
     N: FnMut(u64, IngestMode, Option<u64>, &str, &str, Option<String>) -> Result<(), Error>,
 {
-    let mut buf = String::new();
+    let mut bytes = Vec::new();
     reader
-        .read_to_string(&mut buf)
+        .take(config.max_record_bytes.saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
         .map_err(|err| io_error(err, "failed to read stdin"))?;
-    if buf.trim().is_empty() {
+    let oversized = bytes.len() > config.max_record_bytes;
+    let buf = if oversized {
+        String::from_utf8_lossy(&bytes).into_owned()
+    } else {
+        String::from_utf8(bytes).map_err(|err| {
+            io_error(
+                io::Error::new(io::ErrorKind::InvalidData, err),
+                "failed to read stdin",
+            )
+        })?
+    };
+    if !oversized && buf.trim().is_empty() {
         return Ok(());
     }
-    if buf.len() > config.max_record_bytes {
+    if oversized {
         on_failure(
             1,
             IngestMode::Json,
@@ -545,21 +620,24 @@ where
     let mut skipping = false;
     loop {
         line.clear();
-        let read = reader
-            .read_line(&mut line)
-            .map_err(|err| io_error(err, "failed to read stdin"))?;
+        let (read, oversized) = read_bounded_line(
+            &mut reader,
+            &mut line,
+            config.max_record_bytes.saturating_add(8),
+        )
+        .map_err(|err| io_error(err, "failed to read stdin"))?;
         if read == 0 {
             break;
         }
         line_no += 1;
         let trimmed = line.trim_end_matches(['\n', '\r']);
         if trimmed.is_empty() {
-            if data_lines.is_empty() {
-                continue;
-            }
             if skipping {
                 data_lines.clear();
                 skipping = false;
+                continue;
+            }
+            if data_lines.is_empty() {
                 continue;
             }
             let payload = data_lines.join("\n");
@@ -605,10 +683,12 @@ where
             if skipping {
                 continue;
             }
-            data_lines.push(data.to_string());
             let current_len = data_lines.iter().map(String::len).sum::<usize>()
                 + data_lines.len().saturating_sub(1);
-            if current_len > config.max_record_bytes {
+            let next_len = current_len
+                .saturating_add(usize::from(!data_lines.is_empty()))
+                .saturating_add(data.len());
+            if oversized || next_len > config.max_record_bytes {
                 index += 1;
                 on_failure(
                     index,
@@ -616,10 +696,16 @@ where
                     Some(line_no),
                     "record exceeds size limit",
                     "Oversize",
-                    Some(join_snippet(&data_lines, config.max_snippet_bytes)),
+                    Some(if data_lines.is_empty() {
+                        truncate_snippet(data, config.max_snippet_bytes)
+                    } else {
+                        join_snippet(&data_lines, config.max_snippet_bytes)
+                    }),
                 )?;
                 data_lines.clear();
                 skipping = true;
+            } else {
+                data_lines.push(data.to_string());
             }
         }
     }
@@ -741,9 +827,17 @@ fn truncate_snippet(input: &str, max: usize) -> String {
         return snippet;
     }
     let take = max - suffix.len();
-    snippet.push_str(&input[..take]);
+    snippet.push_str(prefix_at_char_boundary(input, take));
     snippet.push_str(suffix);
     snippet
+}
+
+fn prefix_at_char_boundary(input: &str, max_bytes: usize) -> &str {
+    let mut end = max_bytes.min(input.len());
+    while !input.is_char_boundary(end) {
+        end -= 1;
+    }
+    &input[..end]
 }
 
 fn join_snippet(lines: &[String], max: usize) -> String {
@@ -765,7 +859,7 @@ fn join_snippet(lines: &[String], max: usize) -> String {
         if line.len() <= remaining {
             snippet.push_str(line);
         } else {
-            snippet.push_str(&line[..remaining]);
+            snippet.push_str(prefix_at_char_boundary(line, remaining));
             truncated = true;
             break;
         }
@@ -808,7 +902,10 @@ impl<R: Read> Read for PrefixReader<R> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ErrorPolicy, IngestConfig, IngestFailure, IngestMode, ingest, truncate_snippet};
+    use super::{
+        ErrorPolicy, IngestConfig, IngestFailure, IngestMode, ingest, join_snippet,
+        truncate_snippet,
+    };
     use plasmite::api::{Error, ErrorKind};
 
     fn config(mode: IngestMode, errors: ErrorPolicy) -> IngestConfig {
@@ -820,6 +917,129 @@ mod tests {
             max_record_bytes: 1024,
             max_snippet_bytes: 32,
         }
+    }
+
+    #[test]
+    fn line_reader_caps_retained_bytes_and_consumes_the_whole_line() {
+        use std::io::{BufReader, Cursor, Read};
+        let input = std::io::repeat(b'x')
+            .take(1_000_000)
+            .chain(Cursor::new(b"\n{}\n"));
+        let mut reader = BufReader::new(input);
+        let mut line = String::new();
+        assert_eq!(
+            super::read_bounded_line(&mut reader, &mut line, 16).unwrap(),
+            (1_000_001, true)
+        );
+        assert_eq!(line, "x".repeat(16));
+        assert_eq!(
+            super::read_bounded_line(&mut reader, &mut line, 16).unwrap(),
+            (3, false)
+        );
+        assert_eq!(line, "{}\n");
+    }
+
+    #[test]
+    fn oversized_lines_resume_at_jsonl_and_event_record_boundaries() {
+        for (mode, input) in [
+            (
+                IngestMode::Jsonl,
+                format!("{}\n{{\"ok\":1}}\n", "x".repeat(100_000)),
+            ),
+            (
+                IngestMode::Event,
+                format!(
+                    "data: {}\ndata: discarded\n\ndata: {{\"ok\":1}}\n\n",
+                    "x".repeat(100_000)
+                ),
+            ),
+            (
+                IngestMode::Event,
+                "data: 12345678\ndata: 12345678\n\ndata: {\"ok\":1}\n\n".to_string(),
+            ),
+        ] {
+            let mut cfg = config(mode, ErrorPolicy::Skip);
+            cfg.max_record_bytes = 16;
+            let mut values = Vec::new();
+            let mut failures = Vec::new();
+            let outcome = ingest(
+                input.as_bytes(),
+                cfg,
+                |value| {
+                    values.push(value);
+                    Ok(())
+                },
+                |failure| failures.push(failure),
+            )
+            .unwrap();
+            assert_eq!(values, vec![serde_json::json!({"ok": 1})], "{mode:?}");
+            assert_eq!(outcome.failed, 1, "{mode:?}");
+            assert_eq!(outcome.records_total, 2, "{mode:?}");
+            assert_eq!(failures[0].error_kind, "Oversize");
+        }
+    }
+
+    #[test]
+    fn auto_resync_does_not_accept_an_oversized_valid_prefix() {
+        let input = format!("{{\n{{\"ok\":1}}{}\n{{\"ok\":2}}\n", " ".repeat(100_000));
+        let mut cfg = config(IngestMode::Auto, ErrorPolicy::Skip);
+        cfg.max_record_bytes = 16;
+        let mut values = Vec::new();
+        let mut failures = Vec::new();
+        let outcome = ingest(
+            input.as_bytes(),
+            cfg,
+            |value| {
+                values.push(value);
+                Ok(())
+            },
+            |failure| failures.push(failure),
+        )
+        .unwrap();
+        assert_eq!(values, vec![serde_json::json!({"ok": 2})]);
+        assert_eq!(outcome.failed, 2);
+        assert_eq!(failures[1].error_kind, "Oversize");
+    }
+
+    #[test]
+    fn discarded_nonblank_bytes_cannot_make_an_oversized_line_blank() {
+        let input = format!("{}{{\"hidden\":1}}\n{{\"ok\":2}}\n", " ".repeat(100_000));
+        let mut cfg = config(IngestMode::Jsonl, ErrorPolicy::Skip);
+        cfg.max_record_bytes = 16;
+        let mut values = Vec::new();
+        let mut failures = Vec::new();
+        let outcome = ingest(
+            input.as_bytes(),
+            cfg,
+            |value| {
+                values.push(value);
+                Ok(())
+            },
+            |failure| failures.push(failure),
+        )
+        .unwrap();
+        assert_eq!(values, vec![serde_json::json!({"ok": 2})]);
+        assert_eq!(outcome.failed, 1);
+        assert_eq!(failures[0].error_kind, "Oversize");
+    }
+
+    #[test]
+    fn single_json_stops_reading_at_the_record_limit() {
+        let input = "x".repeat(100_000);
+        let mut reader = std::io::Cursor::new(input.as_bytes());
+        let mut cfg = config(IngestMode::Json, ErrorPolicy::Skip);
+        cfg.max_record_bytes = 16;
+        let mut failures = Vec::new();
+        let outcome = ingest(
+            &mut reader,
+            cfg,
+            |_| panic!("oversized input reached append"),
+            |failure| failures.push(failure),
+        )
+        .unwrap();
+        assert_eq!(reader.position(), 17);
+        assert_eq!(outcome.failed, 1);
+        assert_eq!(failures[0].error_kind, "Oversize");
     }
 
     const INGEST_MUTATION_SEED: u64 = 0x0BAD_F00D_BADC_0FFE;
@@ -1090,6 +1310,12 @@ mod tests {
     fn snippet_truncates() {
         let snippet = truncate_snippet("abcdefghijklmnopqrstuvwxyz", 8);
         assert!(snippet.ends_with("..."));
+    }
+
+    #[test]
+    fn snippets_do_not_split_multibyte_characters() {
+        assert_eq!(truncate_snippet("ééé", 4), "...");
+        assert_eq!(join_snippet(&["ééé".to_string()], 5), "é...");
     }
 
     #[test]

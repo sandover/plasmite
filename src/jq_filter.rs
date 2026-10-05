@@ -135,13 +135,85 @@ fn false_run<'a>(
 }
 
 #[derive(Clone, Debug)]
-pub enum JaqValue {
+enum JaqValue {
     Null,
     Bool(bool),
-    Num(f64),
+    Num(JaqNumber),
     Str(String),
     Arr(Vec<JaqValue>),
     Obj(BTreeMap<String, JaqValue>),
+}
+
+// Preserve JSON integers; floating point belongs only to fractional values
+// and operations that require it. i128 covers both signed and unsigned JSON integers.
+#[derive(Clone, Copy, Debug)]
+enum JaqNumber {
+    Int(i128),
+    Float(f64),
+}
+
+impl JaqNumber {
+    fn as_f64(self) -> f64 {
+        match self {
+            Self::Int(n) => n as f64,
+            Self::Float(n) => n,
+        }
+    }
+
+    fn arithmetic(
+        self,
+        other: Self,
+        integer: fn(i128, i128) -> Option<i128>,
+        float: fn(f64, f64) -> f64,
+    ) -> Self {
+        if let (Self::Int(a), Self::Int(b)) = (self, other)
+            && let Some(value) = integer(a, b)
+        {
+            return Self::Int(value);
+        }
+        Self::Float(float(self.as_f64(), other.as_f64()))
+    }
+
+    fn compare(self, other: Self) -> Ordering {
+        match (self, other) {
+            (Self::Int(a), Self::Int(b)) => a.cmp(&b),
+            (Self::Int(a), Self::Float(b)) => compare_integer_float(a, b),
+            (Self::Float(a), Self::Int(b)) => compare_integer_float(b, a).reverse(),
+            (Self::Float(a), Self::Float(b)) => {
+                a.partial_cmp(&b).unwrap_or_else(|| a.total_cmp(&b))
+            }
+        }
+    }
+}
+
+fn compare_integer_float(integer: i128, float: f64) -> Ordering {
+    if float.is_nan() {
+        return 0.0f64.total_cmp(&float);
+    }
+    if float < i128::MIN as f64 {
+        return Ordering::Greater;
+    }
+    if float >= i128::MAX as f64 {
+        return Ordering::Less;
+    }
+    integer.cmp(&(float as i128)).then_with(|| {
+        if float.fract() > 0.0 {
+            Ordering::Less
+        } else if float.fract() < 0.0 {
+            Ordering::Greater
+        } else {
+            Ordering::Equal
+        }
+    })
+}
+
+impl fmt::Display for JaqNumber {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Int(n) => write!(f, "{n}"),
+            Self::Float(n) => write!(f, "{n}"),
+        }
+    }
 }
 
 impl JaqValue {
@@ -158,7 +230,7 @@ impl JaqValue {
 
     fn as_f64_opt(&self) -> Option<f64> {
         match self {
-            Self::Num(n) => Some(*n),
+            Self::Num(n) => Some(n.as_f64()),
             _ => None,
         }
     }
@@ -174,10 +246,16 @@ impl JaqValue {
         match value {
             Value::Null => Self::Null,
             Value::Bool(b) => Self::Bool(*b),
-            Value::Number(n) => match n.as_f64() {
-                Some(value) => Self::Num(value),
-                None => Self::Str(n.to_string()),
-            },
+            Value::Number(n) => {
+                let number = if let Some(value) = n.as_i64() {
+                    JaqNumber::Int(value.into())
+                } else if let Some(value) = n.as_u64() {
+                    JaqNumber::Int(value.into())
+                } else {
+                    JaqNumber::Float(n.as_f64().expect("JSON number"))
+                };
+                Self::Num(number)
+            }
             Value::String(s) => Self::Str(s.clone()),
             Value::Array(a) => Self::Arr(a.iter().map(Self::from_json).collect()),
             Value::Object(o) => Self::Obj(
@@ -232,13 +310,13 @@ impl From<bool> for JaqValue {
 
 impl From<isize> for JaqValue {
     fn from(value: isize) -> Self {
-        Self::Num(value as f64)
+        Self::Num(JaqNumber::Int(value as i128))
     }
 }
 
 impl From<f64> for JaqValue {
     fn from(value: f64) -> Self {
-        Self::Num(value)
+        Self::Num(JaqNumber::Float(value))
     }
 }
 
@@ -259,7 +337,7 @@ impl PartialEq for JaqValue {
         match (self, other) {
             (Self::Null, Self::Null) => true,
             (Self::Bool(a), Self::Bool(b)) => a == b,
-            (Self::Num(a), Self::Num(b)) => a.to_bits() == b.to_bits(),
+            (Self::Num(a), Self::Num(b)) => a.compare(*b) == Ordering::Equal,
             (Self::Str(a), Self::Str(b)) => a == b,
             (Self::Arr(a), Self::Arr(b)) => a == b,
             (Self::Obj(a), Self::Obj(b)) => a == b,
@@ -286,7 +364,7 @@ impl Ord for JaqValue {
         match (self, other) {
             (Self::Null, Self::Null) => Ordering::Equal,
             (Self::Bool(a), Self::Bool(b)) => a.cmp(b),
-            (Self::Num(a), Self::Num(b)) => a.total_cmp(b),
+            (Self::Num(a), Self::Num(b)) => a.compare(*b),
             (Self::Str(a), Self::Str(b)) => a.cmp(b),
             (Self::Arr(a), Self::Arr(b)) => a.cmp(b),
             (Self::Obj(a), Self::Obj(b)) => a.cmp(b),
@@ -301,7 +379,9 @@ impl std::ops::Add for JaqValue {
     fn add(self, rhs: Self) -> Self::Output {
         use jaq_core::ops::Math;
         match (self, rhs) {
-            (Self::Num(a), Self::Num(b)) => Ok(Self::Num(a + b)),
+            (Self::Num(a), Self::Num(b)) => {
+                Ok(Self::Num(a.arithmetic(b, i128::checked_add, |a, b| a + b)))
+            }
             (Self::Str(a), Self::Str(b)) => Ok(Self::Str(format!("{a}{b}"))),
             (Self::Arr(mut a), Self::Arr(b)) => {
                 a.extend(b);
@@ -318,7 +398,9 @@ impl std::ops::Sub for JaqValue {
     fn sub(self, rhs: Self) -> Self::Output {
         use jaq_core::ops::Math;
         match (self, rhs) {
-            (Self::Num(a), Self::Num(b)) => Ok(Self::Num(a - b)),
+            (Self::Num(a), Self::Num(b)) => {
+                Ok(Self::Num(a.arithmetic(b, i128::checked_sub, |a, b| a - b)))
+            }
             (l, r) => Err(JaqError::math(l, Math::Sub, r)),
         }
     }
@@ -330,7 +412,9 @@ impl std::ops::Mul for JaqValue {
     fn mul(self, rhs: Self) -> Self::Output {
         use jaq_core::ops::Math;
         match (self, rhs) {
-            (Self::Num(a), Self::Num(b)) => Ok(Self::Num(a * b)),
+            (Self::Num(a), Self::Num(b)) => {
+                Ok(Self::Num(a.arithmetic(b, i128::checked_mul, |a, b| a * b)))
+            }
             (l, r) => Err(JaqError::math(l, Math::Mul, r)),
         }
     }
@@ -342,7 +426,9 @@ impl std::ops::Div for JaqValue {
     fn div(self, rhs: Self) -> Self::Output {
         use jaq_core::ops::Math;
         match (self, rhs) {
-            (Self::Num(a), Self::Num(b)) => Ok(Self::Num(a / b)),
+            (Self::Num(a), Self::Num(b)) => {
+                Ok(Self::Num(JaqNumber::Float(a.as_f64() / b.as_f64())))
+            }
             (l, r) => Err(JaqError::math(l, Math::Div, r)),
         }
     }
@@ -354,7 +440,9 @@ impl std::ops::Rem for JaqValue {
     fn rem(self, rhs: Self) -> Self::Output {
         use jaq_core::ops::Math;
         match (self, rhs) {
-            (Self::Num(a), Self::Num(b)) => Ok(Self::Num(a % b)),
+            (Self::Num(a), Self::Num(b)) => {
+                Ok(Self::Num(a.arithmetic(b, i128::checked_rem, |a, b| a % b)))
+            }
             (l, r) => Err(JaqError::math(l, Math::Rem, r)),
         }
     }
@@ -365,7 +453,12 @@ impl std::ops::Neg for JaqValue {
 
     fn neg(self) -> Self::Output {
         match self {
-            Self::Num(a) => Ok(Self::Num(-a)),
+            Self::Num(JaqNumber::Int(a)) => Ok(Self::Num(
+                a.checked_neg()
+                    .map(JaqNumber::Int)
+                    .unwrap_or(JaqNumber::Float(-(a as f64))),
+            )),
+            Self::Num(JaqNumber::Float(a)) => Ok(Self::Num(JaqNumber::Float(-a))),
             other => Err(JaqError::typ(other, "number")),
         }
     }
@@ -373,7 +466,10 @@ impl std::ops::Neg for JaqValue {
 
 impl jaq_core::ValT for JaqValue {
     fn from_num(n: &str) -> Result<Self, JaqError<Self>> {
-        let parsed = n.parse::<f64>().map_err(JaqError::str)?;
+        let parsed = match n.parse::<i128>() {
+            Ok(integer) => JaqNumber::Int(integer),
+            Err(_) => JaqNumber::Float(n.parse::<f64>().map_err(JaqError::str)?),
+        };
         Ok(Self::Num(parsed))
     }
 
@@ -402,10 +498,11 @@ impl jaq_core::ValT for JaqValue {
                 .remove(key)
                 .ok_or_else(|| JaqError::index(Self::Obj(obj), Self::Str(key.clone()))),
             (Self::Arr(arr), Self::Num(n)) => {
-                if !n.is_finite() || n.fract() != 0.0 {
+                let number = n.as_f64();
+                if !number.is_finite() || number.fract() != 0.0 {
                     return Err(JaqError::typ(Self::Num(*n), "integer"));
                 }
-                let idx = *n as isize;
+                let idx = number as isize;
                 let len = arr.len() as isize;
                 let idx = if idx < 0 { len + idx } else { idx };
                 let idx = usize::try_from(idx).map_err(JaqError::str)?;
@@ -420,7 +517,9 @@ impl jaq_core::ValT for JaqValue {
     fn range(self, range: jaq_core::val::Range<&Self>) -> Result<Self, JaqError<Self>> {
         let to_index = |v: &Self| -> Result<isize, JaqError<Self>> {
             match v {
-                Self::Num(n) if n.is_finite() && n.fract() == 0.0 => Ok(*n as isize),
+                Self::Num(n) if n.as_f64().is_finite() && n.as_f64().fract() == 0.0 => {
+                    Ok(n.as_f64() as isize)
+                }
                 other => Err(JaqError::typ(other.clone(), "integer")),
             }
         };
@@ -562,15 +661,13 @@ impl jaq_std::ValT for JaqValue {
     }
 
     fn as_isize(&self) -> Option<isize> {
-        let num = self.as_f64_opt()?;
-        if !num.is_finite() || num.fract() != 0.0 {
-            return None;
-        }
-        let cast = num as isize;
-        if (cast as f64).to_bits() == num.to_bits() {
-            Some(cast)
-        } else {
-            None
+        match self {
+            Self::Num(JaqNumber::Int(integer)) => isize::try_from(*integer).ok(),
+            Self::Num(JaqNumber::Float(number)) if number.is_finite() && number.fract() == 0.0 => {
+                let integer = *number as i128;
+                isize::try_from(integer).ok()
+            }
+            _ => None,
         }
     }
 
@@ -584,6 +681,41 @@ impl jaq_std::ValT for JaqValue {
 mod tests {
     use super::{JqFilter, compile_filters, matches_all};
     use serde_json::json;
+
+    #[test]
+    fn filters_preserve_large_integer_identity_order_and_arithmetic() {
+        let input = json!({"n": 9007199254740993u64, "max": u64::MAX, "min": i64::MIN});
+        for expression in [
+            ".n == 9007199254740993",
+            ".n != 9007199254740992",
+            ".n > 9007199254740992",
+            ".n > 9007199254740992.0",
+            ".n + 1 == 9007199254740994",
+            ".n - 1 == 9007199254740992",
+            ".max == 18446744073709551615",
+            ".min == -9223372036854775808",
+            "1 == 1.0",
+            "0 == -0.0",
+            "-1 < -0.5",
+            "1 > 0.5",
+            "(.n * 2) % 2 == 0",
+            "1 / 2 == 0.5",
+        ] {
+            assert!(
+                JqFilter::compile(expression)
+                    .unwrap()
+                    .matches(&input)
+                    .unwrap(),
+                "{expression}"
+            );
+        }
+        assert!(
+            !JqFilter::compile(".n == 9007199254740992.0")
+                .unwrap()
+                .matches(&input)
+                .unwrap()
+        );
+    }
 
     #[test]
     fn filter_matches_simple_equality() {

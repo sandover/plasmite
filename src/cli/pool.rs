@@ -18,6 +18,7 @@ use crate::pool_info_json::pool_info_json;
 use crate::{PoolCommand, PoolTarget};
 use plasmite::api::{Error, ErrorKind, LocalClient, PoolOptions, PoolRef, to_exit_code};
 use serde_json::json;
+use std::collections::HashSet;
 use std::io::{self, IsTerminal};
 
 pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandResult, Error> {
@@ -40,28 +41,34 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                 .map(parse_size)
                 .transpose()?
                 .unwrap_or(DEFAULT_POOL_SIZE);
-            ensure_pool_dir(pool_dir)?;
-            let mut results = Vec::new();
-            for name in names {
-                let path = resolve_poolref(&name, pool_dir)?;
-                if path.exists() {
+            let mut options = PoolOptions::new(size);
+            if let Some(index_capacity) = index_capacity {
+                let index_size_bytes = index_capacity as u64 * 16;
+                if index_size_bytes > size / 2 {
+                    return Err(Error::new(ErrorKind::Usage)
+                        .with_message("index capacity is too large for pool size")
+                        .with_hint(
+                            "Reduce --index-capacity or increase --size (index region must be <= 50% of the pool file).",
+                        ));
+                }
+                options = options.with_index_capacity(index_capacity);
+            }
+            let paths = names
+                .iter()
+                .map(|name| resolve_poolref(name, pool_dir))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut seen = HashSet::new();
+            for path in &paths {
+                if !seen.insert(path) || path.exists() {
                     return Err(Error::new(ErrorKind::AlreadyExists)
                         .with_message("pool already exists")
-                        .with_path(&path)
+                        .with_path(path)
                         .with_hint("Choose a different name or remove the existing pool file."));
                 }
-                let mut options = PoolOptions::new(size);
-                if let Some(index_capacity) = index_capacity {
-                    let index_size_bytes = index_capacity as u64 * 16;
-                    if index_size_bytes > size / 2 {
-                        return Err(Error::new(ErrorKind::Usage)
-                            .with_message("index capacity is too large for pool size")
-                            .with_hint(
-                                "Reduce --index-capacity or increase --size (index region must be <= 50% of the pool file).",
-                            ));
-                    }
-                    options = options.with_index_capacity(index_capacity);
-                }
+            }
+            ensure_pool_dir(pool_dir)?;
+            let mut results = Vec::new();
+            for (name, path) in names.into_iter().zip(paths) {
                 let pool_ref = PoolRef::path(path);
                 let info = client.create_pool(&pool_ref, options)?;
                 results.push(pool_info_json(&name, &info));

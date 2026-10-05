@@ -76,6 +76,43 @@ fn pool_create_with_no_args_prints_help() {
 }
 
 #[test]
+fn pool_create_checks_all_known_conflicts_before_creating_any_pool() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let directory = pool_dir.to_str().expect("pool directory");
+
+    let existing = cmd()
+        .args(["--dir", directory, "pool", "create", "taken", "--json"])
+        .output()
+        .expect("create existing pool");
+    assert!(existing.status.success());
+
+    let later_existing = cmd()
+        .args([
+            "--dir", directory, "pool", "create", "first", "taken", "--json",
+        ])
+        .output()
+        .expect("create with later existing pool");
+    assert_eq!(later_existing.status.code(), Some(4));
+    assert!(!pool_dir.join("first.plasmite").exists());
+
+    let duplicate = cmd()
+        .args([
+            "--dir",
+            directory,
+            "pool",
+            "create",
+            "same",
+            "same.plasmite",
+            "--json",
+        ])
+        .output()
+        .expect("create duplicate pool");
+    assert_eq!(duplicate.status.code(), Some(4));
+    assert!(!pool_dir.join("same.plasmite").exists());
+}
+
+#[test]
 fn pool_create_defaults_to_table_output() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");

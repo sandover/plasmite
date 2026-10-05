@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { RemoteClient } = require("../remote");
+const { RemoteClient, RemoteError } = require("../remote");
+const { mapDurability } = require("../mappings");
 
 async function withFetchStub(fetchImpl, callback) {
   const originalFetch = global.fetch;
@@ -15,6 +16,15 @@ async function withFetchStub(fetchImpl, callback) {
     global.fetch = originalFetch;
   }
 }
+
+test("error and durability mappings reject unknown or inherited values", () => {
+  for (const kind of ["toString", "constructor", 999]) {
+    assert.equal(new RemoteError({ error: { kind } }, 500).kind, 8);
+  }
+  assert.equal(new RemoteError({ error: { kind: "RetentionGap" } }, 500).kind, 9);
+  assert.throws(() => mapDurability("constructor"), /durability must be/);
+  assert.equal(mapDurability(1), "flush");
+});
 
 test("bearer credentials never go to a non-loopback HTTP URL", async () => {
   await withFetchStub(() => {

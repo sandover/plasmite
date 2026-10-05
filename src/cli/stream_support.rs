@@ -31,7 +31,6 @@ use super::output_support::notice_time_now;
 use super::support::message_from_frame;
 use super::support::message_to_json;
 use super::support::output_value;
-use super::support::{now_ns, parse_since};
 
 #[derive(Debug, Clone)]
 pub(crate) struct DropNotice {
@@ -53,7 +52,7 @@ pub(crate) struct FollowConfig {
     pub(crate) one: bool,
     pub(crate) timeout: Option<Duration>,
     pub(crate) data_only: bool,
-    pub(crate) since_input: Option<String>,
+    pub(crate) since_ns: Option<u64>,
     pub(crate) no_follow: bool,
     pub(crate) required_tags: Vec<String>,
     pub(crate) where_predicates: Vec<JqFilter>,
@@ -120,7 +119,7 @@ pub(crate) fn follow_should_stop(stop: Option<&Arc<AtomicBool>>) -> bool {
 fn history_start(oldest: u64, newest: u64, cfg: &FollowConfig) -> u64 {
     if oldest == 0 {
         newest.saturating_add(1).max(1)
-    } else if cfg.since_input.is_some() {
+    } else if cfg.since_ns.is_some() {
         oldest.max(1)
     } else if cfg.tail > 0 {
         newest
@@ -130,14 +129,6 @@ fn history_start(oldest: u64, newest: u64, cfg: &FollowConfig) -> u64 {
     } else {
         newest.saturating_add(1).max(1)
     }
-}
-
-fn resolved_since(cfg: &FollowConfig) -> Result<Option<u64>, Error> {
-    let now = now_ns()?;
-    cfg.since_input
-        .as_deref()
-        .map(|value| parse_since(value, now))
-        .transpose()
 }
 
 fn matches_message(
@@ -246,7 +237,7 @@ pub(crate) fn follow_remote(
     let bounds = remote_pool.info()?.bounds;
     let upper = bounds.newest_seq.unwrap_or(0);
     let mut expected = history_start(bounds.oldest_seq.unwrap_or(0), upper, cfg);
-    let since_ns = resolved_since(cfg)?;
+    let since_ns = cfg.since_ns;
     let mut drops = DropReporter::new(cfg, pool, format!("{}/{}", client.base_url(), pool));
     if cfg.no_follow && expected > upper {
         return Ok(RunOutcome::ok());
@@ -388,11 +379,11 @@ pub(crate) fn follow_pool(
     let header = pool.header_from_mmap()?;
     let upper = header.newest_seq;
     let mut expected = history_start(header.oldest_seq, upper, &cfg);
-    let since_ns = resolved_since(&cfg)?;
+    let since_ns = cfg.since_ns;
     let mut cursor = Cursor::new();
     // Scan retained frames once. The sequence lower bound skips earlier frames
     // without buffering them and stays fixed if the writer advances the ring.
-    cursor.seek_to(if cfg.since_input.is_some() || cfg.tail > 0 {
+    cursor.seek_to(if cfg.since_ns.is_some() || cfg.tail > 0 {
         header.tail_off
     } else {
         header.head_off

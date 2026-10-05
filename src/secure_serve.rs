@@ -2,6 +2,7 @@
 
 use crate::access_store::AccessStore;
 use crate::cli::args::ServeRunArgs;
+use crate::interface_wire::{ErrorContextWire, ErrorKindWire};
 use crate::serve::{self, ServeConfig};
 use plasmite::api::{Error, ErrorKind};
 use serde::Deserialize;
@@ -97,10 +98,7 @@ pub(crate) fn invite(pool_dir: &Path, name: &str) -> Result<String, Error> {
         .set("content-type", "application/json")
         .send_string(&body)
         .map_err(|err| {
-            Error::new(ErrorKind::Io)
-                .with_message("failed to create access key through the local server")
-                .with_hint("Start `plasmite serve` for this directory and retry.")
-                .with_source(err)
+            local_admin_error(err, "failed to create access key through the local server")
         })?;
     serde_json::from_reader::<_, InviteReply>(response.into_reader())
         .map(|reply| reply.access_key)
@@ -118,16 +116,77 @@ pub(crate) fn keys(pool_dir: &Path) -> Result<serde_json::Value, Error> {
         .set("x-plasmite-server-fingerprint", &fingerprint)
         .call()
         .map_err(|err| {
-            Error::new(ErrorKind::Io)
-                .with_message("failed to list access keys through the local server")
-                .with_hint("Start `plasmite serve` for this directory and retry.")
-                .with_source(err)
+            local_admin_error(err, "failed to list access keys through the local server")
         })?;
     serde_json::from_reader(response.into_reader()).map_err(|err| {
         Error::new(ErrorKind::Corrupt)
             .with_message("invalid access key list from local server")
             .with_source(err)
     })
+}
+
+#[derive(Deserialize)]
+struct AdminErrorEnvelope {
+    error: AdminErrorDetails,
+}
+
+#[derive(Deserialize)]
+struct AdminErrorDetails {
+    kind: ErrorKindWire,
+    #[serde(flatten)]
+    context: ErrorContextWire,
+}
+
+fn local_admin_error(err: ureq::Error, transport_message: &str) -> Error {
+    let ureq::Error::Status(status, response) = err else {
+        return Error::new(ErrorKind::Io)
+            .with_message(transport_message)
+            .with_hint("Start `plasmite serve` for this directory and retry.")
+            .with_source(err);
+    };
+    if let Ok(body) = response.into_string()
+        && let Ok(envelope) = serde_json::from_str::<AdminErrorEnvelope>(&body)
+    {
+        let kind = match envelope.error.kind {
+            ErrorKindWire::Internal => ErrorKind::Internal,
+            ErrorKindWire::Usage => ErrorKind::Usage,
+            ErrorKindWire::NotFound => ErrorKind::NotFound,
+            ErrorKindWire::AlreadyExists => ErrorKind::AlreadyExists,
+            ErrorKindWire::Busy => ErrorKind::Busy,
+            ErrorKindWire::Permission => ErrorKind::Permission,
+            ErrorKindWire::Corrupt => ErrorKind::Corrupt,
+            ErrorKindWire::Io => ErrorKind::Io,
+            ErrorKindWire::RetentionGap => ErrorKind::RetentionGap,
+        };
+        let context = envelope.error.context;
+        let mut error = Error::new(kind);
+        if let Some(message) = context.message {
+            error = error.with_message(message);
+        }
+        if let Some(hint) = context.hint {
+            error = error.with_hint(hint);
+        }
+        if let Some(path) = context.path {
+            error = error.with_path(path);
+        }
+        if let Some(seq) = context.seq {
+            error = error.with_seq(seq);
+        }
+        if let Some(offset) = context.offset {
+            error = error.with_offset(offset);
+        }
+        return error;
+    }
+    let kind = match status {
+        400 | 413 => ErrorKind::Usage,
+        401 | 403 => ErrorKind::Permission,
+        404 => ErrorKind::NotFound,
+        409 => ErrorKind::AlreadyExists,
+        423 => ErrorKind::Busy,
+        500..=599 => ErrorKind::Internal,
+        _ => ErrorKind::Io,
+    };
+    Error::new(kind).with_message(format!("local server returned HTTP {status}"))
 }
 
 pub(crate) fn revoke(pool_dir: &Path, id: &str) -> Result<(), Error> {
@@ -139,9 +198,10 @@ pub(crate) fn revoke(pool_dir: &Path, id: &str) -> Result<(), Error> {
         .send_string(&body);
     match result {
         Ok(_) => Ok(()),
-        Err(ureq::Error::Status(404, _)) => {
-            Err(Error::new(ErrorKind::NotFound).with_message("access key not found"))
-        }
+        Err(err @ ureq::Error::Status(_, _)) => Err(local_admin_error(
+            err,
+            "failed to revoke access key through the local server",
+        )),
         Err(err) => Err(Error::new(ErrorKind::Io)
             .with_message("failed to revoke access key through the local server")
             .with_hint(
@@ -167,4 +227,31 @@ fn local_agent() -> ureq::Agent {
         .redirects(0)
         .timeout(std::time::Duration::from_secs(30))
         .build()
+}
+
+#[cfg(test)]
+mod admin_error_tests {
+    use super::*;
+
+    #[test]
+    fn preserves_domain_error_instead_of_suggesting_server_start() {
+        let response = ureq::Response::new(
+            400,
+            "Bad Request",
+            r#"{"error":{"kind":"Usage","message":"name is required","hint":"Choose a name."}}"#,
+        )
+        .unwrap();
+        let error = local_admin_error(ureq::Error::Status(400, response), "connection failed");
+        assert_eq!(error.kind(), ErrorKind::Usage);
+        assert_eq!(error.message(), Some("name is required"));
+        assert_eq!(error.hint(), Some("Choose a name."));
+    }
+
+    #[test]
+    fn malformed_status_response_keeps_the_http_failure_kind() {
+        let response = ureq::Response::new(403, "Forbidden", "bad envelope").unwrap();
+        let error = local_admin_error(ureq::Error::Status(403, response), "connection failed");
+        assert_eq!(error.kind(), ErrorKind::Permission);
+        assert_eq!(error.hint(), None);
+    }
 }

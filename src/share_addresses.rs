@@ -27,7 +27,8 @@ pub(super) fn candidates() -> Vec<Candidate> {
         })
         .collect();
     found.sort_by_key(|candidate| rank(candidate.kind));
-    found.dedup_by(|a, b| a.host == b.host);
+    let mut seen = std::collections::HashSet::new();
+    found.retain(|candidate| seen.insert(candidate.host.clone()));
     if let Some(name) = super::activity::hostname() {
         found.push(Candidate {
             host: name,

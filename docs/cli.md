@@ -214,3 +214,9 @@ also have specific meanings:
 
 For examples, see the [cookbook](cookbook.md). For stable scripting contracts,
 see the [CLI specification](../spec/v0/SPEC.md).
+
+### Retrying remote writes
+
+With `feed --retry`, a remote append retries an explicit `Busy` response.
+It returns an I/O failure without retrying: the server may have saved the
+message before the connection failed. Check the pool before sending it again.

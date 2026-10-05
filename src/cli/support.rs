@@ -522,7 +522,27 @@ pub(crate) fn add_retry_hint(err: Error, attempts: u32, waited: Duration) -> Err
     }
 }
 
-pub(crate) fn retry_with_config<T, F>(config: Option<RetryConfig>, mut f: F) -> Result<T, Error>
+pub(crate) fn retry_with_config<T, F>(config: Option<RetryConfig>, f: F) -> Result<T, Error>
+where
+    F: FnMut() -> Result<T, Error>,
+{
+    retry_if(config, f, is_retryable)
+}
+
+/// A remote I/O failure can occur after the server commits an append.
+/// Only an explicit Busy response proves that retrying will not duplicate it.
+pub(crate) fn retry_remote_append<T, F>(config: Option<RetryConfig>, f: F) -> Result<T, Error>
+where
+    F: FnMut() -> Result<T, Error>,
+{
+    retry_if(config, f, |err| err.kind() == ErrorKind::Busy)
+}
+
+fn retry_if<T, F>(
+    config: Option<RetryConfig>,
+    mut f: F,
+    can_retry: impl Fn(&Error) -> bool,
+) -> Result<T, Error>
 where
     F: FnMut() -> Result<T, Error>,
 {
@@ -536,7 +556,7 @@ where
         match f() {
             Ok(value) => return Ok(value),
             Err(err) => {
-                if attempts <= config.retries && is_retryable(&err) {
+                if attempts <= config.retries && can_retry(&err) {
                     std::thread::sleep(config.delay);
                     waited += config.delay;
                     continue;
@@ -694,4 +714,47 @@ pub(crate) fn decode_payload(payload: &[u8]) -> Result<(Value, Value), Error> {
             .with_source(err)
     })?;
     Ok((meta, data))
+}
+
+#[cfg(test)]
+mod remote_retry_tests {
+    use super::*;
+
+    #[test]
+    fn remote_append_does_not_repeat_an_ambiguous_timeout() {
+        let mut writes = 0;
+        let result: Result<(), Error> = retry_remote_append(
+            Some(RetryConfig {
+                retries: 3,
+                delay: Duration::ZERO,
+            }),
+            || {
+                writes += 1;
+                Err(Error::new(ErrorKind::Io).with_source(io::Error::from(io::ErrorKind::TimedOut)))
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(writes, 1);
+    }
+
+    #[test]
+    fn remote_append_retries_a_busy_response() {
+        let mut attempts = 0;
+        let result = retry_remote_append(
+            Some(RetryConfig {
+                retries: 1,
+                delay: Duration::ZERO,
+            }),
+            || {
+                attempts += 1;
+                if attempts == 1 {
+                    Err(Error::new(ErrorKind::Busy))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert!(result.is_ok());
+        assert_eq!(attempts, 2);
+    }
 }
