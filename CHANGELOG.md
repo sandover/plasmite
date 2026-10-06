@@ -6,13 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ## [1.1.0] - 2026-10-05
 
-Plasmite 1.1 can keep your pool server running across reboots on macOS, Linux and Windows. Install it once, then manage it with the CLI. This release also hardens shared servers and remote clients, makes retries safer, and improves handling of damaged data and oversized input.
+Plasmite 1.1 adds support for running pool servers as operating system services on macOS, Linux and Windows. The CLI handles installation, startup and service management. This release also adds server and client resource limits, restricts write retries, and fixes errors in pool ownership, input handling and recovery.
 
 [Install or update Plasmite](https://github.com/sandover/plasmite/blob/v1.1.0/docs/record/distribution.md#install-matrix).
 
-### Install a server that starts at boot
+### Service installation and management
 
-Plasmite now sets up the operating system's service for you: launchd on macOS, systemd on Linux, and a native Windows service. Each pool directory has its own setup.
+`serve install` configures launchd on macOS, systemd on Linux, or a native Windows service. The service starts at boot. Each pool directory has its own setup.
 
 For an existing pool directory:
 
@@ -22,54 +22,65 @@ plasmite serve status --all
 plasmite --dir ./shared serve logs --follow
 ```
 
-Replace the example hostname with your server's reachable name. Stop any foreground server for that directory before installing, and approve the system's administrator prompt when requested.
+Replace the example hostname with a reachable server name. Stop any foreground server for the directory before installing. Installation may require administrator approval.
 
-Use `serve start`, `stop`, `restart` and `uninstall` to manage the installed server. Status includes installed servers that have stopped or failed. Uninstalling preserves your pools, access keys and certificates.
+The CLI provides `serve start`, `stop`, `restart`, `logs` and `uninstall`. Status includes installed servers that have stopped or failed. Uninstalling preserves pools, access keys and certificates.
 
-To update a service, run the new executable's `serve install` command against the same directory. With no new options, it keeps the saved settings. If an update fails, Plasmite attempts to restore the previous setup and retains recovery files when administrator repair is needed.
+To update a service, run the new executable's `serve install` command against the same directory. With no new options, it retains the saved settings. If an update fails, Plasmite attempts to restore the previous setup. It retains recovery files when repair requires administrator intervention.
 
-Windows services run under a pool-specific virtual account without storing your login password. See the [service guide](https://github.com/sandover/plasmite/blob/v1.1.0/docs/record/serving.md) for setup, recovery and certificate renewal.
+Windows services run under a pool-specific virtual account and do not store a user login password. The [service guide](https://github.com/sandover/plasmite/blob/v1.1.0/docs/record/serving.md) covers setup, recovery and certificate renewal.
 
-### Less typing for everyday sharing
+### CLI changes
 
-You can now supply the server address and invitation name directly:
+`serve` and `access invite` now accept the server address and invitation name as positional arguments:
 
 ```console
 plasmite --dir ./shared serve https://pools.example.net:9743
 plasmite --dir ./shared access invite laptop
 ```
 
-The earlier `--shared-address` and `access invite --name` forms still work. The [CLI guide](https://github.com/sandover/plasmite/blob/v1.1.0/docs/cli.md) explains listener addresses and saved service settings.
+The earlier `--shared-address` and `access invite --name` forms remain supported. See the [CLI guide](https://github.com/sandover/plasmite/blob/v1.1.0/docs/cli.md) for listener addresses and saved service settings.
 
-### Safer sharing and more dependable data
+### Security and resource limits
 
 - Shared servers limit concurrent HTTPS connections, stalled requests and pending OAuth approvals. Protected pool and MCP requests check authorization before buffering request bodies.
 - Node remote clients refuse redirects and require HTTPS when sending bearer tokens outside loopback.
-- Rust remote clients bound response and stream-frame sizes, and close malformed or truncated streams.
+- Rust remote clients limit response and stream-frame sizes and close malformed or truncated streams.
+- Access-key administration verifies that the server belongs to the intended pool directory.
+
+### Data integrity and recovery
+
 - Pool deletion waits for active writes. Handles to a deleted or replaced pool cannot append to it.
-- An append that encounters a damaged retained sequence returns an error without changing the pool. Python rejects integers that would wrap at the native 64-bit boundary.
-- Filters preserve large JSON integers. Input readers keep oversized records bounded and resume at complete record boundaries when skipping bad input.
-- Access-key administration checks that the server belongs to the intended pool directory. Restart and service-update fixes preserve ownership locks and recovery state.
+- An append that encounters a damaged retained sequence returns an error without changing the pool.
+- Python rejects integers that would wrap at the native 64-bit boundary. Filters preserve large JSON integers.
+- Input readers bound memory use for oversized records. When skipping bad input, they resume at complete record boundaries.
+- Restart and service-update fixes preserve ownership locks and recovery state.
 
-### Before you upgrade
+### Upgrade notes
 
-**This release includes breaking changes despite the 1.1 version number.**
+**This release includes breaking changes despite the 1.1 version number.** Existing pool files and the C ABI remain compatible.
 
-Existing pool files and the C ABI remain compatible.
+#### Remote MCP bridge removal
 
-The remote stdio MCP bridge has been removed: `plasmite mcp --remote SERVER_URL` and `plasmite mcp SERVER_URL` no longer work. Configure Claude Code or Codex CLI to connect directly to the server's HTTPS `/mcp` endpoint and sign in through OAuth. Local `plasmite --dir DIR mcp` remains available. Follow the [MCP migration instructions](https://github.com/sandover/plasmite/blob/v1.1.0/docs/record/upgrading-1.0.md).
+The remote stdio MCP bridge has been removed. `plasmite mcp --remote SERVER_URL` and `plasmite mcp SERVER_URL` no longer work.
 
-Rust callers: `PlasmiteMcpHandler::with_remote_url` has also been removed. Use `with_client` with a `LocalClient` for an embedded local MCP handler; remote MCP clients should connect to the server's HTTPS endpoint.
+Configure Claude Code or Codex CLI to connect directly to the server's HTTPS `/mcp` endpoint and sign in through OAuth. Local `plasmite --dir DIR mcp` remains available. See the [MCP migration instructions](https://github.com/sandover/plasmite/blob/v1.1.0/docs/record/upgrading-1.0.md).
+
+The public Rust constructor `PlasmiteMcpHandler::with_remote_url` has also been removed. Use `with_client` with a `LocalClient` for an embedded local MCP handler. Remote MCP clients should connect to the server's HTTPS endpoint.
+
+#### Write retries and remote clients
 
 `feed --retry` now retries only a busy pool. After an I/O or connection failure, a write may already have succeeded. Check the pool before sending it again.
 
-Node HTTP clients that depend on redirects or send bearer tokens over non-loopback HTTP must update their connection settings. Oversized remote responses now fail rather than consuming unbounded memory.
+Node HTTP clients that depend on redirects or send bearer tokens over non-loopback HTTP must update their connection settings. Oversized remote responses now return errors.
 
 ### Platform notes
 
-Linux ARM64 and ARMv7 SDK archives remain preview targets. Physical Raspberry Pi installation and reboot checks remain outstanding. Windows support continues to target x86_64; the boot-service validation includes an ARM64 Windows VM running the x86_64 binary, not a native ARM64 build.
+Linux ARM64 and ARMv7 SDK archives remain preview targets. Physical Raspberry Pi installation and reboot checks remain outstanding.
 
-The local HTTP administration listener remains credential-free. Use it on a host or container whose local users you trust.
+Windows support continues to target x86_64. Boot-service testing includes an ARM64 Windows VM running the x86_64 binary; it does not establish native ARM64 support.
+
+The local HTTP administration listener remains credential-free. It requires a host or container with trusted local users.
 
 [Full changes since 1.0.0](https://github.com/sandover/plasmite/compare/v1.0.0...v1.1.0)
 
