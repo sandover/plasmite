@@ -55,5 +55,7 @@ and specifications above:
 - [MCP server design](proposals/mcp-server.md)
 - [CLI and help audit](proposals/cli-help-system.md)
 - [Proposed CLI surface design history](proposals/cli-surface.md)
+- [UDP input design](proposals/udp-input.md): read when designing a small
+  datagram input for an existing pool.
 
 The repository's `.ergo/` backlog and journal track planned work and results.

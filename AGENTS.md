@@ -21,6 +21,7 @@ docs/
 ├── proposals/mcp-server.md                    — MCP design history; read when revisiting the MCP surface
 ├── proposals/serve-mcp-native.md              — Secure sharing; read when designing access keys, native connections, or MCP authorization
 ├── proposals/serve-access-mvp.md              — Earlier access proposal; read when tracing the preceding invitation design
+├── proposals/udp-input.md                     — Read when designing User Datagram Protocol (UDP) input, its CLI, or delivery limits
 │
 │   Docs of record
 ├── record/README.md                           — Docs of record index; start here for stable policies and runbooks
