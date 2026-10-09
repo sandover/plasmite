@@ -261,19 +261,27 @@ p.Close(); c.Close()
 
 ## Lite3 Documents
 
-Start with a fresh local pool named `relay`. This example appends a heartbeat,
-fetches its Lite3 document, appends those bytes again, then fetches the new
-message. Lite3 documents contain a `meta.tags` string array and object `data`.
-Plasmite preserves those document bytes; each append assigns a new sequence
-and time. The fresh pool makes the first two sequence numbers 1 and 2.
+Save a heartbeat as Lite3 bytes, then feed those bytes back into the pool.
 
 ```bash
+# Create a new pool.
 plasmite pool create relay
+
+# Add a heartbeat.
 plasmite feed relay '{"kind":"heartbeat"}'
+
+# Save its bytes.
 plasmite fetch relay 1 --format lite3 > heartbeat.lite3
+
+# Feed those bytes back into the pool.
 plasmite feed relay --in lite3 --file heartbeat.lite3
+
+# Read the copied message.
 plasmite fetch relay 2
 ```
+
+The new pool starts at sequence 1. The file contains the message's tags and
+data. Feeding it preserves those bytes and assigns a new sequence and time.
 
 `fetch --json` emits a message envelope with `seq`, `time`, `meta`, and `data`.
 Ordinary `feed` input expects the JSON value for `data`, not that full envelope.
@@ -433,25 +441,30 @@ Replace `pools.example.net` with a hostname or IP the client can reach.
 **On the server:**
 
 ```bash
-plasmite --dir ./shared pool create events
-plasmite --dir ./shared pool create chat
-plasmite --dir ./shared serve --shared-address https://pools.example.net:9743
+# Create a pool and start the shared server.
+plasmite pool create events
+plasmite serve --shared-address https://pools.example.net:9743
 ```
 
-In another terminal on the server, create an invitation for the whole `./shared`
-directory:
+In another terminal on the server, create an invitation. It grants access to
+every pool in the default pool directory:
 
 ```bash
-plasmite --dir ./shared access invite --name laptop
+# Create an access key for the laptop.
+plasmite access invite --name laptop
 ```
 
 Send the HTTPS address and access key separately, and keep the key private. On
 the client, connect and enter the key at the prompt; Plasmite does not echo it:
 
 ```bash
+# Connect and enter the access key.
 plasmite access connect https://pools.example.net:9743
+
+# Send a sensor reading.
 plasmite feed https://pools.example.net:9743/events '{"sensor": "temp", "value": 23.5}'
 
+# Read recent messages and watch for new ones.
 plasmite follow https://pools.example.net:9743/events --tail 20
 ```
 
@@ -535,7 +548,7 @@ For pools on this machine, configure the harness to launch Plasmite directly:
   "mcpServers": {
     "plasmite": {
       "command": "plasmite",
-      "args": ["mcp", "--dir", "/path/to/pools"]
+      "args": ["mcp"]
     }
   }
 }
