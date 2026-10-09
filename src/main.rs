@@ -307,7 +307,7 @@ mod tests {
                     "tag",
                 ],
             ),
-            ("plasmite fetch", vec!["help", "json"]),
+            ("plasmite fetch", vec!["format", "help", "json"]),
             (
                 "plasmite follow",
                 vec![
