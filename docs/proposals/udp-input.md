@@ -36,9 +36,9 @@ The contract has these limits:
   reaches the append operation becomes another pool message.
 - A successful socket send means the sender's operating system accepted the
   datagram. It says nothing about reception or storage.
-- The receiver accepts at most **N bytes of UDP payload**, including the pool
-  name and encoded message. It discards larger datagrams in full. Choose N
-  before freezing the protocol; 1,200 bytes remains a provisional value.
+- The receiver accepts at most **65,507 bytes of UDP payload**, including the
+  pool name, NUL delimiter, and message body. It discards larger datagrams in
+  full. Below, N denotes this fixed limit.
 - Invalid messages, storage pressure, and append errors can prevent an append.
   The sender receives no error or receipt. The receiver never retries an append:
   some I/O errors can occur after publication.
@@ -48,17 +48,59 @@ The contract has these limits:
 - UDP appends use the existing `Durability::Fast` policy. They do not request a
   flush to stable storage before completing the append operation.
 
-The acceptance limit bounds parsing work. Choose it after checking representative
-JSON and Lite3 messages and the networks this feature supports. A conservative
-sending size and the receiver's acceptance limit serve different purposes.
-IPv6's minimum packet size leaves 1,232 bytes after its basic IP and UDP headers;
-1,200 leaves some header space. That makes 1,200 a useful sending baseline, but
-does not establish the right rejection limit for Plasmite. Tunnels and smaller
-path limits can still cause fragmentation or loss. [QUIC datagram sizing](https://www.rfc-editor.org/rfc/rfc9000.html#section-14)
+### Datagram size policy
 
-The receiver uses one fixed 64 KiB buffer regardless of N. This bounds receive
-memory independently of the acceptance policy. There is no application
-fragmentation or reassembly. Send messages above N through HTTP.
+Use one fixed acceptance limit for both encodings and every listener address:
+65,507 bytes. This is the conventional IPv4 UDP payload maximum with a basic
+IP header; IPv6's conventional maximum is 65,527 bytes. Choosing the smaller
+value gives senders one protocol limit across both address families.
+[UDP size limits](https://datatracker.ietf.org/doc/html/rfc8085#section-1)
+
+Recommend sends of at most 1,200 bytes on ordinary protected networks unless
+the sender knows the path supports more. Count routing bytes as well as the
+body. This is a practical starting point, not a delivery guarantee. IPv6's
+minimum link MTU is 1,280 bytes; subtracting its basic 40-byte header and UDP's
+8-byte header leaves 1,232 bytes. A 1,200-byte payload leaves 32 bytes for IPv6
+extension headers. QUIC uses that baseline and discovers larger path sizes.
+[IPv6 packet sizing](https://www.rfc-editor.org/rfc/rfc8200.html#section-5),
+[QUIC datagram sizing](https://www.rfc-editor.org/rfc/rfc9000.html#section-14)
+
+Some IPv4 paths and tunnels support less. RFC 8085 gives a 576-byte IPv4
+fallback effective MTU when the path is unknown, before subtracting headers.
+Senders must account for their path and avoid IP fragmentation. Losing one
+fragment loses the whole datagram, and some firewalls discard fragments.
+For remote messages above 1,200 bytes, prefer HTTP unless the operator knows
+the path supports the complete datagram without fragmentation. Protected
+network access alone says nothing about its packet-size limit.
+[UDP message-size guidance](https://datatracker.ietf.org/doc/html/rfc8085#section-3.2)
+
+A hard 1,200-byte receiver limit would also reject modest messages that arrive
+complete. The following constructed examples use the current CLI's Lite3
+encoder, compact JSON, and the eight-byte `sensors` plus NUL routing prefix:
+
+| Message | JSON datagram bytes | Lite3 datagram bytes |
+| --- | ---: | ---: |
+| TDD temperature reading with one tag | 69 | 469 |
+| 20 numeric fields with one tag | 406 | 1,329 |
+| 50 numeric fields with one tag | 976 | 2,926 |
+| 256 integer samples with one tag | 973 | 10,793 |
+
+These examples show encoding overhead; they do not describe production traffic
+or prove network delivery. Lite3 supports direct binary forwarding rather than
+promising compression. Limits such as 4 KiB or 16 KiB would introduce another
+cutoff without a network or measured receiver requirement.
+
+The receiver uses one fixed 65,536-byte buffer and one append at a time. The
+acceptance limit bounds parser input to about 64 KiB; decoded values and append
+encoding can allocate more. Larger messages cost more CPU and storage work, so
+the controlled-network and bounded-rate requirements still apply. A size limit
+does not control traffic rate. Add no configurable cap, path discovery, or
+sender negotiation in this version.
+
+Plasmite never splits messages or reassembles them. The operating system can
+reassemble IP fragments before delivering a datagram to the socket; receiver
+acceptance does not reveal whether fragmentation occurred. Send messages above
+65,507 bytes through HTTP.
 
 ## Server composition
 
@@ -142,8 +184,8 @@ plasmite serve --udp=100.100.10.20:9701
 
 To accept prepared binary messages, add `--udp-format lite3`. The configured
 format applies to every datagram; the listener never guesses an encoding.
-`--max-body-bytes` continues to govern HTTP bodies. The initial UDP design adds
-no size-tuning option; the acceptance limit remains an open protocol decision.
+`--max-body-bytes` continues to govern HTTP bodies. UDP uses the fixed 65,507-byte
+acceptance limit and adds no size-tuning option.
 
 ### Installed server lifecycle
 
@@ -195,7 +237,8 @@ readiness. With UDP enabled, add these lines to stderr:
 ```text
 UDP input: 127.0.0.1:9701 (json, served pool directory)
 UDP delivery may lose, duplicate, or reorder messages.
-Maximum UDP message size: N bytes. Larger messages are discarded.
+Maximum UDP message size: 65507 bytes including routing. Larger messages are discarded.
+For network sends, prefer at most 1200 bytes unless the path supports more.
 Sending does not confirm storage. UDP has no authentication or encryption.
 ```
 
@@ -275,11 +318,12 @@ message = {"data": {"temperature_c": 22.4, "sample": 81},
            "tags": ["sensor"]}
 body = json.dumps(message, separators=(",", ":")).encode("utf-8")
 payload = b"sensors\x00" + body
+if len(payload) > 65_507:
+    raise ValueError("UDP payload exceeds 65507 bytes; use HTTP")
 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
     sock.sendto(payload, ("127.0.0.1", 9701))
 ```
 
-Once N is fixed, add a sender-side length check against the complete payload.
 The operator reads stored messages through the existing CLI:
 
 ```console
@@ -447,10 +491,12 @@ the original message bodies exactly.
 
 Focused checks must cover:
 
-- Messages at N bytes and oversized messages at N+1 bytes and well above
-  the acceptance limit, including maximum conventional UDP payloads. An
-  oversized datagram whose prefix forms valid JSON or Lite3 must never append.
-  Check this receive behavior on Unix and native Windows.
+- Messages at N bytes and oversized messages at N+1 through 65,527 bytes on
+  IPv6, which permits those payload sizes. IPv4 senders cannot send an ordinary
+  datagram above N; verify the sender-side error separately. An oversized
+  datagram whose prefix forms valid JSON or Lite3 must never append. Check
+  reception on Unix and native Windows, plus rejection of a full receive buffer
+  before parsing. Check the documented sender length guard.
 - Empty, malformed, wrong-format, and invalid-shape messages; empty or invalid
   UTF-8 wire names; and missing routing delimiters. Verify no sequence advance
   and correct outcome counts. Test empty, NUL-containing, separator-containing,
