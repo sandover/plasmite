@@ -307,3 +307,5 @@
 {"version":1,"task_id":"QOBHXR","kind":"claim","at":"2026-10-09T19:46:22.411975Z","agent":"gpt-6@local"}
 {"version":1,"task_id":"QOBHXR","kind":"done","at":"2026-10-09T19:46:22.443461Z","agent":"gpt-6@local","text":"Updated help/contracts/cookbook, executed the heartbeat recipe, and resolved Sol-high findings on receipt races and buffer wording."}
 {"version":1,"task_id":"TS3TYT","kind":"claim","at":"2026-10-09T19:46:22.479311Z","agent":"gpt-6@local"}
+{"version":1,"task_id":"TS3TYT","kind":"block","at":"2026-10-09T19:49:21.406141Z","agent":"gpt-6@local","text":"User requested no release on 2026-10-09; hold tags, pushes, Homebrew changes, and publishing so UDP work can join the candidate. Complete current validation only."}
+{"version":1,"task_id":"TS3TYT","kind":"result","at":"2026-10-09T19:59:52.617002Z","text":"Full local validation passed at 0975419; release stays on hold.","file":{"path":".scratch/release/evidence-v1.2.0.md","sha256":"608fc041e96a785d561155224ea37c99771e0626ac6a7152303565357ec9f92a","mtime":"2026-10-09T19:59:44.186250219Z","git_commit":"0975419f994152b5d7d34b6049f502d11bc84338"}}
