@@ -49,6 +49,22 @@ owns its protocol guarantees.
   machine output and structured errors, without ANSI color or commentary.
 - JSON reports emit one document; JSON streams and append receipts emit one
   document per line. `fetch --json` emits one message envelope.
+- `fetch POOL SEQ` defaults to readable text. `--format pretty`, `--format
+  json`, and `--format lite3` select readable text, one JSON message envelope,
+  and the raw Lite3 document. `--json` selects the same mode as
+  `--format json`; combining it with explicit `--format pretty` or
+  `--format lite3` is a usage error. Local and remote fetch support all three
+  formats.
+- `feed --in lite3` reads one byte buffer as one message from `--file PATH`,
+  `--file -`, or piped stdin. Stdin input ends at EOF. The document may not
+  exceed 256 MiB. Lite3 mode rejects inline `DATA`, `--tag`, and
+  `--errors skip`. It preserves the input document bytes, including its
+  `meta.tags` string array and object `data`; the append assigns a new
+  sequence and time. `feed --json` selects the append receipt format and does
+  not change the input mode. Local and remote feed support Lite3 mode.
+- Lite3 input treats the whole input as one byte buffer. It preserves unused
+  bytes in that buffer and does not split concatenated messages.
+- `follow` and `duplex` do not support Lite3 binary streams.
 - `version --json` emits its version report; bare `version` emits human text.
 - All product-version output uses the same build identity. A clean checkout at
   the matching release tag reports the package version. Other source builds

@@ -475,6 +475,26 @@ impl RemotePool {
     }
 
     pub fn append_lite3(&self, payload: &[u8], options: AppendOptions) -> ApiResult<u64> {
+        let envelope: Lite3AppendEnvelope = self.append_lite3_response(payload, options)?;
+        Ok(envelope.message.seq)
+    }
+
+    /// Append the original Lite3 bytes and return the server's committed message.
+    /// This uses the append response, so retention cannot overtake a second read.
+    pub fn append_lite3_with_receipt(
+        &self,
+        payload: &[u8],
+        options: AppendOptions,
+    ) -> ApiResult<Message> {
+        let envelope: MessageEnvelope = self.append_lite3_response(payload, options)?;
+        Ok(message_from_remote(envelope.message))
+    }
+
+    fn append_lite3_response<R: DeserializeOwned>(
+        &self,
+        payload: &[u8],
+        options: AppendOptions,
+    ) -> ApiResult<R> {
         if options.timestamp_ns != 0 {
             return Err(Error::new(ErrorKind::Usage)
                 .with_message("remote append does not support explicit timestamps"));
@@ -492,10 +512,7 @@ impl RemotePool {
             .send_bytes(payload);
 
         match response {
-            Ok(resp) => {
-                let envelope: Lite3AppendEnvelope = read_json_response(resp)?;
-                Ok(envelope.message.seq)
-            }
+            Ok(resp) => read_json_response(resp),
             Err(ureq::Error::Status(code, resp)) => Err(parse_error_response(code, resp)),
             Err(ureq::Error::Transport(err)) => Err(Error::new(ErrorKind::Io)
                 .with_message("request failed")

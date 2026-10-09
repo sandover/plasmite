@@ -64,14 +64,18 @@ pub(crate) fn open_feed_reader(path: &str) -> Result<Box<dyn Read>, Error> {
     Ok(Box::new(reader))
 }
 
-pub(crate) fn input_mode_to_ingest(mode: InputMode) -> IngestMode {
-    match mode {
+pub(crate) fn input_mode_to_ingest(mode: InputMode) -> Result<IngestMode, Error> {
+    Ok(match mode {
         InputMode::Auto => IngestMode::Auto,
         InputMode::Jsonl => IngestMode::Jsonl,
         InputMode::Json => IngestMode::Json,
         InputMode::Seq => IngestMode::Seq,
         InputMode::Jq => IngestMode::Jq,
-    }
+        InputMode::Lite3 => {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("Lite3 input requires the single-message binary reader"));
+        }
+    })
 }
 
 pub(crate) fn error_policy_to_ingest(policy: ErrorPolicyCli) -> ErrorPolicy {
@@ -202,7 +206,7 @@ where
     F: FnMut(Value, bool) -> Result<Option<Value>, Error>,
 {
     let ingest_config = IngestConfig {
-        mode: input_mode_to_ingest(presentation.input),
+        mode: input_mode_to_ingest(presentation.input)?,
         errors: error_policy_to_ingest(presentation.errors),
         sniff_bytes: DEFAULT_SNIFF_BYTES,
         sniff_lines: DEFAULT_SNIFF_LINES,

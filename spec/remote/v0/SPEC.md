@@ -96,6 +96,9 @@ It captures stable wire-level compatibility guarantees only.
 
 - `POST /v0/pools/{pool}/append` -> success body `{ "message": ... }`.
 - `POST /v0/pools/{pool}/append_lite3` (`application/x-plasmite-lite3`) -> `{ "message": ... }`.
+- Lite3 append validates the complete message before writing; unreadable nested
+  data returns `Corrupt` without appending. Successful appends preserve the
+  document bytes and return the new destination message in the response.
 - `GET /v0/pools/{pool}/messages/{seq}` -> success body `{ "message": ... }`.
 - `GET /v0/pools/{pool}/messages/{seq}/lite3` -> raw Lite3 bytes with `Content-Type: application/x-plasmite-lite3` and `plasmite-seq` header.
 

@@ -251,6 +251,7 @@ pub(crate) fn feed_exact_create_command_hint(
                 InputMode::Json => "json",
                 InputMode::Seq => "seq",
                 InputMode::Jq => "jq",
+                InputMode::Lite3 => "lite3",
             }
             .to_string(),
         );

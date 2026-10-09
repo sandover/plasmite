@@ -1,6 +1,7 @@
 //! Purpose: Feed and fetch black-box CLI integration tests.
 
 pub mod support;
+use plasmite::api::{AppendOptions, Durability, Pool, PoolApiExt, PoolOptions};
 use support::cli::*;
 
 #[test]
@@ -1215,4 +1216,467 @@ fn emit_streams_json_values_from_stdin() {
     assert_eq!(follower_lines.len(), 2);
     assert_eq!(follower_lines[0].get("data").unwrap()["x"], 1);
     assert_eq!(follower_lines[1].get("data").unwrap()["x"], 2);
+}
+
+const FIXTURE_TIMESTAMP_NS: u64 = 1_600_000_000_123_456_789;
+
+fn create_fixture_pool(pool_dir: &Path, name: &str) -> Pool {
+    std::fs::create_dir_all(pool_dir).expect("pool directory");
+    Pool::create(
+        pool_dir.join(format!("{name}.plasmite")),
+        PoolOptions::new(1024 * 1024),
+    )
+    .expect("create fixture pool")
+}
+
+fn append_fixture(pool: &mut Pool) -> (Vec<u8>, String) {
+    let tags = vec!["fixture".to_string(), "binary".to_string()];
+    let message = pool
+        .append_json(
+            &json!({"text": "before\0after\nnext line", "nested": {"value": 7}}),
+            &tags,
+            AppendOptions::new(FIXTURE_TIMESTAMP_NS, Durability::Fast),
+        )
+        .expect("append fixture");
+    assert_eq!(message.seq, 1);
+    let bytes = pool.get_lite3(message.seq).expect("fixture Lite3").payload;
+    (bytes, message.time)
+}
+
+fn append_marker(pool: &mut Pool) {
+    pool.append_json(
+        &json!({"marker": true}),
+        &[],
+        AppendOptions::new(FIXTURE_TIMESTAMP_NS - 1, Durability::Fast),
+    )
+    .expect("append marker");
+}
+
+fn fetch_output(pool_dir: &Path, pool: &str, seq: &str, options: &[&str]) -> std::process::Output {
+    let mut command = cmd();
+    command
+        .arg("--dir")
+        .arg(pool_dir)
+        .args(["fetch", pool, seq])
+        .args(options);
+    command.output().expect("fetch")
+}
+
+#[test]
+fn fetch_formats_keep_readable_json_and_raw_lite3_output() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let mut pool = create_fixture_pool(&pool_dir, "source");
+    let (payload, _) = append_fixture(&mut pool);
+    drop(pool);
+
+    let default = fetch_output(&pool_dir, "source", "1", &[]);
+    let pretty = fetch_output(&pool_dir, "source", "1", &["--format", "pretty"]);
+    assert!(default.status.success());
+    assert!(pretty.status.success());
+    assert_eq!(default.stdout, pretty.stdout);
+    let readable = parse_json(std::str::from_utf8(&default.stdout).expect("readable utf8"));
+    assert_eq!(readable["seq"], 1);
+    assert_eq!(readable["data"]["text"], "before\0after\nnext line");
+
+    let format_json = fetch_output(&pool_dir, "source", "1", &["--format", "json"]);
+    let json_alias = fetch_output(&pool_dir, "source", "1", &["--json"]);
+    assert!(format_json.status.success());
+    assert!(json_alias.status.success());
+    assert_eq!(format_json.stdout, json_alias.stdout);
+    let machine = parse_json(std::str::from_utf8(&format_json.stdout).expect("json utf8"));
+    assert_eq!(machine["meta"]["tags"], json!(["fixture", "binary"]));
+
+    let raw = fetch_output(&pool_dir, "source", "1", &["--format", "lite3"]);
+    assert!(raw.status.success());
+    assert_eq!(raw.stderr, b"");
+    assert_eq!(raw.stdout, payload);
+
+    for format in ["pretty", "lite3"] {
+        let conflict = fetch_output(&pool_dir, "source", "1", &["--json", "--format", format]);
+        assert_eq!(conflict.status.code(), Some(2));
+        let error = parse_error_json(&conflict.stderr);
+        assert_eq!(error["error"]["kind"], "Usage");
+    }
+}
+
+#[test]
+fn feed_lite3_file_preserves_bytes_tags_and_assigns_fresh_identity() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let mut source = create_fixture_pool(&pool_dir, "source");
+    let (payload, source_time) = append_fixture(&mut source);
+    drop(source);
+
+    let mut target = create_fixture_pool(&pool_dir, "target");
+    append_marker(&mut target);
+    drop(target);
+
+    let input_file = temp.path().join("message.lite3");
+    std::fs::write(&input_file, &payload).expect("write Lite3 fixture");
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().expect("pool directory"),
+            "feed",
+            "target",
+            "--in",
+            "lite3",
+            "--file",
+            input_file.to_str().expect("input path"),
+            "--json",
+        ])
+        .output()
+        .expect("feed Lite3 file");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt = parse_json(std::str::from_utf8(&output.stdout).expect("receipt utf8"));
+    assert_eq!(receipt["seq"], 2);
+    assert_ne!(receipt["time"].as_str(), Some(source_time.as_str()));
+    assert_eq!(receipt["meta"]["tags"], json!(["fixture", "binary"]));
+    assert!(receipt.get("data").is_none());
+
+    let raw = fetch_output(&pool_dir, "target", "2", &["--format", "lite3"]);
+    assert!(raw.status.success());
+    assert_eq!(raw.stdout, payload);
+    let message = fetch_output(&pool_dir, "target", "2", &["--format", "json"]);
+    assert!(message.status.success());
+    let message = parse_json(std::str::from_utf8(&message.stdout).expect("message utf8"));
+    assert_eq!(message["meta"]["tags"], json!(["fixture", "binary"]));
+    assert_eq!(message["data"]["text"], "before\0after\nnext line");
+}
+
+#[test]
+fn feed_lite3_file_dash_reads_one_binary_document_from_stdin() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let mut source = create_fixture_pool(&pool_dir, "source");
+    let (payload, _) = append_fixture(&mut source);
+    drop(source);
+    drop(create_fixture_pool(&pool_dir, "target"));
+
+    let mut feed = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().expect("pool directory"),
+            "feed",
+            "target",
+            "--in",
+            "lite3",
+            "--file",
+            "-",
+            "--json",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("feed stdin");
+    feed.stdin
+        .take()
+        .expect("feed stdin")
+        .write_all(&payload)
+        .expect("write Lite3 stdin");
+    let output = feed.wait_with_output().expect("feed output");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt = parse_json(std::str::from_utf8(&output.stdout).expect("receipt utf8"));
+    assert_eq!(receipt["seq"], 1);
+
+    let raw = fetch_output(&pool_dir, "target", "1", &["--format", "lite3"]);
+    assert!(raw.status.success());
+    assert_eq!(raw.stdout, payload);
+}
+
+#[test]
+fn native_fetch_pipe_feeds_the_same_lite3_bytes() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let mut source = create_fixture_pool(&pool_dir, "source");
+    let (payload, _) = append_fixture(&mut source);
+    drop(source);
+    let mut target = create_fixture_pool(&pool_dir, "target");
+    append_marker(&mut target);
+    drop(target);
+
+    let mut fetch = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().expect("pool directory"),
+            "fetch",
+            "source",
+            "1",
+            "--format",
+            "lite3",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("fetch raw Lite3");
+    let input = Stdio::from(fetch.stdout.take().expect("fetch stdout"));
+    let output = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().expect("pool directory"),
+            "feed",
+            "target",
+            "--in",
+            "lite3",
+            "--json",
+        ])
+        .stdin(input)
+        .stdout(Stdio::piped())
+        .output()
+        .expect("feed raw pipe");
+    let fetch_status = fetch.wait().expect("fetch status");
+    assert!(fetch_status.success());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt = parse_json(std::str::from_utf8(&output.stdout).expect("receipt utf8"));
+    assert_eq!(receipt["seq"], 2);
+
+    let raw = fetch_output(&pool_dir, "target", "2", &["--format", "lite3"]);
+    assert!(raw.status.success());
+    assert_eq!(raw.stdout, payload);
+}
+
+#[test]
+fn http_fetch_and_feed_match_local_lite3_bytes() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let mut source = create_fixture_pool(&pool_dir, "source");
+    let (payload, _) = append_fixture(&mut source);
+    drop(source);
+    let mut target = create_fixture_pool(&pool_dir, "target");
+    append_marker(&mut target);
+    drop(target);
+
+    let local = fetch_output(&pool_dir, "source", "1", &["--format", "lite3"]);
+    assert!(local.status.success());
+    assert_eq!(local.stdout, payload);
+
+    let server = ServeProcess::start_with_args_and_scheme(&pool_dir, &[], "http");
+    let source_url = format!("{}/source", server.base_url);
+    let target_url = format!("{}/target", server.base_url);
+    let remote = cmd()
+        .args(["fetch", &source_url, "1", "--format", "lite3"])
+        .output()
+        .expect("HTTP fetch Lite3");
+    assert!(
+        remote.status.success(),
+        "{}",
+        String::from_utf8_lossy(&remote.stderr)
+    );
+    assert_eq!(remote.stdout, local.stdout);
+
+    let input_file = temp.path().join("remote-input.lite3");
+    std::fs::write(&input_file, &payload).expect("write remote Lite3 fixture");
+    let feed = cmd()
+        .args([
+            "feed",
+            &target_url,
+            "--in",
+            "lite3",
+            "--file",
+            input_file.to_str().expect("input path"),
+            "--json",
+        ])
+        .output()
+        .expect("HTTP feed Lite3");
+    assert!(
+        feed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&feed.stderr)
+    );
+    let receipt = parse_json(std::str::from_utf8(&feed.stdout).expect("receipt utf8"));
+    assert_eq!(receipt["seq"], 2);
+    assert_eq!(receipt["meta"]["tags"], json!(["fixture", "binary"]));
+
+    let local_target = fetch_output(&pool_dir, "target", "2", &["--format", "lite3"]);
+    let remote_target = cmd()
+        .args(["fetch", &target_url, "2", "--format", "lite3"])
+        .output()
+        .expect("HTTP fetch appended Lite3");
+    assert!(local_target.status.success());
+    assert!(remote_target.status.success());
+    assert_eq!(local_target.stdout, payload);
+    assert_eq!(remote_target.stdout, payload);
+}
+
+#[test]
+fn feed_lite3_rejects_invalid_options_before_pool_side_effects() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let input_file = temp.path().join("input.lite3");
+    std::fs::write(&input_file, b"not needed").expect("write input");
+    let directory = pool_dir.to_str().expect("pool directory");
+    let input_path = input_file.to_str().expect("input path");
+
+    let cases: [(&str, &[&str]); 3] = [
+        (
+            "inline",
+            &["--create", "--in", "lite3", "{\"x\":1}", "--json"],
+        ),
+        (
+            "tagged",
+            &[
+                "--create", "--in", "lite3", "--tag", "extra", "--file", input_path, "--json",
+            ],
+        ),
+        (
+            "skip",
+            &[
+                "--create", "--in", "lite3", "--errors", "skip", "--file", input_path, "--json",
+            ],
+        ),
+    ];
+    for (name, args) in cases {
+        let output = cmd()
+            .args(["--dir", directory, "feed", name])
+            .args(args)
+            .output()
+            .expect("invalid Lite3 feed");
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let error = parse_error_json(&output.stderr);
+        assert_eq!(error["error"]["kind"], "Usage");
+        assert!(
+            !pool_dir.join(format!("{name}.plasmite")).exists(),
+            "invalid flags created pool {name}"
+        );
+    }
+    assert!(
+        !pool_dir.exists(),
+        "invalid flags created the pool directory"
+    );
+
+    let missing_pool = cmd()
+        .args([
+            "--dir", directory, "feed", "missing", "--in", "lite3", "--tag", "extra", "--file",
+            input_path, "--json",
+        ])
+        .output()
+        .expect("invalid feed with missing pool");
+    assert_eq!(missing_pool.status.code(), Some(2));
+    let error = parse_error_json(&missing_pool.stderr);
+    assert_eq!(error["error"]["kind"], "Usage");
+    assert!(
+        !pool_dir.exists(),
+        "invalid flags opened or created the pool directory"
+    );
+}
+
+#[test]
+fn remote_binary_create_rejects_before_waiting_for_stdin() {
+    let mut child = cmd()
+        .args([
+            "feed",
+            "http://127.0.0.1:1/unused",
+            "--create",
+            "--in",
+            "lite3",
+            "--json",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("invalid remote create");
+    let status = wait_within(
+        &mut child,
+        Duration::from_secs(2),
+        "remote --create validation",
+    );
+    assert_eq!(status.code(), Some(2));
+    let output = child.wait_with_output().expect("error output");
+    assert!(output.stdout.is_empty());
+    let error = parse_error_json(&output.stderr);
+    assert_eq!(error["error"]["kind"], "Usage");
+}
+
+#[test]
+fn feed_lite3_rejects_empty_truncated_corrupt_and_nested_invalid_utf8() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    let mut source = create_fixture_pool(&pool_dir, "source");
+    let (payload, _) = append_fixture(&mut source);
+    drop(source);
+    drop(create_fixture_pool(&pool_dir, "target"));
+
+    let mut truncated = payload.clone();
+    truncated.pop();
+    let doc = plasmite::api::Lite3DocRef::new(&payload);
+    let data = doc.key_offset("data").expect("data offset");
+    let text = doc.key_offset_at(data, "text").expect("text offset");
+    let mut invalid_utf8 = payload.clone();
+    assert_eq!(invalid_utf8[text + 5], b'b');
+    invalid_utf8[text + 5] = 0xff;
+    let invalid = [
+        ("empty", Vec::new()),
+        ("truncated", truncated),
+        ("corrupt", vec![0x01, 0x02, 0x03]),
+        ("nested-invalid-utf8", invalid_utf8),
+    ];
+
+    for (name, bytes) in invalid {
+        let input_file = temp.path().join(format!("{name}.lite3"));
+        std::fs::write(&input_file, bytes).expect("write malformed Lite3");
+        let output = cmd()
+            .args([
+                "--dir",
+                pool_dir.to_str().expect("pool directory"),
+                "feed",
+                "target",
+                "--in",
+                "lite3",
+                "--file",
+                input_file.to_str().expect("input path"),
+                "--json",
+            ])
+            .output()
+            .expect("feed malformed Lite3");
+        assert!(!output.status.success(), "accepted {name} Lite3 payload");
+    }
+
+    let input_file = temp.path().join("valid.lite3");
+    std::fs::write(&input_file, &payload).expect("write valid Lite3");
+    let accepted = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().expect("pool directory"),
+            "feed",
+            "target",
+            "--in",
+            "lite3",
+            "--file",
+            input_file.to_str().expect("input path"),
+            "--json",
+        ])
+        .output()
+        .expect("feed valid Lite3");
+    assert!(
+        accepted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    let receipt = parse_json(std::str::from_utf8(&accepted.stdout).expect("receipt utf8"));
+    assert_eq!(
+        receipt["seq"], 1,
+        "invalid payloads advanced the pool bounds"
+    );
+
+    let raw = fetch_output(&pool_dir, "target", "1", &["--format", "lite3"]);
+    assert!(raw.status.success());
+    assert_eq!(raw.stdout, payload);
 }

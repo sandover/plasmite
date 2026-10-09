@@ -4,6 +4,7 @@
 
 - [CI Gate](#ci-gate)
 - [Live Event Stream](#live-event-stream)
+- [Lite3 Documents](#lite3-documents)
 - [Process Capture with tap](#process-capture-with-tap)
 - [Duplex Chat](#duplex-chat)
 - [System Log Ring Buffer](#system-log-ring-buffer)
@@ -255,6 +256,31 @@ p.Close(); c.Close()
 ```
 
 </details>
+
+---
+
+## Lite3 Documents
+
+Start with a fresh local pool named `relay`. This example appends a heartbeat,
+fetches its Lite3 document, appends those bytes again, then fetches the new
+message. Lite3 documents contain a `meta.tags` string array and object `data`.
+Plasmite preserves those document bytes; each append assigns a new sequence
+and time. The fresh pool makes the first two sequence numbers 1 and 2.
+
+```bash
+plasmite pool create relay
+plasmite feed relay '{"kind":"heartbeat"}'
+plasmite fetch relay 1 --format lite3 > heartbeat.lite3
+plasmite feed relay --in lite3 --file heartbeat.lite3
+plasmite fetch relay 2
+```
+
+`fetch --json` emits a message envelope with `seq`, `time`, `meta`, and `data`.
+Ordinary `feed` input expects the JSON value for `data`, not that full envelope.
+Use `--in lite3` to append the raw Lite3 document. Local and remote pools
+support these `feed` and `fetch` modes. Bash and Zsh preserve bytes in these
+binary pipes; PowerShell requires version 7.4 or later for native binary
+redirection. Earlier versions can use `cmd.exe` redirection.
 
 ---
 

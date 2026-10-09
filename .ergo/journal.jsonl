@@ -291,3 +291,19 @@
 {"version":1,"task_id":"7545PD","kind":"created","at":"2026-10-05T22:40:20.284532Z"}
 {"version":1,"task_id":"GBHADE","kind":"created","at":"2026-10-05T22:40:20.284555Z"}
 {"version":1,"task_id":"GBHADE","kind":"done","at":"2026-10-05T22:56:26.197261Z","text":"Resolved by 150053e. Independent Sol-high review approved exact source. Canonical three-run benchmark: 66 comparable scenarios, zero blocking regressions. Full just release-gate passed; evidence under .scratch/release."}
+{"version":1,"task_id":"XD2GSS","kind":"created","at":"2026-10-09T19:29:25.428128Z"}
+{"version":1,"task_id":"43Q4NT","kind":"created","at":"2026-10-09T19:29:25.428151Z"}
+{"version":1,"task_id":"UP3XNB","kind":"created","at":"2026-10-09T19:29:25.428155Z"}
+{"version":1,"task_id":"QOBHXR","kind":"created","at":"2026-10-09T19:29:25.428159Z"}
+{"version":1,"task_id":"TS3TYT","kind":"created","at":"2026-10-09T19:29:25.428161Z"}
+{"version":1,"task_id":"43Q4NT","kind":"open","at":"2026-10-09T19:35:32.448396Z"}
+{"version":1,"task_id":"UP3XNB","kind":"open","at":"2026-10-09T19:35:32.480224Z"}
+{"version":1,"task_id":"QOBHXR","kind":"open","at":"2026-10-09T19:35:32.510222Z"}
+{"version":1,"task_id":"TS3TYT","kind":"open","at":"2026-10-09T19:35:32.540272Z"}
+{"version":1,"task_id":"43Q4NT","kind":"claim","at":"2026-10-09T19:35:32.568637Z","agent":"gpt-6@local"}
+{"version":1,"task_id":"43Q4NT","kind":"done","at":"2026-10-09T19:39:26.615363Z","agent":"gpt-6@local","text":"Reproduced nested UTF-8 post-append failure, extended the existing shared validator, and passed API plus HTTP no-append regression checks."}
+{"version":1,"task_id":"UP3XNB","kind":"claim","at":"2026-10-09T19:39:26.647021Z","agent":"gpt-6@local"}
+{"version":1,"task_id":"UP3XNB","kind":"done","at":"2026-10-09T19:46:22.376597Z","agent":"gpt-6@local","text":"Passed exact-byte file/pipe/HTTP round trips, receipt identity, malformed-input, bounded-reader, and early option-validation checks."}
+{"version":1,"task_id":"QOBHXR","kind":"claim","at":"2026-10-09T19:46:22.411975Z","agent":"gpt-6@local"}
+{"version":1,"task_id":"QOBHXR","kind":"done","at":"2026-10-09T19:46:22.443461Z","agent":"gpt-6@local","text":"Updated help/contracts/cookbook, executed the heartbeat recipe, and resolved Sol-high findings on receipt races and buffer wording."}
+{"version":1,"task_id":"TS3TYT","kind":"claim","at":"2026-10-09T19:46:22.479311Z","agent":"gpt-6@local"}

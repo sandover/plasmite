@@ -15,7 +15,8 @@ use crate::core::error::{Error, ErrorKind};
 
 pub mod sys;
 
-const MAX_LITE3_BUF: usize = 256 * 1024 * 1024;
+/// Maximum buffer size for encoded messages and single-document CLI input.
+pub const MAX_LITE3_BUF: usize = 256 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct Lite3Buf {
@@ -298,6 +299,11 @@ impl<'a> Lite3DocRef<'a> {
             self.array_string_at(tags_ofs, index)
                 .map_err(|err| err.with_message("meta.tags must be string array"))?;
         }
+
+        // Outer fields can be valid while nested data cannot produce a readable
+        // message. Check that data before any append can commit its bytes.
+        let data_ofs = self.key_offset("data")?;
+        self.to_json_at(data_ofs, false)?;
 
         Ok(())
     }
@@ -585,6 +591,32 @@ mod tests {
         let buf = Lite3Buf::from_json_str(json).expect("lite3");
         let err = validate_bytes(buf.as_slice()).expect_err("should fail");
         assert_eq!(err.kind(), crate::core::error::ErrorKind::Corrupt);
+    }
+
+    #[test]
+    fn unreadable_nested_data_is_rejected_before_append() {
+        use crate::api::{AppendOptions, Durability, ErrorKind, Pool, PoolApiExt, PoolOptions};
+
+        let payload = encode_message(&[], &json!({"x": "y"})).expect("encode");
+        let doc = payload.as_doc();
+        let data = doc.key_offset("data").expect("data");
+        let value = doc.key_offset_at(data, "x").expect("x");
+        let mut bytes = payload.as_slice().to_vec();
+        assert_eq!(bytes[value + 5], b'y');
+        bytes[value + 5] = 0xff;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut pool = Pool::create(
+            temp.path().join("invalid.plasmite"),
+            PoolOptions::new(1024 * 1024),
+        )
+        .expect("create");
+        let before = pool.info().expect("info").bounds;
+        let err = pool
+            .append_lite3(&bytes, AppendOptions::new(123, Durability::Fast))
+            .expect_err("invalid UTF-8 must not append");
+        assert_eq!(err.kind(), ErrorKind::Corrupt);
+        assert_eq!(pool.info().expect("info").bounds, before);
     }
 
     #[test]

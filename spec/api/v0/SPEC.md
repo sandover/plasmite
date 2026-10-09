@@ -109,6 +109,14 @@ Stable error kinds:
 - An append through an open handle returns `NotFound` if its path no longer
   names that pool. Open the replacement pool before writing to it.
 - `append` is atomic with respect to pool ordering and returns the committed envelope.
+- Lite3 message appends validate the required message shape and readable nested
+  data before writing. Invalid input returns `Corrupt` without advancing the pool.
+  Valid appends preserve the input bytes and assign destination sequence/time.
+- `PoolApiExt::append_lite3_with_receipt` prepares the message from input before
+  writing and returns its destination sequence/time without reading the pool
+  again. `RemotePool::append_lite3_with_receipt` returns that message from the
+  append response, without a second remote fetch. Existing Lite3 append methods
+  keep returning the destination sequence number.
 - `get` returns `NotFound` when `seq` is absent/out of range.
 - `tail` preserves pool ordering by `seq`.
 

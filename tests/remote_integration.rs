@@ -165,6 +165,41 @@ fn remote_append_get_tail_lite3() -> TestResult<()> {
 }
 
 #[test]
+fn remote_lite3_receipt_preserves_payload_and_rejects_unreadable_data() -> TestResult<()> {
+    let temp = tempfile::tempdir()?;
+    let server = TestServer::try_start(temp.path())?;
+    let client = server.client()?;
+    let reference = PoolRef::name("binary-receipt");
+    client.create_pool(&reference, PoolOptions::new(1024 * 1024))?;
+    let pool = client.open_pool(&reference)?;
+    let tags = vec!["heartbeat".to_string()];
+    let seed = pool.append_json_now(&json!({"x": "y"}), &tags, Durability::Fast)?;
+    let payload = pool.get_lite3(seed.seq)?;
+    let copied = pool.append_lite3_with_receipt(
+        &payload,
+        plasmite::api::AppendOptions::new(0, Durability::Fast),
+    )?;
+    assert_eq!(copied.seq, seed.seq + 1);
+    assert_eq!(copied.meta.tags, tags);
+    assert_eq!(copied.data, seed.data);
+    assert_eq!(pool.get_lite3(copied.seq)?, payload);
+
+    let doc = plasmite::api::Lite3DocRef::new(&payload);
+    let data = doc.key_offset("data")?;
+    let value = doc.key_offset_at(data, "x")?;
+    let mut invalid = payload.clone();
+    assert_eq!(invalid[value + 5], b'y');
+    invalid[value + 5] = 0xff;
+    let before = pool.info()?.bounds;
+    let err = pool
+        .append_lite3_now(&invalid, Durability::Fast)
+        .expect_err("nested invalid UTF-8 must not append");
+    assert_eq!(err.kind(), ErrorKind::Corrupt);
+    assert_eq!(pool.info()?.bounds, before);
+    Ok(())
+}
+
+#[test]
 fn remote_lite3_invalid_payloads_error() -> TestResult<()> {
     let temp_dir = tempfile::tempdir()?;
     let pool_dir = temp_dir.path();

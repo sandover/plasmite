@@ -64,7 +64,9 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             },
             &context,
         ),
-        Command::Fetch { pool, seq, .. } => feed::fetch(&pool, seq, &context),
+        Command::Fetch {
+            pool, seq, format, ..
+        } => feed::fetch(&pool, seq, format, &context),
         Command::Follow {
             pool,
             create,

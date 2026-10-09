@@ -157,12 +157,26 @@ and HTTP details.
 
 - `feed` accepts one inline JSON value, a file with `--file`, `--file -` for
   stdin, or piped stdin when neither inline data nor a file is given.
-  `--in` selects JSON, JSON Lines, or auto-detection for streamed input;
-  `--errors` selects stop or skip behavior.
+  `--in` selects JSON, JSON Lines, auto-detection, or Lite3 for input;
+  `--errors` selects stop or skip behavior for JSON input.
+- `feed --in lite3` reads one byte buffer as one message from `--file PATH`,
+  `--file -`, or piped stdin. It reads stdin through EOF and accepts at most
+  256 MiB. A remote server may enforce a lower configured request-body limit.
+  Do not pass inline `DATA`, `--tag`, or `--errors skip` with Lite3 input. The
+  document supplies its own `meta.tags` string array and object `data`;
+  Plasmite stores those bytes as given and assigns the new message's sequence
+  and time. `feed --json` still selects the append receipt format.
+  The command treats the whole input as one byte buffer, including unused
+  bytes; it does not split concatenated messages.
+- Binary pipes work with Bash and Zsh. PowerShell 7.4 and later preserves
+  binary data with native redirection. Earlier PowerShell versions need
+  `cmd.exe` redirection for the same binary pipe; their native redirection
+  does not promise byte preservation.
 - `tap POOL -- COMMAND...` runs a required child command, passes through its
   stdin, and records its stdout and stderr.
 - `duplex` reads line-oriented chat from a terminal (requiring `--me`) and a
   JSON stream from non-terminal stdin.
+- `follow` and `duplex` do not emit or consume Lite3 binary streams.
 - `mcp` reads newline-delimited JSON-RPC from stdin until EOF and writes
   JSON-RPC to stdout. Use `--dir DIR mcp` (or `mcp --dir DIR`) to expose local
   pools over stdio. For shared pools, connect the harness directly to the
@@ -185,6 +199,13 @@ Structured output has no color or commentary. `--jsonl` and `--format jsonl`
 remain aliases for message streams. `mcp` always uses JSON-RPC;
 `completion` always prints shell code. `tap` passes through child output;
 `--quiet` suppresses that output.
+
+`fetch POOL SEQ` defaults to readable text. Use `--format pretty`,
+`--format json`, or `--format lite3` to choose readable text, one JSON message
+envelope, or the raw Lite3 document. `--json` is an alias for `--format json`;
+it cannot be combined with `--format pretty` or `--format lite3`. Lite3 fetch
+works for local and remote pools and writes the document bytes to stdout.
+`follow` and `duplex` keep their existing readable and JSON stream formats.
 
 Message envelopes contain `seq`, `time`, `meta`, and `data`. Compatibility
 guarantees for machine output live in the [CLI specification](../spec/v0/SPEC.md).

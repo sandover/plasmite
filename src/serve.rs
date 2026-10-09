@@ -1973,10 +1973,9 @@ async fn append_lite3(
     let result = state
         .storage_executor
         .run_authorized(grant, move || {
-            client.open_pool(&pool_ref).and_then(|mut pool| {
-                let seq = pool.append_lite3_now(&payload, durability)?;
-                pool.get_message(seq)
-            })
+            client
+                .open_pool(&pool_ref)
+                .and_then(|mut pool| pool.append_lite3_with_receipt_now(&payload, durability))
         })
         .await;
     match result {

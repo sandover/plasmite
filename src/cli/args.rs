@@ -121,12 +121,20 @@ pub(crate) enum FollowFormat {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub(crate) enum FetchFormat {
+    Pretty,
+    Json,
+    Lite3,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub(crate) enum InputMode {
     Auto,
     Jsonl,
     Json,
     Seq,
     Jq,
+    Lite3,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, ValueEnum)]
@@ -173,10 +181,11 @@ NOTES
         arg_required_else_help = true,
         display_order = 0,
         about = "Send a message to a pool",
-        long_about = r#"Send JSON messages to a pool.
+        long_about = r#"Send JSON or pre-encoded Lite3 messages to a pool.
 
 Accepts local pool refs (name/path), remote shorthand refs (http(s)://host:port/<pool>),
-inline JSON, file input (-f/--file), or streams via stdin (auto-detected)."#,
+inline JSON, file input (-f/--file), or streams via stdin (auto-detected).
+Use --in lite3 for one pre-encoded message from a file or piped stdin."#,
         after_help = r#"EXAMPLES
   $ plasmite feed foo '{"hello": "world"}'                      # inline JSON
   $ plasmite feed foo --tag sev1 '{"msg": "alert"}'             # with tags
@@ -185,7 +194,10 @@ inline JSON, file input (-f/--file), or streams via stdin (auto-detected)."#,
 INPUT AND OUTPUT
   - Choose one input source: inline DATA, --file, or stdin
   - Receipts are human-readable by default; --json emits one receipt per line
-  - --errors skip continues after bad records and exits 1 if any were rejected"#
+  - --errors skip continues after bad records and exits 1 if any were rejected
+  - --in lite3 reads one message through EOF, up to 256 MiB
+  - Lite3 input preserves tags/data; the append assigns a new sequence and time
+  - Lite3 input rejects inline DATA, --tag, and --errors skip"#
     )]
     Feed {
         #[arg(long, help = "Emit structured JSON without color or commentary")]
@@ -199,7 +211,7 @@ INPUT AND OUTPUT
         #[arg(
             short = 'f',
             long = "file",
-            help = "Input file path (JSON value or stream; use - for stdin)",
+            help = "Input file path (JSON or Lite3; use - for stdin)",
             conflicts_with = "data",
             value_hint = ValueHint::FilePath
         )]
@@ -232,7 +244,8 @@ INPUT AND OUTPUT
   jsonl  One JSON object per line
   json   Single JSON value (object or array)
   seq    RFC 7464 JSON Text Sequences (0x1e-delimited)
-  jq     jq --raw-output / --stream output"#
+  jq     jq --raw-output / --stream output
+  lite3  One complete binary message through EOF (up to 256 MiB)"#
         )]
         input: InputMode,
         #[arg(
@@ -307,14 +320,20 @@ to the server's HTTPS /mcp URL and authorize through OAuth.
         arg_required_else_help = true,
         display_order = 2,
         about = "Fetch one message by sequence number",
-        long_about = r#"Fetch a message from a local name/path or remote pool URL. Human-readable by default; --json emits one message envelope."#,
+        long_about = r#"Fetch a message from a local name/path or remote pool URL.
+Human-readable by default; --json emits one message envelope.
+Use --format lite3 for the original binary message bytes."#,
         after_help = r#"EXAMPLES
   $ plasmite fetch foo 1
   $ plasmite fetch foo 42 --json | jq '.data'
+  $ plasmite fetch foo 42 --format lite3 > message.lite3
 
 INPUT AND OUTPUT
   Local names/paths and HTTP(S) pool URLs are accepted.
-  Human-readable by default; --json emits one message envelope."#
+  Human-readable by default; --json and --format json emit one message envelope.
+  --format lite3 emits only the original document bytes, with no trailing newline.
+  Lite3 holds tags/data; the pool's sequence and time are outside that document.
+  Errors go to stderr. --json conflicts with --format pretty or lite3."#
     )]
     Fetch {
         #[arg(long, help = "Emit structured JSON without color or commentary")]
@@ -323,6 +342,8 @@ INPUT AND OUTPUT
         pool: String,
         #[arg(help = "Sequence number")]
         seq: u64,
+        #[arg(long, value_enum, help = "Output format: pretty|json|lite3")]
+        format: Option<FetchFormat>,
     },
     #[command(
         arg_required_else_help = true,
@@ -910,10 +931,8 @@ pub(crate) struct ServeRunArgs {
 impl Command {
     pub(crate) fn json_output(&self) -> bool {
         match self {
-            Self::Version { json }
-            | Self::Doctor { json, .. }
-            | Self::Feed { json, .. }
-            | Self::Fetch { json, .. } => *json,
+            Self::Version { json } | Self::Doctor { json, .. } | Self::Feed { json, .. } => *json,
+            Self::Fetch { json, format, .. } => *json || matches!(format, Some(FetchFormat::Json)),
             Self::Follow {
                 json,
                 jsonl,

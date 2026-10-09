@@ -4,6 +4,39 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-09
+
+### Raw Lite3 messages in the CLI
+
+Export a message's original Lite3 bytes with `fetch --format lite3`, then
+append those bytes with `feed --in lite3`:
+
+```bash
+plasmite pool create relay
+plasmite feed relay '{"kind":"heartbeat"}'
+plasmite fetch relay 1 --format lite3 > heartbeat.lite3
+plasmite feed relay --in lite3 --file heartbeat.lite3
+```
+
+Both commands support local pools and remote pool URLs. Binary feed accepts
+a file or stdin through EOF, up to 256 MiB; a remote server may enforce a
+lower request-body limit. It preserves the byte buffer, tags, and data. Each
+append gets a new destination sequence and timestamp. Binary fetch writes no
+headings, color, or trailing newline. `fetch --format json` also selects the
+existing JSON envelope output; `--json` keeps its meaning.
+
+### Binary append fixes
+
+- Reject unreadable nested Lite3 data before appending, including invalid
+  UTF-8. This uses the existing JSON decoder to check the data and adds work
+  to raw Lite3 validation; ordinary JSON writes keep their existing path.
+- Build binary append receipts from the input and assigned sequence/time.
+  Concurrent writers can no longer overwrite the message between append and
+  receipt generation. Rust clients can use `append_lite3_with_receipt` to
+  receive the committed message without a second fetch.
+
+[Full changes since 1.1.0](https://github.com/sandover/plasmite/compare/v1.1.0...v1.2.0)
+
 ## [1.1.0] - 2026-10-05
 
 Plasmite 1.1 adds support for running pool servers as operating system services on macOS, Linux and Windows. The CLI handles installation, startup and service management. This release also adds server and client resource limits, restricts write retries, and fixes errors in pool ownership, input handling and recovery.

@@ -476,11 +476,38 @@ pub trait PoolApiExt {
         durability: Durability,
     ) -> Result<Message, Error>;
 
-    /// Append a pre-encoded Lite3 payload without JSON encoding/decoding.
+    /// Validate and append a pre-encoded Lite3 payload without re-encoding it.
     fn append_lite3(&mut self, payload: &[u8], options: AppendOptions) -> Result<u64, Error>;
 
     /// Append a pre-encoded Lite3 payload with a generated timestamp.
     fn append_lite3_now(&mut self, payload: &[u8], durability: Durability) -> Result<u64, Error>;
+
+    /// Append the original Lite3 bytes and return a receipt prepared from input.
+    /// A concurrent overwrite cannot remove the receipt after a successful append.
+    fn append_lite3_with_receipt(
+        &mut self,
+        payload: &[u8],
+        options: AppendOptions,
+    ) -> Result<Message, Error> {
+        let (meta, data) = decode_payload(payload)?;
+        let time = format_ts(options.timestamp_ns)?;
+        let seq = self.append_lite3(payload, options)?;
+        Ok(Message {
+            seq,
+            time,
+            meta,
+            data,
+        })
+    }
+
+    /// Append with a generated timestamp and a receipt prepared from input.
+    fn append_lite3_with_receipt_now(
+        &mut self,
+        payload: &[u8],
+        durability: Durability,
+    ) -> Result<Message, Error> {
+        self.append_lite3_with_receipt(payload, AppendOptions::new(now_ns()?, durability))
+    }
 
     fn get_message(&self, seq: u64) -> Result<Message, Error>;
 
@@ -675,6 +702,38 @@ mod tests {
         let (full, partial) = json_counter_snapshot();
         assert_eq!(full, 0);
         assert_eq!(partial, 1);
+    }
+
+    #[test]
+    fn lite3_receipt_keeps_input_and_exact_identity_after_overwrite() {
+        let dir = tempdir().expect("tempdir");
+        let mut pool = Pool::create(
+            dir.path().join("receipt.plasmite"),
+            PoolOptions::new(64 * 1024),
+        )
+        .expect("create");
+        let tags = vec!["original".to_string()];
+        let data = json!({"text": "x".repeat(4096)});
+        let payload = encode_message(&tags, &data).expect("encode");
+        let receipt = pool
+            .append_lite3_with_receipt(
+                payload.as_slice(),
+                crate::core::pool::AppendOptions::new(123, Durability::Fast),
+            )
+            .expect("append with receipt");
+        assert_eq!(receipt.seq, 1);
+        assert_eq!(receipt.time, super::format_ts(123).expect("time"));
+        assert_eq!(pool.get_lite3(1).expect("raw").payload, payload.as_slice());
+        for _ in 0..32 {
+            pool.append_json_now(&data, &[], Durability::Fast)
+                .expect("overwrite");
+        }
+        assert_eq!(
+            pool.get_message(1).expect_err("overwritten").kind(),
+            ErrorKind::NotFound
+        );
+        assert_eq!(receipt.meta.tags, tags);
+        assert_eq!(receipt.data, data);
     }
 
     #[test]
