@@ -56,26 +56,11 @@ IP header; IPv6's conventional maximum is 65,527 bytes. Choosing the smaller
 value gives senders one protocol limit across both address families.
 [UDP size limits](https://datatracker.ietf.org/doc/html/rfc8085#section-1)
 
-Recommend sends of at most 1,200 bytes on ordinary protected networks unless
-the sender knows the path supports more. Count routing bytes as well as the
-body. This is a practical starting point, not a delivery guarantee. IPv6's
-minimum link MTU is 1,280 bytes; subtracting its basic 40-byte header and UDP's
-8-byte header leaves 1,232 bytes. A 1,200-byte payload leaves 32 bytes for IPv6
-extension headers. QUIC uses that baseline and discovers larger path sizes.
-[IPv6 packet sizing](https://www.rfc-editor.org/rfc/rfc8200.html#section-5),
-[QUIC datagram sizing](https://www.rfc-editor.org/rfc/rfc9000.html#section-14)
+User-facing help and startup output state this maximum. They introduce no
+second size recommendation or tuning option.
 
-Some IPv4 paths and tunnels support less. RFC 8085 gives a 576-byte IPv4
-fallback effective MTU when the path is unknown, before subtracting headers.
-Senders must account for their path and avoid IP fragmentation. Losing one
-fragment loses the whole datagram, and some firewalls discard fragments.
-For remote messages above 1,200 bytes, prefer HTTP unless the operator knows
-the path supports the complete datagram without fragmentation. Protected
-network access alone says nothing about its packet-size limit.
-[UDP message-size guidance](https://datatracker.ietf.org/doc/html/rfc8085#section-3.2)
-
-A hard 1,200-byte receiver limit would also reject modest messages that arrive
-complete. The following constructed examples use the current CLI's Lite3
+Smaller arbitrary limits would reject modest messages that arrive complete.
+The following constructed examples use the current CLI's Lite3
 encoder, compact JSON, and the eight-byte `sensors` plus NUL routing prefix:
 
 | Message | JSON datagram bytes | Lite3 datagram bytes |
@@ -100,7 +85,9 @@ sender negotiation in this version.
 Plasmite never splits messages or reassembles them. The operating system can
 reassemble IP fragments before delivering a datagram to the socket; receiver
 acceptance does not reveal whether fragmentation occurred. Send messages above
-65,507 bytes through HTTP.
+65,507 bytes through HTTP. Fragmentation can increase loss; the existing UDP
+delivery contract applies to every accepted size.
+[UDP message-size guidance](https://datatracker.ietf.org/doc/html/rfc8085#section-3.2)
 
 ## Server composition
 
@@ -238,7 +225,6 @@ readiness. With UDP enabled, add these lines to stderr:
 UDP input: 127.0.0.1:9701 (json, served pool directory)
 UDP delivery may lose, duplicate, or reorder messages.
 Maximum UDP message size: 65507 bytes including routing. Larger messages are discarded.
-For network sends, prefer at most 1200 bytes unless the path supports more.
 Sending does not confirm storage. UDP has no authentication or encryption.
 ```
 
