@@ -12,6 +12,9 @@ use plasmite::api::ErrorKind;
 use plasmite::api::Pool;
 use plasmite::api::PoolRef;
 use plasmite::api::RemoteClient;
+use plasmite::api::RemoteLite3Frame;
+use plasmite::api::RemoteLite3Tail;
+use plasmite::api::RemoteTail;
 use plasmite::api::TailOptions;
 use plasmite::api::notify;
 use plasmite::api::notify::NotifyWait;
@@ -26,12 +29,14 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
+use super::output_support::emit_lite3;
 use super::output_support::emit_message;
 use super::output_support::emit_notice;
 use super::output_support::notice_time_now;
+use super::support::decode_payload;
+use super::support::format_ts;
 use super::support::message_from_frame;
 use super::support::message_to_json;
-use super::support::output_value;
 
 #[derive(Debug, Clone)]
 pub(crate) struct DropNotice {
@@ -52,7 +57,6 @@ pub(crate) struct FollowConfig {
     pub(crate) output_mode: OutputMode,
     pub(crate) one: bool,
     pub(crate) timeout: Option<Duration>,
-    pub(crate) data_only: bool,
     pub(crate) since_ns: Option<u64>,
     pub(crate) no_follow: bool,
     pub(crate) required_tags: Vec<String>,
@@ -150,6 +154,7 @@ struct DropReporter<'a> {
     path: String,
     pending: Option<DropNotice>,
     last_notice_at: Option<Instant>,
+    had_gap: bool,
 }
 
 impl<'a> DropReporter<'a> {
@@ -160,11 +165,16 @@ impl<'a> DropReporter<'a> {
             path,
             pending: None,
             last_notice_at: None,
+            had_gap: false,
         }
     }
 
     fn gap(&mut self, expected_seq: u64, next_seq: u64) {
-        if self.cfg.quiet_drops || next_seq <= expected_seq {
+        if next_seq <= expected_seq {
+            return;
+        }
+        self.had_gap = true;
+        if self.cfg.quiet_drops {
             return;
         }
         match &mut self.pending {
@@ -217,6 +227,79 @@ impl<'a> DropReporter<'a> {
         );
         self.last_notice_at = Some(Instant::now());
     }
+
+    fn finish(&mut self, code: i32) -> RunOutcome {
+        self.flush(true);
+        RunOutcome::with_code(if code == 0 && self.cfg.no_follow && self.had_gap {
+            1
+        } else {
+            code
+        })
+    }
+}
+
+fn needs_message(cfg: &FollowConfig) -> bool {
+    !cfg.output_mode.is_binary()
+        || cfg.suppress_sender.is_some()
+        || !cfg.required_tags.is_empty()
+        || !cfg.where_predicates.is_empty()
+}
+
+fn message_from_remote_frame(frame: &RemoteLite3Frame) -> Result<Value, Error> {
+    let (meta, data) = decode_payload(&frame.payload)?;
+    Ok(json!({
+        "seq": frame.seq,
+        "time": format_ts(frame.timestamp_ns)?,
+        "meta": meta,
+        "data": data,
+    }))
+}
+
+enum RemoteStream {
+    Json(RemoteTail),
+    Lite3(RemoteLite3Tail),
+}
+
+enum RemoteRecord {
+    Json(plasmite::api::Message),
+    Lite3(RemoteLite3Frame),
+}
+
+impl RemoteStream {
+    fn next_record(&mut self) -> Result<Option<RemoteRecord>, Error> {
+        match self {
+            Self::Json(tail) => tail.next_message().map(|item| item.map(RemoteRecord::Json)),
+            Self::Lite3(tail) => tail.next_frame().map(|item| item.map(RemoteRecord::Lite3)),
+        }
+    }
+}
+
+impl RemoteRecord {
+    fn seq(&self) -> u64 {
+        match self {
+            Self::Json(message) => message.seq,
+            Self::Lite3(frame) => frame.seq,
+        }
+    }
+
+    fn timestamp_ns(&self, needed: bool) -> Result<u64, Error> {
+        match self {
+            Self::Lite3(frame) => Ok(frame.timestamp_ns),
+            Self::Json(message) if needed => {
+                let time = time::OffsetDateTime::parse(
+                    &message.time,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .map_err(|err| {
+                    Error::new(ErrorKind::Corrupt)
+                        .with_message("invalid remote message timestamp")
+                        .with_source(err)
+                })?;
+                Ok(u64::try_from(time.unix_timestamp_nanos()).unwrap_or(0))
+            }
+            Self::Json(_) => Ok(0),
+        }
+    }
 }
 
 pub(crate) fn follow_remote(
@@ -241,22 +324,19 @@ pub(crate) fn follow_remote(
     let since_ns = cfg.since_ns;
     let mut drops = DropReporter::new(cfg, pool, format!("{}/{}", client.base_url(), pool));
     if cfg.no_follow && expected > upper {
-        return Ok(RunOutcome::ok());
+        return Ok(drops.finish(0));
     }
     let mut deadline = cfg.timeout.map(|duration| Instant::now() + duration);
     let mut remote_wait_ms = 100;
     loop {
         if follow_should_stop(cfg.stop.as_ref()) {
-            drops.flush(true);
-            return Ok(RunOutcome::ok());
+            return Ok(drops.finish(0));
         }
         if cfg.no_follow && expected > upper {
-            drops.flush(true);
-            return Ok(RunOutcome::ok());
+            return Ok(drops.finish(0));
         }
         if deadline.is_some_and(|at| Instant::now() >= at) {
-            drops.flush(true);
-            return Ok(RunOutcome::with_code(124));
+            return Ok(drops.finish(124));
         }
         let mut options = TailOptions::new();
         options.since_seq = Some(expected);
@@ -281,7 +361,12 @@ pub(crate) fn follow_remote(
                     .unwrap_or(usize::MAX),
             );
         }
-        let mut tail = match remote_pool.tail(options) {
+        let result = if cfg.output_mode.is_binary() {
+            remote_pool.tail_lite3(options).map(RemoteStream::Lite3)
+        } else {
+            remote_pool.tail(options).map(RemoteStream::Json)
+        };
+        let mut tail = match result {
             Ok(tail) => tail,
             Err(err)
                 if err.kind() == ErrorKind::Usage
@@ -296,61 +381,63 @@ pub(crate) fn follow_remote(
             }
             Err(err) => return Err(err),
         };
-        while let Some(message) = tail.next_message()? {
+        while let Some(record) = tail.next_record()? {
             if follow_should_stop(cfg.stop.as_ref()) {
-                drops.flush(true);
-                return Ok(RunOutcome::ok());
+                return Ok(drops.finish(0));
             }
-            if cfg.no_follow && message.seq > upper {
+            if cfg.no_follow && record.seq() > upper {
                 drops.gap(expected, upper.saturating_add(1));
-                drops.flush(true);
-                return Ok(RunOutcome::ok());
+                return Ok(drops.finish(0));
             }
-            if message.seq < expected {
+            if record.seq() < expected {
                 continue;
             }
-            drops.gap(expected, message.seq);
-            expected = message.seq.saturating_add(1);
-            let timestamp_ns = if since_ns.is_some() {
-                let time = time::OffsetDateTime::parse(
-                    &message.time,
-                    &time::format_description::well_known::Rfc3339,
-                )
-                .map_err(|err| {
-                    Error::new(ErrorKind::Corrupt)
-                        .with_message("invalid remote message timestamp")
-                        .with_source(err)
-                })?;
-                u64::try_from(time.unix_timestamp_nanos()).unwrap_or(0)
+            drops.gap(expected, record.seq());
+            // At u64::MAX the next sequence cannot advance past the snapshot.
+            let reached_end = cfg.no_follow && record.seq() == upper;
+            expected = record.seq().saturating_add(1);
+            let timestamp_ns = record.timestamp_ns(since_ns.is_some())?;
+            let value = if needs_message(cfg) {
+                Some(match &record {
+                    RemoteRecord::Json(message) => message_to_json(message),
+                    RemoteRecord::Lite3(frame) => message_from_remote_frame(frame)?,
+                })
             } else {
-                0
+                None
             };
-            let value = message_to_json(&message);
-            if matches_message(cfg, since_ns, timestamp_ns, &value)? {
+            let matches = match value.as_ref() {
+                Some(value) => matches_message(cfg, since_ns, timestamp_ns, value)?,
+                None => since_ns.is_none_or(|since| timestamp_ns >= since),
+            };
+            if matches {
                 // Receiving a matching line after the deadline must not reset
                 // the timer, even if the transport buffered or delayed it.
                 if deadline.is_some_and(|at| Instant::now() >= at) {
-                    drops.flush(true);
-                    return Ok(RunOutcome::with_code(124));
+                    return Ok(drops.finish(124));
                 }
-                emit_message(
-                    output_value(value, cfg.data_only),
-                    cfg.output_mode,
-                    cfg.color_mode,
-                );
+                match record {
+                    RemoteRecord::Lite3(frame) => emit_lite3(
+                        frame.seq,
+                        frame.timestamp_ns,
+                        &frame.payload,
+                        cfg.output_mode,
+                    )?,
+                    RemoteRecord::Json(message) => emit_message(
+                        value.unwrap_or_else(|| message_to_json(&message)),
+                        cfg.output_mode,
+                        cfg.color_mode,
+                    )?,
+                }
                 deadline = cfg.timeout.map(|duration| Instant::now() + duration);
                 if cfg.one {
-                    drops.flush(true);
-                    return Ok(RunOutcome::ok());
+                    return Ok(drops.finish(0));
                 }
             }
-            if cfg.no_follow && message.seq >= upper {
-                drops.flush(true);
-                return Ok(RunOutcome::ok());
+            if reached_end {
+                return Ok(drops.finish(0));
             }
             if deadline.is_some_and(|at| Instant::now() >= at) {
-                drops.flush(true);
-                return Ok(RunOutcome::with_code(124));
+                return Ok(drops.finish(124));
             }
         }
         if cfg.no_follow {
@@ -401,12 +488,10 @@ pub(crate) fn follow_pool(
     let mut backoff = Duration::from_millis(1);
     loop {
         if follow_should_stop(cfg.stop.as_ref()) || (finite && expected > upper) {
-            drops.flush(true);
-            return Ok(RunOutcome::ok());
+            return Ok(drops.finish(0));
         }
         if deadline.is_some_and(|at| Instant::now() >= at) {
-            drops.flush(true);
-            return Ok(RunOutcome::with_code(124));
+            return Ok(drops.finish(124));
         }
         match cursor.next(pool)? {
             CursorResult::Message(frame) => {
@@ -415,13 +500,20 @@ pub(crate) fn follow_pool(
                 }
                 if finite && frame.seq > upper {
                     drops.gap(expected, upper.saturating_add(1));
-                    drops.flush(true);
-                    return Ok(RunOutcome::ok());
+                    return Ok(drops.finish(0));
                 }
                 drops.gap(expected, frame.seq);
                 expected = frame.seq.saturating_add(1);
-                let message = message_from_frame(&frame)?;
-                if matches_message(&cfg, since_ns, frame.timestamp_ns, &message)? {
+                let message = if needs_message(&cfg) {
+                    Some(message_from_frame(&frame)?)
+                } else {
+                    None
+                };
+                let matches = match message.as_ref() {
+                    Some(message) => matches_message(&cfg, since_ns, frame.timestamp_ns, message)?,
+                    None => since_ns.is_none_or(|since| frame.timestamp_ns >= since),
+                };
+                if matches {
                     if let (Some(speed), Some(previous)) = (cfg.replay_speed, previous_timestamp) {
                         if speed > 0.0 {
                             let delay_ns =
@@ -435,12 +527,10 @@ pub(crate) fn follow_pool(
                                 })?;
                             while Instant::now() < until {
                                 if follow_should_stop(cfg.stop.as_ref()) {
-                                    drops.flush(true);
-                                    return Ok(RunOutcome::ok());
+                                    return Ok(drops.finish(0));
                                 }
                                 if deadline.is_some_and(|at| Instant::now() >= at) {
-                                    drops.flush(true);
-                                    return Ok(RunOutcome::with_code(124));
+                                    return Ok(drops.finish(124));
                                 }
                                 let wait = until
                                     .saturating_duration_since(Instant::now())
@@ -457,23 +547,29 @@ pub(crate) fn follow_pool(
                     // A playback delay may finish on the same wake-up that
                     // crosses the output deadline; check before emitting.
                     if deadline.is_some_and(|at| Instant::now() >= at) {
-                        drops.flush(true);
-                        return Ok(RunOutcome::with_code(124));
+                        return Ok(drops.finish(124));
                     }
                     if follow_should_stop(cfg.stop.as_ref()) {
-                        drops.flush(true);
-                        return Ok(RunOutcome::ok());
+                        return Ok(drops.finish(0));
                     }
-                    emit_message(
-                        output_value(message, cfg.data_only),
-                        cfg.output_mode,
-                        cfg.color_mode,
-                    );
+                    if cfg.output_mode.is_binary() {
+                        emit_lite3(
+                            frame.seq,
+                            frame.timestamp_ns,
+                            &frame.payload,
+                            cfg.output_mode,
+                        )?;
+                    } else {
+                        emit_message(
+                            message.expect("text mode decodes message"),
+                            cfg.output_mode,
+                            cfg.color_mode,
+                        )?;
+                    }
                     previous_timestamp = Some(frame.timestamp_ns);
                     deadline = cfg.timeout.map(|duration| Instant::now() + duration);
                     if cfg.one {
-                        drops.flush(true);
-                        return Ok(RunOutcome::ok());
+                        return Ok(drops.finish(0));
                     }
                 }
                 drops.flush(false);
@@ -501,8 +597,7 @@ pub(crate) fn follow_pool(
                     // have been visited or removed. No later append belongs
                     // to this read.
                     drops.gap(expected, upper.saturating_add(1));
-                    drops.flush(true);
-                    return Ok(RunOutcome::ok());
+                    return Ok(drops.finish(0));
                 }
                 drops.flush(false);
                 let wait = deadline

@@ -613,6 +613,7 @@ fn run_spawn_poke(
             .arg(workdir_path)
             .arg("feed")
             .arg(pool)
+            .arg("--data")
             .arg(payload)
             .stdout(Stdio::null())
             .stderr(Stdio::inherit());

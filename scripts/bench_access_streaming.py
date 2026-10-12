@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure CLI JSONL writes and finite history reads with one process per batch."""
+"""Measure CLI JSON stream writes and finite history reads with one process per batch."""
 import argparse
 import json
 import subprocess
@@ -35,15 +35,15 @@ def main():
                 payload = "\n".join(json.dumps(item, separators=(",", ":")) for item in data) + "\n"
                 command = [args.binary, "--dir", args.pool_dir]
                 started = time.perf_counter_ns()
-                append = subprocess.run([*command, "feed", refs[lane], "--json"], input=payload,
+                append = subprocess.run([*command, "feed", refs[lane], "--data", "--format", "json"], input=payload,
                     capture_output=True, text=True, encoding="utf-8", check=True)
                 append_ns = time.perf_counter_ns() - started
-                receipts = [json.loads(line) for line in append.stdout.splitlines()]
-                sequences = [receipt["seq"] for receipt in receipts]
+                messages = [json.loads(line) for line in append.stdout.splitlines()]
+                sequences = [message["seq"] for message in messages]
                 if len(sequences) != len(data) or len(set(sequences)) != len(data):
                     raise RuntimeError("stream append count mismatch")
                 started = time.perf_counter_ns()
-                read = subprocess.run([*command, "follow", refs[lane], "--tail", str(args.messages), "--no-follow", "--json"],
+                read = subprocess.run([*command, "--format", "json", "follow", refs[lane], "--tail", str(args.messages), "--no-follow"],
                     capture_output=True, text=True, encoding="utf-8", check=True, timeout=60)
                 read_ns = time.perf_counter_ns() - started
                 messages = [json.loads(line) for line in read.stdout.splitlines()]

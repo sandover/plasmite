@@ -179,20 +179,29 @@ pub(crate) fn list_pools(pool_dir: &Path, client: &LocalClient) -> Result<Vec<Po
     Ok(pools)
 }
 
-pub(crate) fn emit_pool_list_table(pools: &[PoolListRow], pool_dir: &Path, server: Option<&str>) {
+pub(crate) fn emit_pool_list_table(
+    pools: &[PoolListRow],
+    pool_dir: &Path,
+    server: Option<&str>,
+) -> Result<(), Error> {
     let interactive = io::stdout().is_terminal();
     if interactive && pools.is_empty() {
         if let Some(server) = server {
-            println!("No pools found at {}", human_literal(server));
+            super::output::write_stdout(
+                format!("No pools found at {}\n", human_literal(server)).as_bytes(),
+            )?;
         } else {
-            println!(
-                "No pools found in {}",
-                display_pool_dir_for_humans(pool_dir)
-            );
-            println!();
-            println!("  Create one: plasmite pool create <name>");
+            super::output::write_stdout(
+                format!(
+                    "No pools found in {}\n",
+                    display_pool_dir_for_humans(pool_dir)
+                )
+                .as_bytes(),
+            )?;
+            super::output::write_stdout(b"\n")?;
+            super::output::write_stdout(b"  Create one: plasmite pool create <name>\n")?;
         }
-        return;
+        return Ok(());
     }
 
     let has_errors = pools
@@ -275,10 +284,11 @@ pub(crate) fn emit_pool_list_table(pools: &[PoolListRow], pool_dir: &Path, serve
         })
         .collect::<Vec<_>>();
 
-    emit_table(&headers, &rows);
+    emit_table(&headers, &rows)?;
+    Ok(())
 }
 
-pub(crate) fn emit_pool_create_table(created: &[Value], pool_dir: &Path) {
+pub(crate) fn emit_pool_create_table(created: &[Value], pool_dir: &Path) -> Result<(), Error> {
     if io::stdout().is_terminal() {
         if created.len() == 1 {
             if let Some(pool) = created.first() {
@@ -301,13 +311,18 @@ pub(crate) fn emit_pool_create_table(created: &[Value], pool_dir: &Path) {
                     .and_then(|value| value.as_str())
                     .map(|value| short_display_path(Path::new(value), Some(pool_dir)))
                     .unwrap_or_else(|| "-".to_string());
-                println!(
-                    "Created {} ({size}, {index} index slots)",
-                    human_literal(name)
-                );
-                println!("  path: {}", human_literal(&path));
+                super::output::write_stdout(
+                    format!(
+                        "Created {} ({size}, {index} index slots)\n",
+                        human_literal(name)
+                    )
+                    .as_bytes(),
+                )?;
+                super::output::write_stdout(
+                    format!("  path: {}\n", human_literal(&path)).as_bytes(),
+                )?;
             }
-            return;
+            return Ok(());
         }
 
         let size = created
@@ -316,7 +331,9 @@ pub(crate) fn emit_pool_create_table(created: &[Value], pool_dir: &Path) {
             .and_then(|value| value.as_u64())
             .map(format_bytes)
             .unwrap_or_else(|| "-".to_string());
-        println!("Created {} pools ({} each)", created.len(), size);
+        super::output::write_stdout(
+            format!("Created {} pools ({} each)\n", created.len(), size).as_bytes(),
+        )?;
         for pool in created {
             let name = pool
                 .get("name")
@@ -327,9 +344,11 @@ pub(crate) fn emit_pool_create_table(created: &[Value], pool_dir: &Path) {
                 .and_then(|value| value.as_str())
                 .map(|value| short_display_path(Path::new(value), Some(pool_dir)))
                 .unwrap_or_else(|| "-".to_string());
-            println!("  - {} ({})", human_literal(name), human_literal(&path));
+            super::output::write_stdout(
+                format!("  - {} ({})\n", human_literal(name), human_literal(&path)).as_bytes(),
+            )?;
         }
-        return;
+        return Ok(());
     }
 
     let headers = ["NAME", "SIZE", "INDEX", "PATH"];
@@ -359,7 +378,8 @@ pub(crate) fn emit_pool_create_table(created: &[Value], pool_dir: &Path) {
             vec![name, size, index, path]
         })
         .collect::<Vec<_>>();
-    emit_table(&headers, &rows);
+    emit_table(&headers, &rows)?;
+    Ok(())
 }
 
 fn pool_list_error(name: &str, path: &Path, error: Error) -> PoolListRow {
@@ -370,19 +390,31 @@ fn pool_list_error(name: &str, path: &Path, error: Error) -> PoolListRow {
     }
 }
 
-pub(crate) fn emit_pool_info_pretty(pool_ref: &str, info: &plasmite::api::PoolInfo) {
+pub(crate) fn emit_pool_info_pretty(
+    pool_ref: &str,
+    info: &plasmite::api::PoolInfo,
+) -> Result<(), Error> {
     if !io::stdout().is_terminal() {
-        println!("Pool: {}", human_literal(pool_ref));
-        println!("Path: {}", human_literal(&info.path.display().to_string()));
-        println!(
-            "Size: {} bytes (index: offset={} slots={} bytes={}, ring: offset={} size={})",
-            info.file_size,
-            info.index_offset,
-            info.index_capacity,
-            info.index_size_bytes,
-            info.ring_offset,
-            info.ring_size
-        );
+        super::output::write_stdout(format!("Pool: {}\n", human_literal(pool_ref)).as_bytes())?;
+        super::output::write_stdout(
+            format!(
+                "Path: {}\n",
+                human_literal(&info.path.display().to_string())
+            )
+            .as_bytes(),
+        )?;
+        super::output::write_stdout(
+            format!(
+                "Size: {} bytes (index: offset={} slots={} bytes={}, ring: offset={} size={})\n",
+                info.file_size,
+                info.index_offset,
+                info.index_capacity,
+                info.index_size_bytes,
+                info.ring_offset,
+                info.ring_size
+            )
+            .as_bytes(),
+        )?;
 
         let oldest = info
             .bounds
@@ -402,72 +434,103 @@ pub(crate) fn emit_pool_info_pretty(pool_ref: &str, info: &plasmite::api::PoolIn
                 (Some(oldest), Some(newest)) => newest.saturating_sub(oldest).saturating_add(1),
                 _ => 0,
             });
-        println!("Bounds: oldest={oldest} newest={newest} count={count}");
+        super::output::write_stdout(
+            format!("Bounds: oldest={oldest} newest={newest} count={count}\n").as_bytes(),
+        )?;
 
         if let Some(metrics) = &info.metrics {
             let whole = metrics.utilization.used_percent_hundredths / 100;
             let frac = metrics.utilization.used_percent_hundredths % 100;
-            println!(
-                "Utilization: used={}B free={}B ({}.{:02}%)",
-                metrics.utilization.used_bytes, metrics.utilization.free_bytes, whole, frac
-            );
-            println!(
-                "Oldest: {} ({})",
-                human_literal(metrics.age.oldest_time.as_deref().unwrap_or("-")),
-                human_age(metrics.age.oldest_age_ms),
-            );
-            println!(
-                "Newest: {} ({})",
-                human_literal(metrics.age.newest_time.as_deref().unwrap_or("-")),
-                human_age(metrics.age.newest_age_ms),
-            );
+            super::output::write_stdout(
+                format!(
+                    "Utilization: used={}B free={}B ({}.{:02}%)\n",
+                    metrics.utilization.used_bytes, metrics.utilization.free_bytes, whole, frac
+                )
+                .as_bytes(),
+            )?;
+            super::output::write_stdout(
+                format!(
+                    "Oldest: {} ({})\n",
+                    human_literal(metrics.age.oldest_time.as_deref().unwrap_or("-")),
+                    human_age(metrics.age.oldest_age_ms),
+                )
+                .as_bytes(),
+            )?;
+            super::output::write_stdout(
+                format!(
+                    "Newest: {} ({})\n",
+                    human_literal(metrics.age.newest_time.as_deref().unwrap_or("-")),
+                    human_age(metrics.age.newest_age_ms),
+                )
+                .as_bytes(),
+            )?;
         }
-        return;
+        return Ok(());
     }
 
     let count = message_count_from_info(info);
-    println!("{}", human_literal(pool_ref));
-    println!(
-        "  path:      {}",
-        human_literal(&short_display_path(&info.path, info.path.parent()))
-    );
+    super::output::write_stdout(format!("{}\n", human_literal(pool_ref)).as_bytes())?;
+    super::output::write_stdout(
+        format!(
+            "  path:      {}\n",
+            human_literal(&short_display_path(&info.path, info.path.parent()))
+        )
+        .as_bytes(),
+    )?;
     let messages_summary =
         format_pool_messages_summary(count, info.bounds.oldest_seq, info.bounds.newest_seq);
     if let Some(metrics) = &info.metrics {
         let whole = metrics.utilization.used_percent_hundredths / 100;
         let frac = metrics.utilization.used_percent_hundredths % 100;
-        println!(
-            "  size:      {} ({} used, {}.{:02}%)",
-            format_bytes(info.file_size),
-            format_bytes(metrics.utilization.used_bytes),
-            whole,
-            frac
-        );
-        println!("  messages:  {messages_summary}");
-        println!(
-            "  oldest:    {}",
-            format_pool_time_summary(
-                metrics.age.oldest_age_ms,
-                metrics.age.oldest_time.as_deref()
+        super::output::write_stdout(
+            format!(
+                "  size:      {} ({} used, {}.{:02}%)\n",
+                format_bytes(info.file_size),
+                format_bytes(metrics.utilization.used_bytes),
+                whole,
+                frac
             )
-        );
-        println!(
-            "  newest:    {}",
-            format_pool_time_summary(
-                metrics.age.newest_age_ms,
-                metrics.age.newest_time.as_deref()
+            .as_bytes(),
+        )?;
+        super::output::write_stdout(format!("  messages:  {messages_summary}\n").as_bytes())?;
+        super::output::write_stdout(
+            format!(
+                "  oldest:    {}\n",
+                format_pool_time_summary(
+                    metrics.age.oldest_age_ms,
+                    metrics.age.oldest_time.as_deref()
+                )
             )
-        );
+            .as_bytes(),
+        )?;
+        super::output::write_stdout(
+            format!(
+                "  newest:    {}\n",
+                format_pool_time_summary(
+                    metrics.age.newest_age_ms,
+                    metrics.age.newest_time.as_deref()
+                )
+            )
+            .as_bytes(),
+        )?;
     } else {
-        println!("  size:      {}", format_bytes(info.file_size));
-        println!("  messages:  {messages_summary}");
+        super::output::write_stdout(
+            format!("  size:      {}\n", format_bytes(info.file_size)).as_bytes(),
+        )?;
+        super::output::write_stdout(format!("  messages:  {messages_summary}\n").as_bytes())?;
     }
-    println!(
-        "  index:     {} slots ({})",
-        info.index_capacity,
-        format_bytes(info.index_size_bytes)
-    );
-    println!("  ring:      {}", format_bytes(info.ring_size));
+    super::output::write_stdout(
+        format!(
+            "  index:     {} slots ({})\n",
+            info.index_capacity,
+            format_bytes(info.index_size_bytes)
+        )
+        .as_bytes(),
+    )?;
+    super::output::write_stdout(
+        format!("  ring:      {}\n", format_bytes(info.ring_size)).as_bytes(),
+    )?;
+    Ok(())
 }
 
 pub(crate) fn message_count_from_info(info: &plasmite::api::PoolInfo) -> u64 {

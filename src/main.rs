@@ -13,7 +13,6 @@ use clap::{Parser, error::ErrorKind as ClapErrorKind};
 mod access_store;
 mod cli;
 mod color_json;
-mod ingest;
 mod interface_wire;
 mod jq_filter;
 mod mcp_stdio;
@@ -30,10 +29,7 @@ mod udp_input;
 #[cfg(windows)]
 mod windows_private;
 
-use cli::args::{
-    AccessSubcommand, Cli, ColorMode, ErrorPolicyCli, FollowFormat, InputMode, PoolCommand,
-    ServeRunArgs,
-};
+use cli::args::{AccessSubcommand, Cli, ColorMode, InputMode, PoolCommand, ServeRunArgs};
 use cli::output::OutputMode;
 use cli::{CliContext, CommandResult as RunOutcome};
 use interface_wire::error_policy;
@@ -53,12 +49,20 @@ fn main() {
     }
     let exit_code = match run() {
         Ok(outcome) => outcome.exit_code,
+        Err((err, _, _)) if is_broken_pipe(&err) => 0,
         Err((err, color_mode, output_mode)) => {
             emit_error(&err, color_mode, output_mode);
             error_policy(interface_error_kind(err.kind())).cli_exit_code
         }
     };
     std::process::exit(exit_code);
+}
+
+fn is_broken_pipe(error: &(dyn std::error::Error + 'static)) -> bool {
+    if let Some(stdout) = error.downcast_ref::<cli::output::StdoutFailure>() {
+        return stdout.closed;
+    }
+    error.source().is_some_and(is_broken_pipe)
 }
 
 fn run() -> Result<RunOutcome, (Error, ColorMode, OutputMode)> {
@@ -115,7 +119,24 @@ fn run() -> Result<RunOutcome, (Error, ColorMode, OutputMode)> {
     };
 
     let color_mode = cli.color;
-    let output_mode = cli.command.output_mode();
+    let output_mode = cli.format.unwrap_or_else(default_output_mode);
+    if output_mode.is_binary()
+        && !matches!(
+            cli.command,
+            cli::args::Command::Feed { .. }
+                | cli::args::Command::Fetch { .. }
+                | cli::args::Command::Follow { .. }
+                | cli::args::Command::Duplex { .. }
+        )
+    {
+        return Err((
+            Error::new(ErrorKind::Usage)
+                .with_message("binary output requires a message command")
+                .with_hint("Use --format json or yaml for reports."),
+            color_mode,
+            OutputMode::Human,
+        ));
+    }
     if conflicting_dirs {
         return Err((
             Error::new(ErrorKind::Usage)
@@ -161,34 +182,31 @@ fn has_conflicting_directories(args: &[OsString]) -> bool {
 
 // The parser may fail before it can produce a command. Respect an explicit
 // output request, but never interpret flags belonging to tap's child process.
-fn requests_output(args: &[OsString]) -> OutputMode {
-    if args
-        .iter()
-        .skip(1)
-        .take_while(|arg| *arg != "--")
-        .any(|arg| arg == "--yaml")
-    {
-        OutputMode::Yaml
-    } else if requests_json(args) {
-        OutputMode::Json
-    } else {
+fn default_output_mode() -> OutputMode {
+    use std::io::IsTerminal;
+    if std::io::stdout().is_terminal() {
         OutputMode::Human
+    } else {
+        OutputMode::Json
     }
 }
 
-fn requests_json(args: &[OsString]) -> bool {
-    let mut format_value = false;
-    for arg in args.iter().skip(1).take_while(|arg| *arg != "--") {
-        if format_value && (arg == "jsonl" || arg == "json") {
-            return true;
+fn requests_output(args: &[OsString]) -> OutputMode {
+    let mut args = args.iter().skip(1).take_while(|arg| *arg != "--");
+    while let Some(arg) = args.next() {
+        let value = if arg == "--format" {
+            args.next().and_then(|v| v.to_str())
+        } else {
+            arg.to_str().and_then(|v| v.strip_prefix("--format="))
+        };
+        match value {
+            Some("yaml") => return OutputMode::Yaml,
+            Some("json") => return OutputMode::Json,
+            Some("pretty" | "lite3" | "lite3-raw") => return OutputMode::Human,
+            _ => {}
         }
-        if arg == "--json" || arg == "--jsonl" || arg == "--format=jsonl" || arg == "--format=json"
-        {
-            return true;
-        }
-        format_value = arg == "--format";
     }
-    false
+    default_output_mode()
 }
 
 fn normalize_args<I>(args: I) -> Vec<OsString>
@@ -277,8 +295,7 @@ mod tests {
             args,
             ["plasmite", "--help", "--", "---version", "--json", "--yaml"].map(OsString::from)
         );
-        assert!(!super::requests_json(&args));
-        assert_eq!(super::requests_output(&args), super::OutputMode::Human);
+        assert_eq!(super::requests_output(&args), super::OutputMode::Json);
     }
 
     #[test]
@@ -290,18 +307,21 @@ mod tests {
         collect_cli_inventory(&command, "plasmite", &mut inventory);
 
         let expected = vec![
-            ("plasmite", vec!["color", "dir", "help", "version"]),
-            ("plasmite access", vec!["help"]),
-            ("plasmite access connect", vec!["help", "json"]),
-            ("plasmite access disconnect", vec!["help", "json"]),
-            ("plasmite access invite", vec!["help", "json", "name"]),
-            ("plasmite access keys", vec!["help", "json"]),
-            ("plasmite access list", vec!["help", "json"]),
-            ("plasmite access revoke", vec!["help", "json"]),
-            ("plasmite access status", vec!["help", "json"]),
-            ("plasmite access untrust", vec!["help", "json"]),
-            ("plasmite completion", vec!["help"]),
-            ("plasmite doctor", vec!["all", "help", "json"]),
+            (
+                "plasmite",
+                vec!["color", "dir", "format", "help", "version"],
+            ),
+            ("plasmite access", vec!["format", "help"]),
+            ("plasmite access connect", vec!["format", "help"]),
+            ("plasmite access disconnect", vec!["format", "help"]),
+            ("plasmite access invite", vec!["format", "help", "name"]),
+            ("plasmite access keys", vec!["format", "help"]),
+            ("plasmite access list", vec!["format", "help"]),
+            ("plasmite access revoke", vec!["format", "help"]),
+            ("plasmite access status", vec!["format", "help"]),
+            ("plasmite access untrust", vec!["format", "help"]),
+            ("plasmite completion", vec!["format", "help"]),
+            ("plasmite doctor", vec!["all", "format", "help"]),
             (
                 "plasmite duplex",
                 vec![
@@ -309,8 +329,6 @@ mod tests {
                     "echo-self",
                     "format",
                     "help",
-                    "json",
-                    "jsonl",
                     "me",
                     "since",
                     "tail",
@@ -322,27 +340,24 @@ mod tests {
                 vec![
                     "create",
                     "create-size",
+                    "data",
                     "durability",
-                    "errors",
                     "file",
+                    "format",
                     "help",
-                    "in",
-                    "json",
+                    "input-format",
                     "retry",
                     "retry-delay",
                     "tag",
                 ],
             ),
-            ("plasmite fetch", vec!["format", "help", "json"]),
+            ("plasmite fetch", vec!["format", "help"]),
             (
                 "plasmite follow",
                 vec![
                     "create",
-                    "data-only",
                     "format",
                     "help",
-                    "json",
-                    "jsonl",
                     "no-follow",
                     "no-notify",
                     "one",
@@ -356,19 +371,20 @@ mod tests {
                 ],
             ),
             ("plasmite help", vec![]),
-            ("plasmite mcp", vec!["help"]),
-            ("plasmite pool", vec!["help"]),
+            ("plasmite mcp", vec!["format", "help"]),
+            ("plasmite pool", vec!["format", "help"]),
             (
                 "plasmite pool create",
-                vec!["help", "index-capacity", "json", "size"],
+                vec!["format", "help", "index-capacity", "size"],
             ),
-            ("plasmite pool delete", vec!["help", "json"]),
-            ("plasmite pool info", vec!["help", "json"]),
-            ("plasmite pool list", vec!["help", "json"]),
+            ("plasmite pool delete", vec!["format", "help"]),
+            ("plasmite pool info", vec!["format", "help"]),
+            ("plasmite pool list", vec!["format", "help"]),
             (
                 "plasmite serve",
                 vec![
                     "bind",
+                    "format",
                     "front-cert",
                     "help",
                     "max-body-bytes",
@@ -385,9 +401,9 @@ mod tests {
                 "plasmite serve install",
                 vec![
                     "bind",
+                    "format",
                     "front-cert",
                     "help",
-                    "json",
                     "max-body-bytes",
                     "max-tail-concurrency",
                     "max-tail-timeout-ms",
@@ -401,33 +417,29 @@ mod tests {
             ),
             (
                 "plasmite serve logs",
-                vec!["follow", "help", "json", "tail"],
+                vec!["follow", "format", "help", "tail"],
             ),
-            ("plasmite serve restart", vec!["help", "json"]),
-            ("plasmite serve start", vec!["help", "json"]),
-            ("plasmite serve status", vec!["all", "help", "json"]),
-            ("plasmite serve stop", vec!["help", "json"]),
-            ("plasmite serve uninstall", vec!["help", "json"]),
+            ("plasmite serve restart", vec!["format", "help"]),
+            ("plasmite serve start", vec!["format", "help"]),
+            ("plasmite serve status", vec!["all", "format", "help"]),
+            ("plasmite serve stop", vec!["format", "help"]),
+            ("plasmite serve uninstall", vec!["format", "help"]),
             (
                 "plasmite tap",
                 vec![
                     "create",
                     "create-size",
                     "durability",
+                    "format",
                     "help",
                     "quiet",
                     "tag",
                 ],
             ),
-            ("plasmite version", vec!["help", "json"]),
+            ("plasmite version", vec!["format", "help"]),
         ]
         .into_iter()
-        .map(|(path, mut options)| {
-            // Every JSON-capable command also offers YAML; protocol commands do not.
-            if options.contains(&"json") {
-                options.push("yaml");
-                options.sort();
-            }
+        .map(|(path, options)| {
             (
                 path.to_string(),
                 options.into_iter().map(str::to_string).collect::<Vec<_>>(),

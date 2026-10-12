@@ -22,44 +22,6 @@ use std::time::UNIX_EPOCH;
 
 use super::support::now_ns;
 
-pub(crate) fn emit_feed_receipt_human(receipt: &Value) {
-    let seq = receipt
-        .get("seq")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
-    let time = receipt
-        .get("time")
-        .and_then(|value| value.as_str())
-        .map(|value| human_literal(&format_timestamp_human(value)))
-        .unwrap_or_else(|| "-".to_string());
-    let tags = receipt
-        .get("meta")
-        .and_then(|value| value.get("tags"))
-        .and_then(|value| value.as_array())
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(|value| value.as_str())
-                .map(human_literal)
-                .collect::<Vec<_>>()
-                .join(",")
-        })
-        .unwrap_or_default();
-    if tags.is_empty() {
-        println!("fed seq={seq} at {time}");
-    } else {
-        println!("fed seq={seq} at {time}  tags: {tags}");
-    }
-}
-
-pub(crate) fn emit_feed_receipt(value: Value, _color_mode: ColorMode, output_mode: OutputMode) {
-    if output_mode.is_structured() {
-        emit_output(value, output_mode);
-    } else {
-        emit_feed_receipt_human(&value);
-    }
-}
-
 pub(crate) fn short_display_path(path: &Path, base_dir: Option<&Path>) -> String {
     if let Some(base) = base_dir {
         if let Ok(relative) = path.strip_prefix(base) {
@@ -74,8 +36,8 @@ pub(crate) fn short_display_path(path: &Path, base_dir: Option<&Path>) -> String
         .unwrap_or_else(|| path.display().to_string())
 }
 
-pub(crate) fn emit_table(headers: &[&str], rows: &[Vec<String>]) {
-    println!("{}", render_table(headers, rows));
+pub(crate) fn emit_table(headers: &[&str], rows: &[Vec<String>]) -> Result<(), Error> {
+    super::output::write_stdout(format!("{}\n", render_table(headers, rows)).as_bytes())
 }
 
 pub(crate) fn render_table(headers: &[&str], rows: &[Vec<String>]) -> String {
@@ -162,24 +124,51 @@ pub(crate) fn colorize_label(label: &str, enabled: bool, color: AnsiColor) -> St
     format!("\u{1b}[{code}m{label}\u{1b}[0m")
 }
 
+pub(crate) use super::output::emit_lite3;
+
 pub(crate) fn emit_message(
     value: serde_json::Value,
     output_mode: OutputMode,
     color_mode: ColorMode,
-) {
+) -> Result<(), Error> {
     if output_mode.is_structured() {
-        emit_output(value, output_mode);
-        return;
+        return emit_output(value, output_mode);
+    }
+    if output_mode.is_binary() {
+        let tags: Vec<String> =
+            serde_json::from_value(value["meta"]["tags"].clone()).map_err(|err| {
+                Error::new(ErrorKind::Internal)
+                    .with_message("invalid message tags")
+                    .with_source(err)
+            })?;
+        let payload = plasmite::api::lite3::encode_message(&tags, &value["data"])?;
+        let seq = value["seq"].as_u64().ok_or_else(|| {
+            Error::new(ErrorKind::Internal).with_message("invalid message sequence")
+        })?;
+        let time = value["time"]
+            .as_str()
+            .ok_or_else(|| Error::new(ErrorKind::Internal).with_message("invalid message time"))?;
+        let ns = time::OffsetDateTime::parse(time, &time::format_description::well_known::Rfc3339)
+            .map_err(|err| {
+                Error::new(ErrorKind::Internal)
+                    .with_message("invalid message time")
+                    .with_source(err)
+            })?
+            .unix_timestamp_nanos();
+        let ns = u64::try_from(ns).map_err(|err| {
+            Error::new(ErrorKind::Internal)
+                .with_message("invalid message time")
+                .with_source(err)
+        })?;
+        return emit_lite3(seq, ns, payload.as_slice(), output_mode);
     }
     let is_tty = io::stdout().is_terminal();
-    let use_color = color_mode.use_color(is_tty);
-    let json = if use_color {
+    let json = if color_mode.use_color(is_tty) {
         colorize_json(&value, true)
     } else {
-        serde_json::to_string_pretty(&value)
-            .unwrap_or_else(|_| "{\"error\":\"json encode failed\"}".to_string())
+        serde_json::to_string_pretty(&value).expect("JSON serializes")
     };
-    println!("{json}");
+    super::output::write_stdout(format!("{json}\n").as_bytes())
 }
 
 pub(crate) fn emit_error(err: &Error, color_mode: ColorMode, output_mode: OutputMode) {

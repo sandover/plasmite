@@ -4,9 +4,10 @@ pub mod support;
 
 use serde::Deserialize;
 use serde_json::Value;
+use std::io::Write;
 use std::path::Path;
 use std::process::Output;
-use support::cli::{ServeProcess, cmd};
+use support::cli::{ServeProcess, Stdio, cmd};
 
 fn cli_at(pool_dir: &Path, args: &[&str]) -> Output {
     cmd()
@@ -18,7 +19,7 @@ fn cli_at(pool_dir: &Path, args: &[&str]) -> Output {
 }
 
 fn create_pool(pool_dir: &Path, name: &str) {
-    let output = cli_at(pool_dir, &["pool", "create", name, "--json"]);
+    let output = cli_at(pool_dir, &["pool", "create", name, "--format", "json"]);
     assert_success(&output);
 }
 
@@ -109,9 +110,9 @@ fn fetch_yaml_matches_json_for_local_and_remote_edge_values() {
     let feed = cmd()
         .arg("--dir")
         .arg(&pool_dir)
-        .args(["feed", "edge-values"])
+        .args(["feed", "edge-values", "--data"])
         .arg(input)
-        .args(["--yaml", "--color", "always"])
+        .args(["--format", "yaml", "--color", "always"])
         .output()
         .expect("feed JSON input with YAML receipt");
     let receipt = yaml_report(&feed);
@@ -120,12 +121,28 @@ fn fetch_yaml_matches_json_for_local_and_remote_edge_values() {
 
     let local_json = cli_at(
         &pool_dir,
-        &["fetch", "edge-values", "1", "--json", "--color", "always"],
+        &[
+            "fetch",
+            "edge-values",
+            "1",
+            "--format",
+            "json",
+            "--color",
+            "always",
+        ],
     );
     let local_json = json_report(&local_json);
     let local_yaml = cli_at(
         &pool_dir,
-        &["fetch", "edge-values", "1", "--yaml", "--color", "always"],
+        &[
+            "fetch",
+            "edge-values",
+            "1",
+            "--format",
+            "yaml",
+            "--color",
+            "always",
+        ],
     );
     let local_yaml = yaml_report(&local_yaml);
     assert_eq!(local_yaml, local_json);
@@ -136,17 +153,79 @@ fn fetch_yaml_matches_json_for_local_and_remote_edge_values() {
     let server = ServeProcess::start(&pool_dir);
     let remote_ref = format!("{}/edge-values", server.local_url);
     let remote_json = cmd()
-        .args(["fetch", &remote_ref, "1", "--json", "--color", "always"])
+        .args([
+            "fetch",
+            &remote_ref,
+            "1",
+            "--format",
+            "json",
+            "--color",
+            "always",
+        ])
         .output()
         .expect("remote JSON fetch");
     let remote_json = json_report(&remote_json);
     let remote_yaml = cmd()
-        .args(["fetch", &remote_ref, "1", "--yaml", "--color", "always"])
+        .args([
+            "fetch",
+            &remote_ref,
+            "1",
+            "--format",
+            "yaml",
+            "--color",
+            "always",
+        ])
         .output()
         .expect("remote YAML fetch");
     let remote_yaml = yaml_report(&remote_yaml);
     assert_eq!(remote_yaml, remote_json);
     assert_eq!(remote_yaml, local_json);
+}
+
+#[test]
+fn fetched_yaml_message_feeds_without_an_input_format_override() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    create_pool(&pool_dir, "source");
+    create_pool(&pool_dir, "destination");
+
+    let payload = serde_json::json!({"event": "yaml-copy", "value": 17});
+    let input = serde_json::to_string(&payload).expect("JSON payload");
+    let appended = cli_at(
+        &pool_dir,
+        &[
+            "feed", "source", "--data", &input, "--tag", "copy", "--format", "json",
+        ],
+    );
+    let source_message = json_report(&appended);
+
+    let yaml = cli_at(&pool_dir, &["fetch", "source", "1", "--format", "yaml"]);
+    assert_success(&yaml);
+    assert_document_markers(&yaml.stdout, 1);
+
+    let mut feed = cmd()
+        .arg("--dir")
+        .arg(&pool_dir)
+        .args(["feed", "destination", "--format", "json"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("start YAML feed");
+    feed.stdin
+        .take()
+        .expect("feed stdin")
+        .write_all(&yaml.stdout)
+        .expect("write fetched YAML message");
+    let copied = feed.wait_with_output().expect("wait for YAML feed");
+    let destination_message = json_report(&copied);
+
+    assert_eq!(source_message["data"], payload);
+    assert_eq!(source_message["meta"]["tags"], serde_json::json!(["copy"]));
+    assert_eq!(destination_message["data"], payload);
+    assert_eq!(
+        destination_message["meta"]["tags"],
+        source_message["meta"]["tags"]
+    );
 }
 
 #[test]
@@ -158,16 +237,18 @@ fn yaml_pool_reports_and_version_match_json() {
 
     for (yaml_args, json_args) in [
         (
-            &["version", "--yaml", "--color", "always"][..],
-            &["version", "--json"][..],
+            &["version", "--format", "yaml", "--color", "always"][..],
+            &["version", "--format", "json"][..],
         ),
         (
-            &["pool", "list", "--yaml", "--color", "always"][..],
-            &["pool", "list", "--json"][..],
+            &["pool", "list", "--format", "yaml", "--color", "always"][..],
+            &["pool", "list", "--format", "json"][..],
         ),
         (
-            &["pool", "info", "first", "--yaml", "--color", "always"][..],
-            &["pool", "info", "first", "--json"][..],
+            &[
+                "pool", "info", "first", "--format", "yaml", "--color", "always",
+            ][..],
+            &["pool", "info", "first", "--format", "json"][..],
         ),
     ] {
         let yaml = yaml_report(&cli_at(&pool_dir, yaml_args));
@@ -180,7 +261,7 @@ fn yaml_pool_reports_and_version_match_json() {
 }
 
 #[test]
-fn finite_follow_emits_marked_yaml_documents_and_data_only_values() {
+fn finite_follow_emits_marked_yaml_documents() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
     create_pool(&pool_dir, "history");
@@ -188,7 +269,7 @@ fn finite_follow_emits_marked_yaml_documents_and_data_only_values() {
         let output = cmd()
             .arg("--dir")
             .arg(&pool_dir)
-            .args(["feed", "history"])
+            .args(["feed", "history", "--data"])
             .arg(format!("{{\"value\":{value}}}"))
             .output()
             .expect("feed history value");
@@ -203,7 +284,8 @@ fn finite_follow_emits_marked_yaml_documents_and_data_only_values() {
             "--tail",
             "2",
             "--no-follow",
-            "--yaml",
+            "--format",
+            "yaml",
             "--color",
             "always",
         ],
@@ -217,35 +299,10 @@ fn finite_follow_emits_marked_yaml_documents_and_data_only_values() {
     assert_eq!(envelopes[1]["seq"], 3);
     assert_eq!(envelopes[0]["data"]["value"], 2);
     assert_eq!(envelopes[1]["data"]["value"], 3);
-
-    let values = cli_at(
-        &pool_dir,
-        &[
-            "follow",
-            "history",
-            "--tail",
-            "2",
-            "--no-follow",
-            "--data-only",
-            "--yaml",
-            "--color",
-            "always",
-        ],
-    );
-    assert_success(&values);
-    assert_no_ansi(&values);
-    assert_document_markers(&values.stdout, 2);
-    assert_eq!(
-        yaml_documents(&values.stdout),
-        vec![
-            serde_json::json!({"value": 2}),
-            serde_json::json!({"value": 3})
-        ]
-    );
 }
 
 #[test]
-fn yaml_changes_feed_output_without_accepting_yaml_input() {
+fn feed_accepts_explicit_yaml_data_and_writes_complete_messages() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
     create_pool(&pool_dir, "json-input");
@@ -256,8 +313,10 @@ fn yaml_changes_feed_output_without_accepting_yaml_input() {
         .args([
             "feed",
             "json-input",
+            "--data",
             "{\"value\":1}",
-            "--yaml",
+            "--format",
+            "yaml",
             "--color",
             "always",
         ])
@@ -271,68 +330,66 @@ fn yaml_changes_feed_output_without_accepting_yaml_input() {
         .args([
             "feed",
             "json-input",
+            "--data",
+            "--input-format",
+            "yaml",
             "value: 2",
-            "--yaml",
+            "--format",
+            "yaml",
             "--color",
             "always",
         ])
         .output()
-        .expect("try YAML text as feed input");
-    let error = yaml_error(&yaml_input);
-    assert!(error["error"]["message"].is_string());
+        .expect("feed YAML data");
+    assert_eq!(yaml_report(&yaml_input)["data"]["value"], 2);
 
-    let missing_second_message = cli_at(
+    let second_message = cli_at(
         &pool_dir,
-        &["fetch", "json-input", "2", "--yaml", "--color", "always"],
+        &[
+            "fetch",
+            "json-input",
+            "2",
+            "--format",
+            "yaml",
+            "--color",
+            "always",
+        ],
     );
-    let error = yaml_error(&missing_second_message);
-    assert_eq!(error["error"]["kind"], "NotFound");
+    assert_eq!(yaml_report(&second_message)["data"]["value"], 2);
 }
 
 #[test]
-fn yaml_parse_errors_and_format_conflicts_use_yaml_errors_without_mutation() {
+fn yaml_parse_errors_and_removed_formats_fail_without_mutation() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
-    let parse_error = cli_at(&pool_dir, &["version", "--yaml", "--unknown-option"]);
+    let parse_error = cli_at(
+        &pool_dir,
+        &["version", "--format", "yaml", "--unknown-option"],
+    );
     assert_eq!(parse_error.status.code(), Some(2));
     assert_eq!(yaml_error(&parse_error)["error"]["kind"], "Usage");
 
-    let conflicting_feed = cmd()
+    let invalid_feed_format = cmd()
         .arg("--dir")
         .arg(&pool_dir)
-        .args(["feed", "not-created", "{}", "--create", "--yaml", "--json"])
+        .args([
+            "feed",
+            "not-created",
+            "--create",
+            "--data",
+            "{}",
+            "--format",
+            "jsonl",
+        ])
         .output()
-        .expect("conflicting feed output flags");
-    assert_eq!(conflicting_feed.status.code(), Some(2));
-    assert_eq!(yaml_error(&conflicting_feed)["error"]["kind"], "Usage");
+        .expect("unsupported feed format");
+    assert_eq!(invalid_feed_format.status.code(), Some(2));
     assert!(
         !pool_dir.exists(),
-        "conflicting flags must not create a pool"
+        "an unsupported format must not create a pool"
     );
 
-    create_pool(&pool_dir, "conflicts");
-    for format in ["json", "lite3"] {
-        let conflict = cli_at(
-            &pool_dir,
-            &["fetch", "conflicts", "1", "--yaml", "--format", format],
-        );
-        assert_eq!(conflict.status.code(), Some(2));
-        assert_eq!(yaml_error(&conflict)["error"]["kind"], "Usage");
-    }
-
-    let jsonl_conflict = cli_at(
-        &pool_dir,
-        &[
-            "follow",
-            "conflicts",
-            "--tail",
-            "1",
-            "--no-follow",
-            "--yaml",
-            "--jsonl",
-        ],
-    );
-    assert_eq!(jsonl_conflict.status.code(), Some(2));
-    assert_eq!(yaml_error(&jsonl_conflict)["error"]["kind"], "Usage");
+    let removed_alias = cli_at(&pool_dir, &["version", "--yaml"]);
+    assert_eq!(removed_alias.status.code(), Some(2));
 }

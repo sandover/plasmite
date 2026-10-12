@@ -96,11 +96,20 @@ fn mcp_uses_shared_directory_and_rejects_removed_remote_forms() {
 }
 
 #[test]
-fn redirected_version_and_errors_are_human_by_default() {
+fn redirected_version_and_errors_use_json_by_default() {
     let output = cmd().arg("version").output().unwrap();
     assert!(output.status.success());
+    let version = parse_json(std::str::from_utf8(&output.stdout).unwrap());
+    assert_eq!(version["name"], "plasmite");
+    assert_eq!(version["version"], env!("PLASMITE_BUILD_VERSION"));
+
+    let pretty = cmd()
+        .args(["version", "--format", "pretty"])
+        .output()
+        .unwrap();
+    assert!(pretty.status.success());
     assert_eq!(
-        String::from_utf8(output.stdout).unwrap().trim(),
+        String::from_utf8(pretty.stdout).unwrap().trim(),
         format!("plasmite {}", env!("PLASMITE_BUILD_VERSION"))
     );
     let temp = tempfile::tempdir().unwrap();
@@ -115,7 +124,10 @@ fn redirected_version_and_errors_are_human_by_default() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(3));
-    assert!(String::from_utf8_lossy(&output.stderr).starts_with("error:"));
+    assert_eq!(
+        parse_error_json(&output.stderr)["error"]["kind"],
+        "NotFound"
+    );
 }
 
 #[test]
@@ -126,7 +138,8 @@ fn structured_errors_disable_forced_color() {
             "fetch",
             "missing",
             "1",
-            "--json",
+            "--format",
+            "json",
             "--color",
             "always",
             "--dir",

@@ -46,11 +46,11 @@ impl TestHome {
         let output = command
             .arg("--dir")
             .arg(ignored_dir)
-            .args(["serve", "status", "--json"])
+            .args(["serve", "status", "--format", "json"])
             .output()?;
         if !output.status.success() {
             return Err(format!(
-                "serve status --json failed: {}",
+                "serve status --format json failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             )
             .into());
@@ -59,7 +59,10 @@ impl TestHome {
     }
 
     fn status_text(&self) -> TestResult<String> {
-        let output = self.command().args(["serve", "status"]).output()?;
+        let output = self
+            .command()
+            .args(["serve", "status", "--format", "pretty"])
+            .output()?;
         if !output.status.success() {
             return Err(format!(
                 "serve status failed: {}",

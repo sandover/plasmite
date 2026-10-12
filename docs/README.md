@@ -61,3 +61,5 @@ and specifications above:
   datagram input for an existing pool.
 
 The repository's `.ergo/` backlog and journal track planned work and results.
+
+CLI script migration: [Upgrading to 2.0](record/upgrading-2.0.md).

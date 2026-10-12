@@ -31,7 +31,8 @@ fn create_feed_fetch_follow_flow() {
             pool_dir.to_str().unwrap(),
             "pool",
             "create",
-            "--json",
+            "--format",
+            "json",
             "testpool",
         ])
         .output()
@@ -61,11 +62,12 @@ fn create_feed_fetch_follow_flow() {
             pool_dir.to_str().unwrap(),
             "feed",
             "testpool",
+            "--data",
             "{\"x\":1}",
             "--tag",
             "ping",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert!(feed_out.status.success());
@@ -73,7 +75,7 @@ fn create_feed_fetch_follow_flow() {
     let seq = feed_json.get("seq").unwrap().as_u64().unwrap();
     assert!(feed_json.get("time").is_some());
     assert_eq!(feed_json.get("meta").unwrap()["tags"][0], "ping");
-    assert!(feed_json.get("data").is_none());
+    assert_eq!(feed_json["data"], json!({"x": 1}));
 
     let get = cmd()
         .args([
@@ -83,7 +85,7 @@ fn create_feed_fetch_follow_flow() {
             "testpool",
             &seq.to_string(),
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("fetch");
     assert!(get.status.success());
@@ -99,10 +101,10 @@ fn create_feed_fetch_follow_flow() {
             "testpool",
             "--tail",
             "1",
-            "--jsonl",
+            "--format",
+            "json",
         ])
         .stdout(Stdio::piped())
-        .arg("--json")
         .spawn()
         .expect("follow");
     let stdout = follower.stdout.take().expect("stdout");
@@ -115,7 +117,7 @@ fn create_feed_fetch_follow_flow() {
 }
 
 #[test]
-fn emit_json_emits_receipt() {
+fn feed_stdout_contains_the_complete_message() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -127,7 +129,7 @@ fn emit_json_emits_receipt() {
             "create",
             "testpool",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -138,9 +140,10 @@ fn emit_json_emits_receipt() {
             pool_dir.to_str().unwrap(),
             "feed",
             "testpool",
+            "--data",
             "{\"x\":1}",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert!(emit_out.status.success());
@@ -162,7 +165,7 @@ fn emit_short_file_flag_reads_single_json_file() {
             "create",
             "demo",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -176,10 +179,11 @@ fn emit_short_file_flag_reads_single_json_file() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "-f",
             input_file.to_str().unwrap(),
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert!(
@@ -187,12 +191,12 @@ fn emit_short_file_flag_reads_single_json_file() {
         "{}",
         String::from_utf8_lossy(&emit_out.stderr)
     );
-    let receipts = parse_json_lines(&emit_out.stdout);
-    assert_eq!(receipts.len(), 1);
+    let messages = parse_json_lines(&emit_out.stdout);
+    assert_eq!(messages.len(), 1);
 
     let get = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "fetch", "demo", "1"])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("fetch");
     assert!(get.status.success());
@@ -201,7 +205,7 @@ fn emit_short_file_flag_reads_single_json_file() {
 }
 
 #[test]
-fn emit_file_jsonl_ingests_multiple_records() {
+fn feed_file_reads_multiple_json_records() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -213,7 +217,7 @@ fn emit_file_jsonl_ingests_multiple_records() {
             "create",
             "demo",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -227,10 +231,13 @@ fn emit_file_jsonl_ingests_multiple_records() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
+            "--input-format",
+            "json",
             "--file",
             input_file.to_str().unwrap(),
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert!(
@@ -238,14 +245,16 @@ fn emit_file_jsonl_ingests_multiple_records() {
         "{}",
         String::from_utf8_lossy(&emit_out.stderr)
     );
-    let receipts = parse_json_lines(&emit_out.stdout);
-    assert_eq!(receipts.len(), 2);
-    assert_eq!(receipts[0]["seq"], 1);
-    assert_eq!(receipts[1]["seq"], 2);
+    let messages = parse_json_lines(&emit_out.stdout);
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0]["seq"], 1);
+    assert_eq!(messages[1]["seq"], 2);
+    assert_eq!(messages[0]["data"]["x"], 1);
+    assert_eq!(messages[1]["data"]["x"], 2);
 
     let get_one = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "fetch", "demo", "1"])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("fetch one");
     assert!(get_one.status.success());
@@ -254,7 +263,7 @@ fn emit_file_jsonl_ingests_multiple_records() {
 
     let get_two = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "fetch", "demo", "2"])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("fetch two");
     assert!(get_two.status.success());
@@ -263,7 +272,7 @@ fn emit_file_jsonl_ingests_multiple_records() {
 }
 
 #[test]
-fn emit_file_auto_handles_multiline_json() {
+fn feed_file_auto_handles_multiline_json_data() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -275,7 +284,7 @@ fn emit_file_auto_handles_multiline_json() {
             "create",
             "demo",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -289,10 +298,11 @@ fn emit_file_auto_handles_multiline_json() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "--file",
             input_file.to_str().unwrap(),
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert!(
@@ -300,13 +310,13 @@ fn emit_file_auto_handles_multiline_json() {
         "{}",
         String::from_utf8_lossy(&emit_out.stderr)
     );
-    let receipts = parse_json_lines(&emit_out.stdout);
-    assert_eq!(receipts.len(), 1);
-    assert_eq!(receipts[0]["seq"], 1);
+    let messages = parse_json_lines(&emit_out.stdout);
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["seq"], 1);
 
     let get = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "fetch", "demo", "1"])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("fetch");
     assert!(get.status.success());
@@ -328,7 +338,7 @@ fn emit_retries_when_pool_is_busy() {
             "create",
             "busy",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -346,13 +356,14 @@ fn emit_retries_when_pool_is_busy() {
                 &pool_dir_str,
                 "feed",
                 "busy",
+                "--data",
                 "{\"x\":1}",
                 "--retry",
                 "5",
                 "--retry-delay",
                 "50ms",
             ])
-            .arg("--json")
+            .args(["--format", "json"])
             .output()
             .expect("feed");
         let _ = tx.send(output);
@@ -372,7 +383,7 @@ fn emit_retries_when_pool_is_busy() {
 }
 
 #[test]
-fn emit_auto_handles_pretty_json() {
+fn feed_auto_handles_pretty_json_data() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -384,16 +395,22 @@ fn emit_auto_handles_pretty_json() {
             "create",
             "demo",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
 
     let mut emit_out = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "feed", "demo"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "feed",
+            "demo",
+            "--data",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .arg("--json")
+        .args(["--format", "json"])
         .spawn()
         .expect("feed");
     {
@@ -407,145 +424,11 @@ fn emit_auto_handles_pretty_json() {
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 1);
     assert!(lines[0].get("seq").is_some());
-    assert!(lines[0].get("data").is_none());
+    assert_eq!(lines[0]["data"]["x"], 1);
 }
 
 #[test]
-fn emit_auto_handles_event_stream() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .arg("--json")
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let mut emit_out = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "feed", "demo"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .arg("--json")
-        .spawn()
-        .expect("feed");
-    {
-        let stdin = emit_out.stdin.as_mut().expect("stdin");
-        stdin
-            .write_all(b"data: {\"x\":1}\n\ndata: {\"x\":2}\n\n")
-            .expect("write stdin");
-    }
-    let output = emit_out.wait_with_output().expect("feed output");
-    assert!(output.status.success());
-    let lines = parse_json_lines(&output.stdout);
-    assert_eq!(lines.len(), 2);
-    assert!(lines[1].get("seq").is_some());
-    assert!(lines[1].get("data").is_none());
-}
-
-#[test]
-fn emit_auto_detects_json_seq() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .arg("--json")
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let mut emit_out = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "feed", "demo"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .arg("--json")
-        .spawn()
-        .expect("feed");
-    {
-        let stdin = emit_out.stdin.as_mut().expect("stdin");
-        stdin
-            .write_all(b"\x1e{\"x\":1}\x1e{\"x\":2}")
-            .expect("write stdin");
-    }
-    let output = emit_out.wait_with_output().expect("feed output");
-    assert!(output.status.success());
-    let lines = parse_json_lines(&output.stdout);
-    assert_eq!(lines.len(), 2);
-    assert!(lines[0].get("seq").is_some());
-    assert!(lines[0].get("data").is_none());
-}
-
-#[test]
-fn emit_auto_skip_reports_oversize() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .arg("--json")
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let mut emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "-e",
-            "skip",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .arg("--json")
-        .spawn()
-        .expect("feed");
-    {
-        let stdin = emit_out.stdin.as_mut().expect("stdin");
-        let big = "x".repeat(1024 * 1024 + 1);
-        let line = format!("{{\"big\":\"{big}\"}}\n");
-        stdin.write_all(line.as_bytes()).expect("write stdin");
-        stdin.write_all(b"{\"ok\":1}\n").expect("write ok");
-    }
-    let output = emit_out.wait_with_output().expect("feed output");
-    assert_eq!(output.status.code().unwrap(), 1);
-    let lines = parse_json_lines(&output.stdout);
-    assert_eq!(lines.len(), 1);
-    let notices = parse_json_lines(&output.stderr);
-    let oversize = notices.iter().find(|value| {
-        value
-            .get("notice")
-            .and_then(|v| v.get("details"))
-            .and_then(|v| v.get("error_kind"))
-            .and_then(|v| v.as_str())
-            == Some("Oversize")
-    });
-    assert!(oversize.is_some());
-}
-
-#[test]
-fn feed_file_tty_emits_human_receipts() {
+fn feed_file_tty_emits_complete_json_messages() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
     let input_file = temp.path().join("events.jsonl");
@@ -570,19 +453,27 @@ fn feed_file_tty_emits_human_receipts() {
         pool_dir.to_str().unwrap(),
         "feed",
         "demo",
+        "--data",
         "--file",
         input_file.to_str().unwrap(),
-        "--in",
-        "jsonl",
+        "--input-format",
+        "json",
+        "--format",
+        "json",
     ]);
     assert!(output.status.success());
     let text = sanitize_tty_text(&output.stdout);
-    assert_eq!(text.matches("fed seq=").count(), 2);
-    assert!(!text.contains("\"seq\":"));
+    // macOS `script` writes a literal terminal EOF marker before the child output.
+    // Remove only that leading marker so valid message data remains untouched.
+    let text = text.strip_prefix("^D").unwrap_or(&text);
+    let messages = parse_json_lines(text.as_bytes());
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0]["data"]["x"], 1);
+    assert_eq!(messages[1]["data"]["x"], 2);
 }
 
 #[test]
-fn emit_seq_mode_parses_rs_records() {
+fn feed_json_format_accepts_pretty_json_data() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -594,7 +485,7 @@ fn emit_seq_mode_parses_rs_records() {
             "create",
             "demo",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -605,183 +496,13 @@ fn emit_seq_mode_parses_rs_records() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "-i",
-            "seq",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .arg("--json")
-        .spawn()
-        .expect("feed");
-    {
-        let stdin = emit_out.stdin.as_mut().expect("stdin");
-        stdin
-            .write_all(b"\x1e{\"x\":1}\x1e{\"x\":2}")
-            .expect("write stdin");
-    }
-    let output = emit_out.wait_with_output().expect("feed output");
-    assert!(output.status.success());
-    let lines = parse_json_lines(&output.stdout);
-    assert_eq!(lines.len(), 2);
-    assert!(lines[0].get("seq").is_some());
-    assert!(lines[0].get("data").is_none());
-}
-
-#[test]
-fn emit_errors_skip_emits_notices_and_nonzero() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .arg("--json")
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let mut emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "-i",
-            "jsonl",
-            "-e",
-            "skip",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .arg("--json")
-        .spawn()
-        .expect("feed");
-    {
-        let stdin = emit_out.stdin.as_mut().expect("stdin");
-        stdin
-            .write_all(b"{\"x\":1}\nnot-json\n{\"x\":2}\n")
-            .expect("write stdin");
-    }
-    let output = emit_out.wait_with_output().expect("feed output");
-    assert_eq!(output.status.code().unwrap(), 1);
-    let lines = parse_json_lines(&output.stdout);
-    assert_eq!(lines.len(), 2);
-
-    let notices = parse_json_lines(&output.stderr);
-    assert!(notices.len() >= 2);
-    let first = notices[0]
-        .get("notice")
-        .and_then(|v| v.as_object())
-        .expect("notice");
-    assert_eq!(
-        first.get("kind").and_then(|v| v.as_str()),
-        Some("ingest_skip")
-    );
-    let summary = notices
-        .iter()
-        .find(|value| {
-            value
-                .get("notice")
-                .and_then(|v| v.get("kind"))
-                .and_then(|v| v.as_str())
-                == Some("ingest_summary")
-        })
-        .expect("summary");
-    assert!(summary.get("notice").is_some());
-}
-
-#[test]
-fn emit_errors_skip_reports_oversize() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .arg("--json")
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let mut emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "-i",
-            "jsonl",
-            "-e",
-            "skip",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .arg("--json")
-        .spawn()
-        .expect("feed");
-    {
-        let stdin = emit_out.stdin.as_mut().expect("stdin");
-        let big = "x".repeat(1024 * 1024 + 1);
-        let line = format!("{{\"big\":\"{big}\"}}\n");
-        stdin.write_all(line.as_bytes()).expect("write stdin");
-        stdin.write_all(b"{\"ok\":1}\n").expect("write ok");
-    }
-    let output = emit_out.wait_with_output().expect("feed output");
-    assert_eq!(output.status.code().unwrap(), 1);
-    let notices = parse_json_lines(&output.stderr);
-    let oversize = notices.iter().find(|value| {
-        value
-            .get("notice")
-            .and_then(|v| v.get("details"))
-            .and_then(|v| v.get("error_kind"))
-            .and_then(|v| v.as_str())
-            == Some("Oversize")
-    });
-    assert!(oversize.is_some());
-}
-
-#[test]
-fn emit_in_json_accepts_pretty_json() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .arg("--json")
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let mut emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "-i",
+            "--data",
+            "--input-format",
             "json",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .arg("--json")
+        .args(["--format", "json"])
         .spawn()
         .expect("feed");
     {
@@ -795,149 +516,7 @@ fn emit_in_json_accepts_pretty_json() {
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 1);
     assert!(lines[0].get("seq").is_some());
-    assert!(lines[0].get("data").is_none());
-}
-
-#[test]
-fn emit_in_json_errors_skip_returns_nonzero() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .arg("--json")
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let mut emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "-i",
-            "json",
-            "-e",
-            "skip",
-        ])
-        .stdin(Stdio::piped())
-        .stderr(Stdio::piped())
-        .arg("--json")
-        .spawn()
-        .expect("feed");
-    {
-        let stdin = emit_out.stdin.as_mut().expect("stdin");
-        stdin.write_all(b"{\"x\":1").expect("write stdin");
-    }
-    let output = emit_out.wait_with_output().expect("feed output");
-    assert_eq!(output.status.code().unwrap(), 1);
-    let notices = parse_json_lines(&output.stderr);
-    assert!(notices.iter().any(|value| {
-        value
-            .get("notice")
-            .and_then(|v| v.get("kind"))
-            .and_then(|v| v.as_str())
-            == Some("ingest_skip")
-    }));
-}
-
-#[test]
-fn emit_event_stream_flushes_trailing_event() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .arg("--json")
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let mut emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "-i",
-            "auto",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .arg("--json")
-        .spawn()
-        .expect("feed");
-    {
-        let stdin = emit_out.stdin.as_mut().expect("stdin");
-        stdin.write_all(b"data: {\"x\":1}\n").expect("write stdin");
-    }
-    let output = emit_out.wait_with_output().expect("feed output");
-    assert!(output.status.success());
-    let lines = parse_json_lines(&output.stdout);
-    assert_eq!(lines.len(), 1);
-    assert!(lines[0].get("seq").is_some());
-    assert!(lines[0].get("data").is_none());
-}
-
-#[test]
-fn emit_jq_mode_rejects_skip() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
-
-    let create = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "pool",
-            "create",
-            "demo",
-        ])
-        .arg("--json")
-        .output()
-        .expect("create");
-    assert!(create.status.success());
-
-    let mut emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "-i",
-            "jq",
-            "-e",
-            "skip",
-        ])
-        .stdin(Stdio::piped())
-        .stderr(Stdio::piped())
-        .arg("--json")
-        .spawn()
-        .expect("feed");
-    {
-        let stdin = emit_out.stdin.as_mut().expect("stdin");
-        stdin.write_all(b"{\"x\":1}\n{\"x\":2}\n").expect("write");
-    }
-    let output = emit_out.wait_with_output().expect("feed output");
-    assert_eq!(output.status.code().unwrap(), 2);
-    let err = parse_error_json(&output.stderr);
-    let inner = err
-        .get("error")
-        .and_then(|v| v.as_object())
-        .expect("error object");
-    assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("Usage"));
+    assert_eq!(lines[0]["data"]["x"], 1);
 }
 
 #[test]
@@ -951,10 +530,11 @@ fn emit_create_flag_creates_missing_pool() {
             pool_dir.to_str().unwrap(),
             "feed",
             "autopool",
+            "--data",
             "{\"x\":1}",
             "--create",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert!(emit_out.status.success());
@@ -976,9 +556,10 @@ fn emit_missing_pool_hint_suggests_create() {
             pool_dir.to_str().unwrap(),
             "feed",
             "missing",
+            "--data",
             "{\"x\":1}",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert_eq!(output.status.code(), Some(3));
@@ -987,9 +568,8 @@ fn emit_missing_pool_hint_suggests_create() {
     let inner = err.get("error").and_then(|v| v.as_object()).expect("error");
     assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("NotFound"));
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(hint.contains("--create"));
     assert!(hint.contains("exact command"));
-    assert!(hint.contains("plasmite feed missing --create"));
+    assert!(hint.contains("plasmite pool create missing"));
 }
 
 #[test]
@@ -1005,7 +585,7 @@ fn emit_remote_url_happy_path_appends_message() {
             "create",
             "demo",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -1016,7 +596,7 @@ fn emit_remote_url_happy_path_appends_message() {
         .args(["access", "connect", &server.remote_url])
         .env("PLASMITE_ACCESS_HOME", &access_home)
         .stdin(std::process::Stdio::piped())
-        .arg("--json")
+        .args(["--format", "json"])
         .spawn()
         .expect("connect");
     use std::io::Write;
@@ -1035,18 +615,19 @@ fn emit_remote_url_happy_path_appends_message() {
             pool_dir.to_str().unwrap(),
             "feed",
             &pool_url,
+            "--data",
             "{\"x\":1}",
             "--tag",
             "ping",
         ])
         .env("PLASMITE_ACCESS_HOME", &access_home)
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert!(emit_out.status.success());
     let value = parse_json(std::str::from_utf8(&emit_out.stdout).expect("utf8"));
     assert_eq!(value.get("seq").and_then(|v| v.as_u64()), Some(1));
-    assert!(value.get("data").is_none());
+    assert!(value["data"].is_object());
     assert_eq!(
         value.get("meta").and_then(|v| v.get("tags")),
         Some(&json!(["ping"]))
@@ -1059,9 +640,10 @@ fn emit_remote_url_rejects_api_shaped_path() {
         .args([
             "feed",
             "http://localhost:9170/v0/pools/demo/append",
+            "--data",
             "{\"x\":1}",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert!(!output.status.success());
@@ -1077,8 +659,8 @@ fn emit_remote_url_rejects_api_shaped_path() {
 #[test]
 fn emit_remote_url_rejects_trailing_slash() {
     let output = cmd()
-        .args(["feed", "http://localhost:9170/demo/", "{\"x\":1}"])
-        .arg("--json")
+        .args(["feed", "http://localhost:9170/demo/", "--data", "{\"x\":1}"])
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert!(!output.status.success());
@@ -1097,10 +679,11 @@ fn emit_remote_url_rejects_create_flag() {
         .args([
             "feed",
             "http://localhost:9170/demo",
+            "--data",
             "--create",
             "{\"x\":1}",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert!(!output.status.success());
@@ -1122,7 +705,7 @@ fn emit_remote_url_rejects_create_flag() {
         .and_then(|v| v.get("hint"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    assert!(hint.contains("server-side"));
+    assert!(hint.contains("Create the pool on the server with pool create."));
 }
 
 #[test]
@@ -1131,10 +714,11 @@ fn emit_remote_create_rejected() {
         .args([
             "feed",
             "http://localhost:9170/demo",
+            "--data",
             "--create",
             "{\"x\":1}",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert_eq!(output.status.code(), Some(2));
@@ -1145,11 +729,11 @@ fn emit_remote_create_rejected() {
     let message = inner.get("message").and_then(|v| v.as_str()).unwrap_or("");
     assert!(message.contains("does not support --create"));
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(hint.contains("server-side"));
+    assert!(hint.contains("Create the pool on the server with pool create."));
 }
 
 #[test]
-fn emit_streams_json_values_from_stdin() {
+fn feed_streams_json_values_from_stdin() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1161,16 +745,24 @@ fn emit_streams_json_values_from_stdin() {
             "create",
             "testpool",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
 
     let mut emit_out = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "feed", "testpool"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "feed",
+            "testpool",
+            "--data",
+            "--input-format",
+            "json",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .arg("--json")
+        .args(["--format", "json"])
         .spawn()
         .expect("feed");
     {
@@ -1185,8 +777,8 @@ fn emit_streams_json_values_from_stdin() {
     assert_eq!(lines.len(), 2);
     assert!(lines[0].get("seq").is_some());
     assert!(lines[1].get("seq").is_some());
-    assert!(lines[0].get("data").is_none());
-    assert!(lines[1].get("data").is_none());
+    assert_eq!(lines[0]["data"]["x"], 1);
+    assert_eq!(lines[1]["data"]["x"], 2);
 
     let mut follower = cmd()
         .args([
@@ -1196,10 +788,10 @@ fn emit_streams_json_values_from_stdin() {
             "testpool",
             "--tail",
             "2",
-            "--jsonl",
+            "--format",
+            "json",
         ])
         .stdout(Stdio::piped())
-        .arg("--json")
         .spawn()
         .expect("follow");
     let stdout = follower.stdout.take().expect("stdout");
@@ -1263,7 +855,7 @@ fn fetch_output(pool_dir: &Path, pool: &str, seq: &str, options: &[&str]) -> std
 }
 
 #[test]
-fn fetch_formats_keep_readable_json_and_raw_lite3_output() {
+fn fetch_defaults_to_json_and_pretty_and_raw_lite3_are_explicit() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
     let mut pool = create_fixture_pool(&pool_dir, "source");
@@ -1274,30 +866,22 @@ fn fetch_formats_keep_readable_json_and_raw_lite3_output() {
     let pretty = fetch_output(&pool_dir, "source", "1", &["--format", "pretty"]);
     assert!(default.status.success());
     assert!(pretty.status.success());
-    assert_eq!(default.stdout, pretty.stdout);
     let readable = parse_json(std::str::from_utf8(&default.stdout).expect("readable utf8"));
     assert_eq!(readable["seq"], 1);
     assert_eq!(readable["data"]["text"], "before\0after\nnext line");
+    let pretty_value = parse_json(std::str::from_utf8(&pretty.stdout).expect("pretty utf8"));
+    assert_eq!(pretty_value, readable);
+    assert!(pretty.stdout.iter().filter(|byte| **byte == b'\n').count() > 1);
 
     let format_json = fetch_output(&pool_dir, "source", "1", &["--format", "json"]);
-    let json_alias = fetch_output(&pool_dir, "source", "1", &["--json"]);
     assert!(format_json.status.success());
-    assert!(json_alias.status.success());
-    assert_eq!(format_json.stdout, json_alias.stdout);
     let machine = parse_json(std::str::from_utf8(&format_json.stdout).expect("json utf8"));
     assert_eq!(machine["meta"]["tags"], json!(["fixture", "binary"]));
 
-    let raw = fetch_output(&pool_dir, "source", "1", &["--format", "lite3"]);
+    let raw = fetch_output(&pool_dir, "source", "1", &["--format", "lite3-raw"]);
     assert!(raw.status.success());
     assert_eq!(raw.stderr, b"");
     assert_eq!(raw.stdout, payload);
-
-    for format in ["pretty", "lite3"] {
-        let conflict = fetch_output(&pool_dir, "source", "1", &["--json", "--format", format]);
-        assert_eq!(conflict.status.code(), Some(2));
-        let error = parse_error_json(&conflict.stderr);
-        assert_eq!(error["error"]["kind"], "Usage");
-    }
 }
 
 #[test]
@@ -1320,11 +904,12 @@ fn feed_lite3_file_preserves_bytes_tags_and_assigns_fresh_identity() {
             pool_dir.to_str().expect("pool directory"),
             "feed",
             "target",
-            "--in",
-            "lite3",
+            "--input-format",
+            "lite3-raw",
             "--file",
             input_file.to_str().expect("input path"),
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("feed Lite3 file");
@@ -1337,9 +922,9 @@ fn feed_lite3_file_preserves_bytes_tags_and_assigns_fresh_identity() {
     assert_eq!(receipt["seq"], 2);
     assert_ne!(receipt["time"].as_str(), Some(source_time.as_str()));
     assert_eq!(receipt["meta"]["tags"], json!(["fixture", "binary"]));
-    assert!(receipt.get("data").is_none());
+    assert!(receipt["data"].is_object());
 
-    let raw = fetch_output(&pool_dir, "target", "2", &["--format", "lite3"]);
+    let raw = fetch_output(&pool_dir, "target", "2", &["--format", "lite3-raw"]);
     assert!(raw.status.success());
     assert_eq!(raw.stdout, payload);
     let message = fetch_output(&pool_dir, "target", "2", &["--format", "json"]);
@@ -1364,11 +949,12 @@ fn feed_lite3_file_dash_reads_one_binary_document_from_stdin() {
             pool_dir.to_str().expect("pool directory"),
             "feed",
             "target",
-            "--in",
-            "lite3",
+            "--input-format",
+            "lite3-raw",
             "--file",
             "-",
-            "--json",
+            "--format",
+            "json",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1388,7 +974,7 @@ fn feed_lite3_file_dash_reads_one_binary_document_from_stdin() {
     let receipt = parse_json(std::str::from_utf8(&output.stdout).expect("receipt utf8"));
     assert_eq!(receipt["seq"], 1);
 
-    let raw = fetch_output(&pool_dir, "target", "1", &["--format", "lite3"]);
+    let raw = fetch_output(&pool_dir, "target", "1", &["--format", "lite3-raw"]);
     assert!(raw.status.success());
     assert_eq!(raw.stdout, payload);
 }
@@ -1412,7 +998,7 @@ fn native_fetch_pipe_feeds_the_same_lite3_bytes() {
             "source",
             "1",
             "--format",
-            "lite3",
+            "lite3-raw",
         ])
         .stdout(Stdio::piped())
         .spawn()
@@ -1424,9 +1010,10 @@ fn native_fetch_pipe_feeds_the_same_lite3_bytes() {
             pool_dir.to_str().expect("pool directory"),
             "feed",
             "target",
-            "--in",
-            "lite3",
-            "--json",
+            "--input-format",
+            "lite3-raw",
+            "--format",
+            "json",
         ])
         .stdin(input)
         .stdout(Stdio::piped())
@@ -1442,7 +1029,7 @@ fn native_fetch_pipe_feeds_the_same_lite3_bytes() {
     let receipt = parse_json(std::str::from_utf8(&output.stdout).expect("receipt utf8"));
     assert_eq!(receipt["seq"], 2);
 
-    let raw = fetch_output(&pool_dir, "target", "2", &["--format", "lite3"]);
+    let raw = fetch_output(&pool_dir, "target", "2", &["--format", "lite3-raw"]);
     assert!(raw.status.success());
     assert_eq!(raw.stdout, payload);
 }
@@ -1458,7 +1045,7 @@ fn http_fetch_and_feed_match_local_lite3_bytes() {
     append_marker(&mut target);
     drop(target);
 
-    let local = fetch_output(&pool_dir, "source", "1", &["--format", "lite3"]);
+    let local = fetch_output(&pool_dir, "source", "1", &["--format", "lite3-raw"]);
     assert!(local.status.success());
     assert_eq!(local.stdout, payload);
 
@@ -1466,7 +1053,7 @@ fn http_fetch_and_feed_match_local_lite3_bytes() {
     let source_url = format!("{}/source", server.base_url);
     let target_url = format!("{}/target", server.base_url);
     let remote = cmd()
-        .args(["fetch", &source_url, "1", "--format", "lite3"])
+        .args(["fetch", &source_url, "1", "--format", "lite3-raw"])
         .output()
         .expect("HTTP fetch Lite3");
     assert!(
@@ -1482,11 +1069,12 @@ fn http_fetch_and_feed_match_local_lite3_bytes() {
         .args([
             "feed",
             &target_url,
-            "--in",
-            "lite3",
+            "--input-format",
+            "lite3-raw",
             "--file",
             input_file.to_str().expect("input path"),
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("HTTP feed Lite3");
@@ -1499,9 +1087,9 @@ fn http_fetch_and_feed_match_local_lite3_bytes() {
     assert_eq!(receipt["seq"], 2);
     assert_eq!(receipt["meta"]["tags"], json!(["fixture", "binary"]));
 
-    let local_target = fetch_output(&pool_dir, "target", "2", &["--format", "lite3"]);
+    let local_target = fetch_output(&pool_dir, "target", "2", &["--format", "lite3-raw"]);
     let remote_target = cmd()
-        .args(["fetch", &target_url, "2", "--format", "lite3"])
+        .args(["fetch", &target_url, "2", "--format", "lite3-raw"])
         .output()
         .expect("HTTP fetch appended Lite3");
     assert!(local_target.status.success());
@@ -1522,18 +1110,41 @@ fn feed_lite3_rejects_invalid_options_before_pool_side_effects() {
     let cases: [(&str, &[&str]); 3] = [
         (
             "inline",
-            &["--create", "--in", "lite3", "{\"x\":1}", "--json"],
+            &[
+                "--create",
+                "--input-format",
+                "lite3-raw",
+                "{\"x\":1}",
+                "--format",
+                "json",
+            ],
         ),
         (
             "tagged",
             &[
-                "--create", "--in", "lite3", "--tag", "extra", "--file", input_path, "--json",
+                "--create",
+                "--input-format",
+                "lite3-raw",
+                "--tag",
+                "extra",
+                "--file",
+                input_path,
+                "--format",
+                "json",
             ],
         ),
         (
             "skip",
             &[
-                "--create", "--in", "lite3", "--errors", "skip", "--file", input_path, "--json",
+                "--create",
+                "--input-format",
+                "lite3-raw",
+                "--errors",
+                "skip",
+                "--file",
+                input_path,
+                "--format",
+                "json",
             ],
         ),
     ];
@@ -1563,8 +1174,18 @@ fn feed_lite3_rejects_invalid_options_before_pool_side_effects() {
 
     let missing_pool = cmd()
         .args([
-            "--dir", directory, "feed", "missing", "--in", "lite3", "--tag", "extra", "--file",
-            input_path, "--json",
+            "--dir",
+            directory,
+            "feed",
+            "missing",
+            "--input-format",
+            "lite3-raw",
+            "--tag",
+            "extra",
+            "--file",
+            input_path,
+            "--format",
+            "json",
         ])
         .output()
         .expect("invalid feed with missing pool");
@@ -1584,9 +1205,10 @@ fn remote_binary_create_rejects_before_waiting_for_stdin() {
             "feed",
             "http://127.0.0.1:1/unused",
             "--create",
-            "--in",
-            "lite3",
-            "--json",
+            "--input-format",
+            "lite3-raw",
+            "--format",
+            "json",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1606,7 +1228,7 @@ fn remote_binary_create_rejects_before_waiting_for_stdin() {
 }
 
 #[test]
-fn feed_lite3_rejects_empty_truncated_corrupt_and_nested_invalid_utf8() {
+fn feed_lite3_raw_allows_empty_stream_and_rejects_invalid_payloads() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
     let mut source = create_fixture_pool(&pool_dir, "source");
@@ -1622,8 +1244,29 @@ fn feed_lite3_rejects_empty_truncated_corrupt_and_nested_invalid_utf8() {
     let mut invalid_utf8 = payload.clone();
     assert_eq!(invalid_utf8[text + 5], b'b');
     invalid_utf8[text + 5] = 0xff;
+    let empty_file = temp.path().join("empty.lite3");
+    std::fs::write(&empty_file, []).expect("write empty input");
+    let empty = cmd()
+        .args([
+            "--dir",
+            pool_dir.to_str().expect("pool directory"),
+            "feed",
+            "target",
+            "--input-format",
+            "lite3-raw",
+            "--file",
+            empty_file.to_str().expect("empty path"),
+        ])
+        .output()
+        .expect("feed empty stream");
+    assert!(
+        empty.status.success(),
+        "{}",
+        String::from_utf8_lossy(&empty.stderr)
+    );
+    assert!(empty.stdout.is_empty());
+
     let invalid = [
-        ("empty", Vec::new()),
         ("truncated", truncated),
         ("corrupt", vec![0x01, 0x02, 0x03]),
         ("nested-invalid-utf8", invalid_utf8),
@@ -1638,11 +1281,12 @@ fn feed_lite3_rejects_empty_truncated_corrupt_and_nested_invalid_utf8() {
                 pool_dir.to_str().expect("pool directory"),
                 "feed",
                 "target",
-                "--in",
-                "lite3",
+                "--input-format",
+                "lite3-raw",
                 "--file",
                 input_file.to_str().expect("input path"),
-                "--json",
+                "--format",
+                "json",
             ])
             .output()
             .expect("feed malformed Lite3");
@@ -1657,11 +1301,12 @@ fn feed_lite3_rejects_empty_truncated_corrupt_and_nested_invalid_utf8() {
             pool_dir.to_str().expect("pool directory"),
             "feed",
             "target",
-            "--in",
-            "lite3",
+            "--input-format",
+            "lite3-raw",
             "--file",
             input_file.to_str().expect("input path"),
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("feed valid Lite3");
@@ -1676,7 +1321,7 @@ fn feed_lite3_rejects_empty_truncated_corrupt_and_nested_invalid_utf8() {
         "invalid payloads advanced the pool bounds"
     );
 
-    let raw = fetch_output(&pool_dir, "target", "1", &["--format", "lite3"]);
+    let raw = fetch_output(&pool_dir, "target", "1", &["--format", "lite3-raw"]);
     assert!(raw.status.success());
     assert_eq!(raw.stdout, payload);
 }

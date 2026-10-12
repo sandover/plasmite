@@ -135,7 +135,14 @@ impl TestServer {
                     let invite = Command::new(env!("CARGO_BIN_EXE_plasmite"))
                         .arg("--dir")
                         .arg(pool_dir)
-                        .args(["access", "invite", "--name", "integration-test", "--json"])
+                        .args([
+                            "access",
+                            "invite",
+                            "--name",
+                            "integration-test",
+                            "--format",
+                            "json",
+                        ])
                         .env("HOME", &home)
                         .env("PLASMITE_ACCESS_HOME", &home)
                         .output()?;

@@ -81,7 +81,14 @@ fn positional_and_legacy_destination_inputs_cannot_be_combined() {
 #[test]
 fn serve_lifecycle_does_not_ignore_foreground_or_global_arguments() {
     let rejected = [
-        &["serve", "--bind", "not-an-address", "start", "--json"][..],
+        &[
+            "serve",
+            "--bind",
+            "not-an-address",
+            "start",
+            "--format",
+            "json",
+        ][..],
         &[
             "serve",
             "https://pools.example.com:9743",

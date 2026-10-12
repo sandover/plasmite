@@ -107,7 +107,7 @@ def main():
     if missing:
         parser.error("missing pools: " + ", ".join(missing))
 
-    feeds = {pool: subprocess.Popen([args.bin, "--dir", args.dir, "feed", pool, "--in", "jsonl"], stdin=subprocess.PIPE,
+    feeds = {pool: subprocess.Popen([args.bin, "--dir", args.dir, "feed", pool, "--data", "--input-format", "json"], stdin=subprocess.PIPE,
                                     stdout=subprocess.DEVNULL, text=True)
              for pool in PLAN}
     counts = dict.fromkeys(PLAN, 0)

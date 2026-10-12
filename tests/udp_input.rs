@@ -74,7 +74,7 @@ impl TestHome {
         if let Some(size) = size {
             command.args(["--size", size]);
         }
-        let output = command.args(["--json", name]).output()?;
+        let output = command.args(["--format", "json", name]).output()?;
         if !output.status.success() {
             return Err(format!(
                 "pool create {name} failed: {}",
@@ -410,12 +410,14 @@ fn cli_lite3_fixture(home: &TestHome, pool_dir: &Path) -> TestResult<Vec<u8>> {
         .args([
             "feed",
             "lite3-source",
+            "--data",
             r#"{"fixture":"udp","sample":41}"#,
             "--tag",
             "fixture",
             "--tag",
             "binary",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()?;
     if !feed.status.success() {
@@ -429,7 +431,7 @@ fn cli_lite3_fixture(home: &TestHome, pool_dir: &Path) -> TestResult<Vec<u8>> {
         .command()
         .arg("--dir")
         .arg(pool_dir)
-        .args(["fetch", "lite3-source", "1", "--format", "lite3"])
+        .args(["fetch", "lite3-source", "1", "--format", "lite3-raw"])
         .output()?;
     if !fetch.status.success() {
         return Err(format!(

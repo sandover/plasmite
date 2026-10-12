@@ -49,13 +49,13 @@ pls --dir ./pools pool create channel
 **Alice sends a message**
 
 ```bash
-echo '{"from":"A","msg":"hello world"}' | pls --dir ./pools feed channel
+echo '{"from":"A","msg":"hello world"}' | pls --dir ./pools feed channel --data
 ```
 
 **Bob starts watching** — after Alice's sending process has exited:
 
 ```bash
-pls --dir ./pools follow channel --tail 1 --json --data-only
+pls --dir ./pools follow channel --tail 1 | jq -c '.data'
 ```
 
 **Bob sees it on stdout**
@@ -173,7 +173,7 @@ full access to `./pools`, including creating and deleting pools.
 
 ```bash
 pls access connect https://alice.example.test:9743
-pls follow https://alice.example.test:9743/channel --tail 1 --json --data-only
+pls follow https://alice.example.test:9743/channel --tail 1 | jq -c '.data'
 ```
 
 Carol enters the key at the hidden prompt. She can also open the HTTPS address
@@ -185,7 +185,7 @@ If he stopped it, restart his local `follow` command before Alice sends.
 **Alice sends**
 
 ```bash
-echo '{"from":"A","msg":"hi all"}' | pls --dir ./pools feed channel
+echo '{"from":"A","msg":"hi all"}' | pls --dir ./pools feed channel --data
 ```
 
 Both Bob and Carol see it:
@@ -334,7 +334,7 @@ for output flags, history rules, and secure-sharing migration.
 
 | | |
 |---|---|
-| `feed` *pool* *data* | Send a message |
+| `feed` *pool* `--data` *object* | Create a message |
 | `follow` *pool* | Follow messages |
 | `fetch` *pool* *seq* | Fetch one message by sequence number |
 | `duplex` *pool* | 2-way session with a pool |

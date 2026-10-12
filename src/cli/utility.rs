@@ -11,7 +11,6 @@ use clap::CommandFactory;
 use clap_complete::aot::Shell;
 use plasmite::api::Error;
 use serde_json::json;
-use std::io;
 
 pub(super) enum UtilityCommand {
     Version,
@@ -24,7 +23,9 @@ pub(super) fn run(command: UtilityCommand, context: &CliContext) -> Result<Comma
     match command {
         UtilityCommand::Version => {
             if !output_mode.is_structured() {
-                println!("plasmite {}", env!("PLASMITE_BUILD_VERSION"));
+                super::output::write_stdout(
+                    format!("plasmite {}\n", env!("PLASMITE_BUILD_VERSION")).as_bytes(),
+                )?;
             } else {
                 emit_output(
                     json!({
@@ -32,13 +33,15 @@ pub(super) fn run(command: UtilityCommand, context: &CliContext) -> Result<Comma
                         "version": env!("PLASMITE_BUILD_VERSION"),
                     }),
                     output_mode,
-                );
+                )?;
             }
             Ok(CommandResult::ok())
         }
         UtilityCommand::Completion { shell } => {
             let mut command = Cli::command();
-            clap_complete::aot::generate(shell, &mut command, "plasmite", &mut io::stdout());
+            let mut script = Vec::new();
+            clap_complete::aot::generate(shell, &mut command, "plasmite", &mut script);
+            super::output::write_stdout(&script)?;
             Ok(CommandResult::ok())
         }
         UtilityCommand::Mcp => {

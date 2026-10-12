@@ -38,6 +38,7 @@ fn concurrent_feed_is_serialized() {
                 pool_dir.to_str().unwrap(),
                 "feed",
                 "lockpool",
+                "--data",
                 &format!("{{\"i\":{i}}}"),
                 "--tag",
                 "lock",

@@ -21,27 +21,27 @@ pub(super) fn run(
             "install",
             serve_service::install(context.pool_dir(), &run, no_udp)?,
             output_mode,
-        ),
+        )?,
         Some(ServeSubcommand::Start { .. }) => emit_action(
             "start",
             serve_service::control(context.pool_dir(), "start")?,
             output_mode,
-        ),
+        )?,
         Some(ServeSubcommand::Stop { .. }) => emit_action(
             "stop",
             serve_service::control(context.pool_dir(), "stop")?,
             output_mode,
-        ),
+        )?,
         Some(ServeSubcommand::Restart { .. }) => emit_action(
             "restart",
             serve_service::control(context.pool_dir(), "restart")?,
             output_mode,
-        ),
+        )?,
         Some(ServeSubcommand::Uninstall { .. }) => emit_action(
             "uninstall",
             serve_service::control(context.pool_dir(), "uninstall")?,
             output_mode,
-        ),
+        )?,
         Some(ServeSubcommand::Logs { tail, follow, .. }) => {
             serve_service::logs(context.pool_dir(), tail.unwrap_or(50), follow, output_mode)?
         }
@@ -51,9 +51,9 @@ pub(super) fn run(
                 emit_output(
                     serde_json::to_value(&servers).expect("status serializes"),
                     output_mode,
-                );
+                )?;
             } else if servers.is_empty() {
-                println!("No Plasmite servers or installed setups.");
+                super::output::write_stdout(b"No Plasmite servers or installed setups.\n")?;
             } else {
                 let rows = servers
                     .iter()
@@ -81,23 +81,29 @@ pub(super) fn run(
                         "SHARED HTTPS",
                     ],
                     &rows,
-                );
+                )?;
                 for server in servers {
                     if let Some(setup) = server.setup {
-                        println!(
-                            "  {}  Account: {}  Local: {}  HTTPS listener: {}",
-                            display_pool_dir_for_humans(&server.pool_dir),
-                            human_literal(&setup.account),
-                            human_literal(&server.local_url),
-                            human_literal(setup.run.remote_bind.as_deref().unwrap_or("—"))
-                        );
+                        super::output::write_stdout(
+                            format!(
+                                "  {}  Account: {}  Local: {}  HTTPS listener: {}\n",
+                                display_pool_dir_for_humans(&server.pool_dir),
+                                human_literal(&setup.account),
+                                human_literal(&server.local_url),
+                                human_literal(setup.run.remote_bind.as_deref().unwrap_or("—"))
+                            )
+                            .as_bytes(),
+                        )?;
                     }
                     if let Some(problem) = server.problem {
-                        println!(
-                            "  {}  {}",
-                            display_pool_dir_for_humans(&server.pool_dir),
-                            human_literal(&problem)
-                        );
+                        super::output::write_stdout(
+                            format!(
+                                "  {}  {}\n",
+                                display_pool_dir_for_humans(&server.pool_dir),
+                                human_literal(&problem)
+                            )
+                            .as_bytes(),
+                        )?;
                     }
                 }
             }
@@ -114,9 +120,9 @@ pub(super) fn run(
                 emit_output(
                     serde_json::to_value(&servers).expect("server details serialize"),
                     output_mode,
-                );
+                )?;
             } else if servers.is_empty() {
-                println!("No Plasmite servers running.");
+                super::output::write_stdout(b"No Plasmite servers running.\n")?;
             } else {
                 let directories: Vec<_> = servers
                     .iter()
@@ -141,18 +147,24 @@ pub(super) fn run(
                     .max()
                     .unwrap_or(0)
                     .max(12);
-                println!(
-                    "{:<directory_width$}  {:<local_width$}  {:<remote_width$}  PID",
-                    "DIRECTORY", "LOCAL URL", "SHARED HTTPS"
-                );
+                super::output::write_stdout(
+                    format!(
+                        "{:<directory_width$}  {:<local_width$}  {:<remote_width$}  PID\n",
+                        "DIRECTORY", "LOCAL URL", "SHARED HTTPS"
+                    )
+                    .as_bytes(),
+                )?;
                 for (server, directory) in servers.into_iter().zip(directories) {
-                    println!(
-                        "{:<directory_width$}  {:<local_width$}  {:<remote_width$}  {}",
-                        directory,
-                        human_literal(&server.local_url),
-                        human_literal(server.remote_url.as_deref().unwrap_or("—")),
-                        server.pid
-                    );
+                    super::output::write_stdout(
+                        format!(
+                            "{:<directory_width$}  {:<local_width$}  {:<remote_width$}  {}\n",
+                            directory,
+                            human_literal(&server.local_url),
+                            human_literal(server.remote_url.as_deref().unwrap_or("—")),
+                            server.pid
+                        )
+                        .as_bytes(),
+                    )?;
                 }
             }
         }
@@ -160,60 +172,61 @@ pub(super) fn run(
     Ok(CommandResult::ok())
 }
 
-fn emit_action(action: &str, status: Status, output_mode: OutputMode) {
+fn emit_action(action: &str, status: Status, output_mode: OutputMode) -> Result<(), Error> {
     if output_mode.is_structured() {
         emit_output(
             serde_json::to_value(&status).expect("service status serializes"),
             output_mode,
-        );
-        return;
+        )?;
+        return Ok(());
     }
     match action {
         "stop" => {
-            println!("Stopped {}.", display_pool_dir_for_humans(&status.pool_dir));
+            super::output::write_stdout(format!("Stopped {}.\n", display_pool_dir_for_humans(&status.pool_dir)).as_bytes())?;
             if status.startup {
-                println!("Startup remains enabled; this server will start at the next boot.");
+                super::output::write_stdout(b"Startup remains enabled; this server will start at the next boot.\n")?;
             } else {
-                println!("Startup is off. Run `serve install` to restore startup at boot.");
+                super::output::write_stdout(b"Startup is off. Run `serve install` to restore startup at boot.\n")?;
             }
         }
-        "uninstall" => println!(
-            "Uninstalled the server for {}. Pools, certificates, and access keys remain available.",
+        "uninstall" => super::output::write_stdout(format!(
+            "Uninstalled the server for {}. Pools, certificates, and access keys remain available.\n",
             display_pool_dir_for_humans(&status.pool_dir)
-        ),
+        ).as_bytes())?,
         _ => {
-            println!(
-                "{} {}",
+            super::output::write_stdout(format!(
+                "{} {}\n",
                 if status.state == "running" {
                     "Serving"
                 } else {
                     "Saved setup for"
                 },
                 display_pool_dir_for_humans(&status.pool_dir)
-            );
+            ).as_bytes())?;
             if let Some(setup) = status.setup {
-                println!("Account: {}", human_literal(&setup.account));
-                println!(
-                    "Startup: {}",
+                super::output::write_stdout(format!("Account: {}\n", human_literal(&setup.account)).as_bytes())?;
+                super::output::write_stdout(format!(
+                    "Startup: {}\n",
                     if status.startup {
                         "at boot, before login"
                     } else {
                         "off"
                     }
-                );
-                println!("Local: {}/ui", human_literal(&status.local_url));
-                println!(
-                    "HTTPS listener: {}",
+                ).as_bytes())?;
+                super::output::write_stdout(format!("Local: {}/ui\n", human_literal(&status.local_url)).as_bytes())?;
+                super::output::write_stdout(format!(
+                    "HTTPS listener: {}\n",
                     human_literal(setup.run.remote_bind.as_deref().unwrap_or("—"))
-                );
+                ).as_bytes())?;
                 if let Some(address) = status.remote_url {
-                    println!("Shared: {}", human_literal(&address));
+                    super::output::write_stdout(format!("Shared: {}\n", human_literal(&address)).as_bytes())?;
                 }
-                println!(
-                    "Invite someone: plasmite --dir '{}' access invite NAME",
+                super::output::write_stdout(format!(
+                    "Invite someone: plasmite --dir '{}' access invite NAME\n",
                     human_literal(&status.pool_dir.to_string_lossy().replace('\'', "'\\''"))
-                );
+                ).as_bytes())?;
             }
         }
     }
+    Ok(())
 }

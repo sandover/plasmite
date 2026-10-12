@@ -1,306 +1,271 @@
-//! CLI helpers for feed commands.
+//! Append complete CLI messages through the same local and remote API paths.
 
+use super::message_stream::{InputFormat, InputRecord, read_records};
 use super::output::OutputMode;
+use super::output_support::{emit_lite3, emit_message};
+use super::support::{RetryConfig, message_to_json, retry_append};
 use crate::ColorMode;
-use crate::ErrorPolicyCli;
-use crate::InputMode;
-use crate::ingest::ErrorPolicy;
-use crate::ingest::IngestConfig;
-use crate::ingest::IngestFailure;
-use crate::ingest::IngestMode;
-use crate::ingest::IngestOutcome;
-use crate::ingest::ingest;
-use plasmite::api::AppendOptions;
-use plasmite::api::Durability;
-use plasmite::api::Error;
-use plasmite::api::ErrorKind;
-use plasmite::api::Pool;
-use plasmite::api::RemotePool;
-use plasmite::api::lite3;
-use plasmite::notice::Notice;
-use serde_json::Map;
+use plasmite::api::{
+    AppendOptions, Durability, Error, ErrorKind, Message, Pool, PoolApiExt, RemotePool, lite3,
+};
+use serde::{Deserialize, Deserializer};
 use serde_json::Value;
-use serde_json::json;
-use std::io;
-use std::io::Read;
+use std::io::{self, Read};
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::output_support::emit_feed_receipt;
-use super::output_support::emit_notice;
-use super::output_support::notice_time_now;
-use super::support::DEFAULT_MAX_RECORD_BYTES;
-use super::support::DEFAULT_MAX_SNIPPET_BYTES;
-use super::support::DEFAULT_SNIFF_BYTES;
-use super::support::DEFAULT_SNIFF_LINES;
-use super::support::RetryConfig;
-use super::support::feed_receipt_from_message;
-use super::support::feed_receipt_json;
-use super::support::now_ns;
-use super::support::retry_append;
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MessageInput {
+    #[serde(default, deserialize_with = "present_value")]
+    seq: Option<u64>,
+    #[serde(default, deserialize_with = "present_value")]
+    time: Option<String>,
+    #[serde(default)]
+    meta: MessageMeta,
+    data: Value,
+}
 
-pub(crate) fn parse_inline_json(data: &str) -> Result<Value, Error> {
-    serde_json::from_str(data).map_err(|err| {
-        Error::new(ErrorKind::Usage)
-            .with_message("invalid json")
-            .with_hint("Provide a single JSON value (e.g. '{\"x\":1}').")
-            .with_source(err)
-    })
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MessageMeta {
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+fn present_value<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    reader: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(reader).map(Some)
+}
+
+pub(crate) fn record_payload(
+    record: InputRecord,
+    contents: bool,
+    tags: &[String],
+) -> Result<Vec<u8>, Error> {
+    match record {
+        InputRecord::Lite3 {
+            seq,
+            timestamp_ns,
+            payload,
+        } => {
+            let _ = (seq, timestamp_ns);
+            if contents || !tags.is_empty() {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("Lite3 already contains a complete message")
+                    .with_hint("Remove --data and --tag for Lite3 input."));
+            }
+            Ok(payload)
+        }
+        InputRecord::Json(value) => {
+            let (data, tags) = if contents {
+                (value, tags.to_vec())
+            } else {
+                let message: MessageInput = serde_json::from_value(value).map_err(|err| {
+                    Error::new(ErrorKind::Usage)
+                        .with_message("expected a complete message with an object data field")
+                        .with_hint("Use --data to create messages from application JSON.")
+                        .with_source(err)
+                })?;
+                // Identity belongs to the source pool. The append assigns its own identity.
+                let _ = message.seq;
+                if let Some(time) = message.time {
+                    time::OffsetDateTime::parse(
+                        &time,
+                        &time::format_description::well_known::Rfc3339,
+                    )
+                    .map_err(|err| {
+                        Error::new(ErrorKind::Usage)
+                            .with_message("invalid source message time")
+                            .with_hint("Use an RFC 3339 timestamp or omit time.")
+                            .with_source(err)
+                    })?;
+                }
+                (message.data, message.meta.tags)
+            };
+            Ok(lite3::encode_message(&tags, &data)
+                .map_err(|err| err.with_hint("Put message contents in an object."))?
+                .as_slice()
+                .to_vec())
+        }
+    }
 }
 
 pub(crate) fn missing_feed_data_error() -> Error {
-    Error::new(ErrorKind::Usage)
-        .with_message("missing data input")
-        .with_hint("Provide JSON via DATA, --file, or pipe JSON to stdin.")
+    Error::new(ErrorKind::Usage).with_message("missing message input").with_hint("Pipe messages to feed, use --file, or provide a message argument. Use --data to create a message.")
 }
 
 pub(crate) fn open_feed_reader(path: &str) -> Result<Box<dyn Read>, Error> {
     if path == "-" {
         return Ok(Box::new(io::stdin()));
     }
-    let reader = std::fs::File::open(path).map_err(|err| {
+    Ok(Box::new(std::fs::File::open(path).map_err(|err| {
         Error::new(ErrorKind::Io)
-            .with_message("failed to read data file")
+            .with_message("failed to read message file")
             .with_path(path)
             .with_source(err)
-    })?;
-    Ok(Box::new(reader))
-}
-
-pub(crate) fn input_mode_to_ingest(mode: InputMode) -> Result<IngestMode, Error> {
-    Ok(match mode {
-        InputMode::Auto => IngestMode::Auto,
-        InputMode::Jsonl => IngestMode::Jsonl,
-        InputMode::Json => IngestMode::Json,
-        InputMode::Seq => IngestMode::Seq,
-        InputMode::Jq => IngestMode::Jq,
-        InputMode::Lite3 => {
-            return Err(Error::new(ErrorKind::Usage)
-                .with_message("Lite3 input requires the single-message binary reader"));
-        }
-    })
-}
-
-pub(crate) fn error_policy_to_ingest(policy: ErrorPolicyCli) -> ErrorPolicy {
-    match policy {
-        ErrorPolicyCli::Stop => ErrorPolicy::Stop,
-        ErrorPolicyCli::Skip => ErrorPolicy::Skip,
-    }
-}
-
-pub(crate) fn ingest_failure_notice(
-    failure: &IngestFailure,
-    pool_ref: &str,
-    pool_path_label: &str,
-    color_mode: ColorMode,
-    output_mode: OutputMode,
-) {
-    let mut details = Map::new();
-    details.insert("mode".to_string(), json!(mode_label(failure.mode)));
-    details.insert("index".to_string(), json!(failure.index));
-    details.insert("error_kind".to_string(), json!(failure.error_kind));
-    details.insert("pool_path".to_string(), json!(pool_path_label));
-    if let Some(line) = failure.line {
-        details.insert("line".to_string(), json!(line));
-    }
-    if let Some(snippet) = &failure.snippet {
-        details.insert("snippet".to_string(), json!(snippet));
-    }
-    let notice = Notice {
-        kind: "ingest_skip".to_string(),
-        time: notice_time_now().unwrap_or_else(|| "unknown".to_string()),
-        cmd: "feed".to_string(),
-        pool: pool_ref.to_string(),
-        message: ingest_failure_message(failure),
-        details,
-    };
-    emit_notice(&notice, color_mode, output_mode);
-}
-
-pub(crate) fn ingest_failure_message(failure: &IngestFailure) -> String {
-    match failure.error_kind.as_str() {
-        "Parse" => "Skipped invalid JSON.".to_string(),
-        "Oversize" => "Skipped oversized record.".to_string(),
-        _ => format!("Skipped record: {}.", failure.message),
-    }
-}
-
-pub(crate) fn ingest_summary_notice(
-    outcome: &IngestOutcome,
-    pool_ref: &str,
-    pool_path_label: &str,
-    color_mode: ColorMode,
-    output_mode: OutputMode,
-) {
-    let mut details = Map::new();
-    details.insert("total".to_string(), json!(outcome.records_total));
-    details.insert("ok".to_string(), json!(outcome.ok));
-    details.insert("failed".to_string(), json!(outcome.failed));
-    details.insert("pool_path".to_string(), json!(pool_path_label));
-    let notice = Notice {
-        kind: "ingest_summary".to_string(),
-        time: notice_time_now().unwrap_or_else(|| "unknown".to_string()),
-        cmd: "feed".to_string(),
-        pool: pool_ref.to_string(),
-        message: format!(
-            "Finished with {} skipped record{}.",
-            outcome.failed,
-            if outcome.failed == 1 { "" } else { "s" }
-        ),
-        details,
-    };
-    emit_notice(&notice, color_mode, output_mode);
-}
-
-pub(crate) fn mode_label(mode: IngestMode) -> &'static str {
-    match mode {
-        IngestMode::Auto => "auto",
-        IngestMode::Jsonl => "jsonl",
-        IngestMode::Json => "json",
-        IngestMode::Seq => "seq",
-        IngestMode::Jq => "jq",
-        IngestMode::Event => "event",
-    }
+    })?))
 }
 
 pub(crate) struct FeedIngestContext<'a> {
-    pub(crate) pool_ref: &'a str,
-    pub(crate) pool_path_label: &'a str,
     pub(crate) tags: &'a [String],
     pub(crate) durability: Durability,
     pub(crate) retry_config: Option<RetryConfig>,
     pub(crate) pool_handle: &'a mut Pool,
     pub(crate) color_mode: ColorMode,
     pub(crate) output_mode: OutputMode,
-    pub(crate) input: InputMode,
-    pub(crate) errors: ErrorPolicyCli,
+    pub(crate) input: InputFormat,
+    pub(crate) contents: bool,
+    pub(crate) stop: Option<&'a AtomicBool>,
 }
 
 pub(crate) struct RemoteFeedIngestContext<'a> {
-    pub(crate) pool_ref: &'a str,
-    pub(crate) pool_path_label: &'a str,
     pub(crate) tags: &'a [String],
     pub(crate) durability: Durability,
     pub(crate) retry_config: Option<RetryConfig>,
     pub(crate) remote_pool: &'a RemotePool,
     pub(crate) color_mode: ColorMode,
     pub(crate) output_mode: OutputMode,
-    pub(crate) input: InputMode,
-    pub(crate) errors: ErrorPolicyCli,
+    pub(crate) input: InputFormat,
+    pub(crate) contents: bool,
+    pub(crate) stop: Option<&'a AtomicBool>,
 }
 
-struct IngestPresentation<'a> {
-    pool_ref: &'a str,
-    pool_path_label: &'a str,
-    color_mode: ColorMode,
-    output_mode: OutputMode,
-    input: InputMode,
-    errors: ErrorPolicyCli,
+#[derive(Copy, Clone)]
+struct IngestOptions<'a> {
+    contents: bool,
+    tags: &'a [String],
+    input: InputFormat,
+    output: OutputMode,
+    color: ColorMode,
+    emit: bool,
+    stop: Option<&'a AtomicBool>,
 }
 
-fn ingest_with_append<R, F>(
-    reader: R,
-    presentation: IngestPresentation<'_>,
-    emit_receipt: bool,
-    mut append: F,
-) -> Result<IngestOutcome, Error>
-where
-    R: Read,
-    F: FnMut(Value, bool) -> Result<Option<Value>, Error>,
-{
-    let ingest_config = IngestConfig {
-        mode: input_mode_to_ingest(presentation.input)?,
-        errors: error_policy_to_ingest(presentation.errors),
-        sniff_bytes: DEFAULT_SNIFF_BYTES,
-        sniff_lines: DEFAULT_SNIFF_LINES,
-        max_record_bytes: DEFAULT_MAX_RECORD_BYTES,
-        max_snippet_bytes: DEFAULT_MAX_SNIPPET_BYTES,
-    };
-    let outcome = ingest(
-        reader,
-        ingest_config,
-        |data| {
-            let receipt = append(data, emit_receipt)?;
-            if let Some(receipt) = receipt {
-                emit_feed_receipt(receipt, presentation.color_mode, presentation.output_mode);
+fn ingest_with_append(
+    reader: impl Read,
+    options: IngestOptions<'_>,
+    mut append: impl FnMut(&[u8]) -> Result<Message, Error>,
+) -> Result<u64, Error> {
+    let count = read_records(reader, options.input, |record| {
+        let payload = record_payload(record, options.contents, options.tags)?;
+        if options
+            .stop
+            .is_some_and(|stop| stop.load(Ordering::Acquire))
+        {
+            return Ok(());
+        }
+        let message = append(&payload)?;
+        // Storage succeeded. A later stdout error stops ingestion; it must never retry this append.
+        if options.emit {
+            if options.output.is_binary() {
+                let ns = message_timestamp(&message)?;
+                emit_lite3(message.seq, ns, &payload, options.output)?;
+            } else {
+                emit_message(message_to_json(&message), options.output, options.color)?;
             }
-            Ok(())
-        },
-        |failure| {
-            ingest_failure_notice(
-                &failure,
-                presentation.pool_ref,
-                presentation.pool_path_label,
-                presentation.color_mode,
-                presentation.output_mode,
-            )
-        },
-    )?;
-    if presentation.errors == ErrorPolicyCli::Skip && outcome.failed > 0 {
-        ingest_summary_notice(
-            &outcome,
-            presentation.pool_ref,
-            presentation.pool_path_label,
-            presentation.color_mode,
-            presentation.output_mode,
-        );
-    }
-    Ok(outcome)
+        }
+        Ok(())
+    })?;
+    Ok(count)
 }
 
-pub(crate) fn ingest_from_stdin<R: Read>(
-    reader: R,
+pub(crate) fn message_timestamp(message: &Message) -> Result<u64, Error> {
+    let time = time::OffsetDateTime::parse(
+        &message.time,
+        &time::format_description::well_known::Rfc3339,
+    )
+    .map_err(|err| {
+        Error::new(ErrorKind::Internal)
+            .with_message("invalid message time")
+            .with_source(err)
+    })?;
+    u64::try_from(time.unix_timestamp_nanos()).map_err(|err| {
+        Error::new(ErrorKind::Internal)
+            .with_message("message time is out of range")
+            .with_source(err)
+    })
+}
+
+pub(crate) fn ingest_from_stdin(
+    reader: impl Read,
     ctx: FeedIngestContext<'_>,
     emit_receipt: bool,
-) -> Result<IngestOutcome, Error> {
-    ingest_with_append(
-        reader,
-        IngestPresentation {
-            pool_ref: ctx.pool_ref,
-            pool_path_label: ctx.pool_path_label,
-            color_mode: ctx.color_mode,
-            output_mode: ctx.output_mode,
-            input: ctx.input,
-            errors: ctx.errors,
-        },
-        emit_receipt,
-        |data, emit_receipt| {
-            let payload = lite3::encode_message(ctx.tags, &data)?;
-            let (seq, timestamp_ns) = retry_append(ctx.retry_config, || {
-                let timestamp_ns = now_ns()?;
-                let options = AppendOptions::new(timestamp_ns, ctx.durability);
-                let seq = ctx
-                    .pool_handle
-                    .append_with_options(payload.as_slice(), options)?;
-                Ok((seq, timestamp_ns))
-            })?;
-            emit_receipt
-                .then(|| feed_receipt_json(seq, timestamp_ns, ctx.tags))
-                .transpose()
-        },
-    )
+) -> Result<u64, Error> {
+    let options = IngestOptions {
+        contents: ctx.contents,
+        tags: ctx.tags,
+        input: ctx.input,
+        output: ctx.output_mode,
+        color: ctx.color_mode,
+        emit: emit_receipt,
+        stop: ctx.stop,
+    };
+    ingest_with_append(reader, options, |payload| {
+        retry_append(ctx.retry_config, || {
+            ctx.pool_handle
+                .append_lite3_with_receipt_now(payload, ctx.durability)
+        })
+    })
 }
 
-pub(crate) fn ingest_from_stdin_remote<R: Read>(
-    reader: R,
+pub(crate) fn ingest_from_stdin_remote(
+    reader: impl Read,
     ctx: RemoteFeedIngestContext<'_>,
     emit_receipt: bool,
-) -> Result<IngestOutcome, Error> {
-    ingest_with_append(
-        reader,
-        IngestPresentation {
-            pool_ref: ctx.pool_ref,
-            pool_path_label: ctx.pool_path_label,
-            color_mode: ctx.color_mode,
-            output_mode: ctx.output_mode,
-            input: ctx.input,
-            errors: ctx.errors,
-        },
-        emit_receipt,
-        |data, emit_receipt| {
-            let message = retry_append(ctx.retry_config, || {
-                ctx.remote_pool
-                    .append_json_now(&data, ctx.tags, ctx.durability)
-            })?;
-            Ok(emit_receipt.then(|| feed_receipt_from_message(&message)))
-        },
-    )
+) -> Result<u64, Error> {
+    let options = IngestOptions {
+        contents: ctx.contents,
+        tags: ctx.tags,
+        input: ctx.input,
+        output: ctx.output_mode,
+        color: ctx.color_mode,
+        emit: emit_receipt,
+        stop: ctx.stop,
+    };
+    ingest_with_append(reader, options, |payload| {
+        retry_append(ctx.retry_config, || {
+            ctx.remote_pool
+                .append_lite3_with_receipt(payload, AppendOptions::new(0, ctx.durability))
+        })
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn source_identity_rejects_null_but_allows_omission() {
+        for value in [
+            json!({"seq":null,"data":{}}),
+            json!({"time":null,"data":{}}),
+            json!({"time":"bad","data":{}}),
+        ] {
+            assert!(record_payload(InputRecord::Json(value), false, &[]).is_err());
+        }
+        assert!(record_payload(InputRecord::Json(json!({"data":{}})), false, &[]).is_ok());
+    }
+
+    #[test]
+    fn stopped_session_does_not_append_buffered_messages() {
+        let stop = AtomicBool::new(true);
+        let options = IngestOptions {
+            contents: false,
+            tags: &[],
+            input: InputFormat::Auto,
+            output: OutputMode::Json,
+            color: ColorMode::Never,
+            emit: false,
+            stop: Some(&stop),
+        };
+        let mut writes = 0;
+        ingest_with_append(&b"{\"data\":{}}\n{\"data\":{}}"[..], options, |_| {
+            writes += 1;
+            unreachable!("stopped sender appended");
+        })
+        .unwrap();
+        assert_eq!(writes, 0);
+    }
 }

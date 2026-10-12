@@ -5,7 +5,6 @@
 use super::context::CliContext;
 use super::feed_support::{
     FeedIngestContext, RemoteFeedIngestContext, ingest_from_stdin, ingest_from_stdin_remote,
-    missing_feed_data_error,
 };
 use super::output::OutputMode;
 use super::output_support::emit_follow_timeout_human;
@@ -20,7 +19,7 @@ use super::support::{
     resolve_pool_target,
 };
 use crate::jq_filter::compile_filters;
-use crate::{ErrorPolicyCli, FollowFormat, InputMode, PoolTarget};
+use crate::{InputMode, PoolTarget};
 use plasmite::api::{
     AppendOptions, Durability, Error, ErrorKind, Pool, PoolOptions, PoolRef, lite3,
 };
@@ -34,10 +33,7 @@ pub(super) struct FollowArgs {
     pub(super) tail: u64,
     pub(super) one: bool,
     pub(super) no_follow: bool,
-    pub(super) jsonl: bool,
     pub(super) timeout: Option<String>,
-    pub(super) data_only: bool,
-    pub(super) format: Option<FollowFormat>,
     pub(super) since: Option<String>,
     pub(super) where_expr: Vec<String>,
     pub(super) tags: Vec<String>,
@@ -51,34 +47,19 @@ pub(super) struct DuplexArgs {
     pub(super) me: Option<String>,
     pub(super) create: bool,
     pub(super) tail: u64,
-    pub(super) jsonl: bool,
     pub(super) timeout: Option<String>,
-    pub(super) format: Option<FollowFormat>,
     pub(super) since: Option<String>,
     pub(super) echo_self: bool,
 }
 
 pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandResult, Error> {
-    if args.jsonl && args.format.is_some() {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("conflicting output options")
-            .with_hint("Use --format jsonl (or --jsonl), but not both."));
-    }
-    if context.structured_output() && matches!(args.format, Some(FollowFormat::Pretty)) {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("--json conflicts with --format pretty")
-            .with_hint("Use --json for JSONL, or omit it for human-readable output."));
-    }
-    let format_flag = args.format;
-    let format = args
-        .format
-        .unwrap_or(if args.jsonl || context.structured_output() {
-            FollowFormat::Jsonl
-        } else {
-            FollowFormat::Pretty
-        });
-    let pretty = matches!(format, FollowFormat::Pretty);
     let output_mode = context.output_mode();
+    if output_mode == OutputMode::Lite3Raw {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("follow does not support --format lite3-raw")
+            .with_hint("Use --format lite3 for a framed stream."));
+    }
+    let pretty = output_mode == OutputMode::Human;
     let since_ns = args
         .since
         .as_deref()
@@ -90,10 +71,7 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
         &args.pool,
         args.tail,
         args.one,
-        args.jsonl,
         timeout_input,
-        args.data_only,
-        format_flag,
         args.since.as_deref(),
         &args.where_expr,
         &args.tags,
@@ -104,12 +82,9 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
     if args.no_follow {
         exact_follow_create_hint.push_str(" --no-follow");
     }
-    if context.structured_output() && !args.jsonl && format_flag.is_none() {
-        exact_follow_create_hint.push_str(if output_mode == OutputMode::Yaml {
-            " --yaml"
-        } else {
-            " --json"
-        });
+    if output_mode != OutputMode::Human {
+        exact_follow_create_hint.push_str(" --format ");
+        exact_follow_create_hint.push_str(output_mode.label());
     }
     if args.no_follow && args.tail == 0 && args.since.is_none() {
         return Err(Error::new(ErrorKind::Usage)
@@ -121,7 +96,6 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
         output_mode,
         one: args.one,
         timeout,
-        data_only: args.data_only,
         since_ns,
         no_follow: args.no_follow || args.replay.is_some(),
         required_tags: args.tags,
@@ -204,10 +178,11 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
 }
 
 pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandResult, Error> {
-    if args.jsonl && args.format.is_some() {
+    let output_mode = context.output_mode();
+    if output_mode == OutputMode::Lite3Raw {
         return Err(Error::new(ErrorKind::Usage)
-            .with_message("conflicting output options")
-            .with_hint("Use --format jsonl (or --jsonl), but not both."));
+            .with_message("duplex does not support --format lite3-raw")
+            .with_hint("Use --format lite3 for a framed stream."));
     }
     let stdin_is_terminal = io::stdin().is_terminal();
     if duplex_requires_me_when_tty(stdin_is_terminal, args.me.as_deref()) {
@@ -215,21 +190,7 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
             .with_message("TTY input requires --me for duplex")
             .with_hint("Provide --me NAME to send TTY line-mode messages."));
     }
-    if context.structured_output() && matches!(args.format, Some(FollowFormat::Pretty)) {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("--json conflicts with --format pretty")
-            .with_hint("Use --json for JSONL, or omit it for human-readable output."));
-    }
-    let format_flag = args.format;
-    let format = args
-        .format
-        .unwrap_or(if args.jsonl || context.structured_output() {
-            FollowFormat::Jsonl
-        } else {
-            FollowFormat::Pretty
-        });
-    let pretty = matches!(format, FollowFormat::Pretty);
-    let output_mode = context.output_mode();
+    let pretty = output_mode == OutputMode::Human;
     let since_ns = args
         .since
         .as_deref()
@@ -241,10 +202,7 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
         &args.pool,
         args.tail,
         false,
-        args.jsonl,
         timeout_input,
-        false,
-        format_flag,
         args.since.as_deref(),
         &[],
         &[],
@@ -252,12 +210,9 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
         false,
         None,
     );
-    if context.structured_output() && !args.jsonl && format_flag.is_none() {
-        exact_follow_create_hint.push_str(if output_mode == OutputMode::Yaml {
-            " --yaml"
-        } else {
-            " --json"
-        });
+    if output_mode != OutputMode::Human {
+        exact_follow_create_hint.push_str(" --format ");
+        exact_follow_create_hint.push_str(output_mode.label());
     }
     let stop = Arc::new(AtomicBool::new(false));
     let cfg = FollowConfig {
@@ -265,7 +220,6 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
         output_mode,
         one: false,
         timeout,
-        data_only: false,
         since_ns,
         no_follow: false,
         required_tags: Vec::new(),
@@ -330,7 +284,6 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
             let send_tx = event_tx;
             let stop_for_send = stop.clone();
             let me_for_send = args.me.clone();
-            let pool_ref = args.pool.clone();
             let color_mode = context.color_mode();
             let context_output_mode = output_mode;
             let _ = std::thread::spawn(move || {
@@ -353,12 +306,9 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                     );
                     let _ = send_tx.send((DuplexSide::Send, outcome));
                 } else {
-                    let pool_path_label = path.display().to_string();
                     let outcome = ingest_from_stdin(
                         io::stdin().lock(),
                         FeedIngestContext {
-                            pool_ref: &pool_ref,
-                            pool_path_label: &pool_path_label,
                             tags: &[],
                             durability: Durability::Fast,
                             retry_config: None,
@@ -366,7 +316,8 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                             color_mode,
                             output_mode: context_output_mode,
                             input: InputMode::Auto,
-                            errors: ErrorPolicyCli::Stop,
+                            contents: false,
+                            stop: Some(&stop_for_send),
                         },
                         false,
                     );
@@ -419,12 +370,9 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                     );
                     let _ = send_tx.send((DuplexSide::Send, outcome));
                 } else {
-                    let pool_path_label = format!("{}/{}", client.base_url(), name);
                     let outcome = ingest_from_stdin_remote(
                         io::stdin().lock(),
                         RemoteFeedIngestContext {
-                            pool_ref: &name,
-                            pool_path_label: &pool_path_label,
                             tags: &[],
                             durability: Durability::Fast,
                             retry_config: None,
@@ -432,7 +380,8 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                             color_mode,
                             output_mode: context_output_mode,
                             input: InputMode::Auto,
-                            errors: ErrorPolicyCli::Stop,
+                            contents: false,
+                            stop: Some(&stop_for_send),
                         },
                         false,
                     );
@@ -478,13 +427,6 @@ fn send_tty_lines(
     Ok(CommandResult::ok())
 }
 
-fn ingest_outcome(
-    outcome: Result<crate::ingest::IngestOutcome, Error>,
-) -> Result<CommandResult, Error> {
-    match outcome {
-        Ok(outcome) if outcome.records_total == 0 => Err(missing_feed_data_error()),
-        Ok(outcome) if outcome.failed > 0 => Ok(CommandResult::with_code(1)),
-        Ok(_) => Ok(CommandResult::ok()),
-        Err(err) => Err(err),
-    }
+fn ingest_outcome(outcome: Result<u64, Error>) -> Result<CommandResult, Error> {
+    outcome.map(|_| CommandResult::ok())
 }

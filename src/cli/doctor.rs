@@ -48,12 +48,12 @@ pub(super) fn run(args: DoctorArgs, context: &CliContext) -> Result<CommandResul
 
     if output_mode.is_structured() {
         let values = reports.iter().map(report_json).collect::<Vec<_>>();
-        emit_output(serde_json::json!({ "reports": values }), output_mode);
+        emit_output(serde_json::json!({ "reports": values }), output_mode)?;
     } else if args.all {
-        emit_doctor_human_summary(&reports);
+        emit_doctor_human_summary(&reports)?;
     } else {
         for report in &reports {
-            emit_doctor_human(report);
+            emit_doctor_human(report)?;
         }
     }
 

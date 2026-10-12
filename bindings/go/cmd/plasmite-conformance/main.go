@@ -597,7 +597,7 @@ func runPoolInfo(repoRoot string, workdirPath string, step map[string]any, index
 	if err != nil {
 		return stepErr(index, stepID, err.Error())
 	}
-	cmd := exec.Command(bin, "--dir", workdirPath, "pool", "info", pool, "--json")
+	cmd := exec.Command(bin, "--dir", workdirPath, "pool", "info", pool, "--format", "json")
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -699,7 +699,7 @@ func runSpawnPoke(repoRoot string, workdirPath string, step map[string]any, inde
 		wg.Add(1)
 		go func(payload string, tags []string) {
 			defer wg.Done()
-			args := []string{"--dir", workdirPath, "feed", pool, payload}
+			args := []string{"--dir", workdirPath, "feed", pool, "--data", payload}
 			for _, tag := range tags {
 				args = append(args, "--tag", tag)
 			}

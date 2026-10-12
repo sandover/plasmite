@@ -75,9 +75,9 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                 results.push(pool_info_json(&name, &info));
             }
             if output_mode.is_structured() {
-                emit_output(json!({ "created": results }), output_mode);
+                emit_output(json!({ "created": results }), output_mode)?;
             } else {
-                emit_pool_create_table(&results, pool_dir);
+                emit_pool_create_table(&results, pool_dir)?;
             }
             Ok(CommandResult::ok())
         }
@@ -99,9 +99,9 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                 }
             };
             if output_mode.is_structured() {
-                emit_output(pool_info_json(&name, &info), output_mode);
+                emit_output(pool_info_json(&name, &info), output_mode)?;
             } else {
-                emit_pool_info_pretty(&name, &info);
+                emit_pool_info_pretty(&name, &info)?;
             }
             Ok(CommandResult::ok())
         }
@@ -197,7 +197,7 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                         "failed": failed,
                     }),
                     output_mode,
-                );
+                )?;
             } else if io::stdout().is_terminal() {
                 let total = human_rows.len();
                 let deleted_count = deleted.len();
@@ -205,81 +205,116 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                     if let Some((name, status)) = human_rows.first() {
                         match status {
                             HumanDeleteStatus::Ok => {
-                                println!(
-                                    "Deleted pool \"{}\".",
-                                    super::output_support::human_literal(name)
-                                );
+                                super::output::write_stdout(
+                                    format!(
+                                        "Deleted pool \"{}\".\n",
+                                        super::output_support::human_literal(name)
+                                    )
+                                    .as_bytes(),
+                                )?;
                             }
                             HumanDeleteStatus::Err {
                                 kind: ErrorKind::NotFound,
                                 ..
                             } => {
-                                println!(
-                                    "Pool \"{}\" not found. Nothing to delete.",
-                                    super::output_support::human_literal(name)
-                                );
-                                println!();
-                                println!(
-                                    "  Pool directory: {}",
-                                    display_pool_dir_for_humans(pool_dir)
-                                );
-                                println!("  List pools:     pls pool list");
+                                super::output::write_stdout(
+                                    format!(
+                                        "Pool \"{}\" not found. Nothing to delete.\n",
+                                        super::output_support::human_literal(name)
+                                    )
+                                    .as_bytes(),
+                                )?;
+                                super::output::write_stdout(b"\n")?;
+                                super::output::write_stdout(
+                                    format!(
+                                        "  Pool directory: {}\n",
+                                        display_pool_dir_for_humans(pool_dir)
+                                    )
+                                    .as_bytes(),
+                                )?;
+                                super::output::write_stdout(b"  List pools:     pls pool list\n")?;
                             }
                             HumanDeleteStatus::Err { detail, .. } => {
-                                println!(
-                                    "Failed to delete pool \"{}\".",
-                                    super::output_support::human_literal(name)
-                                );
-                                println!();
-                                println!(
-                                    "  Reason:         {}",
-                                    super::output_support::human_literal(detail)
-                                );
-                                println!(
-                                    "  Pool directory: {}",
-                                    display_pool_dir_for_humans(pool_dir)
-                                );
+                                super::output::write_stdout(
+                                    format!(
+                                        "Failed to delete pool \"{}\".\n",
+                                        super::output_support::human_literal(name)
+                                    )
+                                    .as_bytes(),
+                                )?;
+                                super::output::write_stdout(b"\n")?;
+                                super::output::write_stdout(
+                                    format!(
+                                        "  Reason:         {}\n",
+                                        super::output_support::human_literal(detail)
+                                    )
+                                    .as_bytes(),
+                                )?;
+                                super::output::write_stdout(
+                                    format!(
+                                        "  Pool directory: {}\n",
+                                        display_pool_dir_for_humans(pool_dir)
+                                    )
+                                    .as_bytes(),
+                                )?;
                             }
                         }
                     }
                 } else if failed.is_empty() {
-                    println!("Deleted {deleted_count} pools.");
-                    println!();
+                    super::output::write_stdout(
+                        format!("Deleted {deleted_count} pools.\n").as_bytes(),
+                    )?;
+                    super::output::write_stdout(b"\n")?;
                     for (name, status) in &human_rows {
                         if matches!(status, HumanDeleteStatus::Ok) {
-                            println!("  ✓ {}", super::output_support::human_literal(name));
+                            super::output::write_stdout(
+                                format!("  ✓ {}\n", super::output_support::human_literal(name))
+                                    .as_bytes(),
+                            )?;
                         }
                     }
-                    println!();
-                    println!(
-                        "  Pool directory: {}",
-                        display_pool_dir_for_humans(pool_dir)
-                    );
+                    super::output::write_stdout(b"\n")?;
+                    super::output::write_stdout(
+                        format!(
+                            "  Pool directory: {}\n",
+                            display_pool_dir_for_humans(pool_dir)
+                        )
+                        .as_bytes(),
+                    )?;
                 } else {
-                    println!("Deleted {deleted_count} of {total} pools.");
-                    println!();
+                    super::output::write_stdout(
+                        format!("Deleted {deleted_count} of {total} pools.\n").as_bytes(),
+                    )?;
+                    super::output::write_stdout(b"\n")?;
                     for (name, status) in &human_rows {
                         match status {
-                            HumanDeleteStatus::Ok => {
-                                println!("  ✓ {}", super::output_support::human_literal(name))
-                            }
+                            HumanDeleteStatus::Ok => super::output::write_stdout(
+                                format!("  ✓ {}\n", super::output_support::human_literal(name))
+                                    .as_bytes(),
+                            )?,
                             HumanDeleteStatus::Err { detail, .. } => {
-                                println!(
-                                    "  ✗ {} — {}",
-                                    super::output_support::human_literal(name),
-                                    super::output_support::human_literal(detail)
-                                );
+                                super::output::write_stdout(
+                                    format!(
+                                        "  ✗ {} — {}\n",
+                                        super::output_support::human_literal(name),
+                                        super::output_support::human_literal(detail)
+                                    )
+                                    .as_bytes(),
+                                )?;
                             }
                         }
                     }
-                    println!();
-                    println!(
-                        "  Pool directory: {}",
-                        display_pool_dir_for_humans(pool_dir)
-                    );
+                    super::output::write_stdout(b"\n")?;
+                    super::output::write_stdout(
+                        format!(
+                            "  Pool directory: {}\n",
+                            display_pool_dir_for_humans(pool_dir)
+                        )
+                        .as_bytes(),
+                    )?;
                 }
             } else {
-                emit_table(&["NAME", "STATUS", "PATH", "DETAIL"], &table_rows);
+                emit_table(&["NAME", "STATUS", "PATH", "DETAIL"], &table_rows)?;
             }
             if let Some(kind) = first_error_kind {
                 Ok(CommandResult::with_code(to_exit_code(kind)))
@@ -317,9 +352,9 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
             };
             if output_mode.is_structured() {
                 let pools = pools.iter().map(PoolListRow::json).collect::<Vec<_>>();
-                emit_output(json!({ "pools": pools }), output_mode);
+                emit_output(json!({ "pools": pools }), output_mode)?;
             } else {
-                emit_pool_list_table(&pools, pool_dir, server.as_deref());
+                emit_pool_list_table(&pools, pool_dir, server.as_deref())?;
             }
             Ok(CommandResult::ok())
         }

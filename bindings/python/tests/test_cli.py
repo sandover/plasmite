@@ -123,7 +123,7 @@ class ConsoleCliTests(unittest.TestCase):
 
     def test_bundled_cli_takes_precedence_and_forwards_arguments_and_status(self) -> None:
         bundled = self.executable("bundled", b"\x7fELFbundled")
-        args = [str(self.root / "wrapper"), "pool", "list", "--json"]
+        args = [str(self.root / "wrapper"), "pool", "list", "--format", "json"]
         with mock.patch.object(cli, "_bundled_cli_path", return_value=bundled), \
                 mock.patch.object(cli, "_system_cli_path") as fallback, \
                 mock.patch.object(cli.sys, "argv", args), \
@@ -134,7 +134,7 @@ class ConsoleCliTests(unittest.TestCase):
 
     def test_system_sdk_fallback_forwards_arguments(self) -> None:
         sdk = self.executable("sdk", b"\x7fELFnative-sdk")
-        args = [str(self.root / "wrapper"), "version", "--json"]
+        args = [str(self.root / "wrapper"), "version", "--format", "json"]
         with mock.patch.object(cli, "_bundled_cli_path", return_value=self.root / "missing"), \
                 mock.patch.object(cli.os, "get_exec_path", return_value=[str(sdk.parent)]), \
                 mock.patch.object(cli.sys, "argv", args), \

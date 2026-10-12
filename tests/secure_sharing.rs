@@ -48,7 +48,7 @@ fn native_key_connects_and_reuses_server_identity()
             "--name",
             "laptop",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()?;
     assert!(
         invite.status.success(),
@@ -98,7 +98,7 @@ fn native_key_connects_and_reuses_server_identity()
             "--name",
             "replacement",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()?;
     assert!(
         replacement_invite.status.success(),
@@ -131,7 +131,7 @@ fn native_key_connects_and_reuses_server_identity()
     let replacement_snapshot = RemoteClient::with_access_key(&url, replacement_key)?;
     let access_keys = std::process::Command::new(env!("CARGO_BIN_EXE_plasmite"))
         .args(["--dir", pool_dir.to_str().unwrap(), "access", "keys"])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()?;
     assert!(
         access_keys.status.success(),
@@ -155,7 +155,7 @@ fn native_key_connects_and_reuses_server_identity()
             "revoke",
             original_id,
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()?;
     assert!(
         revoke.status.success(),
@@ -213,7 +213,7 @@ fn native_key_connects_and_reuses_server_identity()
     let cli_disconnect = std::process::Command::new(env!("CARGO_BIN_EXE_plasmite"))
         .args(["access", "disconnect", &url])
         .env("PLASMITE_ACCESS_HOME", &client_home)
-        .arg("--json")
+        .args(["--format", "json"])
         .output()?;
     assert!(
         cli_disconnect.status.success(),

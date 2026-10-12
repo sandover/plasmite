@@ -39,7 +39,7 @@ fn report(output: &std::process::Output) -> Value {
 fn connect(home: &Path, server: &ServeProcess) {
     let mut child = cmd()
         .env("PLASMITE_ACCESS_HOME", home)
-        .args(["access", "connect", &server.remote_url, "--json"])
+        .args(["access", "connect", &server.remote_url, "--format", "json"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -70,13 +70,16 @@ fn loopback_inspection_matches_local_reports() {
             "pool",
             "info",
             "events.part",
-            "--json",
+            "--format",
+            "json",
         ],
     ));
     let pool_url = format!("{}/events.part", server.local_url);
     let remote_info = report(&inspect(
         &home,
-        &["pool", "info", &pool_url, "--json", "--color", "always"],
+        &[
+            "pool", "info", &pool_url, "--format", "json", "--color", "always",
+        ],
     ));
     for key in [
         "path",
@@ -97,7 +100,8 @@ fn loopback_inspection_matches_local_reports() {
             directory.to_str().unwrap(),
             "pool",
             "list",
-            "--json",
+            "--format",
+            "json",
         ],
     ));
     let remote_list = report(&inspect(
@@ -106,7 +110,8 @@ fn loopback_inspection_matches_local_reports() {
             "pool",
             "list",
             &server.local_url,
-            "--json",
+            "--format",
+            "json",
             "--color",
             "always",
         ],
@@ -120,14 +125,20 @@ fn loopback_inspection_matches_local_reports() {
     assert_eq!(remote_list["pools"][0]["name"], "events.part");
     assert!(remote_list["pools"][0]["mtime"].is_null());
     let localhost = server.local_url.replace("127.0.0.1", "localhost");
-    let localhost_list = report(&inspect(&home, &["pool", "list", &localhost, "--json"]));
+    let localhost_list = report(&inspect(
+        &home,
+        &["pool", "list", &localhost, "--format", "json"],
+    ));
     assert_eq!(localhost_list["pools"], remote_list["pools"]);
-    let human_info = inspect(&home, &["pool", "info", &pool_url]);
+    let human_info = inspect(&home, &["pool", "info", &pool_url, "--format", "pretty"]);
     assert!(human_info.status.success());
     assert!(
         String::from_utf8_lossy(&human_info.stdout).contains("Bounds: oldest=1 newest=1 count=1")
     );
-    let human_list = inspect(&home, &["pool", "list", &server.local_url]);
+    let human_list = inspect(
+        &home,
+        &["pool", "list", &server.local_url, "--format", "pretty"],
+    );
     assert!(human_list.status.success());
     let text = String::from_utf8_lossy(&human_list.stdout);
     assert!(text.contains("NAME") && text.contains("events.part"));
@@ -144,7 +155,10 @@ fn saved_connections_follow_each_server_destination() {
     let first = ServeProcess::start(&first_dir);
     let second = ServeProcess::start(&second_dir);
     connect(&home, &first);
-    let unsaved = inspect(&home, &["pool", "list", &second.remote_url, "--json"]);
+    let unsaved = inspect(
+        &home,
+        &["pool", "list", &second.remote_url, "--format", "json"],
+    );
     assert_eq!(unsaved.status.code(), Some(6));
     let error: Value = serde_json::from_slice(&unsaved.stderr).expect("structured error");
     assert_eq!(error["error"]["kind"], "Permission");
@@ -158,23 +172,28 @@ fn saved_connections_follow_each_server_destination() {
     for (server, name) in [(&first, "alpha"), (&second, "beta")] {
         let list = report(&inspect(
             &home,
-            &["pool", "list", &server.remote_url, "--json"],
+            &["pool", "list", &server.remote_url, "--format", "json"],
         ));
         assert_eq!(list["pools"][0]["name"], name);
         let pool_url = format!("{}/{name}", server.remote_url);
-        let info = report(&inspect(&home, &["pool", "info", &pool_url, "--json"]));
+        let info = report(&inspect(
+            &home,
+            &["pool", "info", &pool_url, "--format", "json"],
+        ));
         assert_eq!(info["bounds"]["newest"], 1);
         let fetched = report(&inspect(
             &home,
-            &["fetch", &pool_url, "1", "--json", "--color", "always"],
+            &[
+                "fetch", &pool_url, "1", "--format", "json", "--color", "always",
+            ],
         ));
         assert_eq!(fetched["seq"], 1);
         assert_eq!(fetched["data"], json!({"hello": "world"}));
         assert_eq!(fetched["meta"]["tags"], json!([]));
         assert!(fetched["time"].is_string());
-        let human = inspect(&home, &["fetch", &pool_url, "1"]);
-        assert!(human.status.success());
-        let text = String::from_utf8_lossy(&human.stdout);
+        let pretty = inspect(&home, &["fetch", &pool_url, "1", "--format", "pretty"]);
+        assert!(pretty.status.success());
+        let text = String::from_utf8_lossy(&pretty.stdout);
         assert!(text.contains("world"));
         assert!(
             text.lines().count() > 1,
@@ -195,7 +214,7 @@ fn inspection_rejects_unsafe_and_misshapen_targets() {
         "https://localhost:9743/#fragment",
         "https://user:password@localhost:9743",
     ] {
-        let output = inspect(home.path(), &["pool", "list", target, "--json"]);
+        let output = inspect(home.path(), &["pool", "list", target, "--format", "json"]);
         assert_eq!(output.status.code(), Some(2), "target={target}");
         let error: Value = serde_json::from_slice(&output.stderr).expect("structured error");
         assert_eq!(error["error"]["kind"], "Usage", "target={target}");
@@ -210,7 +229,7 @@ fn inspection_rejects_unsafe_and_misshapen_targets() {
         "https://localhost:9743/demo%2Fother",
         "https://user:password@localhost:9743/demo",
     ] {
-        let output = inspect(home.path(), &["pool", "info", target, "--json"]);
+        let output = inspect(home.path(), &["pool", "info", target, "--format", "json"]);
         assert_eq!(output.status.code(), Some(2), "target={target}");
         let error: Value = serde_json::from_slice(&output.stderr).expect("structured error");
         assert_eq!(error["error"]["kind"], "Usage", "target={target}");
@@ -225,7 +244,7 @@ fn remote_missing_pool_preserves_server_error_and_local_mutations_reject_urls() 
     create_pool(&directory, "existing");
     let server = ServeProcess::start(&directory);
     let pool_url = format!("{}/missing", server.local_url);
-    let output = inspect(&home, &["pool", "info", &pool_url, "--json"]);
+    let output = inspect(&home, &["pool", "info", &pool_url, "--format", "json"]);
     assert_eq!(output.status.code(), Some(3));
     let error: Value = serde_json::from_slice(&output.stderr).expect("structured error");
     assert_eq!(error["error"]["kind"], "NotFound");
@@ -244,7 +263,8 @@ fn remote_missing_pool_preserves_server_error_and_local_mutations_reject_urls() 
                 "pool",
                 command,
                 &pool_url,
-                "--json",
+                "--format",
+                "json",
             ],
         );
         assert_eq!(output.status.code(), Some(2));
@@ -260,7 +280,7 @@ fn empty_remote_list_has_one_report_and_correct_human_guidance() {
     let server = ServeProcess::start(&directory);
     let output = report(&inspect(
         temp.path(),
-        &["pool", "list", &server.local_url, "--json"],
+        &["pool", "list", &server.local_url, "--format", "json"],
     ));
     assert_eq!(output, json!({"pools": []}));
     let human = cmd_tty(&["pool", "list", &server.local_url]);

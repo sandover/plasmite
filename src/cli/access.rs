@@ -22,12 +22,14 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
                     .iter()
                     .map(|destination| json!({ "destination": destination }))
                     .collect();
-                emit_output(json!(rows), output_mode);
+                emit_output(json!(rows), output_mode)?;
             } else if destinations.is_empty() {
-                println!("No saved connections.");
+                super::output::write_stdout(b"No saved connections.\n")?;
             } else {
                 for destination in destinations {
-                    println!("{}", human_literal(&destination));
+                    super::output::write_stdout(
+                        format!("{}\n", human_literal(&destination)).as_bytes(),
+                    )?;
                 }
             }
             Ok(CommandResult::ok())
@@ -38,18 +40,16 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
             let name = name.or(legacy_name).expect("clap requires one client name");
             let access_key = crate::secure_serve::invite(context.pool_dir(), &name)?;
             if !output_mode.is_structured() {
-                println!("Access key for {}: {access_key}", human_literal(&name));
-                println!(
-                    "Use this key to sign in through the server's web page or approve your MCP client."
-                );
-                println!(
-                    "For Plasmite CLI access, run `plasmite access connect <server-address>` on the client machine."
-                );
+                super::output::write_stdout(
+                    format!("Access key for {}: {access_key}\n", human_literal(&name)).as_bytes(),
+                )?;
+                super::output::write_stdout(b"Use this key to sign in through the server's web page or approve your MCP client.\n")?;
+                super::output::write_stdout(b"For Plasmite CLI access, run `plasmite access connect <server-address>` on the client machine.\n")?;
             } else {
                 emit_output(
                     json!({ "name": name, "access_key": access_key }),
                     output_mode,
-                );
+                )?;
             }
             Ok(CommandResult::ok())
         }
@@ -64,7 +64,7 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
                 browser.as_ref().and_then(|result| result.as_ref().err()),
                 Some(&commands),
                 output_mode,
-            );
+            )?;
             if !output_mode.is_structured()
                 && cfg!(any(target_os = "macos", target_os = "windows"))
                 && io::stdin().is_terminal()
@@ -72,7 +72,7 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
                 && let Some(Ok(trust)) = browser
                 && !trust.installed
             {
-                offer_browser_trust(&trust);
+                offer_browser_trust(&trust)?;
             }
             Ok(CommandResult::ok())
         }
@@ -88,41 +88,52 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
                 browser.as_ref().and_then(|result| result.as_ref().err()),
                 None,
                 output_mode,
-            );
-            Ok(CommandResult::ok())
+            )?;
+            Ok(CommandResult::with_code(
+                if status.reachable == Some(true) && status.accepted == Some(true) {
+                    0
+                } else {
+                    1
+                },
+            ))
         }
         AccessSubcommand::Disconnect { url, .. } => {
             plasmite::api::access::disconnect(&url)?;
-            emit_disconnected(&url, output_mode);
+            emit_disconnected(&url, output_mode)?;
             Ok(CommandResult::ok())
         }
         AccessSubcommand::Untrust { fingerprint, .. } => {
             browser_trust::remove(&fingerprint)?;
             if !output_mode.is_structured() {
-                println!(
-                    "Removed browser trust for certificate {}.",
-                    human_literal(&fingerprint.to_ascii_lowercase())
-                );
-                println!("Saved native credentials remain available.");
+                super::output::write_stdout(
+                    format!(
+                        "Removed browser trust for certificate {}.\n",
+                        human_literal(&fingerprint.to_ascii_lowercase())
+                    )
+                    .as_bytes(),
+                )?;
+                super::output::write_stdout(b"Saved native credentials remain available.\n")?;
             } else {
                 emit_output(
                     json!({ "certificate_sha256": fingerprint.to_ascii_lowercase(), "browser_trust_installed": false }),
                     output_mode,
-                );
+                )?;
             }
             Ok(CommandResult::ok())
         }
         AccessSubcommand::Keys { .. } => {
             let keys = crate::secure_serve::keys(context.pool_dir())?;
-            emit_keys(&keys, output_mode);
+            emit_keys(&keys, output_mode)?;
             Ok(CommandResult::ok())
         }
         AccessSubcommand::Revoke { id, .. } => {
             crate::secure_serve::revoke(context.pool_dir(), &id)?;
             if !output_mode.is_structured() {
-                println!("Revoked access key {}.", human_literal(&id));
+                super::output::write_stdout(
+                    format!("Revoked access key {}.\n", human_literal(&id)).as_bytes(),
+                )?;
             } else {
-                emit_output(json!({ "id": id, "revoked": true }), output_mode);
+                emit_output(json!({ "id": id, "revoked": true }), output_mode)?;
             }
             Ok(CommandResult::ok())
         }
@@ -141,31 +152,34 @@ fn browser_status(destination: &str) -> Option<Result<BrowserTrustStatus, Error>
     }
 }
 
-fn emit_disconnected(destination: &str, output_mode: OutputMode) {
+fn emit_disconnected(destination: &str, output_mode: OutputMode) -> Result<(), Error> {
     if !output_mode.is_structured() {
-        println!(
-            "Removed saved credentials for {}.",
-            human_literal(destination)
-        );
-        println!("The server key remains valid until its owner revokes it.");
+        super::output::write_stdout(
+            format!(
+                "Removed saved credentials for {}.\n",
+                human_literal(destination)
+            )
+            .as_bytes(),
+        )?;
+        super::output::write_stdout(b"The server key remains valid until its owner revokes it.\n")?;
     } else {
         emit_output(
             json!({ "destination": destination, "credentials_saved": false }),
             output_mode,
-        );
+        )?;
     }
+    Ok(())
 }
 
-fn emit_keys(keys: &serde_json::Value, output_mode: OutputMode) {
+fn emit_keys(keys: &serde_json::Value, output_mode: OutputMode) -> Result<(), Error> {
     if output_mode.is_structured() {
-        emit_output(keys.clone(), output_mode);
-        return;
+        return emit_output(keys.clone(), output_mode);
     }
 
     let rows = keys["keys"].as_array().map(Vec::as_slice).unwrap_or(&[]);
     if rows.is_empty() {
-        println!("No access keys.");
-        return;
+        super::output::write_stdout(b"No access keys.\n")?;
+        return Ok(());
     }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -199,7 +213,8 @@ fn emit_keys(keys: &serde_json::Value, output_mode: OutputMode) {
     super::output_support::emit_table(
         &["ID", "NAME", "STATE", "CREATED", "LAST USED"],
         &table_rows,
-    );
+    )?;
+    Ok(())
 }
 
 fn relative_time(now: u64, timestamp: u64) -> String {
@@ -214,46 +229,73 @@ fn emit_status(
     browser_error: Option<&Error>,
     setup: Option<&[String; 2]>,
     output_mode: OutputMode,
-) {
+) -> Result<(), Error> {
     if !output_mode.is_structured() {
-        println!("Server: {}", human_literal(&status.destination));
-        println!("Credentials saved: {}", yes_no(status.credentials_saved));
-        println!("Reachable: {}", optional_yes_no(status.reachable));
-        println!("Access accepted: {}", optional_yes_no(status.accepted));
+        super::output::write_stdout(
+            format!("Server: {}\n", human_literal(&status.destination)).as_bytes(),
+        )?;
+        super::output::write_stdout(
+            format!("Credentials saved: {}\n", yes_no(status.credentials_saved)).as_bytes(),
+        )?;
+        super::output::write_stdout(
+            format!("Reachable: {}\n", optional_yes_no(status.reachable)).as_bytes(),
+        )?;
+        super::output::write_stdout(
+            format!("Access accepted: {}\n", optional_yes_no(status.accepted)).as_bytes(),
+        )?;
         if let Some(browser) = browser {
             #[cfg(target_os = "windows")]
-            println!(
-                "Certificate installed in Windows Root: {}",
-                yes_no(browser.installed)
-            );
+            super::output::write_stdout(
+                format!(
+                    "Certificate installed in Windows Root: {}\n",
+                    yes_no(browser.installed)
+                )
+                .as_bytes(),
+            )?;
             #[cfg(not(target_os = "windows"))]
-            println!("Browser trust installed: {}", yes_no(browser.installed));
-            println!(
-                "Certificate SHA-256: {}",
-                human_literal(&browser.certificate_sha256)
-            );
-            println!("Certificate expires: {}", format_expiry(browser.expires_at));
+            super::output::write_stdout(
+                format!("Browser trust installed: {}\n", yes_no(browser.installed)).as_bytes(),
+            )?;
+            super::output::write_stdout(
+                format!(
+                    "Certificate SHA-256: {}\n",
+                    human_literal(&browser.certificate_sha256)
+                )
+                .as_bytes(),
+            )?;
+            super::output::write_stdout(
+                format!(
+                    "Certificate expires: {}\n",
+                    format_expiry(browser.expires_at)
+                )
+                .as_bytes(),
+            )?;
         } else if let Some(error) = browser_error {
-            println!(
-                "Browser trust: unavailable ({})",
-                human_literal(&error.to_string())
-            );
+            super::output::write_stdout(
+                format!(
+                    "Browser trust: unavailable ({})\n",
+                    human_literal(&error.to_string())
+                )
+                .as_bytes(),
+            )?;
         }
         if let Some(problem) = &status.problem {
-            println!("What to do: {}", human_literal(problem));
+            super::output::write_stdout(
+                format!("What to do: {}\n", human_literal(problem)).as_bytes(),
+            )?;
         }
         if let Some(commands) = setup {
-            println!("\nAdd Plasmite to your MCP client:");
-            println!("Claude Code: {}", human_literal(&commands[0]));
-            println!("Codex CLI:  {}", human_literal(&commands[1]));
+            super::output::write_stdout(b"\nAdd Plasmite to your MCP client:\n")?;
+            super::output::write_stdout(
+                format!("Claude Code: {}\n", human_literal(&commands[0])).as_bytes(),
+            )?;
+            super::output::write_stdout(
+                format!("Codex CLI:  {}\n", human_literal(&commands[1])).as_bytes(),
+            )?;
             #[cfg(windows)]
-            println!("Run these commands in PowerShell.");
-            println!(
-                "Then sign in from the MCP client and enter the access key in its browser approval page."
-            );
-            println!(
-                "The saved native connection is for Plasmite commands; it does not sign in the MCP client."
-            );
+            super::output::write_stdout(b"Run these commands in PowerShell.\n")?;
+            super::output::write_stdout(b"Then sign in from the MCP client and enter the access key in its browser approval page.\n")?;
+            super::output::write_stdout(b"The saved native connection is for Plasmite commands; it does not sign in the MCP client.\n")?;
         }
     } else {
         emit_output(
@@ -273,55 +315,66 @@ fn emit_status(
                 "mcp_setup_commands": setup,
             }),
             output_mode,
-        );
+        )?;
     }
+    Ok(())
 }
 
-fn offer_browser_trust(trust: &BrowserTrustStatus) {
-    println!(
-        "\nBrowser certificate trust for {}",
-        human_literal(&trust.destination)
-    );
-    println!(
-        "Named addresses: {}",
-        human_literal(&trust.names.join(", "))
-    );
-    println!(
-        "Certificate SHA-256: {}",
-        human_literal(&trust.certificate_sha256)
-    );
-    println!("Certificate expires: {}", format_expiry(trust.expires_at));
+fn offer_browser_trust(trust: &BrowserTrustStatus) -> Result<(), Error> {
+    super::output::write_stdout(
+        format!(
+            "\nBrowser certificate trust for {}\n",
+            human_literal(&trust.destination)
+        )
+        .as_bytes(),
+    )?;
+    super::output::write_stdout(
+        format!(
+            "Named addresses: {}\n",
+            human_literal(&trust.names.join(", "))
+        )
+        .as_bytes(),
+    )?;
+    super::output::write_stdout(
+        format!(
+            "Certificate SHA-256: {}\n",
+            human_literal(&trust.certificate_sha256)
+        )
+        .as_bytes(),
+    )?;
+    super::output::write_stdout(
+        format!("Certificate expires: {}\n", format_expiry(trust.expires_at)).as_bytes(),
+    )?;
     #[cfg(target_os = "macos")]
-    println!(
-        "Scope: current user's login keychain for SSL; Chrome, Safari, and other macOS TLS apps may use this trust."
-    );
+    super::output::write_stdout(b"Scope: current user's login keychain for SSL; Chrome, Safari, and other macOS TLS apps may use this trust.\n")?;
     #[cfg(target_os = "windows")]
-    println!(
-        "Scope: current user's Windows Root store. Edge, Chrome, and other Windows apps may use this trust."
-    );
+    super::output::write_stdout(b"Scope: current user's Windows Root store. Edge, Chrome, and other Windows apps may use this trust.\n")?;
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         eprint!("Trust this certificate for browser access? [y/N] ");
         use std::io::Write;
         if io::stderr().flush().is_err() {
-            return;
+            return Ok(());
         }
         let mut answer = String::new();
         if io::stdin().read_line(&mut answer).is_err() || !answer.trim().eq_ignore_ascii_case("y") {
-            return;
+            return Ok(());
         }
         match browser_trust::install(&trust.destination, &trust.certificate_sha256) {
             Ok(_) => {
                 #[cfg(target_os = "windows")]
-                println!(
-                    "Certificate installed in Windows Root. To remove it later: plasmite access untrust {}",
+                super::output::write_stdout(format!(
+                    "Certificate installed in Windows Root. To remove it later: plasmite access untrust {}\n",
                     human_literal(&trust.certificate_sha256)
-                );
+                ).as_bytes())?;
                 #[cfg(not(target_os = "windows"))]
-                println!(
-                    "Browser trust installed. To remove it later: plasmite access untrust {}",
-                    human_literal(&trust.certificate_sha256)
-                );
+                super::output::write_stdout(
+                    format!(
+                        "Browser trust installed. To remove it later: plasmite access untrust {}\n",
+                        human_literal(&trust.certificate_sha256)
+                    )
+                    .as_bytes(),
+                )?;
                 if let Err(error) = browser_trust::open(&trust.destination) {
                     eprintln!(
                         "Could not open {}: {}",
@@ -338,6 +391,7 @@ fn offer_browser_trust(trust: &BrowserTrustStatus) {
             }
         }
     }
+    Ok(())
 }
 
 fn format_expiry(timestamp: i64) -> String {

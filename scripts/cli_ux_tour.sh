@@ -151,25 +151,25 @@ JSONL
 record_case "top-level help" zero run_plasmite --help
 record_case "pool help" zero run_plasmite pool --help
 record_case "version" zero run_plasmite version
-record_case "version JSON" zero run_plasmite version --json
+record_case "version JSON" zero run_plasmite version --format json
 record_case "global version after nested command" zero run_plasmite pool list --version
 
 record_case "create pools" zero run_plasmite --dir "${POOL_DIR}" pool create "${POOL_MAIN}" "${POOL_AUX}" --size 1M
 record_case "create duplicate pool" nonzero run_plasmite --dir "${POOL_DIR}" pool create "${POOL_MAIN}"
 record_case "pool list" zero run_plasmite pool list --dir "${POOL_DIR}"
-record_case "pool list JSON" zero run_plasmite pool list --dir "${POOL_DIR}" --json
+record_case "pool list JSON" zero run_plasmite pool list --dir "${POOL_DIR}" --format json
 record_case "conflicting global directories" nonzero run_plasmite --dir "${POOL_DIR}" pool list --dir "${WORK_DIR}/other-pools"
 record_case "pool info" zero run_plasmite --dir "${POOL_DIR}" pool info "${POOL_MAIN}"
 record_case "pool info missing" nonzero run_plasmite --dir "${POOL_DIR}" pool info "${MISSING_POOL}"
 
-record_case "feed inline json with tag" zero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" '{"kind":"inline","ok":true}' --tag ux
-record_case "feed from file" zero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" --file "${WORK_DIR}/good.json"
-record_case "feed mixed jsonl with skip errors" nonzero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" --file "${WORK_DIR}/mixed.jsonl" --in jsonl --errors skip
+record_case "feed inline json with tag" zero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" --data '{"kind":"inline","ok":true}' --tag ux
+record_case "feed from file" zero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" --data --file "${WORK_DIR}/good.json"
+record_case "removed errors skip option is rejected" nonzero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" --data --file "${WORK_DIR}/mixed.jsonl" --input-format json --errors skip
 record_case "fetch existing seq" zero run_plasmite --dir "${POOL_DIR}" fetch "${POOL_MAIN}" 1
-record_case "fetch JSON envelope" zero run_plasmite --dir "${POOL_DIR}" fetch "${POOL_MAIN}" 1 --json
+record_case "fetch JSON envelope" zero run_plasmite --dir "${POOL_DIR}" fetch "${POOL_MAIN}" 1 --format json
 record_case "fetch missing seq" nonzero run_plasmite --dir "${POOL_DIR}" fetch "${POOL_MAIN}" 999999
 record_case "follow tail one" zero run_plasmite --dir "${POOL_DIR}" follow "${POOL_MAIN}" --tail 2 --one
-record_case "finite history JSON" zero run_plasmite follow "${POOL_MAIN}" --dir "${POOL_DIR}" --tail 2 --no-follow --json
+record_case "finite history JSON" zero run_plasmite follow "${POOL_MAIN}" --dir "${POOL_DIR}" --tail 2 --no-follow --format json
 record_case "finite history filtered to no matches" zero run_plasmite --dir "${POOL_DIR}" follow "${POOL_MAIN}" --tail 2 --no-follow --tag unmatched
 record_case "finite history requires selector" nonzero run_plasmite --dir "${POOL_DIR}" follow "${POOL_MAIN}" --no-follow
 record_case "follow timeout on quiet pool" nonzero run_plasmite --dir "${POOL_DIR}" follow "${POOL_AUX}" --timeout 300ms --one
@@ -179,13 +179,13 @@ record_case "doctor all pools" zero run_plasmite --dir "${POOL_DIR}" doctor --al
 
 record_case "serve help" zero run_plasmite serve --help
 record_case "serve status" zero run_plasmite serve status
-record_case "serve status JSON" zero run_plasmite serve status --json
+record_case "serve status JSON" zero run_plasmite serve status --format json
 record_case "access help" zero run_plasmite access --help
 record_case "access connect help" zero run_plasmite access connect --help
 record_case "local MCP help" zero run_plasmite mcp --help
 record_case "saved destinations" zero run_plasmite access list
-record_case "saved destinations JSON" zero run_plasmite access list --json
-record_case "unsaved destination status" zero run_plasmite access status https://127.0.0.1:1
+record_case "saved destinations JSON" zero run_plasmite access list --format json
+record_case "unreachable destination status" nonzero run_plasmite access status https://127.0.0.1:1
 record_case "forget unsaved destination" zero run_plasmite access disconnect https://127.0.0.1:1
 record_case "invalid certificate fingerprint" nonzero run_plasmite access untrust invalid
 record_case "removed MCP --remote option is rejected" "reject:unexpected argument '--remote'" run_plasmite mcp --remote https://127.0.0.1:1

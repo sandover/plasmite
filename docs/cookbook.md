@@ -19,41 +19,26 @@
 
 A pool retains a bounded history, and readers keep their own checkpoints.
 `--tail N` selects the last N retained messages before filters. Use
-`--no-follow` for a finite history read and `--json` or `--yaml` whenever a
-script parses output. See the [CLI guide](cli.md) for shared rules and the
-[1.0 upgrade guide](record/upgrading-1.0.md) for changed defaults.
+`--no-follow` for a finite history read. Pipes and files default to JSON; choose
+`--format yaml` when that helps your workflow. See the [CLI guide](cli.md) for shared rules and the
+[2.0 upgrade guide](record/upgrading-2.0.md) for changed defaults.
 
-## YAML output
+## YAML Messages
 
-Use `--yaml` when a tool expects YAML. It keeps the JSON report or message
-shape and wraps every output in a YAML document, including each item in a
-stream:
+```bash
+plasmite pool create source destination
+plasmite feed source --data --tag sensor '{"temperature":21}'
 
-```console
-plasmite pool info events --yaml
-plasmite fetch events 42 --yaml
-plasmite follow events --tail 20 --no-follow --yaml --data-only
+# Copy history as YAML documents.
+plasmite follow source --tail 10 --no-follow --format yaml |
+  plasmite feed destination
 ```
 
-A fetch prints a marked YAML document:
+YAML carries the same contents and tags as JSON. Each document starts with
+`---` and ends with `...`, so a receiving command can append it immediately.
+Reports also support `--format yaml`.
 
-```yaml
 ---
-seq: 42
-time: '2026-10-12T12:00:00Z'
-meta:
-  tags: []
-data:
-  kind: 'heartbeat'
-...
-```
-
-A message stream writes each document as it arrives. `--data-only` still
-selects each message's `data` value. `--yaml` affects output only; `feed` input
-remains in the supported JSON stream formats or Lite3. Use `--json` for JSON
-output. The two flags conflict, and `--yaml` cannot be combined with `--format`
-where that option exists;
-`follow` and `duplex` also reject `--jsonl`.
 
 ## CI Gate
 
@@ -64,7 +49,7 @@ A deploy script needs to wait until the test runner says "green". No polling loo
 pls follow "ci-$CI_RUN_ID" --create --tail 1 --where '.data.status == "green"' --one > /dev/null && ./deploy-to-staging.sh
 
 # test-runner.sh — signals when done (--create makes the pool if needed)
-./run-tests.sh && pls feed "ci-$CI_RUN_ID" --create '{"status": "green", "commit": "a1b2c3d", "suite": "unit"}'
+./run-tests.sh && pls feed "ci-$CI_RUN_ID" --data --create '{"status": "green", "commit": "a1b2c3d", "suite": "unit"}'
 ```
 
 Set `CI_RUN_ID` to the same unique value in both jobs. `--one` exits when a matching message arrives.
@@ -159,7 +144,7 @@ done
 pls follow telemetry --tag sensor --where '.data.value > 80000'
 
 # replay the last hour of readings to see the trend
-pls follow telemetry --tag sensor --since 1h --no-follow --json \
+pls follow telemetry --tag sensor --since 1h --no-follow --format json \
   | jq '.data | [.ts, .value]'
 ```
 
@@ -232,16 +217,16 @@ keep their original content and tags. See the
 Several processes write to the same pool with different tags. An on-call engineer tails only what matters.
 
 ```bash
-pls feed telemetry --tag deploy '{"service": "api", "sha": "f4e5d6c"}'
-pls feed telemetry --tag alert  '{"service": "api", "msg": "latency spike"}'
-pls feed telemetry --tag metric '{"service": "web", "rps": 1420}'
+pls feed telemetry --data --tag deploy '{"service": "api", "sha": "f4e5d6c"}'
+pls feed telemetry --data --tag alert  '{"service": "api", "msg": "latency spike"}'
+pls feed telemetry --data --tag metric '{"service": "web", "rps": 1420}'
 
 # on-call — show only api alerts
 pls follow telemetry --tail 100 --tag alert --where '.data.service == "api"'
 
 # postmortem — what happened in the 10 minutes before the alert?
 mkdir -p tmp
-pls follow telemetry --since 10m --no-follow --json > tmp/timeline.jsonl
+pls follow telemetry --since 10m --no-follow --format json > tmp/timeline.jsonl
 ```
 
 ### Import external API events
@@ -252,7 +237,7 @@ Stripe's [events API](https://docs.stripe.com/api/events/list) returns a page. P
 # import one page of Stripe events
 curl -fsS -G https://api.stripe.com/v1/events \
   -H "Authorization: Bearer $STRIPE_KEY" -d limit=100 \
-  | jq -c '.data[]' | pls feed stripe-events --create --in jsonl
+  | jq -c '.data[]' | pls feed stripe-events --data --create --input-format json
 
 # filter imported completed payments
 pls follow stripe-events --tail 100 --no-follow --where '.data.type == "payment_intent.succeeded"'
@@ -262,7 +247,7 @@ pls follow stripe-events --since 20m --replay 1
 
 # export the last 500 events for offline analysis, then exit
 mkdir -p tmp
-pls follow stripe-events --tail 500 --no-follow --json > tmp/stripe-dump.jsonl
+pls follow stripe-events --tail 500 --no-follow --format json > tmp/stripe-dump.jsonl
 ```
 
 ### Build progress
@@ -270,19 +255,19 @@ pls follow stripe-events --tail 500 --no-follow --json > tmp/stripe-dump.jsonl
 A CI build prints to stdout, but stdout is gone when the terminal closes. Write structured progress to a pool instead and it's available to any process, anytime.
 
 ```bash
-pls feed build --create '{"step": "compile", "pct": 0}'
+pls feed build --data --create '{"step": "compile", "pct": 0}'
 sleep 1
-pls feed build '{"step": "compile", "pct": 100}'
-pls feed build '{"step": "test", "pct": 0}'
+pls feed build --data '{"step": "compile", "pct": 100}'
+pls feed build --data '{"step": "test", "pct": 0}'
 sleep 2
-pls feed build '{"step": "test", "pct": 100}'
-pls feed build --tag done '{"step": "finished", "ok": true}'
+pls feed build --data '{"step": "test", "pct": 100}'
+pls feed build --data --tag done '{"step": "finished", "ok": true}'
 
 # another terminal — watch the build live
 pls follow build
 
 # a deploy script — ship only when the completed build succeeded
-pls follow build --tag done --tail 100 --one --json | jq -e '.data.ok == true' > /dev/null && ./deploy.sh
+pls follow build --tag done --tail 100 --one --format json | jq -e '.data.ok == true' > /dev/null && ./deploy.sh
 
 # next morning — what happened overnight?
 pls follow build --since 12h --no-follow
@@ -355,36 +340,60 @@ p.Close(); c.Close()
 
 ---
 
-## Lite3 Documents
-
-Save a heartbeat as Lite3 bytes, then feed those bytes back into the pool.
+## Copy, Edit, and Save Messages
 
 ```bash
-# Create a new pool.
+# Create the two pools.
+plasmite pool create source destination
+
+# Add a tagged message.
+plasmite feed source --data --tag sensor '{"temperature":21}'
+
+# Copy future messages in another terminal.
+plasmite follow source | plasmite feed destination
+
+# Or edit a field as each message passes through.
+plasmite follow source |
+  jq -c '.data.temperature += 1' |
+  plasmite feed destination
+
+# Save retained messages and load them later.
+plasmite follow source --tail 100 --no-follow > messages.jsonl
+plasmite feed destination < messages.jsonl
+```
+
+Pipes carry complete messages, including their tags. Each destination assigns
+its own sequence and time. `feed` writes the newly appended messages, so a
+second `feed` can continue the chain.
+
+## Lite3 Documents
+
+Use a framed stream to copy one or many messages without changing their payload bytes.
+
+```bash
+plasmite fetch source 1 --format lite3 | plasmite feed destination
+plasmite follow source --format lite3 | plasmite feed destination
+```
+
+Use the raw form when a device needs one attachment.
+
+```bash
+# Create a pool and add a heartbeat.
 plasmite pool create relay
+plasmite feed relay --data '{"kind":"heartbeat"}'
 
-# Add a heartbeat.
-plasmite feed relay '{"kind":"heartbeat"}'
+# Save the original attachment bytes.
+plasmite fetch relay 1 --format lite3-raw > heartbeat.lite3
 
-# Save its bytes.
-plasmite fetch relay 1 --format lite3 > heartbeat.lite3
-
-# Feed those bytes back into the pool.
-plasmite feed relay --in lite3 --file heartbeat.lite3
-
-# Read the copied message.
+# Append those bytes as a new message.
+plasmite feed relay --input-format lite3-raw < heartbeat.lite3
 plasmite fetch relay 2
 ```
 
-The new pool starts at sequence 1. The file contains the message's tags and
-data. Feeding it preserves those bytes and assigns a new sequence and time.
-
-`fetch --json` emits a message envelope with `seq`, `time`, `meta`, and `data`.
-Ordinary `feed` input expects the JSON value for `data`, not that full envelope.
-Use `--in lite3` to append the raw Lite3 document. Local and remote pools
-support these `feed` and `fetch` modes. Bash and Zsh preserve bytes in these
-binary pipes; PowerShell requires version 7.4 or later for native binary
-redirection. Earlier versions can use `cmd.exe` redirection.
+Local and remote pools share these forms. A payload must fit the pool and
+Plasmite's 256 MiB limit; remote servers may set a lower request limit.
+Bash and Zsh preserve binary pipes. PowerShell needs version 7.4 or later
+for native binary redirection; earlier versions can use `cmd.exe`.
 
 ---
 
@@ -497,7 +506,7 @@ pls follow syslog --since 30m --replay 1
 pls follow syslog --since 1h --no-follow --where '.data.MESSAGE | test("panic")'
 
 # pipe to jq for further analysis
-pls follow syslog --since 10m --no-follow --json | jq '.data | {SYSLOG_IDENTIFIER, MESSAGE}'
+pls follow syslog --since 10m --no-follow --format json | jq '.data | {SYSLOG_IDENTIFIER, MESSAGE}'
 ```
 
 ---
@@ -523,7 +532,7 @@ pls follow incidents --tail 20 --no-follow
 
 # export the evidence for a postmortem
 mkdir -p tmp
-pls follow incidents --tag error --tail 100 --no-follow --json > tmp/errors.jsonl
+pls follow incidents --tag error --tail 100 --no-follow --format json > tmp/errors.jsonl
 ```
 
 ---
@@ -558,7 +567,7 @@ the client, connect and enter the key at the prompt; Plasmite does not echo it:
 plasmite access connect https://pools.example.net:9743
 
 # Send a sensor reading.
-plasmite feed https://pools.example.net:9743/events '{"sensor": "temp", "value": 23.5}'
+plasmite feed https://pools.example.net:9743/events --data '{"sensor": "temp", "value": 23.5}'
 
 # Read recent messages and watch for new ones.
 plasmite follow https://pools.example.net:9743/events --tail 20

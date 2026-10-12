@@ -1,8 +1,5 @@
 //! Shared pool references, parsing, retry, and payload conversion for CLI commands.
 
-use crate::ErrorPolicyCli;
-use crate::FollowFormat;
-use crate::InputMode;
 use crate::PoolTarget;
 use crate::interface_wire::MessageWire;
 use crate::pool_paths::PoolNameResolveError;
@@ -96,10 +93,6 @@ pub(crate) fn parse_remote_pool_target(input: &str) -> Result<PoolTarget, Error>
 
 pub(crate) const DEFAULT_POOL_SIZE: u64 = 1024 * 1024;
 pub(crate) const DEFAULT_RETRY_DELAY: Duration = Duration::from_millis(50);
-pub(crate) const DEFAULT_SNIFF_BYTES: usize = 8 * 1024;
-pub(crate) const DEFAULT_SNIFF_LINES: usize = 8;
-pub(crate) const DEFAULT_MAX_RECORD_BYTES: usize = 1024 * 1024;
-pub(crate) const DEFAULT_MAX_SNIPPET_BYTES: usize = 200;
 pub(crate) const DEFAULT_MAX_BODY_BYTES: u64 = 1024 * 1024;
 pub(crate) const DEFAULT_MAX_TAIL_TIMEOUT_MS: u64 = 30_000;
 pub(crate) const DEFAULT_MAX_TAIL_CONCURRENCY: usize = 64;
@@ -190,90 +183,12 @@ pub(crate) fn render_shell_agnostic_command(tokens: &[String]) -> String {
         .join(" ")
 }
 
-pub(crate) struct FeedExactCreateHint<'a> {
-    pub(crate) tags: &'a [String],
-    pub(crate) data: &'a Option<String>,
-    pub(crate) file: &'a Option<String>,
-    pub(crate) durability: Durability,
-    pub(crate) retry: u32,
-    pub(crate) retry_delay: Option<&'a str>,
-    pub(crate) input: InputMode,
-    pub(crate) errors: ErrorPolicyCli,
-    pub(crate) single_input: bool,
-}
-
-pub(crate) fn feed_exact_create_command_hint(
-    pool: &str,
-    options: FeedExactCreateHint<'_>,
-) -> Option<String> {
-    if !options.single_input {
-        return None;
-    }
-    let mut tokens = vec![
-        "plasmite".to_string(),
-        "feed".to_string(),
-        pool.to_string(),
-        "--create".to_string(),
-    ];
-    for tag in options.tags {
-        tokens.push("--tag".to_string());
-        tokens.push(tag.clone());
-    }
-    if let Some(data) = options.data {
-        tokens.push(data.clone());
-    }
-    if let Some(file) = options.file {
-        tokens.push("--file".to_string());
-        tokens.push(file.clone());
-    }
-    if options.durability != Durability::Fast {
-        tokens.push("--durability".to_string());
-        tokens.push(
-            match options.durability {
-                Durability::Fast => "fast",
-                Durability::Flush => "flush",
-            }
-            .to_string(),
-        );
-    }
-    if options.retry > 0 {
-        tokens.push("--retry".to_string());
-        tokens.push(options.retry.to_string());
-    }
-    if let Some(delay) = options.retry_delay {
-        tokens.push("--retry-delay".to_string());
-        tokens.push(delay.to_string());
-    }
-    if options.input != InputMode::Auto {
-        tokens.push("--in".to_string());
-        tokens.push(
-            match options.input {
-                InputMode::Auto => "auto",
-                InputMode::Jsonl => "jsonl",
-                InputMode::Json => "json",
-                InputMode::Seq => "seq",
-                InputMode::Jq => "jq",
-                InputMode::Lite3 => "lite3",
-            }
-            .to_string(),
-        );
-    }
-    if options.errors != ErrorPolicyCli::Stop {
-        tokens.push("--errors".to_string());
-        tokens.push("skip".to_string());
-    }
-    Some(render_shell_agnostic_command(&tokens))
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn follow_exact_create_command_hint(
     pool: &str,
     tail: u64,
     one: bool,
-    jsonl: bool,
     timeout: Option<&str>,
-    data_only: bool,
-    format: Option<FollowFormat>,
     since: Option<&str>,
     where_expr: &[String],
     tags: &[String],
@@ -294,25 +209,9 @@ pub(crate) fn follow_exact_create_command_hint(
     if one {
         tokens.push("--one".to_string());
     }
-    if jsonl {
-        tokens.push("--jsonl".to_string());
-    }
     if let Some(timeout) = timeout {
         tokens.push("--timeout".to_string());
         tokens.push(timeout.to_string());
-    }
-    if data_only {
-        tokens.push("--data-only".to_string());
-    }
-    if let Some(format) = format {
-        tokens.push("--format".to_string());
-        tokens.push(
-            match format {
-                FollowFormat::Pretty => "pretty",
-                FollowFormat::Jsonl => "jsonl",
-            }
-            .to_string(),
-        );
     }
     if let Some(since) = since {
         tokens.push("--since".to_string());
@@ -571,30 +470,6 @@ pub(crate) fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
     })
 }
 
-pub(crate) fn feed_receipt_json(
-    seq: u64,
-    timestamp_ns: u64,
-    tags: &[String],
-) -> Result<Value, Error> {
-    Ok(json!({
-        "seq": seq,
-        "time": format_ts(timestamp_ns)?,
-        "meta": {
-            "tags": tags,
-        },
-    }))
-}
-
-pub(crate) fn feed_receipt_from_message(message: &plasmite::api::Message) -> Value {
-    json!({
-        "seq": message.seq,
-        "time": message.time,
-        "meta": {
-            "tags": message.meta.tags,
-        },
-    })
-}
-
 pub(crate) fn message_to_json(message: &plasmite::api::Message) -> Value {
     serde_json::to_value(MessageWire::new(
         message.seq,
@@ -624,14 +499,6 @@ pub(crate) fn message_from_frame(frame: &FrameRef) -> Result<Value, Error> {
         data,
     ))
     .expect("message wire data is serializable"))
-}
-
-pub(crate) fn output_value(message: Value, data_only: bool) -> Value {
-    if data_only {
-        message.get("data").cloned().unwrap_or(Value::Null)
-    } else {
-        message
-    }
 }
 
 pub(crate) fn decode_payload(payload: &[u8]) -> Result<(Value, Value), Error> {

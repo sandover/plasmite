@@ -334,7 +334,7 @@ def run_pool_info(
     pool = require_pool(step, index, step_id)
     plasmite_bin = resolve_plasmite_bin(repo_root)
     result = subprocess.run(
-        [plasmite_bin, "--dir", str(workdir_path), "pool", "info", pool, "--json"],
+        [plasmite_bin, "--dir", str(workdir_path), "pool", "info", pool, "--format", "json"],
         capture_output=True,
         text=True,
     )
@@ -385,7 +385,7 @@ def run_spawn_poke(repo_root: Path, workdir_path: Path, step: dict[str, Any], in
         tags = message.get("tags", [])
         if not isinstance(tags, list):
             raise step_err(index, step_id, "message.tags must be array")
-        args = [plasmite_bin, "--dir", str(workdir_path), "feed", pool, payload]
+        args = [plasmite_bin, "--dir", str(workdir_path), "feed", pool, "--data", payload]
         for tag in tags:
             args.extend(["--tag", tag])
         processes.append(subprocess.Popen(args))

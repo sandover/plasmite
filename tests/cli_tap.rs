@@ -3,21 +3,29 @@
 pub mod support;
 use support::cli::*;
 
-fn assert_tap_error_text(output: &std::process::Output, exit_code: i32, message: &str, hint: &str) {
+fn assert_tap_error(output: &std::process::Output, exit_code: i32, message: &str, hint: &str) {
     assert_eq!(output.status.code(), Some(exit_code));
     assert!(output.stdout.is_empty());
-    let stderr = std::str::from_utf8(&output.stderr).expect("utf8 diagnostic");
+    let envelope = parse_error_json(&output.stderr);
+    let error = envelope
+        .get("error")
+        .and_then(|value| value.as_object())
+        .expect("structured error");
+    let actual_message = error
+        .get("message")
+        .and_then(|value| value.as_str())
+        .expect("error message");
     assert!(
-        stderr.starts_with("error:"),
-        "expected human diagnostic: {stderr}"
+        actual_message.contains(message),
+        "missing message {message:?}: {actual_message}"
     );
+    let actual_hint = error
+        .get("hint")
+        .and_then(|value| value.as_str())
+        .expect("error hint");
     assert!(
-        stderr.contains(message),
-        "missing message {message:?}: {stderr}"
-    );
-    assert!(
-        stderr.contains("hint:") && stderr.contains(hint),
-        "missing hint {hint:?}: {stderr}"
+        actual_hint.contains(hint),
+        "missing hint {hint:?}: {actual_hint}"
     );
 }
 
@@ -50,7 +58,7 @@ fn tap_requires_wrapped_command_after_separator() {
     assert!(stdout.contains("Usage: plasmite tap [OPTIONS] <POOL> -- <COMMAND>..."));
 
     let output = cmd().args(["tap", "build"]).output().expect("tap");
-    assert_tap_error_text(
+    assert_tap_error(
         &output,
         2,
         "requires a wrapped command after `--`",
@@ -64,7 +72,7 @@ fn tap_remote_url_rejected_as_local_only() {
         .args(["tap", "http://127.0.0.1:65535/demo", "--", "echo", "hi"])
         .output()
         .expect("tap");
-    assert_tap_error_text(
+    assert_tap_error(
         &output,
         2,
         "tap accepts local pool refs only",
@@ -509,7 +517,7 @@ fn tap_missing_wrapped_executable_is_actionable_nonzero_error() {
         ])
         .output()
         .expect("tap");
-    assert_tap_error_text(
+    assert_tap_error(
         &output,
         2,
         "wrapped command not found",
@@ -534,8 +542,14 @@ fn tap_missing_pool_without_create_has_create_hint() {
         ])
         .output()
         .expect("tap");
-    assert_tap_error_text(&output, 3, "not found", "--create");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("missingpool.plasmite"));
+    assert_tap_error(&output, 3, "not found", "--create");
+    let envelope = parse_error_json(&output.stderr);
+    assert!(
+        envelope["error"]["path"]
+            .as_str()
+            .expect("error path")
+            .ends_with("missingpool.plasmite")
+    );
 }
 
 #[test]
@@ -544,7 +558,7 @@ fn tap_empty_command_after_separator_is_usage_error() {
         .args(["tap", "demo", "--create", "--"])
         .output()
         .expect("tap");
-    assert_tap_error_text(
+    assert_tap_error(
         &output,
         2,
         "tap requires a wrapped command after `--`",

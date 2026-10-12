@@ -12,7 +12,7 @@ fn small_pool_wrap_keeps_reported_oldest_readable() {
         .args([
             "--dir", directory, "pool", "create", "--size", "64K", "wrapped",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(
@@ -22,10 +22,10 @@ fn small_pool_wrap_keeps_reported_oldest_readable() {
     );
 
     let mut feed = cmd()
-        .args(["--dir", directory, "feed", "wrapped"])
+        .args(["--dir", directory, "feed", "wrapped", "--data"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .arg("--json")
+        .args(["--format", "json"])
         .spawn()
         .expect("feed");
     {
@@ -43,7 +43,9 @@ fn small_pool_wrap_keeps_reported_oldest_readable() {
     );
 
     let info = cmd()
-        .args(["--dir", directory, "pool", "info", "wrapped", "--json"])
+        .args([
+            "--dir", directory, "pool", "info", "wrapped", "--format", "json",
+        ])
         .output()
         .expect("pool info");
     assert!(info.status.success());
@@ -54,7 +56,7 @@ fn small_pool_wrap_keeps_reported_oldest_readable() {
     assert_eq!(fetched["seq"].as_u64(), Some(oldest));
 
     let doctor = cmd()
-        .args(["--dir", directory, "doctor", "wrapped", "--json"])
+        .args(["--dir", directory, "doctor", "wrapped", "--format", "json"])
         .output()
         .expect("doctor");
     assert!(
@@ -82,14 +84,16 @@ fn pool_create_checks_all_known_conflicts_before_creating_any_pool() {
     let directory = pool_dir.to_str().expect("pool directory");
 
     let existing = cmd()
-        .args(["--dir", directory, "pool", "create", "taken", "--json"])
+        .args([
+            "--dir", directory, "pool", "create", "taken", "--format", "json",
+        ])
         .output()
         .expect("create existing pool");
     assert!(existing.status.success());
 
     let later_existing = cmd()
         .args([
-            "--dir", directory, "pool", "create", "first", "taken", "--json",
+            "--dir", directory, "pool", "create", "first", "taken", "--format", "json",
         ])
         .output()
         .expect("create with later existing pool");
@@ -104,7 +108,8 @@ fn pool_create_checks_all_known_conflicts_before_creating_any_pool() {
             "create",
             "same",
             "same.plasmite",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("create duplicate pool");
@@ -113,7 +118,7 @@ fn pool_create_checks_all_known_conflicts_before_creating_any_pool() {
 }
 
 #[test]
-fn pool_create_defaults_to_table_output() {
+fn pool_create_pretty_output_is_a_table() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -124,12 +129,14 @@ fn pool_create_defaults_to_table_output() {
             "pool",
             "create",
             "demo",
+            "--format",
+            "pretty",
         ])
         .output()
         .expect("create");
     assert!(create.status.success());
 
-    let stdout = std::str::from_utf8(&create.stdout).expect("utf8");
+    let stdout = sanitize_tty_text(&create.stdout);
     assert!(stdout.contains("NAME"));
     assert!(stdout.contains("SIZE"));
     assert!(stdout.contains("INDEX"));
@@ -150,7 +157,7 @@ fn pool_info_json_includes_metrics() {
             "create",
             "metrics",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -161,9 +168,10 @@ fn pool_info_json_includes_metrics() {
             pool_dir.to_str().unwrap(),
             "feed",
             "metrics",
+            "--data",
             "{\"x\":1}",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert!(feed_one.status.success());
@@ -174,9 +182,10 @@ fn pool_info_json_includes_metrics() {
             pool_dir.to_str().unwrap(),
             "feed",
             "metrics",
+            "--data",
             "{\"x\":2}",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert!(feed_two.status.success());
@@ -188,7 +197,8 @@ fn pool_info_json_includes_metrics() {
             "pool",
             "info",
             "metrics",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("info");
@@ -225,7 +235,7 @@ fn pool_create_supports_explicit_and_zero_index_capacity() {
             "1024",
             "indexed",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create_explicit.status.success());
@@ -237,7 +247,8 @@ fn pool_create_supports_explicit_and_zero_index_capacity() {
             "pool",
             "info",
             "indexed",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("info");
@@ -258,7 +269,7 @@ fn pool_create_supports_explicit_and_zero_index_capacity() {
             "0",
             "scanonly",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create_scan_only.status.success());
@@ -270,7 +281,8 @@ fn pool_create_supports_explicit_and_zero_index_capacity() {
             "pool",
             "info",
             "scanonly",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("info");
@@ -298,7 +310,7 @@ fn pool_create_rejects_oversized_index_capacity() {
             "5000",
             "too-big",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(!create.status.success());
@@ -319,7 +331,7 @@ fn pool_create_rejects_oversized_index_capacity() {
 }
 
 #[test]
-fn pool_info_default_is_human_readable() {
+fn pool_info_pretty_output_is_human_readable() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -341,6 +353,7 @@ fn pool_info_default_is_human_readable() {
             pool_dir.to_str().unwrap(),
             "feed",
             "pretty",
+            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -354,11 +367,13 @@ fn pool_info_default_is_human_readable() {
             "pool",
             "info",
             "pretty",
+            "--format",
+            "pretty",
         ])
         .output()
         .expect("info");
     assert!(info.status.success());
-    let stdout = std::str::from_utf8(&info.stdout).expect("utf8");
+    let stdout = sanitize_tty_text(&info.stdout);
     assert!(stdout.contains("Pool: pretty"));
     assert!(stdout.contains("Path: "));
     assert!(stdout.contains("Bounds: "));
@@ -418,7 +433,7 @@ fn pool_info_missing_does_not_emit_path_or_causes() {
             "info",
             "channel",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("pool info");
     assert_eq!(output.status.code(), Some(3));
@@ -460,7 +475,7 @@ fn readme_quickstart_flow() {
             "--size",
             "128K",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -471,11 +486,12 @@ fn readme_quickstart_flow() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":1}",
             "--tag",
             "ping",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert!(feed_out.status.success());
@@ -490,7 +506,7 @@ fn readme_quickstart_flow() {
             "demo",
             &seq.to_string(),
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("fetch");
     assert!(get.status.success());
@@ -505,10 +521,10 @@ fn readme_quickstart_flow() {
             "demo",
             "--tail",
             "1",
-            "--jsonl",
+            "--format",
+            "json",
         ])
         .stdout(Stdio::piped())
-        .arg("--json")
         .spawn()
         .expect("follow");
     let stdout = follower.stdout.take().expect("stdout");
@@ -534,7 +550,7 @@ fn pool_list_lists_pools_sorted_by_name() {
             "beta",
             "alpha",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -545,7 +561,8 @@ fn pool_list_lists_pools_sorted_by_name() {
             pool_dir.to_str().unwrap(),
             "pool",
             "list",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("list");
@@ -573,7 +590,8 @@ fn pool_list_fails_when_pool_dir_is_a_file() {
             pool_dir.to_str().expect("pool directory"),
             "pool",
             "list",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("list");
@@ -593,7 +611,7 @@ fn pool_list_keeps_missing_directory_empty_and_corrupt_pool_visible() {
     let directory = pool_dir.to_str().expect("pool directory");
 
     let missing = cmd()
-        .args(["--dir", directory, "pool", "list", "--json"])
+        .args(["--dir", directory, "pool", "list", "--format", "json"])
         .output()
         .expect("list missing directory");
     assert!(missing.status.success());
@@ -603,7 +621,7 @@ fn pool_list_keeps_missing_directory_empty_and_corrupt_pool_visible() {
     std::fs::create_dir(&pool_dir).expect("create pool directory");
     std::fs::write(pool_dir.join("bad.plasmite"), b"NOPE").expect("write bad pool");
     let corrupt = cmd()
-        .args(["--dir", directory, "pool", "list", "--json"])
+        .args(["--dir", directory, "pool", "list", "--format", "json"])
         .output()
         .expect("list corrupt pool");
     assert!(corrupt.status.success());
@@ -640,13 +658,10 @@ fn pool_list_defaults_to_table_output() {
 
     std::fs::write(pool_dir.join("bad.plasmite"), b"NOPE").expect("write bad");
 
-    let list = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "pool", "list"])
-        .output()
-        .expect("list");
+    let list = cmd_tty(&["--dir", pool_dir.to_str().unwrap(), "pool", "list"]);
     assert!(list.status.success());
 
-    let stdout = std::str::from_utf8(&list.stdout).expect("utf8");
+    let stdout = sanitize_tty_text(&list.stdout);
     assert!(stdout.contains("NAME"));
     assert!(stdout.contains("STATUS"));
     assert!(stdout.contains("DETAIL"));
@@ -669,7 +684,7 @@ fn pool_delete_removes_pool_file() {
             "create",
             "deleteme",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -680,7 +695,8 @@ fn pool_delete_removes_pool_file() {
             pool_dir.to_str().unwrap(),
             "pool",
             "delete",
-            "--json",
+            "--format",
+            "json",
             "deleteme",
         ])
         .output()
@@ -719,7 +735,7 @@ fn pool_delete_multiple_best_effort_mixed_results() {
             "a",
             "b",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -730,7 +746,8 @@ fn pool_delete_multiple_best_effort_mixed_results() {
             pool_dir.to_str().unwrap(),
             "pool",
             "delete",
-            "--json",
+            "--format",
+            "json",
             "a",
             "missing",
             "b",
@@ -778,7 +795,7 @@ fn pool_delete_multiple_with_invalid_ref_continues() {
 
     let create = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "ok"])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -789,7 +806,8 @@ fn pool_delete_multiple_with_invalid_ref_continues() {
             pool_dir.to_str().unwrap(),
             "pool",
             "delete",
-            "--json",
+            "--format",
+            "json",
             "ok",
             "http://127.0.0.1:9700/demo",
         ])
@@ -823,7 +841,7 @@ fn pool_delete_multiple_with_invalid_ref_continues() {
 }
 
 #[test]
-fn pool_delete_defaults_to_table_output() {
+fn pool_delete_pretty_output_is_a_table() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -841,12 +859,14 @@ fn pool_delete_defaults_to_table_output() {
             "delete",
             "ok",
             "missing",
+            "--format",
+            "pretty",
         ])
         .output()
         .expect("delete");
     assert_eq!(delete.status.code(), Some(3));
 
-    let stdout = std::str::from_utf8(&delete.stdout).expect("utf8");
+    let stdout = sanitize_tty_text(&delete.stdout);
     assert!(stdout.contains("NAME"));
     assert!(stdout.contains("STATUS"));
     assert!(stdout.contains("PATH"));
@@ -870,7 +890,7 @@ fn already_exists_has_hint_and_path() {
             "create",
             "testpool",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -883,7 +903,7 @@ fn already_exists_has_hint_and_path() {
             "create",
             "testpool",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create again");
     assert_eq!(again.status.code().unwrap(), 4);
@@ -929,7 +949,7 @@ fn permission_error_has_hint_and_causes() {
             "create",
             "testpool",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert_eq!(create.status.code().unwrap(), 6);
@@ -979,7 +999,7 @@ fn permission_denied_matrix_for_write_paths() {
             "create",
             "base",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -999,7 +1019,7 @@ fn permission_denied_matrix_for_write_paths() {
             "create",
             "other",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create denied");
     assert!(
@@ -1029,7 +1049,7 @@ fn permission_denied_matrix_for_write_paths() {
             "delete",
             "base",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("delete denied");
     assert_eq!(output_delete.status.code(), Some(8));
@@ -1052,7 +1072,7 @@ fn truncated_pool_file_variants_are_rejected() {
             "create",
             "probe",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -1073,7 +1093,7 @@ fn truncated_pool_file_variants_are_rejected() {
         std::fs::write(&pool_path, &bytes).expect("write mutated pool");
         let output = cmd()
             .args(["--dir", pool_dir.to_str().unwrap(), "pool", "info", "probe"])
-            .arg("--json")
+            .args(["--format", "json"])
             .output()
             .expect("info");
         assert_ne!(
@@ -1104,7 +1124,7 @@ fn corrupt_pool_has_hint_and_path() {
 
     let info = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "pool", "info", "bad"])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("info");
     assert_eq!(info.status.code().unwrap(), 7);
@@ -1141,7 +1161,7 @@ fn doctor_reports_ok_as_json() {
             "create",
             "doctorpool",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -1152,7 +1172,8 @@ fn doctor_reports_ok_as_json() {
             pool_dir.to_str().unwrap(),
             "doctor",
             "doctorpool",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("doctor");
@@ -1181,7 +1202,8 @@ fn doctor_reports_corrupt_and_exit_code() {
             pool_dir.to_str().unwrap(),
             "doctor",
             "bad",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("doctor");
@@ -1212,7 +1234,7 @@ fn doctor_detects_wrong_tail_next_offset() {
             "create",
             "doctorpool",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -1222,9 +1244,10 @@ fn doctor_detects_wrong_tail_next_offset() {
             pool_dir.to_str().expect("pool dir"),
             "feed",
             "doctorpool",
+            "--data",
             "{}",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert!(feed.status.success());
@@ -1245,7 +1268,8 @@ fn doctor_detects_wrong_tail_next_offset() {
             pool_dir.to_str().expect("pool dir"),
             "doctor",
             "doctorpool",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("doctor");
@@ -1267,7 +1291,7 @@ fn doctor_all_reports_mixed_ok_and_corrupt() {
 
     let create = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "pool", "create", "ok"])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -1282,7 +1306,8 @@ fn doctor_all_reports_mixed_ok_and_corrupt() {
             pool_dir.to_str().unwrap(),
             "doctor",
             "--all",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("doctor");
@@ -1316,7 +1341,7 @@ fn doctor_requires_pool_or_all() {
 }
 
 #[test]
-fn doctor_defaults_to_human_output() {
+fn doctor_pretty_output_is_human_readable() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1333,11 +1358,18 @@ fn doctor_defaults_to_human_output() {
     assert!(create.status.success());
 
     let doctor = cmd()
-        .args(["--dir", pool_dir.to_str().unwrap(), "doctor", "doctorpool"])
+        .args([
+            "--dir",
+            pool_dir.to_str().unwrap(),
+            "doctor",
+            "doctorpool",
+            "--format",
+            "pretty",
+        ])
         .output()
         .expect("doctor");
     assert!(doctor.status.success());
-    let stdout = std::str::from_utf8(&doctor.stdout).expect("utf8");
+    let stdout = sanitize_tty_text(&doctor.stdout);
     assert!(stdout.contains("OK: doctorpool"));
 }
 
@@ -1365,6 +1397,7 @@ fn doctor_tty_reports_count_and_seq_range_for_healthy_pool() {
                 pool_dir.to_str().unwrap(),
                 "feed",
                 "doctorpool",
+                "--data",
                 &format!("{{\"x\":{idx}}}"),
             ])
             .output()
@@ -1412,6 +1445,7 @@ fn doctor_all_tty_uses_pool_names_and_message_counts() {
                 pool_dir.to_str().unwrap(),
                 "feed",
                 "tour-main",
+                "--data",
                 &format!("{{\"x\":{idx}}}"),
             ])
             .output()
@@ -1451,7 +1485,7 @@ fn doctor_rejects_pool_with_all() {
             "foo",
             "--all",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("doctor");
     assert!(!doctor.status.success());
@@ -1472,7 +1506,7 @@ fn doctor_missing_pool_reports_not_found() {
 
     let doctor = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "doctor", "missing"])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("doctor");
     assert!(!doctor.status.success());

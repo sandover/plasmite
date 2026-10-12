@@ -63,7 +63,8 @@ fn follow_emits_new_messages() {
             "demo",
             "--tail",
             "1",
-            "--jsonl",
+            "--format",
+            "json",
             "--one",
         ])
         .stdout(Stdio::piped())
@@ -85,6 +86,7 @@ fn follow_emits_new_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":42}",
         ])
         .output()
@@ -124,7 +126,8 @@ fn follow_one_exits_after_first_match() {
             pool_dir.to_str().unwrap(),
             "follow",
             "demo",
-            "--jsonl",
+            "--format",
+            "json",
             "--tail",
             "1",
             "--one",
@@ -141,6 +144,7 @@ fn follow_one_exits_after_first_match() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -170,6 +174,7 @@ fn follow_one_exits_after_first_match() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":2}",
         ])
         .output()
@@ -212,7 +217,8 @@ fn follow_tail_one_exits_after_first_live_match() {
             "demo",
             "--tail",
             "2",
-            "--jsonl",
+            "--format",
+            "json",
             "--one",
         ])
         .stdout(Stdio::piped())
@@ -227,6 +233,7 @@ fn follow_tail_one_exits_after_first_live_match() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -239,6 +246,7 @@ fn follow_tail_one_exits_after_first_live_match() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":2}",
         ])
         .output()
@@ -294,7 +302,8 @@ fn follow_timeout_exits_when_no_output() {
             pool_dir.to_str().unwrap(),
             "follow",
             "demo",
-            "--jsonl",
+            "--format",
+            "json",
             "--timeout",
             "500ms",
         ])
@@ -359,7 +368,14 @@ fn follow_timeout_with_one_exits_on_message() {
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(50));
         let _ = cmd()
-            .args(["--dir", &pool_dir_str, "feed", "demo", "{\"x\":1}"])
+            .args([
+                "--dir",
+                &pool_dir_str,
+                "feed",
+                "demo",
+                "--data",
+                "{\"x\":1}",
+            ])
             .output();
     });
 
@@ -369,7 +385,8 @@ fn follow_timeout_with_one_exits_on_message() {
             pool_dir.to_str().unwrap(),
             "follow",
             "demo",
-            "--jsonl",
+            "--format",
+            "json",
             // The feed may land before or after this follower attaches; with --tail 1
             // it sees the message either way.
             "--tail",
@@ -387,7 +404,7 @@ fn follow_timeout_with_one_exits_on_message() {
 }
 
 #[test]
-fn follow_data_only_jsonl_emits_payload() {
+fn follow_json_emits_complete_message() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -409,6 +426,7 @@ fn follow_data_only_jsonl_emits_payload() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -423,8 +441,8 @@ fn follow_data_only_jsonl_emits_payload() {
             "demo",
             "--tail",
             "1",
-            "--jsonl",
-            "--data-only",
+            "--format",
+            "json",
             "--one",
         ])
         .output()
@@ -432,12 +450,12 @@ fn follow_data_only_jsonl_emits_payload() {
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0].get("x").unwrap().as_i64().unwrap(), 1);
-    assert!(lines[0].get("data").is_none());
+    assert_eq!(lines[0]["data"]["x"], 1);
+    assert_eq!(lines[0]["meta"]["tags"], json!([]));
 }
 
 #[test]
-fn follow_data_only_where_filters_envelope() {
+fn follow_json_preserves_filtered_message_tags() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -459,6 +477,7 @@ fn follow_data_only_where_filters_envelope() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":1}",
             "--tag",
             "drop",
@@ -473,6 +492,7 @@ fn follow_data_only_where_filters_envelope() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":2}",
             "--tag",
             "keep",
@@ -489,8 +509,8 @@ fn follow_data_only_where_filters_envelope() {
             "demo",
             "--tail",
             "1",
-            "--jsonl",
-            "--data-only",
+            "--format",
+            "json",
             "--one",
             "--where",
             r#".meta.tags[]? == "keep""#,
@@ -500,12 +520,12 @@ fn follow_data_only_where_filters_envelope() {
     assert!(output.status.success());
     let lines = parse_json_lines(&output.stdout);
     assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0].get("x").unwrap().as_i64().unwrap(), 2);
-    assert!(lines[0].get("data").is_none());
+    assert_eq!(lines[0]["data"]["x"], 2);
+    assert_eq!(lines[0]["meta"]["tags"], json!(["keep"]));
 }
 
 #[test]
-fn follow_data_only_pretty_emits_payload() {
+fn follow_json_emits_complete_message_with_explicit_format() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -527,6 +547,7 @@ fn follow_data_only_pretty_emits_payload() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":3}",
         ])
         .output()
@@ -542,16 +563,15 @@ fn follow_data_only_pretty_emits_payload() {
             "--tail",
             "1",
             "--format",
-            "pretty",
-            "--data-only",
+            "json",
             "--one",
         ])
         .output()
         .expect("follow");
     assert!(output.status.success());
     let value = parse_json(std::str::from_utf8(&output.stdout).expect("utf8"));
-    assert_eq!(value.get("x").unwrap().as_i64().unwrap(), 3);
-    assert!(value.get("data").is_none());
+    assert_eq!(value["data"]["x"], 3);
+    assert_eq!(value["seq"], 1);
 }
 
 #[test]
@@ -577,6 +597,7 @@ fn follow_where_filters_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":1}",
             "--tag",
             "drop",
@@ -591,6 +612,7 @@ fn follow_where_filters_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":2}",
             "--tag",
             "keep",
@@ -607,7 +629,8 @@ fn follow_where_filters_messages() {
             "demo",
             "--tail",
             "10",
-            "--jsonl",
+            "--format",
+            "json",
             "--where",
             r#".meta.tags[]? == "keep""#,
         ])
@@ -646,6 +669,7 @@ fn follow_tag_filters_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":1}",
             "--tag",
             "drop",
@@ -660,6 +684,7 @@ fn follow_tag_filters_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":2}",
             "--tag",
             "keep",
@@ -676,7 +701,8 @@ fn follow_tag_filters_messages() {
             "demo",
             "--tail",
             "10",
-            "--jsonl",
+            "--format",
+            "json",
             "--tag",
             "keep",
         ])
@@ -721,6 +747,7 @@ fn follow_tag_and_where_compose_with_and() {
                 pool_dir.to_str().unwrap(),
                 "feed",
                 "demo",
+                "--data",
                 payload,
                 "--tag",
                 tag,
@@ -738,7 +765,8 @@ fn follow_tag_and_where_compose_with_and() {
             "demo",
             "--tail",
             "10",
-            "--jsonl",
+            "--format",
+            "json",
             "--tag",
             "keep",
             "--where",
@@ -782,6 +810,7 @@ fn follow_where_multiple_predicates_and() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"level\":1}",
             "--tag",
             "alpha",
@@ -796,6 +825,7 @@ fn follow_where_multiple_predicates_and() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"level\":2}",
             "--tag",
             "alpha",
@@ -812,7 +842,8 @@ fn follow_where_multiple_predicates_and() {
             "demo",
             "--tail",
             "10",
-            "--jsonl",
+            "--format",
+            "json",
             "--where",
             r#".meta.tags[]? == "alpha""#,
             "--where",
@@ -843,7 +874,7 @@ fn follow_where_invalid_expression_is_usage_error() {
             "create",
             "demo",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -854,9 +885,10 @@ fn follow_where_invalid_expression_is_usage_error() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":1}",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert!(emit_out.status.success());
@@ -869,11 +901,11 @@ fn follow_where_invalid_expression_is_usage_error() {
             "demo",
             "--tail",
             "1",
-            "--jsonl",
+            "--format",
+            "json",
             "--where",
             "not valid jq",
         ])
-        .arg("--json")
         .output()
         .expect("follow");
     assert_eq!(follower.status.code().unwrap(), 2);
@@ -898,7 +930,7 @@ fn follow_where_non_boolean_expression_is_usage_error() {
             "create",
             "demo",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -909,9 +941,10 @@ fn follow_where_non_boolean_expression_is_usage_error() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":1}",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("feed");
     assert!(emit_out.status.success());
@@ -924,11 +957,11 @@ fn follow_where_non_boolean_expression_is_usage_error() {
             "demo",
             "--tail",
             "1",
-            "--jsonl",
+            "--format",
+            "json",
             "--where",
             ".data",
         ])
-        .arg("--json")
         .output()
         .expect("follow");
     assert_eq!(follower.status.code().unwrap(), 2);
@@ -963,6 +996,7 @@ fn follow_where_with_since_emits_matches() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -975,6 +1009,7 @@ fn follow_where_with_since_emits_matches() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":5}",
         ])
         .output()
@@ -989,7 +1024,8 @@ fn follow_where_with_since_emits_matches() {
             "demo",
             "--since",
             "1h",
-            "--jsonl",
+            "--format",
+            "json",
             "--where",
             ".data.x == 5",
         ])
@@ -1028,6 +1064,7 @@ fn follow_where_with_format_pretty_emits_matches() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -1081,6 +1118,7 @@ fn follow_where_with_quiet_drops_suppresses_notice() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -1095,7 +1133,8 @@ fn follow_where_with_quiet_drops_suppresses_notice() {
             "demo",
             "--tail",
             "1",
-            "--jsonl",
+            "--format",
+            "json",
             "--where",
             ".data.x == 1",
             "--quiet-drops",
@@ -1140,6 +1179,7 @@ fn follow_where_multiple_predicates_with_since() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":1}",
             "--tag",
             "alpha",
@@ -1154,6 +1194,7 @@ fn follow_where_multiple_predicates_with_since() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":2}",
             "--tag",
             "alpha",
@@ -1170,7 +1211,8 @@ fn follow_where_multiple_predicates_with_since() {
             "demo",
             "--since",
             "1h",
-            "--jsonl",
+            "--format",
+            "json",
             "--where",
             r#".meta.tags[]? == "alpha""#,
             "--where",
@@ -1235,7 +1277,7 @@ fn follow_since_future_missing_pool_reports_not_found() {
             "--since",
             "2999-01-01T00:00:00Z",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("follow");
     assert_eq!(follower.status.code(), Some(3));
@@ -1245,7 +1287,7 @@ fn follow_since_future_missing_pool_reports_not_found() {
 }
 
 #[test]
-fn follow_format_jsonl_matches_jsonl_alias() {
+fn follow_defaults_to_json_when_stdout_is_redirected() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1267,13 +1309,14 @@ fn follow_format_jsonl_matches_jsonl_alias() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":1}",
         ])
         .output()
         .expect("feed");
     assert!(emit_out.status.success());
 
-    let mut fmt = cmd()
+    let output = cmd()
         .args([
             "--dir",
             pool_dir.to_str().unwrap(),
@@ -1281,42 +1324,16 @@ fn follow_format_jsonl_matches_jsonl_alias() {
             "demo",
             "--tail",
             "1",
-            "--format",
-            "jsonl",
+            "--no-follow",
         ])
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("follow format");
-    let fmt_stdout = fmt.stdout.take().expect("stdout");
-    let fmt_line = read_line_with_timeout(fmt_stdout, Duration::from_secs(2));
-    assert!(!fmt_line.is_empty(), "expected a line from follow output");
-    let fmt_line = fmt_line.trim_end();
-    assert!(!fmt_line.contains('\n'));
-    let _ = parse_json(fmt_line);
-    let _ = fmt.kill();
-    let _ = fmt.wait();
-
-    let mut alias = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "follow",
-            "demo",
-            "--tail",
-            "1",
-            "--jsonl",
-        ])
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("follow jsonl");
-    let alias_stdout = alias.stdout.take().expect("stdout");
-    let alias_line = read_line_with_timeout(alias_stdout, Duration::from_secs(2));
-    assert!(!alias_line.is_empty(), "expected a line from follow output");
-    let alias_line = alias_line.trim_end();
-    assert!(!alias_line.contains('\n'));
-    let _ = parse_json(alias_line);
-    let _ = alias.kill();
-    let _ = alias.wait();
+        .output()
+        .expect("follow default output");
+    assert!(output.status.success());
+    let messages = parse_json_lines(&output.stdout);
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["seq"], 1);
+    assert_eq!(messages[0]["data"]["x"], 1);
+    assert_eq!(messages[0]["meta"]["tags"], json!([]));
 }
 
 #[test]
@@ -1334,7 +1351,7 @@ fn follow_emits_drop_notice_on_stderr() {
             "1M",
             "demo",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -1358,13 +1375,13 @@ fn follow_emits_drop_notice_on_stderr() {
                 pool_dir.to_str().unwrap(),
                 "follow",
                 "demo",
-                "--jsonl",
+                "--format",
+                "json",
                 "--tail",
                 "1",
             ])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .arg("--json")
             .spawn()
             .expect("follow"),
     );
@@ -1452,7 +1469,7 @@ fn follow_emits_drop_notice_on_stderr() {
 }
 
 #[test]
-fn follow_rejects_conflicting_output_flags() {
+fn follow_rejects_removed_jsonl_format_value() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -1464,7 +1481,7 @@ fn follow_rejects_conflicting_output_flags() {
             "create",
             "demo",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("create");
     assert!(create.status.success());
@@ -1477,22 +1494,17 @@ fn follow_rejects_conflicting_output_flags() {
             "demo",
             "--tail",
             "1",
-            "--jsonl",
             "--format",
             "jsonl",
         ])
-        .arg("--json")
         .output()
         .expect("follow");
     assert_eq!(follower.status.code().unwrap(), 2);
-    let err = parse_error_json(&follower.stderr);
-    let inner = err
-        .get("error")
-        .and_then(|v| v.as_object())
-        .expect("error object");
-    assert_eq!(inner.get("kind").and_then(|v| v.as_str()).unwrap(), "Usage");
-    let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(hint.contains("--format jsonl") || hint.contains("--jsonl"));
+    assert!(
+        String::from_utf8_lossy(&follower.stderr).contains("jsonl"),
+        "expected an unsupported format error: {}",
+        String::from_utf8_lossy(&follower.stderr)
+    );
 }
 
 #[test]
@@ -1521,7 +1533,7 @@ fn follow_missing_pool_has_actionable_hint() {
     // This assertion currently checks the fallback exact command hint text for missing pools.
     let output = cmd()
         .args(["follow", "-n", "1"])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("follow");
     assert_eq!(output.status.code().unwrap(), 2);
@@ -1542,7 +1554,7 @@ fn follow_missing_pool_hint_suggests_create() {
 
     let output = cmd()
         .args(["--dir", pool_dir.to_str().unwrap(), "follow", "missing"])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("follow");
     assert_eq!(output.status.code(), Some(3));
@@ -1569,7 +1581,7 @@ fn follow_remote_url_rejects_create_flag() {
             "http://127.0.0.1:65535/demo",
             "--create",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("follow");
     assert_eq!(output.status.code(), Some(2));
@@ -1604,6 +1616,7 @@ fn follow_remote_url_happy_path_reads_recent_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -1615,6 +1628,7 @@ fn follow_remote_url_happy_path_reads_recent_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":2}",
         ])
         .output()
@@ -1632,7 +1646,8 @@ fn follow_remote_url_happy_path_reads_recent_messages() {
             "--tail",
             "1",
             "--one",
-            "--jsonl",
+            "--format",
+            "json",
             "--timeout",
             "2s",
         ])
@@ -1673,6 +1688,7 @@ fn follow_remote_url_supports_tag_filter() {
                 pool_dir.to_str().unwrap(),
                 "feed",
                 "demo",
+                "--data",
                 payload,
                 "--tag",
                 tag,
@@ -1688,7 +1704,7 @@ fn follow_remote_url_supports_tag_filter() {
     let pool_url = format!("{}/demo", server.base_url);
     let mut follower = cmd()
         .args([
-            "follow", &pool_url, "--tail", "10", "--jsonl", "--tag", "keep",
+            "follow", &pool_url, "--tail", "10", "--format", "json", "--tag", "keep",
         ])
         .env("PLASMITE_ACCESS_HOME", &access_home)
         .stdout(Stdio::piped())
@@ -1709,9 +1725,9 @@ fn follow_remote_url_rejects_api_shaped_path() {
         .args([
             "follow",
             "http://localhost:9170/v0/pools/demo/tail",
-            "--jsonl",
+            "--format",
+            "json",
         ])
-        .arg("--json")
         .output()
         .expect("follow");
     assert!(!output.status.success());
@@ -1752,7 +1768,8 @@ fn follow_remote_url_supports_since_and_rejects_replay() {
             "--since",
             "5m",
             "--no-follow",
-            "--json",
+            "--format",
+            "json",
         ])
         .env("PLASMITE_ACCESS_HOME", &access_home)
         .output()
@@ -1767,7 +1784,7 @@ fn follow_remote_url_supports_since_and_rejects_replay() {
     assert_eq!(messages[0]["data"]["x"], 1);
     let replay = cmd()
         .args([
-            "follow", &pool_url, "--tail", "5", "--replay", "1", "--json",
+            "follow", &pool_url, "--tail", "5", "--replay", "1", "--format", "json",
         ])
         .env("PLASMITE_ACCESS_HOME", &access_home)
         .output()
@@ -1788,7 +1805,8 @@ fn follow_remote_url_supports_since_and_rejects_replay() {
             "--since",
             "2999-01-01T00:00:00Z",
             "--no-follow",
-            "--json",
+            "--format",
+            "json",
         ])
         .env("PLASMITE_ACCESS_HOME", &access_home)
         .output()
@@ -1819,7 +1837,14 @@ fn follow_remote_url_timeout_returns_124() {
     connect_to_server(&server, &access_home);
     let pool_url = format!("{}/demo", server.base_url);
     let follower = cmd()
-        .args(["follow", &pool_url, "--jsonl", "--timeout", "150ms"])
+        .args([
+            "follow",
+            &pool_url,
+            "--format",
+            "json",
+            "--timeout",
+            "150ms",
+        ])
         .env("PLASMITE_ACCESS_HOME", &access_home)
         .output()
         .expect("follow");
@@ -1849,6 +1874,7 @@ fn duplex_non_tty_echoes_followed_messages_without_self_echo() {
             pool_dir.to_str().unwrap(),
             "feed",
             "chat",
+            "--data",
             "{\"from\":\"bob\",\"msg\":\"seed\"}",
         ])
         .output()
@@ -1866,7 +1892,8 @@ fn duplex_non_tty_echoes_followed_messages_without_self_echo() {
             "alice",
             "--tail",
             "1",
-            "--jsonl",
+            "--format",
+            "json",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1895,7 +1922,7 @@ fn duplex_non_tty_echoes_followed_messages_without_self_echo() {
     {
         let stdin = duplex.stdin.as_mut().expect("duplex stdin");
         stdin
-            .write_all(b"{\"from\":\"alice\",\"msg\":\"reply\"}\n")
+            .write_all(b"{\"data\":{\"from\":\"alice\",\"msg\":\"reply\"}}\n")
             .expect("write stdin");
     }
     assert!(
@@ -1918,7 +1945,8 @@ fn duplex_non_tty_echoes_followed_messages_without_self_echo() {
             "chat",
             "--tail",
             "2",
-            "--jsonl",
+            "--format",
+            "json",
             "--timeout",
             "150ms",
         ])
@@ -1945,7 +1973,7 @@ fn duplex_remote_url_rejects_create_flag() {
             "--me",
             "alice",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("duplex");
     assert_eq!(output.status.code(), Some(2));
@@ -1978,7 +2006,8 @@ fn duplex_remote_url_accepts_future_since() {
             &pool_url,
             "--since",
             "2999-01-01T00:00:00Z",
-            "--json",
+            "--format",
+            "json",
         ])
         .env("PLASMITE_ACCESS_HOME", &access_home)
         .stdin(Stdio::piped())
@@ -1988,7 +2017,7 @@ fn duplex_remote_url_accepts_future_since() {
         .expect("duplex");
     writeln!(
         duplex.stdin.take().expect("stdin"),
-        "{{\"from\":\"alice\",\"msg\":\"hello\"}}"
+        "{{\"data\":{{\"from\":\"alice\",\"msg\":\"hello\"}}}}"
     )
     .expect("send JSON");
     let output = duplex.wait_with_output().expect("duplex output");
@@ -2021,7 +2050,7 @@ fn duplex_since_future_missing_pool_reports_not_found() {
             "--since",
             "2999-01-01T00:00:00Z",
         ])
-        .arg("--json")
+        .args(["--format", "json"])
         .output()
         .expect("duplex");
     assert_eq!(output.status.code(), Some(3));
@@ -2053,6 +2082,7 @@ fn duplex_remote_happy_path_sends_and_reads() {
             pool_dir.to_str().unwrap(),
             "feed",
             "chat",
+            "--data",
             "{\"from\":\"bob\",\"msg\":\"seed\"}",
         ])
         .output()
@@ -2065,7 +2095,7 @@ fn duplex_remote_happy_path_sends_and_reads() {
     let pool_url = format!("{}/chat", server.base_url);
     let mut duplex = cmd()
         .args([
-            "duplex", &pool_url, "--me", "alice", "--tail", "1", "--jsonl",
+            "duplex", &pool_url, "--me", "alice", "--tail", "1", "--format", "json",
         ])
         .env("PLASMITE_ACCESS_HOME", &access_home)
         .stdin(Stdio::piped())
@@ -2080,7 +2110,7 @@ fn duplex_remote_happy_path_sends_and_reads() {
     {
         let stdin = duplex.stdin.as_mut().expect("duplex stdin");
         stdin
-            .write_all(b"{\"from\":\"alice\",\"msg\":\"remote-reply\"}\n")
+            .write_all(b"{\"data\":{\"from\":\"alice\",\"msg\":\"remote-reply\"}}\n")
             .expect("write stdin");
     }
     let _ = duplex.stdin.take();
@@ -2097,7 +2127,8 @@ fn duplex_remote_happy_path_sends_and_reads() {
             &pool_url,
             "--tail",
             "2",
-            "--jsonl",
+            "--format",
+            "json",
             "--timeout",
             "200ms",
         ])
@@ -2131,6 +2162,7 @@ fn follow_replay_emits_messages_in_order() {
                 pool_dir.to_str().unwrap(),
                 "feed",
                 "rp",
+                "--data",
                 &format!("{{\"i\":{i}}}"),
             ])
             .output()
@@ -2148,7 +2180,8 @@ fn follow_replay_emits_messages_in_order() {
             "100",
             "--replay",
             "0",
-            "--jsonl",
+            "--format",
+            "json",
         ])
         .output()
         .expect("follow --replay");
@@ -2176,6 +2209,7 @@ fn follow_replay_tail_limits_messages() {
                 pool_dir.to_str().unwrap(),
                 "feed",
                 "rpt",
+                "--data",
                 &format!("{{\"i\":{i}}}"),
             ])
             .output()
@@ -2192,7 +2226,8 @@ fn follow_replay_tail_limits_messages() {
             "2",
             "--replay",
             "0",
-            "--jsonl",
+            "--format",
+            "json",
         ])
         .output()
         .expect("follow --replay");
@@ -2218,6 +2253,7 @@ fn follow_replay_respects_speed_timing() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rps",
+            "--data",
             "{\"i\":1}",
         ])
         .output()
@@ -2229,6 +2265,7 @@ fn follow_replay_respects_speed_timing() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rps",
+            "--data",
             "{\"i\":2}",
         ])
         .output()
@@ -2245,7 +2282,8 @@ fn follow_replay_respects_speed_timing() {
             "100",
             "--replay",
             "1",
-            "--jsonl",
+            "--format",
+            "json",
         ])
         .output()
         .expect("follow --replay");
@@ -2293,6 +2331,7 @@ fn follow_replay_speed_2x_halves_delay() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rps2",
+            "--data",
             "{\"i\":1}",
         ])
         .output()
@@ -2304,6 +2343,7 @@ fn follow_replay_speed_2x_halves_delay() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rps2",
+            "--data",
             "{\"i\":2}",
         ])
         .output()
@@ -2320,7 +2360,8 @@ fn follow_replay_speed_2x_halves_delay() {
             "100",
             "--replay",
             "2",
-            "--jsonl",
+            "--format",
+            "json",
         ])
         .output()
         .expect("follow --replay");
@@ -2407,6 +2448,7 @@ fn follow_replay_where_filters_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rpw",
+            "--data",
             r#"{"level":"info"}"#,
         ])
         .output()
@@ -2417,6 +2459,7 @@ fn follow_replay_where_filters_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rpw",
+            "--data",
             r#"{"level":"error"}"#,
         ])
         .output()
@@ -2427,6 +2470,7 @@ fn follow_replay_where_filters_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rpw",
+            "--data",
             r#"{"level":"info"}"#,
         ])
         .output()
@@ -2442,7 +2486,8 @@ fn follow_replay_where_filters_messages() {
             "100",
             "--replay",
             "0",
-            "--jsonl",
+            "--format",
+            "json",
             "--where",
             r#".data.level == "error""#,
         ])
@@ -2470,6 +2515,7 @@ fn follow_replay_one_exits_after_first_message() {
                 pool_dir.to_str().unwrap(),
                 "feed",
                 "rpo",
+                "--data",
                 &format!("{{\"i\":{i}}}"),
             ])
             .output()
@@ -2486,7 +2532,8 @@ fn follow_replay_one_exits_after_first_message() {
             "100",
             "--replay",
             "0",
-            "--jsonl",
+            "--format",
+            "json",
             "--one",
         ])
         .output()
@@ -2517,7 +2564,8 @@ fn follow_replay_empty_pool_exits_ok() {
             "100",
             "--replay",
             "0",
-            "--jsonl",
+            "--format",
+            "json",
         ])
         .output()
         .expect("follow --replay");
@@ -2526,7 +2574,7 @@ fn follow_replay_empty_pool_exits_ok() {
 }
 
 #[test]
-fn follow_replay_data_only_emits_payload() {
+fn follow_replay_emits_complete_message() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -2540,6 +2588,7 @@ fn follow_replay_data_only_emits_payload() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rpd",
+            "--data",
             r#"{"x":42}"#,
         ])
         .output()
@@ -2555,16 +2604,16 @@ fn follow_replay_data_only_emits_payload() {
             "100",
             "--replay",
             "0",
-            "--jsonl",
-            "--data-only",
+            "--format",
+            "json",
         ])
         .output()
         .expect("follow --replay");
     assert!(output.status.success());
     let messages = parse_json_lines(&output.stdout);
     assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0], json!({"x": 42}));
-    assert!(messages[0].get("seq").is_none());
+    assert_eq!(messages[0]["data"], json!({"x": 42}));
+    assert_eq!(messages[0]["seq"], 1);
 }
 
 #[test]
@@ -2582,6 +2631,7 @@ fn follow_replay_zero_speed_emits_without_delay() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rp0",
+            "--data",
             "{\"i\":1}",
         ])
         .output()
@@ -2593,6 +2643,7 @@ fn follow_replay_zero_speed_emits_without_delay() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rp0",
+            "--data",
             "{\"i\":2}",
         ])
         .output()
@@ -2609,7 +2660,8 @@ fn follow_replay_zero_speed_emits_without_delay() {
             "100",
             "--replay",
             "0",
-            "--jsonl",
+            "--format",
+            "json",
         ])
         .output()
         .expect("follow --replay 0");

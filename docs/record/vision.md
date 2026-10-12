@@ -20,9 +20,9 @@ These are invariants, not preferences. Each states a violation condition.
 
 **Local-first.** Core workflows never require a running daemon, broker, or external service. A developer must be able to create a pool, feed messages, and follow or fetch them with zero configuration beyond the CLI itself. Any feature that makes a network call part of the default path is a violation.
 
-**JSON-first.** Every interface surface provides a stable plain-JSON path for reading and writing messages. CLI commands may use human-readable defaults when an explicit machine-readable JSON mode is available. HTTP may expose explicit Lite3 byte endpoints as additive performance paths, but JSON endpoints remain canonical. No interface may require users to understand binary formats to complete normal message workflows.
+**JSON-first.** Every interface surface provides a stable plain-JSON path for reading and writing messages. CLI commands show readable output in terminals and compact JSON in pipes or files; a global format choice overrides that documented rule. HTTP may expose explicit Lite3 byte endpoints as additive performance paths, but JSON endpoints remain canonical. No interface may require users to understand binary formats to complete normal message workflows.
 
-**Predictable contracts.** CLI flags, API types, HTTP endpoints, and on-disk format versions are stable within a major version. A script written for v0 must run unmodified on any v0.x release. Breaking an existing flag, type, or endpoint requires a major version increment. Each breaking release must state whether it provides migration guidance or retires the old interface without a migration path. Merging a behavior change without a corresponding spec update is a violation.
+**Predictable contracts.** CLI flags, API types, HTTP endpoints, and on-disk format versions are stable within a major version. A CLI script written for one package major version must run unmodified within that major version. The 2.0 hard cutover uses complete messages and retires the old flags without compatibility modes. Breaking an existing flag, type, or endpoint requires a major version increment. Each breaking release must state whether it provides migration guidance or retires the old interface without a migration path. Merging a behavior change without a corresponding spec update is a violation.
 
 **Progressive capability.** Remote access and advanced features are always opt-in. The single-host workflow must be fully functional with zero flags beyond pool name. Users must not need to understand remote concepts to do local work. Explicit HTTPS pool refs (`https://host:port/<pool>`) are the opt-in path for remote mode from core commands; loopback HTTP serves credential-free use on the server machine.
 
@@ -48,8 +48,8 @@ Out of scope — these are hard stops, not positioning decisions:
 These are checkable, not aspirational.
 
 - A user with no prior plasmite knowledge can execute a create/feed/follow round-trip using only `plasmite --help` output.
-- Any script written against v0 CLI flags and output format runs without modification on any v0.x release.
-- New commands or flags do not change the help output or behavior of existing commands as a side effect.
+- Any script written against the current CLI major version runs without modification within that major version.
+- Message readers and writers share one complete-message shape and matching encodings; default read/write pipes preserve data and tags.
 - Pool operations complete without requiring network access when operating on local pools.
 - Every error returned by the CLI includes either a `hint` field or a documentation reference.
 - A user can capture and replay any command's stdout/stderr using only `tap` and `follow`, with no changes to the wrapped program.
@@ -57,6 +57,6 @@ These are checkable, not aspirational.
 ## Strategy implications
 
 - Keep core storage and validation logic centralized and reusable across all interface surfaces.
-- Prefer explicit flags and observable behavior over implicit heuristics and magic defaults.
+- Use a few documented shared rules: complete messages, syntax-based input detection, and terminal versus pipe output. Use explicit flags only when intent or encoding cannot follow those rules.
 - Treat docs of record as product surface: architecture, vision, and specs must stay coherent with each other and with the running code.
 - When a feature request conflicts with the principles above, the principles win. Features are added; principles are not compromised for convenience.

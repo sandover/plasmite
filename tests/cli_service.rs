@@ -38,7 +38,7 @@ impl TestHome {
             .command()
             .arg("--dir")
             .arg(ignored_dir)
-            .args(["serve", "status", "--all", "--json"])
+            .args(["serve", "status", "--all", "--format", "json"])
             .output()?;
         if !output.status.success() {
             return Err(format!(
@@ -242,7 +242,7 @@ fn status_escapes_directory_controls_and_keeps_json_paths_lossless() -> TestResu
         command
             .arg("--dir")
             .arg(home._temp.path().join("unused"))
-            .args(["serve", "status"]);
+            .args(["serve", "status", "--format", "pretty"]);
         if all {
             command.arg("--all");
         }
@@ -267,7 +267,15 @@ fn status_escapes_directory_controls_and_keeps_json_paths_lossless() -> TestResu
             "human status must not contain terminal controls (all={all}): {text:?}"
         );
 
-        let output = command.arg("--json").output()?;
+        let mut json_command = home.command();
+        json_command
+            .arg("--dir")
+            .arg(home._temp.path().join("unused"))
+            .args(["serve", "status", "--format", "json"]);
+        if all {
+            json_command.arg("--all");
+        }
+        let output = json_command.output()?;
         assert!(output.status.success());
         let rows: Vec<Value> = serde_json::from_slice(&output.stdout)?;
         assert_eq!(rows.len(), 1);
@@ -294,7 +302,14 @@ fn duplicate_listeners_reject_certificate_update_without_changing_identity() -> 
         .command()
         .arg("--dir")
         .arg(&pool_dir)
-        .args(["access", "invite", "--name", "retained-client", "--json"])
+        .args([
+            "access",
+            "invite",
+            "--name",
+            "retained-client",
+            "--format",
+            "json",
+        ])
         .output()?;
     assert!(
         invite.status.success(),
@@ -404,7 +419,7 @@ fn status_all_keeps_healthy_rows_when_one_setup_is_malformed() -> TestResult<()>
         .command()
         .arg("--dir")
         .arg(home._temp.path().join("unused"))
-        .args(["serve", "status", "--all", "--json"])
+        .args(["serve", "status", "--all", "--format", "json"])
         .output()?;
     assert_eq!(output.status.code(), Some(1));
 

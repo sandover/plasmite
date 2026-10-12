@@ -331,3 +331,24 @@
 {"version":1,"task_id":"7EYA7N","kind":"claim","at":"2026-10-12T16:59:13.998643Z","agent":"gpt-6@local"}
 {"version":1,"task_id":"7EYA7N","kind":"result","at":"2026-10-12T18:06:48.791634Z","agent":"gpt-6@local","text":"Review, macOS gate, Windows UDP tests and running-service lifecycle passed.","file":{"path":".scratch/udp-input-evidence/validation.md","sha256":"504c10df52ea04ae0b46d0757a8307cc3d2ed92bf067cee34092d0b07c2268dc","mtime":"2026-10-12T18:06:25.581397005Z","git_commit":"b50e0d52efe7a3f0ee01dadd71b555b47260736c"}}
 {"version":1,"task_id":"7EYA7N","kind":"done","at":"2026-10-12T18:06:48.817688Z","agent":"gpt-6@local","text":"Final review and native checks passed; fixture cleanup complete. Release stays held."}
+{"version":1,"task_id":"WHCI6U","kind":"created","at":"2026-10-12T19:12:50.646205Z"}
+{"version":1,"task_id":"BNP7XE","kind":"created","at":"2026-10-12T19:12:50.646226Z"}
+{"version":1,"task_id":"DPQ4PW","kind":"created","at":"2026-10-12T19:12:50.646229Z"}
+{"version":1,"task_id":"H3PERS","kind":"created","at":"2026-10-12T19:12:50.64623Z"}
+{"version":1,"task_id":"KYJ4NS","kind":"created","at":"2026-10-12T19:12:50.646232Z"}
+{"version":1,"task_id":"BNP7XE","kind":"open","at":"2026-10-12T19:12:59.133958Z"}
+{"version":1,"task_id":"DPQ4PW","kind":"open","at":"2026-10-12T19:12:59.156181Z"}
+{"version":1,"task_id":"H3PERS","kind":"open","at":"2026-10-12T19:12:59.178135Z"}
+{"version":1,"task_id":"KYJ4NS","kind":"open","at":"2026-10-12T19:12:59.202349Z"}
+{"version":1,"task_id":"BNP7XE","kind":"claim","at":"2026-10-12T19:12:59.223901Z","agent":"codex@local"}
+{"version":1,"task_id":"BNP7XE","kind":"result","at":"2026-10-12T19:16:43.917858Z","agent":"codex@local","text":"Sonnet reviewed code; adopted checked writes, loss tracking, simpler readers, and YAML flag replacement","file":{"path":".scratch/cli-cutover/sonnet-plan.md","sha256":"d86ee8c22475dd6d454955b61f46d23902c014530f2c3477a0082bbb889dc52a","mtime":"2026-10-12T19:15:37.132877761Z","git_commit":"1008e4a16b53b1296caea512fdf0e91cc4f2847b"}}
+{"version":1,"task_id":"BNP7XE","kind":"done","at":"2026-10-12T19:16:43.94877Z","agent":"codex@local","text":"Settled hard cutover contract with codebase-aware Sonnet-5 review; no release"}
+{"version":1,"task_id":"DPQ4PW","kind":"claim","at":"2026-10-12T19:16:43.97365Z","agent":"codex@local"}
+{"version":1,"task_id":"H3PERS","kind":"claim","at":"2026-10-12T19:16:43.998001Z","agent":"codex@local"}
+{"version":1,"task_id":"DPQ4PW","kind":"done","at":"2026-10-12T19:41:39.202365Z","agent":"codex@local","text":"Complete text-message pipes and explicit --data creation implemented; focused checks pass."}
+{"version":1,"task_id":"H3PERS","kind":"done","at":"2026-10-12T19:41:39.313448Z","agent":"codex@local","text":"Framed Lite3 streams, raw attachments and finite-history failure behavior implemented and checked."}
+{"version":1,"task_id":"KYJ4NS","kind":"claim","at":"2026-10-12T19:41:39.385381Z","agent":"codex@local"}
+{"version":1,"task_id":"DPQ4PW","kind":"result","at":"2026-10-12T19:41:42.947504Z","text":"Default copy/edit/save/reload/chaining and sparse-input checks pass; review fixes complete.","file":{"path":".scratch/cli-cutover/sol-code-review.md","sha256":"ece49c3342c431b516ac1fc576a2018599dbfd72b320c851e960dcbd9d481b4a","mtime":"2026-10-12T19:40:17.677196569Z","git_commit":"d19e56fd9c7237e4f0a473eab1b3efe74f05bf65"}}
+{"version":1,"task_id":"H3PERS","kind":"result","at":"2026-10-12T19:41:43.016914Z","text":"Local and remote Lite3 pipes preserve bytes; truncation keeps earlier appends.","file":{"path":".scratch/cli-cutover/binary-tests.log","sha256":"ca9ba162ca3276eee44b086eb8cf5ce13bd0f928460201749bc783e8dc3c4442","mtime":"2026-10-12T19:34:31.572695855Z","git_commit":"d19e56fd9c7237e4f0a473eab1b3efe74f05bf65"}}
+{"version":1,"task_id":"KYJ4NS","kind":"result","at":"2026-10-12T19:53:34.428692Z","agent":"codex@local","text":"Full local release gate passes; reviews resolved; docs and callers migrated; release held.","file":{"path":".scratch/cli-cutover/validation.md","sha256":"29fa298e91d607677a36de6051014cae0879901e86c55fe98a394dafd2b04efb","mtime":"2026-10-12T19:53:34.348204449Z","git_commit":"d19e56fd9c7237e4f0a473eab1b3efe74f05bf65"}}
+{"version":1,"task_id":"KYJ4NS","kind":"done","at":"2026-10-12T19:53:34.495798Z","agent":"codex@local","text":"CLI cutover verified and documented; full local gate passes. Landing on main without release."}

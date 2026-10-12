@@ -449,7 +449,8 @@ fn direct_mcp_approval_refresh_restart_and_revocation() -> Result<(), Box<dyn st
             "invite",
             "--name",
             "replacement",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()?;
     assert!(replacement.status.success());

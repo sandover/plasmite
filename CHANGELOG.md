@@ -2,47 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [Unreleased — 2.0.0]
 
-### YAML output
+### CLI message pipes
 
-Commands that support `--json` also accept `--yaml`. YAML preserves the same
-reports and message envelopes, with explicit document boundaries for streaming.
-Errors and notices use the selected format on stderr. Input remains JSON or
-Lite3; storage and network protocols remain unchanged.
+Message commands now read and write complete messages. `follow source | feed
+destination` copies contents and tags with defaults; `jq` can edit fields between
+them. `feed` echoes the complete newly appended message so writers can chain.
+Use `feed --data` to create messages from application objects.
 
-## [1.2.0] - 2026-10-09
+One global `--format pretty|json|yaml|lite3|lite3-raw` replaces the earlier
+output switches. Terminals default to readable output; pipes and files default
+to compact JSON. Feed detects JSON, marked YAML, and framed Lite3 without waiting
+for more messages. JSON accepts multiline objects. YAML input/output preserves
+JSON-compatible values. Framed Lite3 supports one or many messages; the raw
+form supports one attachment through EOF. See [the CLI upgrade guide](docs/record/upgrading-2.0.md).
 
-### Raw Lite3 messages in the CLI
+Invalid input stops and earlier appends remain. Closed downstream pipes stop
+normally; other output errors never retry successful appends. Finite history
+reads fail if retention drops selected messages. Failed access checks return
+nonzero. Text input permits encoding overhead rather than the old 1 MiB cap.
 
-Export a message's original Lite3 bytes with `fetch --format lite3`, then
-append those bytes with `feed --in lite3`:
+### UDP input and binary append
 
-```bash
-plasmite pool create relay
-plasmite feed relay '{"kind":"heartbeat"}'
-plasmite fetch relay 1 --format lite3 > heartbeat.lite3
-plasmite feed relay --in lite3 --file heartbeat.lite3
-```
+`serve --udp` adds directory-wide append-only UDP input. Raw Lite3 appends preserve
+original bytes and reject unreadable nested values before committing. Binary
+append receipts derive from validated input and assigned identity, avoiding a
+second lookup that concurrent retention could invalidate.
 
-Both commands support local pools and remote pool URLs. Binary feed accepts
-a file or stdin through EOF, up to 256 MiB; a remote server may enforce a
-lower request-body limit. It preserves the byte buffer, tags, and data. Each
-append gets a new destination sequence and timestamp. Binary fetch writes no
-headings, color, or trailing newline. `fetch --format json` also selects the
-existing JSON envelope output; `--json` keeps its meaning.
-
-### Binary append fixes
-
-- Reject unreadable nested Lite3 data before appending, including invalid
-  UTF-8. This uses the existing JSON decoder to check the data and adds work
-  to raw Lite3 validation; ordinary JSON writes keep their existing path.
-- Build binary append receipts from the input and assigned sequence/time.
-  Concurrent writers can no longer overwrite the message between append and
-  receipt generation. Rust clients can use `append_lite3_with_receipt` to
-  receive the committed message without a second fetch.
-
-[Full changes since 1.1.0](https://github.com/sandover/plasmite/compare/v1.1.0...v1.2.0)
+Language APIs, HTTP, MCP and pool files keep their current formats. This source
+prepares a major CLI cutover; no 2.0 release has been published.
 
 ## [1.1.0] - 2026-10-05
 

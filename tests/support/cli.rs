@@ -135,7 +135,8 @@ pub fn fetch_message(pool_dir: &Path, pool: &str, seq: u64) -> Value {
             "--dir",
             pool_dir.to_str().expect("pool_dir"),
             "fetch",
-            "--json",
+            "--format",
+            "json",
             pool,
             &seq.to_string(),
         ])

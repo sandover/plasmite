@@ -117,7 +117,7 @@ to make them appear. Stopped servers do not appear in the list.
 
 ```console
 plasmite serve status
-plasmite serve status --json
+plasmite serve status --format json
 ```
 
 The JSON form is an array. Each object has `pid`, `pool_dir` (an absolute
@@ -138,10 +138,10 @@ rather than live listeners.
 ## Saved connections
 
 `access list` lists this user's saved server destinations without contacting
-them. Use `access list --json` for an array of objects with a `destination`
+them. Use `access list --format json` for an array of objects with a `destination`
 field. `access status SERVER_URL` checks one destination's reachability and
-authorization. It exits zero when the check completes, even when the report
-says access failed; scripts should inspect the JSON fields.
+authorization. It prints the report and exits nonzero when the server is
+unreachable or rejects access.
 
 An access key grants full access to every pool in the server’s pool directory:
 it can list, read, and append messages, and create or delete pools. For native
@@ -164,79 +164,101 @@ and resources. See the [serving guide](record/serving.md#connect-an-ai-client)
 for setup and the [MCP contract](../spec/mcp/2025-11-25/SPEC.md) for message
 and HTTP details.
 
-## Input
+## Messages and pipes
 
-- `feed` accepts one inline JSON value, a file with `--file`, `--file -` for
-  stdin, or piped stdin when neither inline data nor a file is given.
-  `--in` selects JSON, JSON Lines, auto-detection, or Lite3 for input;
-  `--errors` selects stop or skip behavior for JSON input. YAML is an output
-  choice only and does not add a YAML input mode.
-- `feed --in lite3` reads one byte buffer as one message from `--file PATH`,
-  `--file -`, or piped stdin. It reads stdin through EOF and accepts at most
-  256 MiB. A remote server may enforce a lower configured request-body limit.
-  Do not pass inline `DATA`, `--tag`, or `--errors skip` with Lite3 input. The
-  document supplies its own `meta.tags` string array and object `data`;
-  Plasmite stores those bytes as given and assigns the new message's sequence
-  and time. `feed --json` selects a JSON append receipt; `feed --yaml`
-  selects the same receipt as YAML. Neither flag changes the input mode. The
-  command treats the whole input as one byte buffer, including unused
-  bytes; it does not split concatenated messages.
-- Binary pipes work with Bash and Zsh. PowerShell 7.4 and later preserves
-  binary data with native redirection. Earlier PowerShell versions need
-  `cmd.exe` redirection for the same binary pipe; their native redirection
-  does not promise byte preservation.
-- `tap POOL -- COMMAND...` runs a required child command, passes through its
-  stdin, and records its stdout and stderr.
-- `duplex` reads line-oriented chat from a terminal (requiring `--me`) and a
-  JSON stream from non-terminal stdin.
-- `follow` and `duplex` do not emit or consume Lite3 binary streams.
-- `mcp` reads newline-delimited JSON-RPC from stdin until EOF and writes
-  JSON-RPC to stdout. Use `--dir DIR mcp` (or `mcp --dir DIR`) to expose local
-  pools over stdio. For shared pools, connect the harness directly to the
-  server's HTTPS `/mcp` address.
+`feed`, `fetch`, `follow`, and `duplex` use complete messages. A JSON message
+contains an object `data` and `meta.tags`, a list of strings. Stored messages
+also contain `seq` and `time`. When `feed` copies a message, it preserves the
+contents and tags and assigns a new destination sequence and time.
 
-## Output
+```bash
+# Copy new messages, including their tags.
+plasmite follow source | plasmite feed destination
 
-Commands produce readable output by default, including when piped. Choose
-`--json` or `--yaml` when a script reads a report or message. Terminal
-presentation, such as color, does not select the output format.
+# Change one field and preserve the rest.
+plasmite follow source |
+  jq -c '.data.temperature += 1' |
+  plasmite feed destination
 
-| Commands | `--json` output | `--yaml` output |
-| --- | --- | --- |
-| `pool`, `doctor`, `serve status`, `serve lifecycle`, `access`, `version` | One report document | One report document |
-| `fetch` | One message envelope | One message envelope |
-| `follow`, `duplex` | One message envelope per line | One YAML document per message |
-| `feed`, `serve logs` | One receipt or log object per line | One YAML document per receipt or log object |
+# Save retained messages and load them later.
+plasmite follow source --tail 100 --no-follow > messages.jsonl
+plasmite feed destination < messages.jsonl
+```
 
-YAML uses the same values and fields as JSON, including reports, messages,
-and receipts. Every YAML output starts with `---` and ends with `...`, including
-a single report. Streams write one complete document as each item arrives.
-Each document stands on its own. YAML quotes string values so readers do not
-interpret dates or boolean-like text as different types.
+`feed` writes the complete newly appended message to stdout. This makes
+`feed first | feed second` a copying chain. Errors and notices go to stderr.
+A successful append remains stored if stdout later fails; Plasmite stops
+without retrying that append.
 
-`--yaml` only selects output. It does not change `feed` input, which remains
-JSON, JSON Lines, auto-detected JSON formats, or Lite3. With `follow`,
-`--data-only` still selects each message's `data` value; YAML writes one marked
-document per selected value.
+## Creating messages
 
-`--yaml` conflicts with `--json`. `fetch` also rejects `--format` with
-`--yaml`; `follow` and `duplex` reject `--format` and `--jsonl`. The JSON
-stream aliases `--jsonl` and `--format jsonl` keep their existing meanings.
-There is no `--format yaml` alias.
+Use `--data` to create messages from application objects. This gives ordinary
+fields such as `data`, `seq`, and `meta` their application meaning.
 
-Structured output has no color or commentary. `mcp` always uses JSON-RPC;
-`completion` always prints shell code. `tap` passes through child output;
-`--quiet` suppresses that output. Help, completion, and bare `version` output
-remain text; `version --json` and `version --yaml` select a report format.
+```bash
+plasmite feed events --data '{"temperature":21}'
+plasmite feed events --data --tag sensor '{"temperature":21}'
+jq -c '.[]' readings.json | plasmite feed events --data
+```
 
-`fetch POOL SEQ` defaults to readable text. Use `--format pretty`,
-`--format json`, or `--format lite3` to choose readable text, one JSON message
-envelope, or the raw Lite3 document. `--json` is an alias for `--format json`;
-it cannot be combined with `--format pretty` or `--format lite3`. Lite3 fetch
-works for local and remote pools and writes the document bytes to stdout.
+Choose one source: a positional argument, `--file PATH`, or stdin.
+`--file -` reads stdin. All sources follow the same message rule. `--tag`
+requires `--data`; copied messages supply their own tags. Missing `meta` or
+`meta.tags` means an empty tag list. Default message input rejects unknown
+message and metadata fields, invalid tags, and non-object contents.
 
-Message envelopes contain `seq`, `time`, `meta`, and `data`. Compatibility
-guarantees for machine output live in the [CLI specification](../spec/v0/SPEC.md).
+## Formats
+
+Global `--format pretty|json|yaml|lite3|lite3-raw` chooses output before or
+after a command. With no flag, a terminal gets readable output and a pipe
+or file gets compact JSON. `--format` controls output only.
+
+| Format | Output and input |
+| --- | --- |
+| `pretty` | Readable JSON messages; JSON input accepts them |
+| `json` | One compact JSON message per line; input also accepts multiline objects |
+| `yaml` | One YAML document per message, starting with `---` and ending with `...` |
+| `lite3` | A binary stream with a versioned prefix and a length for each message |
+| `lite3-raw` | One raw attachment through EOF; fetch output only |
+
+`feed` detects JSON, marked YAML, and framed Lite3 from their syntax as soon
+as the first message arrives. It never guesses a message's meaning from
+application keys. `--input-format auto|json|yaml|lite3|lite3-raw` selects an
+explicit input encoding. Explicit YAML also accepts one unmarked document
+through EOF. YAML input accepts JSON-compatible values and rejects custom
+tags, aliases, non-string keys, and non-finite numbers.
+
+```bash
+plasmite follow source --format yaml | plasmite feed destination
+plasmite follow source --format lite3 | plasmite feed destination
+plasmite fetch source 1 --format lite3-raw > heartbeat.lite3
+plasmite feed destination --input-format lite3-raw < heartbeat.lite3
+```
+
+Framed Lite3 starts with the four bytes `PLS1`. Each record then contains
+an eight-byte source sequence, an eight-byte timestamp in nanoseconds,
+a four-byte payload length, and that many Lite3 bytes. Header integers use
+big-endian byte order, matching the existing HTTP binary stream records.
+The prefix belongs to the CLI stream. Raw attachments have no prefix or
+record header. Copying preserves the original Lite3 payload bytes.
+
+Each Lite3 payload may occupy at most 256 MiB and must fit the destination
+pool. The text reader permits encoding overhead rather than imposing the
+old 1 MiB record limit. Remote servers keep their configured request-body
+limit (1 MiB by default); use `serve --max-body-bytes` when larger messages
+need remote delivery. Truncated or malformed input stops the command and
+returns nonzero. Earlier successful appends remain. Empty input streams
+succeed without appending anything.
+
+Reports use the same JSON/YAML formatting rule but remain reports.
+Binary formats require message commands; raw output requires `fetch`.
+Help and completion remain text. `tap` passes through its child's output;
+`mcp` keeps JSON-RPC. Terminal `duplex` creates chat messages with `--me`;
+piped `duplex` accepts complete messages, streams received messages, and
+ends when stdin closes. Use `feed` when every input needs an echoed append.
+
+Bash and Zsh preserve binary pipes. PowerShell 7.4 and later preserves
+native binary redirection; earlier versions need `cmd.exe` redirection.
 
 ## History and playback
 
@@ -248,15 +270,15 @@ Use `--no-follow` with either selector to read history and exit:
 
 ```console
 plasmite follow events --tail 100 --no-follow
-plasmite follow https://pools.example.net:9743/events --since 5m --no-follow --json
+plasmite follow https://pools.example.net:9743/events --since 5m --no-follow --format json
 ```
 
 A finite read fixes its upper sequence boundary when it starts. Later writes
 cannot keep it running. Relative times use that same starting point. `--tail`
 counts retained messages before filters; `--tag` and `--where` then select
 matches within that history and use the same filters for new messages.
-If retention overtakes the reader, it reports the dropped messages and
-continues through the history still available. `--one` exits at the first
+If retention overtakes a live reader, it reports dropped messages and
+continues. A finite history read reports the loss and exits nonzero. `--one` exits at the first
 match; a timeout exits 124.
 
 `--replay SPEED` controls local history timing and implies a finite read.
@@ -265,13 +287,14 @@ and `0` emits immediately. Remote replay timing remains unsupported.
 
 ## Errors and exits
 
-Errors and notices go to stderr. They use concise text by default, JSON with
-`--json`, or marked YAML documents with `--yaml`. Help stays readable text.
+Errors and notices go to stderr. They follow the selected text format: readable
+text in a terminal, compact JSON in a pipe or file, or marked YAML with
+`--format yaml`. Binary output uses readable diagnostics. Help stays readable text.
 General exit codes are mapped by error kind; these command workflows
 also have specific meanings:
 
 - `follow` and `duplex` return 124 on timeout.
-- `feed --errors skip` returns 1 if any input record was rejected.
+- `feed` stops on invalid input; earlier successful appends remain stored.
 - `tap` returns the child process's status, including a signal-derived status.
 - `pool delete` is nonzero if any requested deletion fails.
 - `doctor` is nonzero if any inspected pool is corrupt.

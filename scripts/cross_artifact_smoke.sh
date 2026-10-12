@@ -191,7 +191,7 @@ echo "[smoke] node -> pool"
   node -e "const { Client } = require('./bindings/node'); const c = new Client(process.argv[1]); const p = c.createPool('node-pool', 1048576n); p.close(); c.close();" "$WORKDIR"
 )
 check_pool_version "$WORKDIR/node-pool.plasmite"
-"$PLASMITE_BIN" --dir "$WORKDIR" pool info node-pool --json >/dev/null
+"$PLASMITE_BIN" --dir "$WORKDIR" pool info node-pool --format json >/dev/null
 
 echo "[smoke] python -> pool"
 PYTHONPATH="$ROOT/bindings/python" python3 - <<'PY' "$WORKDIR"
@@ -205,7 +205,7 @@ pool.close()
 client.close()
 PY
 check_pool_version "$WORKDIR/python-pool.plasmite"
-"$PLASMITE_BIN" --dir "$WORKDIR" pool info python-pool --json >/dev/null
+"$PLASMITE_BIN" --dir "$WORKDIR" pool info python-pool --format json >/dev/null
 
 echo "[smoke] go -> pool"
 cat > "$WORKDIR/go-smoke.json" <<'JSON'
@@ -232,6 +232,6 @@ JSON
     go run ./cmd/plasmite-conformance "$WORKDIR/go-smoke.json"
 )
 check_pool_version "$WORKDIR/work-go/go-pool.plasmite"
-"$PLASMITE_BIN" --dir "$WORKDIR/work-go" pool info go-pool --json >/dev/null
+"$PLASMITE_BIN" --dir "$WORKDIR/work-go" pool info go-pool --format json >/dev/null
 
 echo "[smoke] complete"

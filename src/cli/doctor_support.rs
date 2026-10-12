@@ -17,7 +17,7 @@ use super::output_support::format_seq_range;
 use super::output_support::short_display_path;
 use super::pool_support::message_count_from_info;
 
-pub(crate) fn emit_doctor_human(report: &ValidationReport) {
+pub(crate) fn emit_doctor_human(report: &ValidationReport) -> Result<(), Error> {
     if !io::stdout().is_terminal() {
         let label = report
             .pool_ref
@@ -26,7 +26,7 @@ pub(crate) fn emit_doctor_human(report: &ValidationReport) {
         let label = super::output_support::human_literal(&label);
         match report.status {
             ValidationStatus::Ok => {
-                println!("OK: {label}");
+                super::output::write_stdout(format!("OK: {label}\n").as_bytes())?;
             }
             ValidationStatus::Corrupt => {
                 let last_good = report
@@ -43,18 +43,24 @@ pub(crate) fn emit_doctor_human(report: &ValidationReport) {
                         )
                     })
                     .unwrap_or_default();
-                println!("CORRUPT: {label}{last_good}{issue}");
+                super::output::write_stdout(
+                    format!("CORRUPT: {label}{last_good}{issue}\n").as_bytes(),
+                )?;
             }
         }
-        return;
+        return Ok(());
     }
 
     let label = doctor_display_label(report);
     match report.status {
         ValidationStatus::Ok => {
-            println!("{label}: healthy");
-            println!("  messages:  {}", doctor_messages_summary(report));
-            println!("  checked:   header, index, ring — 0 issues");
+            super::output::write_stdout(format!("{label}: healthy\n").as_bytes())?;
+            super::output::write_stdout(
+                format!("  messages:  {}\n", doctor_messages_summary(report)).as_bytes(),
+            )?;
+            super::output::write_stdout(
+                "  checked:   header, index, ring — 0 issues\n".as_bytes(),
+            )?;
         }
         ValidationStatus::Corrupt => {
             let issue = report
@@ -62,30 +68,39 @@ pub(crate) fn emit_doctor_human(report: &ValidationReport) {
                 .first()
                 .map(|value| value.message.clone())
                 .unwrap_or_else(|| "corruption detected".to_string());
-            println!("{label}: corrupt");
-            println!("  messages:  {}", doctor_messages_summary(report));
-            println!(
-                "  checked:   header, index, ring — {} issues",
-                report.issues.len()
-            );
-            println!(
-                "  detail:    {}",
-                super::output_support::human_literal(&issue)
-            );
+            super::output::write_stdout(format!("{label}: corrupt\n").as_bytes())?;
+            super::output::write_stdout(
+                format!("  messages:  {}\n", doctor_messages_summary(report)).as_bytes(),
+            )?;
+            super::output::write_stdout(
+                format!(
+                    "  checked:   header, index, ring — {} issues\n",
+                    report.issues.len()
+                )
+                .as_bytes(),
+            )?;
+            super::output::write_stdout(
+                format!(
+                    "  detail:    {}\n",
+                    super::output_support::human_literal(&issue)
+                )
+                .as_bytes(),
+            )?;
         }
     }
+    Ok(())
 }
 
-pub(crate) fn emit_doctor_human_summary(reports: &[ValidationReport]) {
+pub(crate) fn emit_doctor_human_summary(reports: &[ValidationReport]) -> Result<(), Error> {
     if reports.is_empty() {
-        println!("No pools found.");
-        return;
+        super::output::write_stdout(b"No pools found.\n")?;
+        return Ok(());
     }
     if !io::stdout().is_terminal() {
         for report in reports {
-            emit_doctor_human(report);
+            emit_doctor_human(report)?;
         }
-        return;
+        return Ok(());
     }
 
     let corrupt = reports
@@ -104,33 +119,42 @@ pub(crate) fn emit_doctor_human_summary(reports: &[ValidationReport]) {
         .max()
         .unwrap_or(0);
     if corrupt == 0 {
-        println!("All {} pools healthy.", reports.len());
-        println!();
+        super::output::write_stdout(format!("All {} pools healthy.\n", reports.len()).as_bytes())?;
+        super::output::write_stdout(b"\n")?;
         for idx in 0..reports.len() {
-            println!(
-                "  {:<label_width$}   {:<message_width$}   0 issues",
-                labels[idx], message_labels[idx]
-            );
+            super::output::write_stdout(
+                format!(
+                    "  {:<label_width$}   {:<message_width$}   0 issues\n",
+                    labels[idx], message_labels[idx]
+                )
+                .as_bytes(),
+            )?;
         }
     } else {
-        println!("{corrupt} of {} pools unhealthy.", reports.len());
-        println!();
+        super::output::write_stdout(
+            format!("{corrupt} of {} pools unhealthy.\n", reports.len()).as_bytes(),
+        )?;
+        super::output::write_stdout(b"\n")?;
         for (idx, report) in reports.iter().enumerate() {
             let label = &labels[idx];
             let messages = &message_labels[idx];
             if report.status == ValidationStatus::Corrupt {
-                println!(
-                    "  ✗ {:<label_width$}   {:<message_width$}   {} issues (run `pls doctor {}` for detail)",
+                super::output::write_stdout(format!(
+                    "  ✗ {:<label_width$}   {:<message_width$}   {} issues (run `pls doctor {}` for detail)\n",
                     label,
                     messages,
                     report.issues.len(),
                     label
-                );
+                ).as_bytes())?;
             } else {
-                println!("  ✓ {label:<label_width$}   {messages:<message_width$}   0 issues");
+                super::output::write_stdout(
+                    format!("  ✓ {label:<label_width$}   {messages:<message_width$}   0 issues\n")
+                        .as_bytes(),
+                )?;
             }
         }
     }
+    Ok(())
 }
 
 pub(crate) fn doctor_display_label(report: &ValidationReport) -> String {

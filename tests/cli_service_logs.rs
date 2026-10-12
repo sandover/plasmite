@@ -68,7 +68,7 @@ impl Fixture {
     }
 
     fn command(&self) -> Command {
-        self.command_with_format("--json")
+        self.command_with_format("json")
     }
 
     fn command_with_format(&self, format: &str) -> Command {
@@ -78,7 +78,7 @@ impl Fixture {
             .env("PLASMITE_ACCESS_HOME", &self.home)
             .arg("--dir")
             .arg(&self.pools)
-            .args(["serve", "logs", "--tail", "2", format]);
+            .args(["--format", format, "serve", "logs", "--tail", "2"]);
         command
     }
 
@@ -98,7 +98,7 @@ struct FollowLog {
 
 impl FollowLog {
     fn start(fixture: &Fixture, close_after_one_line: bool) -> TestResult<Self> {
-        Self::start_with_format(fixture, close_after_one_line, "--json")
+        Self::start_with_format(fixture, close_after_one_line, "json")
     }
 
     fn start_with_format(
@@ -305,7 +305,7 @@ fn json_follow_broken_pipe_reaps_native_reader_and_reports_io_error() -> TestRes
 fn yaml_logs_preserve_messages_and_follow_without_waiting_for_eof() -> TestResult<()> {
     let fixture = Fixture::new()?;
     fixture.append(b"null\n")?;
-    let output = fixture.command_with_format("--yaml").output()?;
+    let output = fixture.command_with_format("yaml").output()?;
     assert!(
         output.status.success(),
         "{}",
@@ -319,7 +319,7 @@ fn yaml_logs_preserve_messages_and_follow_without_waiting_for_eof() -> TestResul
         rows,
         vec![json!({"message":"first line"}), json!({"message":"null"})]
     );
-    let process = FollowLog::start_with_format(&fixture, false, "--yaml")?;
+    let process = FollowLog::start_with_format(&fixture, false, "yaml")?;
     assert_eq!(process.message()?, "first line");
     assert_eq!(process.message()?, "null");
     fixture.append(b"new YAML follow line\n")?;

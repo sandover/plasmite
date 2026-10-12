@@ -73,7 +73,8 @@ fn finite_tail_filters_after_selecting_retained_messages() {
             "--tail",
             "2",
             "--no-follow",
-            "--json",
+            "--format",
+            "json",
             "--timeout",
             "5s",
             "--tag",
@@ -95,7 +96,7 @@ fn finite_one_returns_first_match_in_selected_history() {
     let output = history(
         temp.path(),
         "history",
-        &["--tail", "4", "--no-follow", "--one", "--json"],
+        &["--tail", "4", "--no-follow", "--one", "--format", "json"],
     );
     assert_success(&output);
     assert_eq!(parse_json_lines(&output.stdout)[0]["seq"], 2);
@@ -108,7 +109,7 @@ fn finite_empty_history_exits_without_timeout() {
     let output = history(
         temp.path(),
         "history",
-        &["--tail", "10", "--no-follow", "--json"],
+        &["--tail", "10", "--no-follow", "--format", "json"],
     );
     assert_success(&output);
     assert!(output.stdout.is_empty());
@@ -125,7 +126,8 @@ fn finite_since_uses_timestamp_and_filters() {
             "--since",
             "2020-09-13T12:26:40.003Z",
             "--no-follow",
-            "--json",
+            "--format",
+            "json",
             "--timeout",
             "5s",
             "--tag",
@@ -143,7 +145,7 @@ fn finite_since_uses_timestamp_and_filters() {
     let output = history(
         temp.path(),
         "history",
-        &["--since", "1s", "--no-follow", "--json"],
+        &["--since", "1s", "--no-follow", "--format", "json"],
     );
     assert_success(&output);
     assert!(output.stdout.is_empty());
@@ -152,7 +154,7 @@ fn finite_since_uses_timestamp_and_filters() {
 #[test]
 fn finite_requires_history_selector() {
     let output = cmd()
-        .args(["follow", "missing", "--no-follow", "--json"])
+        .args(["follow", "missing", "--no-follow", "--format", "json"])
         .output()
         .expect("follow");
     assert_eq!(output.status.code(), Some(2));
@@ -166,21 +168,37 @@ fn finite_requires_history_selector() {
 }
 
 #[test]
-fn structured_aliases_remain_uncolored_and_human_default_ignores_tty() {
+fn json_format_is_uncolored_and_pretty_is_readable() {
     let temp = tempfile::tempdir().expect("tempdir");
     seed(temp.path(), 1, 0);
-    for aliases in [vec!["--json"], vec!["--jsonl"], vec!["--format", "jsonl"]] {
-        let mut args = vec!["--tail", "1", "--no-follow", "--color", "always"];
-        args.extend(aliases);
-        let output = history(temp.path(), "history", &args);
-        assert_success(&output);
-        assert_eq!(parse_json_lines(&output.stdout).len(), 1);
-        assert!(!output.stdout.contains(&0x1b));
-    }
     let output = history(
         temp.path(),
         "history",
-        &["--tail", "1", "--no-follow", "--color", "never"],
+        &[
+            "--tail",
+            "1",
+            "--no-follow",
+            "--color",
+            "always",
+            "--format",
+            "json",
+        ],
+    );
+    assert_success(&output);
+    assert_eq!(parse_json_lines(&output.stdout).len(), 1);
+    assert!(!output.stdout.contains(&0x1b));
+    let output = history(
+        temp.path(),
+        "history",
+        &[
+            "--tail",
+            "1",
+            "--no-follow",
+            "--color",
+            "never",
+            "--format",
+            "pretty",
+        ],
     );
     assert_success(&output);
     assert!(String::from_utf8_lossy(&output.stdout).contains("\n  \""));
@@ -193,7 +211,9 @@ fn replay_selects_tail_before_filtering() {
     let output = history(
         temp.path(),
         "history",
-        &["--tail", "2", "--replay", "0", "--json", "--tag", "even"],
+        &[
+            "--tail", "2", "--replay", "0", "--format", "json", "--tag", "even",
+        ],
     );
     assert_success(&output);
     assert_eq!(
@@ -219,7 +239,7 @@ fn local_and_remote_finite_reads_share_selection_rules() {
         vec!["--tail", "5", "--where", "false"],
     ] {
         let mut args = selection;
-        args.extend(["--no-follow", "--json"]);
+        args.extend(["--no-follow", "--format", "json"]);
         let local = history(temp.path(), "history", &args);
         let remote = history(temp.path(), &target, &args);
         assert_success(&local);
@@ -251,7 +271,8 @@ fn finite_snapshot_excludes_writes_while_output_is_blocked() {
                 "--tail",
                 "128",
                 "--no-follow",
-                "--json",
+                "--format",
+                "json",
                 "--timeout",
                 "5s",
             ])
@@ -296,7 +317,8 @@ fn finite_retention_gap_reports_exact_missing_history_and_exits() {
             "--tail",
             "128",
             "--no-follow",
-            "--json",
+            "--format",
+            "json",
             "--timeout",
             "5s",
         ])
@@ -329,8 +351,8 @@ fn finite_retention_gap_reports_exact_missing_history_and_exits() {
         .read_to_end(&mut stderr)
         .expect("stderr read");
     assert!(
-        status.success(),
-        "status={status}, stderr={}",
+        !status.success(),
+        "finite history loss must fail; status={status}, stderr={}",
         String::from_utf8_lossy(&stderr)
     );
     let messages = parse_json_lines(format!("{first}{remaining}").as_bytes());
@@ -371,7 +393,8 @@ fn duplex_since_reads_same_local_and_remote_history() {
                 "2020-09-13T12:26:40.003Z",
                 "--timeout",
                 "150ms",
-                "--json",
+                "--format",
+                "json",
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -425,7 +448,8 @@ fn remote_timeout_counts_output_instead_of_unmatched_arrivals() {
             "false",
             "--timeout",
             "150ms",
-            "--json",
+            "--format",
+            "json",
         ],
     );
     stop.store(true, Ordering::Release);
@@ -458,7 +482,8 @@ fn replay_timeout_includes_playback_delay_without_output() {
             "1",
             "--timeout",
             "225ms",
-            "--json",
+            "--format",
+            "json",
         ],
     );
     assert_eq!(output.status.code(), Some(124));
@@ -479,7 +504,7 @@ fn remote_finite_reads_adapt_to_short_server_tail_limits() {
         let output = history(
             temp.path(),
             &target,
-            &["--tail", "5", "--no-follow", "--json"],
+            &["--tail", "5", "--no-follow", "--format", "json"],
         );
         assert_success(&output);
         assert_eq!(parse_json_lines(&output.stdout).len(), 5);
@@ -584,7 +609,8 @@ fn remote_late_matching_line_does_not_reset_output_timeout() {
             "--one",
             "--timeout",
             "225ms",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("follow");
@@ -604,7 +630,15 @@ fn remote_unrelated_usage_error_is_not_retried() {
     let message = "different request constraint";
     let (target, server) = stub_remote_tail(Duration::ZERO, Some(message), 1);
     let output = cmd()
-        .args(["follow", &target, "--tail", "1", "--no-follow", "--json"])
+        .args([
+            "follow",
+            &target,
+            "--tail",
+            "1",
+            "--no-follow",
+            "--format",
+            "json",
+        ])
         .output()
         .expect("follow");
     assert_eq!(server.join().expect("server"), 3);
@@ -619,7 +653,15 @@ fn remote_unrelated_usage_error_is_not_retried() {
 fn remote_finite_read_terminates_at_maximum_sequence() {
     let (target, server) = stub_remote_tail(Duration::ZERO, None, u64::MAX);
     let output = cmd()
-        .args(["follow", &target, "--tail", "1", "--no-follow", "--json"])
+        .args([
+            "follow",
+            &target,
+            "--tail",
+            "1",
+            "--no-follow",
+            "--format",
+            "json",
+        ])
         .output()
         .expect("follow");
     assert_eq!(server.join().expect("server"), 3);
@@ -634,7 +676,14 @@ fn untailed_live_follow_reports_quiet_end_gap_without_double_counting() {
     let mut child = cmd()
         .arg("--dir")
         .arg(temp.path())
-        .args(["follow", "history", "--json", "--timeout", "1500ms"])
+        .args([
+            "follow",
+            "history",
+            "--format",
+            "json",
+            "--timeout",
+            "1500ms",
+        ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

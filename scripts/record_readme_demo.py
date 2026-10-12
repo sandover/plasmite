@@ -5,7 +5,7 @@
 # ///
 """Record the README's local IPC example through a real shell and PTY.
 
-Use a released 1.0.0 CLI on PATH. Run with uv and a monospace font:
+Use a released 2.0.0 CLI on PATH. Run with uv and a monospace font:
   uv run scripts/record_readme_demo.py --font /System/Library/Fonts/Menlo.ttc
 
 The cast contains the actual terminal bytes and timings. Pillow renders those
@@ -38,10 +38,10 @@ def main():
     args = parser.parse_args()
     binary = shutil.which("pls")
     if not binary:
-        parser.error("install the released Plasmite 1.0.0 CLI first")
+        parser.error("install the released Plasmite 2.0.0 CLI first")
     version = subprocess.check_output([binary, "version"], text=True).strip()
-    if version != "plasmite 1.0.0":
-        parser.error(f"expected released plasmite 1.0.0, found {version}")
+    if version != "plasmite 2.0.0":
+        parser.error(f"expected released plasmite 2.0.0, found {version}")
 
     output = Path(__file__).resolve().parents[1] / "docs/images/ipc"
     output.mkdir(parents=True, exist_ok=True)
@@ -90,9 +90,9 @@ def main():
             enter("pls version", 0.6)
             enter("# Alice creates a channel (aka a pool)", 0.4)
             enter("pls --dir ./pools pool create channel", 0.8)
-            enter("echo '{\"from\":\"A\",\"msg\":\"hello world\"}' | pls --dir ./pools feed channel", 0.8)
+            enter("echo '{\"from\":\"A\",\"msg\":\"hello world\"}' | pls --dir ./pools feed channel --data", 0.8)
             enter("# Alice's writer has exited. Bob starts watching.", 0.8)
-            enter("pls --dir ./pools follow channel --tail 1 --json --data-only", 2.5)
+            enter("pls --dir ./pools follow channel --tail 1 --format json", 2.5)
             # Interrupt only this recording's foreground command, then restore the prompt.
             os.write(master, b"\x03")
             collect(0.3)
@@ -107,7 +107,7 @@ def main():
             os.close(master)
 
         fetched = json.loads(subprocess.check_output(
-            [binary, "--dir", "./pools", "fetch", "channel", "1", "--json"],
+            [binary, "--dir", "./pools", "--format", "json", "fetch", "channel", "1"],
             cwd=scratch, text=True,
         ))
         if fetched["seq"] != 1 or fetched["data"] != {"from": "A", "msg": "hello world"}:
@@ -119,7 +119,7 @@ def main():
 
     header = {
         "version": 2, "width": 84, "height": 16, "timestamp": int(time.time()),
-        "title": "Local IPC with Plasmite 1.0.0",
+        "title": "Local IPC with Plasmite 2.0.0",
         "plasmite_version": version,
         "plasmite_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
     }

@@ -201,46 +201,46 @@ mkdir -p "${POOL_DIR}"
 
 # Produce & Consume
 produce_out="${WORK_DIR}/produce_consume.jsonl"
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed work --create '{"task":"resize","id":1}' >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow work --tail 1 --one --jsonl >"${produce_out}"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed work --data --create '{"task":"resize","id":1}' >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow work --tail 1 --one --format json >"${produce_out}"
 assert_contains "${produce_out}" '"task":"resize"' "Produce & Consume"
 
 # CI Gate
 ci_out="${WORK_DIR}/ci_gate_follow.jsonl"
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" pool create ci >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed ci '{"status":"green","commit":"a1b2c3","suite":"unit"}' >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow ci --where '.data.status == "green"' --tail 1 --one --jsonl >"${ci_out}"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed ci --data '{"status":"green","commit":"a1b2c3","suite":"unit"}' >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow ci --where '.data.status == "green"' --tail 1 --one --format json >"${ci_out}"
 assert_contains "${ci_out}" '"status":"green"' "CI Gate"
 
 # Live Build Progress
 build_out="${WORK_DIR}/live_build_follow.jsonl"
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" pool create build >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build '{"step":"compile","pct":0}' >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build '{"step":"compile","pct":100}' >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build '{"step":"test","pct":0}' >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build '{"step":"test","pct":100}' >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build '{"step":"finished","ok":true}' --tag done >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow build --tag done --tail 1 --one --jsonl >"${build_out}"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build --data '{"step":"compile","pct":0}' >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build --data '{"step":"compile","pct":100}' >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build --data '{"step":"test","pct":0}' >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build --data '{"step":"test","pct":100}' >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed build --data '{"step":"finished","ok":true}' --tag done >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow build --tag done --tail 1 --one --format json >"${build_out}"
 assert_contains "${build_out}" '"ok":true' "Live Build Progress"
 
 # Multi-Writer Event Bus
 multi_out="${WORK_DIR}/multi_writer_follow.jsonl"
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" pool create events >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed events '{"service":"api","sha":"f4e5d6"}' --tag deploy >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed events '{"service":"api","msg":"latency spike"}' --tag alert >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed events '{"service":"web","rps":1420}' --tag metric >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow events --tag alert --tail 3 --no-follow --json >"${multi_out}"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed events --data '{"service":"api","sha":"f4e5d6"}' --tag deploy >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed events --data '{"service":"api","msg":"latency spike"}' --tag alert >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed events --data '{"service":"web","rps":1420}' --tag metric >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow events --tag alert --tail 3 --no-follow --format json >"${multi_out}"
 assert_contains "${multi_out}" '"msg":"latency spike"' "Multi-Writer Event Bus"
 
 # Replay & Debug
 replay_out="${WORK_DIR}/replay.jsonl"
 replay_filter_out="${WORK_DIR}/replay_debug.jsonl"
 "${PLASMITE_BIN}" --dir "${POOL_DIR}" pool create incidents >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed incidents '{"level":"info","msg":"booting"}' >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed incidents '{"level":"error","msg":"latency spike"}' >/dev/null
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow incidents --replay 0 --since 1m --jsonl >"${replay_out}"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed incidents --data '{"level":"info","msg":"booting"}' >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" feed incidents --data '{"level":"error","msg":"latency spike"}' >/dev/null
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow incidents --replay 0 --since 1m --format json >"${replay_out}"
 assert_line_count_at_least "${replay_out}" 2 "Replay & Debug"
-"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow incidents --where '.data.level == "error"' --tail 1 --one --jsonl >"${replay_filter_out}"
+"${PLASMITE_BIN}" --dir "${POOL_DIR}" follow incidents --where '.data.level == "error"' --tail 1 --one --format json >"${replay_filter_out}"
 assert_contains "${replay_filter_out}" '"level":"error"' "Replay & Debug"
 assert_file_non_empty "${replay_filter_out}" "Replay & Debug"
 
@@ -272,8 +272,8 @@ if ! kill -0 "${SERVE_PID}" 2>/dev/null; then
   fail "remote server exited before readiness checks completed"
 fi
 
-"${PLASMITE_BIN}" feed "${remote_url}/remote-events" '{"sensor":"temp","value":23.5}' >/dev/null
-"${PLASMITE_BIN}" follow "${remote_url}/remote-events" --tail 1 --one --jsonl >"${remote_follow_out}"
+"${PLASMITE_BIN}" feed "${remote_url}/remote-events" --data '{"sensor":"temp","value":23.5}' >/dev/null
+"${PLASMITE_BIN}" follow "${remote_url}/remote-events" --tail 1 --one --format json >"${remote_follow_out}"
 assert_contains "${remote_follow_out}" '"sensor":"temp"' "Remote Pool Access"
 
 kill "${SERVE_PID}"

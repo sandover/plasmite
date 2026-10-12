@@ -26,7 +26,9 @@ fn access_connect(home: &Path, destination: &str, access_key: &str, json_output:
     let mut cmd = command(home);
     cmd.args(["access", "connect", destination]);
     if json_output {
-        cmd.arg("--json");
+        cmd.args(["--format", "json"]);
+    } else {
+        cmd.args(["--format", "pretty"]);
     }
     let mut child = cmd
         .stdin(Stdio::piped())
@@ -44,19 +46,27 @@ fn access_connect(home: &Path, destination: &str, access_key: &str, json_output:
 }
 
 #[test]
-fn empty_access_list_is_human_by_default_and_does_not_create_store() {
+fn empty_access_list_defaults_to_json_when_redirected_and_does_not_create_store() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("missing");
-    let human = success(command(&home).args(["access", "list"]).output().unwrap());
-    assert_eq!(human.stdout, b"No saved connections.\n");
-    assert!(human.stderr.is_empty());
+    let redirected = success(command(&home).args(["access", "list"]).output().unwrap());
+    assert_eq!(redirected.stdout, b"[]\n");
+    let pretty = success(
+        command(&home)
+            .args(["access", "list", "--format", "pretty"])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(pretty.stdout, b"No saved connections.\n");
     let machine = success(
         command(&home)
-            .args(["--color", "always", "access", "list", "--json"])
+            .args(["--color", "always", "access", "list", "--format", "json"])
             .output()
             .unwrap(),
     );
     assert_eq!(machine.stdout, b"[]\n");
+    assert!(redirected.stderr.is_empty());
+    assert!(pretty.stderr.is_empty());
     assert!(machine.stderr.is_empty());
     assert!(!home.exists());
 }
@@ -85,14 +95,19 @@ fn access_list_is_sorted_offline_and_never_decodes_or_prints_credentials() {
             "https://a.example.invalid/": "secret-a-do-not-print"
         }}),
     );
-    let human = success(command(&home).args(["access", "list"]).output().unwrap());
+    let human = success(
+        command(&home)
+            .args(["access", "list", "--format", "pretty"])
+            .output()
+            .unwrap(),
+    );
     assert_eq!(
         human.stdout,
         b"https://a.example.invalid/\nhttps://z.example.invalid/\n"
     );
     let machine = success(
         command(&home)
-            .args(["access", "list", "--json"])
+            .args(["access", "list", "--format", "json"])
             .output()
             .unwrap(),
     );
@@ -117,7 +132,7 @@ fn access_list_rejects_symlinked_store_and_file() {
     saved_fixture(&target, json!({"version": 1, "connections": {}}));
     symlink(&target, &home).unwrap();
     let output = command(&home)
-        .args(["access", "list", "--json"])
+        .args(["access", "list", "--format", "json"])
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -132,7 +147,7 @@ fn access_list_rejects_symlinked_store_and_file() {
     )
     .unwrap();
     let output = command(&home)
-        .args(["access", "list", "--json"])
+        .args(["access", "list", "--format", "json"])
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -152,7 +167,7 @@ fn access_list_rejects_unknown_versions_and_credential_bearing_destinations() {
         let home = temp.path().join("access");
         saved_fixture(&home, fixture);
         let output = command(&home)
-            .args(["access", "list", "--json"])
+            .args(["access", "list", "--format", "json"])
             .output()
             .unwrap();
         assert!(!output.status.success());
@@ -164,7 +179,7 @@ fn access_list_rejects_unknown_versions_and_credential_bearing_destinations() {
 }
 
 #[test]
-fn feed_receipts_are_human_by_default_and_explicit_json_ignores_color() {
+fn feed_writes_complete_messages_and_explicit_json_ignores_color() {
     let temp = tempfile::tempdir().unwrap();
     let pool = temp.path().join("events.plasmite");
     success(
@@ -174,25 +189,31 @@ fn feed_receipts_are_human_by_default_and_explicit_json_ignores_color() {
             .output()
             .unwrap(),
     );
-    let human = success(
+    let default_message = success(
         command(temp.path())
             .arg("feed")
             .arg(&pool)
+            .arg("--data")
             .arg("{\"value\":1}")
             .output()
             .unwrap(),
     );
-    assert!(String::from_utf8_lossy(&human.stdout).starts_with("fed seq=1 at "));
+    let default_message: Value = serde_json::from_slice(&default_message.stdout).unwrap();
+    assert_eq!(default_message["seq"], 1);
+    assert!(default_message["time"].is_string());
+    assert!(default_message["meta"]["tags"].is_array());
+    assert_eq!(default_message["data"]["value"], 1);
     let machine = success(
         command(temp.path())
             .args(["--color", "always", "feed"])
             .arg(&pool)
-            .args(["{\"value\":2}", "--json"])
+            .args(["--data", "{\"value\":2}", "--format", "json"])
             .output()
             .unwrap(),
     );
-    let receipt: Value = serde_json::from_slice(&machine.stdout).unwrap();
-    assert_eq!(receipt["seq"], 2);
+    let message: Value = serde_json::from_slice(&machine.stdout).unwrap();
+    assert_eq!(message["seq"], 2);
+    assert_eq!(message["data"]["value"], 2);
     assert!(!machine.stdout.contains(&0x1b));
     assert_eq!(
         machine.stdout.iter().filter(|byte| **byte == b'\n').count(),
@@ -204,16 +225,16 @@ fn feed_receipts_are_human_by_default_and_explicit_json_ignores_color() {
 fn disconnect_reports_local_result_in_selected_format() {
     let temp = tempfile::tempdir().unwrap();
     let destination = "https://offline.example.invalid/";
-    let human = success(
+    let pretty = success(
         command(temp.path())
-            .args(["access", "disconnect", destination])
+            .args(["access", "disconnect", destination, "--format", "pretty"])
             .output()
             .unwrap(),
     );
-    assert!(String::from_utf8_lossy(&human.stdout).starts_with("Removed saved credentials for "));
+    assert!(String::from_utf8_lossy(&pretty.stdout).starts_with("Removed saved credentials for "));
     let machine = success(
         command(temp.path())
-            .args(["access", "disconnect", destination, "--json"])
+            .args(["access", "disconnect", destination, "--format", "json"])
             .output()
             .unwrap(),
     );
@@ -277,11 +298,11 @@ fn access_connect_prints_direct_http_oauth_setup_for_humans_and_json() {
 }
 
 #[test]
-fn skipped_feed_records_keep_selected_notice_format_and_failure_status() {
+fn removed_errors_skip_option_is_rejected() {
     let temp = tempfile::tempdir().unwrap();
     let pool = temp.path().join("events.plasmite");
     let data = temp.path().join("records.jsonl");
-    std::fs::write(&data, b"{\"ok\":true}\ninvalid-json\n").unwrap();
+    std::fs::write(&data, b"{\"data\":{\"ok\":true}}\n").unwrap();
     success(
         command(temp.path())
             .args(["pool", "create"])
@@ -289,33 +310,14 @@ fn skipped_feed_records_keep_selected_notice_format_and_failure_status() {
             .output()
             .unwrap(),
     );
-    for json_output in [false, true] {
-        let mut cmd = command(temp.path());
-        cmd.arg("feed")
-            .arg(&pool)
-            .arg("--file")
-            .arg(&data)
-            .args(["--in", "jsonl", "--errors", "skip"]);
-        if json_output {
-            cmd.arg("--json");
-        }
-        let output = cmd.output().unwrap();
-        assert_eq!(output.status.code(), Some(1));
-        let stderr = String::from_utf8(output.stderr).unwrap();
-        if json_output {
-            let notices = stderr
-                .lines()
-                .map(|line| serde_json::from_str::<Value>(line).unwrap())
-                .collect::<Vec<_>>();
-            assert_eq!(notices.len(), 2);
-            assert_eq!(notices[0]["notice"]["kind"], "ingest_skip");
-            assert_eq!(notices[1]["notice"]["kind"], "ingest_summary");
-            assert_eq!(notices[1]["notice"]["details"]["failed"], 1);
-        } else {
-            assert!(stderr.contains("notice: Skipped invalid JSON."));
-            assert!(stderr.contains("notice: Finished with 1 skipped record."));
-        }
-    }
+    let output = command(temp.path())
+        .args(["feed", pool.to_str().unwrap(), "--file"])
+        .arg(&data)
+        .args(["--data", "--errors", "skip"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--errors"));
 }
 
 #[cfg(unix)]
@@ -333,7 +335,7 @@ fn explicit_access_json_remains_parseable_in_terminal_with_forced_color() {
             "-q",
             "-e",
             "-c",
-            &format!("{quoted_exe} --color always access list --json"),
+            &format!("{quoted_exe} --color always --format json access list"),
             "/dev/null",
         ]);
     }
@@ -346,7 +348,8 @@ fn explicit_access_json_remains_parseable_in_terminal_with_forced_color() {
         "always",
         "access",
         "list",
-        "--json",
+        "--format",
+        "json",
     ]);
     let output = success(cmd.output().unwrap());
     // macOS script echoes EOF as ^D followed by two backspaces. Apply
@@ -369,7 +372,7 @@ fn explicit_access_json_remains_parseable_in_terminal_with_forced_color() {
 }
 
 #[test]
-fn human_feed_tags_are_literal_while_json_preserves_tag_data() {
+fn pretty_and_json_feed_messages_preserve_literal_tag_data() {
     let temp = tempfile::tempdir().unwrap();
     let pool = temp.path().join("events.plasmite");
     let label = "雪\x1b]52;c;value\x07\trow\nnext";
@@ -384,19 +387,20 @@ fn human_feed_tags_are_literal_while_json_preserves_tag_data() {
         command(temp.path())
             .arg("feed")
             .arg(&pool)
-            .args(["{}", "--tag", label])
+            .args(["--data", "{}", "--tag", label, "--format", "pretty"])
             .output()
             .unwrap(),
     );
     let text = String::from_utf8(human.stdout).unwrap();
-    assert!(text.contains("tags: 雪\\u{1b}]52;c;value\\u{7}\\trow\\nnext"));
-    assert_eq!(text.lines().count(), 1);
+    let human_message: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(human_message["meta"]["tags"][0], label);
+    assert!(text.lines().count() > 1);
     assert!(!text.contains('\x1b'));
     let machine = success(
         command(temp.path())
             .arg("feed")
             .arg(&pool)
-            .args(["{}", "--tag", label, "--json"])
+            .args(["--data", "{}", "--tag", label, "--format", "json"])
             .output()
             .unwrap(),
     );
@@ -404,8 +408,9 @@ fn human_feed_tags_are_literal_while_json_preserves_tag_data() {
         machine.stdout.iter().filter(|byte| **byte == b'\n').count(),
         1
     );
-    let receipt: Value = serde_json::from_slice(&machine.stdout).unwrap();
-    assert_eq!(receipt["meta"]["tags"][0], label);
+    let message: Value = serde_json::from_slice(&machine.stdout).unwrap();
+    assert_eq!(message["meta"]["tags"][0], label);
+    assert_eq!(message["data"], json!({}));
 }
 
 #[cfg(unix)]
@@ -433,7 +438,7 @@ fn remote_pool_labels_and_saved_access_names_are_literal_in_human_tables() {
     let expected = "evil\\u{1b}]52;c;value\\u{7}\\trow\\nnext";
     let pools = success(
         command(temp.path())
-            .args(["pool", "list", &server.local_url])
+            .args(["pool", "list", &server.local_url, "--format", "pretty"])
             .output()
             .unwrap(),
     );
@@ -441,7 +446,7 @@ fn remote_pool_labels_and_saved_access_names_are_literal_in_human_tables() {
         command(temp.path())
             .arg("--dir")
             .arg(&directory)
-            .args(["access", "keys"])
+            .args(["access", "keys", "--format", "pretty"])
             .output()
             .unwrap(),
     );
@@ -456,7 +461,7 @@ fn remote_pool_labels_and_saved_access_names_are_literal_in_human_tables() {
     }
     let pools = success(
         command(temp.path())
-            .args(["pool", "list", &server.local_url, "--json"])
+            .args(["pool", "list", &server.local_url, "--format", "json"])
             .output()
             .unwrap(),
     );
@@ -464,7 +469,7 @@ fn remote_pool_labels_and_saved_access_names_are_literal_in_human_tables() {
         command(temp.path())
             .arg("--dir")
             .arg(&directory)
-            .args(["access", "keys", "--json"])
+            .args(["access", "keys", "--format", "json"])
             .output()
             .unwrap(),
     );

@@ -369,7 +369,7 @@ function runPoolInfo(repoRoot, workdirPath, step, index, stepId) {
   const plasmiteBin = resolvePlasmiteBin(repoRoot);
   const result = spawnSync(
     plasmiteBin,
-    ["--dir", workdirPath, "pool", "info", pool, "--json"],
+    ["--dir", workdirPath, "pool", "info", pool, "--format", "json"],
     { encoding: "utf8" }
   );
   if (result.status !== 0) {
@@ -425,7 +425,7 @@ async function runSpawnPoke(repoRoot, workdirPath, step, index, stepId) {
     if (!Array.isArray(tags)) {
       throw stepError(index, stepId, "message.tags must be array");
     }
-    return ["--dir", workdirPath, "feed", pool, payload, ...flattenTags(tags)];
+    return ["--dir", workdirPath, "feed", pool, "--data", payload, ...flattenTags(tags)];
   });
 
   const tasks = commands.map((args) =>

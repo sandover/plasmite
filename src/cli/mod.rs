@@ -10,6 +10,7 @@ mod doctor;
 pub(crate) mod doctor_support;
 mod feed;
 pub(crate) mod feed_support;
+pub(crate) mod message_stream;
 pub(super) mod output;
 pub(crate) mod output_support;
 mod pool;
@@ -39,6 +40,7 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             pool,
             tag,
             data,
+            contents,
             file,
             durability,
             create,
@@ -46,14 +48,13 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             retry,
             retry_delay,
             input,
-            errors,
-            json: _,
             ..
         } => feed::run(
             feed::FeedArgs {
                 pool,
                 tags: tag,
                 data,
+                contents,
                 file,
                 durability,
                 create,
@@ -61,22 +62,16 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
                 retry,
                 retry_delay,
                 input,
-                errors,
             },
             &context,
         ),
-        Command::Fetch {
-            pool, seq, format, ..
-        } => feed::fetch(&pool, seq, format, &context),
+        Command::Fetch { pool, seq, .. } => feed::fetch(&pool, seq, &context),
         Command::Follow {
             pool,
             create,
             tail,
             one,
-            jsonl,
             timeout,
-            data_only,
-            format,
             since,
             where_expr,
             tags,
@@ -84,7 +79,6 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             no_notify,
             replay,
             no_follow,
-            json: _,
             ..
         } => stream::follow(
             stream::FollowArgs {
@@ -92,10 +86,7 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
                 create,
                 tail,
                 one,
-                jsonl,
                 timeout,
-                data_only,
-                format,
                 since,
                 where_expr,
                 tags,
@@ -111,12 +102,9 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             me,
             create,
             tail,
-            jsonl,
             timeout,
-            format,
             since,
             echo_self,
-            json: _,
             ..
         } => stream::duplex(
             stream::DuplexArgs {
@@ -124,9 +112,7 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
                 me,
                 create,
                 tail,
-                jsonl,
                 timeout,
-                format,
                 since,
                 echo_self,
             },

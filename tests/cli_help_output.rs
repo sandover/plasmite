@@ -12,7 +12,8 @@ fn top_level_help_orients_and_routes_readers() {
     assert!(stdout.contains("feed` appends"));
     assert!(stdout.contains("FIRST LOCAL WORKFLOW"));
     assert!(stdout.contains("plasmite pool create chat"));
-    assert!(stdout.contains("Use --json or --yaml on reports and message commands"));
+    assert!(stdout.contains("--format <FORMAT>"));
+    assert!(stdout.contains("pretty in a terminal, json in a pipe"));
     assert!(stdout.contains("Global options work before or after commands"));
     assert!(stdout.contains("plasmite <command> --help"));
     assert!(stdout.contains("/blob/main/docs/cli.md"));
@@ -112,7 +113,7 @@ fn short_help_exposes_material_command_constraints() {
                 "requires --create",
                 "requires --retry > 0",
                 "Choose one input source",
-                "exits 1",
+                "Invalid input stops immediately",
             ],
         ),
         (
@@ -135,9 +136,9 @@ fn short_help_exposes_material_command_constraints() {
         (
             &["duplex", "-h"],
             &[
-                "Terminal input requires --me",
-                "connect before using a remote ref",
-                "Exits 124",
+                "Terminal input creates chat messages and requires --me",
+                "stdin EOF ends the session",
+                "copy a finite stream",
             ],
         ),
         (
@@ -214,15 +215,18 @@ fn version_help_describes_explicit_structured_output() {
         .expect("version help");
     assert!(output.status.success());
     let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
-    assert!(stdout.contains("human-readable version information by default"));
-    assert!(stdout.contains("--json"));
+    assert!(stdout.contains("readable output in a terminal, compact JSON in a pipe or file"));
+    assert!(stdout.contains("--format"));
     assert!(stdout.contains("same report as YAML"));
-    assert!(stdout.contains("--yaml"));
+    assert!(stdout.contains("yaml"));
 }
 
 #[test]
 fn version_json_emits_machine_readable_json() {
-    let output = cmd().args(["version", "--json"]).output().expect("version");
+    let output = cmd()
+        .args(["version", "--format", "json"])
+        .output()
+        .expect("version");
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     let value = parse_json(std::str::from_utf8(&output.stdout).expect("utf8"));
@@ -254,7 +258,8 @@ fn not_found_exit_code() {
             "fetch",
             "testpool",
             "999",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("fetch");
@@ -274,7 +279,7 @@ fn not_found_exit_code() {
 }
 
 #[test]
-fn usage_exit_code() {
+fn usage_exit_code_for_tag_without_data() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -296,7 +301,11 @@ fn usage_exit_code() {
             pool_dir.to_str().unwrap(),
             "feed",
             "testpool",
-            "--json",
+            "--tag",
+            "orphan",
+            "{\"x\":1}",
+            "--format",
+            "json",
         ])
         .output()
         .expect("feed");
@@ -307,8 +316,7 @@ fn usage_exit_code() {
         .and_then(|v| v.as_object())
         .expect("error object");
     assert_eq!(inner.get("kind").and_then(|v| v.as_str()).unwrap(), "Usage");
-    let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(hint.contains("--file") || hint.contains("pipe JSON"));
+    assert!(inner.get("message").and_then(|v| v.as_str()).is_some());
 }
 
 #[test]
@@ -337,7 +345,8 @@ fn color_always_does_not_color_structured_stdout() {
             "pool",
             "info",
             "demo",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("info");
@@ -373,7 +382,8 @@ fn color_never_does_not_emit_ansi() {
             "pool",
             "info",
             "demo",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("info");
@@ -383,7 +393,7 @@ fn color_never_does_not_emit_ansi() {
 }
 
 #[test]
-fn color_always_does_not_color_jsonl() {
+fn color_always_does_not_color_json() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -405,6 +415,7 @@ fn color_always_does_not_color_jsonl() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
+            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -422,11 +433,11 @@ fn color_always_does_not_color_jsonl() {
             "--tail",
             "1",
             "--format",
-            "jsonl",
+            "json",
         ])
         .stdout(Stdio::piped())
         .spawn()
-        .expect("follow jsonl");
+        .expect("follow json");
     let stdout = follower.stdout.take().expect("stdout");
     let line = read_line_with_timeout(stdout, Duration::from_secs(2));
     assert!(!line.is_empty(), "expected a line from follow output");
@@ -450,7 +461,8 @@ fn errors_are_json_when_explicitly_requested() {
             pool_dir.to_str().unwrap(),
             "follow",
             "missing",
-            "--json",
+            "--format",
+            "json",
         ])
         .output()
         .expect("follow");
@@ -494,7 +506,8 @@ fn clap_errors_are_concise_in_json() {
             pool_dir.to_str().unwrap(),
             "follow",
             "demo",
-            "--json",
+            "--format",
+            "json",
             "--definitely-not-a-flag",
         ])
         .output()

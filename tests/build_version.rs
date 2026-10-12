@@ -77,14 +77,17 @@ fn cli_version_surfaces_agree() {
         String::from_utf8(flag.stdout).unwrap().trim(),
         format!("plasmite {}", env!("PLASMITE_BUILD_VERSION"))
     );
-    let human = Command::new(binary).arg("version").output().unwrap();
+    let human = Command::new(binary)
+        .args(["version", "--format", "pretty"])
+        .output()
+        .unwrap();
     assert!(human.status.success());
     assert_eq!(
         String::from_utf8(human.stdout).unwrap().trim(),
         format!("plasmite {}", env!("PLASMITE_BUILD_VERSION"))
     );
     let command = Command::new(binary)
-        .args(["version", "--json"])
+        .args(["version", "--format", "json"])
         .output()
         .unwrap();
     assert!(command.status.success());

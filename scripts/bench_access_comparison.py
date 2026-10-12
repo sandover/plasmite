@@ -184,13 +184,13 @@ class CliPool:
         self.ref = ref
 
     def append(self, item):
-        result = subprocess.run([*self.command, "feed", self.ref, "--json"],
+        result = subprocess.run([*self.command, "feed", self.ref, "--data", "--format", "json"],
             input=json.dumps(item, separators=(",", ":")) + "\n", capture_output=True,
             text=True, encoding="utf-8", check=True)
         return json.loads(result.stdout)
 
     def get(self, seq):
-        result = subprocess.run([*self.command, "fetch", self.ref, str(seq), "--json"],
+        result = subprocess.run([*self.command, "--format", "json", "fetch", self.ref, str(seq)],
             capture_output=True, text=True, encoding="utf-8", check=True)
         return json.loads(result.stdout)
 
