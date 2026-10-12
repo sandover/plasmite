@@ -4,6 +4,7 @@
 
 - [CI Gate](#ci-gate)
 - [Live Event Stream](#live-event-stream)
+- [Record TouchOSC messages with OSC](#record-touchosc-messages-with-open-sound-control-osc)
 - [Lite3 Documents](#lite3-documents)
 - [Process Capture with tap](#process-capture-with-tap)
 - [Duplex Chat](#duplex-chat)
@@ -337,6 +338,83 @@ p.Close(); c.Close()
 ```
 
 </details>
+
+---
+
+## Record TouchOSC messages with Open Sound Control (OSC)
+
+TouchOSC can send Open Sound Control (OSC) messages over User Datagram
+Protocol (UDP). A small Python adapter turns supported values into JSON Lines
+for Plasmite. It uses `uv` to run the adapter and the installed Plasmite CLI to
+write to a pool; it does not need Plasmite's Python bindings.
+
+This recipe requires Plasmite 2.0 or newer, `uv`, and a checkout of this repository.
+From the repository root, create a pool in a separate directory:
+
+```bash
+plasmite --dir ./tmp/osc-pools pool create osc
+```
+
+In one terminal, start the receiver. It listens on `127.0.0.1:9000` by
+default, writes JSON Lines to stdout, and sends status messages to stderr. The
+`--send-test` option sends one sample message to the configured host and port,
+then exits, so you can try the full pipe without TouchOSC:
+
+```bash
+uv run examples/osc_to_json.py \
+  | plasmite --dir ./tmp/osc-pools feed osc --data --tag osc --format json
+```
+
+In a second terminal, send a test message:
+
+```bash
+uv run examples/osc_to_json.py --send-test
+```
+
+Read the recorded message in a third terminal. The adapter emits an object
+with an OSC address and its arguments. `feed --data` wraps it in the usual
+Plasmite envelope; `follow` reads those messages:
+
+```bash
+plasmite --dir ./tmp/osc-pools follow osc --tail 1 --no-follow --format json \
+  --where '.data.address == "/fader/1"'
+```
+
+The result contains `"data":{"address":"/fader/1","args":[0.75]}` along
+with the envelope's sequence, time, and metadata. To browse the pool while
+messages arrive, start the local map server in another terminal and open its
+URL:
+
+```bash
+plasmite --dir ./tmp/osc-pools serve --remote-bind 127.0.0.1:9743
+```
+
+Then open `http://127.0.0.1:9700/ui/map`.
+
+### Connect TouchOSC on a phone
+
+Use a trusted local network: this receiver accepts UDP messages without authentication.
+For a phone on the same network, stop the receiver and restart it so it listens
+on the computer's network interfaces:
+
+```bash
+uv run examples/osc_to_json.py --host 0.0.0.0 \
+  | plasmite --dir ./tmp/osc-pools feed osc --data --tag osc --format json
+```
+
+Keep the Plasmite feed pipe running with the receiver as before. In TouchOSC,
+enable a UDP OSC connection. Set its destination host to the computer's local
+network IP address and the port to `9000`. Do not enter `0.0.0.0` or the phone's own IP as the
+destination. If the phone cannot connect, allow UDP port `9000` through the
+computer's firewall on the local network. See [TouchOSC's OSC connection
+guide](https://hexler.net/touchosc/manual/connections-osc) for its connection
+settings.
+
+The adapter supports OSC numbers, strings, booleans, null values, and arrays
+that can be represented in JSON. It skips blobs and non-finite numbers with a
+notice on stderr. Bundle messages are recorded separately as they arrive;
+their timetags and OSC type tags are not retained. This recipe records incoming
+messages and does not provide playback or an OSC output adapter.
 
 ---
 

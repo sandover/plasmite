@@ -100,6 +100,9 @@ Those guarantees belong in your application or a service designed to supply them
 
 **Use cases** — CI gates, live event streams, duplex chat, system log ring buffers, replay & debug: see the **[Cookbook](docs/cookbook.md)**.
 
+**Creative coding** — record TouchOSC control messages in a Plasmite pool with
+the [Open Sound Control recipe](docs/cookbook.md#record-touchosc-messages-with-open-sound-control-osc).
+
 Plasmite is for single-host and host-adjacent messaging. If you need multi-host cluster replication, schema registries, or workflow orchestration, see [When Plasmite Isn't the Right Fit](docs/cookbook.md#when-plasmite-isnt-the-right-fit).
 
 ## Libraries

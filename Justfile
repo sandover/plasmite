@@ -85,6 +85,10 @@ ui-smoke:
 benchmark-harness-test:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_bench_transport_comparison.py
 
+# Check the OSC example through a live receiver and persistent CLI pipe.
+osc-example-test:
+	PYTHONDONTWRITEBYTECODE=1 uv run --with python-osc==1.10.2 python scripts/test_osc_example.py
+
 # Core, deterministic checks for every local change and pull request.
 check: _trim-target fmt clippy test benchmark-harness-test check-version-alignment check-release-targets verify-lite3
 
@@ -98,7 +102,7 @@ _trim-target:
 
 # Cross-language and artifact checks. Requires Go, Node, Python, and uv.
 # `bindings-test` includes node pack and remote-only smoke tests.
-integration: cookbook-smoke abi-smoke conformance-all cross-artifact-smoke bindings-test ui-smoke
+integration: osc-example-test cookbook-smoke abi-smoke conformance-all cross-artifact-smoke bindings-test ui-smoke
 
 # Canonical release candidate gate before merging, tagging, or publishing.
 release-gate: check integration abi-release
