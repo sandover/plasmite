@@ -3,7 +3,7 @@
 //! Role: Own utility behavior without coupling it to storage commands.
 
 use super::context::CliContext;
-use super::output::emit_json;
+use super::output::emit_output;
 use super::result::CommandResult;
 use crate::Cli;
 use crate::mcp_stdio;
@@ -20,17 +20,18 @@ pub(super) enum UtilityCommand {
 }
 
 pub(super) fn run(command: UtilityCommand, context: &CliContext) -> Result<CommandResult, Error> {
+    let output_mode = context.output_mode();
     match command {
         UtilityCommand::Version => {
-            if !context.json_output() {
+            if !output_mode.is_structured() {
                 println!("plasmite {}", env!("PLASMITE_BUILD_VERSION"));
             } else {
-                emit_json(
+                emit_output(
                     json!({
                         "name": "plasmite",
                         "version": env!("PLASMITE_BUILD_VERSION"),
                     }),
-                    context.color_mode(),
+                    output_mode,
                 );
             }
             Ok(CommandResult::ok())

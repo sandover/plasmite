@@ -7,6 +7,7 @@ use super::feed_support::{
     FeedIngestContext, RemoteFeedIngestContext, ingest_from_stdin, ingest_from_stdin_remote,
     missing_feed_data_error,
 };
+use super::output::OutputMode;
 use super::output_support::emit_follow_timeout_human;
 use super::result::CommandResult;
 use super::stream_support::{
@@ -63,7 +64,7 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
             .with_message("conflicting output options")
             .with_hint("Use --format jsonl (or --jsonl), but not both."));
     }
-    if context.json_output() && matches!(args.format, Some(FollowFormat::Pretty)) {
+    if context.structured_output() && matches!(args.format, Some(FollowFormat::Pretty)) {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("--json conflicts with --format pretty")
             .with_hint("Use --json for JSONL, or omit it for human-readable output."));
@@ -71,12 +72,13 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
     let format_flag = args.format;
     let format = args
         .format
-        .unwrap_or(if args.jsonl || context.json_output() {
+        .unwrap_or(if args.jsonl || context.structured_output() {
             FollowFormat::Jsonl
         } else {
             FollowFormat::Pretty
         });
     let pretty = matches!(format, FollowFormat::Pretty);
+    let output_mode = context.output_mode();
     let since_ns = args
         .since
         .as_deref()
@@ -102,8 +104,12 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
     if args.no_follow {
         exact_follow_create_hint.push_str(" --no-follow");
     }
-    if context.json_output() && !args.jsonl && format_flag.is_none() {
-        exact_follow_create_hint.push_str(" --json");
+    if context.structured_output() && !args.jsonl && format_flag.is_none() {
+        exact_follow_create_hint.push_str(if output_mode == OutputMode::Yaml {
+            " --yaml"
+        } else {
+            " --json"
+        });
     }
     if args.no_follow && args.tail == 0 && args.since.is_none() {
         return Err(Error::new(ErrorKind::Usage)
@@ -112,7 +118,7 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
     }
     let cfg = FollowConfig {
         tail: args.tail,
-        pretty,
+        output_mode,
         one: args.one,
         timeout,
         data_only: args.data_only,
@@ -209,7 +215,7 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
             .with_message("TTY input requires --me for duplex")
             .with_hint("Provide --me NAME to send TTY line-mode messages."));
     }
-    if context.json_output() && matches!(args.format, Some(FollowFormat::Pretty)) {
+    if context.structured_output() && matches!(args.format, Some(FollowFormat::Pretty)) {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("--json conflicts with --format pretty")
             .with_hint("Use --json for JSONL, or omit it for human-readable output."));
@@ -217,12 +223,13 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
     let format_flag = args.format;
     let format = args
         .format
-        .unwrap_or(if args.jsonl || context.json_output() {
+        .unwrap_or(if args.jsonl || context.structured_output() {
             FollowFormat::Jsonl
         } else {
             FollowFormat::Pretty
         });
     let pretty = matches!(format, FollowFormat::Pretty);
+    let output_mode = context.output_mode();
     let since_ns = args
         .since
         .as_deref()
@@ -245,13 +252,17 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
         false,
         None,
     );
-    if context.json_output() && !args.jsonl && format_flag.is_none() {
-        exact_follow_create_hint.push_str(" --json");
+    if context.structured_output() && !args.jsonl && format_flag.is_none() {
+        exact_follow_create_hint.push_str(if output_mode == OutputMode::Yaml {
+            " --yaml"
+        } else {
+            " --json"
+        });
     }
     let stop = Arc::new(AtomicBool::new(false));
     let cfg = FollowConfig {
         tail: args.tail,
-        pretty,
+        output_mode,
         one: false,
         timeout,
         data_only: false,
@@ -321,7 +332,7 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
             let me_for_send = args.me.clone();
             let pool_ref = args.pool.clone();
             let color_mode = context.color_mode();
-            let context_json_output = !pretty;
+            let context_output_mode = output_mode;
             let _ = std::thread::spawn(move || {
                 if stdin_is_terminal {
                     let outcome = send_tty_lines(
@@ -353,7 +364,7 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                             retry_config: None,
                             pool_handle: &mut send_pool,
                             color_mode,
-                            json_output: context_json_output,
+                            output_mode: context_output_mode,
                             input: InputMode::Auto,
                             errors: ErrorPolicyCli::Stop,
                         },
@@ -394,7 +405,7 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
             let stop_for_send = stop.clone();
             let me_for_send = args.me.clone();
             let color_mode = context.color_mode();
-            let context_json_output = !pretty;
+            let context_output_mode = output_mode;
             let _ = std::thread::spawn(move || {
                 if stdin_is_terminal {
                     let outcome = send_tty_lines(
@@ -419,7 +430,7 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                             retry_config: None,
                             remote_pool: &remote_pool,
                             color_mode,
-                            json_output: context_json_output,
+                            output_mode: context_output_mode,
                             input: InputMode::Auto,
                             errors: ErrorPolicyCli::Stop,
                         },

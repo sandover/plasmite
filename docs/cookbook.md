@@ -19,9 +19,41 @@
 
 A pool retains a bounded history, and readers keep their own checkpoints.
 `--tail N` selects the last N retained messages before filters. Use
-`--no-follow` for a finite history read and `--json` whenever a script parses
-output. See the [CLI guide](cli.md) for shared rules and the
+`--no-follow` for a finite history read and `--json` or `--yaml` whenever a
+script parses output. See the [CLI guide](cli.md) for shared rules and the
 [1.0 upgrade guide](record/upgrading-1.0.md) for changed defaults.
+
+## YAML output
+
+Use `--yaml` when a tool expects YAML. It keeps the JSON report or message
+shape and wraps every output in a YAML document, including each item in a
+stream:
+
+```console
+plasmite pool info events --yaml
+plasmite fetch events 42 --yaml
+plasmite follow events --tail 20 --no-follow --yaml --data-only
+```
+
+A fetch prints a marked YAML document:
+
+```yaml
+---
+seq: 42
+time: '2026-10-12T12:00:00Z'
+meta:
+  tags: []
+data:
+  kind: 'heartbeat'
+...
+```
+
+A message stream writes each document as it arrives. `--data-only` still
+selects each message's `data` value. `--yaml` affects output only; `feed` input
+remains in the supported JSON stream formats or Lite3. Use `--json` for JSON
+output. The two flags conflict, and `--yaml` cannot be combined with `--format`
+where that option exists;
+`follow` and `duplex` also reject `--jsonl`.
 
 ## CI Gate
 

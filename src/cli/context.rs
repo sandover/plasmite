@@ -2,6 +2,7 @@
 //! Exports: `CliContext`.
 //! Role: Make command dependencies explicit without a service container.
 
+use super::output::OutputMode;
 use crate::ColorMode;
 use std::path::{Path, PathBuf};
 
@@ -9,15 +10,15 @@ use std::path::{Path, PathBuf};
 pub(crate) struct CliContext {
     pool_dir: PathBuf,
     color_mode: ColorMode,
-    json_output: bool,
+    output_mode: OutputMode,
 }
 
 impl CliContext {
-    pub(crate) fn new(pool_dir: PathBuf, color_mode: ColorMode, json_output: bool) -> Self {
+    pub(crate) fn new(pool_dir: PathBuf, color_mode: ColorMode, output_mode: OutputMode) -> Self {
         Self {
             pool_dir,
             color_mode,
-            json_output,
+            output_mode,
         }
     }
 
@@ -25,12 +26,16 @@ impl CliContext {
         &self.pool_dir
     }
 
-    pub(crate) fn json_output(&self) -> bool {
-        self.json_output
+    pub(crate) fn output_mode(&self) -> OutputMode {
+        self.output_mode
+    }
+
+    pub(crate) fn structured_output(&self) -> bool {
+        self.output_mode.is_structured()
     }
 
     pub(crate) fn color_mode(&self) -> ColorMode {
-        if self.json_output {
+        if self.structured_output() {
             ColorMode::Never
         } else {
             self.color_mode

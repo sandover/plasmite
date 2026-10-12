@@ -1,5 +1,6 @@
 //! CLI helpers for stream commands.
 
+use super::output::OutputMode;
 use crate::ColorMode;
 use crate::RunOutcome;
 use crate::jq_filter::JqFilter;
@@ -48,7 +49,7 @@ impl DropNotice {
 #[derive(Clone, Debug)]
 pub(crate) struct FollowConfig {
     pub(crate) tail: u64,
-    pub(crate) pretty: bool,
+    pub(crate) output_mode: OutputMode,
     pub(crate) one: bool,
     pub(crate) timeout: Option<Duration>,
     pub(crate) data_only: bool,
@@ -212,7 +213,7 @@ impl<'a> DropReporter<'a> {
                 details,
             },
             self.cfg.color_mode,
-            !self.cfg.pretty,
+            self.cfg.output_mode,
         );
         self.last_notice_at = Some(Instant::now());
     }
@@ -334,7 +335,7 @@ pub(crate) fn follow_remote(
                 }
                 emit_message(
                     output_value(value, cfg.data_only),
-                    cfg.pretty,
+                    cfg.output_mode,
                     cfg.color_mode,
                 );
                 deadline = cfg.timeout.map(|duration| Instant::now() + duration);
@@ -465,7 +466,7 @@ pub(crate) fn follow_pool(
                     }
                     emit_message(
                         output_value(message, cfg.data_only),
-                        cfg.pretty,
+                        cfg.output_mode,
                         cfg.color_mode,
                     );
                     previous_timestamp = Some(frame.timestamp_ns);

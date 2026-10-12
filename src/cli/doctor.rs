@@ -6,20 +6,19 @@ use super::context::CliContext;
 use super::doctor_support::{
     doctor_report, emit_doctor_human, emit_doctor_human_summary, report_json,
 };
-use super::output::emit_json;
+use super::output::emit_output;
 use super::pool_support::list_pool_paths;
 use super::result::CommandResult;
 use super::support::resolve_poolref;
 use plasmite::api::{Error, ErrorKind, LocalClient, PoolRef, ValidationStatus, to_exit_code};
-use serde_json::json;
 
 pub(super) struct DoctorArgs {
     pub(super) pool: Option<String>,
     pub(super) all: bool,
-    pub(super) json: bool,
 }
 
 pub(super) fn run(args: DoctorArgs, context: &CliContext) -> Result<CommandResult, Error> {
+    let output_mode = context.output_mode();
     if args.all && args.pool.is_some() {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("--all cannot be combined with a pool name")
@@ -47,9 +46,9 @@ pub(super) fn run(args: DoctorArgs, context: &CliContext) -> Result<CommandResul
         reports
     };
 
-    if args.json {
+    if output_mode.is_structured() {
         let values = reports.iter().map(report_json).collect::<Vec<_>>();
-        emit_json(json!({ "reports": values }), context.color_mode());
+        emit_output(serde_json::json!({ "reports": values }), output_mode);
     } else if args.all {
         emit_doctor_human_summary(&reports);
     } else {

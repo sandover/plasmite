@@ -31,8 +31,8 @@ use plasmite::api::Error;
 pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandResult, Error> {
     match command {
         Command::Version { .. } => utility::run(utility::UtilityCommand::Version, &context),
-        Command::Doctor { pool, all, json } => {
-            doctor::run(doctor::DoctorArgs { pool, all, json }, &context)
+        Command::Doctor { pool, all, .. } => {
+            doctor::run(doctor::DoctorArgs { pool, all }, &context)
         }
         Command::Pool { command } => pool::run(command, &context),
         Command::Feed {
@@ -48,6 +48,7 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             input,
             errors,
             json: _,
+            ..
         } => feed::run(
             feed::FeedArgs {
                 pool,
@@ -84,6 +85,7 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             replay,
             no_follow,
             json: _,
+            ..
         } => stream::follow(
             stream::FollowArgs {
                 pool,
@@ -115,6 +117,7 @@ pub(super) fn dispatch(command: Command, context: CliContext) -> Result<CommandR
             since,
             echo_self,
             json: _,
+            ..
         } => stream::duplex(
             stream::DuplexArgs {
                 pool,

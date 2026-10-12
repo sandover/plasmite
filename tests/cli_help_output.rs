@@ -12,7 +12,7 @@ fn top_level_help_orients_and_routes_readers() {
     assert!(stdout.contains("feed` appends"));
     assert!(stdout.contains("FIRST LOCAL WORKFLOW"));
     assert!(stdout.contains("plasmite pool create chat"));
-    assert!(stdout.contains("Use --json on reports and message commands"));
+    assert!(stdout.contains("Use --json or --yaml on reports and message commands"));
     assert!(stdout.contains("Global options work before or after commands"));
     assert!(stdout.contains("plasmite <command> --help"));
     assert!(stdout.contains("/blob/main/docs/cli.md"));
@@ -216,7 +216,8 @@ fn version_help_describes_explicit_structured_output() {
     let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
     assert!(stdout.contains("human-readable version information by default"));
     assert!(stdout.contains("--json"));
-    assert!(stdout.contains("machine-readable JSON"));
+    assert!(stdout.contains("same report as YAML"));
+    assert!(stdout.contains("--yaml"));
 }
 
 #[test]

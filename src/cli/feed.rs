@@ -131,7 +131,7 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                 emit_feed_receipt(
                     feed_receipt_from_message(&message),
                     context.color_mode(),
-                    context.json_output(),
+                    context.output_mode(),
                 );
             } else if let Some(data) = args.data.as_deref() {
                 let data = parse_inline_json(data)?;
@@ -145,7 +145,7 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                 emit_feed_receipt(
                     feed_receipt_json(seq, timestamp_ns, &args.tags)?,
                     context.color_mode(),
-                    context.json_output(),
+                    context.output_mode(),
                 );
             } else {
                 let pool_path_label = path.display().to_string();
@@ -161,7 +161,7 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                             retry_config,
                             pool_handle: &mut pool_handle,
                             color_mode: context.color_mode(),
-                            json_output: context.json_output(),
+                            output_mode: context.output_mode(),
                             input: args.input,
                             errors: args.errors,
                         },
@@ -178,7 +178,7 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                             retry_config,
                             pool_handle: &mut pool_handle,
                             color_mode: context.color_mode(),
-                            json_output: context.json_output(),
+                            output_mode: context.output_mode(),
                             input: args.input,
                             errors: args.errors,
                         },
@@ -211,7 +211,7 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                 emit_feed_receipt(
                     feed_receipt_from_message(&message),
                     context.color_mode(),
-                    context.json_output(),
+                    context.output_mode(),
                 );
             } else if let Some(data) = args.data.as_deref() {
                 let data = parse_inline_json(data)?;
@@ -221,7 +221,7 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                 emit_feed_receipt(
                     feed_receipt_from_message(&message),
                     context.color_mode(),
-                    context.json_output(),
+                    context.output_mode(),
                 );
             } else {
                 let pool_path_label = format!("{}/{}", client.base_url(), name);
@@ -237,7 +237,7 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                             retry_config,
                             remote_pool: &remote_pool,
                             color_mode: context.color_mode(),
-                            json_output: context.json_output(),
+                            output_mode: context.output_mode(),
                             input: args.input,
                             errors: args.errors,
                         },
@@ -254,7 +254,7 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                             retry_config,
                             remote_pool: &remote_pool,
                             color_mode: context.color_mode(),
-                            json_output: context.json_output(),
+                            output_mode: context.output_mode(),
                             input: args.input,
                             errors: args.errors,
                         },
@@ -281,7 +281,9 @@ pub(super) fn fetch(
     format: Option<FetchFormat>,
     context: &CliContext,
 ) -> Result<CommandResult, Error> {
-    if context.json_output() && matches!(format, Some(FetchFormat::Pretty | FetchFormat::Lite3)) {
+    if context.structured_output()
+        && matches!(format, Some(FetchFormat::Pretty | FetchFormat::Lite3))
+    {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("--json conflicts with --format pretty or lite3")
             .with_hint("Use --json or --format json for a JSON envelope."));
@@ -344,7 +346,7 @@ pub(super) fn fetch(
             message_to_json(&message)
         }
     };
-    emit_message(message, !context.json_output(), context.color_mode());
+    emit_message(message, context.output_mode(), context.color_mode());
     Ok(CommandResult::ok())
 }
 

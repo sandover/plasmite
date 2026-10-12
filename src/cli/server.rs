@@ -2,6 +2,7 @@
 
 use super::args::ServeSubcommand;
 use super::context::CliContext;
+use super::output::{OutputMode, emit_output};
 use super::output_support::{display_pool_dir_for_humans, emit_table, human_literal};
 use super::result::CommandResult;
 use crate::ServeRunArgs;
@@ -13,45 +14,43 @@ pub(super) fn run(
     run: ServeRunArgs,
     context: &CliContext,
 ) -> Result<CommandResult, Error> {
+    let output_mode = context.output_mode();
     match command {
         None => crate::secure_serve::run(context.pool_dir(), &run)?,
         Some(ServeSubcommand::Install { run, no_udp, .. }) => emit_action(
             "install",
             serve_service::install(context.pool_dir(), &run, no_udp)?,
-            context.json_output(),
+            output_mode,
         ),
         Some(ServeSubcommand::Start { .. }) => emit_action(
             "start",
             serve_service::control(context.pool_dir(), "start")?,
-            context.json_output(),
+            output_mode,
         ),
         Some(ServeSubcommand::Stop { .. }) => emit_action(
             "stop",
             serve_service::control(context.pool_dir(), "stop")?,
-            context.json_output(),
+            output_mode,
         ),
         Some(ServeSubcommand::Restart { .. }) => emit_action(
             "restart",
             serve_service::control(context.pool_dir(), "restart")?,
-            context.json_output(),
+            output_mode,
         ),
         Some(ServeSubcommand::Uninstall { .. }) => emit_action(
             "uninstall",
             serve_service::control(context.pool_dir(), "uninstall")?,
-            context.json_output(),
+            output_mode,
         ),
-        Some(ServeSubcommand::Logs { tail, follow, .. }) => serve_service::logs(
-            context.pool_dir(),
-            tail.unwrap_or(50),
-            follow,
-            context.json_output(),
-        )?,
+        Some(ServeSubcommand::Logs { tail, follow, .. }) => {
+            serve_service::logs(context.pool_dir(), tail.unwrap_or(50), follow, output_mode)?
+        }
         Some(ServeSubcommand::Status { all: true, .. }) => {
             let (servers, errors) = serve_service::all()?;
-            if context.json_output() {
-                println!(
-                    "{}",
-                    serde_json::to_string(&servers).expect("status serializes")
+            if output_mode.is_structured() {
+                emit_output(
+                    serde_json::to_value(&servers).expect("status serializes"),
+                    output_mode,
                 );
             } else if servers.is_empty() {
                 println!("No Plasmite servers or installed setups.");
@@ -103,11 +102,7 @@ pub(super) fn run(
                 }
             }
             for error in &errors {
-                super::output_support::emit_error(
-                    error,
-                    context.color_mode(),
-                    context.json_output(),
-                );
+                super::output_support::emit_error(error, context.color_mode(), output_mode);
             }
             if !errors.is_empty() {
                 return Ok(CommandResult::with_code(1));
@@ -115,10 +110,10 @@ pub(super) fn run(
         }
         Some(ServeSubcommand::Status { all: false, .. }) => {
             let servers = crate::serve_registry::running()?;
-            if context.json_output() {
-                println!(
-                    "{}",
-                    serde_json::to_string(&servers).expect("server details serialize")
+            if output_mode.is_structured() {
+                emit_output(
+                    serde_json::to_value(&servers).expect("server details serialize"),
+                    output_mode,
                 );
             } else if servers.is_empty() {
                 println!("No Plasmite servers running.");
@@ -165,11 +160,11 @@ pub(super) fn run(
     Ok(CommandResult::ok())
 }
 
-fn emit_action(action: &str, status: Status, json: bool) {
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string(&status).expect("service status serializes")
+fn emit_action(action: &str, status: Status, output_mode: OutputMode) {
+    if output_mode.is_structured() {
+        emit_output(
+            serde_json::to_value(&status).expect("service status serializes"),
+            output_mode,
         );
         return;
     }

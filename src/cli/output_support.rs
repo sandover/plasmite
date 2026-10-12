@@ -1,7 +1,7 @@
 //! CLI helpers for output commands.
 
 use crate::ColorMode;
-use crate::cli::output::emit_json;
+use crate::cli::output::{OutputMode, emit_output, render_output};
 use crate::color_json::colorize_json;
 use crate::interface_wire::ErrorKindWire;
 use crate::interface_wire::error_policy;
@@ -52,9 +52,9 @@ pub(crate) fn emit_feed_receipt_human(receipt: &Value) {
     }
 }
 
-pub(crate) fn emit_feed_receipt(value: Value, color_mode: ColorMode, json_output: bool) {
-    if json_output {
-        emit_json(value, color_mode);
+pub(crate) fn emit_feed_receipt(value: Value, _color_mode: ColorMode, output_mode: OutputMode) {
+    if output_mode.is_structured() {
+        emit_output(value, output_mode);
     } else {
         emit_feed_receipt_human(&value);
     }
@@ -162,35 +162,34 @@ pub(crate) fn colorize_label(label: &str, enabled: bool, color: AnsiColor) -> St
     format!("\u{1b}[{code}m{label}\u{1b}[0m")
 }
 
-pub(crate) fn emit_message(value: serde_json::Value, pretty: bool, color_mode: ColorMode) {
+pub(crate) fn emit_message(
+    value: serde_json::Value,
+    output_mode: OutputMode,
+    color_mode: ColorMode,
+) {
+    if output_mode.is_structured() {
+        emit_output(value, output_mode);
+        return;
+    }
     let is_tty = io::stdout().is_terminal();
     let use_color = color_mode.use_color(is_tty);
-    let json = if pretty {
-        if use_color {
-            colorize_json(&value, true)
-        } else {
-            serde_json::to_string_pretty(&value)
-                .unwrap_or_else(|_| "{\"error\":\"json encode failed\"}".to_string())
-        }
+    let json = if use_color {
+        colorize_json(&value, true)
     } else {
-        serde_json::to_string(&value)
+        serde_json::to_string_pretty(&value)
             .unwrap_or_else(|_| "{\"error\":\"json encode failed\"}".to_string())
     };
     println!("{json}");
 }
 
-pub(crate) fn emit_error(err: &Error, color_mode: ColorMode, json_output: bool) {
+pub(crate) fn emit_error(err: &Error, color_mode: ColorMode, output_mode: OutputMode) {
     let is_tty = io::stderr().is_terminal();
-    if !json_output {
+    if !output_mode.is_structured() {
         eprintln!("{}", error_text(err, color_mode.use_color(is_tty)));
         return;
     }
 
-    let value = error_json(err);
-    let json = serde_json::to_string(&value).unwrap_or_else(|_| {
-        "{\"error\":{\"kind\":\"Internal\",\"message\":\"json encode failed\"}}".to_string()
-    });
-    eprintln!("{json}");
+    eprint!("{}", render_output(&error_json(err), output_mode));
 }
 
 pub(crate) fn notice_time_now() -> Option<String> {
@@ -200,9 +199,9 @@ pub(crate) fn notice_time_now() -> Option<String> {
     ts.format(&Rfc3339).ok()
 }
 
-pub(crate) fn emit_notice(notice: &Notice, color_mode: ColorMode, json_output: bool) {
+pub(crate) fn emit_notice(notice: &Notice, color_mode: ColorMode, output_mode: OutputMode) {
     let is_tty = io::stderr().is_terminal();
-    if !json_output {
+    if !output_mode.is_structured() {
         let label = colorize_label("notice:", color_mode.use_color(is_tty), AnsiColor::Yellow);
         let message = human_literal(&notice.message);
         if notice.cmd == "feed" {
@@ -213,11 +212,7 @@ pub(crate) fn emit_notice(notice: &Notice, color_mode: ColorMode, json_output: b
         return;
     }
 
-    let value = notice_json(notice);
-    let json = serde_json::to_string(&value).unwrap_or_else(|_| {
-        "{\"notice\":{\"kind\":\"Internal\",\"message\":\"json encode failed\"}}".to_string()
-    });
-    eprintln!("{json}");
+    eprint!("{}", render_output(&notice_json(notice), output_mode));
 }
 
 pub(crate) fn error_message(err: &Error) -> String {

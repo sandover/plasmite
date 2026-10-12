@@ -3,7 +3,7 @@
 //! Role: Own pool-command orchestration while core APIs own storage semantics.
 
 use super::context::CliContext;
-use super::output::emit_json;
+use super::output::emit_output;
 use super::output_support::display_pool_dir_for_humans;
 use super::output_support::{emit_table, error_json, short_display_path};
 use super::pool_support::{
@@ -23,12 +23,13 @@ use std::io::{self, IsTerminal};
 
 pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandResult, Error> {
     let pool_dir = context.pool_dir();
+    let output_mode = context.output_mode();
     match command {
         PoolCommand::Create {
             names,
             size,
             index_capacity,
-            json: json_output,
+            ..
         } => {
             if names.iter().any(|name| name.contains("://")) {
                 return Err(Error::new(ErrorKind::Usage)
@@ -73,17 +74,14 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                 let info = client.create_pool(&pool_ref, options)?;
                 results.push(pool_info_json(&name, &info));
             }
-            if json_output {
-                emit_json(json!({ "created": results }), context.color_mode());
+            if output_mode.is_structured() {
+                emit_output(json!({ "created": results }), output_mode);
             } else {
                 emit_pool_create_table(&results, pool_dir);
             }
             Ok(CommandResult::ok())
         }
-        PoolCommand::Info {
-            name,
-            json: json_output,
-        } => {
+        PoolCommand::Info { name, .. } => {
             let info = match resolve_pool_target(&name, pool_dir)? {
                 PoolTarget::LocalPath(path) => {
                     let client = LocalClient::new().with_pool_dir(pool_dir);
@@ -100,17 +98,14 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                     remote_client(base_url)?.pool_info(&PoolRef::name(pool))?
                 }
             };
-            if json_output {
-                emit_json(pool_info_json(&name, &info), context.color_mode());
+            if output_mode.is_structured() {
+                emit_output(pool_info_json(&name, &info), output_mode);
             } else {
                 emit_pool_info_pretty(&name, &info);
             }
             Ok(CommandResult::ok())
         }
-        PoolCommand::Delete {
-            names,
-            json: json_output,
-        } => {
+        PoolCommand::Delete { names, .. } => {
             let client = LocalClient::new().with_pool_dir(pool_dir);
             let mut deleted = Vec::new();
             let mut failed = Vec::new();
@@ -195,13 +190,13 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                 }
             }
 
-            if json_output {
-                emit_json(
+            if output_mode.is_structured() {
+                emit_output(
                     json!({
                         "deleted": deleted,
                         "failed": failed,
                     }),
-                    context.color_mode(),
+                    output_mode,
                 );
             } else if io::stdout().is_terminal() {
                 let total = human_rows.len();
@@ -292,10 +287,7 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                 Ok(CommandResult::ok())
             }
         }
-        PoolCommand::List {
-            server,
-            json: json_output,
-        } => {
+        PoolCommand::List { server, .. } => {
             let pools = match server.as_deref() {
                 Some(server) => {
                     let mut pools = remote_client(server.to_string())?
@@ -323,9 +315,9 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                     list_pools(pool_dir, &client)?
                 }
             };
-            if json_output {
+            if output_mode.is_structured() {
                 let pools = pools.iter().map(PoolListRow::json).collect::<Vec<_>>();
-                emit_json(json!({ "pools": pools }), context.color_mode());
+                emit_output(json!({ "pools": pools }), output_mode);
             } else {
                 emit_pool_list_table(&pools, pool_dir, server.as_deref());
             }

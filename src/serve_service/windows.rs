@@ -2,6 +2,7 @@
 //! installation binds one pool owner to one virtual service account.
 use super::{Setup, Status, id, io_error, merge, require_fixed_listener_ports, usage};
 use crate::cli::args::ServeRunArgs;
+use crate::cli::output::{OutputMode, render_output};
 use crate::{access_store, serve_registry, windows_private};
 use fs2::FileExt;
 use plasmite::api::{Error, ErrorKind};
@@ -792,7 +793,12 @@ pub(crate) fn registry_directory() -> Option<PathBuf> {
     HOST.get()
         .map(|record| runtime_dir(&record.setup.pool_dir).join("registry"))
 }
-pub(crate) fn logs(pool: &Path, tail: usize, follow: bool, json: bool) -> Result<(), Error> {
+pub(crate) fn logs(
+    pool: &Path,
+    tail: usize,
+    follow: bool,
+    output_mode: OutputMode,
+) -> Result<(), Error> {
     let record = required(
         &fs::canonicalize(pool)
             .map_err(|err| io_error("failed to resolve pool directory", pool, err))?,
@@ -804,7 +810,7 @@ pub(crate) fn logs(pool: &Path, tail: usize, follow: bool, json: bool) -> Result
     let lines = text.lines().collect::<Vec<_>>();
     let mut stdout = io::stdout().lock();
     for line in &lines[lines.len().saturating_sub(tail)..] {
-        log_line(&mut stdout, line, json)?;
+        log_line(&mut stdout, line, output_mode)?;
     }
     if follow {
         let mut offset = bytes.len() as u64;
@@ -828,7 +834,7 @@ pub(crate) fn logs(pool: &Path, tail: usize, follow: bool, json: bool) -> Result
                 log_line(
                     &mut stdout,
                     &line.map_err(|err| io_error("failed to read service log", &path, err))?,
-                    json,
+                    output_mode,
                 )?;
             }
             offset = reader
@@ -838,13 +844,13 @@ pub(crate) fn logs(pool: &Path, tail: usize, follow: bool, json: bool) -> Result
     }
     Ok(())
 }
-fn log_line(stdout: &mut impl Write, line: &str, json: bool) -> Result<(), Error> {
-    let text = if json {
-        serde_json::json!({"message":line}).to_string()
+fn log_line(stdout: &mut impl Write, line: &str, output_mode: OutputMode) -> Result<(), Error> {
+    let text = if output_mode.is_structured() {
+        render_output(&serde_json::json!({"message":line}), output_mode)
     } else {
-        line.into()
+        format!("{line}\n")
     };
-    writeln!(stdout, "{text}")
+    write!(stdout, "{text}")
         .and_then(|()| stdout.flush())
         .map_err(|err| win_error("failed to write service log").with_source(err))
 }

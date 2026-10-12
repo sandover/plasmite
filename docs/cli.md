@@ -169,15 +169,17 @@ and HTTP details.
 - `feed` accepts one inline JSON value, a file with `--file`, `--file -` for
   stdin, or piped stdin when neither inline data nor a file is given.
   `--in` selects JSON, JSON Lines, auto-detection, or Lite3 for input;
-  `--errors` selects stop or skip behavior for JSON input.
+  `--errors` selects stop or skip behavior for JSON input. YAML is an output
+  choice only and does not add a YAML input mode.
 - `feed --in lite3` reads one byte buffer as one message from `--file PATH`,
   `--file -`, or piped stdin. It reads stdin through EOF and accepts at most
   256 MiB. A remote server may enforce a lower configured request-body limit.
   Do not pass inline `DATA`, `--tag`, or `--errors skip` with Lite3 input. The
   document supplies its own `meta.tags` string array and object `data`;
   Plasmite stores those bytes as given and assigns the new message's sequence
-  and time. `feed --json` still selects the append receipt format.
-  The command treats the whole input as one byte buffer, including unused
+  and time. `feed --json` selects a JSON append receipt; `feed --yaml`
+  selects the same receipt as YAML. Neither flag changes the input mode. The
+  command treats the whole input as one byte buffer, including unused
   bytes; it does not split concatenated messages.
 - Binary pipes work with Bash and Zsh. PowerShell 7.4 and later preserves
   binary data with native redirection. Earlier PowerShell versions need
@@ -195,28 +197,43 @@ and HTTP details.
 
 ## Output
 
-Commands produce readable output by default, including when piped. Select
-`--json` explicitly for scripts. Terminal detection controls presentation,
-such as color; it does not select the output contract.
+Commands produce readable output by default, including when piped. Choose
+`--json` or `--yaml` when a script reads a report or message. Terminal
+presentation, such as color, does not select the output format.
 
-| Commands | `--json` output |
-| --- | --- |
-| `pool`, `doctor`, `serve status`, `access`, `version` | One JSON document |
-| `fetch` | One JSON message envelope |
-| `follow`, `duplex` | One JSON message envelope per line |
-| `feed` | One append receipt per line |
+| Commands | `--json` output | `--yaml` output |
+| --- | --- | --- |
+| `pool`, `doctor`, `serve status`, `serve lifecycle`, `access`, `version` | One report document | One report document |
+| `fetch` | One message envelope | One message envelope |
+| `follow`, `duplex` | One message envelope per line | One YAML document per message |
+| `feed`, `serve logs` | One receipt or log object per line | One YAML document per receipt or log object |
 
-Structured output has no color or commentary. `--jsonl` and `--format jsonl`
-remain aliases for message streams. `mcp` always uses JSON-RPC;
+YAML uses the same values and fields as JSON, including reports, messages,
+and receipts. Every YAML output starts with `---` and ends with `...`, including
+a single report. Streams write one complete document as each item arrives.
+Each document stands on its own. YAML quotes string values so readers do not
+interpret dates or boolean-like text as different types.
+
+`--yaml` only selects output. It does not change `feed` input, which remains
+JSON, JSON Lines, auto-detected JSON formats, or Lite3. With `follow`,
+`--data-only` still selects each message's `data` value; YAML writes one marked
+document per selected value.
+
+`--yaml` conflicts with `--json`. `fetch` also rejects `--format` with
+`--yaml`; `follow` and `duplex` reject `--format` and `--jsonl`. The JSON
+stream aliases `--jsonl` and `--format jsonl` keep their existing meanings.
+There is no `--format yaml` alias.
+
+Structured output has no color or commentary. `mcp` always uses JSON-RPC;
 `completion` always prints shell code. `tap` passes through child output;
-`--quiet` suppresses that output.
+`--quiet` suppresses that output. Help, completion, and bare `version` output
+remain text; `version --json` and `version --yaml` select a report format.
 
 `fetch POOL SEQ` defaults to readable text. Use `--format pretty`,
 `--format json`, or `--format lite3` to choose readable text, one JSON message
 envelope, or the raw Lite3 document. `--json` is an alias for `--format json`;
 it cannot be combined with `--format pretty` or `--format lite3`. Lite3 fetch
 works for local and remote pools and writes the document bytes to stdout.
-`follow` and `duplex` keep their existing readable and JSON stream formats.
 
 Message envelopes contain `seq`, `time`, `meta`, and `data`. Compatibility
 guarantees for machine output live in the [CLI specification](../spec/v0/SPEC.md).
@@ -248,9 +265,9 @@ and `0` emits immediately. Remote replay timing remains unsupported.
 
 ## Errors and exits
 
-Errors go to stderr as concise text by default; `--json` selects a structured
-error envelope. Help stays readable text. General exit codes are mapped by
-error kind; these command workflows
+Errors and notices go to stderr. They use concise text by default, JSON with
+`--json`, or marked YAML documents with `--yaml`. Help stays readable text.
+General exit codes are mapped by error kind; these command workflows
 also have specific meanings:
 
 - `follow` and `duplex` return 124 on timeout.

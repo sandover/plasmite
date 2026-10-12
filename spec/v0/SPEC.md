@@ -46,33 +46,50 @@ owns its protocol guarantees.
 - Global `--dir` selects the local pool directory before or after a command.
   It also applies to local MCP stdio. Conflicting repeated directory values
   are rejected. Options after `tap`'s `--` belong to the child process.
-- Commands that expose `--json` provide stable machine-readable output through it.
-- Output defaults to readable text even when piped. Explicit `--json` selects
-  machine output and structured errors, without ANSI color or commentary.
+- Commands that expose `--json` or `--yaml` provide stable machine-readable
+  output through that flag. The flags select the same report or message value
+  in JSON or YAML form. They conflict with each other.
+- Output defaults to readable text even when piped. Explicit `--json` or
+  `--yaml` selects machine output and structured errors, without ANSI color or
+  commentary. YAML output uses the same fields and values as JSON. Each YAML
+  document starts with `---` and ends with `...`, including single reports.
+  Errors and notices go to stderr in the selected output format. Bare help,
+  bare `version`, and `completion` output remain text.
 - JSON reports emit one document; JSON streams and append receipts emit one
-  document per line. `fetch --json` emits one message envelope.
+  document per line. `fetch --json` emits one message envelope. YAML reports
+  emit one marked document; each streamed message, receipt, or log object emits
+  its own complete marked document as soon as it is available.
+- `--yaml` selects output only. It does not add YAML input to `feed`; input
+  remains JSON, supported JSON stream forms, or Lite3. `follow --data-only`
+  keeps selecting each message's `data` value in either structured format.
 - `fetch POOL SEQ` defaults to readable text. `--format pretty`, `--format
   json`, and `--format lite3` select readable text, one JSON message envelope,
   and the raw Lite3 document. `--json` selects the same mode as
   `--format json`; combining it with explicit `--format pretty` or
-  `--format lite3` is a usage error. Local and remote fetch support all three
-  formats.
+  `--format lite3` is a usage error. `--yaml` conflicts with `--format` and
+  has no `--format yaml` alias. Local and remote fetch support all three
+  existing formats, plus `--yaml` output.
 - `feed --in lite3` reads one byte buffer as one message from `--file PATH`,
   `--file -`, or piped stdin. Stdin input ends at EOF. The document may not
   exceed 256 MiB. Lite3 mode rejects inline `DATA`, `--tag`, and
   `--errors skip`. It preserves the input document bytes, including its
   `meta.tags` string array and object `data`; the append assigns a new
-  sequence and time. `feed --json` selects the append receipt format and does
-  not change the input mode. Local and remote feed support Lite3 mode.
+  sequence and time. `feed --json` selects a JSON append receipt and
+  `feed --yaml` selects the same receipt as YAML. Neither changes the input
+  mode. Local and remote feed support Lite3 mode.
 - Lite3 input treats the whole input as one byte buffer. It preserves unused
   bytes in that buffer and does not split concatenated messages.
 - `follow` and `duplex` do not support Lite3 binary streams.
-- `version --json` emits its version report; bare `version` emits human text.
+- `version --json` emits its version report as JSON; `version --yaml` emits
+  the same report as one marked YAML document. Bare `version` emits human
+  text.
 - All product-version output uses the same build identity. A clean checkout at
   the matching release tag reports the package version. Other source builds
   append `-dev` and Git commit metadata, plus `.dirty` for changes to tracked
   files. Stage new files to include them in that check.
 - Streaming reads provide stable JSON Lines via `--format jsonl` or `--jsonl`.
+  `--yaml` conflicts with `--format` and `--jsonl` on `follow` and `duplex`;
+  those JSON stream flags do not select YAML.
 - `feed` append receipts include `seq`, `time`, and `meta` (not echoed `data`).
 
 ### Secure Sharing
@@ -86,7 +103,8 @@ Plasmite 1.0 provides native access-key sharing. It keeps the existing spec path
 - `plasmite serve status` lists every Plasmite server running for the current
   OS user. Top-level `--dir` does not limit discovery. `--json` emits a JSON
   array of server objects with stable fields: `pid` (process ID), `pool_dir`
-  (absolute pool directory), `local_url`, and `remote_url`. `remote_url` uses
+  (absolute pool directory), `local_url`, and `remote_url`. `--yaml` emits the
+  same array as one marked YAML document. `remote_url` uses
   positional `SERVER`, `--shared-address`, or a loopback HTTPS bind. It is
   `null` when the client-facing HTTPS address is unknown. A non-loopback
   bind needs a public origin even with a TLS certificate configured. Secure
@@ -124,7 +142,8 @@ Plasmite 1.0 provides native access-key sharing. It keeps the existing spec path
   leaves the native connection usable. Scripts never wait for this prompt.
 - `plasmite access list` inventories saved destination URLs offline, without
   exposing credentials or probing servers. `--json` emits an array of objects
-  with a `destination` string.
+  with a `destination` string; `--yaml` emits the same array as a marked YAML
+  document.
 - `plasmite access status SERVER_URL` reports whether a connection is saved,
   whether the server is reachable, and whether it accepts the saved access
   secret. On macOS and Windows, it also reports browser trust for the current
@@ -155,6 +174,9 @@ Plasmite 1.0 provides native access-key sharing. It keeps the existing spec path
 - A changed address never inherits credentials automatically. Explicit
   reconnection can reuse a key only if the new address presents the same
   pinned public key and accepts that key's secret.
+- YAML output is available on the same `serve` and `access` commands that
+  expose `--json`; it keeps their report fields and values and marks each
+  document with `---` and `...`.
 - Local HTTP listens on loopback, defaults to port `9700`, and permits
   credential-free local pool operations. HTTPS defaults to port `9743` and
   requires authentication for remote pool operations. Both ports can be
@@ -224,9 +246,11 @@ Plasmite 1.0 provides native access-key sharing. It keeps the existing spec path
   owning `account`, `home`, and effective `run` options. A foreground
   server has `managed: false` and `setup: null`. Install, start, stop,
   restart, and uninstall with `--json` emit one status object with these
-  fields; successful `uninstall` reports `state: "uninstalled"`, `startup: false`, and
+  fields; `--yaml` emits the same status object as a marked YAML document.
+  Successful `uninstall` reports `state: "uninstalled"`, `startup: false`, and
   `setup: null`. `serve logs --json` streams JSON Lines with one
-  `message` field per installed server log line.
+  `message` field per installed server log line. `serve logs --yaml` emits
+  one marked YAML document with the same field for each log line.
 - Local `mcp` exposes local pools over stdio. Shared pools use direct HTTPS
   MCP with harness OAuth. MCP methods and messages follow the separately
   versioned [MCP contract](../mcp/2025-11-25/SPEC.md).
@@ -237,15 +261,17 @@ Plasmite 1.0 provides native access-key sharing. It keeps the existing spec path
 
 - Stable message envelope fields: `seq`, `time`, `meta`, `data`.
 - `seq` is monotonic per pool.
-- `time` is RFC 3339 UTC text in CLI JSON output.
+- `time` is RFC 3339 UTC text in CLI structured output.
 - `meta.tags` is always present (empty array when unset).
-- Message data is JSON. Explicit JSON output preserves the envelope contract.
+- Message data is JSON. Explicit JSON and YAML output preserve the same
+  envelope contract; YAML changes only the serialization format.
 
 ### Error + Exit Contract
 
-- Errors are emitted on stderr.
+- Errors and notices are emitted on stderr.
 - Default stderr is concise human text plus actionable guidance.
 - Explicit JSON selects an envelope with required `error.kind` and `error.message`.
+  Explicit YAML selects the same envelope fields as a marked YAML document.
 - Optional error fields may include `error.hint`, `error.path`, `error.seq`, `error.offset`, `error.causes`.
 - Exit-code mapping by error kind is stable for 1.x and defined by implementation in `src/core/error.rs`.
 

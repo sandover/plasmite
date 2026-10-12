@@ -2,6 +2,7 @@
 
 #![cfg(any(target_os = "linux", target_os = "macos"))]
 
+use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
@@ -67,13 +68,17 @@ impl Fixture {
     }
 
     fn command(&self) -> Command {
+        self.command_with_format("--json")
+    }
+
+    fn command_with_format(&self, format: &str) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_plasmite"));
         command
             .env("HOME", &self.home)
             .env("PLASMITE_ACCESS_HOME", &self.home)
             .arg("--dir")
             .arg(&self.pools)
-            .args(["serve", "logs", "--tail", "2", "--json"]);
+            .args(["serve", "logs", "--tail", "2", format]);
         command
     }
 
@@ -93,8 +98,16 @@ struct FollowLog {
 
 impl FollowLog {
     fn start(fixture: &Fixture, close_after_one_line: bool) -> TestResult<Self> {
+        Self::start_with_format(fixture, close_after_one_line, "--json")
+    }
+
+    fn start_with_format(
+        fixture: &Fixture,
+        close_after_one_line: bool,
+        format: &str,
+    ) -> TestResult<Self> {
         let mut child = fixture
-            .command()
+            .command_with_format(format)
             .arg("--follow")
             .process_group(0)
             .stdout(Stdio::piped())
@@ -118,7 +131,20 @@ impl FollowLog {
 
     fn message(&self) -> TestResult<String> {
         let line = self.lines.recv_timeout(Duration::from_secs(5))??;
-        let row: Value = serde_json::from_str(&line)?;
+        let row: Value = if line == "---" {
+            let mut document = String::from("---\n");
+            loop {
+                let line = self.lines.recv_timeout(Duration::from_secs(5))??;
+                document.push_str(&line);
+                document.push('\n');
+                if line == "..." {
+                    break;
+                }
+            }
+            serde_yaml_ng::from_str(&document)?
+        } else {
+            serde_json::from_str(&line)?
+        };
         Ok(row["message"]
             .as_str()
             .ok_or("missing JSON log message")?
@@ -272,5 +298,32 @@ fn json_follow_broken_pipe_reaps_native_reader_and_reports_io_error() -> TestRes
                 .as_str()
                 .is_some_and(|text| text.to_lowercase().contains("broken pipe")))
     );
+    Ok(())
+}
+
+#[test]
+fn yaml_logs_preserve_messages_and_follow_without_waiting_for_eof() -> TestResult<()> {
+    let fixture = Fixture::new()?;
+    fixture.append(b"null\n")?;
+    let output = fixture.command_with_format("--yaml").output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout)?;
+    let rows = serde_yaml_ng::Deserializer::from_str(&text)
+        .map(Value::deserialize)
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(
+        rows,
+        vec![json!({"message":"first line"}), json!({"message":"null"})]
+    );
+    let process = FollowLog::start_with_format(&fixture, false, "--yaml")?;
+    assert_eq!(process.message()?, "first line");
+    assert_eq!(process.message()?, "null");
+    fixture.append(b"new YAML follow line\n")?;
+    assert_eq!(process.message()?, "new YAML follow line");
+    assert!(process.helper_pid()? > 0);
     Ok(())
 }

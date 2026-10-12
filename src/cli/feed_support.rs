@@ -1,5 +1,6 @@
 //! CLI helpers for feed commands.
 
+use super::output::OutputMode;
 use crate::ColorMode;
 use crate::ErrorPolicyCli;
 use crate::InputMode;
@@ -90,7 +91,7 @@ pub(crate) fn ingest_failure_notice(
     pool_ref: &str,
     pool_path_label: &str,
     color_mode: ColorMode,
-    json_output: bool,
+    output_mode: OutputMode,
 ) {
     let mut details = Map::new();
     details.insert("mode".to_string(), json!(mode_label(failure.mode)));
@@ -111,7 +112,7 @@ pub(crate) fn ingest_failure_notice(
         message: ingest_failure_message(failure),
         details,
     };
-    emit_notice(&notice, color_mode, json_output);
+    emit_notice(&notice, color_mode, output_mode);
 }
 
 pub(crate) fn ingest_failure_message(failure: &IngestFailure) -> String {
@@ -127,7 +128,7 @@ pub(crate) fn ingest_summary_notice(
     pool_ref: &str,
     pool_path_label: &str,
     color_mode: ColorMode,
-    json_output: bool,
+    output_mode: OutputMode,
 ) {
     let mut details = Map::new();
     details.insert("total".to_string(), json!(outcome.records_total));
@@ -146,7 +147,7 @@ pub(crate) fn ingest_summary_notice(
         ),
         details,
     };
-    emit_notice(&notice, color_mode, json_output);
+    emit_notice(&notice, color_mode, output_mode);
 }
 
 pub(crate) fn mode_label(mode: IngestMode) -> &'static str {
@@ -168,7 +169,7 @@ pub(crate) struct FeedIngestContext<'a> {
     pub(crate) retry_config: Option<RetryConfig>,
     pub(crate) pool_handle: &'a mut Pool,
     pub(crate) color_mode: ColorMode,
-    pub(crate) json_output: bool,
+    pub(crate) output_mode: OutputMode,
     pub(crate) input: InputMode,
     pub(crate) errors: ErrorPolicyCli,
 }
@@ -181,7 +182,7 @@ pub(crate) struct RemoteFeedIngestContext<'a> {
     pub(crate) retry_config: Option<RetryConfig>,
     pub(crate) remote_pool: &'a RemotePool,
     pub(crate) color_mode: ColorMode,
-    pub(crate) json_output: bool,
+    pub(crate) output_mode: OutputMode,
     pub(crate) input: InputMode,
     pub(crate) errors: ErrorPolicyCli,
 }
@@ -190,7 +191,7 @@ struct IngestPresentation<'a> {
     pool_ref: &'a str,
     pool_path_label: &'a str,
     color_mode: ColorMode,
-    json_output: bool,
+    output_mode: OutputMode,
     input: InputMode,
     errors: ErrorPolicyCli,
 }
@@ -219,7 +220,7 @@ where
         |data| {
             let receipt = append(data, emit_receipt)?;
             if let Some(receipt) = receipt {
-                emit_feed_receipt(receipt, presentation.color_mode, presentation.json_output);
+                emit_feed_receipt(receipt, presentation.color_mode, presentation.output_mode);
             }
             Ok(())
         },
@@ -229,7 +230,7 @@ where
                 presentation.pool_ref,
                 presentation.pool_path_label,
                 presentation.color_mode,
-                presentation.json_output,
+                presentation.output_mode,
             )
         },
     )?;
@@ -239,7 +240,7 @@ where
             presentation.pool_ref,
             presentation.pool_path_label,
             presentation.color_mode,
-            presentation.json_output,
+            presentation.output_mode,
         );
     }
     Ok(outcome)
@@ -256,7 +257,7 @@ pub(crate) fn ingest_from_stdin<R: Read>(
             pool_ref: ctx.pool_ref,
             pool_path_label: ctx.pool_path_label,
             color_mode: ctx.color_mode,
-            json_output: ctx.json_output,
+            output_mode: ctx.output_mode,
             input: ctx.input,
             errors: ctx.errors,
         },
@@ -289,7 +290,7 @@ pub(crate) fn ingest_from_stdin_remote<R: Read>(
             pool_ref: ctx.pool_ref,
             pool_path_label: ctx.pool_path_label,
             color_mode: ctx.color_mode,
-            json_output: ctx.json_output,
+            output_mode: ctx.output_mode,
             input: ctx.input,
             errors: ctx.errors,
         },

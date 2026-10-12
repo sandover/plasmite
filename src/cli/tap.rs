@@ -499,7 +499,7 @@ mod tests {
         let context = CliContext::new(
             temporary.path().to_path_buf(),
             crate::ColorMode::Never,
-            false,
+            crate::cli::output::OutputMode::Human,
         );
         let (tx, rx) = mpsc::channel();
         let worker = std::thread::spawn(move || {

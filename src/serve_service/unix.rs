@@ -3,6 +3,7 @@ use super::effective_args;
 use super::{Setup, Status, absolute, id, io_error, merge, require_fixed_listener_ports, usage};
 use crate::access_store::{create_private_dir, ensure_private, read_json, write_atomic_json};
 use crate::cli::args::ServeRunArgs;
+use crate::cli::output::{OutputMode, render_output};
 use crate::serve_registry::{self, ServerDetails};
 use fs2::FileExt;
 use plasmite::api::{Error, ErrorKind};
@@ -1153,7 +1154,12 @@ impl Drop for LogChild {
     }
 }
 
-pub(crate) fn logs(pool_dir: &Path, tail: usize, follow: bool, json: bool) -> Result<(), Error> {
+pub(crate) fn logs(
+    pool_dir: &Path,
+    tail: usize,
+    follow: bool,
+    output_mode: OutputMode,
+) -> Result<(), Error> {
     supported()?;
     let setup = required(&absolute(pool_dir)?)?;
     let mut command = Command::new(native_program("tail"));
@@ -1162,7 +1168,7 @@ pub(crate) fn logs(pool_dir: &Path, tail: usize, follow: bool, json: bool) -> Re
         command.arg("-F");
     }
     command.arg(setup.log_path());
-    let exit = if json {
+    let exit = if output_mode.is_structured() {
         use std::io::{BufRead, Write};
         let child = command.stdout(Stdio::piped()).spawn().map_err(|error| {
             Error::new(ErrorKind::Io)
@@ -1177,13 +1183,17 @@ pub(crate) fn logs(pool_dir: &Path, tail: usize, follow: bool, json: bool) -> Re
                     .with_message("failed to read log line")
                     .with_source(error)
             })?;
-            writeln!(stdout, "{}", serde_json::json!({"message": line}))
-                .and_then(|()| stdout.flush())
-                .map_err(|error| {
-                    Error::new(ErrorKind::Io)
-                        .with_message("failed to write service logs")
-                        .with_source(error)
-                })?;
+            write!(
+                stdout,
+                "{}",
+                render_output(&serde_json::json!({"message": line}), output_mode)
+            )
+            .and_then(|()| stdout.flush())
+            .map_err(|error| {
+                Error::new(ErrorKind::Io)
+                    .with_message("failed to write service logs")
+                    .with_source(error)
+            })?;
         }
         child.0.wait()
     } else {

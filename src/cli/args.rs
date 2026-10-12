@@ -70,8 +70,9 @@ FIRST LOCAL WORKFLOW
 
 "#,
     after_help = r#"OUTPUT
-  Human-readable by default. Use --json on reports and message commands for scripts.
-  Structured output contains no color or commentary; errors go to stderr.
+  Human-readable by default. Use --json or --yaml on reports and message commands.
+  YAML keeps the same structured values as JSON and wraps every document in --- and ... markers.
+  Errors and notices go to stderr in the selected format. Help, bare version, and completion stay text.
 
 OPTIONS AND HELP
   Global options work before or after commands, up to tap's -- separator.
@@ -193,15 +194,25 @@ Use --in lite3 for one pre-encoded message from a file or piped stdin."#,
 
 INPUT AND OUTPUT
   - Choose one input source: inline DATA, --file, or stdin
-  - Receipts are human-readable by default; --json emits one receipt per line
+  - Receipts are human-readable by default; --json emits one receipt per line and --yaml one YAML document per receipt
   - --errors skip continues after bad records and exits 1 if any were rejected
   - --in lite3 reads one message through EOF, up to 256 MiB
   - Lite3 input preserves tags/data; the append assigns a new sequence and time
   - Lite3 input rejects inline DATA, --tag, and --errors skip"#
     )]
     Feed {
-        #[arg(long, help = "Emit structured JSON without color or commentary")]
+        #[arg(
+            long,
+            conflicts_with = "yaml",
+            help = "Emit structured JSON without color or commentary"
+        )]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
         #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
         pool: String,
         #[arg(help = "Inline JSON value")]
@@ -321,7 +332,8 @@ to the server's HTTPS /mcp URL and authorize through OAuth.
         display_order = 2,
         about = "Fetch one message by sequence number",
         long_about = r#"Fetch a message from a local name/path or remote pool URL.
-Human-readable by default; --json emits one message envelope.
+Human-readable by default; --json or --yaml emits one message envelope.
+YAML uses explicit document start and end markers.
 Use --format lite3 for the original binary message bytes."#,
         after_help = r#"EXAMPLES
   $ plasmite fetch foo 1
@@ -330,14 +342,25 @@ Use --format lite3 for the original binary message bytes."#,
 
 INPUT AND OUTPUT
   Local names/paths and HTTP(S) pool URLs are accepted.
-  Human-readable by default; --json and --format json emit one message envelope.
+  Human-readable by default; --json and --format json emit JSON, while --yaml emits the same message envelope as YAML.
+  YAML documents start with --- and end with ...; --yaml conflicts with --json and --format.
   --format lite3 emits only the original document bytes, with no trailing newline.
   Lite3 holds tags/data; the pool's sequence and time are outside that document.
-  Errors go to stderr. --json conflicts with --format pretty or lite3."#
+  Errors go to stderr in the selected output format."#
     )]
     Fetch {
-        #[arg(long, help = "Emit structured JSON without color or commentary")]
+        #[arg(
+            long,
+            conflicts_with = "yaml",
+            help = "Emit structured JSON without color or commentary"
+        )]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with_all = ["json", "format"],
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
         #[arg(help = "Pool ref: local name/path or HTTP(S) pool URL")]
         pool: String,
         #[arg(help = "Sequence number")]
@@ -366,8 +389,8 @@ LOCAL AND REMOTE
   Remote refs reject --create, --replay, --no-notify, and --quiet-drops.
   --no-follow requires --tail or --since; finite history ends at the starting bound.
   --tail counts retained messages before filters. Filters apply to history and live output.
-  Human-readable by default; --json emits one envelope per line.
-  --jsonl and --format jsonl retain their meanings as compatibility aliases."#
+  Human-readable by default; --json emits one envelope per line and --yaml one marked YAML document per message.
+  --yaml conflicts with --json, --jsonl, and --format. --jsonl and --format jsonl remain JSON aliases."#
     )]
     Follow {
         #[arg(
@@ -375,8 +398,18 @@ LOCAL AND REMOTE
             help = "Read selected history and exit; requires --tail or --since"
         )]
         no_follow: bool,
-        #[arg(long, help = "Emit structured JSON without color or commentary")]
+        #[arg(
+            long,
+            conflicts_with = "yaml",
+            help = "Emit structured JSON without color or commentary"
+        )]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with_all = ["json", "jsonl", "format"],
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
         #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
         pool: String,
         #[arg(long, help = "Create local pool if missing before following")]
@@ -501,12 +534,22 @@ Notes:
         after_help = r#"INPUT AND EXIT
   - Terminal input requires --me and sends one chat message per non-empty line
   - Piped input is a JSON stream; connect before using a remote ref
-  - Human-readable output by default; --json emits one message envelope per line
+  - Human-readable output by default; --json emits one envelope per line and --yaml one marked YAML document per message
   - Exits 124 on timeout"#
     )]
     Duplex {
-        #[arg(long, help = "Emit structured JSON without color or commentary")]
+        #[arg(
+            long,
+            conflicts_with = "yaml",
+            help = "Emit structured JSON without color or commentary"
+        )]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with_all = ["json", "jsonl", "format"],
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
         #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
         pool: String,
         #[arg(
@@ -561,7 +604,7 @@ Notes:
 
 NOTES
   - Human-readable output is the default.
-  - Use --json for machine-readable output.
+  - Use --json or --yaml for machine-readable output.
   - Exits nonzero when corruption is detected."#
     )]
     Doctor {
@@ -569,22 +612,39 @@ NOTES
         pool: Option<String>,
         #[arg(long, help = "Validate all pools in the pool directory")]
         all: bool,
-        #[arg(long, help = "Emit JSON instead of human-readable output")]
+        #[arg(
+            long,
+            conflicts_with = "yaml",
+            help = "Emit JSON instead of human-readable output"
+        )]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
     },
     #[command(
         display_order = 11,
         about = "Print version information",
         long_about = r#"Print human-readable version information by default.
 
-Use --json for a stable machine-readable JSON report."#,
+Use --json for JSON or --yaml for the same report as YAML."#,
         after_help = r#"EXAMPLES
   $ plasmite version
-  $ plasmite version --json | jq -r '.version'"#
+  $ plasmite version --json | jq -r '.version'
+  $ plasmite version --yaml"#
     )]
     Version {
-        #[arg(long, help = "Emit a JSON version report")]
+        #[arg(long, conflicts_with = "yaml", help = "Emit a JSON version report")]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
     },
     #[command(
         arg_required_else_help = true,
@@ -620,28 +680,58 @@ pub(crate) enum ServeSubcommand {
             help = "Remove UDP input from the installed server"
         )]
         no_udp: bool,
-        #[arg(long, help = "Emit a JSON report")]
+        #[arg(long, conflicts_with = "yaml", help = "Emit a JSON report")]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
     },
     #[command(about = "Start the installed background service")]
     Start {
-        #[arg(long, help = "Emit a JSON report")]
+        #[arg(long, conflicts_with = "yaml", help = "Emit a JSON report")]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
     },
     #[command(about = "Stop the background service")]
     Stop {
-        #[arg(long, help = "Emit a JSON report")]
+        #[arg(long, conflicts_with = "yaml", help = "Emit a JSON report")]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
     },
     #[command(about = "Restart the background service")]
     Restart {
-        #[arg(long, help = "Emit a JSON report")]
+        #[arg(long, conflicts_with = "yaml", help = "Emit a JSON report")]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
     },
     #[command(about = "Remove the background service")]
     Uninstall {
-        #[arg(long, help = "Emit a JSON report")]
+        #[arg(long, conflicts_with = "yaml", help = "Emit a JSON report")]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
     },
     #[command(about = "Show recent server logs")]
     Logs {
@@ -649,15 +739,31 @@ pub(crate) enum ServeSubcommand {
         tail: Option<usize>,
         #[arg(long, help = "Continue following new log lines")]
         follow: bool,
-        #[arg(long, help = "Emit one JSON object per log line")]
+        #[arg(
+            long,
+            conflicts_with = "yaml",
+            help = "Emit one JSON object per log line"
+        )]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
     },
     #[command(about = "Show running servers for this user")]
     Status {
         #[arg(long, help = "Include installed servers that are stopped or failed")]
         all: bool,
-        #[arg(long, help = "Emit a JSON report")]
+        #[arg(long, conflicts_with = "yaml", help = "Emit a JSON report")]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
     },
 }
 
@@ -689,14 +795,24 @@ NOTES
             help = "Inline index slots (default: auto; 0 disables; may use at most half the pool)"
         )]
         index_capacity: Option<u32>,
-        #[arg(long, help = "Emit JSON instead of human-readable output")]
+        #[arg(
+            long,
+            conflicts_with = "yaml",
+            help = "Emit JSON instead of human-readable output"
+        )]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
     },
     #[command(
         arg_required_else_help = true,
         display_order = 2,
         about = "Show pool metadata and bounds",
-        long_about = r#"Show local or remote pool size, bounds, and metrics. Human-readable by default; --json emits a report."#,
+        long_about = r#"Show local or remote pool size, bounds, and metrics. Human-readable by default; --json emits JSON and --yaml emits the same report as YAML."#,
         after_help = r#"EXAMPLES
   $ plasmite pool info foo
   $ plasmite pool info foo --json
@@ -708,8 +824,18 @@ TARGET AND OUTPUT
     Info {
         #[arg(help = "Pool ref: local name/path or HTTP(S) pool URL")]
         name: String,
-        #[arg(long, help = "Emit JSON instead of human-readable output")]
+        #[arg(
+            long,
+            conflicts_with = "yaml",
+            help = "Emit JSON instead of human-readable output"
+        )]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
     },
     #[command(
         arg_required_else_help = true,
@@ -723,22 +849,32 @@ TARGET AND OUTPUT
 
 NOTES
   - Human-readable output is the default.
-  - Use --json for machine-readable output.
+  - Use --json or --yaml for machine-readable output.
   - Best effort: attempts all deletes and reports per-pool failures.
   - Exits non-zero if any requested pool failed to delete."#
     )]
     Delete {
         #[arg(required = true, help = "Pool name(s) or path(s)")]
         names: Vec<String>,
-        #[arg(long, help = "Emit JSON instead of human-readable output")]
+        #[arg(
+            long,
+            conflicts_with = "yaml",
+            help = "Emit JSON instead of human-readable output"
+        )]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
     },
     #[command(
         display_order = 1,
         about = "List local pools or a remote server directory",
         long_about = r#"List local pools or pools at the supplied HTTPS server origin.
 
-Prints a human-readable table by default. Use --json for machine-readable output."#,
+Prints a human-readable table by default. Use --json or --yaml for machine-readable output."#,
         after_help = r#"EXAMPLES
   $ plasmite pool list
   $ plasmite pool list --json
@@ -746,7 +882,7 @@ Prints a human-readable table by default. Use --json for machine-readable output
 
 NOTES
   - Human-readable output is the default.
-  - Use --json for machine-readable output.
+  - Use --json or --yaml for machine-readable output.
   - Non-.plasmite files are ignored.
   - Pools that cannot be read include an error field."#
     )]
@@ -756,8 +892,18 @@ NOTES
             help = "HTTPS server origin (omit for local pools)"
         )]
         server: Option<String>,
-        #[arg(long, help = "Emit JSON instead of human-readable output")]
+        #[arg(
+            long,
+            conflicts_with = "yaml",
+            help = "Emit JSON instead of human-readable output"
+        )]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
     },
 }
 
@@ -766,11 +912,17 @@ pub(crate) enum AccessSubcommand {
     #[command(
         display_order = 0,
         about = "Create a named access key on the server machine",
-        after_help = "Keys grant full access to the selected pool directory. Human-readable by default; --json emits a report containing the new key."
+        after_help = "Keys grant full access to the selected pool directory. Human-readable by default; --json emits JSON and --yaml emits the same report, including the new key, as YAML."
     )]
     Invite {
-        #[arg(long, help = "Emit a JSON report")]
+        #[arg(long, conflicts_with = "yaml", help = "Emit a JSON report")]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
         #[arg(
             value_name = "NAME",
             required_unless_present = "legacy_name",
@@ -790,48 +942,72 @@ pub(crate) enum AccessSubcommand {
     #[command(
         display_order = 3,
         about = "Connect this machine to a shared pool server",
-        after_help = "Reads a key from a hidden terminal prompt or stdin, verifies it, and saves the connection for this OS user. Human-readable by default; --json emits a report.",
+        after_help = "Reads a key from a hidden terminal prompt or stdin, verifies it, and saves the connection for this OS user. Human-readable by default; --json emits JSON and --yaml emits the same report as YAML.",
         long_about = "Verify the server URL and access key, then save the connection for future remote pool commands. The key is read from a hidden prompt or stdin. Reconnect with the same key to recover a lost local connection."
     )]
     Connect {
-        #[arg(long, help = "Emit a JSON report")]
+        #[arg(long, conflicts_with = "yaml", help = "Emit a JSON report")]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
         #[arg(value_name = "SERVER", help = "HTTPS address printed by the server")]
         url: String,
     },
     #[command(
         display_order = 5,
         about = "Show this machine's connection to a shared pool server",
-        after_help = "Checks saved access, reachability, and browser trust without changing state. A completed check exits zero even when access fails. Human-readable by default; --json emits a report.",
+        after_help = "Checks saved access, reachability, and browser trust without changing state. A completed check exits zero even when access fails. Human-readable by default; --json emits JSON and --yaml emits the same report as YAML.",
         long_about = "Check saved access, reachability, and browser trust without changing state. A completed check exits zero even when access fails."
     )]
     Status {
-        #[arg(long, help = "Emit a JSON report")]
+        #[arg(long, conflicts_with = "yaml", help = "Emit a JSON report")]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
         #[arg(value_name = "SERVER", help = "HTTPS address printed by the server")]
         url: String,
     },
     #[command(
         display_order = 6,
         about = "Forget this machine's saved connection",
-        after_help = "Forgets saved credentials for this OS user without contacting the server. Server permission remains until revoked. Human-readable by default; --json emits a report.",
+        after_help = "Forgets saved credentials for this OS user without contacting the server. Server permission remains until revoked. Human-readable by default; --json emits JSON and --yaml emits the same report as YAML.",
         long_about = "Remove this machine's saved access key for a server. This does not revoke the key on the server and works while the server is offline."
     )]
     Disconnect {
-        #[arg(long, help = "Emit a JSON report")]
+        #[arg(long, conflicts_with = "yaml", help = "Emit a JSON report")]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
         #[arg(value_name = "SERVER", help = "HTTPS address of the saved connection")]
         url: String,
     },
     #[command(
         display_order = 7,
         about = "Remove one exact browser-trusted certificate",
-        after_help = "Removes browser trust for one exact certificate; native credentials remain saved. Human-readable by default; --json emits a report.",
+        after_help = "Removes browser trust for one exact certificate; native credentials remain saved. Human-readable by default; --json emits JSON and --yaml emits the same report as YAML.",
         long_about = "Remove the certificate identified by its SHA-256 fingerprint from this OS user's trust store. This works after the server renews its certificate or goes offline. Native credentials remain saved."
     )]
     Untrust {
-        #[arg(long, help = "Emit a JSON report")]
+        #[arg(long, conflicts_with = "yaml", help = "Emit a JSON report")]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
         #[arg(
             value_name = "SHA256",
             help = "Certificate fingerprint shown by access status"
@@ -841,29 +1017,47 @@ pub(crate) enum AccessSubcommand {
     #[command(
         display_order = 1,
         about = "List access keys on the server machine",
-        after_help = "Lists server-side keys for the selected --dir. Human-readable by default; --json emits a report."
+        after_help = "Lists server-side keys for the selected --dir. Human-readable by default; --json emits JSON and --yaml emits the same report as YAML."
     )]
     Keys {
-        #[arg(long, help = "Emit a JSON report")]
+        #[arg(long, conflicts_with = "yaml", help = "Emit a JSON report")]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
     },
     #[command(
         display_order = 4,
         about = "List saved server destinations without contacting servers",
-        after_help = "Reads this OS user's saved destinations without probing servers. Human-readable by default; --json emits an array."
+        after_help = "Reads this OS user's saved destinations without probing servers. Human-readable by default; --json emits JSON and --yaml emits the same array as YAML."
     )]
     List {
-        #[arg(long, help = "Emit a JSON report")]
+        #[arg(long, conflicts_with = "yaml", help = "Emit a JSON report")]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
     },
     #[command(
         display_order = 2,
         about = "Revoke an access key on the server machine",
-        after_help = "Withdraws server permission for the selected --dir. Human-readable by default; --json emits a report."
+        after_help = "Withdraws server permission for the selected --dir. Human-readable by default; --json emits JSON and --yaml emits the same report as YAML."
     )]
     Revoke {
-        #[arg(long, help = "Emit a JSON report")]
+        #[arg(long, conflicts_with = "yaml", help = "Emit a JSON report")]
         json: bool,
+        #[arg(
+            long,
+            conflicts_with = "json",
+            help = "Emit YAML documents with explicit start and end markers"
+        )]
+        yaml: bool,
         #[arg(value_name = "ID", help = "Key ID shown by `access keys`")]
         id: String,
     },
@@ -946,51 +1140,68 @@ pub(crate) struct ServeRunArgs {
 }
 
 impl Command {
-    pub(crate) fn json_output(&self) -> bool {
-        match self {
-            Self::Version { json } | Self::Doctor { json, .. } | Self::Feed { json, .. } => *json,
-            Self::Fetch { json, format, .. } => *json || matches!(format, Some(FetchFormat::Json)),
+    pub(crate) fn output_mode(&self) -> super::output::OutputMode {
+        use super::output::OutputMode;
+        let (json, yaml) = match self {
+            Self::Version { json, yaml }
+            | Self::Doctor { json, yaml, .. }
+            | Self::Feed { json, yaml, .. } => (*json, *yaml),
+            Self::Fetch {
+                json, yaml, format, ..
+            } => (*json || matches!(format, Some(FetchFormat::Json)), *yaml),
             Self::Follow {
                 json,
+                yaml,
                 jsonl,
                 format,
                 ..
             }
             | Self::Duplex {
                 json,
+                yaml,
                 jsonl,
                 format,
                 ..
-            } => *json || *jsonl || matches!(format, Some(FollowFormat::Jsonl)),
+            } => (
+                *json || *jsonl || matches!(format, Some(FollowFormat::Jsonl)),
+                *yaml,
+            ),
             Self::Pool { command } => match command {
-                PoolCommand::Create { json, .. }
-                | PoolCommand::Info { json, .. }
-                | PoolCommand::Delete { json, .. }
-                | PoolCommand::List { json, .. } => *json,
+                PoolCommand::Create { json, yaml, .. }
+                | PoolCommand::Info { json, yaml, .. }
+                | PoolCommand::Delete { json, yaml, .. }
+                | PoolCommand::List { json, yaml, .. } => (*json, *yaml),
             },
             Self::Access { command } => match command {
-                AccessSubcommand::Invite { json, .. }
-                | AccessSubcommand::Connect { json, .. }
-                | AccessSubcommand::Status { json, .. }
-                | AccessSubcommand::Disconnect { json, .. }
-                | AccessSubcommand::Untrust { json, .. }
-                | AccessSubcommand::Keys { json }
-                | AccessSubcommand::List { json }
-                | AccessSubcommand::Revoke { json, .. } => *json,
+                AccessSubcommand::Invite { json, yaml, .. }
+                | AccessSubcommand::Connect { json, yaml, .. }
+                | AccessSubcommand::Status { json, yaml, .. }
+                | AccessSubcommand::Disconnect { json, yaml, .. }
+                | AccessSubcommand::Untrust { json, yaml, .. }
+                | AccessSubcommand::Keys { json, yaml }
+                | AccessSubcommand::List { json, yaml }
+                | AccessSubcommand::Revoke { json, yaml, .. } => (*json, *yaml),
             },
             Self::Serve {
                 command: Some(command),
                 ..
             } => match command {
-                ServeSubcommand::Install { json, .. }
-                | ServeSubcommand::Start { json }
-                | ServeSubcommand::Stop { json }
-                | ServeSubcommand::Restart { json }
-                | ServeSubcommand::Uninstall { json }
-                | ServeSubcommand::Logs { json, .. }
-                | ServeSubcommand::Status { json, .. } => *json,
+                ServeSubcommand::Install { json, yaml, .. }
+                | ServeSubcommand::Start { json, yaml }
+                | ServeSubcommand::Stop { json, yaml }
+                | ServeSubcommand::Restart { json, yaml }
+                | ServeSubcommand::Uninstall { json, yaml }
+                | ServeSubcommand::Logs { json, yaml, .. }
+                | ServeSubcommand::Status { json, yaml, .. } => (*json, *yaml),
             },
-            _ => false,
+            _ => (false, false),
+        };
+        if yaml {
+            OutputMode::Yaml
+        } else if json {
+            OutputMode::Json
+        } else {
+            OutputMode::Human
         }
     }
 }

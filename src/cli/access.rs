@@ -3,6 +3,7 @@
 //! Role: Keep access command presentation at the CLI boundary.
 
 use super::context::CliContext;
+use super::output::{OutputMode, emit_output};
 use super::output_support::human_literal;
 use super::result::CommandResult;
 use crate::AccessSubcommand;
@@ -12,16 +13,16 @@ use serde_json::json;
 use std::io::{self, IsTerminal};
 
 pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<CommandResult, Error> {
-    let json_output = context.json_output();
+    let output_mode = context.output_mode();
     match command {
         AccessSubcommand::List { .. } => {
             let destinations = plasmite::api::access::list()?;
-            if json_output {
+            if output_mode.is_structured() {
                 let rows: Vec<_> = destinations
                     .iter()
                     .map(|destination| json!({ "destination": destination }))
                     .collect();
-                super::output::emit_json(json!(rows), context.color_mode());
+                emit_output(json!(rows), output_mode);
             } else if destinations.is_empty() {
                 println!("No saved connections.");
             } else {
@@ -36,7 +37,7 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
         } => {
             let name = name.or(legacy_name).expect("clap requires one client name");
             let access_key = crate::secure_serve::invite(context.pool_dir(), &name)?;
-            if !json_output {
+            if !output_mode.is_structured() {
                 println!("Access key for {}: {access_key}", human_literal(&name));
                 println!(
                     "Use this key to sign in through the server's web page or approve your MCP client."
@@ -45,7 +46,10 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
                     "For Plasmite CLI access, run `plasmite access connect <server-address>` on the client machine."
                 );
             } else {
-                println!("{}", json!({ "name": name, "access_key": access_key }));
+                emit_output(
+                    json!({ "name": name, "access_key": access_key }),
+                    output_mode,
+                );
             }
             Ok(CommandResult::ok())
         }
@@ -59,9 +63,9 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
                 browser.as_ref().and_then(|result| result.as_ref().ok()),
                 browser.as_ref().and_then(|result| result.as_ref().err()),
                 Some(&commands),
-                json_output,
+                output_mode,
             );
-            if !json_output
+            if !output_mode.is_structured()
                 && cfg!(any(target_os = "macos", target_os = "windows"))
                 && io::stdin().is_terminal()
                 && io::stdout().is_terminal()
@@ -83,42 +87,42 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
                 browser.as_ref().and_then(|result| result.as_ref().ok()),
                 browser.as_ref().and_then(|result| result.as_ref().err()),
                 None,
-                json_output,
+                output_mode,
             );
             Ok(CommandResult::ok())
         }
         AccessSubcommand::Disconnect { url, .. } => {
             plasmite::api::access::disconnect(&url)?;
-            emit_disconnected(&url, json_output);
+            emit_disconnected(&url, output_mode);
             Ok(CommandResult::ok())
         }
         AccessSubcommand::Untrust { fingerprint, .. } => {
             browser_trust::remove(&fingerprint)?;
-            if !json_output {
+            if !output_mode.is_structured() {
                 println!(
                     "Removed browser trust for certificate {}.",
                     human_literal(&fingerprint.to_ascii_lowercase())
                 );
                 println!("Saved native credentials remain available.");
             } else {
-                println!(
-                    "{}",
-                    json!({ "certificate_sha256": fingerprint.to_ascii_lowercase(), "browser_trust_installed": false })
+                emit_output(
+                    json!({ "certificate_sha256": fingerprint.to_ascii_lowercase(), "browser_trust_installed": false }),
+                    output_mode,
                 );
             }
             Ok(CommandResult::ok())
         }
         AccessSubcommand::Keys { .. } => {
             let keys = crate::secure_serve::keys(context.pool_dir())?;
-            emit_keys(&keys, json_output);
+            emit_keys(&keys, output_mode);
             Ok(CommandResult::ok())
         }
         AccessSubcommand::Revoke { id, .. } => {
             crate::secure_serve::revoke(context.pool_dir(), &id)?;
-            if !json_output {
+            if !output_mode.is_structured() {
                 println!("Revoked access key {}.", human_literal(&id));
             } else {
-                println!("{}", json!({ "id": id, "revoked": true }));
+                emit_output(json!({ "id": id, "revoked": true }), output_mode);
             }
             Ok(CommandResult::ok())
         }
@@ -137,24 +141,24 @@ fn browser_status(destination: &str) -> Option<Result<BrowserTrustStatus, Error>
     }
 }
 
-fn emit_disconnected(destination: &str, json_output: bool) {
-    if !json_output {
+fn emit_disconnected(destination: &str, output_mode: OutputMode) {
+    if !output_mode.is_structured() {
         println!(
             "Removed saved credentials for {}.",
             human_literal(destination)
         );
         println!("The server key remains valid until its owner revokes it.");
     } else {
-        println!(
-            "{}",
-            json!({ "destination": destination, "credentials_saved": false })
+        emit_output(
+            json!({ "destination": destination, "credentials_saved": false }),
+            output_mode,
         );
     }
 }
 
-fn emit_keys(keys: &serde_json::Value, json_output: bool) {
-    if json_output {
-        println!("{keys}");
+fn emit_keys(keys: &serde_json::Value, output_mode: OutputMode) {
+    if output_mode.is_structured() {
+        emit_output(keys.clone(), output_mode);
         return;
     }
 
@@ -209,9 +213,9 @@ fn emit_status(
     browser: Option<&BrowserTrustStatus>,
     browser_error: Option<&Error>,
     setup: Option<&[String; 2]>,
-    json_output: bool,
+    output_mode: OutputMode,
 ) {
-    if !json_output {
+    if !output_mode.is_structured() {
         println!("Server: {}", human_literal(&status.destination));
         println!("Credentials saved: {}", yes_no(status.credentials_saved));
         println!("Reachable: {}", optional_yes_no(status.reachable));
@@ -252,8 +256,7 @@ fn emit_status(
             );
         }
     } else {
-        println!(
-            "{}",
+        emit_output(
             json!({
                 "destination": status.destination,
                 "credentials_saved": status.credentials_saved,
@@ -268,7 +271,8 @@ fn emit_status(
                 })),
                 "browser_trust_problem": browser_error.map(ToString::to_string),
                 "mcp_setup_commands": setup,
-            })
+            }),
+            output_mode,
         );
     }
 }

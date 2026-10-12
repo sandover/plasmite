@@ -34,6 +34,7 @@ use cli::args::{
     AccessSubcommand, Cli, ColorMode, ErrorPolicyCli, FollowFormat, InputMode, PoolCommand,
     ServeRunArgs,
 };
+use cli::output::OutputMode;
 use cli::{CliContext, CommandResult as RunOutcome};
 use interface_wire::error_policy;
 use plasmite::api::{Error, ErrorKind};
@@ -52,17 +53,17 @@ fn main() {
     }
     let exit_code = match run() {
         Ok(outcome) => outcome.exit_code,
-        Err((err, color_mode, json_output)) => {
-            emit_error(&err, color_mode, json_output);
+        Err((err, color_mode, output_mode)) => {
+            emit_error(&err, color_mode, output_mode);
             error_policy(interface_error_kind(err.kind())).cli_exit_code
         }
     };
     std::process::exit(exit_code);
 }
 
-fn run() -> Result<RunOutcome, (Error, ColorMode, bool)> {
+fn run() -> Result<RunOutcome, (Error, ColorMode, OutputMode)> {
     let args = normalize_args(std::env::args_os());
-    let explicit_json = requests_json(&args);
+    let explicit_output = requests_output(&args);
     let conflicting_dirs = has_conflicting_directories(&args);
     let cli = match Cli::try_parse_from(args) {
         Ok(cli) => cli,
@@ -86,7 +87,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode, bool)> {
                             .with_message("failed to write CLI output")
                             .with_source(io_err),
                         ColorMode::Auto,
-                        explicit_json,
+                        explicit_output,
                     )
                 })?;
                 let exit_code = if matches!(
@@ -107,34 +108,34 @@ fn run() -> Result<RunOutcome, (Error, ColorMode, bool)> {
                         .with_message(message)
                         .with_hint(hint),
                     ColorMode::Auto,
-                    explicit_json,
+                    explicit_output,
                 ));
             }
         },
     };
 
     let color_mode = cli.color;
-    let json_output = cli.command.json_output();
+    let output_mode = cli.command.output_mode();
     if conflicting_dirs {
         return Err((
             Error::new(ErrorKind::Usage)
                 .with_message("conflicting --dir values select different pool directories")
                 .with_hint("Use one --dir value for the whole invocation."),
             color_mode,
-            json_output,
+            output_mode,
         ));
     }
     let pool_dir = cli.dir.into_iter().next().unwrap_or_else(default_pool_dir);
     let result = cli::dispatch(
         cli.command,
-        CliContext::new(pool_dir, color_mode, json_output),
+        CliContext::new(pool_dir, color_mode, output_mode),
     );
 
     result
         .map_err(add_corrupt_hint)
         .map_err(add_io_hint)
         .map_err(add_internal_hint)
-        .map_err(|err| (err, color_mode, json_output))
+        .map_err(|err| (err, color_mode, output_mode))
 }
 
 // Clap propagates the last scope's global argument values. Check every
@@ -160,13 +161,29 @@ fn has_conflicting_directories(args: &[OsString]) -> bool {
 
 // The parser may fail before it can produce a command. Respect an explicit
 // output request, but never interpret flags belonging to tap's child process.
+fn requests_output(args: &[OsString]) -> OutputMode {
+    if args
+        .iter()
+        .skip(1)
+        .take_while(|arg| *arg != "--")
+        .any(|arg| arg == "--yaml")
+    {
+        OutputMode::Yaml
+    } else if requests_json(args) {
+        OutputMode::Json
+    } else {
+        OutputMode::Human
+    }
+}
+
 fn requests_json(args: &[OsString]) -> bool {
     let mut format_value = false;
     for arg in args.iter().skip(1).take_while(|arg| *arg != "--") {
-        if format_value && arg == "jsonl" {
+        if format_value && (arg == "jsonl" || arg == "json") {
             return true;
         }
-        if arg == "--json" || arg == "--jsonl" || arg == "--format=jsonl" {
+        if arg == "--json" || arg == "--jsonl" || arg == "--format=jsonl" || arg == "--format=json"
+        {
             return true;
         }
         format_value = arg == "--format";
@@ -247,13 +264,21 @@ mod tests {
     #[test]
     fn argument_normalization_preserves_child_arguments() {
         use std::ffi::OsString;
-        let args = ["plasmite", "---help", "--", "---version", "--json"];
+        let args = [
+            "plasmite",
+            "---help",
+            "--",
+            "---version",
+            "--json",
+            "--yaml",
+        ];
         let args = super::normalize_args(args.into_iter().map(OsString::from));
         assert_eq!(
             args,
-            ["plasmite", "--help", "--", "---version", "--json"].map(OsString::from)
+            ["plasmite", "--help", "--", "---version", "--json", "--yaml"].map(OsString::from)
         );
         assert!(!super::requests_json(&args));
+        assert_eq!(super::requests_output(&args), super::OutputMode::Human);
     }
 
     #[test]
@@ -397,7 +422,12 @@ mod tests {
             ("plasmite version", vec!["help", "json"]),
         ]
         .into_iter()
-        .map(|(path, options)| {
+        .map(|(path, mut options)| {
+            // Every JSON-capable command also offers YAML; protocol commands do not.
+            if options.contains(&"json") {
+                options.push("yaml");
+                options.sort();
+            }
             (
                 path.to_string(),
                 options.into_iter().map(str::to_string).collect::<Vec<_>>(),

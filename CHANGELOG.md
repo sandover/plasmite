@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### YAML output
+
+Commands that support `--json` also accept `--yaml`. YAML preserves the same
+reports and message envelopes, with explicit document boundaries for streaming.
+Errors and notices use the selected format on stderr. Input remains JSON or
+Lite3; storage and network protocols remain unchanged.
+
 ## [1.2.0] - 2026-10-09
 
 ### Raw Lite3 messages in the CLI
