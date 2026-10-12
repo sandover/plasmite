@@ -42,6 +42,15 @@ default remote listener port. Without a URL, the HTTPS listener remains at
 backend port or a specific interface. The URL hostname never selects the
 bind interface. The local administration listener stays on loopback.
 
+For small messages whose senders accept possible loss, `--udp` adds an
+append-only UDP listener alongside HTTP and HTTPS. It binds to
+`127.0.0.1:9701` by default; use `--udp=IP:PORT` to choose another address.
+The listener can append to every pool in the selected directory. A non-loopback
+address grants unauthenticated append access to that directory to reachable
+senders, so bind it only on a network whose rules limit access. See
+[UDP input](record/serving.md#send-udp-messages) for its message format and
+delivery limits.
+
 The older `--shared-address SERVER` form still names the public origin but
 keeps the 1.0 listener default of `0.0.0.0:9743`. Use `--remote-bind` to
 change its listener. Supply the public origin through one form only.
@@ -91,7 +100,9 @@ URL chooses the default listener port on first install. Later URL changes
 keep the saved listener unless you supply `--remote-bind`. With no new
 options, `install` keeps the saved settings, installs the current Plasmite
 executable, and starts the service. Updates retain the installed listener
-addresses unless `--remote-bind` changes them.
+addresses unless `--remote-bind` changes them. UDP settings also persist across
+updates and restarts. Use `serve install --no-udp` to remove the saved UDP
+listener; leaving `--udp` off an update keeps its current setting.
 
 ## Server status
 

@@ -188,7 +188,11 @@ behavior. Extract a rule only when both interfaces require the same result.
 Plasmite is transport-agnostic at the core.
 
 - Local mode: CLI/API calls directly into core operations.
-- Remote mode: `plasmite serve` adapts HTTP request/response into the same core calls.
+- Remote pool control: `plasmite serve` adapts HTTP and HTTPS requests into
+  the same core calls.
+- Optional UDP input: the same server routes a datagram's pool name, decodes
+  one JSON or Lite3 message, and calls the existing append operation. It adds
+  append input only; authenticated remote pool control remains on HTTPS.
 - Process capture mode (`plasmite tap`): CLI spawns a child process, reads stdout/stderr on separate threads, and appends line messages through the same local append path as `feed`.
 - Future transports must be adapters over the existing core, not alternate correctness engines.
 

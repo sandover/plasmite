@@ -3,6 +3,7 @@
 Normative contracts are versioned under `spec/`.
 
 - CLI contract (1.x; historical path): `spec/v0/SPEC.md`
+- UDP input contract (v0): `spec/udp/v0/SPEC.md`
 - Public API contract (1.x; historical path): `spec/api/v0/SPEC.md`
 - Remote protocol contract (v0): `spec/remote/v0/SPEC.md`
 - MCP contract (2025-11-25): `spec/mcp/2025-11-25/SPEC.md`

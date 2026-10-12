@@ -117,6 +117,15 @@ pub(crate) fn effective_args(run: &ServeRunArgs) -> Result<ServeRunArgs, Error> 
         .parse()
         .map_err(|_| usage("invalid remote bind address")
             .with_hint("Use a numeric IP:port, such as 100.101.102.103:9743 or [fd7a:115c:a1e0::abcd]:9743. Pass the public DNS name as SERVER."))?;
+    if let Some(address) = &run.udp {
+        let udp: SocketAddr = address.parse().map_err(|_| {
+            usage("invalid UDP bind address")
+                .with_hint("Use a numeric IP:port, such as 127.0.0.1:9701 or [::1]:9701.")
+        })?;
+        if udp.ip().is_multicast() {
+            return Err(usage("UDP input cannot bind to a multicast address"));
+        }
+    }
     if bind == remote_bind && bind.port() != 0 {
         return Err(usage("local and remote listeners need different addresses"));
     }
@@ -154,7 +163,14 @@ pub(crate) fn effective_args(run: &ServeRunArgs) -> Result<ServeRunArgs, Error> 
     Ok(run)
 }
 
-pub(super) fn merge(previous: Option<&Setup>, new: &ServeRunArgs) -> Result<ServeRunArgs, Error> {
+pub(super) fn merge(
+    previous: Option<&Setup>,
+    new: &ServeRunArgs,
+    no_udp: bool,
+) -> Result<ServeRunArgs, Error> {
+    if no_udp && new.udp.is_some() {
+        return Err(usage("--no-udp conflicts with --udp"));
+    }
     let mut run = previous.map(|setup| setup.run.clone()).unwrap_or_default();
     if new.server.is_some() && new.shared_address.is_some() {
         return Err(usage(
@@ -172,6 +188,7 @@ pub(super) fn merge(previous: Option<&Setup>, new: &ServeRunArgs) -> Result<Serv
     update!(
         bind,
         remote_bind,
+        udp,
         front_cert,
         tls_cert,
         tls_key,
@@ -179,7 +196,23 @@ pub(super) fn merge(previous: Option<&Setup>, new: &ServeRunArgs) -> Result<Serv
         max_tail_timeout_ms,
         max_tail_concurrency
     );
+    if no_udp {
+        run.udp = None;
+    }
     effective_args(&run)
+}
+
+pub(super) fn require_fixed_listener_ports(run: &ServeRunArgs) -> Result<(), Error> {
+    for address in [&run.bind, &run.remote_bind, &run.udp]
+        .into_iter()
+        .flatten()
+    {
+        let address: SocketAddr = address.parse().expect("validated listener address");
+        if address.port() == 0 {
+            return Err(usage("installed servers require fixed listener ports"));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(not(windows))]
@@ -204,6 +237,9 @@ impl Setup {
         }
         arg!("--bind", &self.run.bind);
         arg!("--remote-bind", &self.run.remote_bind);
+        if let Some(udp) = &self.run.udp {
+            argv.push(format!("--udp={udp}"));
+        }
         arg!("--max-body-bytes", self.run.max_body_bytes);
         arg!("--max-tail-timeout-ms", self.run.max_tail_timeout_ms);
         arg!("--max-tail-concurrency", self.run.max_tail_concurrency);

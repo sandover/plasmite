@@ -41,6 +41,7 @@ docs/
 spec/
 ├── README.md                                   — Spec index; start here for contract navigation
 ├── v0/SPEC.md                                  — Command-line interface (CLI) contract; read before changing CLI behavior
+├── udp/v0/SPEC.md                              — User Datagram Protocol (UDP) input contract; read when changing UDP messages or listener behavior
 ├── api/v0/SPEC.md                               — Public API contract; read before changing the API surface
 ├── remote/v0/SPEC.md                            — Remote protocol contract; read before changing HTTP endpoints/semantics
 └── mcp/2025-11-25/SPEC.md                       — MCP contract; read before changing local or direct MCP behavior

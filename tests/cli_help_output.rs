@@ -145,11 +145,18 @@ fn short_help_exposes_material_command_constraints() {
             &["<POOL|--all>", "Exits nonzero when corruption"],
         ),
         (
+            &["serve", "install", "-h"],
+            &["--no-udp", "Remove UDP input", "--udp[=<ADDRESS>]"],
+        ),
+        (
             &["serve", "-h"],
             &[
                 "requires --tls-key",
                 "must be positive",
                 "remote clients use HTTPS",
+                "--udp[=<ADDRESS>]",
+                "max 65507 bytes including routing",
+                "lose, duplicate, or reorder",
             ],
         ),
     ];

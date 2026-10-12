@@ -1,7 +1,8 @@
 # UDP input for Plasmite pools
 
-Draft design, October 9, 2026. The commands and protocol below describe proposed
-behavior.
+Implemented design, October 12, 2026. The normative datagram contract lives in
+the [UDP input specification](../../spec/udp/v0/SPEC.md); this document records
+the design rationale and implementation guidance.
 
 Add an optional User Datagram Protocol (UDP) listener to `plasmite serve`. It
 serves the same pool directory as the existing HTTP and HTTPS listeners: `--dir`
@@ -377,6 +378,17 @@ half-configured input; partial
 installation updates stay in the argument-merge step. Pass this value to
 `serve_secure_pair` separately, and keep UDP settings out of `ServeConfig`, which
 the server clones for its two HTTP listeners.
+
+The listener sets its operating-system receive buffer to 128 KiB before
+readiness. Some platforms start with less room than one maximum datagram.
+Sender examples likewise reserve enough send-buffer space for a complete
+datagram. These buffers support the one protocol maximum; they add no user
+setting or delivery guarantee.
+
+Lite3 readers require an aligned buffer start. A pool name has variable length,
+so its routing prefix can misalign the following body. Move the unchanged Lite3
+body to the start of the owned datagram buffer before calling the existing append
+operation. This uses the same allocation and preserves every body byte.
 
 Use one receive loop with one append in flight:
 

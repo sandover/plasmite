@@ -30,6 +30,8 @@ It keeps only script-level guarantees; signatures, walkthroughs, and examples li
 - `plasmite pool info`
 - `plasmite pool list`
 - `plasmite pool delete`
+- `plasmite serve --udp` for optional append-only UDP input (see the
+  [UDP input contract](../udp/v0/SPEC.md))
 - `plasmite feed`
 - `plasmite fetch`
 - `plasmite follow`
@@ -102,6 +104,13 @@ Plasmite 1.0 provides native access-key sharing. It keeps the existing spec path
   public-origin spellings cannot appear together. `--tls-cert` and
   `--tls-key` supply a server certificate; `--front-cert` identifies
   a TLS proxy's public certificate for access-key pinning.
+- `serve --udp` enables one UDP input listener alongside HTTP and HTTPS. Bare
+  `--udp` binds `127.0.0.1:9701`; an explicit numeric IP and port uses
+  `--udp=ADDRESS`. A space-separated address is not accepted. The listener
+  handles all existing pools in the directory selected by global `--dir` and
+  needs no public API, endpoint, or status shape change. It adds one message
+  per accepted datagram under the separately versioned
+  [UDP input contract](../udp/v0/SPEC.md).
 - `plasmite --dir DIR access invite NAME` creates a directory-wide
   access key and displays it only after the server commits it. The earlier
   `--name NAME` spelling remains accepted; the two forms cannot appear
@@ -184,6 +193,11 @@ Plasmite 1.0 provides native access-key sharing. It keeps the existing spec path
   Startup requires the pool and its storage to be available at boot; it
   cannot bypass a disk unlock or mount that requires a person. If the server
   uses Tailscale, unattended mode must provide network access before sign-in.
+  The optional `--udp[=ADDRESS]` setting is saved with the other listener
+  settings and survives restarts and executable updates. Omitting `--udp` on an
+  update keeps its saved value. `serve install --no-udp` clears it; this action
+  conflicts with `--udp` and is available only on `install`. Older setups with
+  no UDP setting keep UDP disabled.
 - `serve start`, `stop`, `restart`, `logs`, and `uninstall` target the
   installed setup selected by `--dir`. They do not control a foreground
   server. `stop` leaves startup enabled. `uninstall` stops the service and

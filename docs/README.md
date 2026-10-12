@@ -5,6 +5,7 @@ Start with the task you want to do:
 | I want to… | Read |
 | --- | --- |
 | Send and read messages on one machine | [Cookbook](cookbook.md) |
+| Send small datagrams to a pool | [UDP input](record/serving.md#send-udp-messages) |
 | Share a pool with another machine | [Share your first pool](record/serving.md#share-your-first-pool) |
 | Share through a Tailscale network | [Tailscale setup](record/serving.md#use-tailscale) |
 | Use shared pools in a browser | [Browser setup](record/serving.md#open-pools-in-a-browser) |
@@ -34,6 +35,7 @@ Start with the task you want to do:
 For exact contracts, start with the [specifications](../spec/README.md):
 
 - [CLI](../spec/v0/SPEC.md)
+- [UDP input](../spec/udp/v0/SPEC.md)
 - [Public API](../spec/api/v0/SPEC.md)
 - [Remote HTTP protocol](../spec/remote/v0/SPEC.md)
 - [MCP](../spec/mcp/2025-11-25/SPEC.md)

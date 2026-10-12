@@ -1,13 +1,13 @@
 #[cfg(test)]
 use super::effective_args;
-use super::{Setup, Status, absolute, id, io_error, merge, usage};
+use super::{Setup, Status, absolute, id, io_error, merge, require_fixed_listener_ports, usage};
 use crate::access_store::{create_private_dir, ensure_private, read_json, write_atomic_json};
 use crate::cli::args::ServeRunArgs;
 use crate::serve_registry::{self, ServerDetails};
 use fs2::FileExt;
 use plasmite::api::{Error, ErrorKind};
 use std::fs::{self, File, OpenOptions};
-use std::net::{SocketAddr, TcpListener};
+use std::net::{SocketAddr, TcpListener, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -722,6 +722,7 @@ fn wait_ready(setup: &Setup) -> Result<(), Error> {
 }
 
 fn preflight(setup: &Setup, previous: Option<&Setup>) -> Result<(), Error> {
+    require_fixed_listener_ports(&setup.run)?;
     let running = serve_registry::running()?
         .into_iter()
         .find(|server| server.pool_dir == setup.pool_dir);
@@ -737,9 +738,6 @@ fn preflight(setup: &Setup, previous: Option<&Setup>) -> Result<(), Error> {
     let mut listeners = Vec::new();
     for bind in [&setup.run.bind, &setup.run.remote_bind] {
         let address: SocketAddr = bind.as_deref().unwrap().parse().expect("validated bind");
-        if address.port() == 0 {
-            return Err(usage("installed servers require fixed listener ports"));
-        }
         let unchanged = running.is_some()
             && previous.is_some_and(|old| bind == &old.run.bind || bind == &old.run.remote_bind);
         if !unchanged {
@@ -749,10 +747,31 @@ fn preflight(setup: &Setup, previous: Option<&Setup>) -> Result<(), Error> {
                 .with_source(error))?);
         }
     }
+    let _udp_socket = if let Some(udp) = &setup.run.udp {
+        let address: SocketAddr = udp.parse().expect("validated UDP bind");
+        let unchanged =
+            running.is_some() && previous.is_some_and(|old| old.run.udp.as_ref() == Some(udp));
+        if !unchanged {
+            Some(UdpSocket::bind(address).map_err(|error| {
+                Error::new(ErrorKind::Io)
+                    .with_message(format!("cannot listen for UDP input on {address}"))
+                    .with_hint("Choose an available UDP port with --udp=ADDRESS.")
+                    .with_source(error)
+            })?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     Ok(())
 }
 
-pub(crate) fn install(pool_dir: &Path, options: &ServeRunArgs) -> Result<Status, Error> {
+pub(crate) fn install(
+    pool_dir: &Path,
+    options: &ServeRunArgs,
+    no_udp: bool,
+) -> Result<Status, Error> {
     supported()?;
     if unsafe_euid_is_root() {
         return Err(usage("run service installation as the account that owns the pools")
@@ -802,7 +821,7 @@ pub(crate) fn install(pool_dir: &Path, options: &ServeRunArgs) -> Result<Status,
         pool_dir,
         account,
         home: owner_home,
-        run: merge(previous.as_ref(), options)?,
+        run: merge(previous.as_ref(), options, no_udp)?,
     };
     let owners = previous.iter().collect::<Vec<_>>();
     verify_native_ownership(&setup, &owners)?;
@@ -2036,6 +2055,7 @@ mod tests {
                 server: Some("https://proxy.example.net".into()),
                 ..Default::default()
             },
+            false,
         )
         .unwrap();
         assert_eq!(run.remote_bind, setup.run.remote_bind);
@@ -2045,7 +2065,9 @@ mod tests {
         let mut setup = setup();
         setup.run.bind = Some("127.0.0.1:12345".into());
         assert_eq!(
-            merge(Some(&setup), &ServeRunArgs::default()).unwrap().bind,
+            merge(Some(&setup), &ServeRunArgs::default(), false)
+                .unwrap()
+                .bind,
             setup.run.bind
         );
     }

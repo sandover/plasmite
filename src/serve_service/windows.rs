@@ -1,6 +1,6 @@
 //! Native Windows services. The manager owns the process lifecycle; a protected
 //! installation binds one pool owner to one virtual service account.
-use super::{Setup, Status, id, io_error, merge, usage};
+use super::{Setup, Status, id, io_error, merge, require_fixed_listener_ports, usage};
 use crate::cli::args::ServeRunArgs;
 use crate::{access_store, serve_registry, windows_private};
 use fs2::FileExt;
@@ -51,6 +51,8 @@ struct Request {
     home: PathBuf,
     source: PathBuf,
     options: ServeRunArgs,
+    #[serde(default)]
+    no_udp: bool,
     result: String,
 }
 
@@ -650,7 +652,12 @@ fn invoke(request: &Request) -> Result<(), Error> {
     }
     Ok(())
 }
-fn request(pool: &Path, action: &str, options: ServeRunArgs) -> Result<Request, Error> {
+fn request(
+    pool: &Path,
+    action: &str,
+    options: ServeRunArgs,
+    no_udp: bool,
+) -> Result<Request, Error> {
     let original = pool;
     let pool = fs::canonicalize(pool)
         .map_err(|err| io_error("failed to resolve pool directory", pool, err))?;
@@ -666,42 +673,25 @@ fn request(pool: &Path, action: &str, options: ServeRunArgs) -> Result<Request, 
         source: std::env::current_exe()
             .map_err(|err| io_error("failed to find Plasmite", original, err))?,
         options,
+        no_udp,
     })
 }
-pub(crate) fn install(pool: &Path, options: &ServeRunArgs) -> Result<Status, Error> {
+pub(crate) fn install(pool: &Path, options: &ServeRunArgs, no_udp: bool) -> Result<Status, Error> {
     if !pool.exists() {
         io_result(windows_private::create_dir_all(pool), pool)?;
     }
     io_result(windows_private::ensure_owner(pool), pool)?;
-    let request = request(pool, "install", options.clone())?;
+    let request = request(pool, "install", options.clone(), no_udp)?;
     let previous = load(&request.pool_dir)?;
-    let run = merge(previous.as_ref().map(|p| &p.setup), options)?;
-    if run
-        .bind
-        .as_deref()
-        .unwrap()
-        .parse::<std::net::SocketAddr>()
-        .unwrap()
-        .port()
-        == 0
-        || run
-            .remote_bind
-            .as_deref()
-            .unwrap()
-            .parse::<std::net::SocketAddr>()
-            .unwrap()
-            .port()
-            == 0
-    {
-        return Err(usage("installed servers require fixed listener ports"));
-    }
+    let run = merge(previous.as_ref().map(|p| &p.setup), options, no_udp)?;
+    require_fixed_listener_ports(&run)?;
     invoke(&request)?;
     let record = required(&request.pool_dir)?;
     wait_ready(&record)?;
     status(&record)
 }
 pub(crate) fn control(pool: &Path, action: &str) -> Result<Status, Error> {
-    let request = request(pool, action, ServeRunArgs::default())?;
+    let request = request(pool, action, ServeRunArgs::default(), false)?;
     let record = required(&request.pool_dir)?;
     let lock_path = request.pool_dir.join(".plasmite-serve/service.lock");
     let lock = io_result(shared(&record)?.open_lock(&lock_path), &lock_path)?;
@@ -1118,6 +1108,32 @@ fn save(record: &Installed) -> Result<(), Error> {
     replace_installed(&temporary, &path)
 }
 fn replace_installed(source: &Path, destination: &Path) -> Result<(), Error> {
+    move_installed(source, destination).map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message("failed to replace installed service file")
+            .with_source(err)
+    })
+}
+fn replace_program(source: &Path, destination: &Path) -> Result<(), Error> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        match move_installed(source, destination) {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                // SCM can report STOPPED before the process releases its image.
+                // Retry only executable replacement; retain the original ACLs.
+                let locked = matches!(err.raw_os_error(), Some(5 | 32));
+                if !locked || Instant::now() >= deadline {
+                    return Err(Error::new(ErrorKind::Io)
+                        .with_message("failed to replace installed service executable")
+                        .with_source(err));
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+}
+fn move_installed(source: &Path, destination: &Path) -> io::Result<()> {
     use windows_sys::Win32::Storage::FileSystem::{
         MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
     };
@@ -1129,7 +1145,7 @@ fn replace_installed(source: &Path, destination: &Path) -> Result<(), Error> {
         )
     } == 0
     {
-        Err(win_error("failed to replace installed service file"))
+        Err(io::Error::last_os_error())
     } else {
         Ok(())
     }
@@ -1480,7 +1496,12 @@ fn admin(request: &Request) -> Result<(), Error> {
         return Err(usage("the installed Windows service is missing")
             .with_hint("Run `serve uninstall` to finish cleanup, then reinstall."));
     }
-    let run = merge(previous.as_ref().map(|p| &p.setup), &request.options)?;
+    let run = merge(
+        previous.as_ref().map(|p| &p.setup),
+        &request.options,
+        request.no_udp,
+    )?;
+    require_fixed_listener_ports(&run)?;
     if previous.is_none()
         && serve_registry::running()?
             .iter()
@@ -1661,7 +1682,7 @@ fn admin(request: &Request) -> Result<(), Error> {
         set_start_type(&service, SERVICE_DISABLED)?;
         startup_disabled = true;
         stop(&service)?;
-        replace_installed(&staging, &record.setup.program)?;
+        replace_program(&staging, &record.setup.program)?;
         program_replaced = true;
         let initial_store = if previous.is_none() {
             identity_may_change = true;
@@ -1766,7 +1787,7 @@ fn admin(request: &Request) -> Result<(), Error> {
             }
             if let Some(previous) = &previous {
                 if program_replaced {
-                    replace_installed(&backup, &previous.setup.program)?;
+                    replace_program(&backup, &previous.setup.program)?;
                 }
                 if setup_saved {
                     replace_installed(&settings_backup, &manifest(&pool)?)?;

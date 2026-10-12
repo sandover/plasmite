@@ -172,6 +172,7 @@ pub(crate) async fn serve_secure_pair(
     local: ServeConfig,
     remote: ServeConfig,
     access: Arc<AccessStore>,
+    udp_bind: Option<SocketAddr>,
 ) -> Result<(), Error> {
     validate_config(&local)?;
     validate_config(&remote)?;
@@ -207,6 +208,11 @@ pub(crate) async fn serve_secure_pair(
                 .with_message("failed to bind remote HTTPS listener")
                 .with_source(err)
         })?;
+    let udp_listener = match udp_bind {
+        Some(address) => Some(crate::udp_input::bind(address).await?),
+        None => None,
+    };
+    let process_shutdown = shutdown_signal();
     access.write_local_bind(local_listener.local_addr().map_err(|err| {
         Error::new(ErrorKind::Io)
             .with_message("failed to inspect local listener")
@@ -243,31 +249,124 @@ pub(crate) async fn serve_secure_pair(
         )
         .layer(middleware::from_fn(local_request_guard));
     let local_app = local_server.app.merge(status_route);
-    notify_ready_file(&remote_listener)?;
     let remote_tls = remote_server.tls_config.ok_or_else(|| {
         Error::new(ErrorKind::Internal).with_message("remote TLS was not configured")
     })?;
-    tokio::try_join!(
-        serve_plain(local_listener, local_app, shutdown_signal()),
-        serve_tls(
-            remote_listener,
-            remote_server.app,
-            remote_tls,
-            shutdown_signal()
-        ),
-    )?;
+    let local_address = local_listener.local_addr().map_err(|err| {
+        Error::new(ErrorKind::Io)
+            .with_message("failed to inspect local listener")
+            .with_source(err)
+    })?;
+    eprintln!(
+        "Serving {}",
+        crate::cli::output_support::human_literal(&local.pool_dir.display().to_string())
+    );
+    eprintln!("Local: http://{local_address}/ui");
+    eprintln!("Remote listener: {remote_address}");
+    if remote_address.ip().is_unspecified() {
+        eprintln!(
+            "Remote listener accepts connections on all interfaces; use --remote-bind to select an interface."
+        );
+    }
+    if let Some(address) = access.shared_address() {
+        eprintln!("Remote HTTPS: {address}");
+    } else if remote_address.ip().is_unspecified() {
+        eprintln!("Remote address: pass SERVER as the HTTPS URL clients will use");
+    } else {
+        eprintln!("Remote HTTPS: https://{remote_address}");
+    }
+    if let Some(socket) = &udp_listener {
+        let address = socket.local_addr().map_err(|err| {
+            Error::new(ErrorKind::Io)
+                .with_message("failed to inspect UDP listener")
+                .with_source(err)
+        })?;
+        eprintln!("UDP input: {address} (JSON/Lite3, served pool directory)");
+        eprintln!("UDP delivery may lose, duplicate, or reorder messages.");
+        eprintln!(
+            "Maximum UDP message size: 65507 bytes including routing. Larger messages are discarded."
+        );
+        eprintln!("Sending does not confirm storage. UDP has no authentication or encryption.");
+        if !address.ip().is_loopback() {
+            eprintln!("Allow only trusted senders through a protected network.");
+        }
+        if address.ip().is_unspecified() {
+            eprintln!(
+                "UDP input accepts messages on all interfaces; use --udp=ADDRESS to select an interface."
+            );
+        }
+    }
+    eprintln!(
+        "Create access: plasmite --dir {} access invite NAME",
+        crate::cli::output_support::human_literal(&local.pool_dir.display().to_string())
+    );
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let mut listeners = JoinSet::new();
+    listeners.spawn(serve_plain(
+        local_listener,
+        local_app,
+        wait_for_shutdown(shutdown_rx.clone()),
+    ));
+    listeners.spawn(serve_tls(
+        remote_listener,
+        remote_server.app,
+        remote_tls,
+        wait_for_shutdown(shutdown_rx.clone()),
+    ));
+    if let Some(socket) = udp_listener {
+        listeners.spawn(crate::udp_input::run(
+            socket,
+            LocalClient::new().with_pool_dir(&local.pool_dir),
+            shutdown_rx,
+        ));
+    }
+    // Publish readiness only after every listener has bound and started.
+    // Keep the existing ready-file value (the HTTPS address).
+    let readiness_error = notify_ready_address(remote_address).err();
+    await_listeners(listeners, shutdown_tx, process_shutdown, readiness_error).await
+}
+
+// A failed listener still gives its peers time to finish their ordinary shutdown.
+async fn await_listeners(
+    mut listeners: JoinSet<Result<(), Error>>,
+    shutdown_tx: watch::Sender<bool>,
+    process_shutdown: impl Future<Output = ()>,
+    mut error: Option<Error>,
+) -> Result<(), Error> {
+    tokio::pin!(process_shutdown);
+    let mut stopping = error.is_some();
+    if stopping {
+        shutdown_tx.send_replace(true);
+    }
+    while !listeners.is_empty() {
+        tokio::select! {
+            _ = &mut process_shutdown, if !stopping => {
+                stopping = true;
+                shutdown_tx.send_replace(true);
+            }
+            outcome = listeners.join_next() => {
+                let failure = match outcome {
+                    Some(Ok(result)) => result.err(),
+                    Some(Err(err)) => Some(Error::new(ErrorKind::Internal)
+                        .with_message("server listener task failed").with_source(err)),
+                    None => None,
+                };
+                if error.is_none() { error = failure; }
+                stopping = true;
+                shutdown_tx.send_replace(true);
+            }
+        }
+    }
+    if let Some(error) = error {
+        return Err(error);
+    }
     Ok(())
 }
 
-fn notify_ready_file(listener: &tokio::net::TcpListener) -> Result<(), Error> {
+fn notify_ready_address(addr: SocketAddr) -> Result<(), Error> {
     let Some(path) = std::env::var_os(READY_FILE_ENV) else {
         return Ok(());
     };
-    let addr = listener.local_addr().map_err(|err| {
-        Error::new(ErrorKind::Io)
-            .with_message("failed to inspect bound server address")
-            .with_source(err)
-    })?;
     let path = PathBuf::from(path);
     let temporary_path = path.with_extension("tmp");
     std::fs::write(&temporary_path, addr.to_string())
@@ -824,29 +923,37 @@ fn init_tracing() {
         .try_init();
 }
 
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        let _ = tokio::signal::ctrl_c().await;
-    };
-    #[cfg(unix)]
-    let terminate = async {
-        let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("install SIGTERM handler");
-        signal.recv().await;
-    };
-    #[cfg(unix)]
-    tokio::select! {
-        _ = ctrl_c => {}
-        _ = terminate => {}
+#[cfg(unix)]
+fn shutdown_signal() -> impl Future<Output = ()> {
+    let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("install SIGTERM handler");
+    async move {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = signal.recv() => {}
+        }
     }
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() {
     #[cfg(windows)]
     if crate::serve_service::windows::registry_directory().is_some() {
         crate::serve_service::windows::shutdown_requested().await;
-    } else {
-        ctrl_c.await;
+        return;
     }
-    #[cfg(not(any(unix, windows)))]
-    ctrl_c.await;
+    let _ = tokio::signal::ctrl_c().await;
+}
+
+pub(crate) async fn wait_for_shutdown(mut shutdown: watch::Receiver<bool>) {
+    loop {
+        if *shutdown.borrow_and_update() {
+            return;
+        }
+        if shutdown.changed().await.is_err() {
+            return;
+        }
+    }
 }
 
 fn authorize(headers: &HeaderMap, state: &AppState) -> Result<Option<AccessGrant>, Error> {
@@ -2578,6 +2685,32 @@ mod tests {
     use serde_json::json;
     use std::sync::{Arc, Mutex};
     use tokio::sync::Semaphore;
+
+    #[tokio::test]
+    async fn listener_failure_waits_for_peer_shutdown_before_returning() {
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        let (completed_tx, completed_rx) = tokio::sync::oneshot::channel();
+        let mut listeners = tokio::task::JoinSet::new();
+        listeners.spawn(async move {
+            super::wait_for_shutdown(shutdown_rx).await;
+            // Yield during cleanup; dropping this future would lose the signal.
+            tokio::task::yield_now().await;
+            completed_tx.send(()).unwrap();
+            Ok(())
+        });
+        listeners.spawn(async {
+            Err(Error::new(ErrorKind::Io).with_message("injected listener failure"))
+        });
+        let error = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            super::await_listeners(listeners, shutdown_tx, std::future::pending(), None),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert!(error.to_string().contains("injected listener failure"));
+        completed_rx.await.expect("peer finished cleanup");
+    }
 
     #[test]
     fn tail_backpressure_expires_and_releases_permit_without_draining_queued_data() {

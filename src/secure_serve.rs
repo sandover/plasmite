@@ -24,6 +24,11 @@ pub(crate) fn run(pool_dir: &Path, run: &ServeRunArgs) -> Result<(), Error> {
         .unwrap()
         .parse()
         .expect("validated bind");
+    let udp_bind = run.udp.as_deref().map(|address| {
+        address
+            .parse::<SocketAddr>()
+            .expect("validated UDP address")
+    });
     let shared_address = run.server.clone();
     std::fs::create_dir_all(pool_dir).map_err(|err| {
         Error::new(ErrorKind::Io)
@@ -52,28 +57,6 @@ pub(crate) fn run(pool_dir: &Path, run: &ServeRunArgs) -> Result<(), Error> {
         tls_key: Some(store.key_path()),
         ..base.clone()
     };
-    eprintln!(
-        "Serving {}",
-        crate::cli::output_support::human_literal(&pool_dir.display().to_string())
-    );
-    eprintln!("Local: http://{local_bind}/ui");
-    eprintln!("Remote listener: {remote_bind}");
-    if remote_bind.ip().is_unspecified() {
-        eprintln!(
-            "Remote listener accepts connections on all interfaces; use --remote-bind to select an interface."
-        );
-    }
-    if let Some(address) = shared_address {
-        eprintln!("Remote HTTPS: {address}");
-    } else if remote_bind.ip().is_unspecified() {
-        eprintln!("Remote address: pass SERVER as the HTTPS URL clients will use");
-    } else {
-        eprintln!("Remote HTTPS: https://{remote_bind}");
-    }
-    eprintln!(
-        "Create access: plasmite --dir {} access invite NAME",
-        crate::cli::output_support::human_literal(&pool_dir.display().to_string())
-    );
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -82,7 +65,7 @@ pub(crate) fn run(pool_dir: &Path, run: &ServeRunArgs) -> Result<(), Error> {
                 .with_message("failed to start server runtime")
                 .with_source(err)
         })?;
-    runtime.block_on(serve::serve_secure_pair(base, remote, store))
+    runtime.block_on(serve::serve_secure_pair(base, remote, store, udp_bind))
 }
 
 #[derive(Deserialize)]

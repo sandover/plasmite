@@ -131,6 +131,70 @@ pls follow telemetry --tag sensor --since 1h --no-follow --json \
   | jq '.data | [.ts, .value]'
 ```
 
+### Send small messages over UDP
+
+UDP input is useful when a sender can tolerate loss, duplicates, and reordering.
+Start a server with `--udp`; the receiver appends one JSON or Lite3 message to
+the named pool. The address below is local to the server. Change it to the
+server's chosen bind address when the sender runs elsewhere.
+
+#### Send JSON from Python
+
+This example uses only Python's standard library and checks the full datagram
+size before sending:
+
+```python
+import json
+import socket
+
+pool = "sensors"
+message = {"data": {"temperature_c": 22.4, "sample": 81},
+           "tags": ["sensor"]}
+payload = pool.encode("utf-8") + b"\x00" + json.dumps(
+    message, separators=(",", ":")
+).encode("utf-8")
+if len(payload) > 65_507:
+    raise ValueError("UDP payload exceeds 65507 bytes; use HTTP")
+
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 128 * 1024)
+    sock.sendto(payload, ("127.0.0.1", 9701))
+```
+
+`sendto` only reports that the local operating system accepted the datagram.
+It does not confirm that Plasmite received or stored it.
+
+#### Relay a Lite3 message from the CLI
+
+`fetch --format lite3` writes the raw Lite3 body, without its message envelope.
+Run this script with a sequence number, such as `python3 relay.py 1`. It fetches
+one local message and sends those bytes after the pool name and NUL delimiter:
+
+```python
+import socket
+import subprocess
+import sys
+
+pool = "sensors"
+seq = sys.argv[1]
+body = subprocess.run(
+    ["plasmite", "fetch", pool, seq, "--format", "lite3"],
+    check=True,
+    stdout=subprocess.PIPE,
+).stdout
+payload = pool.encode("utf-8") + b"\x00" + body
+if len(payload) > 65_507:
+    raise ValueError("UDP payload exceeds 65507 bytes; use HTTP")
+
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 128 * 1024)
+    sock.sendto(payload, ("127.0.0.1", 9701))
+```
+
+The destination pool assigns a new sequence and append time. The Lite3 bytes
+keep their original content and tags. See the
+[UDP input contract](../spec/udp/v0/SPEC.md) for the format and access rules.
+
 ### Multi-writer event bus
 
 Several processes write to the same pool with different tags. An on-call engineer tails only what matters.

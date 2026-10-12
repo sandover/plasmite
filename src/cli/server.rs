@@ -15,9 +15,9 @@ pub(super) fn run(
 ) -> Result<CommandResult, Error> {
     match command {
         None => crate::secure_serve::run(context.pool_dir(), &run)?,
-        Some(ServeSubcommand::Install { run, .. }) => emit_action(
+        Some(ServeSubcommand::Install { run, no_udp, .. }) => emit_action(
             "install",
-            serve_service::install(context.pool_dir(), &run)?,
+            serve_service::install(context.pool_dir(), &run, no_udp)?,
             context.json_output(),
         ),
         Some(ServeSubcommand::Start { .. }) => emit_action(

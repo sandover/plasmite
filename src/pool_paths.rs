@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) enum PoolNameResolveError {
     ContainsPathSeparator,
+    InvalidName,
 }
 
 pub(crate) fn default_pool_dir() -> PathBuf {
@@ -20,6 +21,14 @@ pub(crate) fn resolve_named_pool_path(
     name: &str,
     pool_dir: &Path,
 ) -> Result<PathBuf, PoolNameResolveError> {
+    if name.is_empty()
+        || name.contains('\0')
+        || Path::new(name)
+            .components()
+            .any(|part| matches!(part, std::path::Component::Prefix(_)))
+    {
+        return Err(PoolNameResolveError::InvalidName);
+    }
     if name.chars().any(std::path::is_separator) {
         return Err(PoolNameResolveError::ContainsPathSeparator);
     }

@@ -32,6 +32,8 @@ pub(crate) fn resolve_poolref(input: &str, pool_dir: &Path) -> Result<PathBuf, E
 
 pub(crate) fn map_pool_name_resolve_error(err: PoolNameResolveError) -> Error {
     match err {
+        PoolNameResolveError::InvalidName => Error::new(ErrorKind::Usage)
+            .with_message("pool name must be nonempty and must not contain NUL or a path prefix"),
         PoolNameResolveError::ContainsPathSeparator => {
             Error::new(ErrorKind::Usage).with_message("pool name must not contain path separators")
         }

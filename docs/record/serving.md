@@ -214,6 +214,34 @@ If an invitation's response is lost, list the keys, revoke the new entry,
 and invite again. If a revocation's response is lost, check the key list
 before retrying. Review access after restoring server state from a backup.
 
+## Send UDP messages
+
+Use UDP input when a sender can live with a message being lost, duplicated, or
+received out of order. It adds one listener to the same server and pool
+directory:
+
+```console
+plasmite --dir ./shared pool create sensors
+plasmite --dir ./shared serve --udp
+```
+
+Bare `--udp` listens on `127.0.0.1:9701`. Use `--udp=IP:PORT` to bind another
+numeric address. A datagram starts with the UTF-8 pool name and a NUL byte,
+then carries one complete JSON or Lite3 message. The whole datagram, including
+the routing name, must fit within 65,507 bytes. See the
+[UDP input contract](../../spec/udp/v0/SPEC.md) and the
+[sender examples](../cookbook.md#send-small-messages-over-udp).
+
+The listener can append to every pool in its directory, including pools
+created later. A non-loopback bind gives every reachable sender that same
+directory-wide append access. UDP has no authentication, encryption, reply, or
+delivery confirmation. Bind only on a network whose rules limit senders. Use
+HTTPS when a sender needs authenticated access or a response.
+
+An installed server keeps the setting through restarts and updates. Enable it
+with `plasmite --dir ./shared serve install --udp`; clear it with
+`plasmite --dir ./shared serve install --no-udp`.
+
 ## Deploy a server
 
 Secure serving runs on macOS, Linux, and Windows. The public server URL
@@ -225,6 +253,7 @@ your network routes to the server.
 | --- | --- | --- |
 | Local HTTP | `127.0.0.1:9700` | Pool use and access administration for trusted local processes. No credentials required. |
 | Remote HTTPS | `0.0.0.0:9743` | Pool use through access keys, browser sessions, or MCP authorization. |
+| UDP input | Off; `127.0.0.1:9701` when enabled | Append one JSON or Lite3 message per datagram, without authentication or delivery confirmation. |
 
 Use `--bind` and `--remote-bind` to change the listening addresses. Restrict
 network access to intended recipients. Keep the local HTTP listener on

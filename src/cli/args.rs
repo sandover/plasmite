@@ -614,6 +614,12 @@ pub(crate) enum ServeSubcommand {
     Install {
         #[command(flatten)]
         run: Box<ServeRunArgs>,
+        #[arg(
+            long,
+            conflicts_with = "udp",
+            help = "Remove UDP input from the installed server"
+        )]
+        no_udp: bool,
         #[arg(long, help = "Emit a JSON report")]
         json: bool,
     },
@@ -885,6 +891,17 @@ pub(crate) struct ServeRunArgs {
         help_heading = "Connection"
     )]
     pub(crate) remote_bind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[arg(
+        long,
+        value_name = "ADDRESS",
+        num_args = 0..=1,
+        default_missing_value = "127.0.0.1:9701",
+        require_equals = true,
+        help = "UDP append input on numeric IP:port (default 127.0.0.1:9701; max 65507 bytes including routing; delivery may lose, duplicate, or reorder messages; no receipt, authentication, or encryption)",
+        help_heading = "Connection"
+    )]
+    pub(crate) udp: Option<String>,
     #[arg(
         long = "shared-address",
         value_name = "URL",

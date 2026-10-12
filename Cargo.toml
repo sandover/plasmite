@@ -37,6 +37,7 @@ sha2 = "0.10"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 fs2 = "0.4"
+socket2 = "0.6"
 jaq-core = "2"
 jaq-parse = "1"
 jaq-std = "2"

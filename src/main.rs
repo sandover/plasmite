@@ -26,6 +26,7 @@ mod serve_service;
 #[cfg(windows)]
 mod server_private;
 mod since;
+mod udp_input;
 #[cfg(windows)]
 mod windows_private;
 
@@ -352,6 +353,7 @@ mod tests {
                     "shared-address",
                     "tls-cert",
                     "tls-key",
+                    "udp",
                 ],
             ),
             (
@@ -364,10 +366,12 @@ mod tests {
                     "max-body-bytes",
                     "max-tail-concurrency",
                     "max-tail-timeout-ms",
+                    "no-udp",
                     "remote-bind",
                     "shared-address",
                     "tls-cert",
                     "tls-key",
+                    "udp",
                 ],
             ),
             (
