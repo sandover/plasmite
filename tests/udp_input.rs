@@ -524,6 +524,7 @@ fn assert_http_pool_readers(pool_dir: &Path, lite3: &[u8]) -> TestResult<()> {
 
 #[cfg(unix)]
 fn log_counter(log: &str, field: &str) -> Option<u64> {
+    let log = strip_ansi_codes(log);
     let marker = format!("{field}=");
     log.split_whitespace()
         .find_map(|part| part.strip_prefix(&marker))
@@ -533,6 +534,25 @@ fn log_counter(log: &str, field: &str) -> Option<u64> {
                 .parse()
                 .ok()
         })
+}
+
+#[cfg(unix)]
+fn strip_ansi_codes(text: &str) -> String {
+    let mut characters = text.chars().peekable();
+    let mut plain = String::with_capacity(text.len());
+    while let Some(character) = characters.next() {
+        if character == '\u{1b}' && characters.peek() == Some(&'[') {
+            characters.next();
+            for character in characters.by_ref() {
+                if ('@'..='~').contains(&character) {
+                    break;
+                }
+            }
+        } else {
+            plain.push(character);
+        }
+    }
+    plain
 }
 
 #[test]
@@ -772,10 +792,10 @@ fn one_server_appends_mixed_formats_and_keeps_receiving_after_bad_datagrams() ->
             .lines()
             .find(|line| line.contains("UDP input summary"))
             .ok_or_else(|| format!("missing shutdown UDP summary:\n{}", server.combined_log))?;
-        assert!(summary.contains("received="), "{summary}");
-        assert!(summary.contains("appended="), "{summary}");
-        assert!(summary.contains("oversized="), "{summary}");
-        assert!(summary.contains("errors="), "{summary}");
+        assert!(log_counter(summary, "received").is_some(), "{summary}");
+        assert!(log_counter(summary, "appended").is_some(), "{summary}");
+        assert!(log_counter(summary, "oversized").is_some(), "{summary}");
+        assert!(log_counter(summary, "errors").is_some(), "{summary}");
         assert!(
             log_counter(summary, "appended").unwrap_or_default() >= 12,
             "expected counters to include all observed appends: {summary}"
