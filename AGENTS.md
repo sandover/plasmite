@@ -33,7 +33,7 @@ docs/
 ├── record/architecture.md                      — Implementation architecture; read when changing internals or layering
 ├── record/testing.md                           — Test strategy + commands; read when adding/fixing tests
 ├── record/releasing.md                         — Release policy + versioning; read for what/why (mechanics live in release skill)
-├── record/upgrading-2.0.md                     — Read when migrating CLI scripts to complete-message pipes and shared formats
+├── record/upgrading-1.2.md                     — Read when migrating CLI scripts to complete-message pipes and shared formats
 ├── record/upgrading-1.0.md                     — Read when updating scripts, remote configuration, or Rust clients to 1.0
 ├── record/distribution.md                      — Supported platforms, install channels, and SDK layout; read when adding a channel or platform
 ├── ../include/plasmite.h                       — C ABI header; read for stability contract, ownership rules, linking

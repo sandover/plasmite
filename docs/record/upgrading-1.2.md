@@ -1,8 +1,9 @@
-# Upgrading CLI scripts to 2.0
+# Upgrading CLI scripts to Plasmite 1.2.0
 
-Plasmite 2.0 makes complete messages the common unit of CLI pipes. This is a
-hard cutover: old switches fail rather than selecting compatibility behavior.
-Pool files, language APIs, HTTP and MCP keep their existing contracts.
+Plasmite 1.2.0 includes breaking CLI changes that make complete messages the
+common unit of CLI pipes. This is a hard cutover: old switches fail rather than
+selecting compatibility behavior. Pool files, language APIs, HTTP and MCP keep
+their existing contracts.
 
 ## Copy messages with defaults
 
@@ -19,7 +20,7 @@ the chain. The reader processes each complete message immediately.
 
 ## Create messages explicitly
 
-Before 2.0, feed treated every JSON object as application contents. Add `--data`
+Before 1.2.0, feed treated every JSON object as application contents. Add `--data`
 when that is your intent:
 
 ```bash
@@ -34,7 +35,7 @@ contents, use `jq -c '.data'`; a following feed needs `--data` to wrap them.
 
 ## Choose one output format
 
-| Before | 2.0 |
+| Before | 1.2.0 |
 | --- | --- |
 | `--json`, `--jsonl`, `--format jsonl` | `--format json`, or omit it in a pipe/file |
 | `--yaml` | `--format yaml` |

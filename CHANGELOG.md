@@ -2,7 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased — 2.0.0]
+## [Unreleased]
+
+## [1.2.0] - 2026-10-13
+
+Plasmite 1.2 adds UDP feed and follow across the CLI and native language APIs,
+complete-message CLI pipes, and YAML input/output.
+
+**This release includes breaking CLI changes despite the minor version number.**
+Existing pool files, HTTP and MCP formats, and existing language API behavior
+remain compatible. Read the [CLI upgrade guide](docs/record/upgrading-1.2.md)
+before updating scripts.
 
 ### CLI message pipes
 
@@ -16,22 +26,50 @@ output switches. Terminals default to readable output; pipes and files default
 to compact JSON. Feed detects JSON, marked YAML, and framed Lite3 without waiting
 for more messages. JSON accepts multiline objects. YAML input/output preserves
 JSON-compatible values. Framed Lite3 supports one or many messages; the raw
-form supports one attachment through EOF. See [the CLI upgrade guide](docs/record/upgrading-2.0.md).
+form supports one attachment through EOF.
 
 Invalid input stops and earlier appends remain. Closed downstream pipes stop
 normally; other output errors never retry successful appends. Finite history
 reads fail if retention drops selected messages. Failed access checks return
 nonzero. Text input permits encoding overhead rather than the old 1 MiB cap.
 
-### UDP input and binary append
+### UDP feed and follow
 
-`serve --udp` adds directory-wide append-only UDP input. Raw Lite3 appends preserve
-original bytes and reject unreadable nested values before committing. Binary
-append receipts derive from validated input and assigned identity, avoiding a
+`serve --udp` accepts directory-wide UDP input. Add `--udp-follow` to enable
+reads. `feed`, `follow`, and `duplex` accept `udp://HOST:PORT/POOL`; Rust, C,
+Python, Node, and Go expose matching send/follow APIs. Installed servers retain
+their UDP settings across updates, and reads stay off until explicitly enabled.
+
+UDP provides best-effort delivery on loopback or a separately protected,
+controlled network. It adds no authentication, encryption, stored-write
+acknowledgement, or message retransmission. A successful send means the operating
+system accepted a datagram; UDP feed emits no append receipt. Follow reports
+skipped ranges, rejects replaced pools, and bounds subscribers with leases.
+The maximum whole datagram is 65,507 bytes, including its framing.
+
+The clients preserve original Lite3 bytes and full-width sequence/time metadata.
+Node opens and polls follows without blocking its event loop. Socket-buffer
+settings support the maximum packet on the tested macOS path. Tests cover loss,
+duplicates, reordering, retention, leases, IPv6, and exact maximum-sized packets.
+The [UDP measurements](docs/performance/udp-transport.md) describe delivery and
+latency for a paced loopback workload; they establish no throughput or speed
+advantage over HTTP.
+
+### Binary append validation
+
+Raw Lite3 appends preserve original bytes and reject unreadable nested values
+before committing. Binary append receipts derive from validated input and assigned identity, avoiding a
 second lookup that concurrent retention could invalidate.
 
-Language APIs, HTTP, MCP and pool files keep their current formats. This source
-prepares a major CLI cutover; no 2.0 release has been published.
+The additional validation increases measured 16 KiB raw append cost by about
+3.7 microseconds on the test host. The ordinary JSON write path remains unchanged.
+
+### Examples
+
+The cookbook adds a TouchOSC capture recipe and a runnable OSC-to-JSON-Lines
+example that feeds messages through a persistent CLI pipe.
+
+[Full changes since 1.1.0](https://github.com/sandover/plasmite/compare/v1.1.0...v1.2.0)
 
 ## [1.1.0] - 2026-10-05
 

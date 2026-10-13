@@ -1,6 +1,6 @@
-# Plasmite CLI Spec (2.x)
+# Plasmite CLI Spec (1.2 and later)
 
-This document defines the normative CLI compatibility contract for Plasmite 2.x.
+This document defines the normative CLI compatibility contract starting with Plasmite 1.2.
 The historical `spec/v0/` path is retained for existing documentation links;
 it does not preserve the superseded pre-1.0 CLI behavior.
 It keeps only script-level guarantees; signatures, walkthroughs, and examples live in code docs and `docs/cookbook.md`.
@@ -12,10 +12,11 @@ It keeps only script-level guarantees; signatures, walkthroughs, and examples li
 
 ## Versioning + Compatibility
 
-The CLI follows package major version 2. The hard cutover removes superseded
-format and input switches and changes feed's default message interpretation.
+The 1.2.0 breaking cutover removes superseded format and input switches and
+changes feed's default message interpretation. Later releases follow the
+package major-version compatibility policy.
 No compatibility mode accepts the earlier behavior. The historical document
-path stays available. See [upgrading to 2.0](../../docs/record/upgrading-2.0.md).
+path stays available. See [upgrading to 1.2.0](../../docs/record/upgrading-1.2.md).
 Language APIs, HTTP, MCP, and pool files keep their separately versioned contracts.
 
 ## Stable Surface

@@ -269,7 +269,7 @@ Plasmite ships one product line with multiple distribution surfaces:
 
 ### Compatibility Definition
 
-- **CLI compatibility**: stable command behavior follows semantic versioning intent; breaking CLI behavior bumps major. One narrow correction ships in 1.1.0: removal of the remote MCP bridge added in 1.0.0. This exception does not change the policy for later releases.
+- **CLI compatibility**: stable command behavior follows semantic versioning intent; breaking CLI behavior bumps major. One narrow correction shipped in 1.1.0: removal of the remote MCP bridge added in 1.0.0. The approved 1.2.0 release adds a breaking CLI cutover to complete-message pipes. These exceptions do not change the policy for future releases.
 - **Bindings compatibility**: Python/Node API behavior tracks the same semantic version as CLI releases.
 - **`libplasmite` ABI compatibility**: ABI changes are treated as release-significant and share the same version bump policy as CLI/bindings.
 

@@ -21,4 +21,4 @@ For task guides and specifications, start with the [docs index](../README.md).
 Do not place proposals, exploratory design drafts, or roadmap notes here.
 Track those in ergo tasks/epics until accepted and promoted.
 
-Read [upgrading to 2.0](upgrading-2.0.md) when migrating CLI scripts to complete-message pipes.
+Read [upgrading to 1.2.0](upgrading-1.2.md) when migrating CLI scripts to complete-message pipes.

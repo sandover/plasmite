@@ -67,4 +67,4 @@ and specifications above:
 
 The repository's `.ergo/` backlog and journal track planned work and results.
 
-CLI script migration: [Upgrading to 2.0](record/upgrading-2.0.md).
+CLI script migration: [Upgrading to 1.2.0](record/upgrading-1.2.md).

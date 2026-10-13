@@ -22,7 +22,7 @@ A pool retains a bounded history, and readers keep their own checkpoints.
 `--tail N` selects the last N retained messages before filters. Use
 `--no-follow` for a finite history read. Pipes and files default to JSON; choose
 `--format yaml` when that helps your workflow. See the [CLI guide](cli.md) for shared rules and the
-[2.0 upgrade guide](record/upgrading-2.0.md) for changed defaults.
+[1.2.0 upgrade guide](record/upgrading-1.2.md) for changed defaults.
 
 ## YAML Messages
 
@@ -382,7 +382,7 @@ Protocol (UDP). A small Python adapter turns supported values into JSON Lines
 for Plasmite. It uses `uv` to run the adapter and the installed Plasmite CLI to
 write to a pool; it does not need Plasmite's Python bindings.
 
-This recipe requires Plasmite 2.0 or newer, `uv`, and a checkout of this repository.
+This recipe requires Plasmite 1.2.0 or newer, `uv`, and a checkout of this repository.
 From the repository root, create a pool in a separate directory:
 
 ```bash
