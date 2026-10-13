@@ -1,0 +1,11 @@
+Serving /var/folders/98/12lj8q2s5r17cth22wl7m8bw0000gn/T/plasmite-udp-bench-60311-1791912882694122000/pools
+Local: http://127.0.0.1:60653/ui
+Remote listener: 127.0.0.1:60654
+Remote HTTPS: https://127.0.0.1:60654
+UDP input: 127.0.0.1:58417 (JSON/Lite3, served pool directory)
+UDP delivery may lose, duplicate, or reorder messages.
+Maximum UDP message size: 65507 bytes including routing. Larger messages are discarded.
+Sending does not confirm storage. UDP has no authentication or encryption.
+UDP follow is enabled: anyone who can reach this socket can read served pools.
+Create access: plasmite --dir /var/folders/98/12lj8q2s5r17cth22wl7m8bw0000gn/T/plasmite-udp-bench-60311-1791912882694122000/pools access invite NAME
+HTTP=http://127.0.0.1:60653 UDP=udp://127.0.0.1:58417 count=200 pace_ms=5 (loopback)

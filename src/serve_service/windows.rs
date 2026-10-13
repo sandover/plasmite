@@ -54,6 +54,8 @@ struct Request {
     options: ServeRunArgs,
     #[serde(default)]
     no_udp: bool,
+    #[serde(default)]
+    no_udp_follow: bool,
     result: String,
 }
 
@@ -658,6 +660,7 @@ fn request(
     action: &str,
     options: ServeRunArgs,
     no_udp: bool,
+    no_udp_follow: bool,
 ) -> Result<Request, Error> {
     let original = pool;
     let pool = fs::canonicalize(pool)
@@ -675,16 +678,27 @@ fn request(
             .map_err(|err| io_error("failed to find Plasmite", original, err))?,
         options,
         no_udp,
+        no_udp_follow,
     })
 }
-pub(crate) fn install(pool: &Path, options: &ServeRunArgs, no_udp: bool) -> Result<Status, Error> {
+pub(crate) fn install(
+    pool: &Path,
+    options: &ServeRunArgs,
+    no_udp: bool,
+    no_udp_follow: bool,
+) -> Result<Status, Error> {
     if !pool.exists() {
         io_result(windows_private::create_dir_all(pool), pool)?;
     }
     io_result(windows_private::ensure_owner(pool), pool)?;
-    let request = request(pool, "install", options.clone(), no_udp)?;
+    let request = request(pool, "install", options.clone(), no_udp, no_udp_follow)?;
     let previous = load(&request.pool_dir)?;
-    let run = merge(previous.as_ref().map(|p| &p.setup), options, no_udp)?;
+    let run = merge(
+        previous.as_ref().map(|p| &p.setup),
+        options,
+        no_udp,
+        no_udp_follow,
+    )?;
     require_fixed_listener_ports(&run)?;
     invoke(&request)?;
     let record = required(&request.pool_dir)?;
@@ -692,7 +706,7 @@ pub(crate) fn install(pool: &Path, options: &ServeRunArgs, no_udp: bool) -> Resu
     status(&record)
 }
 pub(crate) fn control(pool: &Path, action: &str) -> Result<Status, Error> {
-    let request = request(pool, action, ServeRunArgs::default(), false)?;
+    let request = request(pool, action, ServeRunArgs::default(), false, false)?;
     let record = required(&request.pool_dir)?;
     let lock_path = request.pool_dir.join(".plasmite-serve/service.lock");
     let lock = io_result(shared(&record)?.open_lock(&lock_path), &lock_path)?;
@@ -1506,6 +1520,7 @@ fn admin(request: &Request) -> Result<(), Error> {
         previous.as_ref().map(|p| &p.setup),
         &request.options,
         request.no_udp,
+        request.no_udp_follow,
     )?;
     require_fixed_listener_ports(&run)?;
     if previous.is_none()

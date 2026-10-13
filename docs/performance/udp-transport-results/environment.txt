@@ -1,0 +1,15 @@
+Final run: 2026-10-13, local loopback only
+Host: Mac17,9, 15 logical CPUs, arm64
+OS: macOS 26.6.2 (25G83)
+Toolchain: rustc 1.88.0, cargo 1.88.0
+Checkout: main at 528e26445f92, dirty with UDP implementation in progress
+Release binary SHA-256: 0b3f9a71a7a7b1e1faa0c6e9dcaabb058ec028cdcdb3795e0678082605de702e
+Protocol maximum UDP datagram: 65507 bytes
+Host default net.inet.udp.maxdgram: 9216 bytes
+Final source sets client and server send/receive buffers to 128 KiB.
+Workload: 200 serial sends, one every 5 ms, per run; three runs per size, fanout, transport.
+Data blobs: 128, 1024, 16384 bytes; prepared Lite3 attachments: 561, 1457, 16817 bytes.
+Pool: fresh 8 MiB pool per run; all followers open before sends.
+Raw final results: loopback.csv, one row per follower per run.
+Raw pre-fix discovery: pre-fix.csv, where 16 KiB UDP sends failed on the default socket buffer.
+Maximum socket proof: max-probe.txt.

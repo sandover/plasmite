@@ -19,6 +19,8 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::path::PathBuf;
 use std::ptr;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 #[repr(C)]
@@ -58,6 +60,23 @@ pub struct plsm_lite3_stream {
 }
 
 #[repr(C)]
+pub struct plsm_udp_client {
+    client: crate::api::UdpClient,
+}
+
+#[repr(C)]
+pub struct plsm_udp_pool {
+    pool: crate::api::UdpPool,
+}
+
+#[repr(C)]
+pub struct plsm_udp_follow {
+    follow: Mutex<crate::api::UdpFollow>,
+    cancelled: AtomicBool,
+}
+
+#[repr(C)]
+#[derive(Default)]
 pub struct plsm_buf {
     data: *mut u8,
     len: usize,
@@ -68,6 +87,25 @@ pub struct plsm_lite3_frame {
     seq: u64,
     timestamp_ns: u64,
     flags: u32,
+    payload: plsm_buf,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct plsm_udp_event {
+    kind: u32,
+    reason: u32,
+    seq: u64,
+    timestamp_ns: u64,
+    first: u64,
+    last: u64,
+    start_seq: u64,
+    next_seq: u64,
+    end_seq: u64,
+    has_end: u8,
+    terminal: u8,
+    retention_gap: u8,
+    reserved: u8,
     payload: plsm_buf,
 }
 
@@ -628,6 +666,320 @@ pub extern "C" fn plsm_lite3_stream_next(
     }
 }
 
+/// Open a UDP client for the explicit server endpoint, such as
+/// `udp://127.0.0.1:9701`.
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_client_new(
+    endpoint: *const c_char,
+    out_client: *mut *mut plsm_udp_client,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    if out_client.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("out_client is null"),
+        );
+    }
+    let endpoint = match parse_utf8_cstr(endpoint, "endpoint") {
+        Ok(endpoint) => endpoint,
+        Err(err) => return fail(out_err, err),
+    };
+    let client = match crate::api::UdpClient::new(endpoint) {
+        Ok(client) => client,
+        Err(err) => return fail(out_err, err),
+    };
+    unsafe {
+        *out_client = Box::into_raw(Box::new(plsm_udp_client { client }));
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_client_free(client: *mut plsm_udp_client) {
+    if !client.is_null() {
+        unsafe { drop(Box::from_raw(client)) };
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_client_open_pool(
+    client: *mut plsm_udp_client,
+    pool_name: *const c_char,
+    out_pool: *mut *mut plsm_udp_pool,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    if out_pool.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("out_pool is null"),
+        );
+    }
+    if client.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("client is null"),
+        );
+    }
+    let pool_name = match parse_utf8_cstr(pool_name, "pool_name") {
+        Ok(pool_name) => pool_name,
+        Err(err) => return fail(out_err, err),
+    };
+    let pool = match unsafe { &*client }
+        .client
+        .open_pool(&PoolRef::name(pool_name))
+    {
+        Ok(pool) => pool,
+        Err(err) => return fail(out_err, err),
+    };
+    unsafe {
+        *out_pool = Box::into_raw(Box::new(plsm_udp_pool { pool }));
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_pool_free(pool: *mut plsm_udp_pool) {
+    if !pool.is_null() {
+        unsafe { drop(Box::from_raw(pool)) };
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_pool_send_json(
+    pool: *mut plsm_udp_pool,
+    json_bytes: *const u8,
+    json_len: usize,
+    tags: *const *const c_char,
+    tags_len: usize,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    if pool.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("pool is null"),
+        );
+    }
+    let data = match parse_json_bytes(json_bytes, json_len) {
+        Ok(value) => value,
+        Err(err) => return fail(out_err, err),
+    };
+    let tags = match parse_tags(tags, tags_len) {
+        Ok(tags) => tags,
+        Err(err) => return fail(out_err, err),
+    };
+    match unsafe { &*pool }.pool.send_json(&data, &tags) {
+        Ok(()) => 0,
+        Err(err) => fail(out_err, err),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_pool_send_lite3(
+    pool: *mut plsm_udp_pool,
+    payload: *const u8,
+    payload_len: usize,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    if pool.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("pool is null"),
+        );
+    }
+    if payload.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("lite3_bytes is null"),
+        );
+    }
+    let payload = unsafe { std::slice::from_raw_parts(payload, payload_len) };
+    match unsafe { &*pool }.pool.send_lite3(payload) {
+        Ok(()) => 0,
+        Err(err) => fail(out_err, err),
+    }
+}
+
+/// Start-kind values are 0=New, 1=Last, 2=Since (nanoseconds), 3=Sequence.
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_pool_follow(
+    pool: *mut plsm_udp_pool,
+    start_kind: u32,
+    start_value: u64,
+    live: u32,
+    out_follow: *mut *mut plsm_udp_follow,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    if out_follow.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("out_follow is null"),
+        );
+    }
+    if pool.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("pool is null"),
+        );
+    }
+    let start = match start_kind {
+        0 => crate::api::UdpStart::New,
+        1 => crate::api::UdpStart::Last(start_value),
+        2 => crate::api::UdpStart::Since(start_value),
+        3 => crate::api::UdpStart::Sequence(start_value),
+        _ => {
+            return fail(
+                out_err,
+                Error::new(ErrorKind::Usage).with_message("invalid UDP follow start kind"),
+            );
+        }
+    };
+    let follow = match unsafe { &*pool }.pool.follow(crate::api::UdpFollowOptions {
+        start,
+        live: live != 0,
+    }) {
+        Ok(follow) => follow,
+        Err(err) => return fail(out_err, err),
+    };
+    unsafe {
+        *out_follow = Box::into_raw(Box::new(plsm_udp_follow {
+            follow: Mutex::new(follow),
+            cancelled: AtomicBool::new(false),
+        }));
+    }
+    0
+}
+
+/// Returns 1 for an event, 0 when the wait expires, 2 when the stream ends,
+/// 3 when a concurrent caller cancels the wait, or -1 on error.
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_follow_next(
+    follow: *mut plsm_udp_follow,
+    timeout_ms: u64,
+    out_event: *mut plsm_udp_event,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    if out_event.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("out_event is null"),
+        );
+    }
+    if follow.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("follow is null"),
+        );
+    }
+    let follow = unsafe { &*follow };
+    if follow.cancelled.load(Ordering::Acquire) {
+        return 3;
+    }
+    let mut guard = match follow.follow.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return fail(
+                out_err,
+                Error::new(ErrorKind::Internal).with_message("UDP follow lock failed"),
+            );
+        }
+    };
+    let Some(deadline) = Instant::now().checked_add(Duration::from_millis(timeout_ms)) else {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("UDP wait timeout is too large"),
+        );
+    };
+    loop {
+        if follow.cancelled.load(Ordering::Acquire) {
+            return 3;
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let wait = remaining.min(Duration::from_millis(50));
+        match guard.next_event_timeout(wait) {
+            Ok(Some(event)) => match write_udp_event(out_event, event) {
+                Ok(()) => return 1,
+                Err(err) => return fail(out_err, err),
+            },
+            Ok(None) if guard.is_finished() => return 2,
+            Ok(None) if Instant::now() >= deadline => return 0,
+            Ok(None) => continue,
+            Err(err) => return fail(out_err, err),
+        }
+    }
+}
+
+/// Signal an in-progress bounded wait to return with status 3.
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_follow_cancel(follow: *mut plsm_udp_follow) {
+    if !follow.is_null() {
+        unsafe { &*follow }.cancelled.store(true, Ordering::Release);
+    }
+}
+
+/// Close the subscription and free the handle after active calls return.
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_follow_close(follow: *mut plsm_udp_follow) {
+    if follow.is_null() {
+        return;
+    }
+    let follow = unsafe { Box::from_raw(follow) };
+    follow.cancelled.store(true, Ordering::Release);
+    if let Ok(mut inner) = follow.follow.lock() {
+        inner.close();
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_event_free(event: *mut plsm_udp_event) {
+    if event.is_null() {
+        return;
+    }
+    unsafe {
+        let event = &mut *event;
+        plsm_buf_free(&mut event.payload);
+        *event = plsm_udp_event::default();
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_event_message(
+    event: *const plsm_udp_event,
+    out_message: *mut plsm_buf,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    if event.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("event is null"),
+        );
+    }
+    let event = unsafe { &*event };
+    if event.kind != 1 {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("event is not a frame"),
+        );
+    }
+    let payload = if event.payload.data.is_null() || event.payload.len == 0 {
+        Vec::new()
+    } else {
+        unsafe { std::slice::from_raw_parts(event.payload.data, event.payload.len) }.to_vec()
+    };
+    let frame = crate::api::UdpFrame {
+        seq: event.seq,
+        timestamp_ns: event.timestamp_ns,
+        payload,
+    };
+    let message = match frame.message() {
+        Ok(message) => message,
+        Err(err) => return fail(out_err, err),
+    };
+    if let Err(err) = write_message_buf(out_message, message) {
+        return fail(out_err, err);
+    }
+    0
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn plsm_stream_free(stream: *mut plsm_stream) {
     if stream.is_null() {
@@ -843,6 +1195,82 @@ fn parse_json_bytes(bytes: *const u8, len: usize) -> Result<Value, Error> {
             .with_message("invalid json")
             .with_source(err)
     })
+}
+
+fn parse_utf8_cstr(input: *const c_char, name: &str) -> Result<String, Error> {
+    if input.is_null() {
+        return Err(Error::new(ErrorKind::Usage).with_message(format!("{name} is null")));
+    }
+    unsafe { CStr::from_ptr(input) }
+        .to_str()
+        .map(str::to_owned)
+        .map_err(|err| {
+            Error::new(ErrorKind::Usage)
+                .with_message(format!("{name} is not valid UTF-8"))
+                .with_source(err)
+        })
+}
+
+fn write_udp_event(out: *mut plsm_udp_event, event: crate::api::UdpEvent) -> Result<(), Error> {
+    if out.is_null() {
+        return Err(Error::new(ErrorKind::Usage).with_message("out_event is null"));
+    }
+    let out = unsafe { &mut *out };
+    *out = plsm_udp_event::default();
+    match event {
+        crate::api::UdpEvent::Frame(frame) => {
+            out.kind = 1;
+            out.seq = frame.seq;
+            out.timestamp_ns = frame.timestamp_ns;
+            out.payload = write_udp_payload(frame.payload);
+        }
+        crate::api::UdpEvent::Gap {
+            first,
+            last,
+            reason,
+        } => {
+            out.kind = 2;
+            out.first = first;
+            out.last = last;
+            out.reason = match reason {
+                crate::api::UdpSkipReason::Unknown => 0,
+                crate::api::UdpSkipReason::Oversized => 1,
+                crate::api::UdpSkipReason::Retention => 2,
+                crate::api::UdpSkipReason::Pressure => 3,
+            };
+        }
+        crate::api::UdpEvent::Progress {
+            start_seq,
+            next_seq,
+            end_seq,
+            terminal,
+            retention_gap,
+        } => {
+            out.kind = 3;
+            out.start_seq = start_seq;
+            out.next_seq = next_seq;
+            if let Some(end_seq) = end_seq {
+                out.end_seq = end_seq;
+                out.has_end = 1;
+            }
+            out.terminal = u8::from(terminal);
+            out.retention_gap = u8::from(retention_gap);
+        }
+    }
+    Ok(())
+}
+
+fn write_udp_payload(payload: Vec<u8>) -> plsm_buf {
+    if payload.is_empty() {
+        return plsm_buf::default();
+    }
+    let mut data = payload.into_boxed_slice();
+    let out = plsm_buf {
+        data: data.as_mut_ptr(),
+        len: data.len(),
+    };
+    std::mem::forget(data);
+    out
 }
 
 fn parse_tags(tags: *const *const c_char, len: usize) -> Result<Vec<String>, Error> {

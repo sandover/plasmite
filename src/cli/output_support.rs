@@ -192,6 +192,16 @@ pub(crate) fn emit_notice(notice: &Notice, color_mode: ColorMode, output_mode: O
     let is_tty = io::stderr().is_terminal();
     if !output_mode.is_structured() {
         let label = colorize_label("notice:", color_mode.use_color(is_tty), AnsiColor::Yellow);
+        if notice.kind == "udp-send" {
+            for (index, line) in notice.message.lines().enumerate() {
+                if index == 0 {
+                    eprintln!("{label} {}", human_literal(line));
+                } else {
+                    eprintln!("{}", human_literal(line));
+                }
+            }
+            return;
+        }
         let message = human_literal(&notice.message);
         if notice.cmd == "feed" {
             eprintln!("{label} {message}");

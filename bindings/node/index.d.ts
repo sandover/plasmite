@@ -24,6 +24,26 @@ export interface Lite3Frame {
   flags: number
   payload: Buffer
 }
+export interface UdpEvent {
+  kind: string
+  seq?: bigint
+  timestampNs?: bigint
+  payload?: Buffer
+  message?: Buffer
+  first?: bigint
+  last?: bigint
+  reason?: string
+  startSeq?: bigint
+  nextSeq?: bigint
+  endSeq?: bigint
+  terminal?: boolean
+  retentionGap?: boolean
+}
+export interface UdpWait {
+  /** 0=timeout, 1=event, 2=finished, 3=cancelled. */
+  status: number
+  event?: UdpEvent
+}
 export declare class Client {
   constructor(poolDir: string)
   createPool(poolRef: string, sizeBytes: number | bigint): Pool
@@ -45,5 +65,22 @@ export declare class Stream {
 }
 export declare class Lite3Stream {
   next(): Lite3Frame | null
+  close(): void
+}
+export declare class UdpClient {
+  constructor(endpoint: string)
+  openPool(poolName: string): UdpPool
+  close(): void
+}
+export declare class UdpPool {
+  sendJson(payload: Buffer, tags: Array<string>): void
+  sendLite3(payload: Buffer): void
+  follow(startKind: number, startValue: number | bigint, live: boolean): Promise<UdpFollow>
+  close(): void
+}
+export declare class UdpFollow {
+  nextEvent(timeoutMs: number | bigint): UdpWait
+  get isFinished(): boolean
+  cancel(): void
   close(): void
 }

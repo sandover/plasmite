@@ -53,6 +53,50 @@ try {
 }
 ```
 
+### UDP sender and follower
+
+UDP uses one explicit endpoint. The server must enable `--udp-follow`, which
+allows unauthenticated, unencrypted reads on that socket. A send call reports
+local validation or operating-system errors; it never returns a storage
+receipt.
+
+```js
+const { UdpClient, UdpStart } = require("plasmite");
+
+(async () => {
+  const client = new UdpClient("udp://127.0.0.1:9701");
+  const pool = client.openPool("sensors");
+  const follow = await pool.follow({ start: UdpStart.new(), live: true });
+
+  try {
+    pool.sendJson({ temperature: 23 }, ["sensor"]);
+    for await (const event of follow) {
+      if (event.kind === "frame") {
+        console.log(event.seq, event.message.data);
+        break;
+      }
+    }
+  } finally {
+    follow.close();
+    pool.close();
+    client.close();
+  }
+})().catch(console.error);
+```
+
+Use `UdpStart.last(count)`, `UdpStart.since(timestampNs)`, or
+`UdpStart.sequence(seq)` to select retained history. Sequence and timestamp
+metadata use `bigint`. Pass `bigint` for start values above JavaScript's safe
+integer range; the SDK rejects unsafe `number` values instead of rounding them.
+`follow()` returns a promise while the server confirms the initial subscription.
+Closing its pool during that handshake does not cancel the opening call; the
+call keeps its native handle until it succeeds or reaches the five-second
+startup deadline. Once open, call `follow.close()` to close the subscription.
+Await `nextEvent(timeoutMs)`; it returns `null` when the wait expires. Pass an
+`AbortSignal` as the second argument to stop one pending wait. The async
+iterator keeps waiting until a finite follow ends and accepts the same signal
+in its options.
+
 ## Troubleshooting
 
 - **Missing pool directory**: pool creation creates parent directories automatically. If you call `openPool(...)` on a missing pool, catch `ErrorKind.NotFound` or use `client.pool(...)` to create-or-open.
@@ -133,6 +177,14 @@ const { RemoteClient } = require("plasmite");
 | | `[Symbol.iterator]()` | Iterate synchronously via `for...of` |
 | | `.close()` | Close the stream |
 | | `[Symbol.dispose]()` | Alias for `.close()` |
+| `UdpClient(endpoint)` | | Open one explicit UDP server endpoint |
+| | `.openPool(name)` | Open a named pool handle |
+| `UdpPool` | `.sendJson(data, tags?)` | Send a JSON-origin message without a storage receipt |
+| | `.sendLite3(buf)` | Send a complete Lite3 document |
+| | `.follow(opts?)` | Open a best-effort UDP event stream (`Promise<UdpFollow>`) |
+| `UdpFollow` | `.nextEvent(timeoutMs?)` | Read one frame, gap, or progress event; return `null` at timeout or end |
+| | `[Symbol.asyncIterator]()` | Iterate events asynchronously |
+| | `.close()` | Cancel a wait and close the subscription |
 
 **Durability** controls fsync behavior:
 - `Durability.Fast` — buffered writes (higher throughput)

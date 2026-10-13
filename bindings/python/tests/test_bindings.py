@@ -10,6 +10,10 @@ from __future__ import annotations
 
 import json
 import os
+import socket
+import subprocess
+import threading
+import time
 import unittest
 from contextlib import contextmanager
 from unittest import mock
@@ -34,6 +38,10 @@ from plasmite import (
     NotFoundError,
     PlasmiteError,
     RetentionGapError,
+    UdpClient,
+    UdpFollowOptions,
+    UdpFrame,
+    UdpStart,
     parse_message,
 )
 
@@ -365,6 +373,115 @@ class BindingTests(unittest.TestCase):
             )
             with self.assertRaises(NotFoundError):
                 client.open_pool("missing")
+
+    def test_udp_sdk_send_and_follow_against_server_process(self) -> None:
+        binary = Path(os.environ.get("PLASMITE_BIN", REPO_ROOT / "target" / "debug" / "plasmite"))
+        if not binary.exists():
+            self.skipTest(f"Plasmite CLI is not built: {binary}")
+
+        with self._new_client() as local_client:
+            with local_client.create_pool("udp-sdk", TEST_POOL_SIZE_BYTES) as local_pool:
+                original = local_pool.append({"origin": "lite3", "value": 7}, ["source"])
+                original_lite3 = local_pool.get_lite3(original.seq).payload
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as held:
+                    held.bind(("127.0.0.1", 0))
+                    port = held.getsockname()[1]
+
+                home = self.temp / "server-home"
+                home.mkdir(parents=True, exist_ok=True)
+                ready = self.temp / "server-ready"
+                env = {
+                    **os.environ,
+                    "HOME": str(home),
+                    "PLASMITE_ACCESS_HOME": str(home),
+                    "PLASMITE_SERVE_READY_FILE": str(ready),
+                }
+                server = subprocess.Popen(
+                    [
+                        str(binary), "--dir", str(self.pool_dir), "serve",
+                        "--bind", "127.0.0.1:0", "--remote-bind", "127.0.0.1:0",
+                        f"--udp=127.0.0.1:{port}", "--udp-follow",
+                    ],
+                    cwd=REPO_ROOT,
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                )
+                try:
+                    deadline = time.monotonic() + 10
+                    while not ready.exists():
+                        if server.poll() is not None:
+                            details = server.stderr.read().decode("utf-8", "replace")
+                            self.fail(f"server exited before readiness: {details}")
+                        if time.monotonic() >= deadline:
+                            self.fail("server did not become ready")
+                        time.sleep(0.02)
+
+                    with UdpClient(f"udp://127.0.0.1:{port}") as udp_client:
+                        with udp_client.open_pool("udp-sdk") as udp_pool:
+                            options = UdpFollowOptions(
+                                start=UdpStart.sequence(original.seq + 1), live=True
+                            )
+                            with udp_pool.follow(options) as follow:
+                                self.assertIsNone(
+                                    udp_pool.send_json({"origin": "json", "value": 8}, ["sensor"])
+                                )
+                                json_frame = _next_udp_frame(self, follow)
+                                json_message = json_frame.message()
+                                self.assertEqual(json_message.data, {"origin": "json", "value": 8})
+                                self.assertEqual(json_message.tags, ["sensor"])
+                                json_time = local_pool.get_lite3(json_frame.seq).timestamp_ns
+                                self.assertEqual(json_frame.timestamp_ns, json_time)
+                                self.assertGreater(json_frame.timestamp_ns, 1 << 53)
+                                stored_json = local_pool.get(json_frame.seq)
+                                self.assertEqual(stored_json.data, json_message.data)
+
+                                self.assertIsNone(udp_pool.send_lite3(original_lite3))
+                                lite3_frame = _next_udp_frame(self, follow)
+                                self.assertEqual(lite3_frame.payload, original_lite3)
+                                self.assertEqual(lite3_frame.message().data, original.data)
+                                self.assertEqual(lite3_frame.message().tags, ["source"])
+                                stored_lite3 = local_pool.get(lite3_frame.seq)
+                                self.assertEqual(stored_lite3.data, original.data)
+
+                            large_start = (1 << 53) + 1
+                            with udp_pool.follow(
+                                UdpFollowOptions(
+                                    start=UdpStart.sequence(large_start), live=False
+                                )
+                            ) as large_follow:
+                                progress = large_follow.next_event(timeout_ms=1000)
+                                self.assertEqual(progress.start_seq, large_start)
+
+                            cancel_follow = udp_pool.follow()
+                            self.assertIsNotNone(cancel_follow.next_event(timeout_ms=0))
+                            received = []
+                            waiter = threading.Thread(
+                                target=lambda: received.append(cancel_follow.next_event())
+                            )
+                            waiter.start()
+                            time.sleep(0.02)
+                            cancel_follow.close()
+                            waiter.join(timeout=1)
+                            self.assertFalse(waiter.is_alive(), "close did not cancel a blocked wait")
+                            self.assertEqual(received, [None])
+                finally:
+                    server.terminate()
+                    try:
+                        server.communicate(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        server.kill()
+                        server.communicate()
+
+
+def _next_udp_frame(test: unittest.TestCase, follow) -> UdpFrame:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        event = follow.next_event(timeout_ms=100)
+        if isinstance(event, UdpFrame):
+            return event
+    test.fail("UDP follower did not receive a frame")
+    raise AssertionError("unreachable")
 
 
 if __name__ == "__main__":

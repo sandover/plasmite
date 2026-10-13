@@ -22,12 +22,13 @@ from ctypes import (
     c_uint64,
     c_uint8,
     c_void_p,
+    cast,
     sizeof,
 )
 from datetime import datetime, timezone
 from enum import IntEnum
 from functools import wraps
-from threading import RLock
+from threading import Lock, RLock
 import json
 import os
 from pathlib import Path
@@ -140,10 +141,41 @@ class plsm_lite3_stream_t(Structure):
     pass
 
 
+class plsm_udp_client_t(Structure):
+    pass
+
+
+class plsm_udp_pool_t(Structure):
+    pass
+
+
+class plsm_udp_follow_t(Structure):
+    pass
+
+
 class plsm_buf_t(Structure):
     _fields_ = [
         ("data", c_void_p),
         ("len", c_size_t),
+    ]
+
+
+class plsm_udp_event_t(Structure):
+    _fields_ = [
+        ("kind", c_uint32),
+        ("reason", c_uint32),
+        ("seq", c_uint64),
+        ("timestamp_ns", c_uint64),
+        ("first", c_uint64),
+        ("last", c_uint64),
+        ("start_seq", c_uint64),
+        ("next_seq", c_uint64),
+        ("end_seq", c_uint64),
+        ("has_end", c_uint8),
+        ("terminal", c_uint8),
+        ("retention_gap", c_uint8),
+        ("reserved", c_uint8),
+        ("payload", plsm_buf_t),
     ]
 
 
@@ -354,6 +386,68 @@ _LIB.plsm_lite3_frame_free.restype = None
 
 _LIB.plsm_error_free.argtypes = [POINTER(plsm_error_t)]
 _LIB.plsm_error_free.restype = None
+
+_LIB.plsm_udp_client_new.argtypes = [
+    c_char_p,
+    POINTER(POINTER(plsm_udp_client_t)),
+    POINTER(POINTER(plsm_error_t)),
+]
+_LIB.plsm_udp_client_new.restype = c_int
+_LIB.plsm_udp_client_free.argtypes = [POINTER(plsm_udp_client_t)]
+_LIB.plsm_udp_client_free.restype = None
+_LIB.plsm_udp_client_open_pool.argtypes = [
+    POINTER(plsm_udp_client_t),
+    c_char_p,
+    POINTER(POINTER(plsm_udp_pool_t)),
+    POINTER(POINTER(plsm_error_t)),
+]
+_LIB.plsm_udp_client_open_pool.restype = c_int
+_LIB.plsm_udp_pool_free.argtypes = [POINTER(plsm_udp_pool_t)]
+_LIB.plsm_udp_pool_free.restype = None
+_LIB.plsm_udp_pool_send_json.argtypes = [
+    POINTER(plsm_udp_pool_t),
+    POINTER(c_uint8),
+    c_size_t,
+    POINTER(c_char_p),
+    c_size_t,
+    POINTER(POINTER(plsm_error_t)),
+]
+_LIB.plsm_udp_pool_send_json.restype = c_int
+_LIB.plsm_udp_pool_send_lite3.argtypes = [
+    POINTER(plsm_udp_pool_t),
+    POINTER(c_uint8),
+    c_size_t,
+    POINTER(POINTER(plsm_error_t)),
+]
+_LIB.plsm_udp_pool_send_lite3.restype = c_int
+_LIB.plsm_udp_pool_follow.argtypes = [
+    POINTER(plsm_udp_pool_t),
+    c_uint32,
+    c_uint64,
+    c_uint32,
+    POINTER(POINTER(plsm_udp_follow_t)),
+    POINTER(POINTER(plsm_error_t)),
+]
+_LIB.plsm_udp_pool_follow.restype = c_int
+_LIB.plsm_udp_follow_next.argtypes = [
+    POINTER(plsm_udp_follow_t),
+    c_uint64,
+    POINTER(plsm_udp_event_t),
+    POINTER(POINTER(plsm_error_t)),
+]
+_LIB.plsm_udp_follow_next.restype = c_int
+_LIB.plsm_udp_follow_cancel.argtypes = [POINTER(plsm_udp_follow_t)]
+_LIB.plsm_udp_follow_cancel.restype = None
+_LIB.plsm_udp_follow_close.argtypes = [POINTER(plsm_udp_follow_t)]
+_LIB.plsm_udp_follow_close.restype = None
+_LIB.plsm_udp_event_free.argtypes = [POINTER(plsm_udp_event_t)]
+_LIB.plsm_udp_event_free.restype = None
+_LIB.plsm_udp_event_message.argtypes = [
+    POINTER(plsm_udp_event_t),
+    POINTER(plsm_buf_t),
+    POINTER(POINTER(plsm_error_t)),
+]
+_LIB.plsm_udp_event_message.restype = c_int
 
 _ERROR_KIND_TO_CLASS: dict[ErrorKind, type[PlasmiteError]] = {
     ErrorKind.INTERNAL: InternalError,
@@ -588,7 +682,10 @@ class Lite3Frame:
 
     @property
     def time(self) -> datetime:
-        return datetime.fromtimestamp(self.timestamp_ns / 1_000_000_000, tz=timezone.utc)
+        seconds, nanoseconds = divmod(self.timestamp_ns, 1_000_000_000)
+        return datetime.fromtimestamp(seconds, tz=timezone.utc).replace(
+            microsecond=nanoseconds // 1_000
+        )
 
 
 class Pool:
@@ -951,6 +1048,333 @@ class Lite3Stream:
         self.close()
 
 
+@dataclass(frozen=True)
+class UdpStart:
+    """A UDP follow start position. Use the named constructors."""
+
+    kind: int
+    value: int = 0
+
+    @classmethod
+    def new(cls) -> UdpStart:
+        return cls(0)
+
+    @classmethod
+    def last(cls, count: int) -> UdpStart:
+        return cls(1, _ensure_non_negative_int(count, "count"))
+
+    @classmethod
+    def since_ns(cls, timestamp_ns: int) -> UdpStart:
+        return cls(2, _ensure_non_negative_int(timestamp_ns, "timestamp_ns"))
+
+    @classmethod
+    def sequence(cls, seq: int) -> UdpStart:
+        return cls(3, _ensure_non_negative_int(seq, "seq"))
+
+
+@dataclass(frozen=True)
+class UdpFollowOptions:
+    start: UdpStart = UdpStart(0)
+    live: bool = True
+
+
+@dataclass(frozen=True)
+class UdpFrame:
+    seq: int
+    timestamp_ns: int
+    payload: bytes
+
+    @property
+    def time(self) -> datetime:
+        seconds, nanoseconds = divmod(self.timestamp_ns, 1_000_000_000)
+        return datetime.fromtimestamp(seconds, tz=timezone.utc).replace(
+            microsecond=nanoseconds // 1_000
+        )
+
+    def message(self) -> Message:
+        payload_buf = (c_uint8 * len(self.payload)).from_buffer_copy(self.payload)
+        event = plsm_udp_event_t()
+        event.kind = 1
+        event.seq = self.seq
+        event.timestamp_ns = self.timestamp_ns
+        event.payload.data = cast(payload_buf, c_void_p) if self.payload else None
+        event.payload.len = len(self.payload)
+        out_message = plsm_buf_t()
+        out_err = POINTER(plsm_error_t)()
+        rc = _LIB.plsm_udp_event_message(byref(event), byref(out_message), byref(out_err))
+        if rc != 0:
+            raise _take_error(out_err)
+        return parse_message(_buf_to_bytes(out_message))
+
+
+@dataclass(frozen=True)
+class UdpGap:
+    first: int
+    last: int
+    reason: str
+
+
+@dataclass(frozen=True)
+class UdpProgress:
+    start_seq: int
+    next_seq: int
+    end_seq: int | None
+    terminal: bool
+    retention_gap: bool
+
+
+UdpEvent = UdpFrame | UdpGap | UdpProgress
+
+
+class UdpClient:
+    """Client for one explicit UDP endpoint."""
+
+    def __init__(self, endpoint: str) -> None:
+        self._lock = RLock()
+        self._ptr = None
+        if not endpoint:
+            raise ValueError("endpoint is required")
+        out_client = POINTER(plsm_udp_client_t)()
+        out_err = POINTER(plsm_error_t)()
+        rc = _LIB.plsm_udp_client_new(endpoint.encode("utf-8"), byref(out_client), byref(out_err))
+        if rc != 0:
+            raise _take_error(out_err)
+        self._ptr = out_client
+
+    @_serialized_handle
+    def open_pool(self, pool_name: str) -> UdpPool:
+        _require_open(self._ptr, "UDP client")
+        if not pool_name:
+            raise ValueError("pool_name is required")
+        out_pool = POINTER(plsm_udp_pool_t)()
+        out_err = POINTER(plsm_error_t)()
+        rc = _LIB.plsm_udp_client_open_pool(
+            self._ptr,
+            pool_name.encode("utf-8"),
+            byref(out_pool),
+            byref(out_err),
+        )
+        if rc != 0:
+            raise _take_error(out_err)
+        return UdpPool(out_pool)
+
+    @_serialized_handle
+    def close(self) -> None:
+        if self._ptr:
+            _LIB.plsm_udp_client_free(self._ptr)
+            self._ptr = None
+
+    def __enter__(self) -> UdpClient:
+        with self._lock:
+            _require_open(self._ptr, "UDP client")
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()
+
+
+class UdpPool:
+    """A named pool on one UDP endpoint."""
+
+    def __init__(self, ptr: POINTER(plsm_udp_pool_t)) -> None:
+        self._lock = RLock()
+        self._ptr = ptr
+
+    @_serialized_handle
+    def send_json(self, value: Any, tags: Iterable[str] = ()) -> None:
+        _require_open(self._ptr, "UDP pool")
+        payload = json.dumps(value, separators=(",", ":")).encode("utf-8")
+        payload_buf = (c_uint8 * len(payload)).from_buffer_copy(payload)
+        tag_arr, keepalive = _tag_array(tags)
+        out_err = POINTER(plsm_error_t)()
+        rc = _LIB.plsm_udp_pool_send_json(
+            self._ptr,
+            payload_buf,
+            c_size_t(len(payload)),
+            tag_arr,
+            c_size_t(len(keepalive)),
+            byref(out_err),
+        )
+        if rc != 0:
+            raise _take_error(out_err)
+
+    @_serialized_handle
+    def send_lite3(self, payload: bytes | bytearray | memoryview) -> None:
+        _require_open(self._ptr, "UDP pool")
+        payload = _ensure_bytes(payload, "payload")
+        if not payload:
+            raise ValueError("payload is required")
+        payload_buf = (c_uint8 * len(payload)).from_buffer_copy(payload)
+        out_err = POINTER(plsm_error_t)()
+        rc = _LIB.plsm_udp_pool_send_lite3(
+            self._ptr,
+            payload_buf,
+            c_size_t(len(payload)),
+            byref(out_err),
+        )
+        if rc != 0:
+            raise _take_error(out_err)
+
+    @_serialized_handle
+    def follow(self, options: UdpFollowOptions | None = None) -> UdpFollow:
+        _require_open(self._ptr, "UDP pool")
+        options = options or UdpFollowOptions()
+        if not isinstance(options, UdpFollowOptions):
+            raise TypeError("options must be UdpFollowOptions")
+        start = options.start
+        if not isinstance(start, UdpStart) or start.kind not in (0, 1, 2, 3):
+            raise ValueError("invalid UDP follow start")
+        start_value = _ensure_non_negative_int(start.value, "start.value")
+        out_follow = POINTER(plsm_udp_follow_t)()
+        out_err = POINTER(plsm_error_t)()
+        rc = _LIB.plsm_udp_pool_follow(
+            self._ptr,
+            c_uint32(start.kind),
+            c_uint64(start_value),
+            c_uint32(1 if options.live else 0),
+            byref(out_follow),
+            byref(out_err),
+        )
+        if rc != 0:
+            raise _take_error(out_err)
+        return UdpFollow(out_follow)
+
+    @_serialized_handle
+    def close(self) -> None:
+        if self._ptr:
+            _LIB.plsm_udp_pool_free(self._ptr)
+            self._ptr = None
+
+    def __enter__(self) -> UdpPool:
+        with self._lock:
+            _require_open(self._ptr, "UDP pool")
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()
+
+
+class UdpFollow:
+    """Best-effort UDP event stream. Close cancels a blocked wait."""
+
+    def __init__(self, ptr: POINTER(plsm_udp_follow_t)) -> None:
+        self._state_lock = RLock()
+        self._read_lock = Lock()
+        self._ptr = ptr
+        self._closing = False
+        self._cancelled = False
+
+    def next_event(self, timeout_ms: int | None = None) -> UdpEvent | None:
+        timeout_ms = _optional_non_negative_int(timeout_ms, "timeout_ms")
+        with self._read_lock:
+            with self._state_lock:
+                _require_open(self._ptr, "UDP follow")
+                if self._closing or self._cancelled:
+                    return None
+                ptr = self._ptr
+            remaining = timeout_ms
+            while True:
+                event = plsm_udp_event_t()
+                out_err = POINTER(plsm_error_t)()
+                wait_ms = 1000 if remaining is None else remaining
+                rc = _LIB.plsm_udp_follow_next(
+                    ptr,
+                    c_uint64(wait_ms),
+                    byref(event),
+                    byref(out_err),
+                )
+                if rc == 1:
+                    return _udp_event_to_python(event)
+                if rc == 2 or rc == 3:
+                    with self._state_lock:
+                        self._cancelled = rc == 3
+                    return None
+                if rc < 0:
+                    raise _take_error(out_err)
+                if remaining is not None:
+                    if remaining == 0:
+                        return None
+                    remaining -= wait_ms
+                    if remaining <= 0:
+                        return None
+
+    def events(self) -> Generator[UdpEvent, None, None]:
+        while True:
+            event = self.next_event()
+            if event is None:
+                return
+            yield event
+
+    def __iter__(self) -> UdpFollow:
+        return self
+
+    def __next__(self) -> UdpEvent:
+        event = self.next_event()
+        if event is None:
+            raise StopIteration
+        return event
+
+    def cancel(self) -> None:
+        with self._state_lock:
+            if self._ptr and not self._cancelled:
+                _LIB.plsm_udp_follow_cancel(self._ptr)
+                self._cancelled = True
+
+    def close(self) -> None:
+        with self._state_lock:
+            ptr = self._ptr
+            if not ptr:
+                return
+            self._closing = True
+            _LIB.plsm_udp_follow_cancel(ptr)
+        with self._read_lock:
+            with self._state_lock:
+                if self._ptr:
+                    _LIB.plsm_udp_follow_close(self._ptr)
+                    self._ptr = None
+                    self._cancelled = True
+
+    def __enter__(self) -> UdpFollow:
+        with self._state_lock:
+            _require_open(self._ptr, "UDP follow")
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()
+
+
+def _udp_event_to_python(event: plsm_udp_event_t) -> UdpEvent:
+    try:
+        if event.kind == 1:
+            payload = b""
+            if event.payload.data and event.payload.len:
+                payload = bytes((c_uint8 * event.payload.len).from_address(event.payload.data))
+            return UdpFrame(int(event.seq), int(event.timestamp_ns), payload)
+        if event.kind == 2:
+            reasons = {0: "unknown", 1: "oversized", 2: "retention", 3: "pressure"}
+            return UdpGap(int(event.first), int(event.last), reasons.get(int(event.reason), "unknown"))
+        if event.kind == 3:
+            return UdpProgress(
+                int(event.start_seq),
+                int(event.next_seq),
+                int(event.end_seq) if event.has_end else None,
+                bool(event.terminal),
+                bool(event.retention_gap),
+            )
+        raise PlasmiteError(ErrorKind.INTERNAL, f"plasmite: unknown UDP event kind {event.kind}")
+    finally:
+        _LIB.plsm_udp_event_free(byref(event))
+
+
 def _parse_rfc3339_utc(raw_time: str) -> datetime:
     parsed = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
@@ -998,6 +1422,14 @@ __all__ = [
     "Stream",
     "Lite3Frame",
     "Lite3Stream",
+    "UdpClient",
+    "UdpPool",
+    "UdpFollow",
+    "UdpStart",
+    "UdpFollowOptions",
+    "UdpFrame",
+    "UdpGap",
+    "UdpProgress",
     "Durability",
     "ErrorKind",
     "PlasmiteError",

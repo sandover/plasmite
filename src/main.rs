@@ -26,6 +26,11 @@ mod serve_service;
 mod server_private;
 mod since;
 mod udp_input;
+#[expect(
+    dead_code,
+    reason = "Server and library compile different parts of the shared UDP codec."
+)]
+mod udp_wire;
 #[cfg(windows)]
 mod windows_private;
 
@@ -40,6 +45,7 @@ use pool_paths::default_pool_dir;
 enum PoolTarget {
     LocalPath(PathBuf),
     Remote { base_url: String, pool: String },
+    Udp { endpoint: String, pool: String },
 }
 
 fn main() {
@@ -395,6 +401,7 @@ mod tests {
                     "tls-cert",
                     "tls-key",
                     "udp",
+                    "udp-follow",
                 ],
             ),
             (
@@ -408,11 +415,13 @@ mod tests {
                     "max-tail-concurrency",
                     "max-tail-timeout-ms",
                     "no-udp",
+                    "no-udp-follow",
                     "remote-bind",
                     "shared-address",
                     "tls-cert",
                     "tls-key",
                     "udp",
+                    "udp-follow",
                 ],
             ),
             (
@@ -685,6 +694,49 @@ mod tests {
                 pool: "demo".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn resolve_pool_target_accepts_one_decoded_udp_name() {
+        let target = resolve_pool_target(
+            "udp://localhost:9701/sensor%20data",
+            Path::new("/tmp/pools"),
+        )
+        .expect("UDP target");
+        assert_eq!(
+            target,
+            PoolTarget::Udp {
+                endpoint: "udp://localhost:9701".into(),
+                pool: "sensor data".into()
+            }
+        );
+        assert_eq!(
+            resolve_pool_target("udp://[::1]:9701/sensors", Path::new("/tmp/pools")).unwrap(),
+            PoolTarget::Udp {
+                endpoint: "udp://[::1]:9701".into(),
+                pool: "sensors".into()
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_pool_target_rejects_unsafe_udp_urls() {
+        for input in [
+            "udp://localhost/sensors",
+            "udp://localhost:9701/sensors/other",
+            "udp://localhost:9701/a%2Fb",
+            "udp://localhost:9701/a%5Cb",
+            "udp://localhost:9701/C%3Aevil",
+            "udp://user@localhost:9701/sensors",
+            "udp://@localhost:9701/sensors",
+            "udp://localhost:9701/sensors?x=1",
+            "udp://localhost:9701/sensors#x",
+        ] {
+            assert!(
+                resolve_pool_target(input, Path::new("/tmp/pools")).is_err(),
+                "{input}"
+            );
+        }
     }
 
     #[test]

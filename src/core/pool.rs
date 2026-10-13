@@ -631,6 +631,11 @@ impl Pool {
         })
     }
 
+    /// Fail if the path no longer names this opened pool instance.
+    pub fn check_current_path(&self) -> Result<(), Error> {
+        require_current_path(&self.file, &self.path)
+    }
+
     pub fn bounds(&self) -> Result<Bounds, Error> {
         let header = self.header_from_mmap()?;
         Ok(bounds_from_header(header))

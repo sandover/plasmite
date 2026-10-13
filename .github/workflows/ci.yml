@@ -273,6 +273,10 @@ jobs:
             --test oauth_access \
             --test access_lifecycle \
             --test remote_integration \
+            --test udp_input \
+            --test udp_client \
+            --test udp_transport \
+            --test udp_transport_cli \
             -- --test-threads=1
       - name: Check shared pools across 64-bit and ARMv7 CLIs
         if: matrix.target == 'armv7-unknown-linux-gnueabihf'
@@ -359,7 +363,7 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           cargo test --release --lib windows_private::tests -- --test-threads=1
           cargo test --release --bin plasmite serve_service::windows::tests -- --test-threads=1
-          cargo test --release --test secure_sharing --test access_lifecycle --test browser_access --test oauth_access --test udp_input --test cli_yaml --test cli_yaml_stream -- --test-threads=1
+          cargo test --release --test secure_sharing --test access_lifecycle --test browser_access --test oauth_access --test udp_input --test udp_client --test udp_transport --test udp_transport_cli --test cli_yaml --test cli_yaml_stream -- --test-threads=1
       - name: Local pool roundtrip smoke
         shell: pwsh
         run: |

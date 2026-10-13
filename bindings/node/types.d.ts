@@ -130,6 +130,71 @@ export interface LocalTailOptions {
   errorOnGap?: boolean
 }
 
+export type UdpStart =
+  | { kind: "new" }
+  | { kind: "last"; count: number | bigint }
+  | { kind: "since"; timestampNs: number | bigint }
+  | { kind: "sequence"; seq: number | bigint }
+
+export interface UdpFollowOptions {
+  start?: UdpStart
+  live?: boolean
+}
+
+export interface UdpWaitOptions {
+  signal?: AbortSignal
+}
+
+export type UdpEvent =
+  | {
+      kind: "frame"
+      seq: bigint
+      timestampNs: bigint
+      payload: Buffer
+      message: Message
+    }
+  | { kind: "gap"; first: bigint; last: bigint; reason: "unknown" | "oversized" | "retention" | "pressure" }
+  | {
+      kind: "progress"
+      startSeq: bigint
+      nextSeq: bigint
+      endSeq: bigint | null
+      terminal: boolean
+      retentionGap: boolean
+    }
+
+export const UdpStart: {
+  new: () => UdpStart
+  last(count: number | bigint): UdpStart
+  since(timestampNs: number | bigint): UdpStart
+  sequence(seq: number | bigint): UdpStart
+}
+
+export class UdpClient {
+  constructor(endpoint: string)
+  openPool(poolName: string): UdpPool
+  close(): void
+  [Symbol.dispose](): void
+}
+
+export class UdpPool {
+  sendJson(payload: unknown, tags?: string[]): void
+  sendLite3(payload: Buffer): void
+  follow(options?: UdpFollowOptions): Promise<UdpFollow>
+  close(): void
+  [Symbol.dispose](): void
+}
+
+export class UdpFollow {
+  readonly finished: boolean
+  nextEvent(timeoutMs?: number | bigint, options?: UdpWaitOptions): Promise<UdpEvent | null>
+  events(options?: { pollIntervalMs?: number | bigint; signal?: AbortSignal }): AsyncGenerator<UdpEvent, void, unknown>
+  cancel(): void
+  close(): void
+  [Symbol.dispose](): void
+  [Symbol.asyncIterator](): AsyncGenerator<UdpEvent, void, unknown>
+}
+
 export function parseMessage(payload: Buffer | Message | MessageEnvelope): Message
 
 export function replay(

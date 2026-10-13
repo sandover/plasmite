@@ -125,6 +125,12 @@ pub(crate) fn effective_args(run: &ServeRunArgs) -> Result<ServeRunArgs, Error> 
         if udp.ip().is_multicast() {
             return Err(usage("UDP input cannot bind to a multicast address"));
         }
+        if udp.ip() == std::net::IpAddr::V4(std::net::Ipv4Addr::BROADCAST) {
+            return Err(usage("UDP cannot bind to a broadcast address"));
+        }
+    }
+    if run.udp_follow == Some(true) && run.udp.is_none() {
+        run.udp = Some("127.0.0.1:9701".into());
     }
     if bind == remote_bind && bind.port() != 0 {
         return Err(usage("local and remote listeners need different addresses"));
@@ -167,9 +173,16 @@ pub(super) fn merge(
     previous: Option<&Setup>,
     new: &ServeRunArgs,
     no_udp: bool,
+    no_udp_follow: bool,
 ) -> Result<ServeRunArgs, Error> {
     if no_udp && new.udp.is_some() {
         return Err(usage("--no-udp conflicts with --udp"));
+    }
+    if no_udp && new.udp_follow == Some(true) {
+        return Err(usage("--no-udp conflicts with --udp-follow"));
+    }
+    if no_udp_follow && new.udp_follow == Some(true) {
+        return Err(usage("--no-udp-follow conflicts with --udp-follow"));
     }
     let mut run = previous.map(|setup| setup.run.clone()).unwrap_or_default();
     if new.server.is_some() && new.shared_address.is_some() {
@@ -189,6 +202,7 @@ pub(super) fn merge(
         bind,
         remote_bind,
         udp,
+        udp_follow,
         front_cert,
         tls_cert,
         tls_key,
@@ -198,6 +212,10 @@ pub(super) fn merge(
     );
     if no_udp {
         run.udp = None;
+        run.udp_follow = Some(false);
+    }
+    if no_udp_follow {
+        run.udp_follow = Some(false);
     }
     effective_args(&run)
 }
@@ -239,6 +257,9 @@ impl Setup {
         arg!("--remote-bind", &self.run.remote_bind);
         if let Some(udp) = &self.run.udp {
             argv.push(format!("--udp={udp}"));
+        }
+        if self.run.udp_follow == Some(true) {
+            argv.push("--udp-follow".into());
         }
         arg!("--max-body-bytes", self.run.max_body_bytes);
         arg!("--max-tail-timeout-ms", self.run.max_tail_timeout_ms);

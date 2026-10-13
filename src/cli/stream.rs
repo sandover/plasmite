@@ -11,7 +11,7 @@ use super::output_support::emit_follow_timeout_human;
 use super::result::CommandResult;
 use super::stream_support::{
     FollowConfig, duplex_requires_me_when_tty, follow_pool, follow_remote, follow_should_stop,
-    parse_duplex_tty_line,
+    follow_udp, parse_duplex_tty_line,
 };
 use super::support::{
     DEFAULT_POOL_SIZE, add_missing_pool_create_hint, ensure_pool_dir,
@@ -167,6 +167,20 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
             }
             let client = remote_client(base_url)?;
             let outcome = follow_remote(&client, &pool, &cfg)?;
+            if outcome.exit_code == 124 && pretty {
+                if let Some(timeout_input) = timeout_input {
+                    emit_follow_timeout_human(timeout_input);
+                }
+            }
+            Ok(outcome)
+        }
+        PoolTarget::Udp { endpoint, pool } => {
+            if args.create || args.replay.is_some() || args.no_notify {
+                return Err(Error::new(ErrorKind::Usage).with_message(
+                    "UDP follow does not support --create, --replay, or --no-notify",
+                ));
+            }
+            let outcome = follow_udp(&endpoint, &pool, &cfg)?;
             if outcome.exit_code == 124 && pretty {
                 if let Some(timeout_input) = timeout_input {
                     emit_follow_timeout_human(timeout_input);
@@ -388,6 +402,50 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                     let outcome = ingest_outcome(outcome);
                     let _ = send_tx.send((DuplexSide::Send, outcome));
                 }
+            });
+        }
+        PoolTarget::Udp {
+            endpoint,
+            pool: name,
+        } => {
+            if args.create {
+                return Err(Error::new(ErrorKind::Usage)
+                    .with_message("UDP duplex does not support --create"));
+            }
+            let client = plasmite::api::UdpClient::new(&endpoint)?;
+            let send_pool = client.open_pool(&PoolRef::name(&name))?;
+            let follow_tx = event_tx.clone();
+            let follow_cfg = cfg.clone();
+            let stop_for_follow = stop.clone();
+            let follow_name = name.clone();
+            let _ = std::thread::spawn(move || {
+                let outcome = follow_udp(&endpoint, &follow_name, &follow_cfg);
+                if outcome.is_err() {
+                    stop_for_follow.store(true, Ordering::Release);
+                }
+                let _ = follow_tx.send((DuplexSide::Follow, outcome));
+            });
+            let send_tx = event_tx;
+            let stop_for_send = stop.clone();
+            let me_for_send = args.me.clone();
+            let _ = std::thread::spawn(move || {
+                let outcome = if stdin_is_terminal {
+                    send_tty_lines(
+                        me_for_send.as_deref().expect("me required"),
+                        &stop_for_send,
+                        |value| send_pool.send_json(&value, &[]),
+                    )
+                } else {
+                    ingest_outcome(super::feed_support::ingest_from_stdin_udp(
+                        io::stdin().lock(),
+                        &send_pool,
+                        &[],
+                        InputMode::Auto,
+                        false,
+                        Some(&stop_for_send),
+                    ))
+                };
+                let _ = send_tx.send((DuplexSide::Send, outcome));
             });
         }
     }

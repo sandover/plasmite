@@ -18,6 +18,7 @@ use plasmite::api::RemoteTail;
 use plasmite::api::TailOptions;
 use plasmite::api::notify;
 use plasmite::api::notify::NotifyWait;
+use plasmite::api::{UdpClient, UdpEvent, UdpFollowOptions, UdpStart};
 use plasmite::notice::Notice;
 use serde_json::Map;
 use serde_json::Value;
@@ -455,6 +456,132 @@ pub(crate) fn follow_remote(
             }
         }
         drops.flush(false);
+    }
+}
+
+pub(crate) fn follow_udp(
+    endpoint: &str,
+    pool: &str,
+    cfg: &FollowConfig,
+) -> Result<RunOutcome, Error> {
+    if cfg.replay_speed.is_some() || !cfg.notify {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("UDP follow does not support --replay or --no-notify"));
+    }
+    let client = UdpClient::new(endpoint)?;
+    let handle = client.open_pool(&PoolRef::name(pool))?;
+    let start = if let Some(since) = cfg.since_ns {
+        UdpStart::Since(since)
+    } else if cfg.tail > 0 {
+        UdpStart::Last(cfg.tail)
+    } else {
+        UdpStart::New
+    };
+    let mut follow = handle.follow(UdpFollowOptions {
+        start,
+        live: !cfg.no_follow,
+    })?;
+    let mut deadline = cfg.timeout.map(|duration| Instant::now() + duration);
+    let mut had_gap = false;
+    let mut retention_gap = false;
+    loop {
+        if follow_should_stop(cfg.stop.as_ref()) {
+            follow.close();
+            return Ok(RunOutcome::with_code(0));
+        }
+        if deadline.is_some_and(|at| Instant::now() >= at) {
+            return Ok(RunOutcome::with_code(124));
+        }
+        let wait = deadline
+            .map(|at| {
+                at.saturating_duration_since(Instant::now())
+                    .min(Duration::from_millis(50))
+            })
+            .unwrap_or(Duration::from_millis(50));
+        let event = follow.next_event_timeout(wait)?;
+        let Some(event) = event else {
+            if follow.is_finished() {
+                return Ok(RunOutcome::with_code(if retention_gap {
+                    9
+                } else if had_gap {
+                    1
+                } else {
+                    0
+                }));
+            }
+            continue;
+        };
+        match event {
+            UdpEvent::Gap {
+                first,
+                last,
+                reason,
+            } => {
+                had_gap = true;
+                if matches!(reason, plasmite::api::UdpSkipReason::Retention) {
+                    retention_gap = true;
+                }
+                if !cfg.quiet_drops {
+                    let mut details = Map::new();
+                    details.insert("first_seq".into(), json!(first));
+                    details.insert("last_seq".into(), json!(last));
+                    details.insert("reason".into(), json!(format!("{reason:?}").to_lowercase()));
+                    emit_notice(
+                        &Notice {
+                            kind: "udp-gap".into(),
+                            time: notice_time_now().unwrap_or_default(),
+                            cmd: "follow".into(),
+                            pool: pool.into(),
+                            message: format!("UDP skipped sequences {first} through {last}"),
+                            details,
+                        },
+                        cfg.color_mode,
+                        cfg.output_mode,
+                    );
+                }
+            }
+            UdpEvent::Progress {
+                retention_gap: retained,
+                ..
+            } => {
+                retention_gap |= retained;
+                had_gap |= retained;
+            }
+            UdpEvent::Frame(frame) => {
+                let value = if needs_message(cfg) {
+                    Some(message_to_json(&frame.message()?))
+                } else {
+                    None
+                };
+                let matches = match value.as_ref() {
+                    Some(value) => matches_message(cfg, cfg.since_ns, frame.timestamp_ns, value)?,
+                    None => cfg.since_ns.is_none_or(|since| frame.timestamp_ns >= since),
+                };
+                if matches {
+                    if deadline.is_some_and(|at| Instant::now() >= at) {
+                        return Ok(RunOutcome::with_code(124));
+                    }
+                    if cfg.output_mode.is_binary() {
+                        emit_lite3(
+                            frame.seq,
+                            frame.timestamp_ns,
+                            &frame.payload,
+                            cfg.output_mode,
+                        )?;
+                    } else {
+                        emit_message(
+                            value.expect("text output decodes message"),
+                            cfg.output_mode,
+                            cfg.color_mode,
+                        )?;
+                    }
+                    deadline = cfg.timeout.map(|duration| Instant::now() + duration);
+                    if cfg.one {
+                        return Ok(RunOutcome::with_code(0));
+                    }
+                }
+            }
+        }
     }
 }
 

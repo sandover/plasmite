@@ -121,7 +121,7 @@ fn short_help_exposes_material_command_constraints() {
             &[
                 "finite SPEED >= 0",
                 "requires --tail or --since",
-                "Remote refs reject --create",
+                "HTTP(S) refs reject --create",
                 "Exit 124",
             ],
         ),
@@ -147,7 +147,13 @@ fn short_help_exposes_material_command_constraints() {
         ),
         (
             &["serve", "install", "-h"],
-            &["--no-udp", "Remove UDP input", "--udp[=<ADDRESS>]"],
+            &[
+                "--no-udp",
+                "Remove UDP input",
+                "--udp[=<ADDRESS>]",
+                "--udp-follow",
+                "--no-udp-follow",
+            ],
         ),
         (
             &["serve", "-h"],
@@ -156,6 +162,7 @@ fn short_help_exposes_material_command_constraints() {
                 "must be positive",
                 "remote clients use HTTPS",
                 "--udp[=<ADDRESS>]",
+                "--udp-follow",
                 "max 65507 bytes including routing",
                 "lose, duplicate, or reorder",
             ],

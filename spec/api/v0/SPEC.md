@@ -191,3 +191,28 @@ bounded cursor state.
 
 - CLI contract: `spec/v0/SPEC.md`
 - Remote protocol contract: `spec/remote/v0/SPEC.md`
+
+## UDP send and follow
+
+Standalone `UdpClient` / `UdpPool` APIs submit unconfirmed messages and follow
+best-effort streams. They do not change `RemoteClient` confirmed append semantics.
+`send_json` encodes the shared message shape to Lite3; `send_lite3` validates and
+preserves complete bytes. Both return only local validation/OS submission success,
+never destination sequence/time. A constructor resolves one UDP endpoint once;
+open validates Name or a same-origin UDP Uri without claiming remote existence.
+`UdpClient::parse_pool_url` splits a validated URL into endpoint and decoded name
+without DNS or sockets; the CLI uses the same parser.
+
+`UdpFollowOptions` chooses New, Last, Since timestamp, or Sequence and live/finite.
+Follow events carry an owned exact-byte frame, a skipped range/reason, or progress.
+Clients expose increasing sequences only; no ordering buffer or data repair.
+Account for sequence before timestamp/tag/application filtering. Explicit polling
+wait deadlines return no event; stream end has an independent finished state.
+A zero timeout polls the socket without blocking and still checks renewal and
+liveness. Keep consuming to maintain the lease.
+Close sends one best-effort stop; stopped consumers do not renew secretly.
+
+The same behavior applies in C, Python, Node, and Go; preserve uint64 metadata.
+`Pool::check_current_path` compares an open handle's native identity to its path
+without writing. Replacement/deletion ends the old UDP stream.
+Wire behavior and network limits live in [UDP v1](../../udp/v1/SPEC.md).

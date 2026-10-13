@@ -352,3 +352,17 @@
 {"version":1,"task_id":"H3PERS","kind":"result","at":"2026-10-12T19:41:43.016914Z","text":"Local and remote Lite3 pipes preserve bytes; truncation keeps earlier appends.","file":{"path":".scratch/cli-cutover/binary-tests.log","sha256":"ca9ba162ca3276eee44b086eb8cf5ce13bd0f928460201749bc783e8dc3c4442","mtime":"2026-10-12T19:34:31.572695855Z","git_commit":"d19e56fd9c7237e4f0a473eab1b3efe74f05bf65"}}
 {"version":1,"task_id":"KYJ4NS","kind":"result","at":"2026-10-12T19:53:34.428692Z","agent":"codex@local","text":"Full local release gate passes; reviews resolved; docs and callers migrated; release held.","file":{"path":".scratch/cli-cutover/validation.md","sha256":"29fa298e91d607677a36de6051014cae0879901e86c55fe98a394dafd2b04efb","mtime":"2026-10-12T19:53:34.348204449Z","git_commit":"d19e56fd9c7237e4f0a473eab1b3efe74f05bf65"}}
 {"version":1,"task_id":"KYJ4NS","kind":"done","at":"2026-10-12T19:53:34.495798Z","agent":"codex@local","text":"CLI cutover verified and documented; full local gate passes. Landing on main without release."}
+{"version":1,"task_id":"UMYIHI","kind":"created","at":"2026-10-13T17:07:47.139725Z"}
+{"version":1,"task_id":"V657SG","kind":"created","at":"2026-10-13T17:07:47.139739Z"}
+{"version":1,"task_id":"G5AX3J","kind":"created","at":"2026-10-13T17:07:47.139744Z"}
+{"version":1,"task_id":"OFXBUK","kind":"created","at":"2026-10-13T17:07:47.139746Z"}
+{"version":1,"task_id":"WLLNSM","kind":"created","at":"2026-10-13T17:07:47.139747Z"}
+{"version":1,"task_id":"V657SG","kind":"claim","at":"2026-10-13T17:08:26.862605Z","agent":"gpt-6@local"}
+{"version":1,"task_id":"G5AX3J","kind":"claim","at":"2026-10-13T17:10:59.588792Z","agent":"udp-cli@codex"}
+{"version":1,"task_id":"G5AX3J","kind":"done","at":"2026-10-13T17:20:25.559694Z","agent":"udp-cli@codex","text":"UDP CLI feed/follow/duplex and installed udp-follow settings implemented. URL/help/service unit tests, focused clippy, and elevated CLI process tests pass; no commit or push."}
+{"version":1,"task_id":"OFXBUK","kind":"claim","at":"2026-10-13T17:46:33.379336Z","agent":"gpt-6@local"}
+{"version":1,"task_id":"V657SG","kind":"done","at":"2026-10-13T17:46:33.407722Z","agent":"gpt-6@local","text":"Core UDP server/client and actual process tests pass, including exact maximum size, leases, impairment, retention, and byte preservation; Sol review fixes applied."}
+{"version":1,"task_id":"OFXBUK","kind":"done","at":"2026-10-13T17:53:42.955116Z","agent":"gpt-6@local","text":"C, Python, Node, and Go send/follow proofs pass against actual servers. Node opens asynchronously, polls without blocking, preserves uint64 metadata, and closes safely. Sol review has no remaining findings."}
+{"version":1,"task_id":"WLLNSM","kind":"claim","at":"2026-10-13T17:53:42.989714Z","agent":"gpt-6@local"}
+{"version":1,"task_id":"WLLNSM","kind":"done","at":"2026-10-13T18:00:00.143471Z","agent":"gpt-6@local","text":"Implementation, documentation, local release gate, and final review complete. Cross-platform CI covers the new targets; report its pending or completed state separately."}
+{"version":1,"task_id":"WLLNSM","kind":"result","at":"2026-10-13T18:00:27.549832Z","text":"Full UDP local gates, SDK proofs, review, and matched measurements pass. Release held; cross-platform CI next.","file":{"path":".scratch/udp-transport-evidence/validation.md","sha256":"7915c94ab34f8428a312576b788d046f43096465ceb27a72634fa1606ac2866d","mtime":"2026-10-13T18:00:00.118082527Z","git_commit":"528e26445f9273ef5c24eef920d978e1f236f27d"}}

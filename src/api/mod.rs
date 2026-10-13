@@ -10,6 +10,7 @@ mod client;
 mod message;
 pub mod notify;
 mod remote;
+mod udp;
 mod validation;
 
 pub use crate::core::cursor::{Cursor, CursorResult, FrameRef};
@@ -28,4 +29,7 @@ pub use message::{
     GapPolicy, Lite3Tail, Message, Meta, PoolApiExt, Replay, ReplayOptions, Tail, TailOptions,
 };
 pub use remote::{RemoteClient, RemoteLite3Frame, RemoteLite3Tail, RemotePool, RemoteTail};
+pub use udp::{
+    UdpClient, UdpEvent, UdpFollow, UdpFollowOptions, UdpFrame, UdpPool, UdpSkipReason, UdpStart,
+};
 pub use validation::{ValidationIssue, ValidationReport, ValidationStatus};

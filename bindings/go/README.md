@@ -14,6 +14,7 @@ for CLI and sharing changes.
 
 - `github.com/sandover/plasmite/bindings/go/local` — cgo-backed local client and pool operations.
 - `github.com/sandover/plasmite/bindings/go/api` — pure Go contracts and shared model types.
+- `github.com/sandover/plasmite/bindings/go/udp` — cgo-backed UDP sender and follower.
 
 Install the local binding package in a downstream module:
 
@@ -186,6 +187,71 @@ if handlerErr != nil {
 
 The error channel receives `ErrorRetentionGap` before the first message or
 Lite3 frame after the gap. Tag filters do not conceal the error.
+
+### UDP sender and follower
+
+The `udp` package takes an explicit endpoint and opens a named pool. Sending
+returns an error only for local validation or operating-system send failures;
+a nil error does not confirm storage. A follower yields frames, gap notices, and
+progress events. Its context cancels a blocked wait within 50 milliseconds.
+
+```go
+import (
+    "context"
+    "encoding/json"
+    "errors"
+    "io"
+    "time"
+
+    "github.com/sandover/plasmite/bindings/go/udp"
+)
+
+client, err := udp.NewClient("udp://127.0.0.1:9701")
+if err != nil {
+    panic(err)
+}
+defer client.Close()
+
+pool, err := client.OpenPool("sensors")
+if err != nil {
+    panic(err)
+}
+defer pool.Close()
+
+follow, err := pool.Follow(udp.NewFollowOptions())
+if err != nil {
+    panic(err)
+}
+defer follow.Close()
+
+if err := pool.SendJSON(map[string]any{"temperature": 23}, []string{"sensor"}); err != nil {
+    panic(err)
+}
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+for {
+    event, err := follow.Next(ctx)
+    if errors.Is(err, io.EOF) {
+        break
+    }
+    if err != nil {
+        panic(err)
+    }
+    if frame, ok := event.(*udp.Frame); ok {
+        var data map[string]any
+        if err := json.Unmarshal(frame.Message.Data, &data); err != nil {
+            panic(err)
+        }
+        _ = data["temperature"]
+        break
+    }
+}
+```
+
+`Next` returns a `*udp.Frame`, `*udp.Gap`, or `*udp.Progress` through the
+`udp.Event` interface. Frames include the original Lite3 bytes and a decoded
+`*api.Message`. Cancel the context to stop a blocked wait. A UDP follow requires
+the server's explicit `--udp-follow` setting; it never switches to HTTP.
 
 ### Concurrent use
 

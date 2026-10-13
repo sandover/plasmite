@@ -33,6 +33,9 @@ pub(super) fn run(args: TapArgs, context: &CliContext) -> Result<CommandResult, 
             .with_hint("Add --create or remove --create-size."));
     }
     if args.pool.contains("://") {
+        if args.pool.starts_with("udp://") {
+            return Err(super::support::udp_unsupported());
+        }
         return Err(Error::new(ErrorKind::Usage)
             .with_message("tap accepts local pool refs only")
             .with_hint("Use a local pool name/path (for example `plasmite tap build -- ...`)."));

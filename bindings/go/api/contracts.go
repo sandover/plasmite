@@ -207,3 +207,70 @@ type Lite3Stream interface {
 	Next() (*Lite3Frame, error)
 	Close()
 }
+
+type UDPStartKind uint32
+
+const (
+	UDPStartNew UDPStartKind = iota
+	UDPStartLast
+	UDPStartSince
+	UDPStartSequence
+)
+
+// UdpStart chooses the history position for a UDP follow. Since is Unix time
+// in nanoseconds; Sequence starts at the named sequence.
+type UDPStart struct {
+	Kind  UDPStartKind
+	Value uint64
+}
+
+func UDPStartNewPosition() UDPStart { return UDPStart{Kind: UDPStartNew} }
+func UDPStartLastCount(count uint64) UDPStart {
+	return UDPStart{Kind: UDPStartLast, Value: count}
+}
+func UDPStartSinceNs(timestamp uint64) UDPStart {
+	return UDPStart{Kind: UDPStartSince, Value: timestamp}
+}
+func UDPStartAtSequence(seq uint64) UDPStart {
+	return UDPStart{Kind: UDPStartSequence, Value: seq}
+}
+
+type UDPFollowOptions struct {
+	Start UDPStart
+	Live  bool
+}
+
+func NewUDPFollowOptions() UDPFollowOptions {
+	return UDPFollowOptions{Start: UDPStartNewPosition(), Live: true}
+}
+
+type UDPEvent interface {
+	udpEvent()
+}
+
+type UDPFrame struct {
+	Seq         uint64
+	TimestampNs uint64
+	Payload     []byte
+	Message     *Message
+}
+
+func (*UDPFrame) udpEvent() {}
+
+type UDPGap struct {
+	First  uint64
+	Last   uint64
+	Reason string
+}
+
+func (*UDPGap) udpEvent() {}
+
+type UDPProgress struct {
+	StartSeq     uint64
+	NextSeq      uint64
+	EndSeq       *uint64
+	Terminal     bool
+	RetentionGap bool
+}
+
+func (*UDPProgress) udpEvent() {}

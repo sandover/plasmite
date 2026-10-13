@@ -173,6 +173,7 @@ pub(crate) async fn serve_secure_pair(
     remote: ServeConfig,
     access: Arc<AccessStore>,
     udp_bind: Option<SocketAddr>,
+    udp_follow: bool,
 ) -> Result<(), Error> {
     validate_config(&local)?;
     validate_config(&remote)?;
@@ -287,6 +288,11 @@ pub(crate) async fn serve_secure_pair(
             "Maximum UDP message size: 65507 bytes including routing. Larger messages are discarded."
         );
         eprintln!("Sending does not confirm storage. UDP has no authentication or encryption.");
+        if udp_follow {
+            eprintln!(
+                "UDP follow is enabled: anyone who can reach this socket can read served pools."
+            );
+        }
         if !address.ip().is_loopback() {
             eprintln!("Allow only trusted senders through a protected network.");
         }
@@ -318,6 +324,8 @@ pub(crate) async fn serve_secure_pair(
             socket,
             LocalClient::new().with_pool_dir(&local.pool_dir),
             shutdown_rx,
+            udp_follow,
+            local.max_concurrent_tails,
         ));
     }
     // Publish readiness only after every listener has bound and started.

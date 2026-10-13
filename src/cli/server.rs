@@ -17,9 +17,14 @@ pub(super) fn run(
     let output_mode = context.output_mode();
     match command {
         None => crate::secure_serve::run(context.pool_dir(), &run)?,
-        Some(ServeSubcommand::Install { run, no_udp, .. }) => emit_action(
+        Some(ServeSubcommand::Install {
+            run,
+            no_udp,
+            no_udp_follow,
+            ..
+        }) => emit_action(
             "install",
-            serve_service::install(context.pool_dir(), &run, no_udp)?,
+            serve_service::install(context.pool_dir(), &run, no_udp, no_udp_follow)?,
             output_mode,
         )?,
         Some(ServeSubcommand::Start { .. }) => emit_action(

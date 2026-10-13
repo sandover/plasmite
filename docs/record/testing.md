@@ -183,9 +183,24 @@ Run the HTTP protocol and remote-client suite separately:
 cargo test --test remote_integration
 ```
 
-All server-backed CLI and remote tests use an operating-system-assigned port
+Server-backed HTTP CLI and remote tests use an operating-system-assigned port
 published by the child after binding. They do not probe and release candidate
 ports or serialize the suite behind a global port lock.
+
+Run UDP server, client, and CLI proofs together:
+
+```sh
+cargo test --test udp_input --test udp_client --test udp_transport --test udp_transport_cli
+```
+
+These tests cover legacy input, send/store/follow byte preservation at the exact
+65,507-byte maximum, separate read opt-in, capacity, expired cookies and leases,
+quiet-pool renewal, replaced pools, finite retention failure, and live retention
+notices. A small proxy drops, duplicates, and reorders packets through the real
+server. CLI tests check receipt-free sends, finite reads, filters, timeout, and
+duplex. The language binding tests each run their UDP client against a child
+server. Node also checks that an opening handshake lets timers and close run.
+The Windows and ARM runtime CI suites include all four Rust UDP targets.
 
 Run the multi-process lock smoke test:
 

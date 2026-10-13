@@ -20,6 +20,13 @@ Commands with remote support accept `https://host:port/pool`. This shorthand
 names a pool; do not append remote API paths. The loopback-only HTTP listener
 is for credential-free use on the server machine.
 
+`feed`, `follow`, and `duplex` also accept `udp://HOST:PORT/POOL`. Give an
+explicit port and one pool name. UDP sends confirm only that the local operating
+system accepted the datagram. Follow discards duplicate and late arrivals,
+reports skipped sequence ranges, and keeps output in pool order. It never
+repairs gaps or switches to HTTP. The maximum datagram size is 65,507 bytes,
+including routing and application framing. Other commands reject UDP URLs.
+
 | Command | Local name/path | Remote URL |
 | --- | --- | --- |
 | `pool create/delete` | yes | no |
@@ -45,11 +52,13 @@ bind interface. The local administration listener stays on loopback.
 For small messages whose senders accept possible loss, `--udp` adds an
 append-only UDP listener alongside HTTP and HTTPS. It binds to
 `127.0.0.1:9701` by default; use `--udp=IP:PORT` to choose another address.
-The listener can append to every pool in the selected directory. A non-loopback
-address grants unauthenticated append access to that directory to reachable
-senders, so bind it only on a network whose rules limit access. See
-[UDP input](record/serving.md#send-udp-messages) for its message format and
-delivery limits.
+`--udp-follow` enables both input and follow at that address. Existing `--udp`
+settings keep input only until you opt into reads. Both capabilities apply to
+all pools in the selected directory. A reachable sender can append without
+credentials; with follow enabled it can also read those pools. Bind only on a
+network whose rules limit access. See
+[UDP messages](record/serving.md#send-udp-messages) for the access and delivery
+contract.
 
 The older `--shared-address SERVER` form still names the public origin but
 keeps the 1.0 listener default of `0.0.0.0:9743`. Use `--remote-bind` to
@@ -102,7 +111,9 @@ options, `install` keeps the saved settings, installs the current Plasmite
 executable, and starts the service. Updates retain the installed listener
 addresses unless `--remote-bind` changes them. UDP settings also persist across
 updates and restarts. Use `serve install --no-udp` to remove the saved UDP
-listener; leaving `--udp` off an update keeps its current setting.
+listener and follow capability; leaving UDP options off an update keeps the
+saved settings. `serve install --udp-follow` enables reads;
+`serve install --no-udp-follow` removes reads and keeps input.
 
 ## Server status
 

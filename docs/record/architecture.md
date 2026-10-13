@@ -190,13 +190,20 @@ Plasmite is transport-agnostic at the core.
 - Local mode: CLI/API calls directly into core operations.
 - Remote pool control: `plasmite serve` adapts HTTP and HTTPS requests into
   the same core calls.
-- Optional UDP input: the same server routes a datagram's pool name, decodes
-  one JSON or Lite3 message, and calls the existing append operation. It adds
-  append input only; authenticated remote pool control remains on HTTPS.
+- Optional UDP: the same server routes input to the existing append operation.
+  With `--udp-follow`, bounded workers read through core cursors and send
+  sequence, timestamp, and original Lite3 bytes to subscribers. A cookie proves
+  return reachability before a worker opens a pool. A worker holds the opened
+  file identity through its lease and checks it before replying to renewals.
+  The client exposes increasing sequences and gap events, without data retries.
+  Standalone UDP APIs return local send success; HTTP append still returns a
+  committed receipt. The private wire codec serves the CLI/server and library.
 - Process capture mode (`plasmite tap`): CLI spawns a child process, reads stdout/stderr on separate threads, and appends line messages through the same local append path as `feed`.
 - Future transports must be adapters over the existing core, not alternate correctness engines.
 
-Invariant: Adding a new transport must not require changes to `src/core`. If a proposed transport requires core changes to function correctly, the design is wrong.
+Adapters use the core's storage rules. Keep network operations and delivery
+policy outside `src/core`. Core helpers such as the read-only native file
+identity check apply to every adapter; they carry no transport-specific state.
 
 The HTTP adapter runs synchronous pool operations on Tokio's blocking worker
 pool. A semaphore admits at most `--max-tail-concurrency` ordinary storage

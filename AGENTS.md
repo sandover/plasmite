@@ -10,6 +10,9 @@ docs/
 ├── building.md                                — Build system + vendoring; read when touching build/release tooling
 ├── cli.md                                     — CLI operating model; read when resolving pool refs, input/output modes, or exits
 ├── cookbook.md                                — Task-oriented examples; read when you want copy/paste CLI workflows
+├── performance/udp-transport.md               — Read when assessing UDP versus HTTP delivery, measured latency, or maximum datagram support
+├── performance/udp-transport-bench.rs          — Read when reproducing the matched UDP and HTTP transport measurements
+├── performance/udp-transport-results/          — Read when checking the raw runs and host setup behind the UDP measurements
 ├── performance/transport-comparison.md        — Measured transport throughput; read when comparing native API and MCP paths
 ├── performance/1.0-release.md                  — Read when assessing 1.0 read costs, writer contention, or benchmark results
 ├── performance/windows-access-1.0.md          — Read when comparing local, HTTP, and MCP access costs on Windows
@@ -22,6 +25,7 @@ docs/
 ├── proposals/serve-mcp-native.md              — Secure sharing; read when designing access keys, native connections, or MCP authorization
 ├── proposals/serve-access-mvp.md              — Earlier access proposal; read when tracing the preceding invitation design
 ├── proposals/udp-input.md                     — Read when designing User Datagram Protocol (UDP) input, its CLI, or delivery limits
+├── proposals/udp-transport.md                 — Read when designing UDP feed and follow across the CLI and native APIs
 │
 │   Docs of record
 ├── record/README.md                           — Docs of record index; start here for stable policies and runbooks
@@ -43,6 +47,7 @@ spec/
 ├── README.md                                   — Spec index; start here for contract navigation
 ├── v0/SPEC.md                                  — Command-line interface (CLI) contract; read before changing CLI behavior
 ├── udp/v0/SPEC.md                              — User Datagram Protocol (UDP) input contract; read when changing UDP messages or listener behavior
+├── udp/v1/SPEC.md                              — Read when changing UDP feed/follow controls, clients, subscriptions, or delivery events
 ├── api/v0/SPEC.md                               — Public API contract; read before changing the API surface
 ├── remote/v0/SPEC.md                            — Remote protocol contract; read before changing HTTP endpoints/semantics
 └── mcp/2025-11-25/SPEC.md                       — MCP contract; read before changing local or direct MCP behavior

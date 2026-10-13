@@ -231,6 +231,23 @@ pub(crate) fn ingest_from_stdin_remote(
     })
 }
 
+pub(crate) fn ingest_from_stdin_udp(
+    reader: impl Read,
+    pool: &plasmite::api::UdpPool,
+    tags: &[String],
+    input: InputFormat,
+    contents: bool,
+    stop: Option<&AtomicBool>,
+) -> Result<u64, Error> {
+    read_records(reader, input, |record| {
+        let payload = record_payload(record, contents, tags)?;
+        if stop.is_some_and(|stop| stop.load(Ordering::Acquire)) {
+            return Ok(());
+        }
+        pool.send_lite3(&payload)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

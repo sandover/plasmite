@@ -1,0 +1,1 @@
+max_datagram=65507 data_header=40 lite3_bytes=65467 follow_datagram_bytes=65507 received_exact=true next_lite3_bytes=65468 oversized_rejected=true

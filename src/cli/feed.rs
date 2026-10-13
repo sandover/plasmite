@@ -61,6 +61,19 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
             .with_hint("Remove --data and the inline argument for Lite3 input."));
     }
     let durability = parse_durability(&args.durability)?;
+    if matches!(target, PoolTarget::Udp { .. })
+        && (args.create
+            || args.create_size.is_some()
+            || args.retry > 0
+            || args.retry_delay.is_some()
+            || durability != plasmite::api::Durability::Fast)
+    {
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("UDP feed does not support create, retry, or flush durability")
+            .with_hint(
+                "Remove --create, --create-size, --retry, --retry-delay, and --durability flush.",
+            ));
+    }
     let retry_config = parse_retry_config(args.retry, args.retry_delay.as_deref())?;
     let reader: Box<dyn Read> = if let Some(data) = &args.data {
         Box::new(io::Cursor::new(data.as_bytes().to_vec()))
@@ -138,6 +151,30 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
                 true,
             )?;
         }
+        PoolTarget::Udp {
+            endpoint,
+            pool: name,
+        } => {
+            let client = plasmite::api::UdpClient::new(endpoint)?;
+            let pool = client.open_pool(&PoolRef::name(name))?;
+            super::output_support::emit_notice(
+                &plasmite::notice::Notice {
+                    kind: "udp-send".into(),
+                    time: super::output_support::notice_time_now().unwrap_or_default(),
+                    cmd: "feed".into(),
+                    pool: args.pool.clone(),
+                    message: "UDP sends do not confirm storage; messages may be lost, duplicated, or reordered.\nMaximum UDP datagram size: 65507 bytes, including routing and application framing.".into(),
+                    details: serde_json::Map::new(),
+                }, context.color_mode(), context.output_mode());
+            super::feed_support::ingest_from_stdin_udp(
+                reader,
+                &pool,
+                &args.tags,
+                args.input,
+                args.contents,
+                None,
+            )?;
+        }
     }
     Ok(CommandResult::ok())
 }
@@ -197,6 +234,7 @@ pub(super) fn fetch(pool: &str, seq: u64, context: &CliContext) -> Result<Comman
                 )?;
             }
         }
+        PoolTarget::Udp { .. } => return Err(super::support::udp_unsupported()),
     }
     Ok(CommandResult::ok())
 }

@@ -772,6 +772,7 @@ pub(crate) fn install(
     pool_dir: &Path,
     options: &ServeRunArgs,
     no_udp: bool,
+    no_udp_follow: bool,
 ) -> Result<Status, Error> {
     supported()?;
     if unsafe_euid_is_root() {
@@ -822,7 +823,7 @@ pub(crate) fn install(
         pool_dir,
         account,
         home: owner_home,
-        run: merge(previous.as_ref(), options, no_udp)?,
+        run: merge(previous.as_ref(), options, no_udp, no_udp_follow)?,
     };
     let owners = previous.iter().collect::<Vec<_>>();
     verify_native_ownership(&setup, &owners)?;
@@ -2066,6 +2067,7 @@ mod tests {
                 ..Default::default()
             },
             false,
+            false,
         )
         .unwrap();
         assert_eq!(run.remote_bind, setup.run.remote_bind);
@@ -2075,11 +2077,62 @@ mod tests {
         let mut setup = setup();
         setup.run.bind = Some("127.0.0.1:12345".into());
         assert_eq!(
-            merge(Some(&setup), &ServeRunArgs::default(), false)
+            merge(Some(&setup), &ServeRunArgs::default(), false, false)
                 .unwrap()
                 .bind,
             setup.run.bind
         );
+    }
+    #[test]
+    fn udp_follow_install_merge_preserves_opt_in_and_allows_removal() {
+        let mut setup = setup();
+        setup.run.udp = Some("127.0.0.1:9701".into());
+        assert_eq!(
+            merge(Some(&setup), &ServeRunArgs::default(), false, false)
+                .unwrap()
+                .udp_follow,
+            None
+        );
+        let enabled = merge(
+            Some(&setup),
+            &ServeRunArgs {
+                udp_follow: Some(true),
+                ..Default::default()
+            },
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(enabled.udp_follow, Some(true));
+        setup.run = enabled;
+        let disabled = merge(Some(&setup), &ServeRunArgs::default(), false, true).unwrap();
+        assert_eq!(disabled.udp_follow, Some(false));
+        assert_eq!(disabled.udp.as_deref(), Some("127.0.0.1:9701"));
+        let removed = merge(Some(&setup), &ServeRunArgs::default(), true, false).unwrap();
+        assert_eq!(removed.udp_follow, Some(false));
+        assert_eq!(removed.udp, None);
+        assert!(
+            merge(
+                None,
+                &ServeRunArgs {
+                    udp_follow: Some(true),
+                    ..Default::default()
+                },
+                true,
+                false
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn udp_follow_alone_uses_default_udp_bind() {
+        let run = effective_args(&ServeRunArgs {
+            udp_follow: Some(true),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(run.udp.as_deref(), Some("127.0.0.1:9701"));
+        assert_eq!(run.udp_follow, Some(true));
     }
     #[test]
     fn duplicate_fixed_listeners_fail_before_identity_mutation() {

@@ -65,7 +65,13 @@ pub(crate) fn run(pool_dir: &Path, run: &ServeRunArgs) -> Result<(), Error> {
                 .with_message("failed to start server runtime")
                 .with_source(err)
         })?;
-    runtime.block_on(serve::serve_secure_pair(base, remote, store, udp_bind))
+    runtime.block_on(serve::serve_secure_pair(
+        base,
+        remote,
+        store,
+        udp_bind,
+        run.udp_follow == Some(true),
+    ))
 }
 
 #[derive(Deserialize)]

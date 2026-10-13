@@ -106,6 +106,31 @@ Use `append_json(...)` / `get_json(...)` only when you explicitly need raw wire 
 
 `Pool.tail(..., tags=[...])` uses exact tag matching and composes with other filters using AND semantics.
 
+## UDP sender and follower
+
+The UDP client names its server endpoint explicitly. `send_json` and
+`send_lite3` return no storage receipt: success means the operating system
+accepted the datagram. A follower yields original Lite3 frames, sequence gaps,
+and progress records. The server must opt in with `serve --udp-follow`.
+
+```python
+from plasmite import UdpClient, UdpFollowOptions, UdpFrame, UdpStart
+
+with UdpClient("udp://127.0.0.1:9701") as client:
+    with client.open_pool("sensors") as pool:
+        with pool.follow(UdpFollowOptions(start=UdpStart.new(), live=True)) as follow:
+            pool.send_json({"temperature": 23}, tags=["sensor"])
+            for event in follow:
+                if isinstance(event, UdpFrame):
+                    message = event.message()
+                    print(message.seq, message.data)
+```
+
+Use `UdpStart.last(count)`, `UdpStart.since_ns(timestamp_ns)`, or
+`UdpStart.sequence(seq)` to select retained history. Pass a finite
+`timeout_ms` to `next_event` when a caller needs a bounded wait; `close()` and
+`cancel()` interrupt an active wait within 50 milliseconds.
+
 Pools have bounded retention. A tail normally resumes at the next retained
 message if writes overtake it. Set `error_on_gap=True` when the consumer must
 distinguish that loss from an ordinary lack of matching messages:

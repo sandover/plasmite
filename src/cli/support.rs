@@ -21,6 +21,9 @@ use std::time::UNIX_EPOCH;
 use url::Url;
 
 pub(crate) fn resolve_poolref(input: &str, pool_dir: &Path) -> Result<PathBuf, Error> {
+    if input.starts_with("udp://") {
+        return Err(udp_unsupported());
+    }
     if input.chars().any(std::path::is_separator) {
         return Ok(PathBuf::from(input));
     }
@@ -41,12 +44,29 @@ pub(crate) fn resolve_pool_target(input: &str, pool_dir: &Path) -> Result<PoolTa
     if input.starts_with("http://") || input.starts_with("https://") {
         return parse_remote_pool_target(input);
     }
+    if input
+        .get(..6)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("udp://"))
+    {
+        return parse_udp_pool_target(input);
+    }
     if input.contains("://") {
         return Err(Error::new(ErrorKind::Usage)
-            .with_message("remote pool ref must use http or https scheme")
-            .with_hint("Use shorthand: http(s)://host:port/<pool>."));
+            .with_message("pool ref must use http, https, or udp scheme")
+            .with_hint("Use http(s)://host:port/<pool> or udp://host:port/<pool>."));
     }
     resolve_poolref(input, pool_dir).map(PoolTarget::LocalPath)
+}
+
+pub(crate) fn udp_unsupported() -> Error {
+    Error::new(ErrorKind::Usage)
+        .with_message("this command does not support UDP pool refs")
+        .with_hint("Use udp://HOST:PORT/POOL with feed, follow, or duplex.")
+}
+
+pub(crate) fn parse_udp_pool_target(input: &str) -> Result<PoolTarget, Error> {
+    let (endpoint, pool) = plasmite::api::UdpClient::parse_pool_url(input)?;
+    Ok(PoolTarget::Udp { endpoint, pool })
 }
 
 pub(crate) fn parse_remote_pool_target(input: &str) -> Result<PoolTarget, Error> {

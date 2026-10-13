@@ -338,3 +338,17 @@ Current remote shorthand constraints (documented, non-frozen):
 - CLI operating model: `docs/cli.md`
 - Remote protocol contract: `spec/remote/v0/SPEC.md`
 - Public API contract: `spec/api/v0/SPEC.md`
+
+## UDP message targets
+
+`feed`, `follow`, and `duplex` also accept explicit `udp://HOST:PORT/POOL` targets.
+`serve --udp-follow` enables UDP reads and implies the default/configured UDP input
+address. Existing `--udp` remains append-only. Installed removal/preservation
+rules follow the [UDP v1 contract](../udp/v1/SPEC.md).
+
+UDP feed never emits a stored-message receipt. Exit 0 means local socket
+submission, not storage. UDP follow/history use the normal filters and formats
+with best-effort delivery. Delivery gaps produce notices and finite exit 1;
+confirmed retained-history gaps exit 9; no-matching-output timeout exits 124.
+No automatic write retry, HTTP fallback, or gap repair. Unsupported commands or
+options reject a UDP target before work, with Usage.

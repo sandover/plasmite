@@ -156,6 +156,40 @@ Start a server with `--udp`; the receiver appends one JSON or Lite3 message to
 the named pool. The address below is local to the server. Change it to the
 server's chosen bind address when the sender runs elsewhere.
 
+#### Feed and follow with the CLI
+
+Create the pool, then start the server over its directory:
+
+```sh
+plasmite pool create sensors
+plasmite serve --udp-follow
+```
+
+In another terminal, follow it:
+
+```sh
+plasmite follow udp://127.0.0.1:9701/sensors --tag sensor
+```
+
+Send a reading:
+
+```sh
+plasmite feed udp://127.0.0.1:9701/sensors --data '{"temperature_c":22.4}' --tag sensor
+```
+
+`feed` writes no receipt to stdout. Its successful exit confirms local send,
+not storage. `follow` reports skipped sequence ranges on stderr and continues.
+Use `--tail 10 --no-follow` for a best-effort finite read; a known skipped range
+makes it exit 1, and a confirmed retention gap makes it exit 9. A filter does
+not turn the messages it rejects into delivery gaps. Use HTTP when you need
+reliable history or a committed write receipt.
+
+The same commands accept JSON, YAML, and framed Lite3 input or output through
+the existing format options. The maximum datagram size is 65,507 bytes including
+routing and application framing. A stored message too large for outgoing UDP
+produces a skip notice. The native SDKs expose separate UDP clients with
+`send` methods and follow events; see their READMEs.
+
 #### Send JSON from Python
 
 This example uses only Python's standard library and checks the full datagram

@@ -13,6 +13,13 @@ use serde_json::json;
 use std::io::{self, IsTerminal};
 
 pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<CommandResult, Error> {
+    if matches!(&command,
+        AccessSubcommand::Connect { url, .. }
+        | AccessSubcommand::Status { url, .. }
+        | AccessSubcommand::Disconnect { url, .. } if url.starts_with("udp://"))
+    {
+        return Err(super::support::udp_unsupported());
+    }
     let output_mode = context.output_mode();
     match command {
         AccessSubcommand::List { .. } => {

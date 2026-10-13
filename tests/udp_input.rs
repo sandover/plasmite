@@ -833,7 +833,7 @@ fn occupied_udp_socket_fails_startup_before_banner_or_readiness() -> TestResult<
 
 #[cfg(unix)]
 #[test]
-fn shutdown_waits_for_an_in_progress_pool_lock_and_does_not_drain_queued_packets() -> TestResult<()>
+fn shutdown_waits_for_an_in_progress_pool_lock_and_does_not_append_queued_packets() -> TestResult<()>
 {
     let home = TestHome::new()?;
     for name in ["locked", "queued"] {
@@ -889,7 +889,12 @@ fn shutdown_waits_for_an_in_progress_pool_lock_and_does_not_drain_queued_packets
         .find(|line| line.contains("UDP input summary"))
         .ok_or_else(|| format!("missing shutdown UDP summary:\n{}", server.combined_log))?;
     assert_eq!(log_counter(summary, "appended"), Some(2), "{summary}");
-    assert_eq!(log_counter(summary, "received"), Some(2), "{summary}");
+    // Reception now runs independently of a blocked append. Queued reception
+    // may increase received, but shutdown must not commit that queued message.
+    assert!(
+        log_counter(summary, "received").unwrap_or_default() >= 2,
+        "{summary}"
+    );
     Ok(())
 }
 

@@ -31,6 +31,9 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
             index_capacity,
             ..
         } => {
+            if names.iter().any(|name| name.starts_with("udp://")) {
+                return Err(super::support::udp_unsupported());
+            }
             if names.iter().any(|name| name.contains("://")) {
                 return Err(Error::new(ErrorKind::Usage)
                     .with_message("pool create accepts local pool names or paths only")
@@ -97,6 +100,7 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                 PoolTarget::Remote { base_url, pool } => {
                     remote_client(base_url)?.pool_info(&PoolRef::name(pool))?
                 }
+                PoolTarget::Udp { .. } => return Err(super::support::udp_unsupported()),
             };
             if output_mode.is_structured() {
                 emit_output(pool_info_json(&name, &info), output_mode)?;
@@ -106,6 +110,9 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
             Ok(CommandResult::ok())
         }
         PoolCommand::Delete { names, .. } => {
+            if names.iter().any(|name| name.starts_with("udp://")) {
+                return Err(super::support::udp_unsupported());
+            }
             let client = LocalClient::new().with_pool_dir(pool_dir);
             let mut deleted = Vec::new();
             let mut failed = Vec::new();
@@ -323,6 +330,12 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
             }
         }
         PoolCommand::List { server, .. } => {
+            if server
+                .as_deref()
+                .is_some_and(|server| server.starts_with("udp://"))
+            {
+                return Err(super::support::udp_unsupported());
+            }
             let pools = match server.as_deref() {
                 Some(server) => {
                     let mut pools = remote_client(server.to_string())?

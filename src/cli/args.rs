@@ -166,7 +166,7 @@ NOTES
         about = "Send a message to a pool",
         long_about = r#"Send JSON or pre-encoded Lite3 messages to a pool.
 
-Accepts local pool refs (name/path), remote shorthand refs (http(s)://host:port/<pool>),
+Accepts local pool refs (name/path), HTTP(S) refs, and udp://host:port/<pool>,
 inline JSON, file input (-f/--file), or streams via stdin (auto-detected).
 Use --input-format lite3-raw for one raw attachment from a file or stdin."#,
         after_help = r#"EXAMPLES
@@ -182,11 +182,12 @@ INPUT AND OUTPUT
   - JSON, marked YAML, and framed Lite3 detect automatically and append one message at a time
   - --input-format chooses an explicit encoding; lite3-raw reads one attachment through EOF
   - Each append gets a new sequence and time and writes the complete destination message
+  - UDP sends produce no storage receipt and may be lost, duplicated, or reordered
   - Invalid input stops immediately; earlier successful appends remain stored
   - stdout holds messages; stderr holds errors and notices"#
     )]
     Feed {
-        #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
+        #[arg(help = "Pool name/path or http(s)://host:port/<pool> or udp://host:port/<pool>")]
         pool: String,
         #[arg(help = "Complete message, or application object with --data")]
         data: Option<String>,
@@ -252,6 +253,7 @@ CONSTRAINTS
   - Request body, tail timeout, and tail concurrency limits must be positive
   - The local admin listener stays on loopback; remote clients use HTTPS
   - Installed servers start at boot
+  - --udp-follow enables unauthenticated, unencrypted UDP reads and implies UDP input
   - On Windows, install, update, and uninstall need approval from the pool-owning administrator"#
     )]
     Serve {
@@ -337,8 +339,9 @@ Use --replay SPEED with history for local timed playback; it implies --no-follow
   $ plasmite follow foo --tail 100 --no-follow > messages.jsonl
 
 LOCAL AND REMOTE
-  Local and remote refs support history, filters, and JSON, YAML, or framed Lite3.
-  Remote refs reject --create, --replay, --no-notify, and --quiet-drops.
+  Local, HTTP(S), and UDP refs support history, filters, and JSON, YAML, or framed Lite3.
+  HTTP(S) refs reject --create, --replay, --no-notify, and --quiet-drops.
+  UDP refs reject --create, --replay, and --no-notify; UDP gaps appear on stderr.
   --no-follow requires --tail or --since and stops at the starting history bound.
   --tail counts retained messages before filters; filters apply to history and new messages.
   Finite reads exit nonzero if retention removes selected messages.
@@ -350,7 +353,7 @@ LOCAL AND REMOTE
             help = "Read selected history and exit; requires --tail or --since"
         )]
         no_follow: bool,
-        #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
+        #[arg(help = "Pool name/path or http(s)://host:port/<pool> or udp://host:port/<pool>")]
         pool: String,
         #[arg(long, help = "Create local pool if missing before following")]
         create: bool,
@@ -470,7 +473,7 @@ INPUT AND OUTPUT
   --echo-self includes received messages whose from field matches --me."#
     )]
     Duplex {
-        #[arg(help = "Pool ref: local name/path or shorthand URL http(s)://host:port/<pool>")]
+        #[arg(help = "Pool name/path or http(s)://host:port/<pool> or udp://host:port/<pool>")]
         pool: String,
         #[arg(
             long,
@@ -568,6 +571,12 @@ pub(crate) enum ServeSubcommand {
             help = "Remove UDP input from the installed server"
         )]
         no_udp: bool,
+        #[arg(
+            long,
+            conflicts_with = "udp_follow",
+            help = "Remove UDP reads from the installed server while retaining UDP input"
+        )]
+        no_udp_follow: bool,
     },
     #[command(about = "Start the installed background service")]
     Start {},
@@ -806,6 +815,9 @@ pub(crate) struct ServeRunArgs {
         help_heading = "Connection"
     )]
     pub(crate) udp: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[arg(long = "udp-follow", action = clap::ArgAction::SetTrue, help = "Allow UDP followers (unauthenticated and unencrypted; implies UDP input)", help_heading = "Connection")]
+    pub(crate) udp_follow: Option<bool>,
     #[arg(
         long = "shared-address",
         value_name = "URL",

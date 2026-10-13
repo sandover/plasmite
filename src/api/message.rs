@@ -597,6 +597,23 @@ fn message_from_frame(frame: &FrameRef) -> Result<Message, Error> {
     })
 }
 
+pub(crate) fn message_from_udp_payload(
+    seq: u64,
+    timestamp_ns: u64,
+    payload: &[u8],
+) -> Result<Message, Error> {
+    // The Lite3 reader expects its document to start at an aligned address.
+    let aligned = payload.to_vec();
+    validate_bytes(&aligned)?;
+    let (meta, data) = decode_payload(&aligned)?;
+    Ok(Message {
+        seq,
+        time: format_ts(timestamp_ns)?,
+        meta,
+        data,
+    })
+}
+
 fn decode_payload(payload: &[u8]) -> Result<(Meta, Value), Error> {
     let doc = Lite3DocRef::new(payload);
     let meta_type = doc

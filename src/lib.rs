@@ -11,6 +11,11 @@ pub mod mcp;
 pub mod notice;
 mod pool_paths;
 mod since;
+#[expect(
+    dead_code,
+    reason = "server and client use different parts of the shared private codec"
+)]
+mod udp_wire;
 #[cfg(windows)]
 #[expect(
     dead_code,
