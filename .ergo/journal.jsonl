@@ -331,6 +331,7 @@
 {"version":1,"task_id":"7EYA7N","kind":"claim","at":"2026-10-12T16:59:13.998643Z","agent":"gpt-6@local"}
 {"version":1,"task_id":"7EYA7N","kind":"result","at":"2026-10-12T18:06:48.791634Z","agent":"gpt-6@local","text":"Review, macOS gate, Windows UDP tests and running-service lifecycle passed.","file":{"path":".scratch/udp-input-evidence/validation.md","sha256":"504c10df52ea04ae0b46d0757a8307cc3d2ed92bf067cee34092d0b07c2268dc","mtime":"2026-10-12T18:06:25.581397005Z","git_commit":"b50e0d52efe7a3f0ee01dadd71b555b47260736c"}}
 {"version":1,"task_id":"7EYA7N","kind":"done","at":"2026-10-12T18:06:48.817688Z","agent":"gpt-6@local","text":"Final review and native checks passed; fixture cleanup complete. Release stays held."}
+{"version":1,"task_id":"TS3TYT","kind":"result","at":"2026-10-12T18:54:19.841406Z","text":"UDP-inclusive gates and CI pass; three-run comparison passes; raw Lite3 validation cost recorded.","file":{"path":".scratch/release/udp-final-qa/REPORT.md","sha256":"29ce26b089f930c898859890a1e07915978d544edf5ab2a13b1faf4752bccafe","mtime":"2026-10-12T18:54:19.777204549Z","git_commit":"1008e4a16b53b1296caea512fdf0e91cc4f2847b"}}
 {"version":1,"task_id":"WHCI6U","kind":"created","at":"2026-10-12T19:12:50.646205Z"}
 {"version":1,"task_id":"BNP7XE","kind":"created","at":"2026-10-12T19:12:50.646226Z"}
 {"version":1,"task_id":"DPQ4PW","kind":"created","at":"2026-10-12T19:12:50.646229Z"}
