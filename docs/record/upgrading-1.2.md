@@ -21,7 +21,9 @@ the chain. The reader processes each complete message immediately.
 ## Create messages
 
 In 1.2.1, ordinary objects are application data again; no `--data` is needed.
-Existing `--data` scripts continue working. In 1.2.0, use `--data` explicitly.
+Version 1.2.1 still accepts existing `--data` scripts. The unreleased CLI cutover
+removes the flag: delete it from commands that feed application objects. In
+1.2.0, the flag was required for ordinary application data.
 
 ```bash
 plasmite feed events '{"temperature":21}'
@@ -32,7 +34,8 @@ jq -c '.[]' readings.json | plasmite feed events
 Only the full output shape is reserved: exactly `seq`, `time`, `meta`, and
 `data`, with exactly `meta.tags`. Such objects copy as messages, with validated
 source identity and new destination identity. A field named `data` alone is
-ordinary application data. Use `--data` to force application interpretation of
+ordinary application data. The unreleased CLI reserves this shape without an
+override; in 1.2.1, `--data` can still force application interpretation of
 the reserved shape. See [message input rules](../cli.md#creating-messages).
 To extract application contents, use `jq -c '.data'`; a following feed accepts
 them directly.

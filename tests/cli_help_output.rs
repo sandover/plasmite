@@ -422,7 +422,6 @@ fn color_always_does_not_color_json() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":1}",
         ])
         .output()

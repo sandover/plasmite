@@ -42,11 +42,7 @@ fn is_message_shape(value: &Value) -> bool {
     })
 }
 
-pub(crate) fn record_payload(
-    record: InputRecord,
-    contents: bool,
-    tags: &[String],
-) -> Result<Vec<u8>, Error> {
+pub(crate) fn record_payload(record: InputRecord, tags: &[String]) -> Result<Vec<u8>, Error> {
     match record {
         InputRecord::Lite3 {
             seq,
@@ -54,21 +50,21 @@ pub(crate) fn record_payload(
             payload,
         } => {
             let _ = (seq, timestamp_ns);
-            if contents || !tags.is_empty() {
+            if !tags.is_empty() {
                 return Err(Error::new(ErrorKind::Usage)
                     .with_message("Lite3 already contains a complete message")
-                    .with_hint("Remove --data and --tag for Lite3 input."));
+                    .with_hint("Remove --tag for Lite3 input."));
             }
             Ok(payload)
         }
         InputRecord::Json(value) => {
-            let (data, tags) = if contents || !is_message_shape(&value) {
+            let (data, tags) = if !is_message_shape(&value) {
                 (value, tags.to_vec())
             } else {
                 if !tags.is_empty() {
                     return Err(Error::new(ErrorKind::Usage)
                         .with_message("complete messages supply their own tags")
-                        .with_hint("Remove --tag, or use --data to treat the envelope as application data."));
+                        .with_hint("Remove --tag to preserve the message's original tags."));
                 }
                 let message: MessageInput = serde_json::from_value(value).map_err(|err| {
                     Error::new(ErrorKind::Usage)
@@ -126,7 +122,6 @@ pub(crate) struct FeedIngestContext<'a> {
     pub(crate) color_mode: ColorMode,
     pub(crate) output_mode: OutputMode,
     pub(crate) input: InputFormat,
-    pub(crate) contents: bool,
     pub(crate) stop: Option<&'a AtomicBool>,
 }
 
@@ -138,13 +133,11 @@ pub(crate) struct RemoteFeedIngestContext<'a> {
     pub(crate) color_mode: ColorMode,
     pub(crate) output_mode: OutputMode,
     pub(crate) input: InputFormat,
-    pub(crate) contents: bool,
     pub(crate) stop: Option<&'a AtomicBool>,
 }
 
 #[derive(Copy, Clone)]
 struct IngestOptions<'a> {
-    contents: bool,
     tags: &'a [String],
     input: InputFormat,
     output: OutputMode,
@@ -159,7 +152,7 @@ fn ingest_with_append(
     mut append: impl FnMut(&[u8]) -> Result<Message, Error>,
 ) -> Result<u64, Error> {
     let count = read_records(reader, options.input, |record| {
-        let payload = record_payload(record, options.contents, options.tags)?;
+        let payload = record_payload(record, options.tags)?;
         if options
             .stop
             .is_some_and(|stop| stop.load(Ordering::Acquire))
@@ -204,7 +197,6 @@ pub(crate) fn ingest_from_stdin(
     emit_receipt: bool,
 ) -> Result<u64, Error> {
     let options = IngestOptions {
-        contents: ctx.contents,
         tags: ctx.tags,
         input: ctx.input,
         output: ctx.output_mode,
@@ -226,7 +218,6 @@ pub(crate) fn ingest_from_stdin_remote(
     emit_receipt: bool,
 ) -> Result<u64, Error> {
     let options = IngestOptions {
-        contents: ctx.contents,
         tags: ctx.tags,
         input: ctx.input,
         output: ctx.output_mode,
@@ -247,11 +238,10 @@ pub(crate) fn ingest_from_stdin_udp(
     pool: &plasmite::api::UdpPool,
     tags: &[String],
     input: InputFormat,
-    contents: bool,
     stop: Option<&AtomicBool>,
 ) -> Result<u64, Error> {
     read_records(reader, input, |record| {
-        let payload = record_payload(record, contents, tags)?;
+        let payload = record_payload(record, tags)?;
         if stop.is_some_and(|stop| stop.load(Ordering::Acquire)) {
             return Ok(());
         }
@@ -268,13 +258,8 @@ mod tests {
     fn only_full_output_shape_is_reserved_and_validated() {
         let message = json!({"seq": 7, "time": "2026-10-14T00:00:00Z",
             "meta": {"tags": ["source"]}, "data": {"x": 1}});
-        assert!(record_payload(InputRecord::Json(message.clone()), false, &[]).is_ok());
-        assert!(
-            record_payload(InputRecord::Json(message.clone()), false, &["outer".into()]).is_err()
-        );
-        assert!(
-            record_payload(InputRecord::Json(message.clone()), true, &["outer".into()]).is_ok()
-        );
+        assert!(record_payload(InputRecord::Json(message.clone()), &[]).is_ok());
+        assert!(record_payload(InputRecord::Json(message.clone()), &["outer".into()]).is_err());
         for (field, invalid) in [
             ("seq", Value::Null),
             ("seq", json!(-1)),
@@ -289,7 +274,7 @@ mod tests {
             let mut value = message.clone();
             value[field] = invalid;
             assert!(
-                record_payload(InputRecord::Json(value), false, &[]).is_err(),
+                record_payload(InputRecord::Json(value), &[]).is_err(),
                 "{field}"
             );
         }
@@ -301,7 +286,7 @@ mod tests {
             json!({"seq": 7, "time": "bad", "meta": {"tags": [], "app": true}, "data": {}}),
         ] {
             assert!(!is_message_shape(&value));
-            assert!(record_payload(InputRecord::Json(value), false, &[]).is_ok());
+            assert!(record_payload(InputRecord::Json(value), &[]).is_ok());
         }
     }
 
@@ -309,7 +294,6 @@ mod tests {
     fn stopped_session_does_not_append_buffered_messages() {
         let stop = AtomicBool::new(true);
         let options = IngestOptions {
-            contents: false,
             tags: &[],
             input: InputFormat::Auto,
             output: OutputMode::Json,

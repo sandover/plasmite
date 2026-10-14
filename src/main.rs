@@ -346,7 +346,6 @@ mod tests {
                 vec![
                     "create",
                     "create-size",
-                    "data",
                     "durability",
                     "file",
                     "format",

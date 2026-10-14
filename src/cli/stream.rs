@@ -326,7 +326,6 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                             color_mode,
                             output_mode: context_output_mode,
                             input: InputMode::Auto,
-                            contents: false,
                             stop: Some(&stop_for_send),
                         },
                         false,
@@ -390,7 +389,6 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                             color_mode,
                             output_mode: context_output_mode,
                             input: InputMode::Auto,
-                            contents: false,
                             stop: Some(&stop_for_send),
                         },
                         false,
@@ -437,7 +435,6 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
                         &send_pool,
                         &[],
                         InputMode::Auto,
-                        false,
                         Some(&stop_for_send),
                     ))
                 };

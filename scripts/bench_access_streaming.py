@@ -35,7 +35,7 @@ def main():
                 payload = "\n".join(json.dumps(item, separators=(",", ":")) for item in data) + "\n"
                 command = [args.binary, "--dir", args.pool_dir]
                 started = time.perf_counter_ns()
-                append = subprocess.run([*command, "feed", refs[lane], "--data", "--format", "json"], input=payload,
+                append = subprocess.run([*command, "feed", refs[lane], "--format", "json"], input=payload,
                     capture_output=True, text=True, encoding="utf-8", check=True)
                 append_ns = time.perf_counter_ns() - started
                 messages = [json.loads(line) for line in append.stdout.splitlines()]

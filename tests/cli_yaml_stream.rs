@@ -33,7 +33,7 @@ fn yaml_follow_delivers_complete_documents_while_still_running() {
         );
     };
     run(&["pool", "create", "stream"]);
-    run(&["feed", "stream", "--data", "{\"number\":1}"]);
+    run(&["feed", "stream", "{\"number\":1}"]);
     let child = cmd()
         .arg("--dir")
         .arg(temp.path())
@@ -69,7 +69,7 @@ fn yaml_follow_delivers_complete_documents_while_still_running() {
     });
     for number in [1, 2] {
         if number == 2 {
-            run(&["feed", "stream", "--data", "{\"number\":2}"]);
+            run(&["feed", "stream", "{\"number\":2}"]);
         }
         let document = receive
             .recv_timeout(Duration::from_secs(5))

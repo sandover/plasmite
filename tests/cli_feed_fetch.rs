@@ -62,7 +62,6 @@ fn create_feed_fetch_follow_flow() {
             pool_dir.to_str().unwrap(),
             "feed",
             "testpool",
-            "--data",
             "{\"x\":1}",
             "--tag",
             "ping",
@@ -140,7 +139,6 @@ fn feed_stdout_contains_the_complete_message() {
             pool_dir.to_str().unwrap(),
             "feed",
             "testpool",
-            "--data",
             "{\"x\":1}",
         ])
         .args(["--format", "json"])
@@ -179,7 +177,6 @@ fn emit_short_file_flag_reads_single_json_file() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "-f",
             input_file.to_str().unwrap(),
         ])
@@ -231,7 +228,6 @@ fn feed_file_reads_multiple_json_records() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "--input-format",
             "json",
             "--file",
@@ -298,7 +294,6 @@ fn feed_file_auto_handles_multiline_json_data() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "--file",
             input_file.to_str().unwrap(),
         ])
@@ -356,7 +351,6 @@ fn emit_retries_when_pool_is_busy() {
                 &pool_dir_str,
                 "feed",
                 "busy",
-                "--data",
                 "{\"x\":1}",
                 "--retry",
                 "5",
@@ -401,13 +395,7 @@ fn feed_auto_handles_pretty_json_data() {
     assert!(create.status.success());
 
     let mut emit_out = cmd()
-        .args([
-            "--dir",
-            pool_dir.to_str().unwrap(),
-            "feed",
-            "demo",
-            "--data",
-        ])
+        .args(["--dir", pool_dir.to_str().unwrap(), "feed", "demo"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .args(["--format", "json"])
@@ -453,7 +441,6 @@ fn feed_file_tty_emits_complete_json_messages() {
         pool_dir.to_str().unwrap(),
         "feed",
         "demo",
-        "--data",
         "--file",
         input_file.to_str().unwrap(),
         "--input-format",
@@ -496,7 +483,6 @@ fn feed_json_format_accepts_pretty_json_data() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "--input-format",
             "json",
         ])
@@ -530,7 +516,6 @@ fn emit_create_flag_creates_missing_pool() {
             pool_dir.to_str().unwrap(),
             "feed",
             "autopool",
-            "--data",
             "{\"x\":1}",
             "--create",
         ])
@@ -556,7 +541,6 @@ fn emit_missing_pool_hint_suggests_create() {
             pool_dir.to_str().unwrap(),
             "feed",
             "missing",
-            "--data",
             "{\"x\":1}",
         ])
         .args(["--format", "json"])
@@ -653,7 +637,6 @@ fn emit_remote_url_rejects_api_shaped_path() {
         .args([
             "feed",
             "http://localhost:9170/v0/pools/demo/append",
-            "--data",
             "{\"x\":1}",
         ])
         .args(["--format", "json"])
@@ -672,7 +655,7 @@ fn emit_remote_url_rejects_api_shaped_path() {
 #[test]
 fn emit_remote_url_rejects_trailing_slash() {
     let output = cmd()
-        .args(["feed", "http://localhost:9170/demo/", "--data", "{\"x\":1}"])
+        .args(["feed", "http://localhost:9170/demo/", "{\"x\":1}"])
         .args(["--format", "json"])
         .output()
         .expect("feed");
@@ -692,7 +675,6 @@ fn emit_remote_url_rejects_create_flag() {
         .args([
             "feed",
             "http://localhost:9170/demo",
-            "--data",
             "--create",
             "{\"x\":1}",
         ])
@@ -727,7 +709,6 @@ fn emit_remote_create_rejected() {
         .args([
             "feed",
             "http://localhost:9170/demo",
-            "--data",
             "--create",
             "{\"x\":1}",
         ])
@@ -769,7 +750,6 @@ fn feed_streams_json_values_from_stdin() {
             pool_dir.to_str().unwrap(),
             "feed",
             "testpool",
-            "--data",
             "--input-format",
             "json",
         ])

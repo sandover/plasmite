@@ -127,7 +127,7 @@ pls --dir ./pools fetch channel 1 --format yaml | pls --dir ./pools feed copy
 
 `--create-size` creates a missing pool; it never resizes or recreates an existing pool. `follow --no-follow` reads all retained messages and exits.
 
-YAML input and output use the same values as JSON. `--format yaml` selects YAML output; marked YAML input is detected automatically. `--data` remains available to treat any object as application data.
+YAML input and output use the same values as JSON. `--format yaml` selects YAML output; marked YAML input is detected automatically.
 
 The APIs work the same way as the CLI.
 

@@ -378,7 +378,7 @@ jobs:
           Set-Content -Path $payloadPath -Value '{"ci":"windows-smoke"}' -NoNewline
           try {
             & $exe --dir $dir pool create $pool
-            & $exe --dir $dir feed $pool --data -f $payloadPath
+            & $exe --dir $dir feed $pool -f $payloadPath
             $out = & $exe --dir $dir follow $pool --format json --tail 1 --one --timeout 2s
             if (-not ($out -match '"ci":"windows-smoke"')) {
               throw "Roundtrip payload marker missing from follow output."

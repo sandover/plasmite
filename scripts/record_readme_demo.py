@@ -90,7 +90,7 @@ def main():
             enter("pls version", 0.6)
             enter("# Alice creates a channel (aka a pool)", 0.4)
             enter("pls --dir ./pools pool create channel", 0.8)
-            enter("echo '{\"from\":\"A\",\"msg\":\"hello world\"}' | pls --dir ./pools feed channel --data", 0.8)
+            enter("echo '{\"from\":\"A\",\"msg\":\"hello world\"}' | pls --dir ./pools feed channel", 0.8)
             enter("# Alice's writer has exited. Bob starts watching.", 0.8)
             enter("pls --dir ./pools follow channel --tail 1 --format json", 2.5)
             # Interrupt only this recording's foreground command, then restore the prompt.

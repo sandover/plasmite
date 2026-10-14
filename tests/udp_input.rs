@@ -410,7 +410,6 @@ fn cli_lite3_fixture(home: &TestHome, pool_dir: &Path) -> TestResult<Vec<u8>> {
         .args([
             "feed",
             "lite3-source",
-            "--data",
             r#"{"fixture":"udp","sample":41}"#,
             "--tag",
             "fixture",
