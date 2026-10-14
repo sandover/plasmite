@@ -515,7 +515,8 @@ jobs:
           \`\`\`
           BODY
           # Trim leading whitespace from heredoc indentation.
-          sed -i 's/^          //' /tmp/release-body.md
+          sed 's/^          //' /tmp/release-body.md > /tmp/release-body-clean.md
+          mv /tmp/release-body-clean.md /tmp/release-body.md
           if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > /tmp/existing-release.json 2> /tmp/release-lookup-error; then
             jq -e --arg tag "$TAG" '.tag_name == $tag and .draft == false and .prerelease == false' /tmp/existing-release.json >/dev/null
             echo "Existing release: preserve its notes and assets; verify below."

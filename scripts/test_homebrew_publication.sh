@@ -22,7 +22,7 @@ done < <(jq -r '.targets[]|select(.channels.github_sdk!=null)|.sdk_platform' "$P
   echo end
 } > "$scratch/original.rb"
 cp "$scratch/build/"* "$scratch/runtime/release-inputs/dist/"
-echo 'Fixture notes' > "$scratch/runtime/changelog-section.md"
+echo '          Fixture notes' > "$scratch/runtime/changelog-section.md"
 cat > "$scratch/bin/curl" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -106,12 +106,15 @@ cmp "$scratch/original.rb" "$scratch/git-tap/Formula/plasmite.rb"
 reset
 export SCENARIO=auth
 if (cd "$scratch/runtime" && bash "$scratch/create.sh") > "$scratch/output" 2>&1; then exit 1; fi
+grep -Fqx 'gh api repos/sandover/plasmite/releases/tags/v9.9.9' "$TRACE"
+grep -Fq 'HTTP 403: Forbidden' "$scratch/output"
 ! grep -q 'gh release create' "$TRACE"
 reject_update
 # Normal publication makes verified downloads available before the tap advances.
 reset
 export SCENARIO=absent
 (cd "$scratch/runtime" && bash "$scratch/create.sh") >/dev/null
+grep -qx 'Fixture notes' "$scratch/runtime/release-body.md"
 "$root/scripts/verify_public_release_assets.sh" "$TAG" "$scratch/build/sha256sums.txt" github_sdk >/dev/null
 update >/dev/null
 cp "$scratch/tap/Formula/plasmite.rb" "$scratch/aligned.rb"
