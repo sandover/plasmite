@@ -106,6 +106,8 @@ cmp "$scratch/original.rb" "$scratch/git-tap/Formula/plasmite.rb"
 reset
 export SCENARIO=auth
 if (cd "$scratch/runtime" && bash "$scratch/create.sh") > "$scratch/output" 2>&1; then exit 1; fi
+grep -Fqx 'gh api repos/sandover/plasmite/releases/tags/v9.9.9' "$TRACE"
+grep -Fq 'HTTP 403: Forbidden' "$scratch/output"
 ! grep -q 'gh release create' "$TRACE"
 reject_update
 # Normal publication makes verified downloads available before the tap advances.
