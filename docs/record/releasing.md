@@ -35,8 +35,9 @@ registry publication. CI verifies the tap; it does not push tap changes.
 
 The maintainer updates the tap locally for a live release. Registries publish in
 parallel after that gate; the GitHub Release is created only after all succeed.
-This order creates a temporary Homebrew download gap until release assets are
-public. If publishing stalls, restore the previous formula until ready to retry.
+**Remaining publication-order issue:** this order creates a Homebrew download
+gap until release assets are public. The runbook documents recovery; it does not
+close that gap. If publishing stalls, restore the previous formula until retry.
 
 Rehearse for dry runs, changes to release machinery, or credential recovery.
 Rehearsal verifies a temporary expected formula without changing the public tap,
@@ -53,7 +54,11 @@ partial publication as complete.
 Release completion requires fresh install/runtime evidence from all four channels:
 
 - Linux: npm and crates.io, plus PyPI when the released manifest declares Linux wheels.
-- macOS: PyPI and Homebrew. The Python check uses a published CPython 3.11 wheel.
+- macOS: PyPI and Homebrew, using a wheel supported by the selected release.
+
+Select Python from the release's published wheel tags and `Requires-Python`.
+The workflow tests CPython 3.11 to cover both 1.2.1's `cp311` wheels and newer
+`py3-none` wheels; that test interpreter is not the package's support policy.
 
 `post-release-smoke.yml` runs these checks. The local script handles registry
 channels only; Homebrew is a separate macOS check. Retries are bounded and cover

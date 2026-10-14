@@ -58,7 +58,8 @@ Honor any requested review or publication hold before remote mutations.
    any registry publication. It uses npm trusted publishing and the
    `PYPI_API_TOKEN` / `CARGO_REGISTRY_TOKEN` secrets. It publishes crates.io, npm
    and PyPI, then attaches SDKs and checksums to the GitHub Release.
-   The current order briefly points the tap at assets not yet public. If publishing
+   **Remaining publication-order issue:** the tap points at assets not yet public.
+   This runbook documents recovery; it does not close that download gap. If publishing
    stalls before assets exist, restore the prior formula with a normal commit;
    realign it before retrying. Do not leave users with broken download URLs.
 
@@ -95,8 +96,11 @@ run IDs**, not the newest workflow run. Recheck the remote tag and exact-SHA CI.
    This checks published installs, not just build artifacts.
 4. For local verification, the script accepts only `npm,pypi,crates`:
    `bash scripts/post_release_delivery_smoke.sh --version <version> --channels npm,pypi,crates`.
-   Run PyPI on a wheel-supported host (currently CPython 3.11 macOS/Windows), or
-   with the documented system SDK. Linux without that SDK should use `npm,crates`.
+   Select a host/interpreter supported by that release's published wheel tags and
+   `Requires-Python`, or use its documented system SDK. The workflow samples
+   CPython 3.11 for compatibility with 1.2.1's `cp311` wheels and newer `py3-none`
+   wheels; it does not define Python support. Check the released manifest before
+   selecting Linux PyPI; without supported wheels or an SDK, use `npm,crates`.
    Homebrew is separate: install the formula on macOS and require the exact version.
 5. Archive results and exact-SHA CI evidence. A missing or failed required channel
    blocks completion. Clean generated builds/successful-test scratch with
