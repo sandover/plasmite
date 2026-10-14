@@ -193,7 +193,6 @@ fn feed_writes_complete_messages_and_explicit_json_ignores_color() {
         command(temp.path())
             .arg("feed")
             .arg(&pool)
-            .arg("--data")
             .arg("{\"value\":1}")
             .output()
             .unwrap(),
@@ -207,7 +206,7 @@ fn feed_writes_complete_messages_and_explicit_json_ignores_color() {
         command(temp.path())
             .args(["--color", "always", "feed"])
             .arg(&pool)
-            .args(["--data", "{\"value\":2}", "--format", "json"])
+            .args(["{\"value\":2}", "--format", "json"])
             .output()
             .unwrap(),
     );
@@ -313,7 +312,7 @@ fn removed_errors_skip_option_is_rejected() {
     let output = command(temp.path())
         .args(["feed", pool.to_str().unwrap(), "--file"])
         .arg(&data)
-        .args(["--data", "--errors", "skip"])
+        .args(["--errors", "skip"])
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
@@ -387,7 +386,7 @@ fn pretty_and_json_feed_messages_preserve_literal_tag_data() {
         command(temp.path())
             .arg("feed")
             .arg(&pool)
-            .args(["--data", "{}", "--tag", label, "--format", "pretty"])
+            .args(["{}", "--tag", label, "--format", "pretty"])
             .output()
             .unwrap(),
     );
@@ -400,7 +399,7 @@ fn pretty_and_json_feed_messages_preserve_literal_tag_data() {
         command(temp.path())
             .arg("feed")
             .arg(&pool)
-            .args(["--data", "{}", "--tag", label, "--format", "json"])
+            .args(["{}", "--tag", label, "--format", "json"])
             .output()
             .unwrap(),
     );

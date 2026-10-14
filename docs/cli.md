@@ -220,9 +220,10 @@ string, `meta.tags` a list of strings, and `data` an object. Invalid reserved
 messages fail. Partial envelopes, extra fields, and a field named `data` alone
 remain application data.
 
-`--data` forces application-data interpretation and keeps existing scripts
-working. `--tag` adds tags to application objects; complete messages supply their
-own tags and reject `--tag`. Non-object application data is rejected.
+`--tag` adds tags to application objects; complete messages supply their own
+tags and reject `--tag`. Non-object application data is rejected. `--data` has
+been removed; delete it from existing commands. There is no override for the
+reserved message shape.
 
 
 For local `feed` and `tap`, `--create-size SIZE` creates a missing pool without

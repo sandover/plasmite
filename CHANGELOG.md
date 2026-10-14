@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+Remove the CLI `--data` flag. `feed` recognizes ordinary JSON/YAML objects and
+complete Plasmite messages automatically. Delete the flag from existing scripts;
+the full message shape remains reserved, with no application-data override.
+
 Linux x86_64 packages target glibc 2.35, adding prebuilt support for Ubuntu 22.04
 and Debian 12. Python wheels bundle the CLI and native library on Linux and use
 Python-version-independent tags for the ctypes bindings.
