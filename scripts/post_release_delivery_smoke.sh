@@ -22,7 +22,10 @@ Options:
 Channels:
   npm       npm + pnpm install/runtime check (pnpm best-effort when unavailable)
   pypi      uv install/runtime check with Python 3.11
-  crates    cargo install/runtime check (deep lane; slower)
+  crates    cargo install/runtime check (builds from source; slower)
+
+PyPI checks need a published wheel for this host, or an installed system SDK.
+Homebrew is checked separately by the workflow's macOS job.
 
 Environment:
   PLASMITE_KEEP_SCRATCH=1      Preserve scratch workdirs/logs under .scratch/

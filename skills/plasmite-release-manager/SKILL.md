@@ -5,138 +5,99 @@ description: "Carefully run Plasmite releases end-to-end with fail-closed pre-re
 
 # Plasmite Release Manager
 
-Authoritative runbook for Plasmite releases. Keep execution fail-closed and aligned with workflow behavior.
+Use this runbook for preparation, rehearsal, publication and recovery. Record the
+release target (`vX.Y.Z`), mode (`dry-run` or `live`), agent and previous release tag.
+Honor any requested review or publication hold before remote mutations.
 
-## Required Inputs
+## Prepare the exact candidate
 
-- `release_target` (for example `v0.4.0`)
-- `mode` (`dry-run` or `live`)
-- `agent_id` (`model@host`)
+1. Check `gh auth status` and access to GitHub Actions artifacts and registries.
+   Keep a clean maintainer checkout of `../homebrew-tap` available.
+2. Inspect the complete diff from the previous release. Finalize the versioned
+   changelog with the actual release date and a fresh empty `[Unreleased]` heading.
+   Review the complete release body: the publish workflow appends install guidance.
+3. Run `bash scripts/bump_version.sh <version>`, then
+   `bash scripts/check-version-alignment.sh`.
+4. Initialize or reopen evidence:
+   `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`.
+5. Run `just release-gate` and `just audit` (the latter refreshes the advisory DB).
+   For hot-path/storage changes, also run
+   `bash skills/plasmite-release-manager/scripts/compare_local_benchmarks.sh --base-tag <base_tag> --runs 3`.
+   Failed required checks block progression. Do not duplicate the canonical gate's
+   individual test commands or benchmark unchanged code.
+6. Commit and push the reviewed candidate, including versions and changelog.
+   Require a clean working tree and confirm the intended remote ref names this SHA.
+   Set `release_sha="$(git rev-parse HEAD)"`, then run:
+   `gh run list --workflow ci.yml --commit "$release_sha" --limit 5 --json headSha,status,conclusion,url`.
+   Require `headSha == release_sha`, `status == completed`, `conclusion == success`.
+   Changes after this point require a new candidate and new exact-SHA CI.
 
-## Release Invariants (Non-Negotiable)
+## Build, rehearse and publish
 
-1. Publish only from a successful `release` build run with matching release metadata.
-2. `release-publish` must gate registry publish on Homebrew tap sync/alignment.
-3. Release remains fail-closed across channels (no partial success treated as done).
-4. Registry/package versions must equal `release_target`.
-5. npm trusted publishing must authorize `sandover/plasmite` and
-   `release-publish.yml`; secrets must exist for `PYPI_API_TOKEN` and
-   `CARGO_REGISTRY_TOKEN`.
-6. Homebrew tap is updated locally (not via CI secret). The maintainer pushes the formula from their `../homebrew-tap` checkout; the `sync-homebrew-tap` CI job verifies alignment.
-7. Tooling pins in workflows are policy:
-   - `RELEASE_RUST_TOOLCHAIN=1.88.0`
-8. Do not release from a commit with red or missing `ci.yml`; the release commit must have a completed/successful CI run.
+1. Tag the green candidate: `git tag <release_target> "$release_sha"`, then
+   `git push origin <release_target>`. Never move an existing release tag.
+   The tag starts `release.yml`; all matrix jobs must pass. Record its run ID/URL.
+   Release builds use Rust 1.88.0 and the targets in `release/targets.json`.
+2. Verify provenance before using artifacts:
+   `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <build_run_id> --expect-tag <release_target>`.
+   Require the metadata's source SHA to equal the reviewed candidate. If downloads
+   are unavailable, use another authorized runtime; do not skip verification.
+3. Rehearse for a dry run, release/packaging/target/publishing changes, or changed
+   registry credentials:
+   `gh workflow run release-publish.yml -f release_tag=<release_target> -f rehearsal=true`.
+   Require success. Rehearsal checks a temporary expected formula; it does not
+   require pushing the public Homebrew tap. **A dry run stops here.**
+   An unchanged normal live release may proceed directly to step 4.
+4. For an authorized live release, prepare and review the tap formula:
+   `bash scripts/update_homebrew_formula.sh <release_target> ../homebrew-tap --build-run-id <build_run_id>`.
+   Commit only `Formula/plasmite.rb` as `plasmite: update to <version>` and push.
+   Immediately dispatch:
+   `gh workflow run release-publish.yml -f release_tag=<release_target> -f rehearsal=false`.
+   Record the publish run ID/URL and require every job to succeed.
+5. The workflow verifies tag/build provenance and tap version/URLs/checksums before
+   any registry publication. It uses npm trusted publishing and the
+   `PYPI_API_TOKEN` / `CARGO_REGISTRY_TOKEN` secrets. It publishes crates.io, npm
+   and PyPI, then attaches SDKs and checksums to the GitHub Release.
+   The current order briefly points the tap at assets not yet public. If publishing
+   stalls before assets exist, restore the prior formula with a normal commit;
+   realign it before retrying. Do not leave users with broken download URLs.
 
-## Pre-Release Setup
+## Recover without guessing
 
-1. Confirm runtime/auth:
-   - `gh auth status`
-2. Confirm version alignment:
-   - `bash scripts/check-version-alignment.sh`
-3. Finalize the changelog:
-   - Rename `## [Unreleased]` to `## [<version>] - <YYYY-MM-DD>` in `CHANGELOG.md`.
-   - Review that the section accurately covers all notable changes since the previous release (check `git log <base_tag>..HEAD --oneline`).
-   - Add a fresh empty `## [Unreleased]` heading above the new section.
-   - The changelog must be committed and pushed before tagging. The `release` job extracts it for GitHub Release notes.
-4. Bump version:
-   - `bash scripts/bump_version.sh <version>`
-5. Initialize/reopen release evidence (derives `base_tag`):
-   - `bash skills/plasmite-release-manager/scripts/init_release_evidence.sh --release-target <vX.Y.Z> --mode <dry-run|live> --agent <model@host>`
-6. Confirm the release commit is green in `ci.yml` before tagging/publishing:
-   - `release_sha="$(git rev-parse HEAD)"`
-   - `gh run list --workflow ci.yml --commit "$release_sha" --limit 5 --json headSha,status,conclusion,url`
-   - Require one run where `headSha == release_sha`, `status == completed`, and `conclusion == success`.
+1. Stop progression and inspect the recorded run:
+   `gh run view <run_id> --json url,jobs`, then `gh run view <run_id> --log-failed`.
+   A generic HTTP 403 is an authorization error, not proof of publication.
+2. Check the exact version on **each** registry. Before accepting an existing
+   package, compare npm/PyPI artifact hashes with the selected build and establish
+   Rust source provenance. Existing versions are immutable; do not overwrite them.
+3. Correct the specific failure (credentials, tap alignment or delivery), then
+   rerun the same publish target. After credential recovery, rehearse first.
+   Prefer `release_tag`; explicit `build_run_id` is for a verified recovery run.
+   The publish workflow handles already-published versions; do not manually create
+   a GitHub Release merely because one registry says a version exists.
+4. Record unresolved blockers using
+   `bash skills/plasmite-release-manager/scripts/file_release_blocker_with_evidence.sh --release-target <release_target> --check "<gate>" --title "<title>" --summary "<summary>" --run-id <run_id> --agent <model@host>`.
+   Partial publication is not a completed release.
 
-## Required QA Gates
+On resume, reopen the evidence and use its **target, source SHA and build/publish
+run IDs**, not the newest workflow run. Recheck the remote tag and exact-SHA CI.
 
-Run before any publish dispatch:
+## Verify public delivery
 
-- Changelog: verify `CHANGELOG.md` has a `## [<version>] - <date>` section (not `[Unreleased]`) and the version matches the release target.
-- Canonical gate: `just release-gate`
-  - This is the single source of truth for required deterministic pre-release checks.
-  - Includes `bindings-test` (which runs `node_pack_smoke.sh` and `node_remote_only_smoke.sh`) plus `python_wheel_smoke.sh`.
-  - Keep this recipe aligned with release policy instead of duplicating command lists in multiple docs.
-
-Run conditional gates when relevant:
-
-- dependency/security changes: `cargo audit --db .scratch/advisory-db --no-fetch --ignore yanked`
-- hot-path/storage changes: `bash skills/plasmite-release-manager/scripts/compare_local_benchmarks.sh --base-tag <base_tag> --runs 3`
-- server/UI/auth changes: `cargo test -q --test remote_integration`
-
-Any failed required gate blocks release progression.
-
-## Build And Publish Procedure
-
-1. Ensure release source is pushed and tag exists/planned.
-2. Run `release.yml` (tag push or manual dispatch with `tag`). Wait for all matrix jobs to succeed.
-3. Update the Homebrew formula locally and push:
-   - `bash scripts/update_homebrew_formula.sh <release_target> ../homebrew-tap --build-run-id <build_run_id>`
-   - `cd ../homebrew-tap && git add Formula/plasmite.rb && git commit -m "plasmite: update to <version>" && git push`
-4. Decide whether a rehearsal is required by inspecting the complete release
-   diff from `base_tag` through the candidate. Run a rehearsal when:
-   - `mode` is `dry-run`;
-   - release workflows, target selection, packaging, publishing, registry
-     authentication, or Homebrew alignment behavior changed; or
-   - registry credentials were added, rotated, or recovered.
-   A normal live release with unchanged release machinery proceeds directly to
-   step 5. Do not maintain a second path inventory solely for this decision.
-   When a rehearsal is required, wait for it to succeed:
-   - `gh workflow run release-publish.yml -f release_tag=<release_target> -f rehearsal=true`
-5. In `live` mode, run live publish:
-   - `gh workflow run release-publish.yml -f release_tag=<release_target> -f rehearsal=false`
-
-Dispatch policy:
-
-- Prefer `release_tag` dispatch for normal operation.
-- A dry run ends after a successful rehearsal and does not dispatch live
-  publishing.
-- Use explicit `build_run_id` only for incident recovery reruns.
-- Optional explicit provenance proof:
-  - `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <build_run_id> --expect-tag <release_target>`
-
-## Failure Handling
-
-On any release workflow failure:
-
-1. Stop progression.
-2. Collect evidence:
-   - `gh run view <run-id> --json url,jobs --jq '{url,jobs:[.jobs[]|select(.conclusion=="failure")|{name,url:.url}]}'`
-   - `gh run view <run-id> --log-failed`
-3. If `sync-homebrew-tap` fails: update and push the formula from the local `../homebrew-tap` checkout (see Build And Publish Procedure step 3), then rerun.
-4. If registries fail with "already published" (npm 403, crates.io "already exists"): the packages are live. Create the GitHub Release manually with `gh release create` using artifacts downloaded from the build run (`gh run download <build_run_id>`).
-5. If incident-class failure, file a blocker:
-   - `bash skills/plasmite-release-manager/scripts/file_release_blocker_with_evidence.sh --release-target <release_target> --check "<gate>" --title "<title>" --summary "<summary>" --run-id <run-id> --agent <model@host>`
-
-## Resume Checkpoint
-
-If interrupted:
-
-```bash
-git status --short --branch
-gh run list --workflow release --limit 1 --json databaseId,conclusion
-gh run list --workflow release-publish --limit 1 --json databaseId,conclusion
-```
-
-## Post-Release Verification
-
-Mandatory checks:
-
-1. GitHub release + assets:
-   - `gh release view <release_target>`
-2. crates.io:
-   - `cargo info plasmite`
-3. npm:
-   - `npm view plasmite version`
-4. PyPI:
-   - `curl -sS https://pypi.org/pypi/plasmite/json | jq -r '.info.version'`
-5. Homebrew formula:
-   - `gh api repos/sandover/homebrew-tap/contents/Formula/plasmite.rb -H "Accept: application/vnd.github.raw"`
-6. CI status for the release commit:
-   - `release_sha="$(git rev-list -n 1 <release_target>)"`
-   - `gh run list --workflow ci.yml --commit "$release_sha" --limit 5 --json headSha,status,conclusion,url`
-   - Require one run where `headSha == release_sha`, `status == completed`, and `conclusion == success`.
-7. Delivery smoke script (required for live releases):
-   - fast lane (default): `bash scripts/post_release_delivery_smoke.sh --version <X.Y.Z>`
-   - deep lane (slower, includes cargo-install validation): `bash scripts/post_release_delivery_smoke.sh --version <X.Y.Z> --channels npm,pypi,crates,homebrew`
-   - CI option (ubuntu-safe default): `gh workflow run post-release-smoke.yml -f release_version=<X.Y.Z>`
-   - Today that workflow defaults to `npm,homebrew`; use the local smoke script on a wheel-supporting host for PyPI runtime validation.
+1. Inspect `gh release view <release_target>`: reviewed notes, all manifest SDK
+   assets and `sha256sums.txt`. Verify downloaded SDK bytes against those checksums.
+2. Check exact registry versions, not only latest:
+   `cargo info plasmite@<version>`, `npm view plasmite@<version> version dist.integrity`,
+   and `curl -fsS https://pypi.org/pypi/plasmite/<version>/json`.
+3. Dispatch `gh workflow run post-release-smoke.yml -f release_version=<version>`.
+   Require Linux npm/crates (also PyPI when the release declares Linux wheels),
+   macOS PyPI, and macOS Homebrew jobs to pass.
+   This checks published installs, not just build artifacts.
+4. For local verification, the script accepts only `npm,pypi,crates`:
+   `bash scripts/post_release_delivery_smoke.sh --version <version> --channels npm,pypi,crates`.
+   Run PyPI on a wheel-supported host (currently CPython 3.11 macOS/Windows), or
+   with the documented system SDK. Linux without that SDK should use `npm,crates`.
+   Homebrew is separate: install the formula on macOS and require the exact version.
+5. Archive results and exact-SHA CI evidence. A missing or failed required channel
+   blocks completion. Clean generated builds/successful-test scratch with
+   `cargo clean`, preserving source, release evidence and active Ergo state.

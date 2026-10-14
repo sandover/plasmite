@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       channels:
-        description: "Optional comma-separated registry channels; blank derives manifest defaults"
+        description: "Optional Linux registry channels; blank checks channels supported by the release"
         required: false
         default: ""
         type: string
@@ -26,6 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.release_version }}
 
       - uses: actions/setup-node@v4
         with:
@@ -33,8 +35,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-
+          python-version: "3.11"
       - uses: astral-sh/setup-uv@v5
 
       - uses: dtolnay/rust-toolchain@stable
@@ -44,12 +45,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PLASMITE_KEEP_SCRATCH: "1"
+          VERSION: ${{ inputs.release_version }}
+          CHANNELS: ${{ inputs.channels }}
+          MAX_WAIT_MINUTES: ${{ inputs.max_wait_minutes }}
         run: |
           set -euo pipefail
+          channels="${CHANNELS:-npm,crates}"
+          if [[ -z "$CHANNELS" ]] && jq -e '.targets[] | select(.rust_target == "x86_64-unknown-linux-gnu" and .channels.pypi == "official")' release/targets.json >/dev/null; then
+            channels="$channels,pypi"
+          fi
           bash scripts/post_release_delivery_smoke.sh \
-            --version "${{ inputs.release_version }}" \
-            --channels "${{ inputs.channels }}" \
-            --max-wait-minutes "${{ inputs.max_wait_minutes }}"
+            --version "$VERSION" \
+            --channels "$channels" \
+            --max-wait-minutes "$MAX_WAIT_MINUTES"
 
       - name: Upload smoke diagnostics
         if: always()
@@ -58,6 +66,26 @@ jobs:
           name: post-release-smoke-${{ github.run_id }}
           path: .scratch/post-release-smoke-*
           if-no-files-found: ignore
+
+  pypi-smoke:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.release_version }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v5
+      - name: Install and run the published Python wheel
+        shell: bash
+        env:
+          VERSION: ${{ inputs.release_version }}
+          MAX_WAIT_MINUTES: ${{ inputs.max_wait_minutes }}
+        run: |
+          bash scripts/post_release_delivery_smoke.sh \
+            --version "$VERSION" --channels pypi \
+            --max-wait-minutes "$MAX_WAIT_MINUTES"
 
   homebrew-smoke:
     runs-on: macos-latest
