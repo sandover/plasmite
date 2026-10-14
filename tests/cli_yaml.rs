@@ -110,7 +110,7 @@ fn fetch_yaml_matches_json_for_local_and_remote_edge_values() {
     let feed = cmd()
         .arg("--dir")
         .arg(&pool_dir)
-        .args(["feed", "edge-values", "--data"])
+        .args(["feed", "edge-values"])
         .arg(input)
         .args(["--format", "yaml", "--color", "always"])
         .output()
@@ -194,7 +194,7 @@ fn fetched_yaml_message_feeds_without_an_input_format_override() {
     let appended = cli_at(
         &pool_dir,
         &[
-            "feed", "source", "--data", &input, "--tag", "copy", "--format", "json",
+            "feed", "source", &input, "--tag", "copy", "--format", "json",
         ],
     );
     let source_message = json_report(&appended);
@@ -269,7 +269,7 @@ fn finite_follow_emits_marked_yaml_documents() {
         let output = cmd()
             .arg("--dir")
             .arg(&pool_dir)
-            .args(["feed", "history", "--data"])
+            .args(["feed", "history"])
             .arg(format!("{{\"value\":{value}}}"))
             .output()
             .expect("feed history value");
@@ -313,7 +313,6 @@ fn feed_accepts_explicit_yaml_data_and_writes_complete_messages() {
         .args([
             "feed",
             "json-input",
-            "--data",
             "{\"value\":1}",
             "--format",
             "yaml",
@@ -330,7 +329,6 @@ fn feed_accepts_explicit_yaml_data_and_writes_complete_messages() {
         .args([
             "feed",
             "json-input",
-            "--data",
             "--input-format",
             "yaml",
             "value: 2",
@@ -373,15 +371,7 @@ fn yaml_parse_errors_and_removed_formats_fail_without_mutation() {
     let invalid_feed_format = cmd()
         .arg("--dir")
         .arg(&pool_dir)
-        .args([
-            "feed",
-            "not-created",
-            "--create",
-            "--data",
-            "{}",
-            "--format",
-            "jsonl",
-        ])
+        .args(["feed", "not-created", "--create", "{}", "--format", "jsonl"])
         .output()
         .expect("unsupported feed format");
     assert_eq!(invalid_feed_format.status.code(), Some(2));

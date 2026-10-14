@@ -271,13 +271,7 @@ fn unsupported_udp_commands_reject_without_server_work() -> Result<(), Box<dyn s
         vec!["pool", "info", "udp://127.0.0.1:9701/sensors"],
         vec!["tap", "udp://127.0.0.1:9701/sensors", "--", "echo", "never"],
         vec!["access", "connect", "udp://127.0.0.1:9701/sensors"],
-        vec![
-            "feed",
-            "udp://127.0.0.1:9701/sensors",
-            "--create",
-            "--data",
-            "{}",
-        ],
+        vec!["feed", "udp://127.0.0.1:9701/sensors", "--create", "{}"],
         vec![
             "follow",
             "udp://127.0.0.1:9701/sensors",

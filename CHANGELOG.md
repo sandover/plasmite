@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+Remove the CLI `--data` flag. `feed` recognizes ordinary JSON/YAML objects and
+complete Plasmite messages automatically. Delete the flag from existing scripts;
+the full message shape remains reserved, with no application-data override.
+
 ## [1.2.1] - 2026-10-14
 
 `feed` now accepts ordinary JSON and YAML objects without `--data`, while still accepting messages piped from other Plasmite commands. Tags survive the trip. Existing `--data` commands continue to work.

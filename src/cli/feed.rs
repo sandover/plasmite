@@ -21,7 +21,6 @@ pub(super) struct FeedArgs {
     pub(super) pool: String,
     pub(super) tags: Vec<String>,
     pub(super) data: Option<String>,
-    pub(super) contents: bool,
     pub(super) file: Option<String>,
     pub(super) durability: String,
     pub(super) create: bool,
@@ -51,11 +50,11 @@ pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandRes
             .with_hint("Use --format lite3 for feed output."));
     }
     if matches!(args.input, InputFormat::Lite3 | InputFormat::Lite3Raw)
-        && (args.contents || !args.tags.is_empty() || args.data.is_some())
+        && (!args.tags.is_empty() || args.data.is_some())
     {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("binary input requires a file or pipe of complete messages")
-            .with_hint("Remove --data, --tag, and the inline argument for Lite3 input."));
+            .with_hint("Remove --tag and the inline argument for Lite3 input."));
     }
     let durability = parse_durability(&args.durability)?;
     if matches!(target, PoolTarget::Udp { .. })
@@ -118,7 +117,6 @@ pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandRes
                     color_mode: context.color_mode(),
                     output_mode: context.output_mode(),
                     input: args.input,
-                    contents: args.contents,
                     stop: None,
                 },
                 true,
@@ -142,7 +140,6 @@ pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandRes
                     color_mode: context.color_mode(),
                     output_mode: context.output_mode(),
                     input: args.input,
-                    contents: args.contents,
                     stop: None,
                 },
                 true,
@@ -164,12 +161,7 @@ pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandRes
                     details: serde_json::Map::new(),
                 }, context.color_mode(), context.output_mode());
             super::feed_support::ingest_from_stdin_udp(
-                reader,
-                &pool,
-                &args.tags,
-                args.input,
-                args.contents,
-                None,
+                reader, &pool, &args.tags, args.input, None,
             )?;
         }
     }

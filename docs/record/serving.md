@@ -74,7 +74,7 @@ access, follow [the browser setup steps](#open-pools-in-a-browser).
 ### 4. Recipient: send and read a message
 
 ```console
-echo '{"text":"hello from Alex"}' | plasmite feed https://pools.example.net:9743/events --data
+echo '{"text":"hello from Alex"}' | plasmite feed https://pools.example.net:9743/events
 plasmite follow https://pools.example.net:9743/events --tail 1
 ```
 
@@ -459,7 +459,7 @@ hidden prompt, then check the connection and send/read a message:
 ```console
 plasmite access connect https://node.tail123.ts.net:9743
 plasmite access status https://node.tail123.ts.net:9743
-echo '{"text":"hello over the tailnet"}' | plasmite feed https://node.tail123.ts.net:9743/events --data
+echo '{"text":"hello over the tailnet"}' | plasmite feed https://node.tail123.ts.net:9743/events
 plasmite follow https://node.tail123.ts.net:9743/events --tail 1 --no-follow --format json
 ```
 

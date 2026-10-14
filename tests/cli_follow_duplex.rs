@@ -86,7 +86,6 @@ fn follow_emits_new_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":42}",
         ])
         .output()
@@ -144,7 +143,6 @@ fn follow_one_exits_after_first_match() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -174,7 +172,6 @@ fn follow_one_exits_after_first_match() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":2}",
         ])
         .output()
@@ -233,7 +230,6 @@ fn follow_tail_one_exits_after_first_live_match() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -246,7 +242,6 @@ fn follow_tail_one_exits_after_first_live_match() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":2}",
         ])
         .output()
@@ -368,14 +363,7 @@ fn follow_timeout_with_one_exits_on_message() {
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(50));
         let _ = cmd()
-            .args([
-                "--dir",
-                &pool_dir_str,
-                "feed",
-                "demo",
-                "--data",
-                "{\"x\":1}",
-            ])
+            .args(["--dir", &pool_dir_str, "feed", "demo", "{\"x\":1}"])
             .output();
     });
 
@@ -426,7 +414,6 @@ fn follow_json_emits_complete_message() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -477,7 +464,6 @@ fn follow_json_preserves_filtered_message_tags() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":1}",
             "--tag",
             "drop",
@@ -492,7 +478,6 @@ fn follow_json_preserves_filtered_message_tags() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":2}",
             "--tag",
             "keep",
@@ -547,7 +532,6 @@ fn follow_json_emits_complete_message_with_explicit_format() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":3}",
         ])
         .output()
@@ -597,7 +581,6 @@ fn follow_where_filters_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":1}",
             "--tag",
             "drop",
@@ -612,7 +595,6 @@ fn follow_where_filters_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":2}",
             "--tag",
             "keep",
@@ -669,7 +651,6 @@ fn follow_tag_filters_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":1}",
             "--tag",
             "drop",
@@ -684,7 +665,6 @@ fn follow_tag_filters_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":2}",
             "--tag",
             "keep",
@@ -747,7 +727,6 @@ fn follow_tag_and_where_compose_with_and() {
                 pool_dir.to_str().unwrap(),
                 "feed",
                 "demo",
-                "--data",
                 payload,
                 "--tag",
                 tag,
@@ -810,7 +789,6 @@ fn follow_where_multiple_predicates_and() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"level\":1}",
             "--tag",
             "alpha",
@@ -825,7 +803,6 @@ fn follow_where_multiple_predicates_and() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"level\":2}",
             "--tag",
             "alpha",
@@ -885,7 +862,6 @@ fn follow_where_invalid_expression_is_usage_error() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":1}",
         ])
         .args(["--format", "json"])
@@ -941,7 +917,6 @@ fn follow_where_non_boolean_expression_is_usage_error() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":1}",
         ])
         .args(["--format", "json"])
@@ -996,7 +971,6 @@ fn follow_where_with_since_emits_matches() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -1009,7 +983,6 @@ fn follow_where_with_since_emits_matches() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":5}",
         ])
         .output()
@@ -1064,7 +1037,6 @@ fn follow_where_with_format_pretty_emits_matches() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -1118,7 +1090,6 @@ fn follow_where_with_quiet_drops_suppresses_notice() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -1179,7 +1150,6 @@ fn follow_where_multiple_predicates_with_since() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":1}",
             "--tag",
             "alpha",
@@ -1194,7 +1164,6 @@ fn follow_where_multiple_predicates_with_since() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":2}",
             "--tag",
             "alpha",
@@ -1309,7 +1278,6 @@ fn follow_defaults_to_json_when_stdout_is_redirected() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -1616,7 +1584,6 @@ fn follow_remote_url_happy_path_reads_recent_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -1628,7 +1595,6 @@ fn follow_remote_url_happy_path_reads_recent_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":2}",
         ])
         .output()
@@ -1688,7 +1654,6 @@ fn follow_remote_url_supports_tag_filter() {
                 pool_dir.to_str().unwrap(),
                 "feed",
                 "demo",
-                "--data",
                 payload,
                 "--tag",
                 tag,
@@ -1874,7 +1839,6 @@ fn duplex_non_tty_echoes_followed_messages_without_self_echo() {
             pool_dir.to_str().unwrap(),
             "feed",
             "chat",
-            "--data",
             "{\"from\":\"bob\",\"msg\":\"seed\"}",
         ])
         .output()
@@ -2082,7 +2046,6 @@ fn duplex_remote_happy_path_sends_and_reads() {
             pool_dir.to_str().unwrap(),
             "feed",
             "chat",
-            "--data",
             "{\"from\":\"bob\",\"msg\":\"seed\"}",
         ])
         .output()
@@ -2163,7 +2126,6 @@ fn follow_replay_emits_messages_in_order() {
                 pool_dir.to_str().unwrap(),
                 "feed",
                 "rp",
-                "--data",
                 &format!("{{\"i\":{i}}}"),
             ])
             .output()
@@ -2210,7 +2172,6 @@ fn follow_replay_tail_limits_messages() {
                 pool_dir.to_str().unwrap(),
                 "feed",
                 "rpt",
-                "--data",
                 &format!("{{\"i\":{i}}}"),
             ])
             .output()
@@ -2254,7 +2215,6 @@ fn follow_replay_respects_speed_timing() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rps",
-            "--data",
             "{\"i\":1}",
         ])
         .output()
@@ -2266,7 +2226,6 @@ fn follow_replay_respects_speed_timing() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rps",
-            "--data",
             "{\"i\":2}",
         ])
         .output()
@@ -2332,7 +2291,6 @@ fn follow_replay_speed_2x_halves_delay() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rps2",
-            "--data",
             "{\"i\":1}",
         ])
         .output()
@@ -2344,7 +2302,6 @@ fn follow_replay_speed_2x_halves_delay() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rps2",
-            "--data",
             "{\"i\":2}",
         ])
         .output()
@@ -2449,7 +2406,6 @@ fn follow_replay_where_filters_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rpw",
-            "--data",
             r#"{"level":"info"}"#,
         ])
         .output()
@@ -2460,7 +2416,6 @@ fn follow_replay_where_filters_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rpw",
-            "--data",
             r#"{"level":"error"}"#,
         ])
         .output()
@@ -2471,7 +2426,6 @@ fn follow_replay_where_filters_messages() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rpw",
-            "--data",
             r#"{"level":"info"}"#,
         ])
         .output()
@@ -2516,7 +2470,6 @@ fn follow_replay_one_exits_after_first_message() {
                 pool_dir.to_str().unwrap(),
                 "feed",
                 "rpo",
-                "--data",
                 &format!("{{\"i\":{i}}}"),
             ])
             .output()
@@ -2589,7 +2542,6 @@ fn follow_replay_emits_complete_message() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rpd",
-            "--data",
             r#"{"x":42}"#,
         ])
         .output()
@@ -2632,7 +2584,6 @@ fn follow_replay_zero_speed_emits_without_delay() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rp0",
-            "--data",
             "{\"i\":1}",
         ])
         .output()
@@ -2644,7 +2595,6 @@ fn follow_replay_zero_speed_emits_without_delay() {
             pool_dir.to_str().unwrap(),
             "feed",
             "rp0",
-            "--data",
             "{\"i\":2}",
         ])
         .output()

@@ -425,7 +425,7 @@ async function runSpawnPoke(repoRoot, workdirPath, step, index, stepId) {
     if (!Array.isArray(tags)) {
       throw stepError(index, stepId, "message.tags must be array");
     }
-    return ["--dir", workdirPath, "feed", pool, "--data", payload, ...flattenTags(tags)];
+    return ["--dir", workdirPath, "feed", pool, payload, ...flattenTags(tags)];
   });
 
   const tasks = commands.map((args) =>

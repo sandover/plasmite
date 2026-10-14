@@ -699,7 +699,7 @@ func runSpawnPoke(repoRoot string, workdirPath string, step map[string]any, inde
 		wg.Add(1)
 		go func(payload string, tags []string) {
 			defer wg.Done()
-			args := []string{"--dir", workdirPath, "feed", pool, "--data", payload}
+			args := []string{"--dir", workdirPath, "feed", pool, payload}
 			for _, tag := range tags {
 				args = append(args, "--tag", tag)
 			}

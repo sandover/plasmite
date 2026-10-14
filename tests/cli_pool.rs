@@ -22,7 +22,7 @@ fn small_pool_wrap_keeps_reported_oldest_readable() {
     );
 
     let mut feed = cmd()
-        .args(["--dir", directory, "feed", "wrapped", "--data"])
+        .args(["--dir", directory, "feed", "wrapped"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .args(["--format", "json"])
@@ -168,7 +168,6 @@ fn pool_info_json_includes_metrics() {
             pool_dir.to_str().unwrap(),
             "feed",
             "metrics",
-            "--data",
             "{\"x\":1}",
         ])
         .args(["--format", "json"])
@@ -182,7 +181,6 @@ fn pool_info_json_includes_metrics() {
             pool_dir.to_str().unwrap(),
             "feed",
             "metrics",
-            "--data",
             "{\"x\":2}",
         ])
         .args(["--format", "json"])
@@ -353,7 +351,6 @@ fn pool_info_pretty_output_is_human_readable() {
             pool_dir.to_str().unwrap(),
             "feed",
             "pretty",
-            "--data",
             "{\"x\":1}",
         ])
         .output()
@@ -486,7 +483,6 @@ fn readme_quickstart_flow() {
             pool_dir.to_str().unwrap(),
             "feed",
             "demo",
-            "--data",
             "{\"x\":1}",
             "--tag",
             "ping",
@@ -1244,7 +1240,6 @@ fn doctor_detects_wrong_tail_next_offset() {
             pool_dir.to_str().expect("pool dir"),
             "feed",
             "doctorpool",
-            "--data",
             "{}",
         ])
         .args(["--format", "json"])
@@ -1397,7 +1392,6 @@ fn doctor_tty_reports_count_and_seq_range_for_healthy_pool() {
                 pool_dir.to_str().unwrap(),
                 "feed",
                 "doctorpool",
-                "--data",
                 &format!("{{\"x\":{idx}}}"),
             ])
             .output()
@@ -1445,7 +1439,6 @@ fn doctor_all_tty_uses_pool_names_and_message_counts() {
                 pool_dir.to_str().unwrap(),
                 "feed",
                 "tour-main",
-                "--data",
                 &format!("{{\"x\":{idx}}}"),
             ])
             .output()

@@ -26,7 +26,7 @@ check_direction() {
   run_cli "$writer" --dir "$directory" pool create --size 64K wrapped >/dev/null
   for ((i=1; i<=450; i++)); do
     printf '{"message":"tick %d","level":"info"}\n' "$i"
-  done | run_cli "$writer" --dir "$directory" feed wrapped --data >/dev/null
+  done | run_cli "$writer" --dir "$directory" feed wrapped >/dev/null
   local original_info read_info oldest newest message
   original_info="$(run_cli "$writer" --dir "$directory" pool info wrapped --format json)"
   read_info="$(run_cli "$reader" --dir "$directory" pool info wrapped --format json)"
@@ -38,7 +38,7 @@ check_direction() {
     message="$(run_cli "$reader" --dir "$directory" fetch wrapped "$i" --format json)"
     jq -e --argjson seq "$i" '.seq == $seq and .data.message == ("tick " + ($seq|tostring)) and .data.level == "info"' <<<"$message" >/dev/null
   done
-  printf '{"message":"after handoff"}\n' | run_cli "$reader" --dir "$directory" feed wrapped --data >/dev/null
+  printf '{"message":"after handoff"}\n' | run_cli "$reader" --dir "$directory" feed wrapped >/dev/null
   message="$(run_cli "$writer" --dir "$directory" fetch wrapped 451 --format json)"
   jq -e '.seq == 451 and .data.message == "after handoff"' <<<"$message" >/dev/null
   run_cli "$writer" --dir "$directory" doctor wrapped --format json >/dev/null
