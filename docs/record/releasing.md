@@ -29,15 +29,16 @@ SDKs, Python distributions, the npm package and source metadata as artifacts.
 Release builds pin Rust 1.88.0. A successful build is not publication.
 
 `release-publish.yml` consumes a successful build matching the release tag and
-source SHA. It checks artifacts and registry readiness, then verifies the
-independently maintained Homebrew formula's version, URLs and checksums **before**
-registry publication. CI verifies the tap; it does not push tap changes.
+source SHA. It checks artifacts and registry readiness, then renders a temporary
+Homebrew candidate. Registries publish in parallel; the GitHub Release follows
+only after all succeed. Anonymous public SDK downloads must match the selected
+build's checksums. Current workflow tools use the selected source's manifest and
+changelog, so retrying an older release does not substitute current product data.
 
-The maintainer updates the tap locally for a live release. Registries publish in
-parallel after that gate; the GitHub Release is created only after all succeed.
-**Remaining publication-order issue:** this order creates a Homebrew download
-gap until release assets are public. The runbook documents recovery; it does not
-close that gap. If publishing stalls, restore the previous formula until retry.
+The live tap stays at the previous release throughout publication. After the
+public assets pass verification, the maintainer updates and pushes the formula.
+The update helper verifies public downloads before atomically replacing the local
+formula; failed verification leaves it unchanged. CI never pushes tap history.
 
 Rehearse for dry runs, changes to release machinery, or credential recovery.
 Rehearsal verifies a temporary expected formula without changing the public tap,
@@ -48,6 +49,12 @@ Recovery must establish the exact state of each channel. Authorization errors an
 an existing version on one registry do not prove the whole release succeeded.
 Use the verified original artifacts; never bypass a failed channel or treat
 partial publication as complete.
+An existing GitHub Release is verified without overwriting its notes or assets.
+Missing or mismatched downloads block tap promotion. Repair missing assets only
+from the verified build; investigate mismatches without clobbering public files.
+If tap promotion fails, Homebrew remains on the previous working release; retry
+the helper and delivery checks. Later asset deletion or outages can still break
+published URLs, so released assets must remain immutable.
 
 ## Delivery and support tiers
 

@@ -87,6 +87,16 @@ fi
 
 tag="v${version}"
 errors=0
+expected_urls="$(
+  while read -r platform; do
+    printf 'https://github.com/sandover/plasmite/releases/download/%s/plasmite_%s_%s.tar.gz\n' "$tag" "$version" "$platform"
+  done < <("$(dirname "${BASH_SOURCE[0]}")/release_channel_targets.sh" homebrew official sdk_platform)
+)"
+actual_urls="$(sed -n 's/^[[:space:]]*url[[:space:]]*"\([^"]*\)".*/\1/p' <<<"$formula_text")"
+if [[ "$(sort <<<"$actual_urls")" != "$(sort <<<"$expected_urls")" ]]; then
+  echo 'error: formula URLs do not exactly match the selected Homebrew target set.' >&2
+  exit 1
+fi
 
 expected_sha() {
   local platform="$1"

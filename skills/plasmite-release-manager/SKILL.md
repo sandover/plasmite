@@ -48,20 +48,20 @@ Honor any requested review or publication hold before remote mutations.
    Require success. Rehearsal checks a temporary expected formula; it does not
    require pushing the public Homebrew tap. **A dry run stops here.**
    An unchanged normal live release may proceed directly to step 4.
-4. For an authorized live release, prepare and review the tap formula:
-   `bash scripts/update_homebrew_formula.sh <release_target> ../homebrew-tap --build-run-id <build_run_id>`.
-   Commit only `Formula/plasmite.rb` as `plasmite: update to <version>` and push.
-   Immediately dispatch:
+4. For an authorized live release, dispatch publication **before updating the tap**:
    `gh workflow run release-publish.yml -f release_tag=<release_target> -f rehearsal=false`.
    Record the publish run ID/URL and require every job to succeed.
-5. The workflow verifies tag/build provenance and tap version/URLs/checksums before
-   any registry publication. It uses npm trusted publishing and the
-   `PYPI_API_TOKEN` / `CARGO_REGISTRY_TOKEN` secrets. It publishes crates.io, npm
-   and PyPI, then attaches SDKs and checksums to the GitHub Release.
-   **Remaining publication-order issue:** the tap points at assets not yet public.
-   This runbook documents recovery; it does not close that download gap. If publishing
-   stalls before assets exist, restore the prior formula with a normal commit;
-   realign it before retrying. Do not leave users with broken download URLs.
+   The workflow verifies provenance and renders an offline Homebrew candidate,
+   publishes registries and GitHub assets, then checks anonymous public SDK
+   downloads against the selected build. Existing releases are verified without
+   overwriting notes or assets. The live tap stays at the previous release.
+5. Only after successful publication, prepare and review the live tap formula:
+   `bash scripts/update_homebrew_formula.sh <release_target> ../homebrew-tap --build-run-id <build_run_id>`.
+   The helper verifies public downloads against build checksums before replacing
+   the formula. On failure, leave the live tap unchanged. Commit only
+   `Formula/plasmite.rb` as `plasmite: update to <version>` and push; if already
+   aligned, no commit is needed. `--prepare-only` is for temporary rehearsal
+   candidates, never a live tap promotion.
 
 ## Recover without guessing
 
@@ -76,6 +76,13 @@ Honor any requested review or publication hold before remote mutations.
    Prefer `release_tag`; explicit `build_run_id` is for a verified recovery run.
    The publish workflow handles already-published versions; do not manually create
    a GitHub Release merely because one registry says a version exists.
+   If the GitHub Release already exists, reruns preserve it and verify its SDKs.
+   Missing or mismatched public assets fail closed; repair only missing files from
+   the verified build under release authorization, and investigate mismatches
+   without clobbering published assets. Retry verification before updating the tap.
+   For an older release, use its selected source manifest via
+   `PLASMITE_RELEASE_TARGETS=<saved-targets.json>`; the workflow carries that
+   manifest and changelog from the selected source SHA.
 4. Record unresolved blockers using
    `bash skills/plasmite-release-manager/scripts/file_release_blocker_with_evidence.sh --release-target <release_target> --check "<gate>" --title "<title>" --summary "<summary>" --run-id <run_id> --agent <model@host>`.
    Partial publication is not a completed release.
