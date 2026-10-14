@@ -22,7 +22,7 @@ done < <(jq -r '.targets[]|select(.channels.github_sdk!=null)|.sdk_platform' "$P
   echo end
 } > "$scratch/original.rb"
 cp "$scratch/build/"* "$scratch/runtime/release-inputs/dist/"
-echo 'Fixture notes' > "$scratch/runtime/changelog-section.md"
+echo '          Fixture notes' > "$scratch/runtime/changelog-section.md"
 cat > "$scratch/bin/curl" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -112,6 +112,7 @@ reject_update
 reset
 export SCENARIO=absent
 (cd "$scratch/runtime" && bash "$scratch/create.sh") >/dev/null
+grep -qx 'Fixture notes' "$scratch/runtime/release-body.md"
 "$root/scripts/verify_public_release_assets.sh" "$TAG" "$scratch/build/sha256sums.txt" github_sdk >/dev/null
 update >/dev/null
 cp "$scratch/tap/Formula/plasmite.rb" "$scratch/aligned.rb"

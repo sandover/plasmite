@@ -188,6 +188,9 @@ jobs:
           cache-dependency-glob: bindings/python/pyproject.toml
           cache-local-path: ${{ runner.temp }}/uv-cache
           cache-suffix: ${{ matrix.target }}
+      - name: Check release publication portability
+        shell: bash
+        run: bash scripts/test_homebrew_publication.sh
       - run: cd bindings/node && npm ci
       - name: Build SDK artifacts for packaging smoke
         shell: bash
