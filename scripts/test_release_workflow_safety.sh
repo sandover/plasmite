@@ -163,10 +163,19 @@ for block in checkout_blocks(publish):
 assert publish_checkout_refs == [
     "${{ github.sha }}",
     "${{ needs.resolve-build-run.outputs.source_sha }}",
+    "${{ github.sha }}",
     "${{ needs.resolve-build-run.outputs.source_sha }}",
-    "${{ needs.resolve-build-run.outputs.source_sha }}",
-    "${{ needs.resolve-build-run.outputs.source_sha }}",
+    "${{ github.sha }}",
 ]
+
+assert 'cp release/targets.json release-inputs/targets.json' in publish
+assert 'cp CHANGELOG.md release-inputs/CHANGELOG.md' in publish
+assert 'sync-homebrew-tap' not in publish
+assert '--prepare-only' in publish
+assert 'git -C homebrew-tap push' not in publish
+assert 'PLASMITE_RELEASE_TARGETS: release-inputs/targets.json' in publish
+assert 'Verify public SDK assets against the selected build' in publish
+assert 'release-inputs/CHANGELOG.md)' in publish
 
 print("release workflow safety checks passed")
 PY

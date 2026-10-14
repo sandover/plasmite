@@ -281,11 +281,16 @@ jobs:
           find "$raw_dir" -name "*${VERSION}*.whl" -exec cp {} release-inputs/py-dist/ \;
           find "$raw_dir" -name "plasmite-${VERSION}.tar.gz" -exec cp {} release-inputs/py-dist/ \;
 
+          cp release/targets.json release-inputs/targets.json
+          cp CHANGELOG.md release-inputs/CHANGELOG.md
+
           unexpected="$(
             find release-inputs -mindepth 1 -maxdepth 1 \
               ! -name dist \
               ! -name node-dist \
               ! -name py-dist \
+              ! -name targets.json \
+              ! -name CHANGELOG.md \
               -print
           )"
           if [[ -n "$unexpected" ]]; then
@@ -300,86 +305,39 @@ jobs:
           path: release-inputs
           if-no-files-found: error
 
-  # Homebrew validation gates every registry publish.
-  # CI checks alignment but does not mutate tap history.
-  sync-homebrew-tap:
+  # Render a candidate without requiring or advancing the live tap.
+  prepare-homebrew-formula:
     runs-on: ubuntu-latest
     needs: [resolve-build-run, collect-build-artifacts]
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.resolve-build-run.outputs.source_sha }}
+          ref: ${{ github.sha }}
       - uses: actions/download-artifact@v4
         with:
           name: release-inputs
           path: release-inputs
-      - name: Compute release checksums
-        shell: bash
-        run: |
-          set -euo pipefail
-          shasum -a 256 release-inputs/dist/*.tar.gz > release-inputs/dist/sha256sums.txt
       - uses: actions/checkout@v4
         with:
           repository: ${{ env.HOMEBREW_TAP_REPO }}
           path: homebrew-tap
-          token: ${{ github.token }}
-      - id: sync
-        name: Compute expected Homebrew tap formula delta
+          persist-credentials: false
+      - name: Verify expected Homebrew formula
         shell: bash
         env:
           TAG: ${{ needs.resolve-build-run.outputs.tag }}
-          BUILD_RUN_ID: ${{ needs.resolve-build-run.outputs.build_run_id }}
-          GH_TOKEN: ${{ github.token }}
+          PLASMITE_RELEASE_TARGETS: release-inputs/targets.json
         run: |
           set -euo pipefail
-          ./scripts/update_homebrew_formula.sh "$TAG" homebrew-tap --build-run-id "$BUILD_RUN_ID"
-          if git -C homebrew-tap diff --quiet -- Formula/plasmite.rb; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "homebrew formula already aligned."
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            git -C homebrew-tap --no-pager diff -- Formula/plasmite.rb
-          fi
-      - name: Rehearsal mode
-        if: needs.resolve-build-run.outputs.rehearsal == 'true' && steps.sync.outputs.changed == 'true'
-        run: 'echo "sync-homebrew-tap rehearsal: local formula differs from expected release state; update ../homebrew-tap manually when promoting."'
-      - name: Fail live run when tap is stale
-        if: needs.resolve-build-run.outputs.rehearsal != 'true' && steps.sync.outputs.changed == 'true'
-        shell: bash
-        env:
-          VERSION: ${{ needs.resolve-build-run.outputs.version }}
-        run: |
-          set -euo pipefail
-          echo "error: ${HOMEBREW_TAP_REPO} is not aligned with v${VERSION}; CI will not push tap changes." >&2
-          echo "hint: update and push ../homebrew-tap locally, then rerun release-publish." >&2
-          exit 1
-      - name: Verify Homebrew formula alignment (rehearsal/local)
-        if: needs.resolve-build-run.outputs.rehearsal == 'true'
-        shell: bash
-        env:
-          VERSION: ${{ needs.resolve-build-run.outputs.version }}
-        run: |
-          set -euo pipefail
-          ./scripts/verify_homebrew_formula_alignment.sh \
-            --version "$VERSION" \
-            --sha256sums release-inputs/dist/sha256sums.txt \
-            --formula-file homebrew-tap/Formula/plasmite.rb
-      - name: Verify Homebrew tap alignment (live/remote)
-        if: needs.resolve-build-run.outputs.rehearsal != 'true'
-        shell: bash
-        env:
-          VERSION: ${{ needs.resolve-build-run.outputs.version }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          ./scripts/verify_homebrew_formula_alignment.sh \
-            --version "$VERSION" \
-            --sha256sums release-inputs/dist/sha256sums.txt \
-            --tap-repo "$HOMEBREW_TAP_REPO"
+          shasum -a 256 release-inputs/dist/*.tar.gz > release-inputs/dist/sha256sums.txt
+          mkdir -p expected-tap/Formula
+          cp homebrew-tap/Formula/plasmite.rb expected-tap/Formula/plasmite.rb
+          ./scripts/update_homebrew_formula.sh "$TAG" expected-tap \
+            --sha256sums release-inputs/dist/sha256sums.txt --prepare-only
 
   publish-crates-io:
     runs-on: ubuntu-latest
-    needs: [resolve-build-run, publish-preflight, collect-build-artifacts, sync-homebrew-tap]
+    needs: [resolve-build-run, publish-preflight, collect-build-artifacts, prepare-homebrew-formula]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -410,7 +368,7 @@ jobs:
 
   publish-npm:
     runs-on: ubuntu-latest
-    needs: [resolve-build-run, publish-preflight, collect-build-artifacts, sync-homebrew-tap]
+    needs: [resolve-build-run, publish-preflight, collect-build-artifacts, prepare-homebrew-formula]
     permissions:
       actions: read
       contents: read
@@ -452,7 +410,7 @@ jobs:
 
   publish-pypi:
     runs-on: ubuntu-latest
-    needs: [resolve-build-run, publish-preflight, collect-build-artifacts, sync-homebrew-tap]
+    needs: [resolve-build-run, publish-preflight, collect-build-artifacts, prepare-homebrew-formula]
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -479,12 +437,11 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
-    needs: [resolve-build-run, collect-build-artifacts, sync-homebrew-tap, publish-pypi, publish-crates-io, publish-npm]
+    needs: [resolve-build-run, collect-build-artifacts, prepare-homebrew-formula, publish-pypi, publish-crates-io, publish-npm]
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.resolve-build-run.outputs.source_sha }}
-          sparse-checkout: CHANGELOG.md
+          ref: ${{ github.sha }}
       - uses: actions/download-artifact@v4
         with:
           name: release-inputs
@@ -508,7 +465,7 @@ jobs:
           section=$(awk -v ver="$VERSION" '
             /^## \[/ { if (found) exit; if (index($0, "[" ver "]")) found=1; next }
             found { print }
-          ' CHANGELOG.md)
+          ' release-inputs/CHANGELOG.md)
           if [[ -z "$section" ]]; then
             section="See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ needs.resolve-build-run.outputs.tag }}/CHANGELOG.md) for details."
           fi
@@ -559,9 +516,26 @@ jobs:
           BODY
           # Trim leading whitespace from heredoc indentation.
           sed -i 's/^          //' /tmp/release-body.md
-          gh release create "$TAG" release-inputs/dist/* \
-            --title "$TAG" \
-            --notes-file /tmp/release-body.md
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > /tmp/existing-release.json 2> /tmp/release-lookup-error; then
+            jq -e --arg tag "$TAG" '.tag_name == $tag and .draft == false and .prerelease == false' /tmp/existing-release.json >/dev/null
+            echo "Existing release: preserve its notes and assets; verify below."
+          else
+            if ! grep -q 'HTTP 404' /tmp/release-lookup-error; then
+              cat /tmp/release-lookup-error >&2
+              exit 1
+            fi
+            gh release create "$TAG" release-inputs/dist/* \
+              --title "$TAG" \
+              --notes-file /tmp/release-body.md
+          fi
+      - name: Verify public SDK assets against the selected build
+        id: public-assets
+        if: needs.resolve-build-run.outputs.rehearsal != 'true'
+        shell: bash
+        env:
+          TAG: ${{ needs.resolve-build-run.outputs.tag }}
+          PLASMITE_RELEASE_TARGETS: release-inputs/targets.json
+        run: ./scripts/verify_public_release_assets.sh "$TAG" release-inputs/dist/sha256sums.txt github_sdk
       - name: Write release summary
         if: always()
         shell: bash
@@ -569,28 +543,30 @@ jobs:
           TAG: ${{ needs.resolve-build-run.outputs.tag }}
           VERSION: ${{ needs.resolve-build-run.outputs.version }}
           REHEARSAL: ${{ needs.resolve-build-run.outputs.rehearsal }}
-          HOMEBREW_RESULT: ${{ needs.sync-homebrew-tap.result }}
+          HOMEBREW_RESULT: ${{ needs.prepare-homebrew-formula.result }}
           CRATES_RESULT: ${{ needs.publish-crates-io.result }}
           NPM_RESULT: ${{ needs.publish-npm.result }}
           PYPI_RESULT: ${{ needs.publish-pypi.result }}
           RELEASE_RESULT: ${{ steps.create-release.outcome }}
+          PUBLIC_ASSET_RESULT: ${{ steps.public-assets.outcome }}
         run: |
           {
             echo "## Plasmite ${TAG}"
             if [[ "$REHEARSAL" == "true" ]]; then
               echo "Rehearsal completed; no registries or GitHub Release were changed."
-            elif [[ "$RELEASE_RESULT" == "success" ]]; then
+            elif [[ "$RELEASE_RESULT" == "success" && "$PUBLIC_ASSET_RESULT" == "success" ]]; then
               echo "[Open GitHub Release](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG})"
             else
-              echo "GitHub Release creation did not complete; see the failed step above."
+              echo "GitHub Release/public asset verification did not complete; keep the live tap unchanged."
             fi
             echo
             echo "| Delivery check | Result |"
             echo "| --- | --- |"
-            echo "| Homebrew formula alignment | ${HOMEBREW_RESULT} |"
+            echo "| Homebrew candidate (live tap follows verified publication) | ${HOMEBREW_RESULT} |"
             echo "| crates.io | ${CRATES_RESULT} |"
             echo "| npm | ${NPM_RESULT} |"
             echo "| PyPI | ${PYPI_RESULT} |"
             echo "| GitHub Release | ${RELEASE_RESULT} |"
+            echo "| Public SDK verification | ${PUBLIC_ASSET_RESULT} |"
             echo "| Version | ${VERSION} |"
           } >> "$GITHUB_STEP_SUMMARY"

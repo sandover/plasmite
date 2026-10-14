@@ -45,5 +45,6 @@ preview_sdks="$("$root_dir/scripts/release_channel_targets.sh" github_sdk previe
 [[ "$preview_sdks" == $'linux_arm64\nlinux_armv7' ]]
 
 "$root_dir/scripts/test_release_workflow_safety.sh"
+"$root_dir/scripts/test_homebrew_publication.sh"
 
 echo "release target validator fixtures ok"

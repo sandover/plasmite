@@ -271,11 +271,11 @@ just sdk-from-source aarch64-apple-darwin
 
 `release.yml` uploads build artifacts only (SDK tarballs, Python dist artifacts, npm tarball, and release metadata).
 
-`.github/workflows/release-publish.yml` (publish stage) consumes a successful build run's artifacts, runs registry preflight checks, syncs/verifies the Homebrew tap formula, publishes crates/npm/PyPI, and then creates/updates the GitHub release with SDK tarballs + `sha256sums.txt`.
+`.github/workflows/release-publish.yml` consumes verified build artifacts, checks an offline Homebrew candidate, publishes crates/npm/PyPI and GitHub SDK assets, then verifies public downloads against the build's checksums. Existing releases are verified without overwriting notes or assets.
 
-Before any registry publish steps run, `release-publish.yml` verifies that the independently maintained `sandover/homebrew-tap` formula is aligned with the build artifacts (version + URLs + checksums). Update and push that formula locally before a live publish; CI never mutates tap history.
+After successful publication, run `scripts/update_homebrew_formula.sh <tag> ../homebrew-tap --build-run-id <id>`, review the diff, and push the formula. The helper refuses to update until anonymous public downloads match the selected build. `--prepare-only` renders temporary rehearsal candidates without a public download check; never push those candidates. CI never mutates tap history.
 
-After publishing, dispatch `post-release-smoke.yml`. Its macOS Homebrew job installs `sandover/tap/plasmite` and verifies `plasmite --version` for the released version.
+After publishing, dispatch `post-release-smoke.yml`. It checks npm and crates.io on Linux (also PyPI when the release declares Linux wheels), a published PyPI wheel on macOS, and the macOS Homebrew installation.
 
 For low-risk workflow validation after release workflow changes, run a no-publish rehearsal:
 
@@ -293,7 +293,7 @@ If you need to force a specific build run (for example, during incident recovery
 
 ## Performance monitoring policy
 
-- Release-blocking performance checks are local-only and run on the maintainer host with the same power/runtime conditions for baseline and candidate.
+- For hot-path or storage changes, release-blocking performance checks run locally on the maintainer host with the same power/runtime conditions for baseline and candidate.
 - Use:
   - `bash skills/plasmite-release-manager/scripts/compare_local_benchmarks.sh --base-tag <vX.Y.Z> --runs 3`
 - Multi-platform performance sweeps are optional and should be run when platform-sensitive code changes (I/O, mmap, locking, FFI/bindings), not required for every patch release.

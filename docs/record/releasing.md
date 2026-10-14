@@ -1,260 +1,81 @@
 # Releasing Plasmite
 
-This document is the human-facing policy for releases, plus a plain-English explanation of what the build + release pipeline *does*.
+The [release runbook](../../skills/plasmite-release-manager/SKILL.md) owns commands,
+sequencing and recovery. This document owns release and compatibility policy;
+it deliberately does not repeat the checklist.
 
-The canonical procedural runbook (commands, exact sequencing, edge cases) lives in the release skill so we do not maintain two independent checklists.
+## Release contract
 
-## Canonical Source of Truth
+A release ships one reviewed commit through GitHub SDK archives, crates.io, npm,
+PyPI and Homebrew. Versions agree across the product's distribution surfaces.
+`release/targets.json` owns native target/channel identity; the
+[distribution guide](distribution.md) describes support tiers and prerequisites.
 
-Use the release skill for all release execution details:
+- Honor the requested review boundary and any publication hold.
+- Require the canonical `just release-gate`, a current audit, and successful
+  `ci.yml` for the exact release SHA before tagging.
+- Run a local benchmark comparison for hot-path or storage changes. Compare with
+  the previous release on the same host; routine patches need no benchmark.
+- Commit and push the complete candidate before tagging. Never move a release tag.
+- Track failed gates under `Release blockers: <release_target>` in Ergo.
+  Failed or incomplete required gates block progression.
+- Record target, source SHA, build/publish run IDs and evidence so recovery resumes
+  the intended release instead of whichever workflow ran most recently.
 
-- `skills/plasmite-release-manager/SKILL.md`
+## Build and publication
 
-To activate it locally, symlink the skill into your agent skills directory:
+`release.yml` builds the tagged commit, smoke-tests every matrix target and stores
+SDKs, Python distributions, the npm package and source metadata as artifacts.
+Release builds pin Rust 1.88.0. A successful build is not publication.
 
-```bash
-CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
-mkdir -p "${CODEX_HOME}/skills"
-ln -snf "$(pwd)/skills/plasmite-release-manager" "${CODEX_HOME}/skills/plasmite-release-manager"
-```
+`release-publish.yml` consumes a successful build matching the release tag and
+source SHA. It checks artifacts and registry readiness, then renders a temporary
+Homebrew candidate. Registries publish in parallel; the GitHub Release follows
+only after all succeed. Anonymous public SDK downloads must match the selected
+build's checksums. Current workflow tools use the selected source's manifest and
+changelog, so retrying an older release does not substitute current product data.
 
-If this file and the skill ever disagree, follow the skill and then update this file or the skill to re-align.
+The live tap stays at the previous release throughout publication. After the
+public assets pass verification, the maintainer updates and pushes the formula.
+The update helper verifies public downloads before atomically replacing the local
+formula; failed verification leaves it unchanged. CI never pushes tap history.
 
-Native release target identity is separately owned by `release/targets.json`.
-The build workflow, packaging scripts, Homebrew alignment, and post-release
-channel selection consume that manifest. `docs/record/distribution.md` remains
-the human-authored support policy, with its target identifiers checked against
-the manifest rather than generated from it.
+Rehearse for dry runs, changes to release machinery, or credential recovery.
+Rehearsal verifies a temporary expected formula without changing the public tap,
+registries or GitHub Release. A dry run ends with rehearsal evidence. An unchanged
+normal live release needs no extra rehearsal.
 
-## Build + Release, in Plain English
+Recovery must establish the exact state of each channel. Authorization errors and
+an existing version on one registry do not prove the whole release succeeded.
+Use the verified original artifacts; never bypass a failed channel or treat
+partial publication as complete.
+An existing GitHub Release is verified without overwriting its notes or assets.
+Missing or mismatched downloads block tap promotion. Repair missing assets only
+from the verified build; investigate mismatches without clobbering public files.
+If tap promotion fails, Homebrew remains on the previous working release; retry
+the helper and delivery checks. Later asset deletion or outages can still break
+published URLs, so released assets must remain immutable.
 
-Think of a Plasmite release as answering two questions:
+## Delivery and support tiers
 
-1. **What exact code are we shipping?** (a specific git commit, pinned by a version tag like `v0.2.3`)
-2. **Can users install that exact build reliably from every channel we support?** (GitHub tarballs, Homebrew, crates.io, npm, PyPI, and preview channels such as cargo-binstall)
+Release completion requires fresh install/runtime evidence from all four channels:
 
-We split the work into two big stages so that “building” and “publishing” are decoupled:
+- Linux: npm and crates.io, plus PyPI when the released manifest declares Linux wheels.
+- macOS: PyPI and Homebrew, using a wheel supported by the selected release.
 
-- **Build stage (GitHub)**: compile + package everything, and upload the results as artifacts.
-- **Publish stage (GitHub)**: manually dispatch `release-publish.yml` with `release_tag=vX.Y.Z` (or an explicit `build_run_id`), verify provenance, sync/verify Homebrew alignment, then publish to registries and create the GitHub Release.
+Select Python from the release's published wheel tags and `Requires-Python`.
+The workflow tests CPython 3.11 to cover both 1.2.1's `cp311` wheels and newer
+`py3-none` wheels; that test interpreter is not the package's support policy.
 
-The build accepts stable `vX.Y.Z` tags. It resolves the tag to a commit SHA
-before building, then checks out that SHA in each build job. Each build job
-fetches the tag and checks that it still names the same commit, so the built
-CLI reports the release version. Publish reads the recorded SHA from the
-successful build metadata and checks that the release tag still points to that
-commit before it collects artifacts or publishes.
+`post-release-smoke.yml` runs these checks. The local script handles registry
+channels only; Homebrew is a separate macOS check. Retries are bounded and cover
+registry propagation, not unsupported platforms or missing SDK prerequisites.
+Build-time package checks do not replace public-delivery verification.
 
-This split is intentional: if a registry token is expired (or a policy check fails), we can re-run the publish stage without rebuilding the entire multi-platform build.
-
-### Where the work happens
-
-- **On a maintainer machine**
-  - Pick the release version and prepare the release notes / changelog.
-  - Run a *local* performance comparison against the prior tag (release-blocking).
-  - Push a version tag (which is the “official pointer” to the commit being released).
-- **On GitHub Actions**
-  - Build and package release artifacts for supported platforms.
-  - Re-download those artifacts, verify they match the tag/version, sync Homebrew formula updates, and then publish to registries + GitHub Releases.
-
-### Stages and gates (what they’re for, and what they cost)
-
-Costs below are intentionally qualitative; exact runtimes vary by machine and GitHub runner load.
-
-1. **Prepare a candidate (local)**
-   - Purpose: ensure you’re not shipping something you haven’t reviewed/tested.
-   - Gate: “Everything you intend to ship is pushed to origin; no local-only commits.”
-   - Cost: cheap to moderate (mostly waiting on tests).
-
-2. **Performance gate (local, release-blocking)**
-   - Purpose: catch “it got 2× slower” regressions *before* any tags or publishes.
-   - Gate: compare candidate vs a baseline tag on the **same host** (reduces noise).
-   - Cost: moderate (benchmarks take minutes, but don’t require GitHub).
-
-3. **Build artifacts (GitHub, `release.yml`)**
-   - Purpose: produce installable artifacts for each supported platform and binding ecosystem.
-   - Gate: every build + packaging + smoke test job must succeed for the matrix targets.
-   - Cost: expensive (multi-platform compilation + packaging; typically the longest stage).
-   - Output (high-level):
-     - “SDK tarballs” for macOS (Intel + Apple Silicon) and Linux (x86_64,
-       plus the Linux ARM64 and ARMv7 preview targets)
-     - Python distributions (sdist + wheels for supported platforms)
-     - Node publish artifact (an npm tarball)
-
-4. **Homebrew parity (GitHub, release-blocking)**
-   - Purpose: prevent a release where Homebrew points at stale or mismatched tarballs.
-   - Gates: `release-publish.yml` verifies exact version/URL/checksum alignment against the tap state; `post-release-smoke.yml` installs the released formula on macOS and runs `plasmite --version`.
-   - Policy split: maintainers update + push `../homebrew-tap` locally; CI only verifies alignment and never mutates tap history.
-   - Cost: cheap (automated diff + verification).
-
-5. **Publish to registries (GitHub, `release-publish.yml`)**
-   - Purpose: make the same version available via crates.io, npm, and PyPI.
-   - Gates:
-     - token “can we log in?” checks (fail fast if CI can’t authenticate)
-     - “publish what we built” checks (publish is only allowed from a successful build run that matches the tag/version)
-   - Cost: moderate (mostly network + registry processing).
-
-6. **Create/update the GitHub Release (GitHub, `release-publish.yml`)**
-   - Purpose: attach the platform tarballs (SDK layout) and checksums to the tag so users can download from GitHub directly.
-   - Gate: only runs after all enabled publish channels succeed (or an explicit, documented bypass).
-   - Cost: cheap.
-
-7. **Delivery verification (human/automation, post-release)**
-   - Purpose: confirm the “happy path” works for real users (install + run) across channels.
-   - Gate: not a publish gate (publishing already happened), but it’s a release-quality requirement tracked by the post-release smoke contract.
-   - Cost: moderate (some waiting for registry propagation).
-
-### Why the performance gate is local
-
-GitHub runners are shared machines, so benchmark numbers can swing due to factors unrelated to our code. For release decisions we prefer “same host, same conditions” comparisons on a maintainer machine.
-
-### “Rehearsal” mode (publish without publishing)
-
-`release-publish.yml` supports a rehearsal mode that runs its
-preflight, provenance, artifact, and Homebrew checks without publishing to
-registries or creating a GitHub Release.
-
-Before dispatch, inspect the complete diff from the previous release tag
-through the candidate. Rehearsal is required for a requested dry run, for
-changes to release workflows or their packaging, target, publishing,
-authentication, and Homebrew behavior, and after registry credentials are
-added, rotated, or recovered. A normal live release with unchanged release
-machinery proceeds directly to live publishing because that workflow runs the
-same fail-closed checks before mutation.
-
-The release diff is the decision record. Plasmite does not maintain a second
-inventory of release-sensitive paths that could drift from the machinery it is
-meant to describe.
-
-## Post-release delivery smoke contract
-
-Purpose: verify that fresh installs resolve + run across public channels after publish completes.
-
-- Required channels: `npm`, `pypi`, `crates`.
-- Required channel: `homebrew` (macOS install + runtime smoke).
-- Runner: `scripts/post_release_delivery_smoke.sh` (manual/local) or `.github/workflows/post-release-smoke.yml` (`workflow_dispatch`).
-
-Per-channel checks:
-
-- `npm`: install `plasmite@<version>` in isolated npm + pnpm workdirs and run `plasmite --version`.
-- `pypi`: use `uv tool run --from plasmite==<version> plasmite --version`.
-- `crates`: `cargo install plasmite --version <version>` into isolated `CARGO_HOME`/`--root`, then run the installed binary.
-- `homebrew`: `brew install sandover/tap/plasmite`, then verify `plasmite --version` is `<version>` on macOS.
-
-Retry/backoff/propagation policy:
-
-- Retries are bounded by `--max-wait-minutes`.
-- Backoff is exponential and capped per attempt.
-- This explicitly handles registry propagation delays (for example npm/PyPI index lag) before declaring failure.
-
-Failure policy:
-
-- Any required-channel failure => release is **not** complete; open/track follow-up and rerun smoke.
-- Any Homebrew failure => release is **not** complete; fix the formula or release artifact and rerun smoke.
-
-## Release Policy
-
-- `docs/record/distribution.md` is the source of truth for what is `official`, `preview`, or unsupported.
-- Releases are fail-closed: any failed or incomplete gate blocks release.
-- Every blocker is filed in `ergo` under one epic: `Release blockers: <release_target>`.
-- Do not tag or publish while blocker tasks remain open.
-- Do not release from a branch with unpushed commits (`git status --short --branch` must not show `ahead`).
-- Use a runtime that can reach GitHub and registries and can use maintainer `gh` auth.
-- Release automation is split: `release.yml` builds artifacts, `release-publish.yml` performs preflight + registry publish + GitHub release.
-- Homebrew parity is mandatory: `release-publish.yml` syncs/verifies the formula in parallel with registry publishes; the final GitHub release is gated on both.
-- Post-release delivery smoke is mandatory for release completion: run `post-release-smoke.yml` (or the script locally) and archive results.
-- Homebrew tap is updated locally from `../homebrew-tap` using `scripts/update_homebrew_formula.sh` and pushed before live publish dispatch. The `sync-homebrew-tap` CI job verifies alignment.
-- Publish-only retry after credential fixes must target the same release tag (or explicit successful `build_run_id`) without rebuilding matrix artifacts.
-
-### Linux ARM SDK preview
-
-The GitHub SDK preview supports CI-built `aarch64-unknown-linux-gnu`
-(`linux_arm64`) and `armv7-unknown-linux-gnueabihf` (`linux_armv7`) archives for
-manual CLI/server installation without Rust. The passing
-[ARM SDK CI run](https://github.com/sandover/plasmite/actions/runs/36803923793)
-built and smoke-tested both SDK archives. The run retained them for 30 days as
-`ci-sdk-aarch64-unknown-linux-gnu` and
-`ci-sdk-armv7-unknown-linux-gnueabihf`, with checksums and build provenance.
-GitHub release asset names are `plasmite_<version>_linux_arm64.tar.gz` and
-`plasmite_<version>_linux_armv7.tar.gz`; the 1.0.0 release introduces these
-preview assets.
-
-ARM64 uses Ubuntu 22.04 with glibc 2.35 as its runtime baseline. ARMv7 uses an
-Ubuntu 22.04 glibc 2.35 sysroot and pins Armv7-A, VFPv3-D16 hard-float, and
-Thumb-2, with NEON optional. The ARMv7 target is 32-bit hard-float; ARMv6 is
-outside the preview. These targets do not add npm, PyPI, or Homebrew support.
-
-The release workflow builds these archives and checks for both before
-attaching them to a GitHub Release. Physical Raspberry Pi validation remains
-separate from CI evidence.
-
-## Support-tier enforcement
-
-- A platform/channel combination is `official` only if its idiomatic install command has a passing automated install/runtime smoke gate in release automation.
-- Preview artifacts (including manual zip/tar workflows) do not upgrade support tier by themselves.
-- cargo-binstall is currently `preview`: URL mapping and release assets exist for Linux/macOS targets, but release-publish smoke is Linux-only until expanded.
-- Promotion from `preview` to `official` must include:
-  - an update to `docs/record/distribution.md`,
-  - release workflow coverage for that combination,
-  - delivery verification evidence in the promotion PR.
-
-## Workflow Diagram
-
-```mermaid
-flowchart TD
-    A["Prepare candidate on main"] --> A1["Local benchmark compare vs base tag (3-run medians, same host)"]
-    A1 --> A2{"Local perf gate passes?"}
-    A2 -- "No" --> X["Stop and file blocker"]
-    A2 -- "Yes" --> B["Tag push (vX.Y.Z)"]
-    B --> C["release.yml build run"]
-    C --> D{"Build succeeded?"}
-    D -- "No" --> X
-    D -- "Yes" --> E{"Dry run, release machinery change, or credential change?"}
-    E -- "Yes" --> F["release-publish rehearsal"]
-    F --> F1{"Rehearsal succeeded?"}
-    F1 -- "No" --> X
-    F1 -- "Yes, dry-run mode" --> L["Stop with rehearsal evidence"]
-    F1 -- "Yes, live mode" --> G["release-publish live (manual dispatch)"]
-    E -- "No" --> G
-    G --> H{"Preflight + tap sync/verification pass?"}
-    H -- "No" --> X
-    H -- "Yes" --> I["Publish crates.io + npm + PyPI"]
-    I --> J["Create GitHub release assets"]
-    J --> K["Delivery verification (registries + Homebrew)"]
-```
-
-## Human Decisions to Make Per Release
-
-The skill handles mechanics, but maintainers still decide:
-
-- release target and timing
-- whether any compatibility risk is acceptable
-- whether registry/tap propagation delays are acceptable
-- whether any exception is explicitly approved and documented
-
-## Minimal Maintainer Checklist
-
-1. Choose version and update release notes/changelog.
-2. Choose `dry-run` when the requested outcome is rehearsal evidence without
-   publication; choose `live` when the requested outcome is publication.
-3. Inspect the complete release diff. A dry run always rehearses. A live run
-   rehearses first when release machinery or credentials changed.
-4. Ask Codex to run the `plasmite-release-manager` skill in the selected mode.
-5. Resolve every blocker produced by pre-release validation.
-6. Push all local commits you intend to ship, then confirm the release source
-   SHA is fully on origin.
-7. Run the local benchmark comparison when the release contains hot-path or
-   storage changes:
-   - `bash skills/plasmite-release-manager/scripts/compare_local_benchmarks.sh --base-tag <base_tag> --runs 3`
-8. Update and push the Homebrew formula from `../homebrew-tap` before live
-   publish dispatch.
-9. If a required rehearsal succeeded in `live` mode, continue with the live
-   dispatch. A dry run stops after rehearsal evidence.
-10. Confirm post-release delivery verification is complete on all channels.
-   - Recommended: dispatch `.github/workflows/post-release-smoke.yml` with the released version and default channels.
-11. If publish fails due to credentials or policy, rerun publishing with the
-    same target after recovery:
-    - `gh workflow run release-publish.yml -f release_tag=<vX.Y.Z> -f rehearsal=false`
+A platform/channel combination is official only with documented prerequisites
+and passing automated install/runtime checks. Preview artifacts do not promote
+themselves: promotion needs a manifest/support-policy change and delivery evidence.
+Linux ARM64/ARMv7 SDKs and cargo-binstall remain preview; see the distribution guide.
 
 ## Versioning Policy
 
