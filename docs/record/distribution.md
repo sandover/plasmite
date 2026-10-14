@@ -24,10 +24,15 @@ Official platforms:
 - Linux: `x86_64-unknown-linux-gnu`
 - Windows: `x86_64-pc-windows-msvc` via npm and PyPI release artifacts
 
-The 1.0 Linux x86_64 prebuilt CLI (SDK, Homebrew, and npm) requires glibc
-2.39 or newer. Ubuntu 22.04 and Debian 12 have older glibc versions; use a
-source build on those systems. The ARM preview has its separate glibc 2.35
-baseline below. Check your system with `getconf GNU_LIBC_VERSION`.
+The next release builds Linux x86_64 packages on Ubuntu 22.04 with glibc 2.35.
+This covers Ubuntu 22.04 and Debian 12 without a source build. The Python wheel
+is tagged `manylinux_2_35_x86_64`, and its CLI and library are checked against
+that floor. Check your system with `getconf GNU_LIBC_VERSION`; these GNU/Linux
+packages require glibc and do not target musl/Alpine.
+
+These changes are unreleased. Version 1.2.1's Linux x86_64 SDK/npm packages
+require glibc 2.39 or newer; its Python source package requires a system SDK.
+The ARM preview retains its glibc 2.35 baseline and manual SDK installation.
 
 macOS native artifacts target macOS 10.12 on Intel and macOS 11 on Apple
 Silicon. Python wheel tags describe the bundled CLI and library architecture
@@ -62,12 +67,12 @@ published release assets below for installation.
 | Homebrew (macOS and x86_64 Linux) | `brew install sandover/tap/plasmite` | Yes | Yes (system SDK) | `official` | Installs `bin/`, `lib/`, `include/`, `pkg-config` metadata; post-release macOS install smoke required. |
 | crates.io (Rust) | `cargo install plasmite` | Yes | No | `official` | Installs binaries into Cargo bin dir; source build. |
 | crates.io (Rust) | `cargo add plasmite` | No | Yes (Rust crate) | `official` | Standard Rust dependency. |
-| PyPI (Python) | `uv tool install plasmite` | Yes | Yes (Python bindings) | `official` (macOS x64/arm64; Windows x64) | Wheel bundles native assets and CLI where wheels are published; Linux currently falls back to source distribution. |
+| PyPI (Python) | `uv tool install plasmite` | Yes | Yes (Python bindings) | `official` (macOS x64/arm64; Linux/Windows x64) | Wheel bundles native assets and CLI. Linux wheel support is unreleased; 1.2.1 uses the source package on Linux. |
 | npm (Node) | `npm i -g plasmite` | Yes | Yes (Node bindings) | `official` (macOS x64/arm64; Linux/Windows x64) | Requires Node >=24; bundles addon, native assets, and CLI. |
 | Go module | `go get github.com/sandover/plasmite/bindings/go/local` | No | Yes (Go bindings) | `official` (macOS/Linux) | Requires system SDK (brew/manual) for cgo; import pure contracts from `/api` when needed. |
 | GitHub release tarball | Download from releases | Yes | Yes (SDK layout) | `official` (manual path) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |
-| GitHub release tarball (Linux ARM64) | Download `plasmite_1.0.0_linux_arm64.tar.gz` | Yes | Yes (SDK layout) | `preview` | Published SDK archive with release checksums; physical Pi qualification pending. |
-| GitHub release tarball (Linux ARMv7) | Download `plasmite_1.0.0_linux_armv7.tar.gz` | Yes | Yes (SDK layout) | `preview` | Published 32-bit hard-float SDK archive with release checksums; physical Pi qualification pending. |
+| GitHub release tarball (Linux ARM64) | Download `plasmite_1.2.1_linux_arm64.tar.gz` | Yes | Yes (SDK layout) | `preview` | Published SDK archive with release checksums; physical Pi qualification pending. |
+| GitHub release tarball (Linux ARMv7) | Download `plasmite_1.2.1_linux_armv7.tar.gz` | Yes | Yes (SDK layout) | `preview` | Published 32-bit hard-float SDK archive with release checksums; physical Pi qualification pending. |
 | cargo-binstall (Rust binary installer) | `cargo binstall plasmite --no-confirm` | Yes | No | `preview` (`x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`) | Uses `package.metadata.binstall` URL mapping to GitHub release SDK tarballs; release-publish smoke gate is currently Linux-only. |
 
 **Requirements:** Node.js 24 or newer for the npm package and its CLI;
@@ -75,7 +80,7 @@ Python 3.10 or newer for the Python package; Go 1.22 or newer, cgo, and
 pkg-config for Go. Rust source installs need the toolchain and C compiler
 described in the [build guide](../building.md#install-the-cli-from-source).
 
-Python's Linux source package needs a separate system SDK. For a manually
+On platforms without a compatible wheel, Python's source package needs a separate system SDK. For a manually
 extracted SDK, point `PLASMITE_LIB_DIR` at its `lib` directory and add its
 `bin` directory to PATH before running Python or its console command. A
 Linux ARM SDK supplies the CLI and C library, but no npm native addon.
@@ -99,13 +104,13 @@ ARM64 requires ARMv8-A; ARMv7 requires Armv7-A with VFPv3-D16 and Thumb-2.
 ARMv6 is unsupported. Physical Pi installation and reboot qualification remain
 pending; the published archives retain the preview tier.
 
-Download the matching [1.0.0 release](https://github.com/sandover/plasmite/releases/tag/v1.0.0)
-archive and [sha256sums.txt](https://github.com/sandover/plasmite/releases/download/v1.0.0/sha256sums.txt):
+Download the matching [1.2.1 release](https://github.com/sandover/plasmite/releases/tag/v1.2.1)
+archive and [sha256sums.txt](https://github.com/sandover/plasmite/releases/download/v1.2.1/sha256sums.txt):
 
 | Userland | Published archive |
 | --- | --- |
-| 64-bit ARM | [plasmite_1.0.0_linux_arm64.tar.gz](https://github.com/sandover/plasmite/releases/download/v1.0.0/plasmite_1.0.0_linux_arm64.tar.gz) |
-| 32-bit ARMv7 hard-float | [plasmite_1.0.0_linux_armv7.tar.gz](https://github.com/sandover/plasmite/releases/download/v1.0.0/plasmite_1.0.0_linux_armv7.tar.gz) |
+| 64-bit ARM | [plasmite_1.2.1_linux_arm64.tar.gz](https://github.com/sandover/plasmite/releases/download/v1.2.1/plasmite_1.2.1_linux_arm64.tar.gz) |
+| 32-bit ARMv7 hard-float | [plasmite_1.2.1_linux_armv7.tar.gz](https://github.com/sandover/plasmite/releases/download/v1.2.1/plasmite_1.2.1_linux_armv7.tar.gz) |
 
 On the Linux ARM machine, run these commands in Bash. They select the archive
 by userland width and stop on download or checksum failure before extraction:

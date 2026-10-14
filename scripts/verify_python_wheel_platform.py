@@ -4,6 +4,7 @@ import email
 import platform
 import re
 import struct
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -17,6 +18,7 @@ from wheel_platform import macho_platform
 
 def verify(wheel: Path, sdk: Path) -> None:
     _, _, _, filename_tags = parse_wheel_filename(wheel.name)
+    assert all(t.interpreter == 'py3' and t.abi == 'none' for t in filename_tags), 'ctypes wheels must not depend on a CPython ABI'
     with zipfile.ZipFile(wheel) as archive:
         metadata_names = [n for n in archive.namelist() if n.endswith('.dist-info/WHEEL')]
         assert len(metadata_names) == 1, 'Expected one WHEEL metadata record'
@@ -57,11 +59,19 @@ def verify(wheel: Path, sdk: Path) -> None:
                 assert data[:2] == b'MZ', 'Expected PE native payload'
                 offset = struct.unpack_from('<I', data, 0x3c)[0]
                 assert data[offset:offset+4] == b'PE\0\0' and struct.unpack_from('<H', data, offset+4)[0] == expected, 'PE architecture differs from wheel tag'
-        elif tag.startswith('linux_'):
-            expected = {'linux_x86_64': (2, 62), 'linux_aarch64': (2, 183), 'linux_armv7l': (1, 40)}[tag]
-            for data in binaries:
+        elif tag.startswith(('linux_', 'manylinux_')):
+            manylinux = re.fullmatch(r'manylinux_(\d+)_(\d+)_(x86_64|aarch64|armv7l)', tag)
+            arch_tag = 'linux_' + manylinux[3] if manylinux else tag
+            expected = {'linux_x86_64': (2, 62), 'linux_aarch64': (2, 183), 'linux_armv7l': (1, 40)}[arch_tag]
+            for name, data in zip(names, binaries):
                 assert data[:4] == b'\x7fELF' and data[5] == 1, 'Expected little-endian ELF native payload'
                 assert (data[4], struct.unpack_from('<H', data, 18)[0]) == expected, 'ELF architecture differs from wheel tag'
+                if manylinux:
+                    source = sdk / ('bin' if name == 'plasmite' else 'lib') / name
+                    versions = subprocess.check_output(['readelf', '--version-info', str(source)], text=True)
+                    required = [(int(major), int(minor)) for major, minor in re.findall(r'GLIBC_(\d+)\.(\d+)', versions)]
+                    floor = (int(manylinux[1]), int(manylinux[2]))
+                    assert not required or max(required) <= floor, f'{name} requires glibc above wheel minimum {floor}'
         else:
             raise AssertionError('Unsupported wheel platform: ' + tag)
     print('Wheel platform, deployment floor, supported tags and exact SDK bytes PASS: ' + wheel.name)

@@ -111,6 +111,15 @@ class BindingTests(unittest.TestCase):
             self.assertIsInstance(get_alias, Message)
             self.assertEqual(get_alias.seq, fetched.seq)
 
+    def test_message_time_fraction_widths_and_raw_precision(self) -> None:
+        for fraction, micros in [("1", 100000), ("123", 123000), ("12345", 123450), ("123456", 123456), ("123456789", 123456)]:
+            with self.subTest(fraction=fraction):
+                payload = json.dumps({"seq": 1, "time": f"2026-10-14T12:34:56.{fraction}Z", "meta": {"tags": []}, "data": {}}).encode()
+                message = parse_message(payload)
+                self.assertEqual(message.time.microsecond, micros)
+                self.assertEqual(message.time.utcoffset().total_seconds(), 0)
+                self.assertEqual(message.raw, payload)
+
     def test_default_pool_size_constant_matches_core_default(self) -> None:
         self.assertEqual(plasmite.DEFAULT_POOL_SIZE_BYTES, 1024 * 1024)
 
