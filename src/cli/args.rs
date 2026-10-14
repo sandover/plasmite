@@ -178,7 +178,7 @@ Use --input-format lite3-raw for one raw attachment from a file or stdin."#,
 INPUT AND OUTPUT
   - Objects are application data unless they have exactly seq, time, meta.tags, and data
   - Complete messages preserve data and tags; source seq/time are validated and replaced
-  - --data forces application data; --tag adds tags to application objects
+  - --tag adds tags to application objects; complete messages supply their own tags
   - Choose one input source: MESSAGE, --file, or stdin
   - JSON, marked YAML, and framed Lite3 detect automatically and append one message at a time
   - --input-format chooses an explicit encoding; lite3-raw reads one attachment through EOF
@@ -192,11 +192,6 @@ INPUT AND OUTPUT
         pool: String,
         #[arg(help = "Application object or complete message")]
         data: Option<String>,
-        #[arg(
-            long = "data",
-            help = "Treat every object as application data, including complete message shapes"
-        )]
-        contents: bool,
         #[arg(long, help = "Tag for application objects (repeatable)")]
         tag: Vec<String>,
         #[arg(

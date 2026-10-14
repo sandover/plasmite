@@ -162,9 +162,9 @@ record_case "conflicting global directories" nonzero run_plasmite --dir "${POOL_
 record_case "pool info" zero run_plasmite --dir "${POOL_DIR}" pool info "${POOL_MAIN}"
 record_case "pool info missing" nonzero run_plasmite --dir "${POOL_DIR}" pool info "${MISSING_POOL}"
 
-record_case "feed inline json with tag" zero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" --data '{"kind":"inline","ok":true}' --tag ux
-record_case "feed from file" zero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" --data --file "${WORK_DIR}/good.json"
-record_case "removed errors skip option is rejected" nonzero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" --data --file "${WORK_DIR}/mixed.jsonl" --input-format json --errors skip
+record_case "feed inline json with tag" zero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" '{"kind":"inline","ok":true}' --tag ux
+record_case "feed from file" zero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" --file "${WORK_DIR}/good.json"
+record_case "removed errors skip option is rejected" nonzero run_plasmite --dir "${POOL_DIR}" feed "${POOL_MAIN}" --file "${WORK_DIR}/mixed.jsonl" --input-format json --errors skip
 record_case "fetch existing seq" zero run_plasmite --dir "${POOL_DIR}" fetch "${POOL_MAIN}" 1
 record_case "fetch JSON envelope" zero run_plasmite --dir "${POOL_DIR}" fetch "${POOL_MAIN}" 1 --format json
 record_case "fetch missing seq" nonzero run_plasmite --dir "${POOL_DIR}" fetch "${POOL_MAIN}" 999999

@@ -16,8 +16,8 @@ seed_demo() {
     return 0
   fi
   "$bin" --dir "$pool_dir" pool create demo --size 1M >/dev/null
-  "$bin" --dir "$pool_dir" feed demo --data --tag deploy '{"service":"api","version":"1.0"}' >/dev/null
-  "$bin" --dir "$pool_dir" feed demo --data --tag metric '{"cpu":12.3,"rps":4200}' >/dev/null
+  "$bin" --dir "$pool_dir" feed demo --tag deploy '{"service":"api","version":"1.0"}' >/dev/null
+  "$bin" --dir "$pool_dir" feed demo --tag metric '{"cpu":12.3,"rps":4200}' >/dev/null
   echo "${label}: seeded demo pool with 2 messages"
 }
 

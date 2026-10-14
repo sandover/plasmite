@@ -12,7 +12,7 @@ pool reference:
 
 ```sh
 plasmite serve --udp-follow
-plasmite feed udp://127.0.0.1:9701/sensors --data '{"temperature":23}'
+plasmite feed udp://127.0.0.1:9701/sensors '{"temperature":23}'
 plasmite follow udp://127.0.0.1:9701/sensors
 plasmite follow udp://127.0.0.1:9701/sensors --tail 10
 plasmite follow udp://127.0.0.1:9701/sensors --tail 100 --no-follow

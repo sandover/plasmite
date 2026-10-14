@@ -55,7 +55,7 @@ owns its protocol guarantees.
   requires unsigned integer seq, RFC 3339 time, string-list meta.tags, and object
   data. Invalid reserved messages fail; partial envelopes and extra fields are
   application data. Copies preserve data/tags and assign destination seq/time.
-  `feed --data` forces application contents. `--tag` is accepted for application
+  `--tag` is accepted for application
   data and rejected for complete messages. Input source never changes this rule.
 - Default feed input recognizes JSON objects, marked YAML documents and framed
   Lite3 from their syntax. It does not wait for another message or EOF after a
@@ -71,7 +71,7 @@ owns its protocol guarantees.
   payload without re-encoding. An empty stream may contain zero bytes.
 - lite3-raw output requires fetch. Raw input requires --input-format lite3-raw
   and treats the entire file/stdin through EOF as one attachment. Neither binary
-  input form accepts --data, --tag or an inline argument. Payloads may occupy at
+  input form accepts --tag or an inline argument. Payloads may occupy at
   most 256 MiB and must fit the destination pool. Text buffering permits JSON
   escaping overhead (six times the payload limit plus 64 KiB). Remote servers
   keep their configured request-body limits.
@@ -82,7 +82,7 @@ owns its protocol guarantees.
 - Finite history reads return nonzero when retention removes selected messages.
   Live follow reports loss on stderr and continues. access status prints its
   report and returns nonzero when reachability or acceptance fails.
-- --json, --yaml, --jsonl, --in, --data-only and --errors are removed.
+- --data, --json, --yaml, --jsonl, --in, --data-only and --errors are removed.
 - Binary output requires a message command. Reports retain their JSON/YAML
   fields. Help/completion remain text, tap preserves child output, MCP keeps
   JSON-RPC. Product version output uses the shared development/release identity.

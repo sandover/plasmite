@@ -104,7 +104,6 @@ fn default_messages_copy_edit_save_reload_and_chain() {
             directory.to_str().unwrap(),
             "feed",
             "reloaded",
-            "--data",
             "{\"seed\":true}",
             "--tag",
             "prior",
@@ -236,7 +235,7 @@ fn first_sparse_object_reaches_pool_before_stdin_closes() {
 }
 
 #[test]
-fn data_mode_preserves_message_named_application_fields_and_old_flags_fail() {
+fn message_named_application_fields_are_preserved_and_old_flags_fail() {
     let temp = tempfile::tempdir().expect("tempdir");
     let directory = temp.path().join("pools");
     create_pool(&directory, "events");
@@ -271,7 +270,6 @@ fn data_mode_preserves_message_named_application_fields_and_old_flags_fail() {
             directory.to_str().unwrap(),
             "feed",
             "events",
-            "--data",
             &text,
             "--tag",
             "outer",
@@ -311,6 +309,7 @@ fn data_mode_preserves_message_named_application_fields_and_old_flags_fail() {
         vec!["version", "--yaml"],
         vec!["version", "--jsonl"],
         vec!["feed", "events", "--in", "json"],
+        vec!["feed", "events", "--data"],
         vec!["feed", "events", "--data-only"],
         vec!["feed", "events", "--errors", "skip"],
     ] {
@@ -321,6 +320,35 @@ fn data_mode_preserves_message_named_application_fields_and_old_flags_fail() {
             .output()
             .expect("run removed-option check");
         assert_eq!(output.status.code(), Some(2), "args={args:?}");
+    }
+}
+
+#[test]
+fn removed_data_flag_is_rejected_before_local_or_network_work() {
+    let temp = tempfile::tempdir().unwrap();
+    let directory = temp.path().join("unused");
+    for command in ["feed", "duplex"] {
+        for target in [
+            "missing",
+            "http://127.0.0.1:1/missing",
+            "udp://127.0.0.1:1/missing",
+        ] {
+            let output = cmd()
+                .arg("--dir")
+                .arg(&directory)
+                .args([command, target, "--data"])
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(2), "{command} {target}");
+            let error = String::from_utf8(output.stderr).unwrap();
+            assert!(error.contains("unexpected argument '--data'"), "{error}");
+            assert!(!directory.exists());
+        }
+    }
+    for command in ["feed", "duplex"] {
+        let help = cmd().args([command, "--help"]).output().unwrap();
+        assert!(help.status.success());
+        assert!(!String::from_utf8(help.stdout).unwrap().contains("--data"));
     }
 }
 
@@ -427,21 +455,20 @@ fn ordinary_partial_and_reserved_objects_use_the_same_rule_for_all_sources() {
     assert_ne!(message["time"], reserved["time"]);
     assert_eq!(message["data"], reserved["data"]);
     assert_eq!(message["meta"], reserved["meta"]);
-    let forced = cmd()
+    let inline = cmd()
         .args([
             "--dir",
             directory.to_str().unwrap(),
             "feed",
             "events",
-            "--data",
             &reserved.to_string(),
         ])
         .output()
         .unwrap();
-    assert!(forced.status.success());
+    assert!(inline.status.success());
     assert_eq!(
-        parse_json(std::str::from_utf8(&forced.stdout).unwrap())["data"],
-        reserved
+        parse_json(std::str::from_utf8(&inline.stdout).unwrap())["data"],
+        reserved["data"]
     );
 
     let yaml = b"---\nx: 5\n...\n---\nseq: 900\ntime: '2000-01-01T00:00:00Z'\nmeta: {tags: [yaml]}\ndata: {x: 6}\n...\n";
