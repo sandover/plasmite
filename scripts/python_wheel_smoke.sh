@@ -127,7 +127,17 @@ activate_venv "$install_env"
 uv pip install --cache-dir "$UV_CACHE_DIR" "$wheel_file"
 
 unset PLASMITE_LIB_DIR DYLD_LIBRARY_PATH LD_LIBRARY_PATH
-python -c 'import plasmite; from plasmite import Client; print("python-wheel-import-ok")'
+python - <<'PY'
+from tempfile import TemporaryDirectory
+from plasmite import Client
+
+with TemporaryDirectory() as directory, Client(directory) as client:
+    with client.pool("wheel-smoke", 1024 * 1024) as pool:
+        sent = pool.append({"wheel": True}, ["package"])
+        received = pool.get(sent.seq)
+        assert received.data == {"wheel": True} and received.tags == ["package"]
+print("python-wheel-native-roundtrip-ok")
+PY
 plasmite --version >/dev/null
 pls --version >/dev/null
 BUNDLED_CLI="$(python -c 'from plasmite._cli import _bundled_cli_path; print(_bundled_cli_path())')"
