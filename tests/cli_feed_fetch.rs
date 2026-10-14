@@ -615,7 +615,6 @@ fn emit_remote_url_happy_path_appends_message() {
             pool_dir.to_str().unwrap(),
             "feed",
             &pool_url,
-            "--data",
             "{\"x\":1}",
             "--tag",
             "ping",
@@ -632,6 +631,20 @@ fn emit_remote_url_happy_path_appends_message() {
         value.get("meta").and_then(|v| v.get("tags")),
         Some(&json!(["ping"]))
     );
+    let copied = cmd()
+        .args(["feed", &pool_url, &value.to_string(), "--format", "json"])
+        .env("PLASMITE_ACCESS_HOME", &access_home)
+        .output()
+        .expect("copy remote message");
+    assert!(
+        copied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&copied.stderr)
+    );
+    let message = parse_json(std::str::from_utf8(&copied.stdout).unwrap());
+    assert_eq!(message["seq"], 2);
+    assert_eq!(message["data"], value["data"]);
+    assert_eq!(message["meta"], value["meta"]);
 }
 
 #[test]
@@ -1324,4 +1337,77 @@ fn feed_lite3_raw_allows_empty_stream_and_rejects_invalid_payloads() {
     let raw = fetch_output(&pool_dir, "target", "1", &["--format", "lite3-raw"]);
     assert!(raw.status.success());
     assert_eq!(raw.stdout, payload);
+}
+
+#[test]
+fn create_size_implies_creation_for_feed_and_tap_without_changing_existing_pools() {
+    for family in ["feed", "tap"] {
+        let temp = tempfile::tempdir().unwrap();
+        let pool_path = temp.path().join("sized.plasmite");
+        let run = |pool: &str, size: Option<&str>| {
+            let mut command = cmd();
+            command.arg("--dir").arg(temp.path()).args([family, pool]);
+            if let Some(size) = size {
+                command.args(["--create-size", size]);
+            }
+            if family == "feed" {
+                command.arg("{\"value\":1}");
+            } else {
+                command.args([
+                    "--quiet",
+                    "--",
+                    env!("CARGO_BIN_EXE_plasmite"),
+                    "version",
+                    "--format",
+                    "json",
+                ]);
+            }
+            command.output().unwrap()
+        };
+        let missing = run("missing", None);
+        assert_eq!(missing.status.code(), Some(3));
+        assert!(!temp.path().join("missing.plasmite").exists());
+        let invalid = run("invalid-size", Some("bad"));
+        assert_eq!(invalid.status.code(), Some(2));
+        assert!(!temp.path().join("invalid-size.plasmite").exists());
+        let created = run("sized", Some("64K"));
+        assert!(
+            created.status.success(),
+            "{}",
+            String::from_utf8_lossy(&created.stderr)
+        );
+        assert_eq!(std::fs::metadata(&pool_path).unwrap().len(), 65536);
+        let original = Pool::open(&pool_path).unwrap().get_message(1).unwrap();
+        let reopened = run("sized", Some("1M"));
+        assert!(
+            reopened.status.success(),
+            "{}",
+            String::from_utf8_lossy(&reopened.stderr)
+        );
+        assert_eq!(std::fs::metadata(&pool_path).unwrap().len(), 65536);
+        let retained = Pool::open(&pool_path).unwrap().get_message(1).unwrap();
+        assert_eq!(retained.seq, original.seq);
+        assert_eq!(retained.time, original.time);
+        assert_eq!(retained.data, original.data);
+    }
+}
+
+#[test]
+fn remote_and_udp_feed_reject_create_size_without_waiting_for_a_server() {
+    for target in ["http://localhost:9170/demo", "udp://127.0.0.1:9701/demo"] {
+        let output = cmd()
+            .args([
+                "feed",
+                target,
+                "--create-size",
+                "64K",
+                "{}",
+                "--format",
+                "json",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(parse_error_json(&output.stderr)["error"]["kind"], "Usage");
+    }
 }

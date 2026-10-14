@@ -76,7 +76,7 @@ class OscExampleTests(unittest.TestCase):
             self.assertIn("Listening for OSC on 127.0.0.1:", ready)
             port = int(ready.split(":")[1].split(";")[0])
             feeder = subprocess.Popen(
-                command + ["feed", "osc", "--data", "--tag", "osc", "--format", "json"],
+                command + ["feed", "osc", "--tag", "osc"],
                 stdin=receiver.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
             self.addCleanup(stop, feeder)

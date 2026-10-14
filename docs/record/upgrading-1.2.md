@@ -18,20 +18,24 @@ The destination keeps contents and tags, and assigns its own sequence and time.
 `feed` writes complete newly appended messages, so another `feed` can continue
 the chain. The reader processes each complete message immediately.
 
-## Create messages explicitly
+## Create messages
 
-Before 1.2.0, feed treated every JSON object as application contents. Add `--data`
-when that is your intent:
+In 1.2.1, ordinary objects are application data again; no `--data` is needed.
+Existing `--data` scripts continue working. In 1.2.0, use `--data` explicitly.
 
 ```bash
-plasmite feed events --data '{"temperature":21}'
-plasmite feed events --data --tag sensor '{"temperature":21}'
-jq -c '.[]' readings.json | plasmite feed events --data
+plasmite feed events '{"temperature":21}'
+plasmite feed events --tag sensor '{"temperature":21}'
+jq -c '.[]' readings.json | plasmite feed events
 ```
 
-Without `--data`, feed requires a complete message with object `data` and
-optional `meta.tags`. Unknown message/meta fields fail. To extract application
-contents, use `jq -c '.data'`; a following feed needs `--data` to wrap them.
+Only the full output shape is reserved: exactly `seq`, `time`, `meta`, and
+`data`, with exactly `meta.tags`. Such objects copy as messages, with validated
+source identity and new destination identity. A field named `data` alone is
+ordinary application data. Use `--data` to force application interpretation of
+the reserved shape. See [message input rules](../cli.md#creating-messages).
+To extract application contents, use `jq -c '.data'`; a following feed accepts
+them directly.
 
 ## Choose one output format
 

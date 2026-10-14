@@ -72,7 +72,6 @@ fn default_messages_copy_edit_save_reload_and_chain() {
                 directory.to_str().unwrap(),
                 "feed",
                 "source",
-                "--data",
                 &input,
                 "--tag",
                 "sensor",
@@ -181,14 +180,21 @@ fn default_messages_copy_edit_save_reload_and_chain() {
 }
 
 #[test]
-fn first_sparse_message_reaches_pool_before_stdin_closes() {
+fn first_sparse_object_reaches_pool_before_stdin_closes() {
     let temp = tempfile::tempdir().expect("tempdir");
     let directory = temp.path().join("pools");
     create_pool(&directory, "heartbeat");
 
     let mut child = KillOnDrop(
         cmd()
-            .args(["--dir", directory.to_str().unwrap(), "feed", "heartbeat"])
+            .args([
+                "--dir",
+                directory.to_str().unwrap(),
+                "feed",
+                "heartbeat",
+                "--tag",
+                "health",
+            ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -199,7 +205,7 @@ fn first_sparse_message_reaches_pool_before_stdin_closes() {
         .stdin
         .as_mut()
         .expect("feed stdin")
-        .write_all(b"{\"data\":{\"beat\":1},\"meta\":{\"tags\":[\"health\"]}}\n")
+        .write_all(b"{\"beat\":1}\n")
         .expect("write first message");
     child
         .0
@@ -253,7 +259,11 @@ fn data_mode_preserves_message_named_application_fields_and_old_flags_fail() {
         ])
         .output()
         .expect("feed without data mode");
-    assert!(!ambiguous.status.success());
+    assert!(ambiguous.status.success());
+    assert_eq!(
+        parse_json(std::str::from_utf8(&ambiguous.stdout).unwrap())["data"],
+        application
+    );
 
     let written = cmd()
         .args([
@@ -274,7 +284,7 @@ fn data_mode_preserves_message_named_application_fields_and_old_flags_fail() {
         String::from_utf8_lossy(&written.stderr)
     );
     let message = parse_json(std::str::from_utf8(&written.stdout).expect("utf8"));
-    assert_eq!(message["seq"], 1);
+    assert_eq!(message["seq"], 2);
     assert_eq!(message["meta"]["tags"], json!(["outer"]));
     assert_eq!(message["data"], application);
 
@@ -290,7 +300,11 @@ fn data_mode_preserves_message_named_application_fields_and_old_flags_fail() {
         ])
         .output()
         .expect("tag without data mode");
-    assert_eq!(tag_without_data.status.code(), Some(2));
+    assert!(tag_without_data.status.success());
+    assert_eq!(
+        parse_json(std::str::from_utf8(&tag_without_data.stdout).unwrap())["meta"]["tags"],
+        json!(["orphan"])
+    );
 
     for args in [
         vec!["version", "--json"],
@@ -317,9 +331,7 @@ fn broken_pipe_stops_after_the_message_being_written() {
     let directory = temp.path().join("pools");
     create_pool(&directory, "events");
     let large_data = "x".repeat(256 * 1024);
-    let input = format!(
-        "{{\"data\":{{\"n\":1}}}}\n{{\"data\":{{\"large\":\"{large_data}\"}}}}\n{{\"data\":{{\"n\":3}}}}\n"
-    );
+    let input = format!("{{\"n\":1}}\n{{\"large\":\"{large_data}\"}}\n{{\"n\":3}}\n");
 
     let mut child = KillOnDrop(
         cmd()
@@ -374,5 +386,125 @@ fn broken_pipe_stops_after_the_message_being_written() {
     assert!(
         !third.status.success(),
         "feed must stop after the broken pipe"
+    );
+}
+
+#[test]
+fn ordinary_partial_and_reserved_objects_use_the_same_rule_for_all_sources() {
+    let temp = tempfile::tempdir().unwrap();
+    let directory = temp.path().join("pools");
+    create_pool(&directory, "events");
+    for application in [
+        json!({"x": 1}),
+        json!({"data": {"x": 2}}),
+        json!({"data": {}, "meta": {"tags": ["application"]}}),
+    ] {
+        let text = application.to_string();
+        let output = feed_stdin(&directory, "events", text.as_bytes());
+        assert!(output.status.success());
+        let message = parse_json(std::str::from_utf8(&output.stdout).unwrap());
+        assert_eq!(message["data"], application);
+        assert_eq!(message["meta"]["tags"], json!([]));
+    }
+    let reserved = json!({"seq": 900, "time": "2000-01-01T00:00:00Z",
+        "meta": {"tags": ["copied"]}, "data": {"value": 4}});
+    let file = temp.path().join("message.json");
+    std::fs::write(&file, reserved.to_string()).unwrap();
+    let copied = cmd()
+        .args([
+            "--dir",
+            directory.to_str().unwrap(),
+            "feed",
+            "events",
+            "--file",
+            file.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(copied.status.success());
+    let message = parse_json(std::str::from_utf8(&copied.stdout).unwrap());
+    assert_eq!(message["seq"], 4);
+    assert_ne!(message["time"], reserved["time"]);
+    assert_eq!(message["data"], reserved["data"]);
+    assert_eq!(message["meta"], reserved["meta"]);
+    let forced = cmd()
+        .args([
+            "--dir",
+            directory.to_str().unwrap(),
+            "feed",
+            "events",
+            "--data",
+            &reserved.to_string(),
+        ])
+        .output()
+        .unwrap();
+    assert!(forced.status.success());
+    assert_eq!(
+        parse_json(std::str::from_utf8(&forced.stdout).unwrap())["data"],
+        reserved
+    );
+
+    let yaml = b"---\nx: 5\n...\n---\nseq: 900\ntime: '2000-01-01T00:00:00Z'\nmeta: {tags: [yaml]}\ndata: {x: 6}\n...\n";
+    let output = feed_stdin(&directory, "events", yaml);
+    assert!(output.status.success());
+    let messages = parse_json_lines(&output.stdout);
+    assert_eq!(messages[0]["data"], json!({"x": 5}));
+    assert_eq!(messages[1]["data"], json!({"x": 6}));
+    assert_eq!(messages[1]["meta"]["tags"], json!(["yaml"]));
+}
+
+#[test]
+fn invalid_reserved_message_stops_after_prior_success() {
+    let temp = tempfile::tempdir().unwrap();
+    let directory = temp.path().join("pools");
+    create_pool(&directory, "events");
+    let output = feed_stdin(&directory, "events", b"{\"ok\":1}\n{\"seq\":null,\"time\":\"bad\",\"meta\":{\"tags\":[]},\"data\":{}}\n{\"later\":true}\n");
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(parse_json_lines(&output.stdout).len(), 1);
+    let history = follow_tail(&directory, "events", "10");
+    let messages = parse_json_lines(&history.stdout);
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["data"], json!({"ok": 1}));
+}
+
+#[test]
+fn actual_feed_follow_fetch_pipes_preserve_data_and_tags() {
+    let temp = tempfile::tempdir().unwrap();
+    let directory = temp.path().join("pools");
+    for name in ["source", "destination"] {
+        create_pool(&directory, name);
+    }
+    for args in [
+        vec!["feed", "source", "--tag", "pipe", "{\"x\":1}"],
+        vec!["follow", "source", "--tail", "1", "--no-follow"],
+        vec!["fetch", "source", "1"],
+    ] {
+        let mut source = cmd()
+            .arg("--dir")
+            .arg(&directory)
+            .args(args)
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let copied = cmd()
+            .arg("--dir")
+            .arg(&directory)
+            .args(["feed", "destination"])
+            .stdin(Stdio::from(source.stdout.take().unwrap()))
+            .output()
+            .unwrap();
+        assert!(source.wait().unwrap().success());
+        assert!(
+            copied.status.success(),
+            "{}",
+            String::from_utf8_lossy(&copied.stderr)
+        );
+        let message = parse_json(std::str::from_utf8(&copied.stdout).unwrap());
+        assert_eq!(message["data"], json!({"x": 1}));
+        assert_eq!(message["meta"]["tags"], json!(["pipe"]));
+    }
+    assert_eq!(
+        parse_json_lines(&follow_tail(&directory, "destination", "3").stdout).len(),
+        3
     );
 }

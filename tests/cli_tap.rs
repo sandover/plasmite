@@ -44,7 +44,7 @@ fn tap_help_renders_examples() {
     assert!(output.status.success());
     let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
     assert!(stdout.contains("plasmite tap build --create -- cargo build"));
-    assert!(stdout.contains("plasmite tap api --create --create-size 64M -- ./server"));
+    assert!(stdout.contains("plasmite tap api --create-size 64M -- ./server"));
     assert!(stdout.contains("`--` is required before wrapped command args"));
     assert!(stdout.contains("Lines larger than the pool ring capacity"));
     assert!(stdout.contains("wrapped child is terminated"));

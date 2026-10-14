@@ -86,11 +86,7 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
         exact_follow_create_hint.push_str(" --format ");
         exact_follow_create_hint.push_str(output_mode.label());
     }
-    if args.no_follow && args.tail == 0 && args.since.is_none() {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("--no-follow requires --tail or --since")
-            .with_hint("Select retained history with --tail N or --since TIME."));
-    }
+
     let cfg = FollowConfig {
         tail: args.tail,
         output_mode,

@@ -1922,7 +1922,7 @@ fn duplex_non_tty_echoes_followed_messages_without_self_echo() {
     {
         let stdin = duplex.stdin.as_mut().expect("duplex stdin");
         stdin
-            .write_all(b"{\"data\":{\"from\":\"alice\",\"msg\":\"reply\"}}\n")
+            .write_all(b"{\"from\":\"alice\",\"msg\":\"reply\"}\n")
             .expect("write stdin");
     }
     assert!(
@@ -2017,7 +2017,7 @@ fn duplex_remote_url_accepts_future_since() {
         .expect("duplex");
     writeln!(
         duplex.stdin.take().expect("stdin"),
-        "{{\"data\":{{\"from\":\"alice\",\"msg\":\"hello\"}}}}"
+        "{{\"from\":\"alice\",\"msg\":\"hello\"}}"
     )
     .expect("send JSON");
     let output = duplex.wait_with_output().expect("duplex output");
@@ -2110,7 +2110,7 @@ fn duplex_remote_happy_path_sends_and_reads() {
     {
         let stdin = duplex.stdin.as_mut().expect("duplex stdin");
         stdin
-            .write_all(b"{\"data\":{\"from\":\"alice\",\"msg\":\"remote-reply\"}}\n")
+            .write_all(b"{\"seq\":900,\"time\":\"2000-01-01T00:00:00Z\",\"meta\":{\"tags\":[\"copied\"]},\"data\":{\"from\":\"alice\",\"msg\":\"remote-reply\"}}\n")
             .expect("write stdin");
     }
     let _ = duplex.stdin.take();
@@ -2144,6 +2144,7 @@ fn duplex_remote_happy_path_sends_and_reads() {
     assert_eq!(follow_lines.len(), 2);
     assert_eq!(follow_lines[0].get("data").unwrap()["from"], "bob");
     assert_eq!(follow_lines[1].get("data").unwrap()["from"], "alice");
+    assert_eq!(follow_lines[1]["meta"]["tags"], json!(["copied"]));
 }
 
 #[test]

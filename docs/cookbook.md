@@ -22,16 +22,16 @@ A pool retains a bounded history, and readers keep their own checkpoints.
 `--tail N` selects the last N retained messages before filters. Use
 `--no-follow` for a finite history read. Pipes and files default to JSON; choose
 `--format yaml` when that helps your workflow. See the [CLI guide](cli.md) for shared rules and the
-[1.2.0 upgrade guide](record/upgrading-1.2.md) for changed defaults.
+[1.2 upgrade guide](record/upgrading-1.2.md) for changed defaults.
 
 ## YAML Messages
 
 ```bash
 plasmite pool create source destination
-plasmite feed source --data --tag sensor '{"temperature":21}'
+plasmite feed source --tag sensor '{"temperature":21}'
 
 # Copy history as YAML documents.
-plasmite follow source --tail 10 --no-follow --format yaml |
+plasmite follow source --no-follow --format yaml |
   plasmite feed destination
 ```
 
@@ -50,7 +50,7 @@ A deploy script needs to wait until the test runner says "green". No polling loo
 pls follow "ci-$CI_RUN_ID" --create --tail 1 --where '.data.status == "green"' --one > /dev/null && ./deploy-to-staging.sh
 
 # test-runner.sh — signals when done (--create makes the pool if needed)
-./run-tests.sh && pls feed "ci-$CI_RUN_ID" --data --create '{"status": "green", "commit": "a1b2c3d", "suite": "unit"}'
+./run-tests.sh && pls feed "ci-$CI_RUN_ID" --create '{"status": "green", "commit": "a1b2c3d", "suite": "unit"}'
 ```
 
 Set `CI_RUN_ID` to the same unique value in both jobs. `--one` exits when a matching message arrives.
@@ -145,7 +145,7 @@ done
 pls follow telemetry --tag sensor --where '.data.value > 80000'
 
 # replay the last hour of readings to see the trend
-pls follow telemetry --tag sensor --since 1h --no-follow --format json \
+pls follow telemetry --tag sensor --since 1h --no-follow \
   | jq '.data | [.ts, .value]'
 ```
 
@@ -174,7 +174,7 @@ plasmite follow udp://127.0.0.1:9701/sensors --tag sensor
 Send a reading:
 
 ```sh
-plasmite feed udp://127.0.0.1:9701/sensors --data '{"temperature_c":22.4}' --tag sensor
+plasmite feed udp://127.0.0.1:9701/sensors '{"temperature_c":22.4}' --tag sensor
 ```
 
 `feed` writes no receipt to stdout. Its successful exit confirms local send,
@@ -252,16 +252,16 @@ keep their original content and tags. See the
 Several processes write to the same pool with different tags. An on-call engineer tails only what matters.
 
 ```bash
-pls feed telemetry --data --tag deploy '{"service": "api", "sha": "f4e5d6c"}'
-pls feed telemetry --data --tag alert  '{"service": "api", "msg": "latency spike"}'
-pls feed telemetry --data --tag metric '{"service": "web", "rps": 1420}'
+pls feed telemetry --tag deploy '{"service": "api", "sha": "f4e5d6c"}'
+pls feed telemetry --tag alert  '{"service": "api", "msg": "latency spike"}'
+pls feed telemetry --tag metric '{"service": "web", "rps": 1420}'
 
 # on-call — show only api alerts
 pls follow telemetry --tail 100 --tag alert --where '.data.service == "api"'
 
 # postmortem — what happened in the 10 minutes before the alert?
 mkdir -p tmp
-pls follow telemetry --since 10m --no-follow --format json > tmp/timeline.jsonl
+pls follow telemetry --since 10m --no-follow > tmp/timeline.jsonl
 ```
 
 ### Import external API events
@@ -272,7 +272,7 @@ Stripe's [events API](https://docs.stripe.com/api/events/list) returns a page. P
 # import one page of Stripe events
 curl -fsS -G https://api.stripe.com/v1/events \
   -H "Authorization: Bearer $STRIPE_KEY" -d limit=100 \
-  | jq -c '.data[]' | pls feed stripe-events --data --create --input-format json
+  | jq -c '.data[]' | pls feed stripe-events --create
 
 # filter imported completed payments
 pls follow stripe-events --tail 100 --no-follow --where '.data.type == "payment_intent.succeeded"'
@@ -282,7 +282,7 @@ pls follow stripe-events --since 20m --replay 1
 
 # export the last 500 events for offline analysis, then exit
 mkdir -p tmp
-pls follow stripe-events --tail 500 --no-follow --format json > tmp/stripe-dump.jsonl
+pls follow stripe-events --tail 500 --no-follow > tmp/stripe-dump.jsonl
 ```
 
 ### Build progress
@@ -290,19 +290,19 @@ pls follow stripe-events --tail 500 --no-follow --format json > tmp/stripe-dump.
 A CI build prints to stdout, but stdout is gone when the terminal closes. Write structured progress to a pool instead and it's available to any process, anytime.
 
 ```bash
-pls feed build --data --create '{"step": "compile", "pct": 0}'
+pls feed build --create '{"step": "compile", "pct": 0}'
 sleep 1
-pls feed build --data '{"step": "compile", "pct": 100}'
-pls feed build --data '{"step": "test", "pct": 0}'
+pls feed build '{"step": "compile", "pct": 100}'
+pls feed build '{"step": "test", "pct": 0}'
 sleep 2
-pls feed build --data '{"step": "test", "pct": 100}'
-pls feed build --data --tag done '{"step": "finished", "ok": true}'
+pls feed build '{"step": "test", "pct": 100}'
+pls feed build --tag done '{"step": "finished", "ok": true}'
 
 # another terminal — watch the build live
 pls follow build
 
 # a deploy script — ship only when the completed build succeeded
-pls follow build --tag done --tail 100 --one --format json | jq -e '.data.ok == true' > /dev/null && ./deploy.sh
+pls follow build --tag done --tail 100 --one | jq -e '.data.ok == true' > /dev/null && ./deploy.sh
 
 # next morning — what happened overnight?
 pls follow build --since 12h --no-follow
@@ -396,7 +396,7 @@ then exits, so you can try the full pipe without TouchOSC:
 
 ```bash
 uv run examples/osc_to_json.py \
-  | plasmite --dir ./tmp/osc-pools feed osc --data --tag osc --format json
+  | plasmite --dir ./tmp/osc-pools feed osc --tag osc
 ```
 
 In a second terminal, send a test message:
@@ -406,7 +406,7 @@ uv run examples/osc_to_json.py --send-test
 ```
 
 Read the recorded message in a third terminal. The adapter emits an object
-with an OSC address and its arguments. `feed --data` wraps it in the usual
+with an OSC address and its arguments. `feed` wraps it in the usual
 Plasmite envelope; `follow` reads those messages:
 
 ```bash
@@ -433,7 +433,7 @@ on the computer's network interfaces:
 
 ```bash
 uv run examples/osc_to_json.py --host 0.0.0.0 \
-  | plasmite --dir ./tmp/osc-pools feed osc --data --tag osc --format json
+  | plasmite --dir ./tmp/osc-pools feed osc --tag osc
 ```
 
 Keep the Plasmite feed pipe running with the receiver as before. In TouchOSC,
@@ -459,7 +459,7 @@ messages and does not provide playback or an OSC output adapter.
 plasmite pool create source destination
 
 # Add a tagged message.
-plasmite feed source --data --tag sensor '{"temperature":21}'
+plasmite feed source --tag sensor '{"temperature":21}'
 
 # Copy future messages in another terminal.
 plasmite follow source | plasmite feed destination
@@ -470,7 +470,7 @@ plasmite follow source |
   plasmite feed destination
 
 # Save retained messages and load them later.
-plasmite follow source --tail 100 --no-follow > messages.jsonl
+plasmite follow source --no-follow > messages.jsonl
 plasmite feed destination < messages.jsonl
 ```
 
@@ -492,7 +492,7 @@ Use the raw form when a device needs one attachment.
 ```bash
 # Create a pool and add a heartbeat.
 plasmite pool create relay
-plasmite feed relay --data '{"kind":"heartbeat"}'
+plasmite feed relay '{"kind":"heartbeat"}'
 
 # Save the original attachment bytes.
 plasmite fetch relay 1 --format lite3-raw > heartbeat.lite3
@@ -533,7 +533,7 @@ pls tap deploy --tag prod -- ./deploy.sh
 For long-running or high-volume commands, choose an explicit pool size so the ring does not overwrite data too quickly:
 
 ```bash
-pls tap api --create --create-size 64M -- ./server
+pls tap api --create-size 64M -- ./server
 ```
 
 ---
@@ -570,7 +570,7 @@ After `access connect` below, duplex works over the network too:
 pls duplex https://192.0.2.10:9743/chat --me alice --tail 10
 ```
 
-Note: `--create` and `--since` are not supported for remote pools. Use `--tail` to catch up on history.
+Note: `--create` is not supported for remote pools. Use `--tail` or `--since` to catch up on history.
 
 ### Scripted duplex (non-TTY)
 
@@ -618,7 +618,7 @@ pls follow syslog --since 30m --replay 1
 pls follow syslog --since 1h --no-follow --where '.data.MESSAGE | test("panic")'
 
 # pipe to jq for further analysis
-pls follow syslog --since 10m --no-follow --format json | jq '.data | {SYSLOG_IDENTIFIER, MESSAGE}'
+pls follow syslog --since 10m --no-follow | jq '.data | {SYSLOG_IDENTIFIER, MESSAGE}'
 ```
 
 ---
@@ -644,7 +644,7 @@ pls follow incidents --tail 20 --no-follow
 
 # export the evidence for a postmortem
 mkdir -p tmp
-pls follow incidents --tag error --tail 100 --no-follow --format json > tmp/errors.jsonl
+pls follow incidents --tag error --tail 100 --no-follow > tmp/errors.jsonl
 ```
 
 ---
@@ -660,7 +660,7 @@ Replace `pools.example.net` with a hostname or IP the client can reach.
 ```bash
 # Create a pool and start the shared server.
 plasmite pool create events
-plasmite serve --shared-address https://pools.example.net:9743
+plasmite serve https://pools.example.net:9743
 ```
 
 In another terminal on the server, create an invitation. It grants access to
@@ -668,7 +668,7 @@ every pool in the default pool directory:
 
 ```bash
 # Create an access key for the laptop.
-plasmite access invite --name laptop
+plasmite access invite laptop
 ```
 
 Send the HTTPS address and access key separately, and keep the key private. On
@@ -679,7 +679,7 @@ the client, connect and enter the key at the prompt; Plasmite does not echo it:
 plasmite access connect https://pools.example.net:9743
 
 # Send a sensor reading.
-plasmite feed https://pools.example.net:9743/events --data '{"sensor": "temp", "value": 23.5}'
+plasmite feed https://pools.example.net:9743/events '{"sensor": "temp", "value": 23.5}'
 
 # Read recent messages and watch for new ones.
 plasmite follow https://pools.example.net:9743/events --tail 20

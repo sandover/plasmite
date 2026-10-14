@@ -203,20 +203,31 @@ without retrying that append.
 
 ## Creating messages
 
-Use `--data` to create messages from application objects. This gives ordinary
-fields such as `data`, `seq`, and `meta` their application meaning.
+Ordinary JSON or YAML objects are application data; no flag is needed:
 
 ```bash
-plasmite feed events --data '{"temperature":21}'
-plasmite feed events --data --tag sensor '{"temperature":21}'
-jq -c '.[]' readings.json | plasmite feed events --data
+plasmite feed events '{"temperature":21}'
+plasmite feed events --tag sensor '{"temperature":21}'
+jq -c '.[]' readings.json | plasmite feed events
 ```
 
 Choose one source: a positional argument, `--file PATH`, or stdin.
-`--file -` reads stdin. All sources follow the same message rule. `--tag`
-requires `--data`; copied messages supply their own tags. Missing `meta` or
-`meta.tags` means an empty tag list. Default message input rejects unknown
-message and metadata fields, invalid tags, and non-object contents.
+`--file -` reads stdin. All sources follow the same message rule. Only objects
+with exactly `seq`, `time`, `meta`, and `data`, where `meta` has exactly `tags`,
+are recognized as complete messages. That shape is reserved, even when intended
+as application data. Source `seq` must be an unsigned integer, `time` an RFC 3339
+string, `meta.tags` a list of strings, and `data` an object. Invalid reserved
+messages fail. Partial envelopes, extra fields, and a field named `data` alone
+remain application data.
+
+`--data` forces application-data interpretation and keeps existing scripts
+working. `--tag` adds tags to application objects; complete messages supply their
+own tags and reject `--tag`. Non-object application data is rejected.
+
+
+For local `feed` and `tap`, `--create-size SIZE` creates a missing pool without
+requiring `--create`. Existing pools are opened unchanged; the option never resizes
+or recreates them. Without either creation option, a missing pool remains an error.
 
 ## Formats
 
@@ -265,7 +276,7 @@ Reports use the same JSON/YAML formatting rule but remain reports.
 Binary formats require message commands; raw output requires `fetch`.
 Help and completion remain text. `tap` passes through its child's output;
 `mcp` keeps JSON-RPC. Terminal `duplex` creates chat messages with `--me`;
-piped `duplex` accepts complete messages, streams received messages, and
+piped `duplex` accepts application objects and complete messages, streams received messages, and
 ends when stdin closes. Use `feed` when every input needs an echoed append.
 
 Bash and Zsh preserve binary pipes. PowerShell 7.4 and later preserves
@@ -277,10 +288,11 @@ native binary redirection; earlier versions need `cmd.exe` redirection.
 messages, and `--since TIME` adds messages since an RFC 3339 or relative time
 such as `5m`. Local and remote reads follow these same rules.
 
-Use `--no-follow` with either selector to read history and exit:
+Use `--no-follow` alone to read all currently retained history and exit, or add
+`--tail` or `--since` to select a smaller history:
 
 ```console
-plasmite follow events --tail 100 --no-follow
+plasmite follow events --no-follow
 plasmite follow https://pools.example.net:9743/events --since 5m --no-follow --format json
 ```
 

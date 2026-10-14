@@ -152,18 +152,13 @@ fn finite_since_uses_timestamp_and_filters() {
 }
 
 #[test]
-fn finite_requires_history_selector() {
-    let output = cmd()
-        .args(["follow", "missing", "--no-follow", "--format", "json"])
-        .output()
-        .expect("follow");
-    assert_eq!(output.status.code(), Some(2));
-    let error = parse_error_json(&output.stderr);
-    assert!(
-        error["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("requires --tail or --since")
+fn finite_missing_pool_still_reports_not_found() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = history(temp.path(), "missing", &["--no-follow", "--format", "json"]);
+    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(
+        parse_error_json(&output.stderr)["error"]["kind"],
+        "NotFound"
     );
 }
 
@@ -232,6 +227,9 @@ fn local_and_remote_finite_reads_share_selection_rules() {
     let server = ServeProcess::start_with_args_and_scheme(temp.path(), &[], "http");
     let target = format!("{}/history", server.base_url);
     for selection in [
+        vec![],
+        vec!["--tag", "even"],
+        vec!["--where", "false"],
         vec!["--tail", "2", "--tag", "even"],
         vec!["--since", "2020-09-13T12:26:40.003Z", "--tag", "odd"],
         vec!["--tail", "5", "--one"],
@@ -268,8 +266,6 @@ fn finite_snapshot_excludes_writes_while_output_is_blocked() {
             .args([
                 "follow",
                 &target,
-                "--tail",
-                "128",
                 "--no-follow",
                 "--format",
                 "json",
@@ -314,8 +310,6 @@ fn finite_retention_gap_reports_exact_missing_history_and_exits() {
         .args([
             "follow",
             "history",
-            "--tail",
-            "128",
             "--no-follow",
             "--format",
             "json",
@@ -501,11 +495,7 @@ fn remote_finite_reads_adapt_to_short_server_tail_limits() {
             "http",
         );
         let target = format!("{}/history", server.base_url);
-        let output = history(
-            temp.path(),
-            &target,
-            &["--tail", "5", "--no-follow", "--format", "json"],
-        );
+        let output = history(temp.path(), &target, &["--no-follow", "--format", "json"]);
         assert_success(&output);
         assert_eq!(parse_json_lines(&output.stdout).len(), 5);
     }
@@ -517,6 +507,15 @@ fn stub_remote_tail(
     delay: Duration,
     error: Option<&'static str>,
     sequence: u64,
+) -> (String, thread::JoinHandle<usize>) {
+    stub_remote_tail_with_bounds(delay, error, sequence, sequence)
+}
+
+fn stub_remote_tail_with_bounds(
+    delay: Duration,
+    error: Option<&'static str>,
+    sequence: u64,
+    oldest: u64,
 ) -> (String, thread::JoinHandle<usize>) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let target = format!("http://{}/history", listener.local_addr().expect("address"));
@@ -579,7 +578,7 @@ fn stub_remote_tail(
                     ),
                 }
             } else {
-                ("200 OK", json!({"pool":{"path":"history","file_size":1048576,"ring_offset":256,"ring_size":1048320,"bounds":{"oldest":sequence,"newest":sequence}}}).to_string())
+                ("200 OK", json!({"pool":{"path":"history","file_size":1048576,"ring_offset":256,"ring_size":1048320,"bounds":{"oldest":oldest,"newest":sequence}}}).to_string())
             };
             let stream = reader.get_mut();
             write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).expect("response headers");
@@ -774,4 +773,67 @@ fn untailed_live_follow_reports_quiet_end_gap_without_double_counting() {
         messages.last().expect("last retained message")["seq"],
         newest
     );
+}
+
+#[test]
+fn no_follow_alone_reads_all_retained_history_including_empty_and_wrapped_pools() {
+    for count in [0, 5, 300] {
+        let temp = tempfile::tempdir().unwrap();
+        let pool = seed(temp.path(), count, 32768);
+        let bounds = pool.info().unwrap().bounds;
+        let server = ServeProcess::start_with_args_and_scheme(temp.path(), &[], "http");
+        for target in ["history".to_owned(), format!("{}/history", server.base_url)] {
+            let output = history(temp.path(), &target, &["--no-follow", "--format", "json"]);
+            assert_success(&output);
+            let messages = parse_json_lines(&output.stdout);
+            let expected = match (bounds.oldest_seq, bounds.newest_seq) {
+                (Some(oldest), Some(newest)) => (oldest..=newest).collect::<Vec<_>>(),
+                _ => vec![],
+            };
+            assert_eq!(
+                messages
+                    .iter()
+                    .map(|m| m["seq"].as_u64().unwrap())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
+}
+
+#[test]
+fn bare_follow_stays_live_only_for_local_and_remote_pools() {
+    let temp = tempfile::tempdir().unwrap();
+    seed(temp.path(), 5, 0);
+    let server = ServeProcess::start_with_args_and_scheme(temp.path(), &[], "http");
+    for target in ["history".to_owned(), format!("{}/history", server.base_url)] {
+        let output = history(
+            temp.path(),
+            &target,
+            &["--timeout", "100ms", "--format", "json"],
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(124),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stdout.is_empty());
+    }
+}
+
+#[test]
+fn remote_no_follow_alone_fails_when_retention_overtakes_initial_history() {
+    // Initial bounds select 1..=3. The next response begins at 3 after
+    // retention removes the first two selected messages.
+    let (target, server) = stub_remote_tail_with_bounds(Duration::ZERO, None, 3, 1);
+    let output = cmd()
+        .args(["follow", &target, "--no-follow", "--format", "json"])
+        .output()
+        .unwrap();
+    assert_eq!(server.join().unwrap(), 3);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(parse_json_lines(&output.stdout)[0]["seq"], 3);
+    let notices = parse_json_lines(&output.stderr);
+    assert_eq!(notices[0]["notice"]["details"]["dropped_count"], 2);
 }

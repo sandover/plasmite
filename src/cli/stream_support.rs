@@ -132,6 +132,8 @@ fn history_start(oldest: u64, newest: u64, cfg: &FollowConfig) -> u64 {
             .saturating_sub(cfg.tail.saturating_sub(1))
             .max(oldest)
             .max(1)
+    } else if cfg.no_follow {
+        oldest.max(1)
     } else {
         newest.saturating_add(1).max(1)
     }
@@ -474,6 +476,8 @@ pub(crate) fn follow_udp(
         UdpStart::Since(since)
     } else if cfg.tail > 0 {
         UdpStart::Last(cfg.tail)
+    } else if cfg.no_follow {
+        UdpStart::Last(u64::MAX)
     } else {
         UdpStart::New
     };
@@ -598,7 +602,7 @@ pub(crate) fn follow_pool(
     let mut cursor = Cursor::new();
     // Scan retained frames once. The sequence lower bound skips earlier frames
     // without buffering them and stays fixed if the writer advances the ring.
-    cursor.seek_to(if cfg.since_ns.is_some() || cfg.tail > 0 {
+    cursor.seek_to(if cfg.since_ns.is_some() || cfg.tail > 0 || cfg.no_follow {
         header.tail_off
     } else {
         header.head_off

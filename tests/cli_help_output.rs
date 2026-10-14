@@ -110,7 +110,7 @@ fn short_help_exposes_material_command_constraints() {
         (
             &["feed", "-h"],
             &[
-                "requires --create",
+                "creates if missing",
                 "requires --retry > 0",
                 "Choose one input source",
                 "Invalid input stops immediately",
@@ -129,7 +129,7 @@ fn short_help_exposes_material_command_constraints() {
             &["tap", "-h"],
             &[
                 "<POOL> -- <COMMAND>...",
-                "requires --create",
+                "creates if missing",
                 "wrapped command's exit status",
             ],
         ),
@@ -286,7 +286,7 @@ fn not_found_exit_code() {
 }
 
 #[test]
-fn usage_exit_code_for_tag_without_data() {
+fn usage_exit_code_for_tag_on_complete_message() {
     let temp = tempfile::tempdir().expect("tempdir");
     let pool_dir = temp.path().join("pools");
 
@@ -310,7 +310,7 @@ fn usage_exit_code_for_tag_without_data() {
             "testpool",
             "--tag",
             "orphan",
-            "{\"x\":1}",
+            r#"{"seq":7,"time":"2000-01-01T00:00:00Z","meta":{"tags":[]},"data":{"x":1}}"#,
             "--format",
             "json",
         ])

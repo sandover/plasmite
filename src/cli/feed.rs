@@ -31,18 +31,15 @@ pub(super) struct FeedArgs {
     pub(super) input: InputFormat,
 }
 
-pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult, Error> {
+pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandResult, Error> {
+    args.create |= args.create_size.is_some();
     let target = resolve_pool_target(&args.pool, context.pool_dir())?;
     if args.create && matches!(target, PoolTarget::Remote { .. }) {
         return Err(Error::new(ErrorKind::Usage)
-            .with_message("remote feed does not support --create")
+            .with_message("remote feed does not support --create or --create-size")
             .with_hint("Create the pool on the server with pool create."));
     }
-    if args.create_size.is_some() && !args.create {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("--create-size requires --create")
-            .with_hint("Add --create or remove --create-size."));
-    }
+
     if args.retry_delay.is_some() && args.retry == 0 {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("--retry-delay requires --retry")
@@ -54,11 +51,11 @@ pub(super) fn run(args: FeedArgs, context: &CliContext) -> Result<CommandResult,
             .with_hint("Use --format lite3 for feed output."));
     }
     if matches!(args.input, InputFormat::Lite3 | InputFormat::Lite3Raw)
-        && (args.contents || args.data.is_some())
+        && (args.contents || !args.tags.is_empty() || args.data.is_some())
     {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("binary input requires a file or pipe of complete messages")
-            .with_hint("Remove --data and the inline argument for Lite3 input."));
+            .with_hint("Remove --data, --tag, and the inline argument for Lite3 input."));
     }
     let durability = parse_durability(&args.durability)?;
     if matches!(target, PoolTarget::Udp { .. })

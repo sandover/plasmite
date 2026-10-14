@@ -1,6 +1,6 @@
 //! Actual CLI processes send and follow through the UDP endpoint.
 
-use plasmite::api::Pool;
+use plasmite::api::{Pool, PoolApiExt};
 use serde_json::Value;
 use std::fs;
 use std::io::Write;
@@ -75,14 +75,7 @@ fn udp_cli_feed_and_finite_follow_keep_send_receipt_free() -> Result<(), Box<dyn
     }
     let url = format!("udp://127.0.0.1:{port}/sensors");
     let sent = command()
-        .args([
-            "feed",
-            &url,
-            "--data",
-            r#"{"temperature":23}"#,
-            "--format",
-            "json",
-        ])
+        .args(["feed", &url, r#"{"temperature":23}"#, "--format", "json"])
         .output()?;
     assert!(
         sent.status.success(),
@@ -119,7 +112,6 @@ fn udp_cli_feed_and_finite_follow_keep_send_receipt_free() -> Result<(), Box<dyn
         .args([
             "feed",
             &url,
-            "--data",
             "--tag",
             "alert",
             r#"{"temperature":24}"#,
@@ -164,6 +156,22 @@ fn udp_cli_feed_and_finite_follow_keep_send_receipt_free() -> Result<(), Box<dyn
     let matched: Value = serde_json::from_slice(lines[0])?;
     assert_eq!(matched["data"]["temperature"], 24);
 
+    // Re-send a complete UDP follow output, preserving tags and replacing identity.
+    let source: Value = serde_json::from_slice(lines[0])?;
+    let copied = command()
+        .args(["feed", &url, &source.to_string(), "--format", "json"])
+        .output()?;
+    assert!(
+        copied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&copied.stderr)
+    );
+    assert!(copied.stdout.is_empty());
+    wait_for_seq(&pool_path, 3)?;
+    let stored = Pool::open(&pool_path)?.get_message(3)?;
+    assert_eq!(stored.data, source["data"]);
+    assert_eq!(stored.meta.tags, vec!["alert"]);
+
     let timed_out = command()
         .args([
             "follow",
@@ -194,7 +202,7 @@ fn udp_cli_feed_and_finite_follow_keep_send_receipt_free() -> Result<(), Box<dyn
         .stdin
         .take()
         .expect("piped stdin")
-        .write_all(b"{\"data\":{\"from\":\"peer\",\"duplex\":true}}\n")?;
+        .write_all(b"{\"from\":\"peer\",\"duplex\":true}\n")?;
     let duplex_output = duplex.wait_with_output()?;
     assert!(
         duplex_output.status.success(),
@@ -212,7 +220,32 @@ fn udp_cli_feed_and_finite_follow_keep_send_receipt_free() -> Result<(), Box<dyn
             "duplex output must be a received message"
         );
     }
-    wait_for_seq(&pool_path, 3)?;
+    wait_for_seq(&pool_path, 4)?;
+    let all = command()
+        .args([
+            "follow",
+            &url,
+            "--no-follow",
+            "--format",
+            "json",
+            "--timeout",
+            "6s",
+        ])
+        .output()?;
+    assert!(
+        all.status.success(),
+        "{}",
+        String::from_utf8_lossy(&all.stderr)
+    );
+    let messages = all
+        .stdout
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(serde_json::from_slice::<Value>)
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(messages.len(), 4);
+    assert_eq!(messages.first().unwrap()["seq"], 1);
+    assert_eq!(messages.last().unwrap()["seq"], 4);
     Ok(())
 }
 

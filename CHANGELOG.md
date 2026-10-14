@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-14
+
+`feed` now accepts ordinary JSON and YAML objects without `--data`, while still accepting messages piped from other Plasmite commands. Tags survive the trip. Existing `--data` commands continue to work.
+
+`--create-size` creates missing local pools for `feed` and `tap`. `follow --no-follow` reads all currently retained history and exits.
+
+```bash
+plasmite feed source --create-size 1M --tag sensor '{"temperature":21}'
+plasmite follow source --no-follow | plasmite feed destination --create-size 1M
+```
+
+See the [CLI documentation](docs/cli.md#creating-messages) for input rules and the reserved message shape.
+
 ## [1.2.0] - 2026-10-13
 
 Plasmite 1.2 adds UDP feed and follow across the CLI and native language APIs,

@@ -8,7 +8,7 @@ use crate::ColorMode;
 use plasmite::api::{
     AppendOptions, Durability, Error, ErrorKind, Message, Pool, PoolApiExt, RemotePool, lite3,
 };
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use serde_json::Value;
 use std::io::{self, Read};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,26 +16,30 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MessageInput {
-    #[serde(default, deserialize_with = "present_value")]
-    seq: Option<u64>,
-    #[serde(default, deserialize_with = "present_value")]
-    time: Option<String>,
-    #[serde(default)]
+    seq: u64,
+    time: String,
     meta: MessageMeta,
     data: Value,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MessageMeta {
-    #[serde(default)]
     tags: Vec<String>,
 }
 
-fn present_value<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
-    reader: D,
-) -> Result<Option<T>, D::Error> {
-    T::deserialize(reader).map(Some)
+// Reserve only the canonical output envelope. Partial envelopes and objects
+// with application fields remain ordinary data, even when they contain `data`.
+fn is_message_shape(value: &Value) -> bool {
+    value.as_object().is_some_and(|object| {
+        object.len() == 4
+            && ["seq", "time", "meta", "data"]
+                .iter()
+                .all(|key| object.contains_key(*key))
+            && object["meta"]
+                .as_object()
+                .is_some_and(|meta| meta.len() == 1 && meta.contains_key("tags"))
+    })
 }
 
 pub(crate) fn record_payload(
@@ -58,29 +62,34 @@ pub(crate) fn record_payload(
             Ok(payload)
         }
         InputRecord::Json(value) => {
-            let (data, tags) = if contents {
+            let (data, tags) = if contents || !is_message_shape(&value) {
                 (value, tags.to_vec())
             } else {
+                if !tags.is_empty() {
+                    return Err(Error::new(ErrorKind::Usage)
+                        .with_message("complete messages supply their own tags")
+                        .with_hint("Remove --tag, or use --data to treat the envelope as application data."));
+                }
                 let message: MessageInput = serde_json::from_value(value).map_err(|err| {
                     Error::new(ErrorKind::Usage)
-                        .with_message("expected a complete message with an object data field")
-                        .with_hint("Use --data to create messages from application JSON.")
+                        .with_message("invalid complete message")
+                        .with_hint(
+                            "Expected seq, RFC 3339 time, meta.tags strings, and object data.",
+                        )
                         .with_source(err)
                 })?;
                 // Identity belongs to the source pool. The append assigns its own identity.
                 let _ = message.seq;
-                if let Some(time) = message.time {
-                    time::OffsetDateTime::parse(
-                        &time,
-                        &time::format_description::well_known::Rfc3339,
-                    )
-                    .map_err(|err| {
-                        Error::new(ErrorKind::Usage)
-                            .with_message("invalid source message time")
-                            .with_hint("Use an RFC 3339 timestamp or omit time.")
-                            .with_source(err)
-                    })?;
-                }
+                time::OffsetDateTime::parse(
+                    &message.time,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .map_err(|err| {
+                    Error::new(ErrorKind::Usage)
+                        .with_message("invalid source message time")
+                        .with_hint("Use an RFC 3339 timestamp.")
+                        .with_source(err)
+                })?;
                 (message.data, message.meta.tags)
             };
             Ok(lite3::encode_message(&tags, &data)
@@ -92,7 +101,9 @@ pub(crate) fn record_payload(
 }
 
 pub(crate) fn missing_feed_data_error() -> Error {
-    Error::new(ErrorKind::Usage).with_message("missing message input").with_hint("Pipe messages to feed, use --file, or provide a message argument. Use --data to create a message.")
+    Error::new(ErrorKind::Usage)
+        .with_message("missing message input")
+        .with_hint("Pipe messages to feed, use --file, or provide a message argument.")
 }
 
 pub(crate) fn open_feed_reader(path: &str) -> Result<Box<dyn Read>, Error> {
@@ -254,15 +265,44 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn source_identity_rejects_null_but_allows_omission() {
-        for value in [
-            json!({"seq":null,"data":{}}),
-            json!({"time":null,"data":{}}),
-            json!({"time":"bad","data":{}}),
+    fn only_full_output_shape_is_reserved_and_validated() {
+        let message = json!({"seq": 7, "time": "2026-10-14T00:00:00Z",
+            "meta": {"tags": ["source"]}, "data": {"x": 1}});
+        assert!(record_payload(InputRecord::Json(message.clone()), false, &[]).is_ok());
+        assert!(
+            record_payload(InputRecord::Json(message.clone()), false, &["outer".into()]).is_err()
+        );
+        assert!(
+            record_payload(InputRecord::Json(message.clone()), true, &["outer".into()]).is_ok()
+        );
+        for (field, invalid) in [
+            ("seq", Value::Null),
+            ("seq", json!(-1)),
+            ("seq", json!(1.5)),
+            ("time", Value::Null),
+            ("time", json!("bad")),
+            ("meta", json!({"tags": null})),
+            ("meta", json!({"tags": [1]})),
+            ("data", json!([])),
+            ("data", Value::Null),
         ] {
-            assert!(record_payload(InputRecord::Json(value), false, &[]).is_err());
+            let mut value = message.clone();
+            value[field] = invalid;
+            assert!(
+                record_payload(InputRecord::Json(value), false, &[]).is_err(),
+                "{field}"
+            );
         }
-        assert!(record_payload(InputRecord::Json(json!({"data":{}})), false, &[]).is_ok());
+        for value in [
+            json!({"data": {}}),
+            json!({"seq": null, "data": {}}),
+            json!({"time": "bad", "data": {}}),
+            json!({"seq": 7, "time": "bad", "meta": {}, "data": {}}),
+            json!({"seq": 7, "time": "bad", "meta": {"tags": [], "app": true}, "data": {}}),
+        ] {
+            assert!(!is_message_shape(&value));
+            assert!(record_payload(InputRecord::Json(value), false, &[]).is_ok());
+        }
     }
 
     #[test]

@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 COMMANDS
   Send and read
-    feed POOL [MESSAGE | --file PATH]    Append complete messages (stdin when omitted)
+    feed POOL [MESSAGE | --file PATH]    Append objects or messages (stdin when omitted)
     follow POOL [--tail N | --since TIME]
                 [--no-follow] [--replay SPEED]
                 [--tag TAG] [--where EXPR] [--one] [--timeout DURATION]
@@ -66,7 +66,7 @@ Messages are JSON: `feed` appends, `follow` streams, and `fetch` reads one by se
 FIRST LOCAL WORKFLOW
   $ plasmite pool create chat
   $ plasmite follow chat                                      # Terminal 1
-  $ plasmite feed chat --data '{"from":"alice","msg":"hello"}'       # Terminal 2
+  $ plasmite feed chat '{"from":"alice","msg":"hello"}'       # Terminal 2
 
 "#,
     after_help = r#"OUTPUT
@@ -170,14 +170,15 @@ Accepts local pool refs (name/path), HTTP(S) refs, and udp://host:port/<pool>,
 inline JSON, file input (-f/--file), or streams via stdin (auto-detected).
 Use --input-format lite3-raw for one raw attachment from a file or stdin."#,
         after_help = r#"EXAMPLES
-  $ plasmite feed foo --data '{"hello":"world"}'             # create a message
-  $ plasmite feed foo --data --tag alert '{"msg":"check"}'  # create with a tag
+  $ plasmite feed foo '{"hello":"world"}'             # create a message
+  $ plasmite feed foo --tag alert '{"msg":"check"}'  # create with a tag
   $ plasmite follow source | plasmite feed destination       # copy messages
   $ plasmite feed foo < messages.jsonl                      # reload saved messages
 
 INPUT AND OUTPUT
-  - Complete messages contain object data and optional meta.tags; missing tags mean []
-  - Use --data to construct messages from application objects; --tag requires --data
+  - Objects are application data unless they have exactly seq, time, meta.tags, and data
+  - Complete messages preserve data and tags; source seq/time are validated and replaced
+  - --data forces application data; --tag adds tags to application objects
   - Choose one input source: MESSAGE, --file, or stdin
   - JSON, marked YAML, and framed Lite3 detect automatically and append one message at a time
   - --input-format chooses an explicit encoding; lite3-raw reads one attachment through EOF
@@ -189,18 +190,14 @@ INPUT AND OUTPUT
     Feed {
         #[arg(help = "Pool name/path or http(s)://host:port/<pool> or udp://host:port/<pool>")]
         pool: String,
-        #[arg(help = "Complete message, or application object with --data")]
+        #[arg(help = "Application object or complete message")]
         data: Option<String>,
         #[arg(
             long = "data",
-            help = "Create messages from application objects instead of reading complete messages"
+            help = "Treat every object as application data, including complete message shapes"
         )]
         contents: bool,
-        #[arg(
-            long,
-            requires = "contents",
-            help = "Tag for messages created with --data (repeatable)"
-        )]
+        #[arg(long, help = "Tag for application objects (repeatable)")]
         tag: Vec<String>,
         #[arg(
             short = 'f',
@@ -216,7 +213,7 @@ INPUT AND OUTPUT
         create: bool,
         #[arg(
             long = "create-size",
-            help = "Pool size when creating (bytes or K/M/G; requires --create)"
+            help = "Pool size when creating (bytes or K/M/G; creates if missing, leaves existing pools unchanged)"
         )]
         create_size: Option<String>,
         #[arg(long, default_value_t = 0, help = "Retry count for Busy errors")]
@@ -329,7 +326,7 @@ OUTPUT
 
 By default, `follow` waits for new messages forever (Ctrl-C to stop).
 Use `--tail N` to see recent history first, then keep following.
-Use --no-follow with --tail or --since to read finite history.
+Use --no-follow alone for all retained history, or with --tail or --since for a selection.
 Use --replay SPEED with history for local timed playback; it implies --no-follow."#,
         after_help = r#"EXAMPLES
   $ plasmite follow foo                                      # new messages
@@ -342,7 +339,7 @@ LOCAL AND REMOTE
   Local, HTTP(S), and UDP refs support history, filters, and JSON, YAML, or framed Lite3.
   HTTP(S) refs reject --create, --replay, --no-notify, and --quiet-drops.
   UDP refs reject --create, --replay, and --no-notify; UDP gaps appear on stderr.
-  --no-follow requires --tail or --since and stops at the starting history bound.
+  --no-follow alone reads all retained history and stops at the starting history bound.
   --tail counts retained messages before filters; filters apply to history and new messages.
   Finite reads exit nonzero if retention removes selected messages.
   Live reads report dropped messages on stderr and continue."#
@@ -350,7 +347,7 @@ LOCAL AND REMOTE
     Follow {
         #[arg(
             long,
-            help = "Read selected history and exit; requires --tail or --since"
+            help = "Read all retained history and exit, or select with --tail or --since"
         )]
         no_follow: bool,
         #[arg(help = "Pool name/path or http(s)://host:port/<pool> or udp://host:port/<pool>")]
@@ -413,7 +410,7 @@ Use `--` to separate tap flags from the wrapped command argv."#,
   $ plasmite follow build
   $ plasmite follow build --where '.data.stream == "stderr"'
   $ plasmite tap deploy --tag prod -- ./deploy.sh
-  $ plasmite tap api --create --create-size 64M -- ./server
+  $ plasmite tap api --create-size 64M -- ./server
 
 CAPTURE AND EXIT
   - `--` is required before wrapped command args
@@ -429,7 +426,7 @@ CAPTURE AND EXIT
         create: bool,
         #[arg(
             long = "create-size",
-            help = "Pool size when creating (bytes or K/M/G; requires --create)"
+            help = "Pool size when creating (bytes or K/M/G; creates if missing, leaves existing pools unchanged)"
         )]
         create_size: Option<String>,
         #[arg(long, help = "Repeatable tag for captured line messages")]

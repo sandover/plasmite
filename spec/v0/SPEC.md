@@ -49,11 +49,14 @@ owns its protocol guarantees.
 - `feed`, `fetch`, `follow`, and duplex receive output carry complete messages:
   `seq`, `time`, `meta.tags`, and object `data`. feed writes its complete newly
   appended message. Diagnostics go to stderr and never mix with stdout messages.
-- feed accepts a positional message, a file, or stdin. Default JSON/YAML input
-  requires object data, accepts optional meta.tags (default []), and rejects
-  unknown message/meta fields. It validates supplied source seq/time but assigns
-  destination seq/time. `feed --data` instead treats each object as application
-  contents; `--tag` requires --data. Input source never changes this interpretation.
+- feed accepts a positional object/message, a file, or stdin. JSON/YAML objects
+  are application data unless their keys are exactly seq, time, meta, data and
+  meta is an object with exactly tags. This reserved complete-message shape
+  requires unsigned integer seq, RFC 3339 time, string-list meta.tags, and object
+  data. Invalid reserved messages fail; partial envelopes and extra fields are
+  application data. Copies preserve data/tags and assign destination seq/time.
+  `feed --data` forces application contents. `--tag` is accepted for application
+  data and rejected for complete messages. Input source never changes this rule.
 - Default feed input recognizes JSON objects, marked YAML documents and framed
   Lite3 from their syntax. It does not wait for another message or EOF after a
   complete record. Explicit --input-format accepts auto, json, yaml, lite3,
@@ -284,6 +287,12 @@ Plasmite 1.0 provides native access-key sharing. It keeps the existing spec path
 - Incompatible on-disk changes must bump format version.
 - Older binaries must refuse newer incompatible formats with actionable guidance.
 
+### Pool Creation
+
+Local `feed` and `tap` treat `--create-size SIZE` as create-if-missing. Existing
+pools remain unchanged; commands without creation options still fail for a missing
+pool. Remote feed still rejects creation options, and tap remains local-only.
+
 ### Append Retries
 
 - `feed --retry N` retries `Busy` at most N times after the initial attempt,
@@ -297,8 +306,9 @@ Plasmite 1.0 provides native access-key sharing. It keeps the existing spec path
   retained messages before applying tag or jq filters.
 - `--since` accepts RFC 3339 timestamps and relative values such as `5m`,
   resolved at invocation start. Local and remote follow/duplex accept it.
-- `follow --no-follow` requires a history selector and stops at the initial
-  history boundary even while writers append. `--one` stops at the first match.
+- `follow --no-follow` alone selects all currently retained history; with a
+  history selector it reads that selection. It stops at the initial upper sequence
+  boundary even while writers append. `--one` stops at the first match.
 - Local `--replay SPEED` requires a history selector and implies finite
   playback. Output deadlines also bound replay waits. Remote replay is rejected.
 - CLI `--timeout` is an idle output deadline; API tails retain their separately
