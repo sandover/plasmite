@@ -14,11 +14,26 @@ Plasmite is a CLI and library suite (Rust, Python, Go, Node, C) for sending and
 receiving JSON messages through persistent, disk-backed channels called
 **pools**. Each pool is one file that keeps a bounded history of messages,
 overwriting the oldest when it fills. Local messaging needs no daemon or broker.
+For remote messaging, the optional server supports HTTPS and UDP feed and follow.
 
 ![Independent writers append JSON to one pool file; each reader follows its own place in the retained history](docs/images/ipc/pool-model.svg)
 
 Local processes share the pool's file. Reading a message doesn't remove it;
 each reader can start with recent history and keep following new messages.
+
+## Why Plasmite?
+
+What would it take to make IPC pleasant and predictable?
+
+- Reading and writing processes come and go... so **message channels should outlast them**
+- Machines crash... so **channels should persist on disk**
+- Disks are finite... so **channels should be bounded in size**
+- Message brokers bring complexity and ceremony... so for local IPC, **don't require a broker**
+- Observability matters... so **messages must be inspectable**
+- Schemas are great... but **schemas should be optional**
+- Latency matters... so **IPC should be fast**
+
+So, there's **Plasmite**.
 
 ## Install
 
@@ -73,20 +88,6 @@ stop following.
 
 *[Still frame](docs/images/ipc/local-ipc.png) · [Recording and reproduction](docs/images/README.md)*
 
-## Why Plasmite?
-
-What would it take to make IPC pleasant and predictable?
-
-- Reading and writing processes come and go... so **message channels should outlast them**
-- Machines crash... so **channels should persist on disk**
-- Disks are finite... so **channels should be bounded in size**
-- Message brokers bring complexity and ceremony... so for local IPC, **don't require a broker**
-- Observability matters... so **messages must be inspectable**
-- Schemas are great... but **schemas should be optional**
-- Latency matters... so **IPC should do only the work each operation needs**
-
-So, there's **Plasmite**.
-
 ## Choosing a pool
 
 A pool fits workflows where independent processes need a bounded, inspectable
@@ -105,10 +106,41 @@ the [Open Sound Control recipe](docs/cookbook.md#record-touchosc-messages-with-o
 
 Plasmite is for single-host and host-adjacent messaging. If you need multi-host cluster replication, schema registries, or workflow orchestration, see [When Plasmite Isn't the Right Fit](docs/cookbook.md#when-plasmite-isnt-the-right-fit).
 
+## Comparison with other styles of IPC
+
+| | Tradeoffs | Plasmite |
+|---|---|---|
+| **Kafka / RabbitMQ** | Brokers bring partitions, groups, exchanges and bindings to configure and operate. | No broker or topology to configure for local IPC. Add a server when you need remote access. |
+| **Redis / NATS** | A server to run and connect to, even for local messaging. | Pools persist on disk independent of any process. Server only if you need one. |
+| **Log files / `tail -f`** | Message structure, rotation and replay are yours to arrange. | Messages have structure and sequence numbers. Disk usage is bounded. Replay retained history; use the same CLI for remote access. |
+| **Ad-hoc files (temp files, locks, polled dirs)** | Polling, locking, ordering and cleanup are yours to implement. | Readers stream in real time. Writers append concurrently without managing locks themselves, and messages are ordered. Ring buffer bounds disk usage. |
+| **SQLite as a queue** | Design a schema, manage retention, and arrange reader polling or notifications. | Follow and replay are built in. No message schema, migrations or cleanup routine required. Easy remote access. |
+| **OS primitives (pipes, sockets, shm)** | Framing, persistence and coordination depend on the primitive and application. | Many readers, many writers. Retained messages outlast processes; flush durability is available when writes must reach disk before success. |
+| **ZeroMQ** | Choose a messaging pattern and arrange storage if messages must survive restarts. | Messages persist. One mental model: append, follow, replay. Plain JSON you can pipe through `jq`. |
+
+## Build event bus
+
+Your build script writes progress to a pool. In another terminal, you follow it in real time.
+
+```bash
+pls --dir ./pools feed build --data --create '{"step":"compile","status":"done"}'
+pls --dir ./pools feed build --data '{"step":"test","status":"running"}'
+
+# elsewhere:
+pls --dir ./pools follow build --tail 2
+```
+
 ## Libraries
 
 The CLI and libraries use the same pools. Open the same directory from your
 application to send and receive messages without starting a server.
+
+```python
+from plasmite import Client
+
+with Client("./pools") as client, client.pool("events") as pool:
+    pool.append({"sensor": "temp", "value": 23.5})
+```
 
 | Language | Guide |
 | --- | --- |
@@ -121,7 +153,8 @@ application to send and receive messages without starting a server.
 The bindings share message and retention semantics. Rust and the CLI provide
 secure native connections; Node's HTTP client supports credential-free
 loopback use but does not load saved access keys or verify their certificate
-pins. Python, Go, C, and local Node bindings operate on local pools. See the
+pins. All five languages also provide UDP send and follow APIs. UDP is
+best-effort and does not use saved access keys or certificate pins. See the
 [binding guides](#more) for the methods each language exposes.
 
 ## Inspect and share pools
@@ -145,7 +178,7 @@ hover a message to find its place on the ring.
 traffic; hovering a message highlights its place on the ring.
 [Still frame](docs/images/ui/pool-map.png).*
 
-### Remote IPC
+### Remote IPC over HTTPS
 
 For IPC across machines, `pls serve` exposes local pools over HTTPS. Native
 clients and browsers connect with an access key.
@@ -197,6 +230,32 @@ Both Bob and Carol see it:
 {"from":"A","msg":"hi all"}
 ```
 
+### UDP feed and follow
+
+Send messages to a pool and follow its stream over UDP from the CLI or the
+Rust, Python, Go, Node and C APIs. Enable input with `serve --udp`, or input
+and reads with `serve --udp-follow`. Stop the earlier server first:
+
+```bash
+pls --dir ./pools serve --udp-follow
+```
+
+In separate terminals, follow the pool and send a message:
+
+```bash
+pls follow udp://127.0.0.1:9701/channel
+pls feed udp://127.0.0.1:9701/channel --data '{"from":"A","msg":"hi all"}'
+```
+
+The default UDP listener is on loopback; choose another bind address for remote
+use. Input and reads apply to all pools in the served directory.
+
+UDP offers best-effort delivery: messages may be lost, duplicated or reordered.
+It provides no authentication or encryption, so use loopback or a separately
+protected network. A successful send does not confirm storage; follow reports
+skipped ranges without repairing them. See the
+[UDP guide](docs/record/serving.md#send-udp-messages) for setup and limitations.
+
 ### MCP clients
 
 A local Model Context Protocol (MCP) process can work directly with local pools:
@@ -236,8 +295,12 @@ lock, then inspect the immutable snapshot after releasing the lock. Lite3
 supports field lookup without decoding the full payload into JSON.
 
 Writers encode before taking the exclusive file lock, then place the frame,
-commit it, and publish the new bounds. An inline sequence index accelerates
-`fetch`; a missing or stale slot falls back to scanning retained history.
+commit it, and publish the new bounds. An inline sequence index maps sequence
+numbers to byte offsets. `fetch POOL 42` jumps directly to the frame when the
+index slot matches; a missing or stale slot falls back to scanning retained history.
+
+Each message uses 72–79 bytes of framing beyond its Lite3 payload: a 64-byte
+header, an 8-byte commit marker, and padding for alignment.
 
 Throughput depends on payload size, durability, readers, writers, and the host.
 Run [`scripts/bench_runtime_lanes.sh`](scripts/bench_runtime_lanes.sh) for a
@@ -328,8 +391,9 @@ Tarballs for Linux and macOS are on [GitHub Releases](https://github.com/sandove
 
 Windows builds (`x86_64-pc-windows-msvc`) are available via npm and PyPI. See the [distribution docs](docs/record/distribution.md) for the full install matrix.
 
-Updating an earlier installation? Read the [1.0 upgrade guide](docs/record/upgrading-1.0.md)
-for output flags, history rules, and secure-sharing migration.
+Updating an earlier installation? Read the [1.2 upgrade guide](docs/record/upgrading-1.2.md)
+for message input defaults and output formats, and the
+[1.0 upgrade guide](docs/record/upgrading-1.0.md) for secure-sharing migration.
 
 ## Command Overview
 
