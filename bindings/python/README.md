@@ -12,8 +12,14 @@ Published wheels bundle native assets under `plasmite/_native/` on the platforms
 Current packaged-wheel targets:
 - macOS: `x86_64`, `arm64`
 - Windows: `x86_64`
+- Linux: `x86_64`, glibc 2.35 or newer (unreleased)
 
-Linux currently falls back to source distribution, so runtime use there should come from a system SDK install (for example Homebrew or a GitHub release tarball) unless/until Linux wheels are added.
+The Linux wheel bundles the CLI and library; no separate SDK or Rust build is
+needed. Both `plasmite` and `pls` commands use the same bundled binary.
+These Linux packaging changes are unreleased. Version 1.2.1 on Linux
+still uses the source package and needs a system SDK (Homebrew or a GitHub SDK
+archive). Wheels built by this checkout use the stable C ABI through ctypes and
+support Python 3.10+ without depending on one CPython minor version.
 
 ### Using uv (recommended)
 

@@ -226,6 +226,25 @@ export PKG_CONFIG_PATH=/path/to/sdk/lib/pkgconfig
 pkg-config --cflags --libs plasmite
 ```
 
+### Linux x86_64 packages
+
+Release SDKs, npm native assets and Python wheels build on Ubuntu 22.04, pinning
+an explicit glibc 2.35 baseline. Python packaging uses `auditwheel` to check both
+bundled native programs before tagging the wheel `manylinux_2_35_x86_64`.
+These packaging changes are unreleased; 1.2.1 retains the older Linux install
+prerequisites in the [distribution guide](record/distribution.md).
+
+To run the release wheel check against an SDK built on that baseline:
+
+```bash
+PLASMITE_SDK_DIR=/path/to/sdk \
+PLASMITE_MANYLINUX_PLATFORM=manylinux_2_35_x86_64 \
+  bash scripts/python_wheel_smoke.sh
+```
+
+The check rejects a newer glibc dependency instead of merely renaming the wheel.
+Source builds on other hosts can still run the ordinary local wheel smoke.
+
 ### Install a Linux ARM preview
 
 The published [1.0.0 release](https://github.com/sandover/plasmite/releases/tag/v1.0.0)

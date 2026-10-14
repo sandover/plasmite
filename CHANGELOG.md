@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+Linux x86_64 packages target glibc 2.35, adding prebuilt support for Ubuntu 22.04
+and Debian 12. Python wheels bundle the CLI and native library on Linux and use
+Python-version-independent tags for the ctypes bindings.
+Python 3.10 accepts nanosecond message timestamps, and Python installs include
+both `plasmite` and `pls` commands.
+
 ## [1.2.1] - 2026-10-14
 
 `feed` now accepts ordinary JSON and YAML objects without `--data`, while still accepting messages piped from other Plasmite commands. Tags survive the trip. Existing `--data` commands continue to work.

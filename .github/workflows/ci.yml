@@ -162,7 +162,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
           - os: macos-15-intel
             target: x86_64-apple-darwin
@@ -202,7 +202,13 @@ jobs:
         env:
           PLASMITE_SDK_DIR: ${{ github.workspace }}/target/${{ matrix.target }}/release
           UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
-        run: ./scripts/python_wheel_smoke.sh
+        shell: bash
+        run: |
+          if [[ '${{ matrix.target }}' == x86_64-unknown-linux-gnu ]]; then
+            test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.35'
+            export PLASMITE_MANYLINUX_PLATFORM=manylinux_2_35_x86_64
+          fi
+          ./scripts/python_wheel_smoke.sh
 
   arm-sdk-smoke:
     needs: [pr-paths]

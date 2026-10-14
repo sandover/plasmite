@@ -108,6 +108,15 @@ if [[ -z "$wheel_file" ]]; then
   exit 1
 fi
 
+if [[ -n "${PLASMITE_MANYLINUX_PLATFORM:-}" ]]; then
+  uv pip install --cache-dir "$UV_CACHE_DIR" 'auditwheel==6.8.2' 'patchelf==0.19.1.0'
+  auditwheel repair --plat "$PLASMITE_MANYLINUX_PLATFORM" --only-plat \
+    --wheel-dir "$WORKDIR/repaired" "$wheel_file"
+  rm "$wheel_file"
+  cp "$WORKDIR"/repaired/*.whl "$ROOT/bindings/python/dist/"
+  wheel_file="$(ls -1 "$ROOT"/bindings/python/dist/*.whl)"
+fi
+
 wheel_has_member "$wheel_file" 'plasmite/_native/(plasmite\.dll|libplasmite\.(dylib|so))'
 wheel_has_member "$wheel_file" 'plasmite/_native/plasmite(\.exe)?'
 python "$ROOT/scripts/verify_python_wheel_platform.py" "$wheel_file" "$SDK_DIR"
@@ -120,6 +129,7 @@ uv pip install --cache-dir "$UV_CACHE_DIR" "$wheel_file"
 unset PLASMITE_LIB_DIR DYLD_LIBRARY_PATH LD_LIBRARY_PATH
 python -c 'import plasmite; from plasmite import Client; print("python-wheel-import-ok")'
 plasmite --version >/dev/null
+pls --version >/dev/null
 BUNDLED_CLI="$(python -c 'from plasmite._cli import _bundled_cli_path; print(_bundled_cli_path())')"
 python "$ROOT/scripts/packaged_serve_smoke.py" --cli "$BUNDLED_CLI" --scratch "$WORKDIR"
 deactivate
