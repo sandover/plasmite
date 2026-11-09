@@ -34,9 +34,8 @@ use super::output_support::emit_lite3;
 use super::output_support::emit_message;
 use super::output_support::emit_notice;
 use super::output_support::notice_time_now;
-use super::support::decode_payload;
-use super::support::format_ts;
 use super::support::message_from_frame;
+use super::support::message_from_lite3;
 use super::support::message_to_json;
 
 #[derive(Debug, Clone)]
@@ -248,16 +247,6 @@ fn needs_message(cfg: &FollowConfig) -> bool {
         || !cfg.where_predicates.is_empty()
 }
 
-fn message_from_remote_frame(frame: &RemoteLite3Frame) -> Result<Value, Error> {
-    let (meta, data) = decode_payload(&frame.payload)?;
-    Ok(json!({
-        "seq": frame.seq,
-        "time": format_ts(frame.timestamp_ns)?,
-        "meta": meta,
-        "data": data,
-    }))
-}
-
 enum RemoteStream {
     Json(RemoteTail),
     Lite3(RemoteLite3Tail),
@@ -400,13 +389,20 @@ pub(crate) fn follow_remote(
             let reached_end = cfg.no_follow && record.seq() == upper;
             expected = record.seq().saturating_add(1);
             let timestamp_ns = record.timestamp_ns(since_ns.is_some())?;
-            let value = if needs_message(cfg) {
-                Some(match &record {
-                    RemoteRecord::Json(message) => message_to_json(message),
-                    RemoteRecord::Lite3(frame) => message_from_remote_frame(frame)?,
-                })
-            } else {
-                None
+            let (value, frame) = match record {
+                RemoteRecord::Json(message) => (Some(message_to_json(message)), None),
+                RemoteRecord::Lite3(frame) => {
+                    let value = if needs_message(cfg) {
+                        Some(message_from_lite3(
+                            frame.seq,
+                            frame.timestamp_ns,
+                            &frame.payload,
+                        )?)
+                    } else {
+                        None
+                    };
+                    (value, Some(frame))
+                }
             };
             let matches = match value.as_ref() {
                 Some(value) => matches_message(cfg, since_ns, timestamp_ns, value)?,
@@ -418,18 +414,15 @@ pub(crate) fn follow_remote(
                 if deadline.is_some_and(|at| Instant::now() >= at) {
                     return Ok(drops.finish(124));
                 }
-                match record {
-                    RemoteRecord::Lite3(frame) => emit_lite3(
+                if let Some(frame) = frame {
+                    emit_lite3(
                         frame.seq,
                         frame.timestamp_ns,
                         &frame.payload,
                         cfg.output_mode,
-                    )?,
-                    RemoteRecord::Json(message) => emit_message(
-                        value.unwrap_or_else(|| message_to_json(&message)),
-                        cfg.output_mode,
-                        cfg.color_mode,
-                    )?,
+                    )?;
+                } else if let Some(value) = value {
+                    emit_message(value, cfg.output_mode, cfg.color_mode)?;
                 }
                 deadline = cfg.timeout.map(|duration| Instant::now() + duration);
                 if cfg.one {
@@ -553,7 +546,7 @@ pub(crate) fn follow_udp(
             }
             UdpEvent::Frame(frame) => {
                 let value = if needs_message(cfg) {
-                    Some(message_to_json(&frame.message()?))
+                    Some(message_to_json(frame.message()?))
                 } else {
                     None
                 };

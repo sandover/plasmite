@@ -961,16 +961,12 @@ pub extern "C" fn plsm_udp_event_message(
         );
     }
     let payload = if event.payload.data.is_null() || event.payload.len == 0 {
-        Vec::new()
+        &[]
     } else {
-        unsafe { std::slice::from_raw_parts(event.payload.data, event.payload.len) }.to_vec()
+        unsafe { std::slice::from_raw_parts(event.payload.data, event.payload.len) }
     };
-    let frame = crate::api::UdpFrame {
-        seq: event.seq,
-        timestamp_ns: event.timestamp_ns,
-        payload,
-    };
-    let message = match frame.message() {
+    let message = match crate::api::message_from_udp_payload(event.seq, event.timestamp_ns, payload)
+    {
         Ok(message) => message,
         Err(err) => return fail(out_err, err),
     };
@@ -1457,6 +1453,34 @@ mod tests {
     fn parse_buf(buf: &plsm_buf) -> Value {
         let slice = unsafe { std::slice::from_raw_parts(buf.data, buf.len) };
         serde_json::from_slice(slice).expect("valid json")
+    }
+
+    #[test]
+    fn udp_event_decodes_unaligned_payload() {
+        let data = serde_json::json!({"value": 17});
+        let document = crate::api::lite3::encode_message(&["tag".into()], &data).unwrap();
+        let mut bytes = vec![0; document.len() + 1];
+        let offset = usize::from((bytes.as_ptr() as usize).is_multiple_of(4));
+        let payload = &mut bytes[offset..offset + document.len()];
+        payload.copy_from_slice(document.as_slice());
+        let event = plsm_udp_event {
+            kind: 1,
+            seq: 42,
+            payload: plsm_buf {
+                data: payload.as_mut_ptr(),
+                len: payload.len(),
+            },
+            ..Default::default()
+        };
+        let mut message = plsm_buf::default();
+        let mut error = std::ptr::null_mut();
+        assert_eq!(plsm_udp_event_message(&event, &mut message, &mut error), 0);
+        let json = parse_buf(&message);
+        plsm_buf_free(&mut message);
+        assert_eq!(json["seq"], 42);
+        assert_eq!(json["meta"]["tags"], serde_json::json!(["tag"]));
+        assert_eq!(json["data"], data);
+        assert_eq!(payload, document.as_slice());
     }
 
     fn take_lite3_payload(frame: &plsm_lite3_frame) -> Vec<u8> {

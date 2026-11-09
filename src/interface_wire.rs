@@ -28,6 +28,19 @@ impl MessageWire {
             data,
         }
     }
+
+    /// Move the existing data tree into the JSON envelope.
+    pub(crate) fn into_json(self) -> Value {
+        Value::from_iter([
+            ("seq", self.seq.into()),
+            ("time", self.time.into()),
+            (
+                "meta",
+                Value::from_iter([("tags", Value::from(self.meta.tags))]),
+            ),
+            ("data", self.data),
+        ])
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -237,15 +250,17 @@ mod tests {
             data: json!({"ok": true}),
         };
 
+        let expected = json!({
+            "seq": 7,
+            "time": "2026-07-28T12:00:00Z",
+            "meta": {"tags": ["build", "green"]},
+            "data": {"ok": true}
+        });
         assert_eq!(
-            serde_json::to_value(wire).expect("serialize message"),
-            json!({
-                "seq": 7,
-                "time": "2026-07-28T12:00:00Z",
-                "meta": {"tags": ["build", "green"]},
-                "data": {"ok": true}
-            })
+            serde_json::to_value(&wire).expect("serialize message"),
+            expected
         );
+        assert_eq!(wire.into_json(), expected);
     }
 
     #[test]

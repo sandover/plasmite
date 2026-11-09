@@ -106,15 +106,18 @@ pub struct UdpFollow {
     id: wire::Id,
     selection: wire::Selection,
     pending: VecDeque<UdpEvent>,
-    initial_start_seq: Option<u64>,
-    initial_end_seq: Option<Option<u64>>,
+    initial_bounds: Option<FollowBounds>,
     first_observed_seq: Option<u64>,
     next_expected_seq: Option<u64>,
     last_activity: Instant,
     next_renewal: Instant,
-    started: bool,
-    finished: bool,
-    closed: bool,
+    opening: bool, // Coalesce gaps while the handshake owns the receive loop.
+    terminal_seen: bool,
+}
+
+struct FollowBounds {
+    start_seq: u64,
+    end_seq: Option<u64>,
 }
 
 impl UdpClient {
@@ -227,15 +230,13 @@ impl UdpPool {
             id,
             selection,
             pending: VecDeque::new(),
-            initial_start_seq: None,
-            initial_end_seq: None,
+            initial_bounds: None,
             first_observed_seq: None,
             next_expected_seq: None,
             last_activity: now,
             next_renewal: now + Duration::from_millis(wire::RENEW_MS),
-            started: false,
-            finished: false,
-            closed: false,
+            opening: true,
+            terminal_seen: false,
         };
         follow.open()?;
         Ok(follow)
@@ -243,7 +244,7 @@ impl UdpPool {
 }
 
 impl UdpFollow {
-    /// Wait for one event. It returns `None` only after finite follow ends.
+    /// Wait for one event. Return `None` when a finished or closed follow has no queued events.
     pub fn next_event(&mut self) -> Result<Option<UdpEvent>, Error> {
         self.next_event_until(None, false)
     }
@@ -255,26 +256,22 @@ impl UdpFollow {
         self.next_event_until(deadline, timeout.is_zero())
     }
 
+    /// Return true once terminal progress arrives or the socket closes.
+    /// The caller can still read queued events.
     pub fn is_finished(&self) -> bool {
-        self.finished
+        self.terminal_seen || self.socket.is_none()
     }
 
     /// Send one best-effort close and release the socket.
     pub fn close(&mut self) {
-        if self.closed {
-            return;
-        }
-        if let Some(socket) = self.socket.as_ref() {
+        if let Some(socket) = self.socket.take() {
             let _ = socket.send(&wire::header(wire::CLOSE, self.id));
         }
-        self.closed = true;
-        self.socket.take();
-        self.finished = true;
     }
 
     fn open(&mut self) -> Result<(), Error> {
         let deadline = Instant::now() + Duration::from_millis(wire::STARTUP_MS);
-        let mut cookie = None;
+        let mut answered_challenge = false;
         let mut request = self.subscribe_packet(None, Some(self.selection.clone()))?;
         self.send_control(&request)?;
         let mut retry_at = Instant::now() + CONTROL_RETRY;
@@ -310,15 +307,15 @@ impl UdpFollow {
                 continue;
             }
             match op {
-                wire::CHALLENGE if cookie.is_none() => {
+                wire::CHALLENGE if !answered_challenge => {
                     let challenge: wire::Challenge = decode_control(body, "UDP challenge")?;
                     if challenge.cookie.mac.is_empty() || challenge.cookie.expires_ms == 0 {
                         return Err(protocol_error("UDP server sent an invalid challenge"));
                     }
-                    cookie = Some(challenge.cookie.clone());
                     request = self
                         .subscribe_packet(Some(challenge.cookie), Some(self.selection.clone()))?;
                     self.send_control(&request)?;
+                    answered_challenge = true;
                     retry_at = Instant::now() + CONTROL_RETRY;
                 }
                 wire::CHALLENGE => {}
@@ -326,13 +323,11 @@ impl UdpFollow {
                 wire::PROGRESS => {
                     let progress: wire::Progress = decode_control(body, "UDP progress")?;
                     self.accept_progress(progress)?;
-                    self.started();
-                    return Ok(());
+                    break;
                 }
                 wire::DATA => {
                     self.accept_data(body)?;
-                    self.started();
-                    return Ok(());
+                    break;
                 }
                 wire::SKIP => {
                     let skip: wire::Skip = decode_control(body, "UDP skip")?;
@@ -342,6 +337,10 @@ impl UdpFollow {
                 _ => {}
             }
         }
+        self.opening = false;
+        self.refresh_liveness();
+        self.next_renewal = self.last_activity + Duration::from_millis(wire::RENEW_MS);
+        Ok(())
     }
 
     fn next_event_until(
@@ -352,7 +351,7 @@ impl UdpFollow {
         if let Some(event) = self.pending.pop_front() {
             return Ok(Some(event));
         }
-        if self.finished || self.closed {
+        if self.is_finished() {
             return Ok(None);
         }
         let mut buffer = [0u8; 65_536];
@@ -361,7 +360,7 @@ impl UdpFollow {
             if let Some(event) = self.pending.pop_front() {
                 return Ok(Some(event));
             }
-            if self.finished || self.closed {
+            if self.is_finished() {
                 return Ok(None);
             }
             let now = Instant::now();
@@ -495,21 +494,20 @@ impl UdpFollow {
         {
             return Err(protocol_error("UDP progress sequence range is invalid"));
         }
-        if let Some(end_seq) = self.initial_end_seq {
-            if progress.end_seq != end_seq {
+        if let Some(bounds) = &self.initial_bounds {
+            if progress.end_seq != bounds.end_seq {
                 return Err(protocol_error("UDP server changed the follow end sequence"));
             }
-        } else {
-            self.initial_end_seq = Some(progress.end_seq);
-        }
-        if let Some(start_seq) = self.initial_start_seq {
-            if progress.start_seq != start_seq {
+            if progress.start_seq != bounds.start_seq {
                 return Err(protocol_error(
                     "UDP server changed the follow start sequence",
                 ));
             }
         } else {
-            self.initial_start_seq = Some(progress.start_seq);
+            self.initial_bounds = Some(FollowBounds {
+                start_seq: progress.start_seq,
+                end_seq: progress.end_seq,
+            });
             if let Some(first) = self.first_observed_seq
                 && first > progress.start_seq
             {
@@ -550,7 +548,7 @@ impl UdpFollow {
             });
         }
         if progress.terminal {
-            self.finished = true;
+            self.terminal_seen = true;
         }
         Ok(())
     }
@@ -622,7 +620,7 @@ impl UdpFollow {
         if first > last {
             return;
         }
-        if !self.started {
+        if self.opening {
             if let Some(UdpEvent::Gap {
                 first: queued_first,
                 last: queued_last,
@@ -656,12 +654,6 @@ impl UdpFollow {
             last,
             reason,
         });
-    }
-
-    fn started(&mut self) {
-        self.started = true;
-        self.refresh_liveness();
-        self.next_renewal = self.last_activity + Duration::from_millis(wire::RENEW_MS);
     }
 
     fn refresh_liveness(&mut self) {

@@ -72,7 +72,7 @@ pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandRes
     }
     let retry_config = parse_retry_config(args.retry, args.retry_delay.as_deref())?;
     let reader: Box<dyn Read> = if let Some(data) = &args.data {
-        Box::new(io::Cursor::new(data.as_bytes().to_vec()))
+        Box::new(io::Cursor::new(data.as_bytes()))
     } else if let Some(file) = &args.file {
         open_feed_reader(file)?
     } else if !io::stdin().is_terminal() {
@@ -217,7 +217,7 @@ pub(super) fn fetch(pool: &str, seq: u64, context: &CliContext) -> Result<Comman
                     .get_message(seq)
                     .map_err(|err| add_missing_seq_hint(err, pool))?;
                 emit_message(
-                    message_to_json(&message),
+                    message_to_json(message),
                     context.output_mode(),
                     context.color_mode(),
                 )?;

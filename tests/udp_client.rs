@@ -1,4 +1,6 @@
-use plasmite::api::{ErrorKind, PoolRef, UdpClient, UdpEvent, UdpFollowOptions, UdpStart, lite3};
+use plasmite::api::{
+    ErrorKind, PoolRef, UdpClient, UdpEvent, UdpFollowOptions, UdpSkipReason, UdpStart, lite3,
+};
 use serde_json::{Value, json};
 use std::net::UdpSocket;
 use std::sync::mpsc;
@@ -7,8 +9,10 @@ use std::time::Duration;
 
 const HEADER: usize = 24;
 const SUBSCRIBE: u8 = 1;
+const CLOSE: u8 = 2;
 const CHALLENGE: u8 = 3;
 const PROGRESS: u8 = 4;
+const SKIP: u8 = 5;
 const DATA: u8 = 7;
 
 fn packet(op: u8, id: &[u8], body: &[u8]) -> Vec<u8> {
@@ -17,6 +21,31 @@ fn packet(op: u8, id: &[u8], body: &[u8]) -> Vec<u8> {
     packet.extend_from_slice(id);
     packet.extend_from_slice(body);
     packet
+}
+
+fn accept_subscription(peer: &UdpSocket) -> (Vec<u8>, std::net::SocketAddr, Value) {
+    let mut received = [0u8; 4096];
+    let (length, client) = peer.recv_from(&mut received).expect("initial subscribe");
+    let request = &received[..length];
+    assert_eq!(&request[..6], b"\0PUDP\x01");
+    assert_eq!(&request[6..8], &[SUBSCRIBE, 0]);
+    assert!(request.len() >= 256);
+    let id = request[8..HEADER].to_vec();
+    let subscribe: Value = serde_json::from_slice(&request[HEADER..]).expect("subscribe json");
+    let cookie = json!({"expires_ms": 10_000, "mac": "mock-cookie"});
+    let body = serde_json::to_vec(&json!({"cookie": cookie})).unwrap();
+    peer.send_to(&packet(CHALLENGE, &id, &body), client)
+        .expect("send challenge");
+
+    let (length, source) = peer.recv_from(&mut received).expect("verified subscribe");
+    let verified = &received[..length];
+    assert_eq!(source, client);
+    assert_eq!(verified[6], SUBSCRIBE);
+    assert_eq!(&verified[8..HEADER], id);
+    let verified: Value = serde_json::from_slice(&verified[HEADER..]).expect("verified json");
+    assert_eq!(verified["cookie"], cookie);
+    assert_eq!(verified["selection"], subscribe["selection"]);
+    (id, client, subscribe)
 }
 
 #[test]
@@ -65,15 +94,7 @@ fn follows_network_frames_and_reports_initial_gap_after_data_arrives_first() {
     let (release_tx, release_rx) = mpsc::channel();
     let (progress_release_tx, progress_release_rx) = mpsc::channel();
     let server = thread::spawn(move || {
-        let mut received = [0u8; 4096];
-        let (length, client_address) = peer.recv_from(&mut received).expect("initial subscribe");
-        let request = &received[..length];
-        assert_eq!(&request[..6], b"\0PUDP\x01");
-        assert_eq!(request[6], SUBSCRIBE);
-        assert_eq!(request[7], 0);
-        assert!(request.len() >= 256);
-        let id = request[8..HEADER].to_vec();
-        let subscribe: Value = serde_json::from_slice(&request[HEADER..]).expect("subscribe json");
+        let (id, client_address, subscribe) = accept_subscription(&peer);
         assert_eq!(subscribe["selection"]["pool"], "sensors");
         assert_eq!(subscribe["selection"]["start"]["kind"], "since");
         assert_eq!(
@@ -81,25 +102,6 @@ fn follows_network_frames_and_reports_initial_gap_after_data_arrives_first() {
             1_700_000_000_000_000_000u64
         );
         assert_eq!(subscribe["selection"]["live"], true);
-
-        let challenge = json!({
-            "cookie": {"expires_ms": 10_000, "mac": "mock-cookie"}
-        });
-        let challenge_packet = packet(
-            CHALLENGE,
-            &id,
-            &serde_json::to_vec(&challenge).expect("challenge json"),
-        );
-        peer.send_to(&challenge_packet, client_address)
-            .expect("send challenge");
-
-        let (length, client_address) = peer.recv_from(&mut received).expect("verified subscribe");
-        let verified = &received[..length];
-        assert_eq!(verified[6], SUBSCRIBE);
-        assert_eq!(&verified[8..HEADER], id);
-        let verified: Value = serde_json::from_slice(&verified[HEADER..]).expect("verified json");
-        assert_eq!(verified["cookie"]["mac"], "mock-cookie");
-        assert_eq!(verified["selection"]["pool"], "sensors");
 
         let payload = lite3::encode_message(&["lab".into()], &json!({"temperature": 23}))
             .expect("encode frame");
@@ -187,6 +189,16 @@ fn follows_network_frames_and_reports_initial_gap_after_data_arrives_first() {
             reason: plasmite::api::UdpSkipReason::Unknown,
         }
     );
+    assert!(
+        follow
+            .next_event_timeout(Duration::from_millis(20))
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        !follow.is_finished(),
+        "a quiet interval must leave follow open"
+    );
     progress_release_tx.send(()).expect("release peer progress");
     let progress = follow
         .next_event_timeout(Duration::from_secs(1))
@@ -202,6 +214,144 @@ fn follows_network_frames_and_reports_initial_gap_after_data_arrives_first() {
     ));
     follow.close();
     server.join().expect("mock peer");
+}
+
+#[test]
+fn finite_follow_drains_early_skips_and_terminal_progress_after_close() {
+    let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    let endpoint = peer.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (id, client, _) = accept_subscription(&peer);
+        // Opening progress and the final DATA packet were lost. Two earlier SKIPs
+        // arrive while the client is still opening.
+        for (seq, reason) in [(2, "oversized"), (3, "pressure")] {
+            let body =
+                serde_json::to_vec(&json!({"first": seq, "last": seq, "reason": reason})).unwrap();
+            peer.send_to(&packet(SKIP, &id, &body), client).unwrap();
+        }
+        let body = serde_json::to_vec(&json!({
+            "start_seq": 2, "next_seq": 5, "end_seq": 4, "lease_ms": 30_000, "terminal": true
+        }))
+        .unwrap();
+        peer.send_to(&packet(PROGRESS, &id, &body), client).unwrap();
+
+        let mut close = [0; HEADER + 1];
+        let (len, source) = peer.recv_from(&mut close).expect("close datagram");
+        assert_eq!(source, client);
+        assert_eq!(&close[..len], packet(CLOSE, &id, &[]));
+        peer.set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        let err = peer
+            .recv_from(&mut close)
+            .expect_err("close must only send once");
+        assert!(matches!(
+            err.kind(),
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+        ));
+    });
+
+    let pool = UdpClient::new(format!("udp://{endpoint}"))
+        .unwrap()
+        .open_pool(&PoolRef::name("sensors"))
+        .unwrap();
+    let mut follow = pool
+        .follow(UdpFollowOptions {
+            start: UdpStart::Last(3),
+            live: false,
+        })
+        .unwrap();
+    assert!(follow.is_finished(), "SKIP alone must not finish opening");
+    follow.close();
+    follow.close();
+    assert_eq!(
+        follow.next_event().unwrap(),
+        Some(UdpEvent::Gap {
+            first: 2,
+            last: 4,
+            reason: UdpSkipReason::Unknown
+        })
+    );
+    assert_eq!(
+        follow.next_event().unwrap(),
+        Some(UdpEvent::Progress {
+            start_seq: 2,
+            next_seq: 5,
+            end_seq: Some(4),
+            terminal: true,
+            retention_gap: false
+        })
+    );
+    assert_eq!(follow.next_event().unwrap(), None);
+    drop(follow);
+    server.join().unwrap();
+}
+
+#[test]
+fn follow_rejects_progress_that_changes_the_opening_range() {
+    let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    let endpoint = peer.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (id, client, _) = accept_subscription(&peer);
+        for (start, next, end, terminal) in [
+            (1, 1, 2, false),
+            (1, 4, 3, true), // Different upper bound.
+            (2, 3, 2, true), // Different start.
+            (1, 3, 2, true), // Original range, final DATA lost.
+        ] {
+            let body = serde_json::to_vec(&json!({
+                "start_seq": start, "next_seq": next, "end_seq": end,
+                "lease_ms": 30_000, "terminal": terminal
+            }))
+            .unwrap();
+            peer.send_to(&packet(PROGRESS, &id, &body), client).unwrap();
+        }
+    });
+
+    let pool = UdpClient::new(format!("udp://{endpoint}"))
+        .unwrap()
+        .open_pool(&PoolRef::name("sensors"))
+        .unwrap();
+    let mut follow = pool
+        .follow(UdpFollowOptions {
+            start: UdpStart::Last(2),
+            live: false,
+        })
+        .unwrap();
+    let mut next = || follow.next_event_timeout(Duration::from_secs(1));
+    assert!(matches!(
+        next().unwrap(),
+        Some(UdpEvent::Progress {
+            terminal: false,
+            ..
+        })
+    ));
+    for _ in 0..2 {
+        assert_eq!(
+            next().expect_err("changed bounds").kind(),
+            ErrorKind::Corrupt
+        );
+    }
+    assert_eq!(
+        next().unwrap(),
+        Some(UdpEvent::Gap {
+            first: 1,
+            last: 2,
+            reason: UdpSkipReason::Unknown
+        })
+    );
+    assert!(matches!(
+        next().unwrap(),
+        Some(UdpEvent::Progress {
+            start_seq: 1,
+            end_seq: Some(2),
+            terminal: true,
+            ..
+        })
+    ));
+    assert_eq!(next().unwrap(), None);
+    server.join().unwrap();
 }
 
 #[test]

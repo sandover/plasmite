@@ -32,15 +32,14 @@ const MAX_PENDING_PER_SOURCE: usize = 32;
 const MAX_PENDING_PER_CLIENT: usize = 8;
 const PUBLIC_REQUESTS_PER_MINUTE: u16 = 30;
 
-#[derive(Clone)]
 pub(crate) struct OauthService {
     issuer: String,
     resource: String,
     access: Arc<AccessStore>,
     path: PathBuf,
-    state: Arc<Mutex<OAuthState>>,
-    pending: Arc<Mutex<HashMap<String, Pending>>>,
-    request_windows: Arc<Mutex<HashMap<IpAddr, (u64, u16)>>>,
+    state: Mutex<OAuthState>,
+    pending: Mutex<HashMap<String, Pending>>,
+    request_windows: Mutex<HashMap<IpAddr, (u64, u16)>>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -150,9 +149,9 @@ impl OauthService {
             resource,
             access,
             path,
-            state: Arc::new(Mutex::new(state)),
-            pending: Arc::new(Mutex::new(HashMap::new())),
-            request_windows: Arc::new(Mutex::new(HashMap::new())),
+            state: Mutex::new(state),
+            pending: Mutex::new(HashMap::new()),
+            request_windows: Mutex::new(HashMap::new()),
         })))
     }
 

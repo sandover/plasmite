@@ -820,7 +820,7 @@ impl PlasmiteMcpHandler {
 
         ToolCallResult::success_with_structured(
             format!("Appended message {} to `{pool}`.", message.seq),
-            json!({ "message": message_json_value(&message) }),
+            Value::from_iter([("message", message_json_value(message))]),
         )
     }
 
@@ -861,7 +861,7 @@ impl PlasmiteMcpHandler {
         };
         ToolCallResult::success_with_structured(
             format!("Fetched sequence {seq} from `{pool}`."),
-            json!({ "message": message_json_value(&message) }),
+            Value::from_iter([("message", message_json_value(message))]),
         )
     }
 
@@ -1519,14 +1519,8 @@ fn pool_info_json_value(pool_ref: &str, info: &PoolInfo) -> Value {
         .expect("pool-info wire data is serializable")
 }
 
-fn message_json_value(message: &crate::api::Message) -> Value {
-    serde_json::to_value(MessageWire::new(
-        message.seq,
-        message.time.clone(),
-        message.meta.tags.clone(),
-        message.data.clone(),
-    ))
-    .expect("message wire data is serializable")
+fn message_json_value(message: crate::api::Message) -> Value {
+    MessageWire::new(message.seq, message.time, message.meta.tags, message.data).into_json()
 }
 
 struct ReadBatch {
@@ -1557,21 +1551,24 @@ impl ReadBatch {
 }
 
 fn read_batch_json_value(batch: ReadBatch, timed_out: Option<bool>) -> Value {
-    let mut value = json!({
-        "messages": batch.messages,
-        "next_after_seq": batch.next_after_seq,
-        "last_returned_seq": batch.last_returned_seq,
-        "oldest_available_seq": batch.oldest_available_seq,
-        "newest_available_seq": batch.newest_available_seq,
-        "fell_behind": batch.fell_behind,
-    });
+    let mut value = Map::from_iter([
+        ("messages".into(), Value::Array(batch.messages)),
+        ("next_after_seq".into(), batch.next_after_seq.into()),
+        ("last_returned_seq".into(), batch.last_returned_seq.into()),
+        (
+            "oldest_available_seq".into(),
+            batch.oldest_available_seq.into(),
+        ),
+        (
+            "newest_available_seq".into(),
+            batch.newest_available_seq.into(),
+        ),
+        ("fell_behind".into(), batch.fell_behind.into()),
+    ]);
     if let Some(timed_out) = timed_out {
-        value
-            .as_object_mut()
-            .expect("read batch must be an object")
-            .insert("timed_out".to_string(), json!(timed_out));
+        value.insert("timed_out".into(), timed_out.into());
     }
-    value
+    Value::Object(value)
 }
 
 fn read_messages_for_tool(
@@ -1647,16 +1644,12 @@ fn read_messages_for_tool(
             }
         }
 
+        messages.push(message_json_value(message));
         if after_seq.is_some() {
-            messages.push(message_json_value(&message));
             if messages.len() >= count {
                 break;
             }
-            continue;
-        }
-
-        messages.push(message_json_value(&message));
-        if messages.len() > count {
+        } else if messages.len() > count {
             messages.remove(0);
         }
     }

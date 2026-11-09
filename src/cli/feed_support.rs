@@ -166,7 +166,7 @@ fn ingest_with_append(
                 let ns = message_timestamp(&message)?;
                 emit_lite3(message.seq, ns, &payload, options.output)?;
             } else {
-                emit_message(message_to_json(&message), options.output, options.color)?;
+                emit_message(message_to_json(message), options.output, options.color)?;
             }
         }
         Ok(())
