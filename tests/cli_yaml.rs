@@ -39,7 +39,7 @@ fn assert_no_ansi(output: &Output) {
 
 fn yaml_documents(bytes: &[u8]) -> Vec<Value> {
     let text = std::str::from_utf8(bytes).expect("YAML output is UTF-8");
-    serde_yaml_ng::Deserializer::from_str(text)
+    yaml_serde::Deserializer::from_str(text)
         .map(|document| Value::deserialize(document).expect("valid YAML document"))
         .collect()
 }
@@ -354,6 +354,42 @@ fn feed_accepts_explicit_yaml_data_and_writes_complete_messages() {
         ],
     );
     assert_eq!(yaml_report(&second_message)["data"]["value"], 2);
+}
+
+#[test]
+fn feed_keeps_complete_yaml_messages_before_a_rejected_document() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pool_dir = temp.path().join("pools");
+    create_pool(&pool_dir, "events");
+
+    let mut child = cmd()
+        .arg("--dir")
+        .arg(&pool_dir)
+        .args(["feed", "events", "--format", "json"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start feed");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"---\nstate: 'null'\nready: true\n...\n---\nstate: first\nstate: second\n...\n---\nstate: last\n...\n")
+        .expect("write YAML stream");
+    let result = child.wait_with_output().expect("wait for feed");
+    assert!(!result.status.success(), "duplicate keys must fail");
+
+    let first = cli_at(&pool_dir, &["fetch", "events", "1", "--format", "json"]);
+    assert_eq!(
+        json_report(&first)["data"],
+        serde_json::json!({"state": "null", "ready": true})
+    );
+    let next = cli_at(
+        &pool_dir,
+        &["feed", "events", r#"{"state":"next"}"#, "--format", "json"],
+    );
+    assert_eq!(json_report(&next)["seq"], 2);
 }
 
 #[test]

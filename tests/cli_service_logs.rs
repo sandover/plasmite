@@ -141,7 +141,7 @@ impl FollowLog {
                     break;
                 }
             }
-            serde_yaml_ng::from_str(&document)?
+            yaml_serde::from_str(&document)?
         } else {
             serde_json::from_str(&line)?
         };
@@ -312,7 +312,7 @@ fn yaml_logs_preserve_messages_and_follow_without_waiting_for_eof() -> TestResul
         String::from_utf8_lossy(&output.stderr)
     );
     let text = String::from_utf8(output.stdout)?;
-    let rows = serde_yaml_ng::Deserializer::from_str(&text)
+    let rows = yaml_serde::Deserializer::from_str(&text)
         .map(Value::deserialize)
         .collect::<Result<Vec<_>, _>>()?;
     assert_eq!(

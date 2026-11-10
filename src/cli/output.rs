@@ -147,7 +147,7 @@ mod tests {
             "null": null, "array": [], "map": {},
         });
         let output = render_output(&value, OutputMode::Yaml);
-        let decoded: Value = serde_yaml_ng::from_str(&output).unwrap();
+        let decoded: Value = yaml_serde::from_str(&output).unwrap();
         assert_eq!(decoded, value);
         assert_eq!(decoded["unsigned"].as_u64(), Some(u64::MAX));
         assert_eq!(decoded["signed"].as_i64(), Some(i64::MIN));

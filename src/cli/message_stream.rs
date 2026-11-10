@@ -3,8 +3,8 @@
 use clap::ValueEnum;
 use plasmite::api::{Error, ErrorKind, lite3};
 use serde_json::{Map, Number, Value};
-use serde_yaml_ng::Value as YamlValue;
 use std::io::{self, BufRead, BufReader, Read, Write};
+use yaml_serde::Value as YamlValue;
 
 pub(crate) const LITE3_STREAM_MAGIC: &[u8; 4] = b"PLS1";
 const MAX_PAYLOAD_BYTES: usize = lite3::MAX_LITE3_BUF;
@@ -210,7 +210,7 @@ fn parse_yaml_document(bytes: &[u8]) -> Result<Value, Error> {
     let _: Value = serde_saphyr::from_slice_with_options(bytes, options)
         .map_err(|err| input_error("invalid or unsupported YAML message").with_source(err))?;
     // This parser retains tagged values and exact numeric types that the budget pass discards.
-    let yaml: YamlValue = serde_yaml_ng::from_slice(bytes)
+    let yaml: YamlValue = yaml_serde::from_slice(bytes)
         .map_err(|err| input_error("invalid YAML message").with_source(err))?;
     yaml_to_json(yaml)
 }
@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn yaml_preserves_json_types_and_rejects_unsupported_values() {
         let mut seen = Vec::new();
-        let input = b"---\ndata:\n  count: 18446744073709551615\n  ratio: 1.0\n  text: '2026-10-12'\n...\n---\ndata:\n  wrong: !Thing 2\n...\n";
+        let input = b"---\ndata:\n  count: 18446744073709551615\n  minimum: -9223372036854775808\n  ratio: 1.0\n  text: '2026-10-12'\n  '1': [null, false, 'false']\n  choice: yes\n  code: 000123\n  label: 1_000\n...\n---\ndata:\n  wrong: !Thing 2\n...\n";
         let err = read_records(Cursor::new(input), InputFormat::Auto, |record| {
             let InputRecord::Json(value) = record else {
                 panic!("YAML")
@@ -511,15 +511,34 @@ mod tests {
         .expect_err("custom tag rejected");
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0]["data"]["count"].as_u64(), Some(u64::MAX));
-        assert!(seen[0]["data"]["ratio"].is_f64());
+        assert_eq!(seen[0]["data"]["minimum"].as_i64(), Some(i64::MIN));
+        assert_eq!(seen[0]["data"]["ratio"], serde_json::json!(1.0));
         assert_eq!(seen[0]["data"]["text"], "2026-10-12");
-        assert_eq!(err.message(), Some("YAML tags are not supported"));
+        assert_eq!(
+            seen[0]["data"]["1"],
+            serde_json::json!([null, false, "false"])
+        );
+        assert_eq!(seen[0]["data"]["choice"], "yes");
+        assert_eq!(seen[0]["data"]["code"], "000123");
+        assert_eq!(seen[0]["data"]["label"], "1_000");
+        assert_eq!(err.kind(), ErrorKind::Usage);
         for input in [
             b"---\ndata: {x: .nan}\n...\n".as_slice(),
             b"---\ndata: {1: hi}\n...\n",
+            b"---\ndata: {true: hi}\n...\n",
+            b"---\ndata: {count: 18446744073709551616}\n...\n",
+            b"---\ndata: {!Thing x: hi}\n...\n",
+            b"---\ndata: {<<: {x: 1}}\n...\n",
             b"---\na: &x [1]\nb: *x\n...\n",
         ] {
-            assert!(read_records(Cursor::new(input), InputFormat::Yaml, |_| Ok(())).is_err());
+            let error = read_records(Cursor::new(input), InputFormat::Yaml, |_| {
+                panic!(
+                    "unsupported YAML reached the caller: {}",
+                    String::from_utf8_lossy(input)
+                )
+            })
+            .expect_err("unsupported YAML");
+            assert_eq!(error.kind(), ErrorKind::Usage);
         }
     }
 
