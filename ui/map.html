@@ -237,7 +237,7 @@ Invariants: Message data enters the DOM as text.
       (() => {
         "use strict";
         const $ = (id) => document.getElementById(id);
-        const { parseJSON, sequence, cursor, tailStart } = PlasmiteUI;
+        const { parseJSON, followEvents, sequence, cursor, tailStart } = PlasmiteUI;
         const scroll = $("map-scroll");
         const messages = $("messages");
         const cards = new Map();
@@ -1023,67 +1023,31 @@ Invariants: Message data enters the DOM as text.
 
         // Streams.
 
-        // Splits a server-sent event stream into events as chunks arrive. Returns
-        // the complete events and the unfinished remainder.
-        function parseEvents(buffer) {
-          const blocks = buffer.split("\n\n");
-          const rest = blocks.pop() || "";
-          const events = [];
-          for (const block of blocks) {
-            let name = "";
-            const data = [];
-            for (const line of block.split("\n")) {
-              if (line.startsWith("event:")) name = line.slice(6).trim();
-              if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
-            }
-            if (data.length) events.push({ name, data: parseJSON(data.join("\n")) });
-          }
-          return { events, rest };
-        }
-
-        // Follows a server-sent event stream until the returned stop() is called,
-        // reconnecting retryMs after any drop, including a clean close. url() is
-        // read on each connect, so a reconnect can resume where the last one ended.
-        // Stops for good on 401 (the session ended; sign in again) and on 403 or
-        // 404 (nothing here to read).
-        function follow(url, onEvent, onDrop = () => {}) {
+        function follow(url, onEvent, { onDrop, onEnd } = {}) {
           const controller = new AbortController();
-          let stopped = false;
-          (async () => {
-            while (!stopped) {
-              try {
-                const response = await fetch(url(), { cache: "no-store", signal: controller.signal });
-                if (response.status === 401) { location.assign("/ui"); return; }
-                if (response.status === 403 || response.status === 404) return;
-                if (!response.ok || !response.body) throw new Error("Stream failed (" + response.status + ")");
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = "";
-                for (;;) {
-                  const part = await reader.read();
-                  if (stopped || part.done) break;
-                  const parsed = parseEvents(buffer + decoder.decode(part.value, { stream: true }).replaceAll("\r\n", "\n"));
-                  buffer = parsed.rest;
-                  for (const event of parsed.events) {
-                    if (event.name === "error") throw new Error((event.data.error && event.data.error.message) || "Stream error");
-                    // A bug in the page's own handling is logged, not treated as a dropped stream.
-                    try { onEvent(event); } catch (error) { console.error(error); }
-                  }
-                }
-              } catch (_) { /* The stream dropped or was stopped; reconnect below unless stopped. */ }
-              if (stopped) return;
-              onDrop();
-              await new Promise((resolve) => setTimeout(resolve, retryMs));
-            }
-          })();
-          return () => { stopped = true; controller.abort(); };
+          followEvents({
+            url, signal: controller.signal, retryMs, onDrop,
+            onResponse(response) {
+              if (response.status === 401) { location.assign("/ui"); return false; }
+              return response.status !== 403 && response.status !== 404;
+            },
+            onEvent(event) {
+              if (event.name === "error") throw new Error(event.data.error?.message || "Stream error");
+              try { onEvent(event); } catch (error) { console.error(error); }
+            },
+          }).finally(onEnd);
+          return () => controller.abort();
         }
 
         function startList() {
           if (state.stopList || document.visibilityState !== "visible") return;
-          state.stopList = follow(() => "/v0/ui/pools/stream",
+          const stop = follow(() => "/v0/ui/pools/stream",
             (event) => { if (event.name === "pools") showPools(event.data); },
-            () => setStatus("reconnecting"));
+            {
+              onDrop: () => setStatus("reconnecting"),
+              onEnd: () => { if (state.stopList === stop) state.stopList = null; },
+            });
+          state.stopList = stop;
         }
 
         function stopList() {
@@ -1095,11 +1059,14 @@ Invariants: Message data enters the DOM as text.
         // ring, so the card shows no notice for it.
         function startReader(name) {
           stopReader();
-          state.stopReader = follow(() => {
+          const stop = follow(() => {
             const query = new URLSearchParams({ gap_policy: "continue" });
             if (state.nextSeq != null) query.set("since_seq", cursor(state.nextSeq));
             return "/v0/ui/pools/" + encodeURIComponent(name) + "/events?" + query;
-          }, (event) => { if (event.name === "message") addMessage(event.data); });
+          }, (event) => { if (event.name === "message") addMessage(event.data); }, {
+            onEnd: () => { if (state.stopReader === stop) state.stopReader = null; },
+          });
+          state.stopReader = stop;
         }
 
         function stopReader() {

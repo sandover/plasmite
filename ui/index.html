@@ -241,11 +241,18 @@ Invariants: Pool names are rendered as text (never injected as HTML).
           local: false,
           stopped: false,
         };
+        let listController = null;
+
+        function stopPoolList() {
+          listController?.abort();
+          listController = null;
+        }
 
         /* ---- Utility functions ---- */
 
         function renderLogin(message) {
           state.stopped = true;
+          stopPoolList();
           document.getElementById('actions').replaceChildren();
           app.textContent = '';
           var card = document.createElement('section');
@@ -277,6 +284,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
 
         async function logout() {
           state.stopped = true;
+          stopPoolList();
           await fetch('/v0/browser/session', { method: 'DELETE' });
           renderLogin('Signed out.');
         }
@@ -553,50 +561,37 @@ Invariants: Pool names are rendered as text (never injected as HTML).
         // Follows the server's pool snapshots; the server sends one when anything
         // but message ages changes, and the page ages the times itself.
         async function followPoolList() {
-          while (!state.stopped) {
-            try {
-              var response = await fetch("/v0/ui/pools/stream", { cache: "no-store" });
-              if (response.status === 401) {
-                renderLogin('Session ended. Enter the key again.');
-                return;
-              }
-              if (!response.ok || !response.body) throw new Error("Pool list failed (" + response.status + ")");
-              var reader = response.body.getReader();
-              var decoder = new TextDecoder();
-              var buffer = "";
-              while (!state.stopped) {
-                var part = await reader.read();
-                if (part.done) break;
-                buffer += decoder.decode(part.value, { stream: true }).replace(/\r\n/g, "\n");
-                var blocks = buffer.split("\n\n");
-                buffer = blocks.pop();
-                for (var i = 0; i < blocks.length; i++) {
-                  var lines = blocks[i].split("\n");
-                  var name = "", data = "";
-                  for (var j = 0; j < lines.length; j++) {
-                    if (lines[j].startsWith("event:")) name = lines[j].slice(6).trim();
-                    else if (lines[j].startsWith("data:")) data += (data ? "\n" : "") + lines[j].slice(5).trimStart();
-                  }
-                  if (name === "error") throw new Error("Pool list stream failed.");
-                  if (name !== "pools") continue;
-                  list.pools = PlasmiteUI.parseJSON(data).pools || [];
-                  list.error = "";
-                  list.reconnecting = false;
-                  renderPoolList();
+          if (state.stopped || listController) return;
+          const controller = new AbortController();
+          listController = controller;
+          try {
+            await PlasmiteUI.followEvents({
+              url: () => "/v0/ui/pools/stream",
+              signal: controller.signal,
+              onResponse(response) {
+                if (response.status === 401) {
+                  renderLogin('Session ended. Enter the key again.');
+                  return false;
                 }
-              }
-            } catch (err) {
-              if (!list.pools) list.error = String(err.message || err);
-            }
-            if (state.stopped) return;
-            list.reconnecting = Boolean(list.pools);
-            renderPoolList();
-            await wait(1000);
+                if (!response.ok || !response.body) throw new Error("Pool list failed (" + response.status + ")");
+              },
+              onEvent(event) {
+                if (event.name === "error") throw new Error("Pool list stream failed.");
+                if (event.name !== "pools") return;
+                list.pools = event.data.pools || [];
+                list.error = "";
+                list.reconnecting = false;
+                renderPoolList();
+              },
+              onDrop(error) {
+                if (error && !list.pools) list.error = String(error.message || error);
+                list.reconnecting = Boolean(list.pools);
+                renderPoolList();
+              },
+            });
+          } finally {
+            if (listController === controller) listController = null;
           }
-        }
-
-        function wait(ms) {
-          return new Promise(function (resolve) { setTimeout(resolve, ms); });
         }
 
         /* ---- Boot ---- */

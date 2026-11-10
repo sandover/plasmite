@@ -71,18 +71,11 @@ impl Default for TailOptions {
     }
 }
 
-pub struct Tail<'a> {
-    pool: &'a Pool,
-    cursor: Cursor,
-    options: TailOptions,
-    seen: usize,
-    deadline: Option<Instant>,
-    notify: Option<PoolSemaphore>,
-    expected_seq: Option<u64>,
-    terminated: bool,
-}
+pub struct Tail<'a>(TailReader<'a>);
 
-pub struct Lite3Tail<'a> {
+pub struct Lite3Tail<'a>(TailReader<'a>);
+
+struct TailReader<'a> {
     pool: &'a Pool,
     cursor: Cursor,
     options: TailOptions,
@@ -223,7 +216,7 @@ fn collect_replay_snapshot(
     Ok(entries)
 }
 
-impl<'a> Tail<'a> {
+impl<'a> TailReader<'a> {
     fn new(pool: &'a Pool, options: TailOptions) -> Self {
         let deadline = options.timeout.map(|duration| Instant::now() + duration);
         let expected_seq = options.since_seq;
@@ -244,14 +237,17 @@ impl<'a> Tail<'a> {
         }
     }
 
-    pub fn next_message(&mut self) -> Result<Option<Message>, Error> {
+    fn next<T>(
+        &mut self,
+        select: impl Fn(FrameRef, &[String]) -> Result<Option<T>, Error>,
+    ) -> Result<Option<T>, Error> {
         if self.terminated {
             return Ok(None);
         }
-        if let Some(max) = self.options.max_messages {
-            if self.seen >= max {
-                return Ok(None);
-            }
+        if let Some(max) = self.options.max_messages
+            && self.seen >= max
+        {
+            return Ok(None);
         }
 
         loop {
@@ -263,10 +259,10 @@ impl<'a> Tail<'a> {
             {
                 return Ok(None);
             }
-            if let Some(deadline) = self.deadline {
-                if Instant::now() >= deadline {
-                    return Ok(None);
-                }
+            if let Some(deadline) = self.deadline
+                && Instant::now() >= deadline
+            {
+                return Ok(None);
             }
 
             match self.cursor.next(self.pool)? {
@@ -285,12 +281,10 @@ impl<'a> Tail<'a> {
                     if !should_process {
                         continue;
                     }
-                    let message = message_from_frame(&frame)?;
-                    if !has_required_tags(&message.meta.tags, self.options.tags.as_slice()) {
-                        continue;
+                    if let Some(item) = select(frame, &self.options.tags)? {
+                        self.seen += 1;
+                        return Ok(Some(item));
                     }
-                    self.seen += 1;
-                    return Ok(Some(message));
                 }
                 CursorResult::WouldBlock => {
                     let wait_for = wait_interval(self.deadline, self.options.poll_interval);
@@ -318,98 +312,21 @@ impl<'a> Tail<'a> {
     }
 }
 
-impl<'a> Lite3Tail<'a> {
-    fn new(pool: &'a Pool, options: TailOptions) -> Self {
-        let deadline = options.timeout.map(|duration| Instant::now() + duration);
-        let expected_seq = options.since_seq;
-        let notify = if options.notify {
-            open_for_path(pool.path()).ok()
-        } else {
-            None
-        };
-        Self {
-            pool,
-            cursor: Cursor::new(),
-            options,
-            seen: 0,
-            deadline,
-            notify,
-            expected_seq,
-            terminated: false,
-        }
+impl Tail<'_> {
+    pub fn next_message(&mut self) -> Result<Option<Message>, Error> {
+        self.0.next(|frame, tags| {
+            let message = message_from_frame(&frame)?;
+            Ok(has_required_tags(&message.meta.tags, tags).then_some(message))
+        })
     }
+}
 
+impl Lite3Tail<'_> {
     pub fn next_frame(&mut self) -> Result<Option<FrameRef>, Error> {
-        if self.terminated {
-            return Ok(None);
-        }
-        if let Some(max) = self.options.max_messages {
-            if self.seen >= max {
-                return Ok(None);
-            }
-        }
-
-        loop {
-            if self
-                .options
-                .cancel
-                .as_ref()
-                .is_some_and(|cancel| cancel.load(Ordering::Acquire))
-            {
-                return Ok(None);
-            }
-            if let Some(deadline) = self.deadline {
-                if Instant::now() >= deadline {
-                    return Ok(None);
-                }
-            }
-
-            match self.cursor.next(self.pool)? {
-                CursorResult::Message(frame) => {
-                    let should_process = match observe_sequence(
-                        &mut self.expected_seq,
-                        frame.seq,
-                        self.options.gap_policy,
-                    ) {
-                        Ok(should_process) => should_process,
-                        Err(err) => {
-                            self.terminated = true;
-                            return Err(err);
-                        }
-                    };
-                    if !should_process {
-                        continue;
-                    }
-                    let (meta, _) = decode_payload(&frame.payload)?;
-                    if !has_required_tags(&meta.tags, self.options.tags.as_slice()) {
-                        continue;
-                    }
-                    self.seen += 1;
-                    return Ok(Some(frame));
-                }
-                CursorResult::WouldBlock => {
-                    let wait_for = wait_interval(self.deadline, self.options.poll_interval);
-                    if let Some(notify) = &mut self.notify {
-                        match notify.wait(wait_for) {
-                            Ok(WaitOutcome::Signaled) | Ok(WaitOutcome::TimedOut) => {}
-                            Err(NotifyError::Unavailable) => {
-                                self.notify = None;
-                                std::thread::sleep(wait_for);
-                            }
-                            Err(NotifyError::Io(err)) => {
-                                let _ = err.kind();
-                                std::thread::sleep(wait_for);
-                            }
-                        }
-                    } else {
-                        std::thread::sleep(wait_for);
-                    }
-                }
-                CursorResult::FellBehind => {
-                    continue;
-                }
-            }
-        }
+        self.0.next(|frame, tags| {
+            let (meta, _) = decode_payload(&frame.payload)?;
+            Ok(has_required_tags(&meta.tags, tags).then_some(frame))
+        })
     }
 }
 
@@ -575,11 +492,11 @@ impl PoolApiExt for Pool {
     }
 
     fn tail(&self, options: TailOptions) -> Tail<'_> {
-        Tail::new(self, options)
+        Tail(TailReader::new(self, options))
     }
 
     fn tail_lite3(&self, options: TailOptions) -> Lite3Tail<'_> {
-        Lite3Tail::new(self, options)
+        Lite3Tail(TailReader::new(self, options))
     }
 
     fn replay(&self, options: ReplayOptions) -> Result<Replay, Error> {
@@ -694,6 +611,9 @@ mod tests {
     use crate::core::lite3::{encode_message, json_counter_snapshot, reset_json_counters};
     use crate::core::pool::{Durability, Pool, PoolOptions};
     use serde_json::json;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
     use tempfile::tempdir;
 
     #[test]
@@ -781,19 +701,30 @@ mod tests {
     }
 
     #[test]
-    fn tail_notify_opt_out_disables_notify() {
+    fn tails_read_new_messages_with_notifications_disabled() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
-        let pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
+        let mut writer = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
+        let reader = Pool::open(&path).expect("open reader");
 
         let mut options = TailOptions::new();
         options.notify = false;
-        let tail = pool.tail(options);
-        assert!(tail.notify.is_none());
+        options.timeout = Some(Duration::from_secs(2));
+        let mut json = reader.tail(options.clone());
+        let mut lite3 = reader.tail_lite3(options);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                writer
+                    .append_json_now(&json!({"n": 1}), &[], Durability::Fast)
+                    .expect("append after opening tails");
+            });
+            assert_eq!(json.next_message().unwrap().unwrap().seq, 1);
+            assert_eq!(lite3.next_frame().unwrap().unwrap().seq, 1);
+        });
     }
 
     #[test]
-    fn tail_filters_by_required_tags() {
+    fn tails_count_only_matching_messages_toward_the_limit() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");
         let mut pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
@@ -812,15 +743,54 @@ mod tests {
                 crate::core::pool::Durability::Fast,
             )
             .expect("append");
+        pool.append_json_now(&json!({"n": 3}), &["keep".into()], Durability::Fast)
+            .expect("append another matching message");
 
         let mut options = TailOptions::new();
         options.since_seq = Some(first.seq);
         options.max_messages = Some(1);
         options.tags = vec!["keep".to_string()];
+        let mut raw = pool.tail_lite3(options.clone());
         let mut tail = pool.tail(options);
         let message = tail.next_message().expect("tail").expect("message");
         assert_eq!(message.seq, second.seq);
         assert_eq!(message.data, json!({"n": 2}));
+        assert_eq!(
+            raw.next_frame().unwrap().unwrap(),
+            pool.get_lite3(second.seq).unwrap()
+        );
+        assert!(tail.next_message().unwrap().is_none());
+        assert!(raw.next_frame().unwrap().is_none());
+    }
+
+    #[test]
+    fn tails_stop_on_cancellation_and_expired_deadline_with_messages_available() {
+        let dir = tempdir().unwrap();
+        let mut pool = Pool::create(
+            dir.path().join("pool.plasmite"),
+            PoolOptions::new(1024 * 1024),
+        )
+        .unwrap();
+        pool.append_json_now(&json!({"n": 1}), &[], Durability::Fast)
+            .unwrap();
+        pool.append_json_now(&json!({"n": 2}), &[], Durability::Fast)
+            .unwrap();
+
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut options = TailOptions::new();
+        options.cancel = Some(cancel.clone());
+        let mut json = pool.tail(options.clone());
+        let mut lite3 = pool.tail_lite3(options);
+        assert_eq!(json.next_message().unwrap().unwrap().seq, 1);
+        assert_eq!(lite3.next_frame().unwrap().unwrap().seq, 1);
+        cancel.store(true, Ordering::Release);
+        assert!(json.next_message().unwrap().is_none());
+        assert!(lite3.next_frame().unwrap().is_none());
+
+        let mut expired = TailOptions::new();
+        expired.timeout = Some(Duration::ZERO);
+        assert!(pool.tail(expired.clone()).next_message().unwrap().is_none());
+        assert!(pool.tail_lite3(expired).next_frame().unwrap().is_none());
     }
 
     fn append_until_oldest_after(pool: &mut Pool, seq: u64) {
@@ -859,6 +829,7 @@ mod tests {
         let mut strict_options = TailOptions::new();
         strict_options.since_seq = Some(first.seq);
         strict_options.gap_policy = GapPolicy::Error;
+        let mut strict_lite3 = strict_reader.tail_lite3(strict_options.clone());
         let mut strict = strict_reader.tail(strict_options);
         assert_eq!(
             strict
@@ -868,6 +839,7 @@ mod tests {
                 .seq,
             first.seq
         );
+        assert_eq!(strict_lite3.next_frame().unwrap().unwrap().seq, first.seq);
 
         let mut continuing_options = TailOptions::new();
         continuing_options.since_seq = Some(first.seq);
@@ -902,6 +874,12 @@ mod tests {
                 .expect("terminated strict tail")
                 .is_none()
         );
+        let raw_error = strict_lite3
+            .next_frame()
+            .expect_err("strict Lite3 tail must fail");
+        assert_eq!(raw_error.kind(), ErrorKind::RetentionGap);
+        assert_eq!(raw_error.seq(), Some(first.seq + 1));
+        assert!(strict_lite3.next_frame().unwrap().is_none());
 
         let resumed = continuing
             .next_message()

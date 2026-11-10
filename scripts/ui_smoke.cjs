@@ -14,6 +14,7 @@ function element() {
     style: { setProperty() {} }, classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
     scrollHeight: 100, scrollTop: 0, clientHeight: 100,
     append(...items) { this.children.push(...items); },
+    appendChild(item) { this.children.push(item); return item; },
     replaceChildren(...items) { this.children = items; },
     querySelector() { return element(); }, querySelectorAll() { return []; },
     addEventListener(name, fn) { this.listeners[name] = fn; },
@@ -50,10 +51,10 @@ function browser(page, exports = '') {
   return { context, nodes, timers, api: context.PlasmiteUI, page: context.testPage };
 }
 
-const poolExports = `window.testPage = { state, addMessage, flush, appendRows, fromRaw, parseEvents, loadEarlier,
+const poolExports = `window.testPage = { state, addMessage, flush, appendRows, fromRaw, loadEarlier,
     copy, toLogin, messageLink, boot, followPool, get pending() { return pending; },
   quietRendering() { renderFacts = () => {}; renderRows = () => {}; applyFilter = () => {}; } };`;
-const mapExports = 'window.testPage = { state, addMessage, segmentOf, ageGroups, parseEvents };';
+const mapExports = 'window.testPage = { state, addMessage, segmentOf, ageGroups, follow, startList };';
 const raw = (api, seq) => api.parseJSON(`{"seq":${seq},"time":"2026-01-01T00:00:00Z","meta":{},"data":{"value":1}}`);
 
 test('all inline scripts compile', () => {
@@ -194,10 +195,101 @@ function historyBrowser() {
   return env;
 }
 const info = (oldest) => ({ ok: true, status: 200, text: async () => `{"pool":{"bounds":{"oldest":${oldest}}}}` });
-const stream = (text) => ({ ok: true, status: 200, body: { getReader() {
-  let sent = false;
-  return { async read() { if (sent) return { done: true }; sent = true; return { value: new TextEncoder().encode(text), done: false }; } };
+const stream = (...chunks) => ({ ok: true, status: 200, body: { getReader() {
+  return { async read() {
+    if (!chunks.length) return { done: true };
+    return { value: new TextEncoder().encode(chunks.shift()), done: false };
+  } };
 } } });
+
+test('pool follow resumes at the next exact sequence after a split event and disconnect', async () => {
+  const env = browser('pool', poolExports);
+  env.page.state.nextSeq = 9007199254740993n;
+  const requests = [];
+  env.context.fetch = async (url) => {
+    requests.push(new URL(url, env.context.location.origin));
+    if (requests.length === 1) return stream(
+      'event: message\r',
+      '\ndata: {"seq":900719925474',
+      '0993,"data":{"sample":1}}\r\n\r\n');
+    return { ok: false, status: 404 };
+  };
+  const following = env.page.followPool();
+  await new Promise(setImmediate);
+  assert.equal(env.page.pending[0].seq, 9007199254740993n);
+  assert.equal(env.nodes.get('live').textContent, 'reconnecting');
+  const [id, retry] = [...env.timers].find(([, timer]) => timer.delay === 1000);
+  env.timers.delete(id);
+  retry.fn();
+  await following;
+  assert.deepEqual(requests.map(url => url.searchParams.get('since_seq')),
+    ['9007199254740993', '9007199254740994']);
+  assert.match(env.nodes.get('empty').textContent, /No pool named/);
+});
+
+test('stopping a map reader during its retry wait prevents a new request', async () => {
+  const env = browser('map', mapExports);
+  let requests = 0;
+  let signal;
+  const events = [];
+  env.context.fetch = async (_, options) => {
+    requests++;
+    signal = options.signal;
+    return stream('event: message\ndata: {"seq":1,"data":{}}\n\n');
+  };
+  const stop = env.page.follow(() => '/events', event => events.push(event));
+  await new Promise(setImmediate);
+  assert.deepEqual(events.map(event => event.data.seq), [1n]);
+  assert.equal(env.timers.size, 1, 'disconnect scheduled a retry');
+  stop();
+  for (const timer of env.timers.values()) timer.fn();
+  await new Promise(setImmediate);
+  assert.equal(signal.aborted, true);
+  assert.equal(requests, 1);
+});
+
+test('a rejected map stream stops retrying and a later start opens a fresh stream', async () => {
+  const env = browser('map', mapExports);
+  env.context.document.visibilityState = 'visible';
+  const requests = [];
+  env.context.fetch = async url => {
+    requests.push(url);
+    return { ok: false, status: 403 };
+  };
+  env.page.startList();
+  await new Promise(setImmediate);
+  assert.equal(env.timers.size, 0);
+  env.page.startList();
+  await new Promise(setImmediate);
+  assert.deepEqual(requests, ['/v0/ui/pools/stream', '/v0/ui/pools/stream']);
+});
+
+test('signing out discards a pool list event from the old connection', async () => {
+  const env = browser('index', `window.testPage = { list, followPoolList, logout,
+    quietRendering() { renderPoolList = () => {}; } };`);
+  env.page.quietRendering();
+  let finishRead, signal;
+  let cancelled = false;
+  env.context.fetch = async (_, options) => {
+    if (options.method === 'DELETE') return { ok: true };
+    signal = options.signal;
+    return { ok: true, body: { getReader() {
+      return {
+        read() { return new Promise(resolve => { finishRead = resolve; }); },
+        async cancel() { cancelled = true; },
+      };
+    } } };
+  };
+  const following = env.page.followPoolList();
+  await new Promise(setImmediate);
+  await env.page.logout();
+  finishRead({ value: new TextEncoder().encode('event: pools\ndata: {"pools":[{"name":"old"}]}\n\n') });
+  await following;
+  assert.equal(signal.aborted, true);
+  assert.equal(cancelled, true);
+  assert.equal(env.page.list.pools, null);
+  assert.equal(env.timers.size, 0);
+});
 
 test('history refresh prevents a stale-bounds request after overwrite', async () => {
   const env = historyBrowser();
