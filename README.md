@@ -194,11 +194,9 @@ uv tool install plasmite   # standalone CLI + Python bindings
 uv add plasmite            # add to a uv-managed project
 ```
 
-The next release adds a Linux x86_64 wheel with the CLI and native library,
-requiring glibc 2.35 or newer. It needs no separate SDK or Rust toolchain.
-Version 1.2.1 still requires a system SDK on Linux, from Homebrew or a GitHub
-release tarball. macOS and Windows x86_64 have published wheels; Linux ARM
-uses the preview SDK archives. See the
+Plasmite 1.3 adds a Linux x86_64 wheel with the CLI and native library. It
+requires glibc 2.35 or newer and needs only the bundled native files. Wheels
+also cover macOS and Windows x86_64. Linux ARM uses the preview SDK archives. See the
 [distribution guide](docs/record/distribution.md#install-matrix) for the matrix.
 
 ### Node

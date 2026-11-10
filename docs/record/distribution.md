@@ -24,13 +24,13 @@ Official platforms:
 - Linux: `x86_64-unknown-linux-gnu`
 - Windows: `x86_64-pc-windows-msvc` via npm and PyPI release artifacts
 
-The next release builds Linux x86_64 packages on Ubuntu 22.04 with glibc 2.35.
+Plasmite 1.3.0 builds Linux x86_64 packages on Ubuntu 22.04 with glibc 2.35.
 This covers Ubuntu 22.04 and Debian 12 without a source build. The Python wheel
 is tagged `manylinux_2_35_x86_64`, and its CLI and library are checked against
 that floor. Check your system with `getconf GNU_LIBC_VERSION`; these GNU/Linux
 packages require glibc and do not target musl/Alpine.
 
-These changes are unreleased. Version 1.2.1's Linux x86_64 SDK/npm packages
+Version 1.2.1's Linux x86_64 SDK/npm packages
 require glibc 2.39 or newer; its Python source package requires a system SDK.
 The ARM preview retains its glibc 2.35 baseline and manual SDK installation.
 
@@ -67,12 +67,12 @@ published release assets below for installation.
 | Homebrew (macOS and x86_64 Linux) | `brew install sandover/tap/plasmite` | Yes | Yes (system SDK) | `official` | Installs `bin/`, `lib/`, `include/`, `pkg-config` metadata; post-release macOS install smoke required. |
 | crates.io (Rust) | `cargo install plasmite` | Yes | No | `official` | Installs binaries into Cargo bin dir; source build. |
 | crates.io (Rust) | `cargo add plasmite` | No | Yes (Rust crate) | `official` | Standard Rust dependency. |
-| PyPI (Python) | `uv tool install plasmite` | Yes | Yes (Python bindings) | `official` (macOS x64/arm64; Linux/Windows x64) | Wheel bundles native assets and CLI. Linux wheel support is unreleased; 1.2.1 uses the source package on Linux. |
+| PyPI (Python) | `uv tool install plasmite` | Yes | Yes (Python bindings) | `official` (macOS x64/arm64; Linux/Windows x64) | Wheel bundles native assets and CLI. Linux wheels start with 1.3.0. |
 | npm (Node) | `npm i -g plasmite` | Yes | Yes (Node bindings) | `official` (macOS x64/arm64; Linux/Windows x64) | Requires Node >=24; bundles addon, native assets, and CLI. |
 | Go module | `go get github.com/sandover/plasmite/bindings/go/local` | No | Yes (Go bindings) | `official` (macOS/Linux) | Requires system SDK (brew/manual) for cgo; import pure contracts from `/api` when needed. |
 | GitHub release tarball | Download from releases | Yes | Yes (SDK layout) | `official` (manual path) | Contains `bin/`, `lib/`, `include/`, `lib/pkgconfig/`. |
-| GitHub release tarball (Linux ARM64) | Download `plasmite_1.2.1_linux_arm64.tar.gz` | Yes | Yes (SDK layout) | `preview` | Published SDK archive with release checksums; physical Pi qualification pending. |
-| GitHub release tarball (Linux ARMv7) | Download `plasmite_1.2.1_linux_armv7.tar.gz` | Yes | Yes (SDK layout) | `preview` | Published 32-bit hard-float SDK archive with release checksums; physical Pi qualification pending. |
+| GitHub release tarball (Linux ARM64) | Download `plasmite_1.3.0_linux_arm64.tar.gz` | Yes | Yes (SDK layout) | `preview` | Published SDK archive with release checksums; physical Pi qualification pending. |
+| GitHub release tarball (Linux ARMv7) | Download `plasmite_1.3.0_linux_armv7.tar.gz` | Yes | Yes (SDK layout) | `preview` | Published 32-bit hard-float SDK archive with release checksums; physical Pi qualification pending. |
 | cargo-binstall (Rust binary installer) | `cargo binstall plasmite --no-confirm` | Yes | No | `preview` (`x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`) | Uses `package.metadata.binstall` URL mapping to GitHub release SDK tarballs; release-publish smoke gate is currently Linux-only. |
 
 **Requirements:** Node.js 24 or newer for the npm package and its CLI;
@@ -104,13 +104,13 @@ ARM64 requires ARMv8-A; ARMv7 requires Armv7-A with VFPv3-D16 and Thumb-2.
 ARMv6 is unsupported. Physical Pi installation and reboot qualification remain
 pending; the published archives retain the preview tier.
 
-Download the matching [1.2.1 release](https://github.com/sandover/plasmite/releases/tag/v1.2.1)
-archive and [sha256sums.txt](https://github.com/sandover/plasmite/releases/download/v1.2.1/sha256sums.txt):
+Download the matching [1.3.0 release](https://github.com/sandover/plasmite/releases/tag/v1.3.0)
+archive and [sha256sums.txt](https://github.com/sandover/plasmite/releases/download/v1.3.0/sha256sums.txt):
 
 | Userland | Published archive |
 | --- | --- |
-| 64-bit ARM | [plasmite_1.2.1_linux_arm64.tar.gz](https://github.com/sandover/plasmite/releases/download/v1.2.1/plasmite_1.2.1_linux_arm64.tar.gz) |
-| 32-bit ARMv7 hard-float | [plasmite_1.2.1_linux_armv7.tar.gz](https://github.com/sandover/plasmite/releases/download/v1.2.1/plasmite_1.2.1_linux_armv7.tar.gz) |
+| 64-bit ARM | [plasmite_1.3.0_linux_arm64.tar.gz](https://github.com/sandover/plasmite/releases/download/v1.3.0/plasmite_1.3.0_linux_arm64.tar.gz) |
+| 32-bit ARMv7 hard-float | [plasmite_1.3.0_linux_armv7.tar.gz](https://github.com/sandover/plasmite/releases/download/v1.3.0/plasmite_1.3.0_linux_armv7.tar.gz) |
 
 On the Linux ARM machine, run these commands in Bash. They select the archive
 by userland width and stop on download or checksum failure before extraction:
@@ -123,15 +123,16 @@ case "$(getconf LONG_BIT)" in
   *) echo "unsupported userland width" >&2; exit 1 ;;
 esac
 getconf GNU_LIBC_VERSION # Requires glibc 2.35 or newer.
-archive="plasmite_1.0.0_${platform}.tar.gz"
-release_url="https://github.com/sandover/plasmite/releases/download/v1.0.0"
-mkdir -p "$HOME/arm-sdk-1.0.0"
-cd "$HOME/arm-sdk-1.0.0"
+version=1.3.0
+archive="plasmite_${version}_${platform}.tar.gz"
+release_url="https://github.com/sandover/plasmite/releases/download/v${version}"
+mkdir -p "$HOME/arm-sdk-${version}"
+cd "$HOME/arm-sdk-${version}"
 curl -fL "$release_url/$archive" -o "$archive"
 curl -fL "$release_url/sha256sums.txt" -o sha256sums.txt
 awk -v archive="$archive" '$2 == "./" archive || $2 == archive { print; found = 1 } END { if (!found) exit 1 }' sha256sums.txt |
   sha256sum --check -
-sdk_dir="$HOME/.local/share/plasmite/1.0.0"
+sdk_dir="$HOME/.local/share/plasmite/${version}"
 mkdir -p "$sdk_dir"
 tar -xzf "$archive" -C "$sdk_dir"
 export PATH="$sdk_dir/bin:$PATH"
@@ -141,9 +142,9 @@ plasmite --version
 Each archive extracts `bin/`, `include/`, and `lib/` directly into `sdk_dir`;
 Rust is not required. Add that `bin` path to your shell's startup file for
 future sessions. For C consumers, export
-`PKG_CONFIG_PATH="$HOME/.local/share/plasmite/1.0.0/lib/pkgconfig"` and use
+`PKG_CONFIG_PATH="$HOME/.local/share/plasmite/1.3.0/lib/pkgconfig"` and use
 `pkg-config --cflags --libs plasmite`. To run a dynamically linked C consumer,
-also export `LD_LIBRARY_PATH="$HOME/.local/share/plasmite/1.0.0/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"`.
+also export `LD_LIBRARY_PATH="$HOME/.local/share/plasmite/1.3.0/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"`.
 Python's Linux source installation can
 use `PLASMITE_LIB_DIR="$HOME/.local/share/plasmite/1.0.0/lib"` with the same
 `bin` path on `PATH`; the archive does not add an npm addon or an ARM wheel.

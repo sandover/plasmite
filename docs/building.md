@@ -231,8 +231,8 @@ pkg-config --cflags --libs plasmite
 Release SDKs, npm native assets and Python wheels build on Ubuntu 22.04, pinning
 an explicit glibc 2.35 baseline. Python packaging uses `auditwheel` to check both
 bundled native programs before tagging the wheel `manylinux_2_35_x86_64`.
-These packaging changes are unreleased; 1.2.1 retains the older Linux install
-prerequisites in the [distribution guide](record/distribution.md).
+These packages start with Plasmite 1.3.0. See the
+[distribution guide](record/distribution.md) for the requirements of older releases.
 
 To run the release wheel check against an SDK built on that baseline:
 

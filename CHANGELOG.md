@@ -4,15 +4,33 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-Remove the CLI `--data` flag. `feed` recognizes ordinary JSON/YAML objects and
-complete Plasmite messages automatically. Delete the flag from existing scripts;
-the full message shape remains reserved, with no application-data override.
+## [1.3.0] - 2026-11-10
 
-Linux x86_64 packages target glibc 2.35, adding prebuilt support for Ubuntu 22.04
-and Debian 12. Python wheels bundle the CLI and native library on Linux and use
-Python-version-independent tags for the ctypes bindings.
-Python 3.10 accepts nanosecond message timestamps, and Python installs include
-both `plasmite` and `pls` commands.
+**Delete `--data` from existing `plasmite feed` commands.** `feed` recognizes
+ordinary JSON and YAML objects automatically. It copies an object with exactly
+`seq`, `time`, `meta`, and `data`, where `meta` contains only `tags`, as a
+Plasmite message. If a script used `--data` to store that exact shape as
+application data, wrap the object in an outer field before feeding it.
+This CLI change is a one-time exception to the major-version policy.
+[Upgrade guide](https://github.com/sandover/plasmite/blob/v1.3.0/docs/record/upgrading-1.2.md#create-messages)
+
+### Linux installs and Python wheels
+
+Prebuilt Linux x86-64 packages now run on Ubuntu 22.04 and Debian 12. The
+Linux Python wheel bundles the CLI and native library. Python installs provide
+both `plasmite` and `pls`, and the wheels support Python 3.10 and newer across
+CPython versions. The Python 3.10 binding can read nanosecond timestamps.
+
+### Security and reliability
+
+- Update the TLS certificate verifier, trusted roots, and Tokio runtime to
+  address RustSec advisories.
+- Build with Rust 1.99.1 to fix a shared-library alignment error on macOS 27.
+- Use the same retention and timeout rules for JSON and Lite3 tails. Browser
+  streams resume from the next sequence after a disconnect. UDP follow handles
+  early skips, completion, and cancellation more reliably.
+
+[Full changes since 1.2.1](https://github.com/sandover/plasmite/compare/v1.2.1...v1.3.0)
 
 ## [1.2.1] - 2026-10-14
 
