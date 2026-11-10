@@ -517,7 +517,7 @@ pub extern "C" fn plsm_stream_next(
                         return fail(out_err, err);
                     }
                 }
-                let message = match message_from_frame(&frame) {
+                let message = match crate::api::message_from_frame(&frame) {
                     Ok(message) => message,
                     Err(err) => return fail(out_err, err),
                 };
@@ -1288,58 +1288,6 @@ fn parse_tags(tags: *const *const c_char, len: usize) -> Result<Vec<String>, Err
     Ok(out)
 }
 
-fn message_from_frame(frame: &crate::api::FrameRef) -> Result<crate::api::Message, Error> {
-    let doc = crate::api::Lite3DocRef::new(&frame.payload);
-    let meta_type = doc
-        .type_at_key(0, "meta")
-        .map_err(|err| err.with_message("missing meta"))?;
-    if meta_type != crate::api::lite3::sys::LITE3_TYPE_OBJECT {
-        return Err(Error::new(ErrorKind::Corrupt).with_message("meta is not object"));
-    }
-
-    let meta_ofs = doc
-        .key_offset("meta")
-        .map_err(|err| err.with_message("missing meta"))?;
-    let tags_ofs = doc
-        .key_offset_at(meta_ofs, "tags")
-        .map_err(|err| err.with_message("missing meta.tags"))?;
-    let tags_count = doc
-        .count_at(tags_ofs)
-        .map_err(|_| Error::new(ErrorKind::Corrupt).with_message("meta.tags must be array"))?;
-    let mut tags = Vec::with_capacity(tags_count as usize);
-    for index in 0..tags_count {
-        let item_type = doc.array_item_type(tags_ofs, index).map_err(|_| {
-            Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
-        })?;
-        if item_type != crate::api::lite3::sys::LITE3_TYPE_STRING {
-            return Err(
-                Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
-            );
-        }
-        let tag = doc.array_string_at(tags_ofs, index).map_err(|_| {
-            Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
-        })?;
-        tags.push(tag);
-    }
-
-    let data_ofs = doc
-        .key_offset("data")
-        .map_err(|err| err.with_message("missing data"))?;
-    let data_json = doc.to_json_at(data_ofs, false)?;
-    let data: Value = serde_json::from_str(&data_json).map_err(|err| {
-        Error::new(ErrorKind::Corrupt)
-            .with_message("invalid payload json")
-            .with_source(err)
-    })?;
-
-    Ok(crate::api::Message {
-        seq: frame.seq,
-        time: format_ts(frame.timestamp_ns)?,
-        meta: crate::api::Meta { tags },
-        data,
-    })
-}
-
 fn write_message_buf(
     out_message: *mut plsm_buf,
     message: crate::api::Message,
@@ -1428,21 +1376,6 @@ fn error_kind_code(kind: ErrorKind) -> i32 {
         ErrorKind::Io => 8,
         ErrorKind::RetentionGap => 9,
     }
-}
-
-fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
-    use time::format_description::well_known::Rfc3339;
-    let ts =
-        time::OffsetDateTime::from_unix_timestamp_nanos(timestamp_ns as i128).map_err(|err| {
-            Error::new(ErrorKind::Internal)
-                .with_message("invalid timestamp")
-                .with_source(err)
-        })?;
-    ts.format(&Rfc3339).map_err(|err| {
-        Error::new(ErrorKind::Internal)
-            .with_message("timestamp format failed")
-            .with_source(err)
-    })
 }
 
 #[cfg(test)]

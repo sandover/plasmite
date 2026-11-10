@@ -3,7 +3,7 @@
 use super::context::CliContext;
 use super::feed_support::{
     FeedIngestContext, RemoteFeedIngestContext, ingest_from_stdin, ingest_from_stdin_remote,
-    message_timestamp, missing_feed_data_error, open_feed_reader,
+    missing_feed_data_error, open_feed_reader,
 };
 use super::message_stream::InputFormat;
 use super::output_support::{emit_lite3, emit_message};
@@ -202,11 +202,10 @@ pub(super) fn fetch(pool: &str, seq: u64, context: &CliContext) -> Result<Comman
                 let ns = if context.output_mode() == super::output::OutputMode::Lite3Raw {
                     0
                 } else {
-                    message_timestamp(
-                        &handle
-                            .get_message(seq)
-                            .map_err(|err| add_missing_seq_hint(err, pool))?,
-                    )?
+                    handle
+                        .get_message(seq)
+                        .map_err(|err| add_missing_seq_hint(err, pool))?
+                        .timestamp_ns()?
                 };
                 let payload = handle
                     .get_lite3(seq)

@@ -3,7 +3,7 @@
 use super::message_stream::{InputFormat, InputRecord, read_records};
 use super::output::OutputMode;
 use super::output_support::{emit_lite3, emit_message};
-use super::support::{RetryConfig, message_to_json, retry_append};
+use super::support::{RetryConfig, message_to_json, now_ns, retry_append};
 use crate::ColorMode;
 use plasmite::api::{
     AppendOptions, Durability, Error, ErrorKind, Message, Pool, PoolApiExt, RemotePool, lite3,
@@ -146,10 +146,15 @@ struct IngestOptions<'a> {
     stop: Option<&'a AtomicBool>,
 }
 
+enum Receipt {
+    Text(Message),
+    Binary { seq: u64, timestamp_ns: u64 },
+}
+
 fn ingest_with_append(
     reader: impl Read,
     options: IngestOptions<'_>,
-    mut append: impl FnMut(&[u8]) -> Result<Message, Error>,
+    mut append: impl FnMut(&[u8]) -> Result<Receipt, Error>,
 ) -> Result<u64, Error> {
     let count = read_records(reader, options.input, |record| {
         let payload = record_payload(record, options.tags)?;
@@ -159,36 +164,21 @@ fn ingest_with_append(
         {
             return Ok(());
         }
-        let message = append(&payload)?;
-        // Storage succeeded. A later stdout error stops ingestion; it must never retry this append.
+        let receipt = append(&payload)?;
+        // A stdout error stops ingestion after the append has succeeded.
         if options.emit {
-            if options.output.is_binary() {
-                let ns = message_timestamp(&message)?;
-                emit_lite3(message.seq, ns, &payload, options.output)?;
-            } else {
-                emit_message(message_to_json(message), options.output, options.color)?;
+            match receipt {
+                Receipt::Text(message) => {
+                    emit_message(message_to_json(message), options.output, options.color)?;
+                }
+                Receipt::Binary { seq, timestamp_ns } => {
+                    emit_lite3(seq, timestamp_ns, &payload, options.output)?;
+                }
             }
         }
         Ok(())
     })?;
     Ok(count)
-}
-
-pub(crate) fn message_timestamp(message: &Message) -> Result<u64, Error> {
-    let time = time::OffsetDateTime::parse(
-        &message.time,
-        &time::format_description::well_known::Rfc3339,
-    )
-    .map_err(|err| {
-        Error::new(ErrorKind::Internal)
-            .with_message("invalid message time")
-            .with_source(err)
-    })?;
-    u64::try_from(time.unix_timestamp_nanos()).map_err(|err| {
-        Error::new(ErrorKind::Internal)
-            .with_message("message time is out of range")
-            .with_source(err)
-    })
 }
 
 pub(crate) fn ingest_from_stdin(
@@ -206,8 +196,17 @@ pub(crate) fn ingest_from_stdin(
     };
     ingest_with_append(reader, options, |payload| {
         retry_append(ctx.retry_config, || {
-            ctx.pool_handle
-                .append_lite3_with_receipt_now(payload, ctx.durability)
+            if options.output.is_binary() {
+                let timestamp_ns = now_ns()?;
+                let seq = ctx
+                    .pool_handle
+                    .append_lite3(payload, AppendOptions::new(timestamp_ns, ctx.durability))?;
+                Ok(Receipt::Binary { seq, timestamp_ns })
+            } else {
+                ctx.pool_handle
+                    .append_lite3_with_receipt_now(payload, ctx.durability)
+                    .map(Receipt::Text)
+            }
         })
     })
 }
@@ -227,8 +226,15 @@ pub(crate) fn ingest_from_stdin_remote(
     };
     ingest_with_append(reader, options, |payload| {
         retry_append(ctx.retry_config, || {
-            ctx.remote_pool
-                .append_lite3_with_receipt(payload, AppendOptions::new(0, ctx.durability))
+            let append = AppendOptions::new(0, ctx.durability);
+            if options.output.is_binary() {
+                let (seq, timestamp_ns) = ctx.remote_pool.append_lite3_identity(payload, append)?;
+                Ok(Receipt::Binary { seq, timestamp_ns })
+            } else {
+                ctx.remote_pool
+                    .append_lite3_with_receipt(payload, append)
+                    .map(Receipt::Text)
+            }
         })
     })
 }
@@ -301,12 +307,9 @@ mod tests {
             emit: false,
             stop: Some(&stop),
         };
-        let mut writes = 0;
         ingest_with_append(&b"{\"data\":{}}\n{\"data\":{}}"[..], options, |_| {
-            writes += 1;
             unreachable!("stopped sender appended");
         })
         .unwrap();
-        assert_eq!(writes, 0);
     }
 }

@@ -13,7 +13,8 @@ use crate::core::pool::{
     PoolUtilization,
 };
 use crate::interface_wire::{
-    LITE3_FRAME_HEADER_LEN, Lite3FrameHeader, MessageWire, PoolInfoWire, PoolMetricsWire,
+    HttpErrorEnvelope, HttpErrorWire, LITE3_FRAME_HEADER_LEN, Lite3FrameHeader, MessageWire,
+    PoolInfoWire, PoolMetricsWire, error_kind_from_status,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -102,21 +103,6 @@ struct Lite3AppendEnvelope {
 #[derive(Deserialize)]
 struct Lite3AppendMessage {
     seq: u64,
-}
-
-#[derive(Deserialize)]
-struct ErrorEnvelope {
-    error: RemoteError,
-}
-
-#[derive(Deserialize)]
-struct RemoteError {
-    kind: String,
-    message: Option<String>,
-    hint: Option<String>,
-    path: Option<String>,
-    seq: Option<u64>,
-    offset: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -459,6 +445,30 @@ impl RemotePool {
         Ok(message_from_remote(envelope.message))
     }
 
+    /// Append Lite3 and return the committed sequence and nanosecond timestamp.
+    pub fn append_lite3_identity(
+        &self,
+        payload: &[u8],
+        options: AppendOptions,
+    ) -> ApiResult<(u64, u64)> {
+        #[derive(Deserialize)]
+        struct Identity {
+            seq: u64,
+            time: String,
+        }
+
+        #[derive(Deserialize)]
+        struct Envelope {
+            message: Identity,
+        }
+
+        let Envelope { message } = self.append_lite3_response(payload, options)?;
+        Ok((
+            message.seq,
+            super::message::parse_timestamp_ns(&message.time)?,
+        ))
+    }
+
     fn append_lite3_response<R: DeserializeOwned>(
         &self,
         payload: &[u8],
@@ -597,11 +607,12 @@ impl RemoteTail {
                         .with_source(err)
                 })?;
                 if value.get("error").is_some() {
-                    let envelope: ErrorEnvelope = serde_json::from_value(value).map_err(|err| {
-                        Error::new(ErrorKind::Internal)
-                            .with_message("invalid tail error json")
-                            .with_source(err)
-                    })?;
+                    let envelope: HttpErrorEnvelope =
+                        serde_json::from_value(value).map_err(|err| {
+                            Error::new(ErrorKind::Internal)
+                                .with_message("invalid tail error json")
+                                .with_source(err)
+                        })?;
                     return Err(error_from_remote(envelope.error));
                 }
                 let message: MessageWire = serde_json::from_value(value).map_err(|err| {
@@ -866,7 +877,7 @@ fn request_result(response: Result<ureq::Response, ureq::Error>) -> ApiResult<ur
 
 fn parse_error_response(status: u16, response: ureq::Response) -> Error {
     let body = response.into_string().unwrap_or_default();
-    if let Ok(envelope) = serde_json::from_str::<ErrorEnvelope>(&body) {
+    if let Ok(envelope) = serde_json::from_str::<HttpErrorEnvelope>(&body) {
         return error_from_remote(envelope.error);
     }
     let kind = error_kind_from_status(status);
@@ -898,52 +909,9 @@ fn read_exact_or_eof(reader: &mut dyn Read, buf: &mut [u8]) -> ApiResult<bool> {
     Ok(true)
 }
 
-fn error_from_remote(remote: RemoteError) -> Error {
-    let kind = parse_error_kind(&remote.kind);
-    let mut err = Error::new(kind);
-    if let Some(message) = remote.message {
-        err = err.with_message(message);
-    }
-    if let Some(hint) = remote.hint {
-        err = err.with_hint(hint);
-    }
-    if let Some(path) = remote.path {
-        err = err.with_path(path);
-    }
-    if let Some(seq) = remote.seq {
-        err = err.with_seq(seq);
-    }
-    if let Some(offset) = remote.offset {
-        err = err.with_offset(offset);
-    }
-    err
-}
-
-fn parse_error_kind(kind: &str) -> ErrorKind {
-    match kind {
-        "Internal" => ErrorKind::Internal,
-        "Usage" => ErrorKind::Usage,
-        "NotFound" => ErrorKind::NotFound,
-        "AlreadyExists" => ErrorKind::AlreadyExists,
-        "Busy" => ErrorKind::Busy,
-        "Permission" => ErrorKind::Permission,
-        "Corrupt" => ErrorKind::Corrupt,
-        "Io" => ErrorKind::Io,
-        "RetentionGap" => ErrorKind::RetentionGap,
-        _ => ErrorKind::Internal,
-    }
-}
-
-fn error_kind_from_status(status: u16) -> ErrorKind {
-    match status {
-        400 | 413 => ErrorKind::Usage,
-        401 | 403 => ErrorKind::Permission,
-        404 => ErrorKind::NotFound,
-        409 => ErrorKind::AlreadyExists,
-        423 => ErrorKind::Busy,
-        500..=599 => ErrorKind::Internal,
-        _ => ErrorKind::Io,
-    }
+fn error_from_remote(remote: HttpErrorWire) -> Error {
+    let kind = remote.kind().unwrap_or(ErrorKind::Internal);
+    remote.into_error(kind)
 }
 
 fn pool_info_from_remote(pool_ref: &str, pool: PoolInfoWire) -> PoolInfo {
@@ -1014,7 +982,8 @@ fn durability_to_str(durability: Durability) -> &'static str {
 mod tests {
     use super::{
         RemoteClient, RemoteLite3Tail, RemoteTail, TailReader, extract_pool_from_url,
-        normalize_base_url, parse_error_kind, parse_pool_uri, read_jsonl_line, read_lite3_response,
+        normalize_base_url, parse_error_response, parse_pool_uri, read_jsonl_line,
+        read_lite3_response,
     };
     use crate::api::PoolRef;
     use crate::core::error::ErrorKind;
@@ -1048,12 +1017,25 @@ mod tests {
     }
 
     #[test]
-    fn parse_error_kind_maps_known_values() {
-        assert_eq!(parse_error_kind("Usage"), ErrorKind::Usage);
-        assert_eq!(parse_error_kind("AlreadyExists"), ErrorKind::AlreadyExists);
-        assert_eq!(parse_error_kind("Permission"), ErrorKind::Permission);
-        assert_eq!(parse_error_kind("Corrupt"), ErrorKind::Corrupt);
-        assert_eq!(parse_error_kind("Busy"), ErrorKind::Busy);
+    fn remote_error_details_survive_new_kinds_and_plain_http_failures() {
+        let response = ureq::Response::new(
+            409,
+            "Conflict",
+            r#"{"error":{"kind":"FutureKind","message":"retry the append","hint":"refresh the cursor","path":"pools/test","seq":72,"offset":4096}}"#,
+        )
+        .unwrap();
+        let error = parse_error_response(409, response);
+        assert_eq!(error.kind(), ErrorKind::Internal);
+        assert_eq!(error.message(), Some("retry the append"));
+        assert_eq!(error.hint(), Some("refresh the cursor"));
+        assert_eq!(error.path(), Some(std::path::Path::new("pools/test")));
+        assert_eq!(error.seq(), Some(72));
+        assert_eq!(error.offset(), Some(4096));
+
+        let response = ureq::Response::new(423, "Locked", "upstream proxy error").unwrap();
+        let error = parse_error_response(423, response);
+        assert_eq!(error.kind(), ErrorKind::Busy);
+        assert_eq!(error.message(), Some("remote error status 423"));
     }
 
     #[test]

@@ -30,6 +30,38 @@ pub struct Message {
     pub data: Value,
 }
 
+impl Message {
+    /// Decode a message payload using the sequence and timestamp of its frame.
+    pub fn from_lite3(seq: u64, timestamp_ns: u64, payload: &[u8]) -> Result<Self, Error> {
+        let (meta, data) = decode_payload(payload)?;
+        Ok(Self {
+            seq,
+            time: format_ts(timestamp_ns)?,
+            meta,
+            data,
+        })
+    }
+
+    /// Return the message timestamp in nanoseconds since the Unix epoch.
+    pub fn timestamp_ns(&self) -> Result<u64, Error> {
+        parse_timestamp_ns(&self.time)
+    }
+}
+
+pub(super) fn parse_timestamp_ns(time: &str) -> Result<u64, Error> {
+    let time = time::OffsetDateTime::parse(time, &time::format_description::well_known::Rfc3339)
+        .map_err(|err| {
+            Error::new(ErrorKind::Internal)
+                .with_message("invalid message time")
+                .with_source(err)
+        })?;
+    u64::try_from(time.unix_timestamp_nanos()).map_err(|err| {
+        Error::new(ErrorKind::Internal)
+            .with_message("message time is out of range")
+            .with_source(err)
+    })
+}
+
 #[derive(Clone, Debug)]
 pub struct TailOptions {
     pub since_seq: Option<u64>,
@@ -504,14 +536,8 @@ impl PoolApiExt for Pool {
     }
 }
 
-fn message_from_frame(frame: &FrameRef) -> Result<Message, Error> {
-    let (meta, data) = decode_payload(&frame.payload)?;
-    Ok(Message {
-        seq: frame.seq,
-        time: format_ts(frame.timestamp_ns)?,
-        meta,
-        data,
-    })
+pub(crate) fn message_from_frame(frame: &FrameRef) -> Result<Message, Error> {
+    Message::from_lite3(frame.seq, frame.timestamp_ns, &frame.payload)
 }
 
 pub(crate) fn message_from_udp_payload(
@@ -522,13 +548,7 @@ pub(crate) fn message_from_udp_payload(
     // The Lite3 reader expects its document to start at an aligned address.
     let aligned = payload.to_vec();
     validate_bytes(&aligned)?;
-    let (meta, data) = decode_payload(&aligned)?;
-    Ok(Message {
-        seq,
-        time: format_ts(timestamp_ns)?,
-        meta,
-        data,
-    })
+    Message::from_lite3(seq, timestamp_ns, &aligned)
 }
 
 fn decode_payload(payload: &[u8]) -> Result<(Meta, Value), Error> {
@@ -606,7 +626,7 @@ fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GapPolicy, Meta, PoolApiExt, ReplayOptions, TailOptions, decode_payload};
+    use super::{GapPolicy, PoolApiExt, ReplayOptions, TailOptions, decode_payload};
     use crate::core::error::ErrorKind;
     use crate::core::lite3::{encode_message, json_counter_snapshot, reset_json_counters};
     use crate::core::pool::{Durability, Pool, PoolOptions};
@@ -617,17 +637,32 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn decode_payload_round_trip() {
-        let data = json!({"x": 1});
-        let payload = encode_message(&["tag".to_string()], &data).expect("encode");
-        let (meta, out) = decode_payload(payload.as_slice()).expect("decode");
-        assert_eq!(
-            meta,
-            Meta {
-                tags: vec!["tag".to_string()]
-            }
-        );
-        assert_eq!(out, data);
+    fn stored_lite3_messages_preserve_nested_data_and_report_malformed_tags() {
+        let dir = tempdir().unwrap();
+        let mut pool =
+            Pool::create(dir.path().join("legacy.plasmite"), PoolOptions::new(65536)).unwrap();
+        let options = crate::core::pool::AppendOptions::new(123, Durability::Fast);
+        let data = json!({"nested": [null, {"x": "α\u{0000}β"}], "large": i64::MAX});
+        let tags = vec!["sensor".to_owned(), "north".to_owned()];
+        let payload = encode_message(&tags, &data).unwrap();
+        let seq = pool
+            .append_with_options(payload.as_slice(), options)
+            .unwrap();
+        let message = pool.get_message(seq).unwrap();
+        assert_eq!(message.time, "1970-01-01T00:00:00.000000123Z");
+        assert_eq!(message.meta.tags, tags);
+        assert_eq!(message.data, data);
+
+        let invalid = crate::core::lite3::Lite3Buf::from_json_str(
+            r#"{"meta":{"tags":["sensor",7]},"data":{"x":1}}"#,
+        )
+        .unwrap();
+        let seq = pool
+            .append_with_options(invalid.as_slice(), options)
+            .unwrap();
+        let error = pool.get_message(seq).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Corrupt);
+        assert_eq!(error.message(), Some("meta.tags must be string array"));
     }
 
     #[test]
@@ -659,7 +694,7 @@ mod tests {
             )
             .expect("append with receipt");
         assert_eq!(receipt.seq, 1);
-        assert_eq!(receipt.time, super::format_ts(123).expect("time"));
+        assert_eq!(receipt.time, "1970-01-01T00:00:00.000000123Z");
         assert_eq!(pool.get_lite3(1).expect("raw").payload, payload.as_slice());
         for _ in 0..32 {
             pool.append_json_now(&data, &[], Durability::Fast)

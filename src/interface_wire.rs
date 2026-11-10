@@ -3,6 +3,7 @@
 //! Role: Single source of truth for stable v0 field names and omission rules.
 //! Invariants: This module contains representation only, not transport policy.
 
+use crate::{Error, ErrorKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -173,6 +174,70 @@ pub(crate) enum ErrorKindWire {
     Corrupt,
     Io,
     RetentionGap,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct HttpErrorEnvelope {
+    pub(crate) error: HttpErrorWire,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct HttpErrorWire {
+    kind: String,
+    message: Option<String>,
+    hint: Option<String>,
+    path: Option<String>,
+    seq: Option<u64>,
+    offset: Option<u64>,
+}
+
+impl HttpErrorWire {
+    pub(crate) fn kind(&self) -> Option<ErrorKind> {
+        Some(match self.kind.as_str() {
+            "Internal" => ErrorKind::Internal,
+            "Usage" => ErrorKind::Usage,
+            "NotFound" => ErrorKind::NotFound,
+            "AlreadyExists" => ErrorKind::AlreadyExists,
+            "Busy" => ErrorKind::Busy,
+            "Permission" => ErrorKind::Permission,
+            "Corrupt" => ErrorKind::Corrupt,
+            "Io" => ErrorKind::Io,
+            "RetentionGap" => ErrorKind::RetentionGap,
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn into_error(self, kind: ErrorKind) -> Error {
+        let mut error = Error::new(kind);
+        if let Some(message) = self.message {
+            error = error.with_message(message);
+        }
+        if let Some(hint) = self.hint {
+            error = error.with_hint(hint);
+        }
+        if let Some(path) = self.path {
+            error = error.with_path(path);
+        }
+        if let Some(seq) = self.seq {
+            error = error.with_seq(seq);
+        }
+        if let Some(offset) = self.offset {
+            error = error.with_offset(offset);
+        }
+        error
+    }
+}
+
+pub(crate) fn error_kind_from_status(status: u16) -> ErrorKind {
+    match status {
+        400 | 413 => ErrorKind::Usage,
+        401 | 403 => ErrorKind::Permission,
+        404 => ErrorKind::NotFound,
+        409 => ErrorKind::AlreadyExists,
+        423 => ErrorKind::Busy,
+        500..=599 => ErrorKind::Internal,
+        _ => ErrorKind::Io,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -6,6 +6,7 @@
 mod abi;
 pub mod api;
 mod core;
+use core::error::{Error, ErrorKind};
 mod interface_wire;
 pub mod mcp;
 pub mod notice;

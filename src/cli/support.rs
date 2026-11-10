@@ -8,9 +8,7 @@ use plasmite::api::Durability;
 use plasmite::api::Error;
 use plasmite::api::ErrorKind;
 use plasmite::api::FrameRef;
-use plasmite::api::Lite3DocRef;
 use plasmite::api::RemoteClient;
-use plasmite::api::lite3;
 use serde_json::Value;
 use std::path::Path;
 use std::path::PathBuf;
@@ -474,21 +472,6 @@ pub(crate) fn now_ns() -> Result<u64, Error> {
     Ok(duration.as_nanos() as u64)
 }
 
-pub(crate) fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
-    use time::format_description::well_known::Rfc3339;
-    let ts =
-        time::OffsetDateTime::from_unix_timestamp_nanos(timestamp_ns as i128).map_err(|err| {
-            Error::new(ErrorKind::Internal)
-                .with_message("invalid timestamp")
-                .with_source(err)
-        })?;
-    ts.format(&Rfc3339).map_err(|err| {
-        Error::new(ErrorKind::Internal)
-            .with_message("timestamp format failed")
-            .with_source(err)
-    })
-}
-
 pub(crate) fn message_to_json(message: plasmite::api::Message) -> Value {
     MessageWire::new(message.seq, message.time, message.meta.tags, message.data).into_json()
 }
@@ -502,48 +485,7 @@ pub(crate) fn message_from_lite3(
     timestamp_ns: u64,
     payload: &[u8],
 ) -> Result<Value, Error> {
-    let doc = Lite3DocRef::new(payload);
-    let meta_type = doc
-        .type_at_key(0, "meta")
-        .map_err(|err| err.with_message("missing meta"))?;
-    if meta_type != lite3::sys::LITE3_TYPE_OBJECT {
-        return Err(Error::new(ErrorKind::Corrupt).with_message("meta is not object"));
-    }
-
-    let meta_ofs = doc
-        .key_offset("meta")
-        .map_err(|err| err.with_message("missing meta"))?;
-    let tags_ofs = doc
-        .key_offset_at(meta_ofs, "tags")
-        .map_err(|err| err.with_message("missing meta.tags"))?;
-    let tags_count = doc
-        .count_at(tags_ofs)
-        .map_err(|_| Error::new(ErrorKind::Corrupt).with_message("meta.tags must be array"))?;
-    let mut tags = Vec::with_capacity(tags_count as usize);
-    for index in 0..tags_count {
-        let item_type = doc.array_item_type(tags_ofs, index).map_err(|_| {
-            Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
-        })?;
-        if item_type != lite3::sys::LITE3_TYPE_STRING {
-            return Err(
-                Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
-            );
-        }
-        let tag = doc.array_string_at(tags_ofs, index).map_err(|_| {
-            Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
-        })?;
-        tags.push(tag);
-    }
-    let data_ofs = doc
-        .key_offset("data")
-        .map_err(|err| err.with_message("missing data"))?;
-    let data_json = doc.to_json_at(data_ofs, false)?;
-    let data: Value = serde_json::from_str(&data_json).map_err(|err| {
-        Error::new(ErrorKind::Corrupt)
-            .with_message("invalid payload json")
-            .with_source(err)
-    })?;
-    Ok(MessageWire::new(seq, format_ts(timestamp_ns)?, tags, data).into_json())
+    plasmite::api::Message::from_lite3(seq, timestamp_ns, payload).map(message_to_json)
 }
 
 #[cfg(test)]
@@ -565,7 +507,8 @@ mod append_retry_tests {
                 plasmite::api::PoolOptions::new(1024 * 1024),
             )
             .expect("create");
-            let payload = lite3::encode_message(&[], &json!({"n": 1})).expect("encode");
+            let payload =
+                plasmite::api::lite3::encode_message(&[], &json!({"n": 1})).expect("encode");
             let result: Result<(), Error> = retry_append(
                 Some(RetryConfig {
                     retries: 3,

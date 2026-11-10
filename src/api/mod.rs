@@ -27,7 +27,7 @@ pub use client::{LocalClient, PoolRef};
 pub use message::{
     GapPolicy, Lite3Tail, Message, Meta, PoolApiExt, Replay, ReplayOptions, Tail, TailOptions,
 };
-pub(crate) use message::{message_from_udp_payload, observe_sequence};
+pub(crate) use message::{message_from_frame, message_from_udp_payload, observe_sequence};
 pub use remote::{RemoteClient, RemoteLite3Frame, RemoteLite3Tail, RemotePool, RemoteTail};
 pub use udp::{
     UdpClient, UdpEvent, UdpFollow, UdpFollowOptions, UdpFrame, UdpPool, UdpSkipReason, UdpStart,
