@@ -31,6 +31,7 @@ from functools import wraps
 from threading import Lock, RLock
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import time as _time
@@ -1376,6 +1377,9 @@ def _udp_event_to_python(event: plsm_udp_event_t) -> UdpEvent:
 
 
 def _parse_rfc3339_utc(raw_time: str) -> datetime:
+    # Python 3.10 accepts only 3 or 6 fractional digits. datetime keeps
+    # microseconds; the original nanosecond timestamp remains in Message.raw.
+    raw_time = re.sub(r"\.(\d+)", lambda match: "." + match[1][:6].ljust(6, "0"), raw_time)
     parsed = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         raise ValueError("message time must include timezone")

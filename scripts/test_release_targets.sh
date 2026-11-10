@@ -29,6 +29,7 @@ expect_invalid unsupported-homebrew '(.targets[] | select(.rust_target == "x86_6
 expect_invalid armv7-npm '(.targets[] | select(.rust_target == "armv7-unknown-linux-gnueabihf").channels.npm) = "preview"'
 expect_invalid arm64-wheel '(.targets[] | select(.rust_target == "aarch64-unknown-linux-gnu").upload_wheel) = true'
 expect_invalid newer-arm64-runner '(.targets[] | select(.rust_target == "aarch64-unknown-linux-gnu").runner) = "ubuntu-24.04-arm"'
+expect_invalid newer-x86-runner '(.targets[] | select(.rust_target == "x86_64-unknown-linux-gnu").runner) = "ubuntu-latest"'
 
 matrix="$("$root_dir/scripts/render_release_matrix.sh" "$manifest")"
 [[ "$(jq -r '. | length' <<<"$matrix")" == 6 ]]
@@ -39,7 +40,7 @@ for target in aarch64-unknown-linux-gnu armv7-unknown-linux-gnueabihf; do
 done
 [[ "$(jq -r '.[] | select(.target == "aarch64-unknown-linux-gnu") | .os' <<<"$matrix")" == ubuntu-22.04-arm ]]
 [[ "$(jq -r '.[] | select(.target == "armv7-unknown-linux-gnueabihf") | .armv7_cross' <<<"$matrix")" == true ]]
-[[ "$(jq -r '.[] | select(.target == "x86_64-unknown-linux-gnu") | .build_python and .upload_sdist and .build_node' <<<"$matrix")" == true ]]
+[[ "$(jq -r '.[] | select(.target == "x86_64-unknown-linux-gnu") | .build_python and .upload_sdist and .upload_wheel and .build_node' <<<"$matrix")" == true ]]
 [[ "$(jq -r '.[] | select(.target == "x86_64-pc-windows-msvc") | .build_python and .upload_wheel and .build_node' <<<"$matrix")" == true ]]
 preview_sdks="$("$root_dir/scripts/release_channel_targets.sh" github_sdk preview sdk_platform | sort)"
 [[ "$preview_sdks" == $'linux_arm64\nlinux_armv7' ]]

@@ -14,7 +14,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from setuptools import setup
+from setuptools import Distribution, setup
 from setuptools.command.build_py import build_py
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wheel_platform import macos_platform_tag
@@ -23,6 +23,13 @@ try:
     from setuptools.command.bdist_wheel import bdist_wheel
 except ImportError:  # pragma: no cover - fallback for older setuptools
     from wheel.bdist_wheel import bdist_wheel
+
+
+class NativeDistribution(Distribution):
+    """Place the bundled C ABI library and CLI in platlib, not purelib."""
+
+    def has_ext_modules(self) -> bool:
+        return True
 
 
 class BuildPyWithNativeBundle(build_py):
@@ -92,12 +99,13 @@ class BdistWheelWithNativeBundle(bdist_wheel):
         self.root_is_pure = False
 
     def get_tag(self) -> tuple[str, str, str]:
-        python_tag, abi_tag, platform_tag = super().get_tag()
+        _, _, platform_tag = super().get_tag()
         if platform_tag.startswith("macosx_"):
             install = self.get_finalized_command("install")
             native_dir = Path(install.install_lib) / "plasmite" / "_native"
             platform_tag = macos_platform_tag(native_dir, platform_tag)
-        return python_tag, abi_tag, platform_tag
+        # ctypes uses the stable C ABI; neither bundled program links to Python.
+        return "py3", "none", platform_tag
 
 
-setup(cmdclass={"build_py": BuildPyWithNativeBundle, "bdist_wheel": BdistWheelWithNativeBundle})
+setup(distclass=NativeDistribution, cmdclass={"build_py": BuildPyWithNativeBundle, "bdist_wheel": BdistWheelWithNativeBundle})

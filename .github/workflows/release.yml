@@ -193,6 +193,12 @@ jobs:
         if: matrix.sdk_platform == 'linux_arm64'
         shell: bash
         run: test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.35'
+      - name: Pin Linux x86_64 package compatibility
+        if: matrix.sdk_platform == 'linux_amd64'
+        shell: bash
+        run: |
+          test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.35'
+          echo 'PLASMITE_MANYLINUX_PLATFORM=manylinux_2_35_x86_64' >> "$GITHUB_ENV"
       - name: Configure ARMv7 C and Rust linkers
         if: matrix.armv7_cross
         shell: bash

@@ -49,7 +49,9 @@ jq -e '
       .channels.homebrew == null and .channels.npm == null and .channels.pypi == null and .channels.cargo_binstall == null and
       (.upload_sdist | not) and (.upload_wheel | not)
     else true end)
-    and (if .rust_target == "aarch64-unknown-linux-gnu" then
+    and (if .rust_target == "x86_64-unknown-linux-gnu" then
+      .runner == "ubuntu-22.04"
+    elif .rust_target == "aarch64-unknown-linux-gnu" then
       .runner == "ubuntu-22.04-arm" and .sdk_platform == "linux_arm64" and .channels.github_sdk == "preview"
     elif .rust_target == "armv7-unknown-linux-gnueabihf" then
       .runner == "ubuntu-22.04" and .sdk_platform == "linux_armv7" and .channels.github_sdk == "preview"
