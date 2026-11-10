@@ -180,7 +180,7 @@ fn plan_drop_step_fast(
     tail_next_off: usize,
     oldest_seq: u64,
 ) -> Option<(DropStep, usize, u64)> {
-    if tail_next_off == 0 || tail_next_off >= ring_size || tail_next_off % 8 != 0 {
+    if tail_next_off == 0 || tail_next_off >= ring_size || !tail_next_off.is_multiple_of(8) {
         return None;
     }
     if ring_size - tail_next_off < FRAME_HEADER_LEN {
@@ -204,7 +204,7 @@ fn plan_drop_step_fast(
         return None;
     }
     let len = tail_next_off - tail;
-    if len < FRAME_HEADER_LEN || len % 8 != 0 {
+    if len < FRAME_HEADER_LEN || !len.is_multiple_of(8) {
         return None;
     }
 

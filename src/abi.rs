@@ -494,17 +494,17 @@ pub extern "C" fn plsm_stream_next(
     if stream.terminated {
         return 0;
     }
-    if let Some(max) = stream.max_messages {
-        if stream.seen >= max {
-            return 0;
-        }
+    if let Some(max) = stream.max_messages
+        && stream.seen >= max
+    {
+        return 0;
     }
 
     loop {
-        if let Some(deadline) = stream.deadline {
-            if Instant::now() >= deadline {
-                return 0;
-            }
+        if let Some(deadline) = stream.deadline
+            && Instant::now() >= deadline
+        {
+            return 0;
         }
 
         match stream.cursor.next(&stream.pool) {
@@ -628,17 +628,17 @@ pub extern "C" fn plsm_lite3_stream_next(
     if stream.terminated {
         return 0;
     }
-    if let Some(max) = stream.max_messages {
-        if stream.seen >= max {
-            return 0;
-        }
+    if let Some(max) = stream.max_messages
+        && stream.seen >= max
+    {
+        return 0;
     }
 
     loop {
-        if let Some(deadline) = stream.deadline {
-            if Instant::now() >= deadline {
-                return 0;
-            }
+        if let Some(deadline) = stream.deadline
+            && Instant::now() >= deadline
+        {
+            return 0;
         }
 
         match stream.cursor.next(&stream.pool) {

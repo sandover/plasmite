@@ -574,10 +574,10 @@ impl UdpFollow {
             return Ok(());
         }
         self.first_observed_seq.get_or_insert(seq);
-        if let Some(expected) = self.next_expected_seq {
-            if seq > expected {
-                self.enqueue_gap(expected, seq - 1, UdpSkipReason::Unknown);
-            }
+        if let Some(expected) = self.next_expected_seq
+            && seq > expected
+        {
+            self.enqueue_gap(expected, seq - 1, UdpSkipReason::Unknown);
         }
         self.next_expected_seq = Some(seq.saturating_add(1));
         let since = match &self.selection.start {

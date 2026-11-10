@@ -573,7 +573,7 @@ mod tests {
         let mut bytes = buf.as_slice().to_vec();
         // Lite3 size_kc stores count in the high 26 bits and key count in the
         // low six. Keep the empty array's key count and corrupt only its size.
-        bytes[tags + 32..tags + 36].copy_from_slice(&(u32::MAX & !63).to_le_bytes());
+        bytes[tags + 32..tags + 36].copy_from_slice(&(!63u32).to_le_bytes());
         let doc = super::Lite3DocRef::new(&bytes);
         let err = doc.count_at(tags).expect_err("impossible count");
         assert_eq!(err.kind(), crate::core::error::ErrorKind::Corrupt);

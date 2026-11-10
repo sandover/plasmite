@@ -331,9 +331,10 @@ fn run_append(
         None => Vec::new(),
     };
 
-    let result = client
-        .open_pool(&pool_ref)
-        .and_then(|mut pool| pool.append_json_now(data, &tags, plasmite::api::Durability::Fast));
+    let result = match client.open_pool(&pool_ref) {
+        Ok(mut pool) => pool.append_json_now(data, &tags, plasmite::api::Durability::Fast),
+        Err(err) => Err(err),
+    };
 
     match result {
         Ok(message) => {
@@ -341,14 +342,13 @@ fn run_append(
                 .get("expect")
                 .and_then(|expect| expect.get("seq"))
                 .and_then(Value::as_u64)
+                && message.seq != expected_seq
             {
-                if message.seq != expected_seq {
-                    return Err(step_err(
-                        index,
-                        step_id,
-                        &format!("expected seq {expected_seq}, got {}", message.seq),
-                    ));
-                }
+                return Err(step_err(
+                    index,
+                    step_id,
+                    &format!("expected seq {expected_seq}, got {}", message.seq),
+                ));
             }
             validate_expect_error(step.get("expect"), &Ok(()), index, step_id)
         }
@@ -371,9 +371,10 @@ fn run_get(
         .and_then(Value::as_u64)
         .ok_or_else(|| step_err(index, step_id, "missing input.seq"))?;
 
-    let result = client
-        .open_pool(&pool_ref)
-        .and_then(|pool| pool.get_message(seq));
+    let result = match client.open_pool(&pool_ref) {
+        Ok(pool) => pool.get_message(seq),
+        Err(err) => Err(err),
+    };
 
     match result {
         Ok(message) => {
@@ -404,17 +405,23 @@ fn run_tail(
         options.max_messages = Some(max as usize);
     }
 
-    let result = client.open_pool(&pool_ref).map(|pool| {
-        let mut tail = pool.tail(options);
-        let mut messages = Vec::new();
-        while let Some(message) = tail.next_message()? {
-            messages.push(message);
+    let result = match client.open_pool(&pool_ref) {
+        Ok(pool) => {
+            let mut tail = pool.tail(options);
+            let mut messages = Vec::new();
+            loop {
+                match tail.next_message() {
+                    Ok(Some(message)) => messages.push(message),
+                    Ok(None) => break Ok(messages),
+                    Err(err) => break Err(err),
+                }
+            }
         }
-        Ok::<_, Error>(messages)
-    });
+        Err(err) => Err(err),
+    };
 
     match result {
-        Ok(Ok(messages)) => {
+        Ok(messages) => {
             let expect = step
                 .get("expect")
                 .ok_or_else(|| step_err(index, step_id, "missing expect"))?;
@@ -489,7 +496,6 @@ fn run_tail(
 
             validate_expect_error(step.get("expect"), &Ok(()), index, step_id)
         }
-        Ok(Err(err)) => validate_expect_error(step.get("expect"), &Err(err), index, step_id),
         Err(err) => validate_expect_error(step.get("expect"), &Err(err), index, step_id),
     }
 }
@@ -503,24 +509,24 @@ fn run_list_pools(
     let result = client.list_pools();
     match result {
         Ok(pools) => {
-            if let Some(expect) = step.get("expect") {
-                if let Some(expected) = expect.get("names") {
-                    let expected = match expected.as_array() {
-                        Some(values) => parse_string_array(values.as_slice())
-                            .map_err(|err| step_err(index, step_id, &err))?,
-                        None => return Err(step_err(index, step_id, "expect.names must be array")),
-                    };
-                    let mut actual = pools
-                        .iter()
-                        .filter_map(|pool| pool.path.file_stem().and_then(|name| name.to_str()))
-                        .map(str::to_string)
-                        .collect::<Vec<_>>();
-                    let mut expected = expected;
-                    actual.sort();
-                    expected.sort();
-                    if actual != expected {
-                        return Err(step_err(index, step_id, "pool list mismatch"));
-                    }
+            if let Some(expect) = step.get("expect")
+                && let Some(expected) = expect.get("names")
+            {
+                let expected = match expected.as_array() {
+                    Some(values) => parse_string_array(values.as_slice())
+                        .map_err(|err| step_err(index, step_id, &err))?,
+                    None => return Err(step_err(index, step_id, "expect.names must be array")),
+                };
+                let mut actual = pools
+                    .iter()
+                    .filter_map(|pool| pool.path.file_stem().and_then(|name| name.to_str()))
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                let mut expected = expected;
+                actual.sort();
+                expected.sort();
+                if actual != expected {
+                    return Err(step_err(index, step_id, "pool list mismatch"));
                 }
             }
             validate_expect_error(step.get("expect"), &Ok(()), index, step_id)
@@ -540,15 +546,15 @@ fn run_pool_info(
     match result {
         Ok(info) => {
             if let Some(expect) = step.get("expect") {
-                if let Some(size) = expect.get("file_size").and_then(Value::as_u64) {
-                    if info.file_size != size {
-                        return Err(step_err(index, step_id, "file_size mismatch"));
-                    }
+                if let Some(size) = expect.get("file_size").and_then(Value::as_u64)
+                    && info.file_size != size
+                {
+                    return Err(step_err(index, step_id, "file_size mismatch"));
                 }
-                if let Some(size) = expect.get("ring_size").and_then(Value::as_u64) {
-                    if info.ring_size != size {
-                        return Err(step_err(index, step_id, "ring_size mismatch"));
-                    }
+                if let Some(size) = expect.get("ring_size").and_then(Value::as_u64)
+                    && info.ring_size != size
+                {
+                    return Err(step_err(index, step_id, "ring_size mismatch"));
                 }
                 if let Some(bounds) = expect.get("bounds") {
                     expect_bounds(bounds, &info.bounds, index, step_id)?;
@@ -757,20 +763,20 @@ fn validate_expect_error(
         }
     }
 
-    if let Some(has_path) = expect_error.get("has_path").and_then(Value::as_bool) {
-        if has_path != err.path().is_some() {
-            return Err(step_err(index, step_id, "path presence mismatch"));
-        }
+    if let Some(has_path) = expect_error.get("has_path").and_then(Value::as_bool)
+        && has_path != err.path().is_some()
+    {
+        return Err(step_err(index, step_id, "path presence mismatch"));
     }
-    if let Some(has_seq) = expect_error.get("has_seq").and_then(Value::as_bool) {
-        if has_seq != err.seq().is_some() {
-            return Err(step_err(index, step_id, "seq presence mismatch"));
-        }
+    if let Some(has_seq) = expect_error.get("has_seq").and_then(Value::as_bool)
+        && has_seq != err.seq().is_some()
+    {
+        return Err(step_err(index, step_id, "seq presence mismatch"));
     }
-    if let Some(has_offset) = expect_error.get("has_offset").and_then(Value::as_bool) {
-        if has_offset != err.offset().is_some() {
-            return Err(step_err(index, step_id, "offset presence mismatch"));
-        }
+    if let Some(has_offset) = expect_error.get("has_offset").and_then(Value::as_bool)
+        && has_offset != err.offset().is_some()
+    {
+        return Err(step_err(index, step_id, "offset presence mismatch"));
     }
 
     Ok(())
@@ -807,10 +813,10 @@ fn expect_data(
     index: usize,
     step_id: &Option<String>,
 ) -> Result<(), String> {
-    if let Some(expected_data) = expect.get("data") {
-        if expected_data != actual {
-            return Err(step_err(index, step_id, "data mismatch"));
-        }
+    if let Some(expected_data) = expect.get("data")
+        && expected_data != actual
+    {
+        return Err(step_err(index, step_id, "data mismatch"));
     }
     Ok(())
 }

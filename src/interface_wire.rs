@@ -215,27 +215,11 @@ pub(crate) const fn error_policy(kind: ErrorKindWire) -> ErrorPolicy {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct ErrorContextWire {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) message: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) hint: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) seq: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) offset: Option<u64>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(crate) causes: Vec<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        BoundsWire, ErrorContextWire, ErrorKindWire, MessageMetaWire, MessageWire, PoolAgeWire,
-        PoolInfoWire, PoolMetricsWire, PoolUtilizationWire, error_policy,
+        BoundsWire, ErrorKindWire, MessageMetaWire, MessageWire, PoolAgeWire, PoolInfoWire,
+        PoolMetricsWire, PoolUtilizationWire, error_policy,
     };
     use serde_json::json;
 
@@ -404,18 +388,5 @@ mod tests {
             assert_eq!(policy.http_status, http_status);
             assert_eq!(policy.mcp_error_kind, mcp_error_kind);
         }
-    }
-
-    #[test]
-    fn error_context_omits_absent_facts() {
-        let context = ErrorContextWire {
-            seq: Some(9),
-            ..ErrorContextWire::default()
-        };
-
-        assert_eq!(
-            serde_json::to_value(context).expect("serialize error context"),
-            json!({"seq": 9})
-        );
     }
 }

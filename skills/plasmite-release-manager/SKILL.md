@@ -37,7 +37,7 @@ Honor any requested review or publication hold before remote mutations.
 1. Tag the green candidate: `git tag <release_target> "$release_sha"`, then
    `git push origin <release_target>`. Never move an existing release tag.
    The tag starts `release.yml`; all matrix jobs must pass. Record its run ID/URL.
-   Release builds use Rust 1.88.0 and the targets in `release/targets.json`.
+   Release builds use Rust 1.99.1 and the targets in `release/targets.json`.
 2. Verify provenance before using artifacts:
    `bash skills/plasmite-release-manager/scripts/inspect_release_build_metadata.sh --run-id <build_run_id> --expect-tag <release_target>`.
    Require the metadata's source SHA to equal the reviewed candidate. If downloads

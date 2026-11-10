@@ -377,7 +377,7 @@ fn decode_32_byte_hex(value: &str) -> Option<[u8; 32]> {
         return None;
     }
     let mut decoded = [0; 32];
-    for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+    for (index, pair) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         decoded[index] = (hex_nibble(pair[0])? << 4) | hex_nibble(pair[1])?;
     }
     Some(decoded)
@@ -394,7 +394,7 @@ pub(super) fn encode_hex(bytes: &[u8]) -> String {
 }
 
 pub(super) fn decode_hex(value: &str) -> Option<Vec<u8>> {
-    if value.len() % 2 != 0
+    if !value.len().is_multiple_of(2)
         || !value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
@@ -403,7 +403,9 @@ pub(super) fn decode_hex(value: &str) -> Option<Vec<u8>> {
     }
     value
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| Some((hex_nibble(pair[0])? << 4) | hex_nibble(pair[1])?))
         .collect()
 }

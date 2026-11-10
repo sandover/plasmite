@@ -638,34 +638,32 @@ pub(crate) fn follow_pool(
                     None => since_ns.is_none_or(|since| frame.timestamp_ns >= since),
                 };
                 if matches {
-                    if let (Some(speed), Some(previous)) = (cfg.replay_speed, previous_timestamp) {
-                        if speed > 0.0 {
-                            let delay_ns =
-                                (frame.timestamp_ns.saturating_sub(previous) as f64 / speed) as u64;
-                            // Bounded waits keep duplex/caller cancellation responsive.
-                            let until = Instant::now()
-                                .checked_add(Duration::from_nanos(delay_ns))
-                                .ok_or_else(|| {
-                                    Error::new(ErrorKind::Usage)
-                                        .with_message("replay delay is too large")
-                                })?;
-                            while Instant::now() < until {
-                                if follow_should_stop(cfg.stop.as_ref()) {
-                                    return Ok(drops.finish(0));
-                                }
-                                if deadline.is_some_and(|at| Instant::now() >= at) {
-                                    return Ok(drops.finish(124));
-                                }
-                                let wait = until
-                                    .saturating_duration_since(Instant::now())
-                                    .min(Duration::from_millis(50));
-                                let wait = deadline
-                                    .map(|at| {
-                                        at.saturating_duration_since(Instant::now()).min(wait)
-                                    })
-                                    .unwrap_or(wait);
-                                std::thread::sleep(wait);
+                    if let (Some(speed), Some(previous)) = (cfg.replay_speed, previous_timestamp)
+                        && speed > 0.0
+                    {
+                        let delay_ns =
+                            (frame.timestamp_ns.saturating_sub(previous) as f64 / speed) as u64;
+                        // Bounded waits keep duplex/caller cancellation responsive.
+                        let until = Instant::now()
+                            .checked_add(Duration::from_nanos(delay_ns))
+                            .ok_or_else(|| {
+                                Error::new(ErrorKind::Usage)
+                                    .with_message("replay delay is too large")
+                            })?;
+                        while Instant::now() < until {
+                            if follow_should_stop(cfg.stop.as_ref()) {
+                                return Ok(drops.finish(0));
                             }
+                            if deadline.is_some_and(|at| Instant::now() >= at) {
+                                return Ok(drops.finish(124));
+                            }
+                            let wait = until
+                                .saturating_duration_since(Instant::now())
+                                .min(Duration::from_millis(50));
+                            let wait = deadline
+                                .map(|at| at.saturating_duration_since(Instant::now()).min(wait))
+                                .unwrap_or(wait);
+                            std::thread::sleep(wait);
                         }
                     }
                     // A playback delay may finish on the same wake-up that

@@ -319,9 +319,9 @@ fn follow_rejects_progress_that_changes_the_opening_range() {
             live: false,
         })
         .unwrap();
-    let mut next = || follow.next_event_timeout(Duration::from_secs(1));
+    let timeout = Duration::from_secs(1);
     assert!(matches!(
-        next().unwrap(),
+        follow.next_event_timeout(timeout).unwrap(),
         Some(UdpEvent::Progress {
             terminal: false,
             ..
@@ -329,12 +329,15 @@ fn follow_rejects_progress_that_changes_the_opening_range() {
     ));
     for _ in 0..2 {
         assert_eq!(
-            next().expect_err("changed bounds").kind(),
+            follow
+                .next_event_timeout(timeout)
+                .expect_err("changed bounds")
+                .kind(),
             ErrorKind::Corrupt
         );
     }
     assert_eq!(
-        next().unwrap(),
+        follow.next_event_timeout(timeout).unwrap(),
         Some(UdpEvent::Gap {
             first: 1,
             last: 2,
@@ -342,7 +345,7 @@ fn follow_rejects_progress_that_changes_the_opening_range() {
         })
     );
     assert!(matches!(
-        next().unwrap(),
+        follow.next_event_timeout(timeout).unwrap(),
         Some(UdpEvent::Progress {
             start_seq: 1,
             end_seq: Some(2),
@@ -350,7 +353,7 @@ fn follow_rejects_progress_that_changes_the_opening_range() {
             ..
         })
     ));
-    assert_eq!(next().unwrap(), None);
+    assert_eq!(follow.next_event_timeout(timeout).unwrap(), None);
     server.join().unwrap();
 }
 

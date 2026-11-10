@@ -23,12 +23,11 @@ use std::time::UNIX_EPOCH;
 use super::support::now_ns;
 
 pub(crate) fn short_display_path(path: &Path, base_dir: Option<&Path>) -> String {
-    if let Some(base) = base_dir {
-        if let Ok(relative) = path.strip_prefix(base) {
-            if !relative.as_os_str().is_empty() {
-                return relative.display().to_string();
-            }
-        }
+    if let Some(base) = base_dir
+        && let Ok(relative) = path.strip_prefix(base)
+        && !relative.as_os_str().is_empty()
+    {
+        return relative.display().to_string();
     }
     path.file_name()
         .and_then(|name| name.to_str())

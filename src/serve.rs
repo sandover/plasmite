@@ -625,17 +625,18 @@ async fn remote_browser_guard(
         drain_rejected_body(request).await;
         return error_response(err);
     }
-    if path == "/mcp" && request.method() == Method::POST {
-        if let Some(oauth) = &state.oauth {
-            let bearer = request
-                .headers()
-                .get(header::AUTHORIZATION)
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.strip_prefix("Bearer "));
-            if bearer.and_then(|value| oauth.grant(value)).is_none() {
-                drain_rejected_body(request).await;
-                return oauth.challenge();
-            }
+    if path == "/mcp"
+        && request.method() == Method::POST
+        && let Some(oauth) = &state.oauth
+    {
+        let bearer = request
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "));
+        if bearer.and_then(|value| oauth.grant(value)).is_none() {
+            drain_rejected_body(request).await;
+            return oauth.challenge();
         }
     }
     next.run(request).await
@@ -1185,10 +1186,10 @@ async fn browser_session_status(
 }
 
 async fn browser_logout(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
-    if let Some(token) = cookie_token(&headers) {
-        if let Err(err) = state.browser_sessions.remove(token) {
-            return error_response(err);
-        }
+    if let Some(token) = cookie_token(&headers)
+        && let Err(err) = state.browser_sessions.remove(token)
+    {
+        return error_response(err);
     }
     let mut response = json_response(json!({"authenticated": false}));
     response
@@ -2065,12 +2066,11 @@ async fn append_lite3(
     if let Some(content_type) = headers
         .get("content-type")
         .and_then(|value| value.to_str().ok())
+        && !content_type.starts_with("application/x-plasmite-lite3")
     {
-        if !content_type.starts_with("application/x-plasmite-lite3") {
-            return error_response(
-                Error::new(ErrorKind::Usage).with_message("invalid content-type for lite3 append"),
-            );
-        }
+        return error_response(
+            Error::new(ErrorKind::Usage).with_message("invalid content-type for lite3 append"),
+        );
     }
     if payload.is_empty() {
         return error_response(

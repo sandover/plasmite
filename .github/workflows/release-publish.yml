@@ -23,7 +23,7 @@ permissions:
   actions: read
 
 env:
-  RELEASE_RUST_TOOLCHAIN: "1.88.0"
+  RELEASE_RUST_TOOLCHAIN: "1.99.1"
   HOMEBREW_TAP_REPO: "sandover/homebrew-tap"
 
 jobs:

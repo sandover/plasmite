@@ -177,7 +177,10 @@ impl PoolHeader {
         {
             return Err(Error::new(ErrorKind::Corrupt).with_message("header offset out of range"));
         }
-        if self.head_off % 8 != 0 || self.tail_off % 8 != 0 || self.tail_next_off % 8 != 0 {
+        if !self.head_off.is_multiple_of(8)
+            || !self.tail_off.is_multiple_of(8)
+            || !self.tail_next_off.is_multiple_of(8)
+        {
             return Err(Error::new(ErrorKind::Corrupt).with_message("header offset not aligned"));
         }
         // Empty pool is indicated by oldest_seq == 0. newest_seq is monotonic and may be non-zero
@@ -356,10 +359,10 @@ impl SeqOffsetCache {
             return;
         }
 
-        if self.entries.len() == self.max_entries {
-            if let Some(evict) = self.order.pop_back() {
-                self.entries.remove(&evict);
-            }
+        if self.entries.len() == self.max_entries
+            && let Some(evict) = self.order.pop_back()
+        {
+            self.entries.remove(&evict);
         }
 
         self.entries.insert(seq, offset);
@@ -749,10 +752,10 @@ impl Pool {
         if let Some(offset) = cache.get(seq) {
             let cached =
                 crate::core::cursor::read_frame_at(self.mmap(), ring_offset, ring_size, offset);
-            if let Ok(crate::core::cursor::ReadResult::Message { frame, .. }) = cached {
-                if frame.seq == seq {
-                    return Ok(frame.into_owned());
-                }
+            if let Ok(crate::core::cursor::ReadResult::Message { frame, .. }) = cached
+                && frame.seq == seq
+            {
+                return Ok(frame.into_owned());
             }
             cache.remove(seq);
         }
@@ -969,11 +972,10 @@ impl Pool {
 
         let used_bytes = used_ring_bytes(header);
         let free_bytes = header.ring_size.saturating_sub(used_bytes);
-        let used_percent_hundredths = if header.ring_size == 0 {
-            0
-        } else {
-            used_bytes.saturating_mul(10_000) / header.ring_size
-        };
+        let used_percent_hundredths = used_bytes
+            .saturating_mul(10_000)
+            .checked_div(header.ring_size)
+            .unwrap_or(0);
 
         let (oldest_timestamp_ns, newest_timestamp_ns) = self.boundary_timestamps(bounds);
         let now_ns = unix_now_ns();

@@ -26,7 +26,7 @@ PyPI and Homebrew. Versions agree across the product's distribution surfaces.
 
 `release.yml` builds the tagged commit, smoke-tests every matrix target and stores
 SDKs, Python distributions, the npm package and source metadata as artifacts.
-Release builds pin Rust 1.88.0. A successful build is not publication.
+Release builds pin Rust 1.99.1. A successful build is not publication.
 
 `release-publish.yml` consumes a successful build matching the release tag and
 source SHA. It checks artifacts and registry readiness, then renders a temporary

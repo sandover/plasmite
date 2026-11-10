@@ -27,12 +27,12 @@ fn main() {
 }
 
 fn resolve_plasmite_binary() -> PathBuf {
-    if let Ok(exe) = env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            let candidate = parent.join("plasmite");
-            if candidate.exists() {
-                return candidate;
-            }
+    if let Ok(exe) = env::current_exe()
+        && let Some(parent) = exe.parent()
+    {
+        let candidate = parent.join("plasmite");
+        if candidate.exists() {
+            return candidate;
         }
     }
     PathBuf::from("plasmite")

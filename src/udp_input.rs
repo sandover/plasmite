@@ -258,10 +258,10 @@ fn follow_worker(
     sub: Arc<Subscription>,
 ) -> Key {
     let result = follow_pool(&socket, &client, key, &sub);
-    if let Err(err) = result {
-        if sub.active() {
-            failure(&socket, key, &err);
-        }
+    if let Err(err) = result
+        && sub.active()
+    {
+        failure(&socket, key, &err);
     }
     key
 }
@@ -515,14 +515,14 @@ pub(crate) async fn run(
             continue;
         }
         let Some(cookie) = request.cookie else {
-            if length >= 256 {
-                if let Some(cookie) = control.cookie(key, &selection) {
-                    let body = wire::Challenge { cookie };
-                    if let Some(response) = wire::control(wire::CHALLENGE, id, &body)
-                        .filter(|packet| packet.len() <= length)
-                    {
-                        let _ = outgoing.send_to(&response, source);
-                    }
+            if length >= 256
+                && let Some(cookie) = control.cookie(key, &selection)
+            {
+                let body = wire::Challenge { cookie };
+                if let Some(response) = wire::control(wire::CHALLENGE, id, &body)
+                    .filter(|packet| packet.len() <= length)
+                {
+                    let _ = outgoing.send_to(&response, source);
                 }
             }
             continue;

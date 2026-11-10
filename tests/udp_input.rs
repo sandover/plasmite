@@ -153,12 +153,11 @@ impl UdpServer {
     fn wait_for_udp_banner(&mut self, timeout: Duration) -> TestResult<SocketAddr> {
         let deadline = Instant::now() + timeout;
         loop {
-            if let Some(line) = self.receive_until(deadline)? {
-                if line.stream == OutputStream::Stderr
-                    && let Some(address) = parse_udp_banner(&line.text)
-                {
-                    return Ok(address);
-                }
+            if let Some(line) = self.receive_until(deadline)?
+                && line.stream == OutputStream::Stderr
+                && let Some(address) = parse_udp_banner(&line.text)
+            {
+                return Ok(address);
             }
             self.ensure_running("UDP startup banner")?;
         }

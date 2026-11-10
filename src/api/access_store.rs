@@ -223,11 +223,11 @@ impl StorePaths {
     }
 
     fn open_lock(&self) -> Result<File, Error> {
-        if let Ok(metadata) = fs::symlink_metadata(&self.lock) {
-            if metadata.file_type().is_symlink() || !metadata.is_file() {
-                return Err(Error::new(ErrorKind::Permission)
-                    .with_message("saved connection lock must be a regular file"));
-            }
+        if let Ok(metadata) = fs::symlink_metadata(&self.lock)
+            && (metadata.file_type().is_symlink() || !metadata.is_file())
+        {
+            return Err(Error::new(ErrorKind::Permission)
+                .with_message("saved connection lock must be a regular file"));
         }
         #[cfg(windows)]
         let opened = crate::windows_private::open_lock(&self.lock);
