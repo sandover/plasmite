@@ -20,8 +20,6 @@ bindings/python/build/
 bindings/python/.venv/
 bindings/python/plasmite/_native/
 bindings/python/uv.lock
-conformance/work*/
-conformance/work-*/
 **/*.rs.bk
 .DS_Store
 .scratch/

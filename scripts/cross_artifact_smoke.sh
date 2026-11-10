@@ -181,57 +181,72 @@ check_pool_version() {
   fi
 }
 
-echo "[smoke] cli -> pool"
-"$PLASMITE_BIN" --dir "$WORKDIR" pool create cli-pool --size 1048576 >/dev/null
-check_pool_version "$WORKDIR/cli-pool.plasmite"
-
-echo "[smoke] node -> pool"
-(
-  cd "$ROOT"
-  node -e "const { Client } = require('./bindings/node'); const c = new Client(process.argv[1]); const p = c.createPool('node-pool', 1048576n); p.close(); c.close();" "$WORKDIR"
-)
-check_pool_version "$WORKDIR/node-pool.plasmite"
-"$PLASMITE_BIN" --dir "$WORKDIR" pool info node-pool --format json >/dev/null
-
-echo "[smoke] python -> pool"
-PYTHONPATH="$ROOT/bindings/python" python3 - <<'PY' "$WORKDIR"
-import sys
-from plasmite import Client
-
-workdir = sys.argv[1]
-client = Client(workdir)
-pool = client.create_pool("python-pool", 1048576)
-pool.close()
-client.close()
-PY
-check_pool_version "$WORKDIR/python-pool.plasmite"
-"$PLASMITE_BIN" --dir "$WORKDIR" pool info python-pool --format json >/dev/null
-
-echo "[smoke] go -> pool"
-cat > "$WORKDIR/go-smoke.json" <<'JSON'
-{
-  "conformance_version": 0,
-  "name": "go-create-smoke",
-  "workdir": "work-go",
-  "steps": [
-    {
-      "op": "create_pool",
-      "pool": "go-pool",
-      "input": {
-        "size_bytes": 1048576
-      }
-    }
-  ]
-}
-JSON
+echo "[smoke] Go -> Node, CLI -> open Node stream, Node -> Python -> CLI"
+POOL_DIR="$WORKDIR/pools"
 (
   cd "$ROOT/bindings/go"
   PKG_CONFIG=/usr/bin/true \
     CGO_CFLAGS="-I$ROOT/include" \
     CGO_LDFLAGS="-L$LIB_DIR" \
-    go run ./cmd/plasmite-conformance "$WORKDIR/go-smoke.json"
+    go run ./cmd/cookbook-smoke-fixture "$POOL_DIR" >/dev/null
 )
-check_pool_version "$WORKDIR/work-go/go-pool.plasmite"
-"$PLASMITE_BIN" --dir "$WORKDIR/work-go" pool info go-pool --format json >/dev/null
+check_pool_version "$POOL_DIR/cookbook-smoke.plasmite"
+
+(
+  cd "$ROOT"
+  node - "$POOL_DIR" <<'JS'
+const assert = require("node:assert/strict");
+const { execFileSync } = require("node:child_process");
+const { Client, parseMessage } = require("./bindings/node");
+const poolDir = process.argv[2];
+const client = new Client(poolDir);
+const pool = client.openPool("cookbook-smoke");
+try {
+  const seed = pool.get(1n);
+  assert.deepEqual(seed.data, { task: "resize", id: 1 });
+  assert.deepEqual(seed.tags, ["cookbook"]);
+  const stream = pool.openStream(2n, 1n, 5000n);
+  try {
+    execFileSync(process.env.PLASMITE_BIN, [
+      "--dir", poolDir, "feed", "cookbook-smoke", '{"writer":"cli"}', "--tag", "external",
+    ], { timeout: 10000 });
+    const message = parseMessage(stream.nextJson());
+    assert.equal(message.seq, 2n);
+    assert.deepEqual(message.data, { writer: "cli" });
+    assert.deepEqual(message.tags, ["external"]);
+  } finally {
+    stream.close();
+  }
+  assert.equal(pool.append({ writer: "node" }, ["handoff"]).seq, 3n);
+} finally {
+  pool.close();
+  client.close();
+}
+JS
+)
+
+PYTHONPATH="$ROOT/bindings/python" python3 - "$POOL_DIR" <<'PYTHON'
+import json
+import os
+import subprocess
+import sys
+from plasmite import Client
+
+pool_dir = sys.argv[1]
+with Client(pool_dir) as client, client.open_pool("cookbook-smoke") as pool:
+    message = pool.get(3)
+    assert message.data == {"writer": "node"}
+    assert message.meta.tags == ["handoff"]
+    assert pool.append({"writer": "python"}, ["handoff"]).seq == 4
+
+out = subprocess.check_output(
+    [os.environ["PLASMITE_BIN"], "--dir", pool_dir, "fetch", "cookbook-smoke", "4", "--format", "json"],
+    timeout=10,
+)
+message = json.loads(out)
+assert message["seq"] == 4
+assert message["data"] == {"writer": "python"}
+assert message["meta"]["tags"] == ["handoff"]
+PYTHON
 
 echo "[smoke] complete"

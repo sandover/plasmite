@@ -130,11 +130,10 @@ jobs:
               - 'vendor/lite3/**'
               - 'include/**'
               - 'bindings/**'
-              - 'conformance/**'
               - 'tests/abi_adversarial.c'
               - 'scripts/abi_smoke.sh'
               - 'scripts/abi_adversarial.sh'
-              - 'scripts/conformance_all.sh'
+              - 'scripts/cross_artifact_smoke.sh'
               - 'scripts/node_pack_smoke.sh'
               - 'scripts/node_remote_only_smoke.sh'
               - 'Justfile'
@@ -335,8 +334,8 @@ jobs:
         with:
           tool: just
       - run: cd bindings/node && npm ci
-      - name: Run ABI, conformance, and binding contracts
-        run: just abi-smoke conformance-all bindings-test
+      - name: Run ABI, binding, and cross-artifact checks
+        run: just abi-smoke bindings-test cross-artifact-smoke
 
   windows-smoke:
     needs: [pr-paths]

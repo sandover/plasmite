@@ -1,5 +1,5 @@
 /*
-Purpose: Exercise Node binding behaviors beyond conformance manifests.
+Purpose: Exercise the Node binding against native pools and remote servers.
 Key Exports: None (node:test suite).
 Role: Validate tail timeout, large payloads, and lifecycle errors.
 Invariants: Requires libplasmite + index.node to be built.
@@ -46,6 +46,7 @@ function withClient(run) {
     return run({ client, poolDir, temp });
   } finally {
     client.close();
+    fs.rmSync(temp, { recursive: true, force: true });
   }
 }
 
@@ -86,6 +87,7 @@ async function withPoolAsync(poolName, run, sizeBytes = TEST_POOL_SIZE_BYTES) {
   } finally {
     pool.close();
     client.close();
+    fs.rmSync(temp, { recursive: true, force: true });
   }
 }
 
@@ -290,6 +292,25 @@ test("local tails can fail closed on retention gaps", async () => {
   );
 });
 
+test("an open stream reports the first unread sequence after overwrite", () => {
+  withPool("slow-reader", ({ pool }) => {
+    const seed = pool.append({ kind: "seed" });
+    const stream = pool.openStream(seed.seq, null, 500n, true);
+    try {
+      assert.equal(parseMessage(stream.nextJson()).seq, seed.seq);
+      const lost = pool.append({ kind: "lost" });
+      fillPast(pool, lost.seq);
+      assert.throws(() => stream.nextJson(), {
+        kind: ErrorKind.RetentionGap,
+        seq: Number(lost.seq),
+      });
+      assert.equal(stream.nextJson(), null);
+    } finally {
+      stream.close();
+    }
+  }, 64 * 1024);
+});
+
 test("lite3 streams can fail closed on retention gaps", () => {
   withPool(
     "lite3-gap",
@@ -356,6 +377,24 @@ test("native error paths do not become error metadata", () => {
     client.close();
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("missing sequences and corrupt pool files carry different error details", () => {
+  withPool("damaged", ({ client, pool, poolDir }) => {
+    assert.throws(() => pool.get(42n), {
+      kind: ErrorKind.NotFound,
+      seq: 42,
+      path: undefined,
+    });
+    pool.close();
+    const poolPath = path.join(poolDir, "damaged.plasmite");
+    fs.truncateSync(poolPath, 4);
+    assert.throws(() => client.openPool("damaged"), {
+      kind: ErrorKind.Corrupt,
+      path: poolPath,
+      seq: undefined,
+    });
+  });
 });
 
 test("native errors with unknown kind default to Io", () => {

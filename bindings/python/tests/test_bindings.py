@@ -1,7 +1,7 @@
 """
 Purpose: Validate Python binding behaviors for payloads, tailing, and lifecycle.
 Key Exports: None (unittest module).
-Role: Exercise edge cases beyond conformance manifests.
+Role: Exercise the Python binding against native pools and server processes.
 Invariants: Requires libplasmite to be discoverable.
 Notes: Uses temporary directories and avoids global state.
 """
@@ -12,6 +12,7 @@ import json
 import os
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 import unittest
@@ -50,14 +51,11 @@ TEST_POOL_SIZE_BYTES = 1024 * 1024
 
 class BindingTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp = Path(self._tempdir())
+        temp = tempfile.TemporaryDirectory(prefix="plasmite-py-")
+        self.addCleanup(temp.cleanup)
+        self.temp = Path(temp.name)
         self.pool_dir = self.temp / "pools"
         self.pool_dir.mkdir(parents=True, exist_ok=True)
-
-    def _tempdir(self) -> str:
-        import tempfile
-
-        return tempfile.mkdtemp(prefix="plasmite-py-")
 
     def _new_client(self) -> Client:
         return Client(str(self.pool_dir))
@@ -223,6 +221,18 @@ class BindingTests(unittest.TestCase):
             self.assertGreater(continuing.seq, first.seq)
             pool.close()
 
+    def test_open_stream_reports_first_unread_sequence_after_overwrite(self) -> None:
+        with self._new_client() as client, client.create_pool("slow-reader", 64 * 1024) as pool:
+            seed = pool.append({"kind": "seed"})
+            with pool.open_stream(since_seq=seed.seq, timeout_ms=500, error_on_gap=True) as stream:
+                self.assertEqual(parse_message(stream.next_json()).seq, seed.seq)
+                lost = pool.append({"kind": "lost"})
+                self._fill_past(pool, lost.seq)
+                with self.assertRaises(RetentionGapError) as raised:
+                    stream.next_json()
+                self.assertEqual(raised.exception.seq, lost.seq)
+                self.assertIsNone(stream.next_json())
+
     def test_lite3_stream_can_fail_on_retention_gap(self) -> None:
         with self._new_client() as client:
             pool = client.create_pool("lite3-gap", 64 * 1024)
@@ -382,6 +392,27 @@ class BindingTests(unittest.TestCase):
             )
             with self.assertRaises(NotFoundError):
                 client.open_pool("missing")
+
+    def test_pool_lookup_errors_distinguish_missing_sequence_and_corrupt_file(self) -> None:
+        pool_path = self.pool_dir / "damaged.plasmite"
+        with self._new_client() as client:
+            with self.assertRaises(NotFoundError) as missing_pool:
+                client.open_pool("damaged")
+            self.assertEqual(missing_pool.exception.path, str(pool_path))
+            self.assertIsNone(missing_pool.exception.seq)
+
+            with client.create_pool("damaged", TEST_POOL_SIZE_BYTES) as pool:
+                with self.assertRaises(NotFoundError) as missing_message:
+                    pool.get(42)
+                self.assertEqual(missing_message.exception.seq, 42)
+                self.assertIsNone(missing_message.exception.path)
+
+            with pool_path.open("r+b") as handle:
+                handle.truncate(4)
+            with self.assertRaises(plasmite.CorruptError) as corrupt:
+                client.open_pool("damaged")
+            self.assertEqual(corrupt.exception.path, str(pool_path))
+            self.assertIsNone(corrupt.exception.seq)
 
     def test_udp_sdk_send_and_follow_against_server_process(self) -> None:
         binary = Path(os.environ.get("PLASMITE_BIN", REPO_ROOT / "target" / "debug" / "plasmite"))

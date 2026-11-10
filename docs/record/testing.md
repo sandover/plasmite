@@ -21,7 +21,7 @@ There are three top-level commands, ordered by cost and coverage:
 - `just check`: formatting, linting, Rust tests, version alignment, and Lite3
   integrity. Run it when handing work off and before every push; pull requests
   run the same command.
-- `just integration`: cookbook, ABI, conformance, cross-artifact, browser-script, and language
+- `just integration`: cookbook, ABI, cross-artifact, browser-script, and language
   binding checks. It requires Go, Node, Python, and `uv`.
 - `just ui-smoke`: exact browser sequence IDs, bounded history loading,
   session/clipboard recovery, and access setup guidance in a deterministic Node harness.
@@ -228,60 +228,16 @@ fi
 cargo audit --db .scratch/advisory-db --no-fetch
 ```
 
-## Conformance suite
+## Binding contracts
 
-The conformance suite validates that all language bindings behave consistently.
-See `conformance/README.md` for the full manifest format.
+Run `just bindings-test` for the Go, Node, and Python tests. Each binding's
+suite tests message data and tags, structured errors, and both retention gap
+policies through its own API. Rust API tests run with `cargo test`.
 
-Run all conformance runners (recommended):
-
-```bash
-./scripts/conformance_all.sh
-```
-
-Run the Rust conformance runner directly:
-
-```bash
-cargo run --bin plasmite-conformance -- conformance/sample-v0.json
-```
-
-Run Go conformance directly:
-
-```bash
-cd bindings/go
-cargo build -p plasmite
-DYLD_LIBRARY_PATH="$(pwd)/../../target/debug${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}" \
-LD_LIBRARY_PATH="$(pwd)/../../target/debug${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-PKG_CONFIG="/usr/bin/true" \
-CGO_CFLAGS="-I$(pwd)/../../include" \
-CGO_LDFLAGS="-L$(pwd)/../../target/debug" \
-go run ./cmd/plasmite-conformance ../../conformance/sample-v0.json
-```
-
-Run Node conformance directly:
-
-```bash
-cd bindings/node
-npm run build
-PLASMITE_LIB_DIR="$(pwd)/../../target/debug" \
-PLASMITE_BIN="$(pwd)/../../target/debug/plasmite" \
-node cmd/plasmite-conformance.js ../../conformance/sample-v0.json
-```
-
-Run Python conformance directly:
-
-```bash
-cd bindings/python
-PLASMITE_LIB_DIR="$(pwd)/../../target/debug" \
-PLASMITE_BIN="$(pwd)/../../target/debug/plasmite" \
-python3 cmd/plasmite_conformance.py ../../conformance/sample-v0.json
-```
-
-Cross-artifact compatibility smoke:
-
-```bash
-./scripts/cross_artifact_smoke.sh
-```
+Run `just cross-artifact-smoke` after building the bindings and CLI. Go
+creates a pool, Node opens a stream that reads a message from a separate
+CLI process, and Node, Python, and the CLI read each other's messages from
+the same file.
 
 ### C ABI boundary checks
 

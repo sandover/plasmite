@@ -234,6 +234,41 @@ mod tests {
     }
 
     #[test]
+    fn pool_admin_lists_only_pools_and_reports_deleted_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let client = LocalClient::new().with_pool_dir(temp.path());
+        let keep = PoolRef::name("keep");
+        let delete = PoolRef::name("delete");
+        for pool in [&keep, &delete] {
+            client
+                .create_pool(pool, super::PoolOptions::new(1024 * 1024))
+                .unwrap();
+        }
+        std::fs::write(temp.path().join("notes.txt"), b"ignore this").unwrap();
+
+        let info = client.pool_info(&keep).unwrap();
+        assert_eq!(info.file_size, 1024 * 1024);
+        assert_eq!(info.bounds.oldest_seq, None);
+        assert_eq!(info.bounds.newest_seq, None);
+        assert_eq!(client.list_pools().unwrap().len(), 2);
+
+        client.delete_pool(&delete).unwrap();
+        let listed = client.list_pools().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].path, info.path);
+        for error in [
+            client.pool_info(&delete).unwrap_err(),
+            client.delete_pool(&delete).unwrap_err(),
+        ] {
+            assert_eq!(error.kind(), super::ErrorKind::NotFound);
+            assert_eq!(
+                error.path(),
+                Some(temp.path().join("delete.plasmite").as_path())
+            );
+        }
+    }
+
+    #[test]
     fn list_pools_returns_empty_when_directory_does_not_exist() {
         let temp = tempfile::tempdir().expect("tempdir");
         let pool_dir = temp.path().join("missing");

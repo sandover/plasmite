@@ -95,6 +95,37 @@ func fillPast(t *testing.T, pool api.Pool, seq uint64) {
 	t.Fatalf("sequence %d remained retained after filling the pool", seq)
 }
 
+func TestPoolLookupErrorsDistinguishMissingSequenceAndCorruptFile(t *testing.T) {
+	client := newTestClient(t)
+	poolPath := filepath.Join(t.TempDir(), "damaged.plasmite")
+	ref := PoolRefPath(poolPath)
+
+	assertError := func(err error, kind ErrorKind, path string, seq *uint64) {
+		t.Helper()
+		var got *Error
+		if !errors.As(err, &got) || got.Kind != kind || got.Path != path ||
+			(seq == nil && got.Seq != nil) || (seq != nil && (got.Seq == nil || *got.Seq != *seq)) {
+			t.Fatalf("expected kind %v, path %q and sequence %v, got %#v", kind, path, seq, got)
+		}
+	}
+
+	_, err := client.OpenPool(ref)
+	assertError(err, ErrorNotFound, poolPath, nil)
+	pool, err := client.CreatePool(ref, testPoolSizeBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = pool.Get(42)
+	pool.Close()
+	assertError(err, ErrorNotFound, "", uint64Ptr(42))
+
+	if err := os.Truncate(poolPath, 4); err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.OpenPool(ref)
+	assertError(err, ErrorCorrupt, poolPath, nil)
+}
+
 func TestAppendGetLargePayload(t *testing.T) {
 	client := newTestClient(t)
 	pool := newTestPool(t, client, "big")
@@ -314,6 +345,42 @@ func TestTailLite3RetentionGapPolicy(t *testing.T) {
 	}
 	if plasmiteErr.Seq == nil || *plasmiteErr.Seq != first.Seq {
 		t.Fatalf("expected gap sequence %d, got %#v", first.Seq, plasmiteErr.Seq)
+	}
+}
+
+func TestOpenStreamReportsFirstMissingSequenceAfterOverwrite(t *testing.T) {
+	client := newTestClient(t)
+	pool := newTestPool(t, client, "slow-reader")
+	seed, err := pool.Append(map[string]any{"kind": "seed"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := pool.(*Pool).openStream(&seed.Seq, nil, uint64Ptr(500), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	raw, err := stream.NextJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var message api.Message
+	if err := json.Unmarshal(raw, &message); err != nil || message.Seq != seed.Seq {
+		t.Fatalf("read seed: %s (%v)", raw, err)
+	}
+
+	firstMissing := seed.Seq + 1
+	if _, err := pool.Append(map[string]any{"kind": "lost"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	fillPast(t, pool, firstMissing)
+	_, err = stream.NextJSON()
+	var gap *Error
+	if !errors.As(err, &gap) || gap.Kind != ErrorRetentionGap || gap.Seq == nil || *gap.Seq != firstMissing {
+		t.Fatalf("expected gap at %d, got %#v", firstMissing, err)
+	}
+	if _, err := stream.NextJSON(); err != io.EOF {
+		t.Fatalf("expected the failed stream to end, got %v", err)
 	}
 }
 
