@@ -53,7 +53,7 @@ use activity::{ActivityRegistry, RequestActivity};
 #[path = "browser_session.rs"]
 mod browser_session;
 use crate::interface_error_kind;
-use crate::interface_wire::{MessageWire, error_policy};
+use crate::interface_wire::{LITE3_FRAME_HEADER_LEN, Lite3FrameHeader, MessageWire, error_policy};
 use crate::pool_info_json::pool_info_json;
 use browser_session::{BrowserSessions, COOKIE_NAME, LIFETIME};
 #[path = "oauth.rs"]
@@ -2607,10 +2607,13 @@ fn encode_lite3_stream_frame(frame: &plasmite::api::FrameRef) -> Result<Bytes, E
     let payload_len: u32 = frame.payload.len().try_into().map_err(|_| {
         Error::new(ErrorKind::Usage).with_message("lite3 payload exceeds max frame length")
     })?;
-    let mut buf = Vec::with_capacity(8 + 8 + 4 + payload_len as usize);
-    buf.extend_from_slice(&frame.seq.to_be_bytes());
-    buf.extend_from_slice(&frame.timestamp_ns.to_be_bytes());
-    buf.extend_from_slice(&payload_len.to_be_bytes());
+    let header = Lite3FrameHeader {
+        seq: frame.seq,
+        timestamp_ns: frame.timestamp_ns,
+        payload_len,
+    };
+    let mut buf = Vec::with_capacity(LITE3_FRAME_HEADER_LEN + payload_len as usize);
+    buf.extend_from_slice(&header.encode());
     buf.extend_from_slice(&frame.payload);
     Ok(Bytes::from(buf))
 }

@@ -340,7 +340,7 @@ fn emit_retries_when_pool_is_busy() {
 
     let pool_path = pool_dir.join("busy.plasmite");
     let file = File::open(&pool_path).expect("open pool");
-    file.try_lock_exclusive().expect("try lock");
+    file.try_lock().expect("try lock");
 
     let (tx, rx) = mpsc::channel();
     let pool_dir_str = pool_dir.to_str().unwrap().to_string();
@@ -364,7 +364,7 @@ fn emit_retries_when_pool_is_busy() {
     });
 
     thread::sleep(Duration::from_millis(150));
-    fs2::FileExt::unlock(&file).expect("unlock");
+    file.unlock().expect("unlock");
 
     let output = rx.recv_timeout(Duration::from_secs(2)).expect("output");
     assert!(

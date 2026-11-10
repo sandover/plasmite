@@ -1,6 +1,5 @@
 use super::{AccessKey, encode_hex, key_from_payload, store_payload};
 use crate::core::error::{Error, ErrorKind};
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 #[cfg(not(windows))]
@@ -32,17 +31,17 @@ pub(super) fn load(destination: &str) -> Result<Option<AccessKey>, Error> {
     #[cfg(not(windows))]
     paths.prepare_dir()?;
     let lock = paths.open_lock()?;
-    FileExt::lock_shared(&lock)
+    lock.lock_shared()
         .map_err(|error| store_io_error("failed to lock saved connections", error))?;
     let file = match paths.read_file()? {
         Some(file) => file,
         None => {
-            let _ = FileExt::unlock(&lock);
+            let _ = lock.unlock();
             return Ok(None);
         }
     };
     if file.version != STORE_VERSION {
-        let _ = FileExt::unlock(&lock);
+        let _ = lock.unlock();
         return Err(Error::new(ErrorKind::Corrupt)
             .with_message("saved connection file has an unsupported version"));
     }
@@ -50,7 +49,7 @@ pub(super) fn load(destination: &str) -> Result<Option<AccessKey>, Error> {
     let result = encoded
         .map(|value| decode_record(destination, value))
         .transpose();
-    let _ = FileExt::unlock(&lock);
+    let _ = lock.unlock();
     result
 }
 
@@ -65,7 +64,7 @@ pub(super) fn list() -> Result<Vec<String>, Error> {
     #[cfg(not(windows))]
     paths.prepare_dir()?;
     let lock = paths.open_lock()?;
-    FileExt::lock_shared(&lock)
+    lock.lock_shared()
         .map_err(|error| store_io_error("failed to lock saved connections", error))?;
     let result = (|| {
         let Some(file) = paths.read_file()? else {
@@ -77,7 +76,7 @@ pub(super) fn list() -> Result<Vec<String>, Error> {
         }
         Ok(file.connections.into_keys().collect())
     })();
-    let _ = FileExt::unlock(&lock);
+    let _ = lock.unlock();
     result
 }
 
@@ -88,7 +87,7 @@ pub(super) fn save(destination: &str, key: &AccessKey) -> Result<(), Error> {
     #[cfg(not(windows))]
     paths.prepare_dir()?;
     let lock = paths.open_lock()?;
-    FileExt::lock_exclusive(&lock)
+    lock.lock()
         .map_err(|error| store_io_error("failed to lock saved connections", error))?;
     let result = (|| {
         let mut file = paths.read_file()?.unwrap_or(CredentialFile {
@@ -103,7 +102,7 @@ pub(super) fn save(destination: &str, key: &AccessKey) -> Result<(), Error> {
             .insert(destination.to_owned(), encode_record(destination, key)?);
         paths.write_file(&file)
     })();
-    let _ = FileExt::unlock(&lock);
+    let _ = lock.unlock();
     result
 }
 
@@ -117,7 +116,7 @@ pub(super) fn remove(destination: &str) -> Result<(), Error> {
     #[cfg(not(windows))]
     paths.prepare_dir()?;
     let lock = paths.open_lock()?;
-    FileExt::lock_exclusive(&lock)
+    lock.lock()
         .map_err(|error| store_io_error("failed to lock saved connections", error))?;
     let result = (|| {
         let Some(mut file) = paths.read_file()? else {
@@ -132,7 +131,7 @@ pub(super) fn remove(destination: &str) -> Result<(), Error> {
         }
         Ok(())
     })();
-    let _ = FileExt::unlock(&lock);
+    let _ = lock.unlock();
     result
 }
 

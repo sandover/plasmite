@@ -1,10 +1,37 @@
 //! Purpose: Define the canonical serialized data shared by interface adapters.
-//! Exports: Internal message, pool-info, bounds, metrics, and error wire types.
+//! Exports: Internal message, Lite3 header, pool-info, bounds, metrics, and error wire types.
 //! Role: Single source of truth for stable v0 field names and omission rules.
 //! Invariants: This module contains representation only, not transport policy.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+pub(crate) const LITE3_FRAME_HEADER_LEN: usize = 20;
+
+pub(crate) struct Lite3FrameHeader {
+    pub(crate) seq: u64,
+    pub(crate) timestamp_ns: u64,
+    pub(crate) payload_len: u32,
+}
+
+impl Lite3FrameHeader {
+    #[allow(dead_code, reason = "Only the CLI binary writes Lite3 stream headers.")]
+    pub(crate) fn encode(self) -> [u8; LITE3_FRAME_HEADER_LEN] {
+        let mut bytes = [0; LITE3_FRAME_HEADER_LEN];
+        bytes[..8].copy_from_slice(&self.seq.to_be_bytes());
+        bytes[8..16].copy_from_slice(&self.timestamp_ns.to_be_bytes());
+        bytes[16..].copy_from_slice(&self.payload_len.to_be_bytes());
+        bytes
+    }
+
+    pub(crate) fn decode(bytes: [u8; LITE3_FRAME_HEADER_LEN]) -> Self {
+        Self {
+            seq: u64::from_be_bytes(bytes[..8].try_into().expect("sequence field")),
+            timestamp_ns: u64::from_be_bytes(bytes[8..16].try_into().expect("timestamp field")),
+            payload_len: u32::from_be_bytes(bytes[16..].try_into().expect("length field")),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct MessageWire {

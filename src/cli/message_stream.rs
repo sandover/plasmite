@@ -1,5 +1,6 @@
 //! Read one complete CLI message at a time and write framed Lite3 messages.
 
+use crate::interface_wire::{LITE3_FRAME_HEADER_LEN, Lite3FrameHeader};
 use clap::ValueEnum;
 use plasmite::api::{Error, ErrorKind, lite3};
 use serde_json::{Map, Number, Value};
@@ -273,13 +274,16 @@ where
     }
     let mut count = 0;
     loop {
-        let mut header = [0; 20];
+        let mut header = [0; LITE3_FRAME_HEADER_LEN];
         if !read_exact_or_eof(reader, &mut header)? {
             return Ok(count);
         }
-        let seq = u64::from_be_bytes(header[..8].try_into().expect("fixed header"));
-        let timestamp_ns = u64::from_be_bytes(header[8..16].try_into().expect("fixed header"));
-        let len = u32::from_be_bytes(header[16..].try_into().expect("fixed header")) as usize;
+        let Lite3FrameHeader {
+            seq,
+            timestamp_ns,
+            payload_len,
+        } = Lite3FrameHeader::decode(header);
+        let len = payload_len as usize;
         if len > MAX_PAYLOAD_BYTES {
             return Err(input_error("Lite3 payload exceeds 256 MiB"));
         }
@@ -336,11 +340,13 @@ pub(crate) fn write_frame(
     if payload.len() > MAX_PAYLOAD_BYTES {
         return Err(input_error("Lite3 payload exceeds 256 MiB"));
     }
-    let len = u32::try_from(payload.len()).expect("256 MiB fits u32");
+    let header = Lite3FrameHeader {
+        seq,
+        timestamp_ns,
+        payload_len: u32::try_from(payload.len()).expect("256 MiB fits u32"),
+    };
     writer
-        .write_all(&seq.to_be_bytes())
-        .and_then(|()| writer.write_all(&timestamp_ns.to_be_bytes()))
-        .and_then(|()| writer.write_all(&len.to_be_bytes()))
+        .write_all(&header.encode())
         .and_then(|()| writer.write_all(payload))
         .and_then(|()| writer.flush())
         .map_err(write_error)

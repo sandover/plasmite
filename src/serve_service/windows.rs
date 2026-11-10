@@ -4,7 +4,6 @@ use super::{Setup, Status, id, io_error, merge, require_fixed_listener_ports, us
 use crate::cli::args::ServeRunArgs;
 use crate::cli::output::{OutputMode, render_output};
 use crate::{access_store, serve_registry, windows_private};
-use fs2::FileExt;
 use plasmite::api::{Error, ErrorKind};
 use serde::{Deserialize, Serialize};
 use std::ffi::c_void;
@@ -710,8 +709,13 @@ pub(crate) fn control(pool: &Path, action: &str) -> Result<Status, Error> {
     let record = required(&request.pool_dir)?;
     let lock_path = request.pool_dir.join(".plasmite-serve/service.lock");
     let lock = io_result(shared(&record)?.open_lock(&lock_path), &lock_path)?;
-    lock.try_lock_exclusive()
-        .map_err(|err| io_error("another service operation is in progress", &lock_path, err))?;
+    lock.try_lock().map_err(|err| {
+        io_error(
+            "another service operation is in progress",
+            &lock_path,
+            err.into(),
+        )
+    })?;
     if action == "start" || action == "stop" || action == "restart" {
         let service = verify_service(&record, SERVICE_START | SERVICE_STOP)?;
         if action != "start" {
@@ -1414,8 +1418,13 @@ fn restore_identity(record: &Installed, bytes: &[u8]) -> Result<(), Error> {
     let path = state.join("identity.json");
     let lock_path = state.join("lock");
     let lock = io_result(policy.open_lock(&lock_path), &lock_path)?;
-    lock.try_lock_exclusive()
-        .map_err(|err| io_error("another server owns this pool directory", &lock_path, err))?;
+    lock.try_lock().map_err(|err| {
+        io_error(
+            "another server owns this pool directory",
+            &lock_path,
+            err.into(),
+        )
+    })?;
     let temporary = state.join("identity.restore.json");
     let mut file = io_result(policy.create_file(&temporary), &temporary)?;
     file.write_all(bytes)
@@ -1461,8 +1470,13 @@ fn admin(request: &Request) -> Result<(), Error> {
         Some(record) => io_result(shared(record)?.open_lock(&lock_path), &lock_path)?,
         None => io_result(windows_private::open_lock(&lock_path), &lock_path)?,
     };
-    lock.try_lock_exclusive()
-        .map_err(|err| io_error("another service operation is in progress", &lock_path, err))?;
+    lock.try_lock().map_err(|err| {
+        io_error(
+            "another service operation is in progress",
+            &lock_path,
+            err.into(),
+        )
+    })?;
     if request.action == "uninstall" {
         let record =
             previous.ok_or_else(|| usage("this pool directory has no installed server"))?;
@@ -1724,8 +1738,9 @@ fn admin(request: &Request) -> Result<(), Error> {
         let server_lock = if initial_store.is_none() {
             let path = state.join("lock");
             let lock = io_result(shared(&record)?.open_lock(&path), &path)?;
-            lock.try_lock_exclusive()
-                .map_err(|err| io_error("another server owns this pool directory", &path, err))?;
+            lock.try_lock().map_err(|err| {
+                io_error("another server owns this pool directory", &path, err.into())
+            })?;
             Some(lock)
         } else {
             None

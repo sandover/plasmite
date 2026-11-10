@@ -1,6 +1,5 @@
 //! Persistent server identity and access records for one pool directory.
 
-use fs2::FileExt;
 use getrandom::fill;
 use plasmite::api::{Error, ErrorKind, access::spki_fingerprint};
 use rcgen::{
@@ -44,7 +43,7 @@ struct OwnerLock(File);
 
 impl Drop for OwnerLock {
     fn drop(&mut self) {
-        let _ = FileExt::unlock(&self.0);
+        let _ = self.0.unlock();
     }
 }
 
@@ -117,7 +116,7 @@ impl AccessStore {
         #[cfg(not(windows))]
         ensure_private(&dir)?;
         let lock = open_private(&dir.join("lock"))?;
-        lock.try_lock_exclusive().map_err(|err| {
+        lock.try_lock().map_err(|err| {
             Error::new(ErrorKind::Busy)
                 .with_message("another server owns this pool directory")
                 .with_path(&dir)
@@ -301,7 +300,7 @@ impl AccessStore {
         let _directory = private_directory(&dir)?;
         ensure_private(&dir)?;
         let lock = open_private(&dir.join("lock"))?;
-        lock.try_lock_exclusive().map_err(|err| {
+        lock.try_lock().map_err(|err| {
             Error::new(ErrorKind::Busy)
                 .with_message("another server owns this pool directory")
                 .with_path(&dir)

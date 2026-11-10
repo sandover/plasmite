@@ -1,7 +1,5 @@
 //! Real-process UDP input checks using loopback sockets and ordinary pool readers.
 
-#[cfg(unix)]
-use fs2::FileExt;
 use plasmite::api::{Pool, PoolApiExt};
 use serde_json::{Value, json};
 use std::fs;
@@ -854,7 +852,7 @@ fn shutdown_waits_for_an_in_progress_pool_lock_and_does_not_append_queued_packet
         .read(true)
         .write(true)
         .open(&locked_path)?;
-    lock_file.lock_exclusive()?;
+    lock_file.lock()?;
     send(
         &socket,
         address,
@@ -876,7 +874,7 @@ fn shutdown_waits_for_an_in_progress_pool_lock_and_does_not_append_queued_packet
         "server exited before the held pool lock was released"
     );
 
-    fs2::FileExt::unlock(&lock_file)?;
+    lock_file.unlock()?;
     wait_for_sequence(&locked_path, 1, Duration::from_secs(3))?;
     server.wait_for_exit(Duration::from_secs(5))?;
     assert_eq!(message(&locked_path, 1)?.data["lock_holder"], true);

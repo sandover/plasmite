@@ -3,7 +3,6 @@
 //! Role: Keep command-family suites focused on behavior rather than setup.
 
 pub use super::server::TestServer as ServeProcess;
-pub use fs2::FileExt;
 pub use rcgen::{Certificate, CertificateParams, SanType};
 pub use serde_json::{Value, json};
 pub use std::fs::File;

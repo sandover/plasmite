@@ -12,7 +12,9 @@ use crate::core::pool::{
     AppendOptions, Bounds, Durability, PoolAgeMetrics, PoolInfo, PoolMetrics, PoolOptions,
     PoolUtilization,
 };
-use crate::interface_wire::{MessageWire, PoolInfoWire, PoolMetricsWire};
+use crate::interface_wire::{
+    LITE3_FRAME_HEADER_LEN, Lite3FrameHeader, MessageWire, PoolInfoWire, PoolMetricsWire,
+};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -28,6 +30,7 @@ const MAX_REMOTE_RESPONSE_BYTES: usize = 256 * 1024 * 1024;
 use url::{Host, Url};
 
 type ApiResult<T> = Result<T, Error>;
+type TailReader = BufReader<Box<dyn Read + Send + Sync>>;
 
 #[derive(Clone)]
 pub struct RemoteClient {
@@ -56,11 +59,11 @@ pub struct RemotePool {
 }
 
 pub struct RemoteTail {
-    reader: Option<BufReader<Box<dyn std::io::Read + Send + Sync>>>,
+    reader: Option<TailReader>,
 }
 
 pub struct RemoteLite3Tail {
-    reader: Option<BufReader<Box<dyn std::io::Read + Send + Sync>>>,
+    reader: Option<TailReader>,
 }
 
 #[derive(Clone, Debug)]
@@ -322,13 +325,7 @@ impl RemoteClient {
                 .send_string(&payload)
         };
 
-        match response {
-            Ok(resp) => read_json_response(resp),
-            Err(ureq::Error::Status(code, resp)) => Err(parse_error_response(code, resp)),
-            Err(ureq::Error::Transport(err)) => Err(Error::new(ErrorKind::Io)
-                .with_message("request failed")
-                .with_source(err)),
-        }
+        read_json_response(request_result(response)?)
     }
 
     fn request(&self, method: &str, url: &Url) -> ApiResult<ureq::Request> {
@@ -390,34 +387,6 @@ impl RemoteClient {
             request = request.set("Authorization", &format!("Bearer {}", key.secret_hex()));
         }
         Ok(request)
-    }
-
-    fn request_stream(&self, url: &Url) -> ApiResult<ureq::Response> {
-        let response = self
-            .open("GET", url)?
-            .set("Accept", "application/json")
-            .call();
-        match response {
-            Ok(resp) => Ok(resp),
-            Err(ureq::Error::Status(code, resp)) => Err(parse_error_response(code, resp)),
-            Err(ureq::Error::Transport(err)) => Err(Error::new(ErrorKind::Io)
-                .with_message("request failed")
-                .with_source(err)),
-        }
-    }
-
-    fn request_stream_lite3(&self, url: &Url) -> ApiResult<ureq::Response> {
-        let response = self
-            .open("GET", url)?
-            .set("Accept", "application/x-plasmite-lite3-stream")
-            .call();
-        match response {
-            Ok(resp) => Ok(resp),
-            Err(ureq::Error::Status(code, resp)) => Err(parse_error_response(code, resp)),
-            Err(ureq::Error::Transport(err)) => Err(Error::new(ErrorKind::Io)
-                .with_message("request failed")
-                .with_source(err)),
-        }
     }
 }
 
@@ -511,13 +480,7 @@ impl RemotePool {
             .set("Content-Type", "application/x-plasmite-lite3")
             .send_bytes(payload);
 
-        match response {
-            Ok(resp) => read_json_response(resp),
-            Err(ureq::Error::Status(code, resp)) => Err(parse_error_response(code, resp)),
-            Err(ureq::Error::Transport(err)) => Err(Error::new(ErrorKind::Io)
-                .with_message("request failed")
-                .with_source(err)),
-        }
+        read_json_response(request_result(response)?)
     }
 
     pub fn append_lite3_now(&self, payload: &[u8], durability: Durability) -> ApiResult<u64> {
@@ -559,17 +522,35 @@ impl RemotePool {
             .request("GET", &url)?
             .set("Accept", "application/x-plasmite-lite3")
             .call();
-        match response {
-            Ok(resp) => read_lite3_response(resp.into_reader(), MAX_REMOTE_RESPONSE_BYTES),
-            Err(ureq::Error::Status(code, resp)) => Err(parse_error_response(code, resp)),
-            Err(ureq::Error::Transport(err)) => Err(Error::new(ErrorKind::Io)
-                .with_message("request failed")
-                .with_source(err)),
-        }
+        read_lite3_response(
+            request_result(response)?.into_reader(),
+            MAX_REMOTE_RESPONSE_BYTES,
+        )
     }
 
     pub fn tail(&self, options: TailOptions) -> ApiResult<RemoteTail> {
-        let mut url = build_url(&self.base_url, &["v0", "pools", &self.pool, "tail"])?;
+        Ok(RemoteTail {
+            reader: Some(self.open_tail("tail", "application/json", options)?),
+        })
+    }
+
+    pub fn tail_lite3(&self, options: TailOptions) -> ApiResult<RemoteLite3Tail> {
+        if options.gap_policy == GapPolicy::Error {
+            return Err(Error::new(ErrorKind::Usage).with_message(
+                "remote Lite3 tails do not support fail-closed retention gaps because the stream has no error frame",
+            ));
+        }
+        Ok(RemoteLite3Tail {
+            reader: Some(self.open_tail(
+                "tail_lite3",
+                "application/x-plasmite-lite3-stream",
+                options,
+            )?),
+        })
+    }
+
+    fn open_tail(&self, route: &str, accept: &str, options: TailOptions) -> ApiResult<TailReader> {
+        let mut url = build_url(&self.base_url, &["v0", "pools", &self.pool, route])?;
         {
             let mut pairs = url.query_pairs_mut();
             if let Some(since) = options.since_seq {
@@ -589,45 +570,13 @@ impl RemotePool {
             }
         }
 
+        // Streaming requests use the server's tail lifetime instead of a client deadline.
         let response = self
             .client
-            .request_stream(&url)
+            .open("GET", &url)
+            .and_then(|request| request_result(request.set("Accept", accept).call()))
             .map_err(|err| err.with_path(self.pool.clone()))?;
-        Ok(RemoteTail {
-            reader: Some(BufReader::new(response.into_reader())),
-        })
-    }
-
-    pub fn tail_lite3(&self, options: TailOptions) -> ApiResult<RemoteLite3Tail> {
-        if options.gap_policy == GapPolicy::Error {
-            return Err(Error::new(ErrorKind::Usage).with_message(
-                "remote Lite3 tails do not support fail-closed retention gaps because the stream has no error frame",
-            ));
-        }
-        let mut url = build_url(&self.base_url, &["v0", "pools", &self.pool, "tail_lite3"])?;
-        {
-            let mut pairs = url.query_pairs_mut();
-            if let Some(since) = options.since_seq {
-                pairs.append_pair("since_seq", &since.to_string());
-            }
-            if let Some(max) = options.max_messages {
-                pairs.append_pair("max", &max.to_string());
-            }
-            if let Some(timeout) = options.timeout {
-                pairs.append_pair("timeout_ms", &timeout.as_millis().to_string());
-            }
-            for tag in &options.tags {
-                pairs.append_pair("tag", tag);
-            }
-        }
-
-        let response = self
-            .client
-            .request_stream_lite3(&url)
-            .map_err(|err| err.with_path(self.pool.clone()))?;
-        Ok(RemoteLite3Tail {
-            reader: Some(BufReader::new(response.into_reader())),
-        })
+        Ok(BufReader::new(response.into_reader()))
     }
 }
 
@@ -680,14 +629,16 @@ impl RemoteLite3Tail {
             let Some(reader) = self.reader.as_mut() else {
                 return Ok(None);
             };
-            let mut header = [0u8; 20];
+            let mut header = [0; LITE3_FRAME_HEADER_LEN];
             if !read_exact_or_eof(reader, &mut header)? {
                 return Ok(None);
             }
-            let seq = u64::from_be_bytes(header[0..8].try_into().expect("seq header"));
-            let timestamp_ns =
-                u64::from_be_bytes(header[8..16].try_into().expect("timestamp header"));
-            let len = u32::from_be_bytes(header[16..20].try_into().expect("len header")) as usize;
+            let Lite3FrameHeader {
+                seq,
+                timestamp_ns,
+                payload_len,
+            } = Lite3FrameHeader::decode(header);
+            let len = payload_len as usize;
             if len > MAX_REMOTE_RESPONSE_BYTES {
                 return Err(Error::new(ErrorKind::Io)
                     .with_message("lite3 frame exceeded maximum response size"));
@@ -875,10 +826,7 @@ fn read_lite3_response(reader: impl Read, max_bytes: usize) -> ApiResult<Vec<u8>
     Ok(out)
 }
 
-fn read_jsonl_line(
-    reader: &mut Option<BufReader<Box<dyn Read + Send + Sync>>>,
-    max_bytes: usize,
-) -> ApiResult<Option<String>> {
+fn read_jsonl_line(reader: &mut Option<TailReader>, max_bytes: usize) -> ApiResult<Option<String>> {
     let Some(stream) = reader.as_mut() else {
         return Ok(None);
     };
@@ -905,6 +853,15 @@ fn read_jsonl_line(
         *reader = None;
     }
     result
+}
+
+fn request_result(response: Result<ureq::Response, ureq::Error>) -> ApiResult<ureq::Response> {
+    response.map_err(|err| match err {
+        ureq::Error::Status(code, response) => parse_error_response(code, response),
+        ureq::Error::Transport(err) => Error::new(ErrorKind::Io)
+            .with_message("request failed")
+            .with_source(err),
+    })
 }
 
 fn parse_error_response(status: u16, response: ureq::Response) -> Error {
@@ -1056,8 +1013,8 @@ fn durability_to_str(durability: Durability) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        RemoteClient, RemoteLite3Tail, RemoteTail, extract_pool_from_url, normalize_base_url,
-        parse_error_kind, parse_pool_uri, read_jsonl_line, read_lite3_response,
+        RemoteClient, RemoteLite3Tail, RemoteTail, TailReader, extract_pool_from_url,
+        normalize_base_url, parse_error_kind, parse_pool_uri, read_jsonl_line, read_lite3_response,
     };
     use crate::api::PoolRef;
     use crate::core::error::ErrorKind;
@@ -1122,9 +1079,9 @@ mod tests {
 
     #[test]
     fn jsonl_line_reader_enforces_limit() {
-        let mut reader: Option<BufReader<Box<dyn Read + Send + Sync>>> = Some(BufReader::new(
-            Box::new(Cursor::new(b"123\n1234\n".to_vec())),
-        ));
+        let mut reader: Option<TailReader> = Some(BufReader::new(Box::new(Cursor::new(
+            b"123\n1234\n".to_vec(),
+        ))));
         assert_eq!(
             read_jsonl_line(&mut reader, 4).expect("line"),
             Some("123\n".into())

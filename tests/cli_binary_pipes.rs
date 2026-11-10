@@ -132,6 +132,11 @@ fn framed_fetch_matches_local_and_http_and_truncation_keeps_prior_appends() {
     assert!(remote.status.success());
     assert_eq!(local.stdout, remote.stdout);
     assert_eq!(&local.stdout[..4], b"PLS1");
+    let stored = source.get_lite3(1).unwrap();
+    assert_eq!(&local.stdout[4..12], &1u64.to_be_bytes());
+    assert_eq!(&local.stdout[12..20], &stored.timestamp_ns.to_be_bytes());
+    assert_eq!(&local.stdout[20..24], &(payload.len() as u32).to_be_bytes());
+    assert_eq!(&local.stdout[24..], payload.as_slice());
     let mut truncated = local.stdout.clone();
     truncated.extend_from_slice(&[0, 0]); // The next frame's header ends early.
     let mut feed = KillOnDrop(

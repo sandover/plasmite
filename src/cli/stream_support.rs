@@ -119,6 +119,35 @@ pub(crate) fn follow_should_stop(stop: Option<&Arc<AtomicBool>>) -> bool {
     stop.is_some_and(|flag| flag.load(Ordering::Acquire))
 }
 
+// The timeout measures time without successful output, across transport waits.
+struct FollowDeadline {
+    timeout: Option<Duration>,
+    deadline: Option<Instant>,
+}
+
+impl FollowDeadline {
+    fn new(timeout: Option<Duration>) -> Self {
+        Self {
+            timeout,
+            deadline: timeout.map(|duration| Instant::now() + duration),
+        }
+    }
+
+    fn expired(&self) -> bool {
+        self.deadline.is_some_and(|at| Instant::now() >= at)
+    }
+
+    fn limit_wait(&self, max_wait: Duration) -> Duration {
+        self.deadline.map_or(max_wait, |at| {
+            at.saturating_duration_since(Instant::now()).min(max_wait)
+        })
+    }
+
+    fn emitted(&mut self) {
+        *self = Self::new(self.timeout);
+    }
+}
+
 // Sequence bounds and relative time use one start snapshot. Tail selects retained
 // frames, not matching frames; all selection predicates run after that selection.
 fn history_start(oldest: u64, newest: u64, cfg: &FollowConfig) -> u64 {
@@ -318,7 +347,7 @@ pub(crate) fn follow_remote(
     if cfg.no_follow && expected > upper {
         return Ok(drops.finish(0));
     }
-    let mut deadline = cfg.timeout.map(|duration| Instant::now() + duration);
+    let mut deadline = FollowDeadline::new(cfg.timeout);
     let mut remote_wait_ms = 100;
     loop {
         if follow_should_stop(cfg.stop.as_ref()) {
@@ -327,7 +356,7 @@ pub(crate) fn follow_remote(
         if cfg.no_follow && expected > upper {
             return Ok(drops.finish(0));
         }
-        if deadline.is_some_and(|at| Instant::now() >= at) {
+        if deadline.expired() {
             return Ok(drops.finish(124));
         }
         let mut options = TailOptions::new();
@@ -335,18 +364,8 @@ pub(crate) fn follow_remote(
         // Finite reads and cancellable duplex sessions use short server waits
         // so they can observe retention/cancellation without another message.
         // An ordinary unbounded follow uses the server's streaming lifetime.
-        options.timeout = if cfg.no_follow || cfg.stop.is_some() || deadline.is_some() {
-            Some(
-                deadline
-                    .map(|at| {
-                        at.saturating_duration_since(Instant::now())
-                            .min(Duration::from_millis(remote_wait_ms))
-                    })
-                    .unwrap_or(Duration::from_millis(remote_wait_ms)),
-            )
-        } else {
-            None
-        };
+        options.timeout = (cfg.no_follow || cfg.stop.is_some() || cfg.timeout.is_some())
+            .then(|| deadline.limit_wait(Duration::from_millis(remote_wait_ms)));
         if cfg.no_follow {
             options.max_messages = Some(
                 usize::try_from(upper.saturating_sub(expected).saturating_add(1))
@@ -411,7 +430,7 @@ pub(crate) fn follow_remote(
             if matches {
                 // Receiving a matching line after the deadline must not reset
                 // the timer, even if the transport buffered or delayed it.
-                if deadline.is_some_and(|at| Instant::now() >= at) {
+                if deadline.expired() {
                     return Ok(drops.finish(124));
                 }
                 if let Some(frame) = frame {
@@ -424,7 +443,7 @@ pub(crate) fn follow_remote(
                 } else if let Some(value) = value {
                     emit_message(value, cfg.output_mode, cfg.color_mode)?;
                 }
-                deadline = cfg.timeout.map(|duration| Instant::now() + duration);
+                deadline.emitted();
                 if cfg.one {
                     return Ok(drops.finish(0));
                 }
@@ -432,7 +451,7 @@ pub(crate) fn follow_remote(
             if reached_end {
                 return Ok(drops.finish(0));
             }
-            if deadline.is_some_and(|at| Instant::now() >= at) {
+            if deadline.expired() {
                 return Ok(drops.finish(124));
             }
         }
@@ -478,7 +497,7 @@ pub(crate) fn follow_udp(
         start,
         live: !cfg.no_follow,
     })?;
-    let mut deadline = cfg.timeout.map(|duration| Instant::now() + duration);
+    let mut deadline = FollowDeadline::new(cfg.timeout);
     let mut had_gap = false;
     let mut retention_gap = false;
     loop {
@@ -486,15 +505,10 @@ pub(crate) fn follow_udp(
             follow.close();
             return Ok(RunOutcome::with_code(0));
         }
-        if deadline.is_some_and(|at| Instant::now() >= at) {
+        if deadline.expired() {
             return Ok(RunOutcome::with_code(124));
         }
-        let wait = deadline
-            .map(|at| {
-                at.saturating_duration_since(Instant::now())
-                    .min(Duration::from_millis(50))
-            })
-            .unwrap_or(Duration::from_millis(50));
+        let wait = deadline.limit_wait(Duration::from_millis(50));
         let event = follow.next_event_timeout(wait)?;
         let Some(event) = event else {
             if follow.is_finished() {
@@ -555,7 +569,7 @@ pub(crate) fn follow_udp(
                     None => cfg.since_ns.is_none_or(|since| frame.timestamp_ns >= since),
                 };
                 if matches {
-                    if deadline.is_some_and(|at| Instant::now() >= at) {
+                    if deadline.expired() {
                         return Ok(RunOutcome::with_code(124));
                     }
                     if cfg.output_mode.is_binary() {
@@ -572,7 +586,7 @@ pub(crate) fn follow_udp(
                             cfg.color_mode,
                         )?;
                     }
-                    deadline = cfg.timeout.map(|duration| Instant::now() + duration);
+                    deadline.emitted();
                     if cfg.one {
                         return Ok(RunOutcome::with_code(0));
                     }
@@ -603,7 +617,7 @@ pub(crate) fn follow_pool(
     let finite = cfg.no_follow || cfg.replay_speed.is_some();
     let mut previous_timestamp = None::<u64>;
     let mut drops = DropReporter::new(&cfg, pool_ref, pool_path.display().to_string());
-    let mut deadline = cfg.timeout.map(|duration| Instant::now() + duration);
+    let mut deadline = FollowDeadline::new(cfg.timeout);
     let mut notify_handle = if cfg.notify {
         notify::open_for_path(pool_path)
     } else {
@@ -614,7 +628,7 @@ pub(crate) fn follow_pool(
         if follow_should_stop(cfg.stop.as_ref()) || (finite && expected > upper) {
             return Ok(drops.finish(0));
         }
-        if deadline.is_some_and(|at| Instant::now() >= at) {
+        if deadline.expired() {
             return Ok(drops.finish(124));
         }
         match cursor.next(pool)? {
@@ -654,21 +668,18 @@ pub(crate) fn follow_pool(
                             if follow_should_stop(cfg.stop.as_ref()) {
                                 return Ok(drops.finish(0));
                             }
-                            if deadline.is_some_and(|at| Instant::now() >= at) {
+                            if deadline.expired() {
                                 return Ok(drops.finish(124));
                             }
                             let wait = until
                                 .saturating_duration_since(Instant::now())
                                 .min(Duration::from_millis(50));
-                            let wait = deadline
-                                .map(|at| at.saturating_duration_since(Instant::now()).min(wait))
-                                .unwrap_or(wait);
-                            std::thread::sleep(wait);
+                            std::thread::sleep(deadline.limit_wait(wait));
                         }
                     }
                     // A playback delay may finish on the same wake-up that
                     // crosses the output deadline; check before emitting.
-                    if deadline.is_some_and(|at| Instant::now() >= at) {
+                    if deadline.expired() {
                         return Ok(drops.finish(124));
                     }
                     if follow_should_stop(cfg.stop.as_ref()) {
@@ -689,7 +700,7 @@ pub(crate) fn follow_pool(
                         )?;
                     }
                     previous_timestamp = Some(frame.timestamp_ns);
-                    deadline = cfg.timeout.map(|duration| Instant::now() + duration);
+                    deadline.emitted();
                     if cfg.one {
                         return Ok(drops.finish(0));
                     }
@@ -722,9 +733,7 @@ pub(crate) fn follow_pool(
                     return Ok(drops.finish(0));
                 }
                 drops.flush(false);
-                let wait = deadline
-                    .map(|at| at.saturating_duration_since(Instant::now()).min(backoff))
-                    .unwrap_or(backoff);
+                let wait = deadline.limit_wait(backoff);
                 let waited = notify_handle.as_mut().map(|handle| handle.wait(wait));
                 if matches!(waited, None | Some(NotifyWait::Unavailable)) {
                     notify_handle = None;

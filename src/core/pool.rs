@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use fs2::FileExt;
 use libc::{EACCES, EPERM};
 use memmap2::MmapMut;
 
@@ -546,7 +545,7 @@ impl Pool {
         let actual_size = metadata.len();
 
         validate_mapped_size(actual_size).map_err(|err| err.with_path(&path))?;
-        FileExt::lock_shared(&file).map_err(|err| {
+        file.lock_shared().map_err(|err| {
             Error::new(lock_error_kind(&err))
                 .with_path(&path)
                 .with_source(err)
@@ -560,7 +559,7 @@ impl Pool {
             };
             Ok::<_, Error>((header, mmap))
         })();
-        let unlock = FileExt::unlock(&file).map_err(|err| {
+        let unlock = file.unlock().map_err(|err| {
             Error::new(lock_error_kind(&err))
                 .with_path(&path)
                 .with_source(err)
@@ -623,7 +622,7 @@ impl Pool {
         let snapshot = self.snapshot_lock.lock().map_err(|_| {
             Error::new(ErrorKind::Internal).with_message("pool snapshot lock is unavailable")
         })?;
-        FileExt::lock_shared(&self.file).map_err(|err| {
+        self.file.lock_shared().map_err(|err| {
             Error::new(lock_error_kind(&err))
                 .with_path(&self.path)
                 .with_source(err)
@@ -1029,13 +1028,13 @@ pub(crate) struct ReadLock<'a> {
 
 impl Drop for ReadLock<'_> {
     fn drop(&mut self) {
-        let _ = FileExt::unlock(self.file);
+        let _ = self.file.unlock();
     }
 }
 
 impl Drop for AppendLock {
     fn drop(&mut self) {
-        let _ = FileExt::unlock(&self.file);
+        let _ = self.file.unlock();
     }
 }
 
@@ -1111,7 +1110,7 @@ fn require_identity_matches(same: bool, path: &Path) -> Result<(), Error> {
 }
 
 fn lock_for_append(file: File, path: &Path) -> Result<AppendLock, Error> {
-    file.lock_exclusive().map_err(|err| {
+    file.lock().map_err(|err| {
         Error::new(lock_error_kind(&err))
             .with_path(path)
             .with_source(err)
