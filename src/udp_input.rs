@@ -258,10 +258,10 @@ fn follow_worker(
     sub: Arc<Subscription>,
 ) -> Key {
     let result = follow_pool(&socket, &client, key, &sub);
-    if let Err(err) = result {
-        if sub.active() {
-            failure(&socket, key, &err);
-        }
+    if let Err(err) = result
+        && sub.active()
+    {
+        failure(&socket, key, &err);
     }
     key
 }
@@ -293,18 +293,8 @@ fn follow_pool(
         if sub.renewal_requested.swap(false, Ordering::AcqRel) {
             reply(socket, key, wire::PROGRESS, &progress);
         }
-        if !sub.selection.live && progress.next_seq > upper {
-            progress.terminal = true;
-            reply(socket, key, wire::PROGRESS, &progress);
-            // Retain only terminal metadata; the opened pool remains identity-checked until close/expiry.
-            while sub.active() {
-                pool.check_current_path()?;
-                if sub.renewal_requested.swap(false, Ordering::AcqRel) {
-                    reply(socket, key, wire::PROGRESS, &progress);
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            return Ok(());
+        if progress.end_seq.is_some_and(|end| progress.next_seq > end) {
+            return reply_with_terminal_progress(socket, &pool, key, sub, progress);
         }
         let next = match pending.take() {
             Some(frame) => CursorResult::Message(frame),
@@ -389,6 +379,26 @@ fn follow_pool(
                 }
             }
         }
+    }
+    Ok(())
+}
+
+fn reply_with_terminal_progress(
+    socket: &std::net::UdpSocket,
+    pool: &Pool,
+    key: Key,
+    sub: &Subscription,
+    mut progress: wire::Progress,
+) -> Result<(), Error> {
+    progress.terminal = true;
+    reply(socket, key, wire::PROGRESS, &progress);
+    // A renewal can recover a lost completion notice while the same pool exists.
+    while sub.active() {
+        pool.check_current_path()?;
+        if sub.renewal_requested.swap(false, Ordering::AcqRel) {
+            reply(socket, key, wire::PROGRESS, &progress);
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
     Ok(())
 }
@@ -505,14 +515,14 @@ pub(crate) async fn run(
             continue;
         }
         let Some(cookie) = request.cookie else {
-            if length >= 256 {
-                if let Some(cookie) = control.cookie(key, &selection) {
-                    let body = wire::Challenge { cookie };
-                    if let Some(response) = wire::control(wire::CHALLENGE, id, &body)
-                        .filter(|packet| packet.len() <= length)
-                    {
-                        let _ = outgoing.send_to(&response, source);
-                    }
+            if length >= 256
+                && let Some(cookie) = control.cookie(key, &selection)
+            {
+                let body = wire::Challenge { cookie };
+                if let Some(response) = wire::control(wire::CHALLENGE, id, &body)
+                    .filter(|packet| packet.len() <= length)
+                {
+                    let _ = outgoing.send_to(&response, source);
                 }
             }
             continue;

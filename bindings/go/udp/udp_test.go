@@ -20,6 +20,21 @@ import (
 
 const testPoolSizeBytes uint64 = 1024 * 1024
 
+// Next calls Err after it holds the read lock and takes the native pointer.
+type observedContext struct {
+	context.Context
+	entered chan struct{}
+}
+
+func (c observedContext) Err() error {
+	select {
+	case <-c.entered:
+	default:
+		close(c.entered)
+	}
+	return c.Context.Err()
+}
+
 func TestSDKSendsJSONAndOriginalLite3ThroughServer(t *testing.T) {
 	repoRoot := repositoryRoot(t)
 	binary := os.Getenv("PLASMITE_BIN")
@@ -207,12 +222,17 @@ func TestSDKSendsJSONAndOriginalLite3ThroughServer(t *testing.T) {
 	}
 	ctx, cancelWait := context.WithCancel(context.Background())
 	defer cancelWait()
+	observed := observedContext{ctx, make(chan struct{})}
 	done := make(chan error, 1)
 	go func() {
-		_, err := cancelFollow.Next(ctx)
+		_, err := cancelFollow.Next(observed)
 		done <- err
 	}()
-	time.Sleep(20 * time.Millisecond)
+	select {
+	case <-observed.entered:
+	case <-time.After(time.Second):
+		t.Fatal("follow did not start reading")
+	}
 	cancelWait()
 	select {
 	case err := <-done:
@@ -222,6 +242,59 @@ func TestSDKSendsJSONAndOriginalLite3ThroughServer(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("canceled wait did not return promptly")
 	}
+
+	t.Run("concurrent close cancels a read and leaves the handle closed", func(t *testing.T) {
+		follow, err := udpPool.Follow(NewFollowOptions())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer follow.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if event, err := follow.Next(ctx); err != nil {
+			t.Fatalf("read opening progress: %v", err)
+		} else if _, ok := event.(*api.UDPProgress); !ok {
+			t.Fatalf("expected opening progress, got %#v", event)
+		}
+
+		wait := observedContext{ctx, make(chan struct{})}
+		read := make(chan error, 1)
+		go func() {
+			_, err := follow.Next(wait)
+			read <- err
+		}()
+		select {
+		case <-wait.entered:
+		case <-ctx.Done():
+			t.Fatal("follow did not start reading")
+		}
+		closed := make(chan struct{}, 2)
+		for range 2 {
+			go func() {
+				follow.Close()
+				closed <- struct{}{}
+			}()
+		}
+		select {
+		case err := <-read:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("close interrupted read with %v, want context.Canceled", err)
+			}
+		case <-ctx.Done():
+			t.Fatal("close did not interrupt the read")
+		}
+		for range 2 {
+			select {
+			case <-closed:
+			case <-ctx.Done():
+				t.Fatal("close did not return")
+			}
+		}
+		follow.Cancel()
+		if _, err := follow.Next(context.Background()); !errors.Is(err, api.ErrClosed) {
+			t.Fatalf("read after close returned %v, want ErrClosed", err)
+		}
+	})
 }
 
 func nextFrame(t *testing.T, follow *Follow) *api.UDPFrame {

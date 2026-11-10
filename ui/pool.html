@@ -355,7 +355,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
     <script>
       (() => {
         const $ = (id) => document.getElementById(id);
-        const { parseJSON, sequence, cursor, tailStart, messageJSON, loginURL } = PlasmiteUI;
+        const { parseJSON, readEvents, followEvents, sequence, cursor, tailStart, messageJSON, loginURL } = PlasmiteUI;
         const poolPath = location.pathname.slice("/ui/pools/".length);
         const poolName = (() => { try { return decodeURIComponent(poolPath); } catch (_) { return poolPath; } })();
         const requested = Number(new URLSearchParams(location.search).get("n") || "400");
@@ -1022,22 +1022,6 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           $("append").hidden = true;
         }
 
-        function parseEvents(buffer) {
-          const blocks = buffer.split("\n\n");
-          const rest = blocks.pop() || "";
-          const events = [];
-          for (const block of blocks) {
-            let name = "";
-            const data = [];
-            for (const line of block.split("\n")) {
-              if (line.startsWith("event:")) name = line.slice(6).trim();
-              if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
-            }
-            if (data.length) events.push({ name, data: parseJSON(data.join("\n")) });
-          }
-          return { events, rest };
-        }
-
         // Earlier messages: the batch before the oldest one shown, so a reader can go back
         // through everything the ring still holds.
         function oldestHeld() {
@@ -1077,22 +1061,13 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
               { cache: "no-store", signal: controller.signal });
             if (response.status === 401) { toLogin(); return; }
             if (!response.ok || !response.body) throw new Error("Earlier messages failed (" + response.status + ")");
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = "";
-            reading: for (;;) {
-              const part = await reader.read();
-              if (part.done) break;
-              const parsed = parseEvents(buffer + decoder.decode(part.value, { stream: true }).replaceAll("\r\n", "\n"));
-              buffer = parsed.rest;
-              for (const event of parsed.events) {
-                if (event.name === "error") throw new Error(event.data.error?.message || "Earlier messages were overwritten");
-                if (event.name !== "message") continue;
-                if (event.data.seq >= first.seq) break reading;
-                older.push(fromRaw(event.data));
-                if (older.length >= pageSize) break reading;
-              }
-            }
+            await readEvents(response.body, event => {
+              if (event.name === "error") throw new Error(event.data.error?.message || "Earlier messages were overwritten");
+              if (event.name !== "message") return;
+              if (event.data.seq >= first.seq) return false;
+              older.push(fromRaw(event.data));
+              return older.length < pageSize;
+            }, controller.signal);
             if (!older.length) showNotice("No earlier messages arrived. They may have been overwritten; try Load earlier again.");
           } catch (error) {
             showNotice(controller.signal.aborted ? "Loading earlier messages timed out. Try Load earlier again." :
@@ -1119,36 +1094,28 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
 
         // Follows the pool from the next unseen message, reconnecting after any drop.
         async function followPool() {
-          for (;;) {
-            if (state.nextSeq != null && cursor(state.nextSeq) == null) return;
-            try {
+          if (state.nextSeq != null && cursor(state.nextSeq) == null) return;
+          await followEvents({
+            retryMs,
+            url() {
               const query = new URLSearchParams({ gap_policy: "continue" });
               if (state.nextSeq != null) query.set("since_seq", cursor(state.nextSeq));
-              const response = await fetch("/v0/ui/pools/" + encodeURIComponent(poolName) + "/events?" + query, { cache: "no-store" });
-              if (response.status === 401) { toLogin(); return; }
-              if (response.status === 404) { showMissing(); return; }
-              if (!response.ok || !response.body) throw new Error("Stream failed (" + response.status + ")");
-              setLive(true);
-              const reader = response.body.getReader();
-              const decoder = new TextDecoder();
-              let buffer = "";
-              for (;;) {
-                const part = await reader.read();
-                if (part.done) break;
-                const parsed = parseEvents(buffer + decoder.decode(part.value, { stream: true }).replaceAll("\r\n", "\n"));
-                buffer = parsed.rest;
-                for (const event of parsed.events) {
-                  if (event.name === "error") throw new Error("Stream error");
-                  if (event.name === "message") {
-                    addMessage(event.data);
-                    if (cursor(state.nextSeq) == null) { await reader.cancel(); return; }
-                  }
-                }
+              return "/v0/ui/pools/" + encodeURIComponent(poolName) + "/events?" + query;
+            },
+            onResponse(response) {
+              if (response.status === 401) { toLogin(); return false; }
+              if (response.status === 404) { showMissing(); return false; }
+              if (response.ok && response.body) setLive(true);
+            },
+            onEvent(event) {
+              if (event.name === "error") throw new Error("Stream error");
+              if (event.name === "message") {
+                addMessage(event.data);
+                return cursor(state.nextSeq) != null;
               }
-            } catch (_) { /* Reconnect below. */ }
-            setLive(false);
-            await new Promise((resolve) => setTimeout(resolve, retryMs));
-          }
+            },
+            onDrop() { setLive(false); },
+          });
         }
 
         // Page events.

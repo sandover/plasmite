@@ -45,10 +45,12 @@ impl Server {
         fs::create_dir_all(&home)?;
         let client = LocalClient::new().with_pool_dir(&pools);
         client.create_pool(&PoolRef::name("events"), PoolOptions::new(4 * 1024 * 1024))?;
-        let held = UdpSocket::bind(udp_bind)?;
-        let address = held.local_addr()?;
-        drop(held);
+        if udp_bind.is_ipv6() {
+            // Preserve the OS error so the IPv6 test can skip hosts without IPv6.
+            UdpSocket::bind(udp_bind)?;
+        }
         let ready = temp.path().join("ready");
+        let log = temp.path().join("server.stderr");
         let mut command = Command::new(env!("CARGO_BIN_EXE_plasmite"));
         command
             .env("HOME", &home)
@@ -63,11 +65,11 @@ impl Server {
                 "--remote-bind",
                 "127.0.0.1:0",
             ])
-            .arg(format!("--udp={address}"))
+            .arg(format!("--udp={udp_bind}"))
             .arg("--max-tail-concurrency")
             .arg(capacity.to_string())
             .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stderr(fs::File::create(&log)?);
         if follow {
             command.arg("--udp-follow");
         }
@@ -76,17 +78,26 @@ impl Server {
             child,
             _temp: temp,
             pools,
-            address,
+            address: udp_bind,
         };
         let deadline = Instant::now() + Duration::from_secs(10);
         while !ready.exists() {
             assert!(
                 server.child.try_wait()?.is_none(),
-                "server exited before readiness"
+                "server exited before readiness: {}",
+                fs::read_to_string(&log)?
             );
             assert!(Instant::now() < deadline, "server startup timed out");
             thread::sleep(Duration::from_millis(10));
         }
+        // Read the port the server bound rather than reserving and releasing
+        // one before startup, when another parallel test could acquire it.
+        let output = fs::read_to_string(log)?;
+        server.address = output
+            .lines()
+            .find_map(|line| line.strip_prefix("UDP input: ")?.split_whitespace().next())
+            .ok_or("server did not report its UDP address")?
+            .parse()?;
         Ok(server)
     }
     fn local(&self) -> LocalClient {
@@ -414,6 +425,98 @@ fn replacing_a_pool_ends_the_old_stream_instead_of_resetting_sequence() -> TestR
     }
     Ok(())
 }
+
+#[test]
+fn completed_follow_rejects_pool_replacement_before_answering_renewal() -> TestResult {
+    let server = Server::start(true, 1)?;
+    let socket = raw_socket()?;
+    let id = [21; 16];
+    let selection = wire::Selection {
+        pool: "events".into(),
+        start: wire::Start::Last(1),
+        live: false,
+    };
+    let cookie = challenge(&socket, server.address, id, &selection)?;
+    prove(&socket, server.address, id, &selection, cookie)?;
+    let (_, opening) = receive_control(&socket, id, wire::PROGRESS)?;
+    assert!(!wire::decode::<wire::Progress>(&opening).unwrap().terminal);
+    let (_, completion) = receive_control(&socket, id, wire::PROGRESS)?;
+    assert!(
+        wire::decode::<wire::Progress>(&completion)
+            .unwrap()
+            .terminal
+    );
+
+    let old = server.pools.join("events.plasmite");
+    fs::rename(&old, server.pools.join("old.plasmite"))?;
+    server
+        .local()
+        .create_pool(&PoolRef::name("events"), PoolOptions::new(1024 * 1024))?;
+    let renewal = wire::control(
+        wire::SUBSCRIBE,
+        id,
+        &wire::Subscribe {
+            selection: None,
+            cookie: None,
+        },
+    )
+    .unwrap();
+    socket.send_to(&renewal, server.address)?;
+    let (_, error) = receive_control(&socket, id, wire::ERROR)?;
+    assert_eq!(
+        wire::decode::<wire::Failure>(&error).unwrap().kind,
+        "NotFound"
+    );
+    Ok(())
+}
+
+#[test]
+fn close_during_history_selection_releases_the_subscriber_slot() -> TestResult {
+    let server = Server::start(true, 1)?;
+    server.append(json!({"sample":1}), 1)?;
+    let native = server.local().open_pool(&PoolRef::name("events"))?;
+    let locked = native.append_lock()?;
+    let socket = raw_socket()?;
+    let id = [22; 16];
+    let selection = wire::Selection {
+        pool: "events".into(),
+        start: wire::Start::Since(1),
+        live: true,
+    };
+    let cookie = challenge(&socket, server.address, id, &selection)?;
+    prove(&socket, server.address, id, &selection, cookie)?;
+    // The exclusive lock keeps the worker in history selection while the
+    // listener can still admit requests and see that its one slot is occupied.
+    let udp = server.udp()?;
+    assert_eq!(
+        udp.follow(UdpFollowOptions::new())
+            .err()
+            .expect("occupied slot")
+            .kind(),
+        ErrorKind::Busy
+    );
+    socket.send_to(&wire::header(wire::CLOSE, id), server.address)?;
+    // A response on the same socket puts the close ahead of unlocking the pool.
+    challenge(&socket, server.address, [23; 16], &selection)?;
+    drop(locked);
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match udp.follow(UdpFollowOptions::new()) {
+            Ok(mut stream) => {
+                stream.close();
+                break;
+            }
+            Err(err) if err.kind() == ErrorKind::Busy && Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(20));
+            }
+            Err(err) => return Err(err.into()),
+        }
+    }
+    quiet_for(&socket)?;
+    Ok(())
+}
+
 #[test]
 fn challenge_requires_return_proof_before_reading_and_binds_the_endpoint() -> TestResult {
     let server = Server::start(true, 64)?;

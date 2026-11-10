@@ -34,9 +34,8 @@ use super::output_support::emit_lite3;
 use super::output_support::emit_message;
 use super::output_support::emit_notice;
 use super::output_support::notice_time_now;
-use super::support::decode_payload;
-use super::support::format_ts;
 use super::support::message_from_frame;
+use super::support::message_from_lite3;
 use super::support::message_to_json;
 
 #[derive(Debug, Clone)]
@@ -248,16 +247,6 @@ fn needs_message(cfg: &FollowConfig) -> bool {
         || !cfg.where_predicates.is_empty()
 }
 
-fn message_from_remote_frame(frame: &RemoteLite3Frame) -> Result<Value, Error> {
-    let (meta, data) = decode_payload(&frame.payload)?;
-    Ok(json!({
-        "seq": frame.seq,
-        "time": format_ts(frame.timestamp_ns)?,
-        "meta": meta,
-        "data": data,
-    }))
-}
-
 enum RemoteStream {
     Json(RemoteTail),
     Lite3(RemoteLite3Tail),
@@ -400,13 +389,20 @@ pub(crate) fn follow_remote(
             let reached_end = cfg.no_follow && record.seq() == upper;
             expected = record.seq().saturating_add(1);
             let timestamp_ns = record.timestamp_ns(since_ns.is_some())?;
-            let value = if needs_message(cfg) {
-                Some(match &record {
-                    RemoteRecord::Json(message) => message_to_json(message),
-                    RemoteRecord::Lite3(frame) => message_from_remote_frame(frame)?,
-                })
-            } else {
-                None
+            let (value, frame) = match record {
+                RemoteRecord::Json(message) => (Some(message_to_json(message)), None),
+                RemoteRecord::Lite3(frame) => {
+                    let value = if needs_message(cfg) {
+                        Some(message_from_lite3(
+                            frame.seq,
+                            frame.timestamp_ns,
+                            &frame.payload,
+                        )?)
+                    } else {
+                        None
+                    };
+                    (value, Some(frame))
+                }
             };
             let matches = match value.as_ref() {
                 Some(value) => matches_message(cfg, since_ns, timestamp_ns, value)?,
@@ -418,18 +414,15 @@ pub(crate) fn follow_remote(
                 if deadline.is_some_and(|at| Instant::now() >= at) {
                     return Ok(drops.finish(124));
                 }
-                match record {
-                    RemoteRecord::Lite3(frame) => emit_lite3(
+                if let Some(frame) = frame {
+                    emit_lite3(
                         frame.seq,
                         frame.timestamp_ns,
                         &frame.payload,
                         cfg.output_mode,
-                    )?,
-                    RemoteRecord::Json(message) => emit_message(
-                        value.unwrap_or_else(|| message_to_json(&message)),
-                        cfg.output_mode,
-                        cfg.color_mode,
-                    )?,
+                    )?;
+                } else if let Some(value) = value {
+                    emit_message(value, cfg.output_mode, cfg.color_mode)?;
                 }
                 deadline = cfg.timeout.map(|duration| Instant::now() + duration);
                 if cfg.one {
@@ -553,7 +546,7 @@ pub(crate) fn follow_udp(
             }
             UdpEvent::Frame(frame) => {
                 let value = if needs_message(cfg) {
-                    Some(message_to_json(&frame.message()?))
+                    Some(message_to_json(frame.message()?))
                 } else {
                     None
                 };
@@ -645,34 +638,32 @@ pub(crate) fn follow_pool(
                     None => since_ns.is_none_or(|since| frame.timestamp_ns >= since),
                 };
                 if matches {
-                    if let (Some(speed), Some(previous)) = (cfg.replay_speed, previous_timestamp) {
-                        if speed > 0.0 {
-                            let delay_ns =
-                                (frame.timestamp_ns.saturating_sub(previous) as f64 / speed) as u64;
-                            // Bounded waits keep duplex/caller cancellation responsive.
-                            let until = Instant::now()
-                                .checked_add(Duration::from_nanos(delay_ns))
-                                .ok_or_else(|| {
-                                    Error::new(ErrorKind::Usage)
-                                        .with_message("replay delay is too large")
-                                })?;
-                            while Instant::now() < until {
-                                if follow_should_stop(cfg.stop.as_ref()) {
-                                    return Ok(drops.finish(0));
-                                }
-                                if deadline.is_some_and(|at| Instant::now() >= at) {
-                                    return Ok(drops.finish(124));
-                                }
-                                let wait = until
-                                    .saturating_duration_since(Instant::now())
-                                    .min(Duration::from_millis(50));
-                                let wait = deadline
-                                    .map(|at| {
-                                        at.saturating_duration_since(Instant::now()).min(wait)
-                                    })
-                                    .unwrap_or(wait);
-                                std::thread::sleep(wait);
+                    if let (Some(speed), Some(previous)) = (cfg.replay_speed, previous_timestamp)
+                        && speed > 0.0
+                    {
+                        let delay_ns =
+                            (frame.timestamp_ns.saturating_sub(previous) as f64 / speed) as u64;
+                        // Bounded waits keep duplex/caller cancellation responsive.
+                        let until = Instant::now()
+                            .checked_add(Duration::from_nanos(delay_ns))
+                            .ok_or_else(|| {
+                                Error::new(ErrorKind::Usage)
+                                    .with_message("replay delay is too large")
+                            })?;
+                        while Instant::now() < until {
+                            if follow_should_stop(cfg.stop.as_ref()) {
+                                return Ok(drops.finish(0));
                             }
+                            if deadline.is_some_and(|at| Instant::now() >= at) {
+                                return Ok(drops.finish(124));
+                            }
+                            let wait = until
+                                .saturating_duration_since(Instant::now())
+                                .min(Duration::from_millis(50));
+                            let wait = deadline
+                                .map(|at| at.saturating_duration_since(Instant::now()).min(wait))
+                                .unwrap_or(wait);
+                            std::thread::sleep(wait);
                         }
                     }
                     // A playback delay may finish on the same wake-up that

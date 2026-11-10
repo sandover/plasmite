@@ -188,6 +188,9 @@ jobs:
           cache-dependency-glob: bindings/python/pyproject.toml
           cache-local-path: ${{ runner.temp }}/uv-cache
           cache-suffix: ${{ matrix.target }}
+      - name: Check release publication portability
+        shell: bash
+        run: bash scripts/test_homebrew_publication.sh
       - run: cd bindings/node && npm ci
       - name: Build SDK artifacts for packaging smoke
         shell: bash
@@ -231,7 +234,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.88.0
+          toolchain: 1.99.1
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Install SDK smoke tools
@@ -451,11 +454,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.88.0
+          toolchain: 1.99.1
       - uses: taiki-e/install-action@v2
         with:
           tool: just
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
+      - run: cargo fetch --locked
       - run: just audit

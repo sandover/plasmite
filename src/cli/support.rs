@@ -12,7 +12,6 @@ use plasmite::api::Lite3DocRef;
 use plasmite::api::RemoteClient;
 use plasmite::api::lite3;
 use serde_json::Value;
-use serde_json::json;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -490,38 +489,19 @@ pub(crate) fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
     })
 }
 
-pub(crate) fn message_to_json(message: &plasmite::api::Message) -> Value {
-    serde_json::to_value(MessageWire::new(
-        message.seq,
-        message.time.clone(),
-        message.meta.tags.clone(),
-        message.data.clone(),
-    ))
-    .expect("message wire data is serializable")
+pub(crate) fn message_to_json(message: plasmite::api::Message) -> Value {
+    MessageWire::new(message.seq, message.time, message.meta.tags, message.data).into_json()
 }
 
 pub(crate) fn message_from_frame(frame: &FrameRef) -> Result<Value, Error> {
-    let (meta, data) = decode_payload(&frame.payload)?;
-    let tags = serde_json::from_value(
-        meta.get("tags")
-            .cloned()
-            .ok_or_else(|| Error::new(ErrorKind::Corrupt).with_message("missing meta.tags"))?,
-    )
-    .map_err(|err| {
-        Error::new(ErrorKind::Corrupt)
-            .with_message("meta.tags is not an array of strings")
-            .with_source(err)
-    })?;
-    Ok(serde_json::to_value(MessageWire::new(
-        frame.seq,
-        format_ts(frame.timestamp_ns)?,
-        tags,
-        data,
-    ))
-    .expect("message wire data is serializable"))
+    message_from_lite3(frame.seq, frame.timestamp_ns, &frame.payload)
 }
 
-pub(crate) fn decode_payload(payload: &[u8]) -> Result<(Value, Value), Error> {
+pub(crate) fn message_from_lite3(
+    seq: u64,
+    timestamp_ns: u64,
+    payload: &[u8],
+) -> Result<Value, Error> {
     let doc = Lite3DocRef::new(payload);
     let meta_type = doc
         .type_at_key(0, "meta")
@@ -554,8 +534,6 @@ pub(crate) fn decode_payload(payload: &[u8]) -> Result<(Value, Value), Error> {
         })?;
         tags.push(tag);
     }
-    let meta = json!({ "tags": tags });
-
     let data_ofs = doc
         .key_offset("data")
         .map_err(|err| err.with_message("missing data"))?;
@@ -565,12 +543,13 @@ pub(crate) fn decode_payload(payload: &[u8]) -> Result<(Value, Value), Error> {
             .with_message("invalid payload json")
             .with_source(err)
     })?;
-    Ok((meta, data))
+    Ok(MessageWire::new(seq, format_ts(timestamp_ns)?, tags, data).into_json())
 }
 
 #[cfg(test)]
 mod append_retry_tests {
     use super::*;
+    use serde_json::json;
     use std::io;
 
     #[test]

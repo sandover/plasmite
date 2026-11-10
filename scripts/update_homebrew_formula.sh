@@ -9,7 +9,10 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: update_homebrew_formula.sh <version-tag> <homebrew-tap-path> [--build-run-id <id> | --sha256sums <path>]
+usage: update_homebrew_formula.sh <version-tag> <homebrew-tap-path> [--build-run-id <id> | --sha256sums <path>] [--prepare-only]
+
+Normal updates require verified public SDK downloads. --prepare-only renders a
+temporary candidate for rehearsal; never push that candidate before publication.
 
 examples:
   scripts/update_homebrew_formula.sh v0.1.9 ../homebrew-tap
@@ -34,9 +37,14 @@ shift 2
 
 build_run_id=""
 sha256_file=""
+prepare_only=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --prepare-only)
+      prepare_only=true
+      shift
+      ;;
     --build-run-id)
       build_run_id="${2:-}"
       shift 2
@@ -76,8 +84,14 @@ if [[ ! -f "$formula_file" ]]; then
   exit 1
 fi
 
+if [[ "$prepare_only" == true && -e "$tap_path/.git" ]]; then
+  echo 'error: --prepare-only requires a temporary candidate, not a tap Git checkout.' >&2
+  exit 1
+fi
+
 tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT
+candidate=""
+trap 'rm -rf "$tmp_dir"; [[ -z "$candidate" ]] || rm -f "$candidate" "$candidate.bak"' EXIT
 verification_sha_file=""
 
 load_sha_from_file() {
@@ -125,6 +139,14 @@ else
   verification_sha_file="$tmp_dir/sha256sums.txt"
 fi
 
+if [[ "$prepare_only" != true ]]; then
+  "$root_dir/scripts/verify_public_release_assets.sh" "$version_tag" "$verification_sha_file"
+fi
+
+original_formula="$formula_file"
+candidate="$(mktemp "${formula_file}.tmp.XXXXXX")"
+cp -p "$formula_file" "$candidate"
+formula_file="$candidate"
 export version version_tag formula_file
 
 perl -0777 -i.bak -pe '
@@ -153,7 +175,16 @@ rm -f "${formula_file}.bak"
   --sha256sums "$verification_sha_file" \
   --formula-file "$formula_file"
 
-echo "Formula updated successfully: $formula_file"
+if cmp -s "$candidate" "$original_formula"; then
+  echo "Formula already aligned: $original_formula"
+  exit 0
+fi
+mv "$candidate" "$original_formula"
+echo "Formula updated successfully: $original_formula"
+if [[ "$prepare_only" == true ]]; then
+  echo "Rehearsal candidate only; do not push. Rerun without --prepare-only after publication."
+  exit 0
+fi
 echo
 echo "Next steps:"
 echo "  cd ${tap_path}"

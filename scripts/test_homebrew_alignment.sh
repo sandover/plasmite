@@ -33,7 +33,7 @@ mkdir -p "$(dirname "$formula")"
 "$root_dir/scripts/update_homebrew_formula.sh" \
   v9.9.9 \
   "$tap_dir" \
-  --sha256sums "$new_sums" >/dev/null
+  --sha256sums "$new_sums" --prepare-only >/dev/null
 "$root_dir/scripts/verify_homebrew_formula_alignment.sh" \
   --version 9.9.9 \
   --sha256sums "$new_sums" \
@@ -83,7 +83,7 @@ PATH="$fake_bin:$PATH" \
   "$root_dir/scripts/update_homebrew_formula.sh" \
   v9.9.9 \
   "$tap_dir" \
-  --build-run-id 123 >/dev/null
+  --build-run-id 123 --prepare-only >/dev/null
 
 expected_calls="$tmp_dir/expected-gh-calls.txt"
 "$root_dir/scripts/release_channel_targets.sh" homebrew official rust_target |
@@ -98,7 +98,7 @@ if PATH="$fake_bin:$PATH" \
   "$root_dir/scripts/update_homebrew_formula.sh" \
   v9.9.9 \
   "$tap_dir" \
-  --build-run-id 123 >/dev/null 2>&1; then
+  --build-run-id 123 --prepare-only >/dev/null 2>&1; then
   echo "expected a missing Homebrew SDK artifact to fail" >&2
   exit 1
 fi

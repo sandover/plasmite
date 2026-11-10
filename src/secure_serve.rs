@@ -2,7 +2,7 @@
 
 use crate::access_store::AccessStore;
 use crate::cli::args::ServeRunArgs;
-use crate::interface_wire::{ErrorContextWire, ErrorKindWire};
+use crate::interface_wire::ErrorKindWire;
 use crate::serve::{self, ServeConfig};
 use plasmite::api::{Error, ErrorKind};
 use serde::Deserialize;
@@ -122,8 +122,11 @@ struct AdminErrorEnvelope {
 #[derive(Deserialize)]
 struct AdminErrorDetails {
     kind: ErrorKindWire,
-    #[serde(flatten)]
-    context: ErrorContextWire,
+    message: Option<String>,
+    hint: Option<String>,
+    path: Option<String>,
+    seq: Option<u64>,
+    offset: Option<u64>,
 }
 
 fn local_admin_error(err: ureq::Error, transport_message: &str) -> Error {
@@ -136,7 +139,8 @@ fn local_admin_error(err: ureq::Error, transport_message: &str) -> Error {
     if let Ok(body) = response.into_string()
         && let Ok(envelope) = serde_json::from_str::<AdminErrorEnvelope>(&body)
     {
-        let kind = match envelope.error.kind {
+        let details = envelope.error;
+        let kind = match details.kind {
             ErrorKindWire::Internal => ErrorKind::Internal,
             ErrorKindWire::Usage => ErrorKind::Usage,
             ErrorKindWire::NotFound => ErrorKind::NotFound,
@@ -147,21 +151,20 @@ fn local_admin_error(err: ureq::Error, transport_message: &str) -> Error {
             ErrorKindWire::Io => ErrorKind::Io,
             ErrorKindWire::RetentionGap => ErrorKind::RetentionGap,
         };
-        let context = envelope.error.context;
         let mut error = Error::new(kind);
-        if let Some(message) = context.message {
+        if let Some(message) = details.message {
             error = error.with_message(message);
         }
-        if let Some(hint) = context.hint {
+        if let Some(hint) = details.hint {
             error = error.with_hint(hint);
         }
-        if let Some(path) = context.path {
+        if let Some(path) = details.path {
             error = error.with_path(path);
         }
-        if let Some(seq) = context.seq {
+        if let Some(seq) = details.seq {
             error = error.with_seq(seq);
         }
-        if let Some(offset) = context.offset {
+        if let Some(offset) = details.offset {
             error = error.with_offset(offset);
         }
         return error;
@@ -298,13 +301,16 @@ mod admin_error_tests {
         let response = ureq::Response::new(
             400,
             "Bad Request",
-            r#"{"error":{"kind":"Usage","message":"name is required","hint":"Choose a name."}}"#,
+            r#"{"error":{"kind":"Usage","message":"name is required","hint":"Choose a name.","path":"example.plasmite","seq":9,"offset":4096}}"#,
         )
         .unwrap();
         let error = local_admin_error(ureq::Error::Status(400, response), "connection failed");
         assert_eq!(error.kind(), ErrorKind::Usage);
         assert_eq!(error.message(), Some("name is required"));
         assert_eq!(error.hint(), Some("Choose a name."));
+        assert_eq!(error.path(), Some(Path::new("example.plasmite")));
+        assert_eq!(error.seq(), Some(9));
+        assert_eq!(error.offset(), Some(4096));
     }
 
     #[test]

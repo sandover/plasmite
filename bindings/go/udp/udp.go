@@ -67,7 +67,6 @@ type Follow struct {
 	readMu  sync.Mutex
 	ptr     *C.plsm_udp_follow_t
 	closing bool
-	closed  bool
 }
 
 func NewClient(endpoint string) (*Client, error) {
@@ -232,7 +231,7 @@ func (f *Follow) Next(ctx context.Context) (api.UDPEvent, error) {
 	f.readMu.Lock()
 	defer f.readMu.Unlock()
 	f.stateMu.Lock()
-	if f.ptr == nil || f.closing || f.closed {
+	if f.ptr == nil || f.closing {
 		f.stateMu.Unlock()
 		return nil, closedError("UDP follow")
 	}
@@ -280,7 +279,7 @@ func (f *Follow) Cancel() {
 	}
 	f.stateMu.Lock()
 	defer f.stateMu.Unlock()
-	if f.ptr != nil && !f.closed {
+	if f.ptr != nil {
 		C.plsm_udp_follow_cancel(f.ptr)
 	}
 }
@@ -291,7 +290,7 @@ func (f *Follow) Close() {
 	}
 	f.stateMu.Lock()
 	ptr := f.ptr
-	if ptr == nil || f.closed {
+	if ptr == nil {
 		f.stateMu.Unlock()
 		return
 	}
@@ -302,10 +301,9 @@ func (f *Follow) Close() {
 	defer f.readMu.Unlock()
 	f.stateMu.Lock()
 	defer f.stateMu.Unlock()
-	if f.ptr != nil && !f.closed {
+	if f.ptr != nil {
 		C.plsm_udp_follow_close(f.ptr)
 		f.ptr = nil
-		f.closed = true
 	}
 }
 

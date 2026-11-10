@@ -146,10 +146,11 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
                 }
             };
             let outcome = follow_pool(&pool_handle, &args.pool, &path, cfg)?;
-            if outcome.exit_code == 124 && pretty {
-                if let Some(timeout_input) = timeout_input {
-                    emit_follow_timeout_human(timeout_input);
-                }
+            if outcome.exit_code == 124
+                && pretty
+                && let Some(timeout_input) = timeout_input
+            {
+                emit_follow_timeout_human(timeout_input);
             }
             Ok(outcome)
         }
@@ -163,10 +164,11 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
             }
             let client = remote_client(base_url)?;
             let outcome = follow_remote(&client, &pool, &cfg)?;
-            if outcome.exit_code == 124 && pretty {
-                if let Some(timeout_input) = timeout_input {
-                    emit_follow_timeout_human(timeout_input);
-                }
+            if outcome.exit_code == 124
+                && pretty
+                && let Some(timeout_input) = timeout_input
+            {
+                emit_follow_timeout_human(timeout_input);
             }
             Ok(outcome)
         }
@@ -177,10 +179,11 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
                 ));
             }
             let outcome = follow_udp(&endpoint, &pool, &cfg)?;
-            if outcome.exit_code == 124 && pretty {
-                if let Some(timeout_input) = timeout_input {
-                    emit_follow_timeout_human(timeout_input);
-                }
+            if outcome.exit_code == 124
+                && pretty
+                && let Some(timeout_input) = timeout_input
+            {
+                emit_follow_timeout_human(timeout_input);
             }
             Ok(outcome)
         }

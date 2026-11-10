@@ -23,7 +23,7 @@ fn seed(dir: &Path, count: u64, payload_bytes: usize) -> Pool {
 }
 
 fn append(pool: &mut Pool, value: u64, payload_bytes: usize, timestamp: u64) {
-    let tags = if value % 2 == 0 {
+    let tags = if value.is_multiple_of(2) {
         vec!["even".into()]
     } else {
         vec!["odd".into()]
@@ -550,10 +550,10 @@ fn stub_remote_tail_with_bounds(
                 if header == "\r\n" || header.is_empty() {
                     break;
                 }
-                if let Some((name, value)) = header.split_once(':') {
-                    if name.eq_ignore_ascii_case("Content-Length") {
-                        content_length = value.trim().parse::<usize>().expect("content length");
-                    }
+                if let Some((name, value)) = header.split_once(':')
+                    && name.eq_ignore_ascii_case("Content-Length")
+                {
+                    content_length = value.trim().parse::<usize>().expect("content length");
                 }
             }
             assert!(content_length <= 65_536, "bounded fixture request body");

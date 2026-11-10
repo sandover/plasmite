@@ -652,12 +652,14 @@ fn hex(input: &[u8]) -> String {
 }
 
 fn hex_decode(input: &str) -> Option<Vec<u8>> {
-    if input.len() % 2 != 0 {
+    if !input.len().is_multiple_of(2) {
         return None;
     }
     input
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let hi = (pair[0] as char).to_digit(16)?;
             let lo = (pair[1] as char).to_digit(16)?;

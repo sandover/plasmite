@@ -80,8 +80,76 @@
     return value;
   }
 
+  function parseEvents(buffer) {
+    const blocks = buffer.replace(/\r\n/g, "\n").split("\n\n");
+    const rest = blocks.pop() || "";
+    const events = [];
+    for (const block of blocks) {
+      let name = "";
+      const data = [];
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) name = line.slice(6).trim();
+        if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+      }
+      if (data.length) events.push({ name, data: parseJSON(data.join("\n")) });
+    }
+    return { events, rest };
+  }
+
+  async function readEvents(body, onEvent, signal) {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      while (!signal?.aborted) {
+        const part = await reader.read();
+        if (part.done) return true;
+        const parsed = parseEvents(buffer + decoder.decode(part.value, { stream: true }));
+        buffer = parsed.rest;
+        for (const event of parsed.events) {
+          if (signal?.aborted || onEvent(event) === false) return false;
+        }
+      }
+      return false;
+    } finally {
+      try { await reader.cancel(); } catch (_) { /* The body may already be closed. */ }
+    }
+  }
+
+  function retryWait(delay, signal) {
+    return new Promise(resolve => {
+      const timer = setTimeout(finish, delay);
+      function finish() {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", finish);
+        resolve();
+      }
+      signal?.addEventListener("abort", finish, { once: true });
+    });
+  }
+
+  // Pages decide which responses stop a stream and where the next request resumes.
+  async function followEvents({
+    url, onEvent, onResponse = () => {}, onDrop = () => {}, signal, retryMs = 1000,
+  }) {
+    while (!signal?.aborted) {
+      let failure;
+      try {
+        const response = await fetch(url(), { cache: "no-store", signal });
+        if (signal?.aborted || onResponse(response) === false) return;
+        if (!response.ok || !response.body) throw new Error("Stream failed (" + response.status + ")");
+        if (!await readEvents(response.body, onEvent, signal)) return;
+      } catch (error) {
+        failure = error;
+      }
+      if (signal?.aborted) return;
+      onDrop(failure);
+      if (!signal?.aborted) await retryWait(retryMs, signal);
+    }
+  }
+
   window.PlasmiteUI = {
-    parseJSON, sequence,
+    parseJSON, readEvents, followEvents, sequence,
     cursor: (next) => next > maxSequence ? null : String(next),
     tailStart: (bounds, count) => {
       if (typeof bounds.newest !== "bigint") return null;

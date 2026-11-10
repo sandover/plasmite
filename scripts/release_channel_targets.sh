@@ -13,7 +13,7 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 channel="$1"
 tier="${2:-official}"
 field="${3:-sdk_platform}"
-manifest="$root_dir/release/targets.json"
+manifest="${PLASMITE_RELEASE_TARGETS:-$root_dir/release/targets.json}"
 
 case "$channel" in
   github_sdk|homebrew|npm|pypi|cargo_binstall) ;;

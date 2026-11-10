@@ -223,11 +223,11 @@ impl StorePaths {
     }
 
     fn open_lock(&self) -> Result<File, Error> {
-        if let Ok(metadata) = fs::symlink_metadata(&self.lock) {
-            if metadata.file_type().is_symlink() || !metadata.is_file() {
-                return Err(Error::new(ErrorKind::Permission)
-                    .with_message("saved connection lock must be a regular file"));
-            }
+        if let Ok(metadata) = fs::symlink_metadata(&self.lock)
+            && (metadata.file_type().is_symlink() || !metadata.is_file())
+        {
+            return Err(Error::new(ErrorKind::Permission)
+                .with_message("saved connection lock must be a regular file"));
         }
         #[cfg(windows)]
         let opened = crate::windows_private::open_lock(&self.lock);
@@ -448,7 +448,7 @@ fn dpapi(payload: &[u8], protect: bool) -> Result<Vec<u8>, Error> {
     }
     let size = u32::try_from(payload.len())
         .map_err(|_| Error::new(ErrorKind::Usage).with_message("saved connection is too large"))?;
-    let mut input = DataBlob {
+    let input = DataBlob {
         size,
         data: payload.as_ptr() as *mut u8,
     };
@@ -479,7 +479,6 @@ fn dpapi(payload: &[u8], protect: bool) -> Result<Vec<u8>, Error> {
             )
         }
     };
-    input.data = std::ptr::null_mut();
     if ok == 0 {
         return Err(Error::new(ErrorKind::Permission)
             .with_message("could not protect saved connection for this Windows user")

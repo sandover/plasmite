@@ -202,7 +202,7 @@ mod tests {
         mut seed: u64,
     ) -> [u8; FRAME_HEADER_LEN] {
         let op = (next_seed(&mut seed) % 7) as u8;
-        let offset = ((next_seed(&mut seed) as usize) % FRAME_HEADER_LEN) as usize;
+        let offset = (next_seed(&mut seed) as usize) % FRAME_HEADER_LEN;
         let value = (next_seed(&mut seed) & 0xFF) as u8;
 
         match op {

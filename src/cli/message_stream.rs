@@ -53,7 +53,7 @@ where
                     if rest != *b"--" {
                         return Err(input_error("unknown input format"));
                     }
-                    let prefix = io::Cursor::new(b"---".to_vec());
+                    let prefix = io::Cursor::new(b"---");
                     read_yaml_records(BufReader::new(prefix.chain(reader)), &mut on_record)
                 }
                 b'P' => {
