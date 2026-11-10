@@ -638,13 +638,13 @@ fn invoke(request: &Request) -> Result<(), Error> {
     let message = access_store::read_json::<Option<String>>(&path)
         .ok()
         .flatten();
-    if let Err(error) = fs::remove_file(&path) {
-        if error.kind() != io::ErrorKind::NotFound {
-            eprintln!(
-                "could not remove service operation details at {}: {error}",
-                path.display()
-            );
-        }
+    if let Err(error) = fs::remove_file(&path)
+        && error.kind() != io::ErrorKind::NotFound
+    {
+        eprintln!(
+            "could not remove service operation details at {}: {error}",
+            path.display()
+        );
     }
     if code != 0 {
         return Err(usage(
@@ -1476,10 +1476,10 @@ fn admin(request: &Request) -> Result<(), Error> {
         pool_access(&record, false)?;
         walk(&state, &mut |path| io_result(policy.revoke(path), path))?;
         ancestor_access(&record, false)?;
-        if let Some(service) = service {
-            if unsafe { DeleteService(service.0) } == 0 {
-                return Err(win_error("failed to remove Windows service"));
-            }
+        if let Some(service) = service
+            && unsafe { DeleteService(service.0) } == 0
+        {
+            return Err(win_error("failed to remove Windows service"));
         }
         // Keep the authenticated manifest until executable cleanup succeeds,
         // so a retry can finish after native service deletion.
