@@ -444,4 +444,5 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
+      - run: cargo fetch --locked
       - run: just audit

@@ -163,7 +163,7 @@ audit-db: scratch
 
 # Run cargo-audit against the locally pinned advisory DB.
 audit: audit-db
-	cargo audit --db .scratch/advisory-db --no-fetch --ignore yanked
+	cargo audit --db .scratch/advisory-db --no-fetch
 
 # Build and execute the benchmark example in release mode.
 bench:

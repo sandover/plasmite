@@ -50,14 +50,14 @@ serde-saphyr = { version = "=1.1.0", default-features = false, features = ["seri
 serde = { version = "1", features = ["derive"] }
 time = { version = "0.3", features = ["formatting", "parsing"] }
 axum = "0.7"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+tokio = { version = "1.51.6", features = ["macros", "rt-multi-thread", "net", "signal"] }
 tokio-stream = "0.1"
 bytes = "1"
 ureq = { version = "2", features = ["json"] }
 url = "2"
 signal-hook = "0.3"
 rcgen = "0.12"
-rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls = { version = "0.23.46", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "ring", "tls12"] }
 hyper = { version = "1", features = ["client", "server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["server", "server-auto", "tokio", "service", "http1", "http2"] }
