@@ -228,6 +228,18 @@ fi
 cargo audit --db .scratch/advisory-db --no-fetch
 ```
 
+## Windows service upgrades
+
+Run these tests in an administrator terminal on Windows. They register and
+remove disposable native services using temporary pool directories.
+
+```powershell
+cargo test --test cli_service windows_upgrade:: -- --ignored --test-threads=1
+```
+
+Set `PLASMITE_WINDOWS_PREVIOUS_EXE` to the absolute path of an earlier
+Plasmite executable to test an upgrade from that version.
+
 ## Binding contracts
 
 Run `just bindings-test` for the Go, Node, and Python tests. Each binding's

@@ -444,3 +444,228 @@ fn status_all_keeps_healthy_rows_when_one_setup_is_malformed() -> TestResult<()>
     );
     Ok(())
 }
+
+#[cfg(windows)]
+mod windows_upgrade {
+    use super::*;
+    use plasmite::api::{PoolRef, RemoteClient};
+    use std::net::TcpListener;
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::process::Output;
+    use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
+
+    struct ServiceFixture {
+        temp: Option<TempDir>,
+        pool: PathBuf,
+    }
+
+    impl ServiceFixture {
+        fn new() -> TestResult<Self> {
+            // These tests register real, disposable services under the current user.
+            if unsafe { windows_sys::Win32::UI::Shell::IsUserAnAdmin() } == 0 {
+                return Err("run the service upgrade tests in an administrator terminal".into());
+            }
+            let temp = tempfile::Builder::new()
+                .prefix("plasmite-upgrade-")
+                .tempdir()?;
+            let pool = temp.path().join("service pools");
+            Ok(Self {
+                temp: Some(temp),
+                pool,
+            })
+        }
+
+        fn run(&self, binary: &Path, args: &[&str]) -> TestResult<Output> {
+            Ok(Command::new(binary)
+                .arg("--dir")
+                .arg(&self.pool)
+                .args(args)
+                .output()?)
+        }
+
+        fn json(&self, binary: &Path, args: &[&str]) -> TestResult<Value> {
+            let output = self.run(binary, args)?;
+            if !output.status.success() {
+                return Err(
+                    format!("{args:?}: {}", String::from_utf8_lossy(&output.stderr)).into(),
+                );
+            }
+            Ok(serde_json::from_slice(&output.stdout)?)
+        }
+
+        fn install(&self) -> TestResult<Value> {
+            let local = TcpListener::bind("127.0.0.1:0")?;
+            let remote = TcpListener::bind("127.0.0.1:0")?;
+            let bind = local.local_addr()?.to_string();
+            let remote_bind = remote.local_addr()?.to_string();
+            drop((local, remote));
+            let previous = std::env::var_os("PLASMITE_WINDOWS_PREVIOUS_EXE")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| binary().to_owned());
+            self.json(
+                &previous,
+                &[
+                    "serve",
+                    "install",
+                    &format!(
+                        "https://localhost:{}",
+                        remote_bind.rsplit(':').next().unwrap()
+                    ),
+                    "--bind",
+                    &bind,
+                    "--remote-bind",
+                    &remote_bind,
+                    "--format",
+                    "json",
+                ],
+            )
+        }
+
+        fn status(&self) -> TestResult<Value> {
+            let path = self.pool.canonicalize()?;
+            let rows = self.json(binary(), &["serve", "status", "--all", "--format", "json"])?;
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["pool_dir"].as_str() == path.to_str())
+                .cloned()
+                .ok_or_else(|| "installed service missing from status".into())
+        }
+
+        fn seed(&self) -> TestResult<String> {
+            self.json(
+                binary(),
+                &[
+                    "feed",
+                    "events",
+                    "--create",
+                    r#"{"probe":"retained"}"#,
+                    "--format",
+                    "json",
+                ],
+            )?;
+            let invite = self.json(
+                binary(),
+                &[
+                    "access",
+                    "invite",
+                    "--name",
+                    "upgrade-test",
+                    "--format",
+                    "json",
+                ],
+            )?;
+            Ok(invite["access_key"].as_str().unwrap().to_owned())
+        }
+
+        fn uninstall(mut self) -> TestResult<()> {
+            self.json(binary(), &["serve", "uninstall", "--format", "json"])?;
+            drop(self.temp.take());
+            Ok(())
+        }
+    }
+
+    impl Drop for ServiceFixture {
+        fn drop(&mut self) {
+            if !self.pool.exists() {
+                return;
+            }
+            match self.run(binary(), &["serve", "uninstall"]) {
+                Ok(output) if output.status.success() => (),
+                result => {
+                    if let Some(temp) = self.temp.take() {
+                        eprintln!(
+                            "test service cleanup needs attention at {}: {result:?}",
+                            temp.keep().display()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn binary() -> &'static Path {
+        static BINARY: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+        BINARY.get_or_init(|| {
+            std::env::var_os("PLASMITE_WINDOWS_TEST_EXE")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_plasmite")))
+        })
+    }
+
+    fn check_remote(row: &Value, key: &str) -> TestResult<()> {
+        let client = RemoteClient::with_access_key(row["remote_url"].as_str().unwrap(), key)?;
+        let message = client.open_pool(&PoolRef::name("events"))?.get_message(1)?;
+        assert_eq!(message.data, serde_json::json!({"probe": "retained"}));
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "registers a disposable Windows service and requires elevation"]
+    fn upgrade_with_active_executable_held_open() -> TestResult<()> {
+        let fixture = ServiceFixture::new()?;
+        let before = fixture.install()?;
+        let key = fixture.seed()?;
+        let program = Path::new(before["setup"]["program"].as_str().unwrap());
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(program)?;
+        let after = fixture.json(binary(), &["serve", "install", "--format", "json"])?;
+        assert_eq!(after["state"], "running");
+        assert_eq!(after["startup"], true);
+        assert_ne!(after["pid"], before["pid"]);
+        assert_ne!(after["setup"]["program"], before["setup"]["program"]);
+        assert_eq!(after["setup"]["run"], before["setup"]["run"]);
+        check_remote(&after, &key)?;
+        drop(held);
+
+        let again = fixture.json(binary(), &["serve", "install", "--format", "json"])?;
+        assert_eq!(again["setup"]["program"], before["setup"]["program"]);
+        assert_eq!(again["setup"]["run"], before["setup"]["run"]);
+        check_remote(&again, &key)?;
+        fixture.uninstall()
+    }
+
+    #[test]
+    #[ignore = "registers a disposable Windows service and requires elevation"]
+    fn failed_start_restores_running_service_and_credentials() -> TestResult<()> {
+        let fixture = ServiceFixture::new()?;
+        let before = fixture.install()?;
+        let key = fixture.seed()?;
+        let identity = fixture.pool.join(".plasmite-serve/identity.json");
+        let old_identity = fs::read(&identity)?;
+        let conflict = TcpListener::bind("127.0.0.1:0")?;
+        let output = fixture.run(
+            binary(),
+            &[
+                "serve",
+                "install",
+                "--bind",
+                &conflict.local_addr()?.to_string(),
+                "--format",
+                "json",
+            ],
+        )?;
+        assert!(
+            !output.status.success(),
+            "candidate unexpectedly started on occupied port"
+        );
+        let after = fixture.status()?;
+        assert_eq!(
+            after["state"],
+            "running",
+            "upgrade error: {}; service status: {after}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(after["startup"], true);
+        assert_ne!(
+            after["pid"], before["pid"],
+            "the old server should have restarted"
+        );
+        assert_eq!(after["setup"], before["setup"]);
+        assert_eq!(fs::read(identity)?, old_identity);
+        check_remote(&after, &key)?;
+        fixture.uninstall()
+    }
+}

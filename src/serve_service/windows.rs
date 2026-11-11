@@ -103,8 +103,15 @@ fn root() -> Result<PathBuf, Error> {
 fn installation(pool: &Path) -> Result<PathBuf, Error> {
     Ok(root()?.join(id(pool)))
 }
-fn manifest(pool: &Path) -> Result<PathBuf, Error> {
-    Ok(installation(pool)?.join("setup.json"))
+// The original filenames form the first slot, so existing installs can upgrade in place.
+const PROGRAMS: [&str; 2] = ["plasmite.exe", "plasmite.alt.exe"];
+
+fn manifest(program: &Path) -> PathBuf {
+    program.with_file_name(if program.ends_with(PROGRAMS[1]) {
+        "setup.alt.json"
+    } else {
+        "setup.json"
+    })
 }
 fn runtime_dir(pool: &Path) -> PathBuf {
     pool.join(".plasmite-serve").join("service")
@@ -138,12 +145,12 @@ fn quote(text: &str) -> String {
     result.push('"');
     result
 }
-fn command(setup: &Setup) -> Result<String, Error> {
-    Ok(format!(
+fn command(program: &Path) -> String {
+    format!(
         "{} __plasmite_service {}",
-        quote(&setup.program.to_string_lossy()),
-        quote(&manifest(&setup.pool_dir)?.to_string_lossy())
-    ))
+        quote(&program.to_string_lossy()),
+        quote(&manifest(program).to_string_lossy())
+    )
 }
 unsafe fn from_wide(pointer: *const u16) -> String {
     if pointer.is_null() {
@@ -288,13 +295,14 @@ fn query(service: &Service) -> Result<SERVICE_STATUS_PROCESS, Error> {
     }
     Ok(status)
 }
-fn verify_service(record: &Installed, access: u32) -> Result<Service, Error> {
-    let service = open(
-        &record.setup.pool_dir,
-        access | SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS,
-        false,
-    )?
-    .ok_or_else(|| usage("the installed Windows service is missing"))?;
+struct ServiceConfig {
+    kind: u32,
+    start_type: u32,
+    command: String,
+    account: String,
+}
+
+fn service_config(service: &Service) -> Result<ServiceConfig, Error> {
     let mut needed = 0;
     unsafe {
         QueryServiceConfigW(service.0, std::ptr::null_mut(), 0, &mut needed);
@@ -308,40 +316,52 @@ fn verify_service(record: &Installed, access: u32) -> Result<Service, Error> {
         return Err(win_error("failed to inspect Windows service configuration"));
     }
     let config = unsafe { &*config };
-    if config.dwServiceType != SERVICE_WIN32_OWN_PROCESS
-        || unsafe { from_wide(config.lpBinaryPathName) } != command(&record.setup)?
-        || unsafe { from_wide(config.lpServiceStartName) }.to_lowercase()
-            != account(&record.setup.pool_dir).to_lowercase()
+    Ok(ServiceConfig {
+        kind: config.dwServiceType,
+        start_type: config.dwStartType,
+        command: unsafe { from_wide(config.lpBinaryPathName) },
+        account: unsafe { from_wide(config.lpServiceStartName) },
+    })
+}
+
+fn verify_config(config: &ServiceConfig, setup: &Setup) -> Result<(), Error> {
+    if config.kind != SERVICE_WIN32_OWN_PROCESS
+        || config.command != command(&setup.program)
+        || !config.account.eq_ignore_ascii_case(&setup.account)
     {
         return Err(usage(
             "Windows service configuration does not match this installation",
         ));
     }
+    Ok(())
+}
+
+fn verify_service(record: &Installed, access: u32) -> Result<Service, Error> {
+    let service = open(
+        &record.setup.pool_dir,
+        access | SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS,
+        false,
+    )?
+    .ok_or_else(|| usage("the installed Windows service is missing"))?;
+    verify_config(&service_config(&service)?, &record.setup)?;
     Ok(service)
 }
-fn start_type(service: &Service) -> Result<u32, Error> {
-    let mut needed = 0;
-    unsafe {
-        QueryServiceConfigW(service.0, std::ptr::null_mut(), 0, &mut needed);
-    }
-    if needed == 0 || needed > 64 * 1024 {
-        return Err(win_error("failed to inspect Windows service startup"));
-    }
-    let mut data = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
-    let config = data.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>();
-    if unsafe { QueryServiceConfigW(service.0, config, needed, &mut needed) } == 0 {
-        return Err(win_error("failed to inspect Windows service startup"));
-    }
-    Ok(unsafe { (*config).dwStartType })
-}
-fn set_start_type(service: &Service, start_type: u32) -> Result<(), Error> {
+
+fn configure_service(
+    service: &Service,
+    start_type: u32,
+    program: Option<&Path>,
+) -> Result<(), Error> {
+    let command = program.map(|program| wide(&command(program)));
     if unsafe {
         ChangeServiceConfigW(
             service.0,
             SERVICE_NO_CHANGE,
             start_type,
             SERVICE_NO_CHANGE,
-            std::ptr::null(),
+            command
+                .as_ref()
+                .map_or(std::ptr::null(), |value| value.as_ptr()),
             std::ptr::null(),
             std::ptr::null_mut(),
             std::ptr::null(),
@@ -351,21 +371,46 @@ fn set_start_type(service: &Service, start_type: u32) -> Result<(), Error> {
         )
     } == 0
     {
-        return Err(win_error("failed to enable Windows boot startup"));
+        return Err(win_error("failed to configure Windows service startup"));
     }
     Ok(())
 }
-fn load(pool: &Path) -> Result<Option<Installed>, Error> {
-    let path = manifest(pool)?;
-    let bytes = match windows_private::read_installed(&path) {
+
+fn read_record(path: &Path) -> Result<Option<Installed>, Error> {
+    let bytes = match windows_private::read_installed(path) {
         Ok(bytes) => bytes,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(io_error("unsafe Windows service setup", &path, err)),
+        Err(err) => return Err(io_error("unsafe Windows service setup", path, err)),
     };
-    let record: Installed = serde_json::from_slice(&bytes)
-        .map_err(|err| usage("invalid Windows service setup").with_source(err))?;
+    serde_json::from_slice(&bytes).map(Some).map_err(|err| {
+        usage("invalid Windows service setup")
+            .with_path(path)
+            .with_source(err)
+    })
+}
+
+fn load(pool: &Path) -> Result<Option<Installed>, Error> {
+    let instance = installation(pool)?;
+    let programs = PROGRAMS.map(|name| instance.join(name));
+    let config = open(pool, SERVICE_QUERY_CONFIG, true)?
+        .map(|service| service_config(&service))
+        .transpose()?;
+    let program = match &config {
+        Some(config) => programs
+            .iter()
+            .find(|program| config.command == command(program))
+            .ok_or_else(|| {
+                usage("Windows service configuration does not match this installation")
+            })?,
+        // A retry after service deletion still needs the protected owner record.
+        None if !manifest(&programs[0]).exists() => &programs[1],
+        None => &programs[0],
+    };
+    let Some(record) = read_record(&manifest(program))? else {
+        return Ok(None);
+    };
     if record.setup.pool_dir != pool
-        || record.setup.program != installation(pool)?.join("plasmite.exe")
+        || record.setup.program != *program
         || record.setup.account != account(pool)
         || !record.service_sid.starts_with("S-1-5-80-")
     {
@@ -378,11 +423,11 @@ fn load(pool: &Path) -> Result<Option<Installed>, Error> {
         return Err(usage("this Windows service belongs to another account"));
     }
     shared(&record)?;
-    if open(pool, SERVICE_QUERY_CONFIG, true)?.is_some() {
-        if record.service_sid != lookup_sid(&account(pool))? {
+    if let Some(config) = config {
+        verify_config(&config, &record.setup)?;
+        if record.service_sid != lookup_sid(&record.setup.account)? {
             return Err(usage("Windows service identity does not match its setup"));
         }
-        verify_service(&record, 0)?;
     }
     Ok(Some(record))
 }
@@ -533,7 +578,12 @@ fn stop(service: &Service) -> Result<(), Error> {
     }
 }
 fn status(record: &Installed) -> Result<Status, Error> {
-    if open(&record.setup.pool_dir, SERVICE_QUERY_CONFIG, true)?.is_none() {
+    let Some(service) = open(
+        &record.setup.pool_dir,
+        SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS,
+        true,
+    )?
+    else {
         return Ok(Status {
             pool_dir: record.setup.pool_dir.clone(), pid: None,
             local_url: format!("http://{}", record.setup.run.bind.as_deref().unwrap()),
@@ -541,8 +591,9 @@ fn status(record: &Installed) -> Result<Status, Error> {
             state: "failed".into(), problem: Some("The Windows service is missing. Run `serve uninstall` to finish cleanup before reinstalling.".into()),
             setup: Some(record.setup.clone()),
         });
-    }
-    let service = verify_service(record, 0)?;
+    };
+    let config = service_config(&service)?;
+    verify_config(&config, &record.setup)?;
     let native = query(&service)?;
     let server = managed_running(record)?
         .into_iter()
@@ -563,7 +614,7 @@ fn status(record: &Installed) -> Result<Status, Error> {
             .unwrap_or_else(|| format!("http://{}", record.setup.run.bind.as_deref().unwrap())),
         remote_url: record.setup.run.server.clone(),
         managed: true,
-        startup: start_type(&service)? == SERVICE_AUTO_START,
+        startup: config.start_type == SERVICE_AUTO_START,
         state: state.into(),
         problem: (state == "failed" || state == "starting")
             .then(|| "The installed server has not responded. Inspect `serve logs`.".into()),
@@ -778,10 +829,10 @@ fn installations() -> Result<Vec<Result<Installed, Error>>, Error> {
     };
     let owner = current_sid()?;
     for entry in entries {
-        let path = entry
+        let directory = entry
             .map_err(|err| io_error("failed to inspect Windows service", &root, err))?
-            .path()
-            .join("setup.json");
+            .path();
+        let path = manifest(&directory.join(PROGRAMS[0]));
         let Ok(bytes) = windows_private::read_installed(&path) else {
             continue;
         };
@@ -1059,10 +1110,13 @@ pub(crate) fn entry() -> Option<i32> {
         let bytes = io_result(windows_private::read_installed(&path), &path)?;
         let record: Installed = serde_json::from_slice(&bytes)
             .map_err(|err| usage("invalid service setup").with_source(err))?;
-        if current_sid()? != record.service_sid || path != manifest(&record.setup.pool_dir)? {
+        if current_sid()? != record.service_sid || path != manifest(&record.setup.program) {
             return Err(usage("service process does not match installed account"));
         }
         let record = required(&record.setup.pool_dir)?;
+        if path != manifest(&record.setup.program) {
+            return Err(usage("service process does not match the selected setup"));
+        }
         HOST.set(record.clone())
             .map_err(|_| usage("service host already initialized"))?;
         let mut name = wide(&service_name(&record.setup.pool_dir));
@@ -1118,7 +1172,7 @@ fn create_install_directory(
     protected(path, owner, service)
 }
 fn save(record: &Installed) -> Result<(), Error> {
-    let path = manifest(&record.setup.pool_dir)?;
+    let path = manifest(&record.setup.program);
     let temporary = path.with_extension("new.json");
     let bytes = serde_json::to_vec(record)
         .map_err(|err| usage("failed to encode service setup").with_source(err))?;
@@ -1137,25 +1191,6 @@ fn replace_installed(source: &Path, destination: &Path) -> Result<(), Error> {
             .with_message("failed to replace installed service file")
             .with_source(err)
     })
-}
-fn replace_program(source: &Path, destination: &Path) -> Result<(), Error> {
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        match move_installed(source, destination) {
-            Ok(()) => return Ok(()),
-            Err(err) => {
-                // SCM can report STOPPED before the process releases its image.
-                // Retry only executable replacement; retain the original ACLs.
-                let locked = matches!(err.raw_os_error(), Some(5 | 32));
-                if !locked || Instant::now() >= deadline {
-                    return Err(Error::new(ErrorKind::Io)
-                        .with_message("failed to replace installed service executable")
-                        .with_source(err));
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        }
-    }
 }
 fn move_installed(source: &Path, destination: &Path) -> io::Result<()> {
     use windows_sys::Win32::Storage::FileSystem::{
@@ -1275,7 +1310,7 @@ fn set_recovery(service: &Service, enabled: bool) -> Result<(), Error> {
 fn create_service(setup: &Setup) -> Result<Service, Error> {
     let manager = manager(SC_MANAGER_CREATE_SERVICE)?;
     let name = wide(&service_name(&setup.pool_dir));
-    let program = wide(&command(setup)?);
+    let program = wide(&command(&setup.program));
     let user = wide(&setup.account);
     let handle = unsafe {
         CreateServiceW(
@@ -1499,12 +1534,16 @@ fn admin(request: &Request) -> Result<(), Error> {
         // so a retry can finish after native service deletion.
         let instance = installation(&pool)?;
         for name in [
-            "plasmite.exe",
+            PROGRAMS[0],
+            PROGRAMS[1],
             "plasmite.new.exe",
             "plasmite.previous.exe",
             "setup.previous.json",
             "identity.previous.json",
             "setup.new.json",
+            "setup.alt.new.json",
+            "setup.alt.json",
+            "setup.json",
         ] {
             let path = instance.join(name);
             match fs::remove_file(&path) {
@@ -1512,7 +1551,7 @@ fn admin(request: &Request) -> Result<(), Error> {
                 Err(error) if error.kind() == io::ErrorKind::NotFound => (),
                 Err(error) => {
                     return Err(io_error(
-                        "service stopped; executable cleanup remains",
+                        "service stopped; installation cleanup remains",
                         &path,
                         error,
                     )
@@ -1520,8 +1559,6 @@ fn admin(request: &Request) -> Result<(), Error> {
                 }
             }
         }
-        fs::remove_file(manifest(&pool)?)
-            .map_err(|err| io_error("service stopped; setup cleanup remains", &pool, err))?;
         fs::remove_dir(&instance).map_err(|err| io_error("service stopped; installation directory cleanup remains", &instance, err)
             .with_hint(format!("In an administrator terminal, inspect and remove the empty directory {} before reinstalling.", instance.display())))?;
         return Ok(());
@@ -1575,18 +1612,28 @@ fn admin(request: &Request) -> Result<(), Error> {
     create_install_directory(parent, None, None)?;
     create_install_directory(&program_root, None, None)?;
     let instance = installation(&pool)?;
+    let first = instance.join(PROGRAMS[0]);
+    let program = match &previous {
+        Some(record) if record.setup.program == first => instance.join(PROGRAMS[1]),
+        _ => first,
+    };
     let setup = Setup {
         pool_dir: pool.clone(),
-        program: instance.join("plasmite.exe"),
+        program,
         account: account(&pool),
         home: request.home.clone(),
         run: run.clone(),
     };
     let staging = instance.join("plasmite.new.exe");
-    let backup = instance.join("plasmite.previous.exe");
-    let settings_backup = instance.join("setup.previous.json");
     let identity_backup = instance.join("identity.previous.json");
-    if backup.exists() || settings_backup.exists() || identity_backup.exists() {
+    if [
+        "plasmite.previous.exe",
+        "setup.previous.json",
+        "identity.previous.json",
+    ]
+    .iter()
+    .any(|name| instance.join(name).exists())
+    {
         return Err(usage("a previous service update needs recovery").with_path(&instance));
     }
     let staged: Result<Service, Error> = (|| {
@@ -1642,20 +1689,7 @@ fn admin(request: &Request) -> Result<(), Error> {
         protected(&instance, Some(&record.owner), Some(&record.service_sid))?;
         protected(&staging, Some(&record.owner), Some(&record.service_sid))?;
         let was_running = query(&service)?.dwCurrentState != SERVICE_STOPPED;
-        let previous_start_type = start_type(&service)?;
-        if let Some(previous) = &previous {
-            fs::copy(&previous.setup.program, &backup)
-                .map_err(|err| io_error("failed to retain previous executable", &backup, err))?;
-            protected(&backup, Some(&record.owner), Some(&record.service_sid))?;
-            fs::copy(manifest(&pool)?, &settings_backup).map_err(|err| {
-                io_error("failed to retain previous setup", &settings_backup, err)
-            })?;
-            protected(
-                &settings_backup,
-                Some(&record.owner),
-                Some(&record.service_sid),
-            )?;
-        }
+        let previous_start_type = service_config(&service)?.start_type;
         let identity = state.join("identity.json");
         if identity.exists() {
             let bytes = if let Some(previous) = &previous {
@@ -1672,6 +1706,7 @@ fn admin(request: &Request) -> Result<(), Error> {
                 Some(&record.service_sid),
             )?;
         }
+        replace_installed(&staging, &record.setup.program)?;
         Ok((record, was_running, previous_start_type))
     })();
     let (mut record, was_running, previous_start_type) = match prepared {
@@ -1684,7 +1719,7 @@ fn admin(request: &Request) -> Result<(), Error> {
                         .with_hint(error.to_string()),
                 );
             }
-            for path in [&staging, &backup, &settings_backup, &identity_backup] {
+            for path in [&staging, &identity_backup] {
                 if path.exists() {
                     fs::remove_file(path)
                         .map_err(|err| io_error("failed to remove preparation file", path, err))?;
@@ -1704,21 +1739,18 @@ fn admin(request: &Request) -> Result<(), Error> {
     };
     let mut retained_tls = Vec::new();
     let mut granted_ancestors = Vec::new();
-    let mut program_replaced = false;
-    let mut setup_saved = false;
+    let mut stopped = false;
     let mut identity_may_change = false;
     let mut recovery_cleared = false;
     let mut startup_disabled = false;
     let result = (|| {
-        // A failed candidate must not queue a restart that can undo rollback's
-        // stopped state. Disable startup while replacing its executable too.
+        // Suppress automatic restart while the candidate is being tested.
         set_recovery(&service, false)?;
         recovery_cleared = true;
-        set_start_type(&service, SERVICE_DISABLED)?;
+        configure_service(&service, SERVICE_DISABLED, None)?;
         startup_disabled = true;
         stop(&service)?;
-        replace_program(&staging, &record.setup.program)?;
-        program_replaced = true;
+        stopped = true;
         let initial_store = if previous.is_none() {
             identity_may_change = true;
             Some(access_store::AccessStore::open(
@@ -1760,10 +1792,9 @@ fn admin(request: &Request) -> Result<(), Error> {
             &mut retained_tls,
         )?;
         save(&record)?;
-        setup_saved = true;
         drop(server_lock);
         drop(initial_store);
-        set_start_type(&service, SERVICE_AUTO_START)?;
+        configure_service(&service, SERVICE_AUTO_START, Some(&record.setup.program))?;
         // StartService can time out after spawning the candidate process.
         identity_may_change = true;
         start(&service)?;
@@ -1772,41 +1803,11 @@ fn admin(request: &Request) -> Result<(), Error> {
     })();
     if let Err(error) = &result {
         let recovery = (|| {
-            if !program_replaced {
-                // The old image and setup still govern the service. Compensate
-                // only successful policy changes, even if stopping failed.
-                if let Some(previous) = &previous {
-                    let recovery = if recovery_cleared {
-                        set_recovery(&service, true)
-                    } else {
-                        Ok(())
-                    };
-                    let startup = if startup_disabled && was_running {
-                        // A disabled service may have been running before the
-                        // update. Restore its boot policy after attempting start.
-                        (|| {
-                            set_start_type(&service, SERVICE_AUTO_START)?;
-                            let restarted = start(&service);
-                            let restored = set_start_type(&service, previous_start_type);
-                            restarted?;
-                            restored?;
-                            wait_ready(previous)
-                        })()
-                    } else if startup_disabled {
-                        set_start_type(&service, previous_start_type)
-                    } else {
-                        Ok(())
-                    };
-                    recovery?;
-                    startup?;
-                } else if unsafe { DeleteService(service.0) } == 0 {
-                    return Err(win_error("failed to remove failed service"));
-                }
-                return Ok(());
+            if identity_may_change {
+                configure_service(&service, SERVICE_DISABLED, None)?;
+                set_recovery(&service, false)?;
+                stop(&service)?;
             }
-            set_start_type(&service, SERVICE_DISABLED)?;
-            set_recovery(&service, false)?;
-            stop(&service)?;
             // Restore only identity, never the access-key records committed by
             // another owner command while the candidate ran.
             if identity_may_change && identity_backup.exists() {
@@ -1822,35 +1823,38 @@ fn admin(request: &Request) -> Result<(), Error> {
                 })?;
             }
             if let Some(previous) = &previous {
-                if program_replaced {
-                    replace_program(&backup, &previous.setup.program)?;
+                if recovery_cleared {
+                    set_recovery(&service, true)?;
                 }
-                if setup_saved {
-                    replace_installed(&settings_backup, &manifest(&pool)?)?;
-                }
-                set_recovery(&service, true)?;
-                // A previously running disabled service needs AUTO long enough
-                // to start. Restore its boot policy even if start/readiness fails.
-                if was_running {
-                    set_start_type(&service, SERVICE_AUTO_START)?;
-                }
-                let restarted = if was_running { start(&service) } else { Ok(()) };
-                set_start_type(&service, previous_start_type)?;
-                restarted?;
-                if was_running {
-                    wait_ready(previous)?;
+                if startup_disabled {
+                    let old_program = Some(previous.setup.program.as_path());
+                    if was_running {
+                        // A previously running disabled service needs AUTO long enough to start.
+                        configure_service(&service, SERVICE_AUTO_START, old_program)?;
+                        let restarted = start(&service);
+                        configure_service(&service, previous_start_type, None)?;
+                        restarted?;
+                        wait_ready(previous)?;
+                    } else {
+                        configure_service(&service, previous_start_type, old_program)?;
+                    }
                 }
             } else {
-                let policy = shared(&record)?;
-                pool_access(&record, false)?;
-                walk(&state, &mut |path| io_result(policy.revoke(path), path))?;
-                for path in granted_ancestors.iter().rev() {
-                    io_result(policy.ancestor_access(path, false), path)?;
+                if stopped {
+                    let policy = shared(&record)?;
+                    pool_access(&record, false)?;
+                    walk(&state, &mut |path| io_result(policy.revoke(path), path))?;
+                    for path in granted_ancestors.iter().rev() {
+                        io_result(policy.ancestor_access(path, false), path)?;
+                    }
                 }
                 if unsafe { DeleteService(service.0) } == 0 {
                     return Err(win_error("failed to remove failed service"));
                 }
-                for path in [manifest(&pool)?, record.setup.program.clone()] {
+                for path in [
+                    manifest(&record.setup.program),
+                    record.setup.program.clone(),
+                ] {
                     if path.exists() {
                         fs::remove_file(&path).map_err(|err| {
                             io_error("failed to remove failed installation", &path, err)
@@ -1868,7 +1872,7 @@ fn admin(request: &Request) -> Result<(), Error> {
                 )));
         }
     }
-    for path in [staging, backup, settings_backup, identity_backup] {
+    for path in [staging, identity_backup] {
         if path.exists() {
             fs::remove_file(&path)
                 .map_err(|err| io_error("failed to remove service staging file", &path, err))?;

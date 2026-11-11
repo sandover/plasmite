@@ -246,10 +246,17 @@ socket. This check limits spoofed bulk replies; it grants no identity or access
 rights. Old `--udp` configurations keep reads disabled.
 
 Clients use `feed`, `follow`, or `duplex` with `udp://HOST:PORT/POOL`. Follow
-supports new messages and selected history, discards duplicates and late
-arrivals, and reports gaps. It renews a 30-second lease every 10 seconds while
-receiving. It never retries message delivery or falls back to HTTP. Outgoing
-DATA includes 40 bytes of framing within the same 65,507-byte maximum. See the
+supports new messages and selected history. The approved
+[receive policy](../../spec/udp/v1/SPEC.md#receive-ordering-and-notices) requires
+arrival-order delivery, including late messages and duplicates. Current clients
+still discard those packets; implementation of the new policy remains pending.
+Under that policy, only explicit server skips produce notices; sequence jumps
+and progress never prove network loss or block later DATA. A finite follow ends
+on terminal progress, so packets still in flight may go unread.
+
+Follow renews a 30-second lease every 10 seconds while receiving. It never
+retries message delivery or falls back to HTTP. Outgoing DATA includes 40 bytes
+of framing within the same 65,507-byte maximum. See the
 [UDP transport contract](../../spec/udp/v1/SPEC.md) for controls and events.
 
 `--max-tail-concurrency` limits UDP followers separately from HTTP tails. A
@@ -340,13 +347,12 @@ These commands target the installed setup, not a foreground server. Run
 URL sets the listener port on first install; later URL changes keep the
 saved listener unless you supply `--remote-bind`. With no new options,
 `install` keeps the saved settings, installs the current Plasmite executable,
-and starts the service. On Windows, updates stop the service before replacing
-its executable and setup. A failed update restores the prior service while
-preserving its identity, certificates, and keys. Updates retain the installed
-listener addresses unless `--remote-bind` changes them.
-If Windows refuses executable replacement while the service runs, the update
-restores the prior service. Run `serve stop`, then repeat `serve install` from
-the new Plasmite executable.
+and starts the service. On Windows, Plasmite stages the executable in the
+inactive installation slot, stops the service, saves the candidate setup,
+and switches the service to the candidate. If the candidate fails to start,
+Plasmite switches back and restores the prior service state, identity, and
+certificates. Updates retain the installed listener addresses unless you
+supply `--remote-bind`.
 If rollback cannot finish, the error names the retained recovery files.
 Complete recovery in an administrator terminal before installing again.
 
