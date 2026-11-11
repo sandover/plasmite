@@ -180,8 +180,14 @@ Lite3 frame after the gap. Tag filters do not conceal the error.
 
 The `udp` package takes an explicit endpoint and opens a named pool. Sending
 returns an error only for local validation or operating-system send failures;
-a nil error does not confirm storage. A follower yields frames, gap notices, and
-progress events. Its context cancels a blocked wait within 50 milliseconds.
+a nil error does not confirm storage. A follower yields frames, explicit server
+skip notices, and progress events. Its context cancels a blocked wait within
+50 milliseconds. The
+[receive policy](../../spec/udp/v1/SPEC.md#receive-ordering-and-notices) requires
+arrival-order delivery, including late messages and duplicates; sequence/progress
+jumps never establish loss or suppress frames. This source change awaits a
+major release.
+Finite follows end on terminal progress and may leave DATA in flight.
 
 ```go
 import (

@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Breaking UDP follow behavior (next major release)
+
+UDP follow now delivers matching messages in arrival order, including late
+messages and duplicates. Consumers choose whether to reorder or discard them.
+Sequence jumps and progress no longer create inferred gaps or suppress DATA;
+gap events report explicit server skips. The client preserves exact skip
+ranges and reasons and reports retention flags without inventing a range.
+
+Finite reads finish on terminal progress after draining accepted events.
+Packets still in flight may go unread, and exit 0 gives no assurance of complete
+delivery. Observed oversized/pressure skips still exit 1; confirmed retention
+gaps exit 9. Local and HTTP tails retain their ordering contracts. The wire
+format and public layouts remain unchanged. This reverses documented 1.x
+client behavior and requires a major release under the compatibility policy.
+
+Finite UDP completion now releases its reader worker and pool mapping. A bounded
+completion record keeps only the metadata and original file identity needed to
+answer renewals until close or expiry. Both receive phases share packet and event
+handling. Public `Gap` names remain compatibility labels for server skips;
+`Unknown` remains reserved and clients reject it as a wire skip reason.
+
 ## [1.3.0] - 2026-11-10
 
 **Delete `--data` from existing `plasmite feed` commands.** `feed` recognizes

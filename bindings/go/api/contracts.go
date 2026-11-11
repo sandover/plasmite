@@ -257,6 +257,7 @@ type UDPFrame struct {
 
 func (*UDPFrame) udpEvent() {}
 
+// UDPGap is the compatibility name for an explicit server skip, never inferred loss.
 type UDPGap struct {
 	First  uint64
 	Last   uint64

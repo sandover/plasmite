@@ -3,7 +3,6 @@ use plasmite::api::{
 };
 use serde_json::{Value, json};
 use std::net::UdpSocket;
-use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
@@ -86,134 +85,151 @@ fn sends_complete_routed_lite3_datagrams_and_checks_both_sizes() {
 }
 
 #[test]
-fn follows_network_frames_and_reports_initial_gap_after_data_arrives_first() {
-    let peer = UdpSocket::bind("127.0.0.1:0").expect("bind peer");
-    peer.set_read_timeout(Some(Duration::from_secs(3)))
-        .expect("read timeout");
-    let endpoint = peer.local_addr().expect("peer address");
-    let (release_tx, release_rx) = mpsc::channel();
-    let (progress_release_tx, progress_release_rx) = mpsc::channel();
+fn follows_arrival_order_across_progress_skips_duplicates_and_timestamp_filters() {
+    let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let endpoint = peer.local_addr().unwrap();
+    let timestamp = 1_700_000_000_000_000_000u64;
+    let payload = lite3::encode_message(&["lab".into()], &json!({"temperature": 23})).unwrap();
+    let original = payload.as_slice().to_vec();
     let server = thread::spawn(move || {
-        let (id, client_address, subscribe) = accept_subscription(&peer);
-        assert_eq!(subscribe["selection"]["pool"], "sensors");
+        let (id, address, subscribe) = accept_subscription(&peer);
         assert_eq!(subscribe["selection"]["start"]["kind"], "since");
-        assert_eq!(
-            subscribe["selection"]["start"]["value"],
-            1_700_000_000_000_000_000u64
-        );
-        assert_eq!(subscribe["selection"]["live"], true);
-
-        let payload = lite3::encode_message(&["lab".into()], &json!({"temperature": 23}))
-            .expect("encode frame");
-        let mut data = packet(DATA, &id, &[]);
-        data.extend_from_slice(&3u64.to_be_bytes());
-        data.extend_from_slice(&1_700_000_000_000_000_000u64.to_be_bytes());
-        data.extend_from_slice(payload.as_slice());
-        peer.send_to(&data, client_address)
-            .expect("send data first");
-        release_rx.recv().expect("client consumed data");
-
-        let progress = json!({
-            "start_seq": 1,
-            "next_seq": 1,
-            "end_seq": null,
-            "lease_ms": 30_000,
-            "terminal": false,
-            "retention_gap": false
-        });
-        let progress_packet = packet(
-            PROGRESS,
-            &id,
-            &serde_json::to_vec(&progress).expect("progress json"),
-        );
-        peer.send_to(&progress_packet, client_address)
-            .expect("send progress later");
-
-        progress_release_rx
-            .recv()
-            .expect("client consumed initial gap");
-        let mut late_timestamp_data = packet(DATA, &id, &[]);
-        late_timestamp_data.extend_from_slice(&4u64.to_be_bytes());
-        late_timestamp_data.extend_from_slice(&1_699_999_999_999_999_999u64.to_be_bytes());
-        late_timestamp_data.extend_from_slice(payload.as_slice());
-        peer.send_to(&late_timestamp_data, client_address)
-            .expect("send timestamp-filtered data");
-        let progress = json!({
-            "start_seq": 1,
-            "next_seq": 5,
-            "end_seq": null,
-            "lease_ms": 30_000,
-            "terminal": false,
-            "retention_gap": false
-        });
-        let progress_packet = packet(
-            PROGRESS,
-            &id,
-            &serde_json::to_vec(&progress).expect("progress json"),
-        );
-        peer.send_to(&progress_packet, client_address)
-            .expect("send renewed progress");
+        let send_data = |seq: u64, time: u64| {
+            let mut body = seq.to_be_bytes().to_vec();
+            body.extend_from_slice(&time.to_be_bytes());
+            body.extend_from_slice(payload.as_slice());
+            peer.send_to(&packet(DATA, &id, &body), address).unwrap();
+        };
+        let progress = |next| {
+            packet(
+                PROGRESS,
+                &id,
+                &serde_json::to_vec(&json!({
+                    "start_seq": 1, "next_seq": next, "end_seq": null,
+                    "lease_ms": 30_000, "terminal": false
+                }))
+                .unwrap(),
+            )
+        };
+        send_data(10, timestamp); // DATA can open the follow before PROGRESS.
+        peer.send_to(&progress(20), address).unwrap();
+        peer.send_to(
+            &packet(
+                SKIP,
+                &id,
+                &serde_json::to_vec(&json!({
+                    "first": 11, "last": 11, "reason": "pressure"
+                }))
+                .unwrap(),
+            ),
+            address,
+        )
+        .unwrap();
+        peer.send_to(&progress(11), address).unwrap(); // Stale progress is descriptive.
+        for seq in [12, 11, 12] {
+            send_data(seq, timestamp);
+        }
+        send_data(13, timestamp - 1); // The requested timestamp filter still applies.
+        peer.send_to(&progress(21), address).unwrap();
     });
-
-    let client = UdpClient::new(format!("udp://{endpoint}")).expect("client");
-    let pool = client.open_pool(&PoolRef::name("sensors")).expect("pool");
+    let pool = UdpClient::new(format!("udp://{endpoint}"))
+        .unwrap()
+        .open_pool(&PoolRef::name("sensors"))
+        .unwrap();
     let mut follow = pool
         .follow(UdpFollowOptions {
-            start: UdpStart::Since(1_700_000_000_000_000_000),
+            start: UdpStart::Since(timestamp),
             live: true,
         })
-        .expect("open follow");
-    let frame = follow
-        .next_event_timeout(Duration::from_secs(1))
-        .expect("receive frame")
-        .expect("frame event");
-    let UdpEvent::Frame(frame) = frame else {
-        panic!("expected frame first, got {frame:?}");
-    };
-    assert_eq!(frame.seq, 3);
-    let message = frame.message().expect("decode shared message");
-    assert_eq!(message.seq, 3);
-    assert_eq!(message.meta.tags, ["lab"]);
-    assert_eq!(message.data, json!({"temperature": 23}));
-    release_tx.send(()).expect("release peer");
-
-    let gap = follow
-        .next_event_timeout(Duration::from_secs(1))
-        .expect("receive initial gap")
-        .expect("gap event");
-    assert_eq!(
-        gap,
-        UdpEvent::Gap {
-            first: 1,
-            last: 2,
-            reason: plasmite::api::UdpSkipReason::Unknown,
+        .unwrap();
+    let mut sequences = Vec::new();
+    let mut progress = Vec::new();
+    let mut skips = Vec::new();
+    for _ in 0..8 {
+        match follow
+            .next_event_timeout(Duration::from_secs(1))
+            .unwrap()
+            .expect("event")
+        {
+            UdpEvent::Frame(frame) => {
+                sequences.push(frame.seq);
+                assert_eq!(frame.timestamp_ns, timestamp);
+                assert_eq!(frame.payload, original);
+                let message = frame.message().unwrap();
+                assert_eq!(message.seq, frame.seq);
+                assert_eq!(message.meta.tags, ["lab"]);
+                assert_eq!(message.data, json!({"temperature": 23}));
+            }
+            UdpEvent::Gap {
+                first,
+                last,
+                reason,
+            } => skips.push((first, last, reason)),
+            UdpEvent::Progress { next_seq, .. } => progress.push(next_seq),
         }
-    );
+    }
+    assert_eq!(sequences, [10, 12, 11, 12]);
+    assert_eq!(progress, [20, 11, 21]);
+    assert_eq!(skips, [(11, 11, UdpSkipReason::Pressure)]);
     assert!(
         follow
             .next_event_timeout(Duration::from_millis(20))
             .unwrap()
             .is_none()
     );
-    assert!(
-        !follow.is_finished(),
-        "a quiet interval must leave follow open"
-    );
-    progress_release_tx.send(()).expect("release peer progress");
-    let progress = follow
-        .next_event_timeout(Duration::from_secs(1))
-        .expect("receive progress after timestamp filter")
-        .expect("progress event");
-    assert!(matches!(
-        progress,
-        UdpEvent::Progress {
-            next_seq: 5,
-            retention_gap: false,
-            ..
-        }
-    ));
+    assert!(!follow.is_finished());
     follow.close();
-    server.join().expect("mock peer");
+    server.join().unwrap();
+}
+
+#[test]
+fn finite_terminal_progress_ends_without_waiting_for_late_data() {
+    let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let endpoint = peer.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (id, address, _) = accept_subscription(&peer);
+        let payload = lite3::encode_message(&[], &json!({"sample": 1})).unwrap();
+        let data = |seq: u64| {
+            let mut body = seq.to_be_bytes().to_vec();
+            body.extend_from_slice(&1u64.to_be_bytes());
+            body.extend_from_slice(payload.as_slice());
+            packet(DATA, &id, &body)
+        };
+        peer.send_to(&data(10), address).unwrap();
+        peer.send_to(
+            &packet(
+                PROGRESS,
+                &id,
+                &serde_json::to_vec(&json!({
+                    "start_seq": 10, "next_seq": 12, "end_seq": 11,
+                    "lease_ms": 30_000, "terminal": true
+                }))
+                .unwrap(),
+            ),
+            address,
+        )
+        .unwrap();
+        peer.send_to(&data(11), address).unwrap();
+    });
+    let pool = UdpClient::new(format!("udp://{endpoint}"))
+        .unwrap()
+        .open_pool(&PoolRef::name("sensors"))
+        .unwrap();
+    let mut follow = pool
+        .follow(UdpFollowOptions {
+            start: UdpStart::Last(2),
+            live: false,
+        })
+        .unwrap();
+    assert!(
+        matches!(follow.next_event().unwrap(), Some(UdpEvent::Frame(frame)) if frame.seq == 10)
+    );
+    assert!(matches!(
+        follow.next_event().unwrap(),
+        Some(UdpEvent::Progress { terminal: true, .. })
+    ));
+    assert_eq!(follow.next_event().unwrap(), None);
+    server.join().unwrap();
 }
 
 #[test]
@@ -268,8 +284,16 @@ fn finite_follow_drains_early_skips_and_terminal_progress_after_close() {
         follow.next_event().unwrap(),
         Some(UdpEvent::Gap {
             first: 2,
-            last: 4,
-            reason: UdpSkipReason::Unknown
+            last: 2,
+            reason: UdpSkipReason::Oversized
+        })
+    );
+    assert_eq!(
+        follow.next_event().unwrap(),
+        Some(UdpEvent::Gap {
+            first: 3,
+            last: 3,
+            reason: UdpSkipReason::Pressure
         })
     );
     assert_eq!(
@@ -336,14 +360,6 @@ fn follow_rejects_progress_that_changes_the_opening_range() {
             ErrorKind::Corrupt
         );
     }
-    assert_eq!(
-        follow.next_event_timeout(timeout).unwrap(),
-        Some(UdpEvent::Gap {
-            first: 1,
-            last: 2,
-            reason: UdpSkipReason::Unknown
-        })
-    );
     assert!(matches!(
         follow.next_event_timeout(timeout).unwrap(),
         Some(UdpEvent::Progress {
@@ -379,4 +395,44 @@ fn rejects_pool_paths_and_other_server_urls() {
         );
     }
     assert!(UdpClient::new("udp://127.0.0.1/sensors").is_err());
+}
+
+#[test]
+fn unknown_skip_reason_is_reserved_in_both_receive_phases() {
+    for opening in [true, false] {
+        let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let endpoint = peer.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (id, client, _) = accept_subscription(&peer);
+            if !opening {
+                let body = serde_json::to_vec(&json!({
+                    "start_seq":1, "next_seq":1, "end_seq":null,
+                    "lease_ms":30000, "terminal":false,
+                }))
+                .unwrap();
+                peer.send_to(&packet(PROGRESS, &id, &body), client).unwrap();
+            }
+            let body =
+                serde_json::to_vec(&json!({"first":1, "last":1, "reason":"unknown"})).unwrap();
+            peer.send_to(&packet(SKIP, &id, &body), client).unwrap();
+        });
+        let pool = UdpClient::new(format!("udp://{endpoint}"))
+            .unwrap()
+            .open_pool(&PoolRef::name("events"))
+            .unwrap();
+        let result = pool.follow(UdpFollowOptions::new());
+        let error = if opening {
+            result.err().expect("unknown startup skip reason")
+        } else {
+            let mut stream = result.unwrap();
+            assert!(matches!(
+                stream.next_event().unwrap(),
+                Some(UdpEvent::Progress { .. })
+            ));
+            stream.next_event().expect_err("unknown live skip reason")
+        };
+        assert_eq!(error.kind(), ErrorKind::Corrupt);
+        server.join().unwrap();
+    }
 }

@@ -1,8 +1,8 @@
-//! Append one routed JSON or Lite3 message per UDP datagram.
+//! Route UDP appends and subscriptions over the shared pool directory.
 
 use crate::udp_wire as wire;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use plasmite::api::{Cursor, CursorResult, FrameRef, Pool};
+use plasmite::api::{Cursor, CursorResult, FrameRef, Pool, PoolPathGuard};
 use plasmite::api::{Durability, Error, ErrorKind, LocalClient, PoolApiExt, PoolRef};
 use ring::hmac;
 use serde::Deserialize;
@@ -111,6 +111,20 @@ impl Subscription {
                 .expiry
                 .lock()
                 .is_ok_and(|expiry| Instant::now() < *expiry)
+    }
+}
+
+struct Completed {
+    sub: Arc<Subscription>,
+    pool: PoolPathGuard,
+    progress: wire::Progress,
+}
+
+impl Completed {
+    fn reply(&self, socket: &std::net::UdpSocket, key: Key) -> Result<(), Error> {
+        self.pool.check_current_path()?;
+        reply(socket, key, wire::PROGRESS, &self.progress);
+        Ok(())
     }
 }
 
@@ -256,21 +270,43 @@ fn follow_worker(
     client: LocalClient,
     key: Key,
     sub: Arc<Subscription>,
-) -> Key {
-    let result = follow_pool(&socket, &client, key, &sub);
-    if let Err(err) = result
-        && sub.active()
-    {
-        failure(&socket, key, &err);
-    }
-    key
+) -> (Key, Option<Completed>) {
+    let completion = match follow_pool(&socket, &client, key, &sub) {
+        Ok(completion) => completion,
+        Err(err) => {
+            if sub.active() {
+                failure(&socket, key, &err);
+            }
+            None
+        }
+    };
+    (key, completion)
 }
+fn completed_worker(
+    socket: Arc<std::net::UdpSocket>,
+    key: Key,
+    completed: Completed,
+) -> (Key, Option<Completed>) {
+    let completion = if completed.sub.active() {
+        match completed.reply(&socket, key) {
+            Ok(()) => Some(completed),
+            Err(err) => {
+                failure(&socket, key, &err);
+                None
+            }
+        }
+    } else {
+        None
+    };
+    (key, completion)
+}
+
 fn follow_pool(
     socket: &std::net::UdpSocket,
     client: &LocalClient,
     key: Key,
-    sub: &Subscription,
-) -> Result<(), Error> {
+    sub: &Arc<Subscription>,
+) -> Result<Option<Completed>, Error> {
     let pool = client.open_pool(&PoolRef::name(&sub.selection.pool))?;
     let (start_seq, upper, mut cursor, mut pending) =
         select_start(&pool, &sub.selection.start, sub)?;
@@ -294,7 +330,14 @@ fn follow_pool(
             reply(socket, key, wire::PROGRESS, &progress);
         }
         if progress.end_seq.is_some_and(|end| progress.next_seq > end) {
-            return reply_with_terminal_progress(socket, &pool, key, sub, progress);
+            progress.terminal = true;
+            let completed = Completed {
+                sub: sub.clone(),
+                pool: pool.into_path_guard(),
+                progress,
+            };
+            completed.reply(socket, key)?;
+            return Ok(Some(completed));
         }
         let next = match pending.take() {
             Some(frame) => CursorResult::Message(frame),
@@ -380,27 +423,7 @@ fn follow_pool(
             }
         }
     }
-    Ok(())
-}
-
-fn reply_with_terminal_progress(
-    socket: &std::net::UdpSocket,
-    pool: &Pool,
-    key: Key,
-    sub: &Subscription,
-    mut progress: wire::Progress,
-) -> Result<(), Error> {
-    progress.terminal = true;
-    reply(socket, key, wire::PROGRESS, &progress);
-    // A renewal can recover a lost completion notice while the same pool exists.
-    while sub.active() {
-        pool.check_current_path()?;
-        if sub.renewal_requested.swap(false, Ordering::AcqRel) {
-            reply(socket, key, wire::PROGRESS, &progress);
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    Ok(())
+    Ok(None)
 }
 
 pub(crate) async fn run(
@@ -422,7 +445,8 @@ pub(crate) async fn run(
         .map_err(|err| Error::new(ErrorKind::Io).with_source(err))?;
     let mut control = Control::new()?;
     let mut subscriptions: HashMap<Key, Arc<Subscription>> = HashMap::new();
-    let mut workers = tokio::task::JoinSet::new();
+    let mut completed: HashMap<Key, Completed> = HashMap::new();
+    let mut workers: tokio::task::JoinSet<(Key, Option<Completed>)> = tokio::task::JoinSet::new();
     let counts = Arc::new(Mutex::new(Counters::default()));
     let (append_tx, mut append_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
     let writer_stop = Arc::new(AtomicBool::new(false));
@@ -456,12 +480,26 @@ pub(crate) async fn run(
     let stop = crate::serve::wait_for_shutdown(shutdown);
     tokio::pin!(stop);
     let result = loop {
+        let next_expiry = completed
+            .values()
+            .map(|done| *done.sub.expiry.lock().expect("UDP lease"))
+            .min()
+            .unwrap_or_else(Instant::now);
         let packet = tokio::select! { biased;
             _ = &mut stop => break Ok(()),
-            completed = workers.join_next(), if !workers.is_empty() => {
-                match completed { Some(Ok(key)) => { subscriptions.remove(&key); },
+            outcome = workers.join_next(), if !workers.is_empty() => {
+                match outcome { Some(Ok((key, completion))) => {
+                    subscriptions.remove(&key);
+                    if let Some(done) = completion.filter(|done| done.sub.active()) {
+                        completed.insert(key, done);
+                    }
+                },
                     Some(Err(err)) => break Err(Error::new(ErrorKind::Internal).with_message("UDP follow worker failed").with_source(err)),
                     None => {} } continue;
+            }
+            _ = tokio::time::sleep_until(next_expiry.into()), if !completed.is_empty() => {
+                completed.retain(|_, done| done.sub.active());
+                continue;
             }
             _ = interval.tick() => { counts.lock().expect("UDP counters").report(); continue; }
             received = socket.recv_from(&mut buffer) => match received {
@@ -492,6 +530,7 @@ pub(crate) async fn run(
         };
         let key = (source, id);
         if op == wire::CLOSE && body.is_empty() {
+            completed.remove(&key);
             if let Some(sub) = subscriptions.get(&key) {
                 sub.cancelled.store(true, Ordering::Release);
             }
@@ -508,6 +547,12 @@ pub(crate) async fn run(
                 *sub.expiry.lock().expect("UDP lease") =
                     Instant::now() + Duration::from_millis(wire::LEASE_MS);
                 sub.renewal_requested.store(true, Ordering::Release);
+            } else if let Some(done) = completed.remove(&key).filter(|done| done.sub.active()) {
+                *done.sub.expiry.lock().expect("UDP lease") =
+                    Instant::now() + Duration::from_millis(wire::LEASE_MS);
+                subscriptions.insert(key, done.sub.clone());
+                let socket = outgoing.clone();
+                workers.spawn_blocking(move || completed_worker(socket, key, done));
             }
             continue;
         };
@@ -552,7 +597,23 @@ pub(crate) async fn run(
             }
             continue;
         }
-        if subscriptions.len() >= capacity {
+        if let Some(done) = completed.get(&key) {
+            if done.sub.selection != selection || !done.sub.active() {
+                failure(
+                    &outgoing,
+                    key,
+                    &Error::new(ErrorKind::Usage)
+                        .with_message("UDP subscription selection changed or expired"),
+                );
+                continue;
+            }
+            let done = completed.remove(&key).expect("completed subscription");
+            subscriptions.insert(key, done.sub.clone());
+            let socket = outgoing.clone();
+            workers.spawn_blocking(move || completed_worker(socket, key, done));
+            continue;
+        }
+        if subscriptions.len() + completed.len() >= capacity {
             failure(
                 &outgoing,
                 key,
@@ -585,4 +646,47 @@ pub(crate) async fn run(
     }
     counts.lock().expect("UDP counters").report();
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finite_follow_releases_worker_and_mapping_before_lease_ends() {
+        let directory = tempfile::tempdir().unwrap();
+        let client = LocalClient::new().with_pool_dir(directory.path());
+        client
+            .create_pool(
+                &PoolRef::name("events"),
+                plasmite::api::PoolOptions::new(1024 * 1024),
+            )
+            .unwrap();
+        let sender = Arc::new(std::net::UdpSocket::bind("127.0.0.1:0").unwrap());
+        let receiver = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let key = (receiver.local_addr().unwrap(), [1; 16]);
+        let sub = Arc::new(Subscription {
+            selection: wire::Selection {
+                pool: "events".into(),
+                start: wire::Start::Last(1),
+                live: false,
+            },
+            cancelled: AtomicBool::new(false),
+            expiry: Mutex::new(Instant::now() + Duration::from_millis(wire::LEASE_MS)),
+            renewal_requested: AtomicBool::new(false),
+        });
+        let worker_sub = sub.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            tx.send(follow_worker(sender, client, key, worker_sub))
+                .unwrap();
+        });
+        let result = rx.recv_timeout(Duration::from_secs(2));
+        sub.cancelled.store(true, Ordering::Release);
+        worker.join().unwrap();
+        let (_, completion) = result.expect("finite worker must return before lease expiry");
+        let completion = completion.expect("completion record");
+        assert!(completion.progress.terminal);
+        completion.pool.check_current_path().unwrap();
+    }
 }

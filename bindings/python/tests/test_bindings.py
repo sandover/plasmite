@@ -42,6 +42,8 @@ from plasmite import (
     UdpClient,
     UdpFollowOptions,
     UdpFrame,
+    UdpGap,
+    UdpProgress,
     UdpStart,
     parse_message,
 )
@@ -413,6 +415,69 @@ class BindingTests(unittest.TestCase):
                 client.open_pool("damaged")
             self.assertEqual(corrupt.exception.path, str(pool_path))
             self.assertIsNone(corrupt.exception.seq)
+
+    def test_udp_delivers_late_and_duplicate_frames(self) -> None:
+        with self._new_client() as client:
+            with self._new_pool(client, "udp-order") as pool:
+                message = pool.append({"value": 17}, ["tag"])
+                payload = pool.get_lite3(message.seq).payload
+        base = 1 << 53
+        timestamp = 1_700_000_000_000_000_001
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as peer:
+            peer.bind(("127.0.0.1", 0))
+            peer.settimeout(3)
+
+            def serve() -> None:
+                request, address = peer.recvfrom(4096)
+                subscription = request[8:24]
+
+                def send(op: int, body: bytes) -> None:
+                    peer.sendto(b"\0PUDP\x01" + bytes([op, 0]) + subscription + body, address)
+
+                cookie = {"expires_ms": 10_000, "mac": "test-cookie"}
+                send(3, json.dumps({"cookie": cookie}).encode())
+                verified, source = peer.recvfrom(4096)
+                assert source == address
+                assert json.loads(verified[24:])["cookie"] == cookie
+
+                def data(seq: int) -> None:
+                    send(7, seq.to_bytes(8, "big") + timestamp.to_bytes(8, "big") + payload)
+
+                def progress(terminal: bool) -> None:
+                    send(4, json.dumps({
+                        "start_seq": base + 10, "next_seq": base + 13,
+                        "end_seq": base + 12, "lease_ms": 30_000, "terminal": terminal,
+                    }).encode())
+
+                data(base + 10)
+                progress(False)
+                send(5, json.dumps({"first": base + 11, "last": base + 11, "reason": "pressure"}).encode())
+                for seq in [base + 12, base + 11, base + 12]:
+                    data(seq)
+                progress(True)
+
+            worker = threading.Thread(target=serve)
+            worker.start()
+            try:
+                with UdpClient(f"udp://127.0.0.1:{peer.getsockname()[1]}") as client:
+                    with client.open_pool("sensors") as pool:
+                        with pool.follow(UdpFollowOptions(start=UdpStart.last(4), live=False)) as follow:
+                            events = [follow.next_event(timeout_ms=1000) for _ in range(7)]
+                            self.assertIsNone(follow.next_event(timeout_ms=0))
+                frames = [event for event in events if isinstance(event, UdpFrame)]
+                self.assertEqual([frame.seq for frame in frames], [base + 10, base + 12, base + 11, base + 12])
+                for frame in frames:
+                    self.assertEqual(frame.payload, payload)
+                    self.assertEqual(frame.timestamp_ns, timestamp)
+                    self.assertEqual(frame.message().data, {"value": 17})
+                skips = [event for event in events if isinstance(event, UdpGap)]
+                self.assertEqual([(event.first, event.last, event.reason) for event in skips], [(base + 11, base + 11, "pressure")])
+                progress = [event for event in events if isinstance(event, UdpProgress)]
+                self.assertEqual([event.next_seq for event in progress], [base + 13, base + 13])
+                self.assertTrue(progress[-1].terminal)
+            finally:
+                worker.join(timeout=4)
+                self.assertFalse(worker.is_alive())
 
     def test_udp_sdk_send_and_follow_against_server_process(self) -> None:
         binary = Path(os.environ.get("PLASMITE_BIN", REPO_ROOT / "target" / "debug" / "plasmite"))

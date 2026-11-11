@@ -143,13 +143,16 @@ The C interface adds bounded waits without changing legacy `*_next` calls:
   streams expose bounded waits and concurrent cancellation; high-level tails
   accept an optional `threading.Event` cancellation flag.
 
-- Ordering is strictly by `seq` within a pool.
+- Local and HTTP tails deliver messages strictly by `seq` within a pool.
+  Standalone UDP follows use the separate
+  [arrival-order receive policy](../../udp/v1/SPEC.md#receive-ordering-and-notices).
 - Streams support explicit caller cancellation.
 - Implementations must respect backpressure and avoid unbounded buffering.
 - Once cancellation is observed, no further messages may be delivered.
 - A local tail cancellation flag ends the tail promptly and returns no further
   messages after cancellation is observed.
-- Reconnect behavior (for remote transports) must be explicit and must not reorder messages.
+- HTTP reconnect behavior must be explicit and must not reorder messages.
+  UDP follows never reconnect automatically.
 - Remote one-shot network requests use a 30-second deadline in the Rust client.
   A transport timeout or incomplete successful-response body returns `Io`;
   an HTTP error response retains its status-based error mapping. System DNS
@@ -225,15 +228,28 @@ open validates Name or a same-origin UDP Uri without claiming remote existence.
 without DNS or sockets; the CLI uses the same parser.
 
 `UdpFollowOptions` chooses New, Last, Since timestamp, or Sequence and live/finite.
-Follow events carry an owned exact-byte frame, a skipped range/reason, or progress.
-Clients expose increasing sequences only; no ordering buffer or data repair.
-Account for sequence before timestamp/tag/application filtering. Explicit polling
-wait deadlines return no event; stream end has an independent finished state.
+Follow events carry an owned exact-byte frame, an explicit server skipped
+range/reason, or progress. The
+[arrival-order policy](../../udp/v1/SPEC.md#receive-ordering-and-notices) describes
+an unreleased amendment to the 1.x behavior; shipment requires a major release.
+Clients deliver valid matching DATA in arrival order, including late messages
+and duplicates.
+Sequence/progress jumps must neither create inferred gaps nor suppress DATA.
+Consumers choose whether to reorder or discard messages. Apply timestamp, tag,
+and application filters to each message without creating skips. A finite follow
+ends on terminal progress after draining accepted events; packets still in
+flight may go unread. No ordering buffer, duplicate suppression, or data repair.
+Explicit polling wait deadlines return no event; stream end has an independent
+finished state.
 A zero timeout polls the socket without blocking and still checks renewal and
 liveness. Keep consuming to maintain the lease.
 Close sends one best-effort stop; stopped consumers do not renew secretly.
 
 The same behavior applies in C, Python, Node, and Go; preserve uint64 metadata.
 `Pool::check_current_path` compares an open handle's native identity to its path
-without writing. Replacement/deletion ends the old UDP stream.
+without writing. `Pool::into_path_guard` consumes the pool, releases its mapping,
+and keeps the original file handle and path for the same read-only identity check.
+Replacement/deletion ends the old UDP stream, including completion renewal.
+Public `Gap` names denote explicit server skips for compatibility. `Unknown`
+remains a reserved public reason; clients reject it in SKIP packets.
 Wire behavior and network limits live in [UDP v1](../../udp/v1/SPEC.md).

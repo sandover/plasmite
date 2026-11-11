@@ -909,3 +909,72 @@ async function nextUdpFrame(follow) {
   }
   assert.fail("UDP follower did not receive a frame");
 }
+
+test("UDP native frames retain arrival order, duplicates, and uint64 metadata", { timeout: 5000 }, async (t) => {
+  const temp = makeTempDir();
+  const client = new Client(temp);
+  const pool = client.createPool("udp-order", DEFAULT_POOL_SIZE_BYTES);
+  const original = pool.append({ value: 17 }, ["tag"]);
+  const payload = pool.getLite3(original.seq).payload;
+  const base = 1n << 53n;
+  const timestamp = 1_700_000_000_000_000_001n;
+  const peer = dgram.createSocket("udp4");
+  let udpClient, udpPool, follow;
+  t.after(() => {
+    follow?.close();
+    udpPool?.close();
+    udpClient?.close();
+    peer.close();
+    pool.close();
+    client.close();
+    fs.rmSync(temp, { recursive: true, force: true });
+  });
+  await new Promise((resolve) => peer.bind(0, "127.0.0.1", resolve));
+  let started = false;
+  peer.on("message", (request, address) => {
+    if (request[6] !== 1 || started) return;
+    const id = request.subarray(8, 24);
+    const subscribe = JSON.parse(request.subarray(24));
+    const send = (op, body) => peer.send(Buffer.concat([
+      Buffer.from([0, 80, 85, 68, 80, 1, op, 0]), id, Buffer.from(body),
+    ]), address.port, address.address);
+    if (!subscribe.cookie) {
+      send(3, JSON.stringify({ cookie: { expires_ms: 10000, mac: "test-cookie" } }));
+      return;
+    }
+    assert.equal(subscribe.cookie.mac, "test-cookie");
+    started = true;
+    const data = (seq) => {
+      const header = Buffer.alloc(16);
+      header.writeBigUInt64BE(seq);
+      header.writeBigUInt64BE(timestamp, 8);
+      send(7, Buffer.concat([header, payload]));
+    };
+    const progress = (terminal) => send(4,
+      `{"start_seq":${base + 10n},"next_seq":${base + 13n},"end_seq":${base + 12n},"lease_ms":30000,"terminal":${terminal}}`);
+    data(base + 10n);
+    progress(false);
+    send(5, `{"first":${base + 11n},"last":${base + 11n},"reason":"pressure"}`);
+    for (const seq of [base + 12n, base + 11n, base + 12n]) data(seq);
+    progress(true);
+  });
+  udpClient = new UdpClient(`udp://127.0.0.1:${peer.address().port}`);
+  udpPool = udpClient.openPool("sensors");
+  follow = await udpPool.follow({ start: UdpStart.last(4), live: false });
+  const events = [];
+  for (let i = 0; i < 7; i++) events.push(await follow.nextEvent(1000));
+  assert.equal(await follow.nextEvent(0), null);
+  const frames = events.filter((event) => event?.kind === "frame");
+  assert.deepEqual(frames.map((frame) => frame.seq), [base + 10n, base + 12n, base + 11n, base + 12n]);
+  for (const frame of frames) {
+    assert.deepEqual(frame.payload, payload);
+    assert.equal(frame.timestampNs, timestamp);
+    assert.equal(frame.message.seq, frame.seq);
+    assert.deepEqual(frame.message.data, { value: 17 });
+  }
+  assert.deepEqual(events.filter((event) => event?.kind === "gap").map((event) => [event.first, event.last, event.reason]),
+    [[base + 11n, base + 11n, "pressure"]]);
+  const progress = events.filter((event) => event?.kind === "progress");
+  assert.deepEqual(progress.map((event) => event.nextSeq), [base + 13n, base + 13n]);
+  assert.equal(progress.at(-1).terminal, true);
+});

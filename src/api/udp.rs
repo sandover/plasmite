@@ -1,7 +1,7 @@
 //! Purpose: Provide best-effort UDP send and follow clients.
 //! Exports: `UdpClient`, `UdpPool`, `UdpFollow`, and UDP event types.
 //! Role: Keep the UDP transport separate from committed HTTP append semantics.
-//! Invariants: Resolve one server endpoint per client; expose increasing sequences only.
+//! Invariants: Resolve one server endpoint per client; deliver DATA in arrival order.
 #![expect(
     clippy::result_large_err,
     reason = "the public API uses the shared Error type like sibling API modules"
@@ -29,7 +29,7 @@ pub type UdpSkipReason = wire::Reason;
 
 const CONTROL_RETRY: Duration = Duration::from_secs(1);
 const INITIAL_REQUEST_MIN: usize = 256;
-const MAX_PENDING_EVENTS: usize = 64;
+const MAX_OPENING_SKIPS: usize = 64;
 
 #[derive(Clone, Debug)]
 pub struct UdpClient {
@@ -87,6 +87,7 @@ impl UdpFrame {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UdpEvent {
     Frame(UdpFrame),
+    /// Compatibility name for an explicit server SKIP, never inferred network loss.
     Gap {
         first: u64,
         last: u64,
@@ -107,11 +108,8 @@ pub struct UdpFollow {
     selection: wire::Selection,
     pending: VecDeque<UdpEvent>,
     initial_bounds: Option<FollowBounds>,
-    first_observed_seq: Option<u64>,
-    next_expected_seq: Option<u64>,
     last_activity: Instant,
     next_renewal: Instant,
-    opening: bool, // Coalesce gaps while the handshake owns the receive loop.
     terminal_seen: bool,
 }
 
@@ -208,6 +206,7 @@ impl UdpPool {
         Ok(())
     }
 
+    /// Subscribe to best-effort DATA in arrival order, including late messages and duplicates.
     pub fn follow(&self, options: UdpFollowOptions) -> Result<UdpFollow, Error> {
         let mut id = [0u8; 16];
         getrandom::fill(&mut id).map_err(|error| {
@@ -231,11 +230,8 @@ impl UdpPool {
             selection,
             pending: VecDeque::new(),
             initial_bounds: None,
-            first_observed_seq: None,
-            next_expected_seq: None,
             last_activity: now,
             next_renewal: now + Duration::from_millis(wire::RENEW_MS),
-            opening: true,
             terminal_seen: false,
         };
         follow.open()?;
@@ -297,15 +293,9 @@ impl UdpFollow {
                 }
                 Err(error) => return Err(socket_error("UDP follow receive failed", error)),
             };
-            if length > wire::MAX_DATAGRAM {
-                continue;
-            }
-            let Some((op, response_id, body)) = wire::parse(&buffer[..length]) else {
+            let Some((op, body)) = self.response(&buffer[..length]) else {
                 continue;
             };
-            if response_id != self.id {
-                continue;
-            }
             match op {
                 wire::CHALLENGE if !answered_challenge => {
                     let challenge: wire::Challenge = decode_control(body, "UDP challenge")?;
@@ -318,26 +308,13 @@ impl UdpFollow {
                     answered_challenge = true;
                     retry_at = Instant::now() + CONTROL_RETRY;
                 }
-                wire::CHALLENGE => {}
-                wire::ERROR => return Err(decode_failure(body)?),
-                wire::PROGRESS => {
-                    let progress: wire::Progress = decode_control(body, "UDP progress")?;
-                    self.accept_progress(progress)?;
+                wire::PROGRESS | wire::DATA => {
+                    self.accept_response(op, body)?;
                     break;
                 }
-                wire::DATA => {
-                    self.accept_data(body)?;
-                    break;
-                }
-                wire::SKIP => {
-                    let skip: wire::Skip = decode_control(body, "UDP skip")?;
-                    self.accept_skip(skip)?;
-                    // SKIP can overtake opening PROGRESS, so it does not complete startup.
-                }
-                _ => {}
+                _ => self.accept_response(op, body)?,
             }
         }
-        self.opening = false;
         self.refresh_liveness();
         self.next_renewal = self.last_activity + Duration::from_millis(wire::RENEW_MS);
         Ok(())
@@ -410,35 +387,37 @@ impl UdpFollow {
                 }
                 Err(error) => return Err(socket_error("UDP follow receive failed", error)),
             };
-            if length > wire::MAX_DATAGRAM {
-                continue;
-            }
-            let Some((op, response_id, body)) = wire::parse(&buffer[..length]) else {
+            let Some((op, body)) = self.response(&buffer[..length]) else {
                 continue;
             };
-            if response_id != self.id {
-                continue;
-            }
 
-            match op {
-                wire::PROGRESS => {
-                    let progress: wire::Progress = decode_control(body, "UDP progress")?;
-                    self.accept_progress(progress)?;
-                    self.refresh_liveness();
-                }
-                wire::DATA => {
-                    self.accept_data(body)?;
-                    self.refresh_liveness();
-                }
-                wire::SKIP => {
-                    let skip: wire::Skip = decode_control(body, "UDP skip")?;
-                    self.accept_skip(skip)?;
-                    self.refresh_liveness();
-                }
-                wire::ERROR => return Err(decode_failure(body)?),
-                _ => continue,
-            }
+            self.accept_response(op, body)?;
         }
+    }
+
+    fn response<'a>(&self, packet: &'a [u8]) -> Option<(u8, &'a [u8])> {
+        let (op, id, body) = wire::parse(packet)?;
+        (id == self.id).then_some((op, body))
+    }
+
+    fn accept_response(&mut self, op: u8, body: &[u8]) -> Result<(), Error> {
+        match op {
+            wire::PROGRESS => self.accept_progress(decode_control(body, "UDP progress")?)?,
+            wire::DATA => self.accept_data(body)?,
+            wire::SKIP => {
+                // Opening may receive SKIPs before PROGRESS; preserve each exact range.
+                if self.pending.len() >= MAX_OPENING_SKIPS {
+                    return Err(Error::new(ErrorKind::Busy)
+                        .with_message("UDP startup skip queue is full before opening progress")
+                        .with_hint("Try following again or use HTTP for selected history."));
+                }
+                self.accept_skip(decode_control(body, "UDP skip")?)?;
+            }
+            wire::ERROR => return Err(decode_failure(body)?),
+            _ => return Ok(()),
+        }
+        self.refresh_liveness();
+        Ok(())
     }
 
     fn subscribe_packet(
@@ -508,45 +487,14 @@ impl UdpFollow {
                 start_seq: progress.start_seq,
                 end_seq: progress.end_seq,
             });
-            if let Some(first) = self.first_observed_seq
-                && first > progress.start_seq
-            {
-                self.pending.push_front(UdpEvent::Gap {
-                    first: progress.start_seq,
-                    last: first - 1,
-                    reason: UdpSkipReason::Unknown,
-                });
-            }
-            if self.next_expected_seq.is_none() {
-                self.next_expected_seq = Some(progress.start_seq);
-            }
         }
-
-        let stale = self
-            .next_expected_seq
-            .is_some_and(|expected| progress.next_seq < expected);
-        if !stale
-            && let Some(expected) = self.next_expected_seq
-            && progress.next_seq > expected
-        {
-            let reason = if progress.retention_gap {
-                UdpSkipReason::Retention
-            } else {
-                UdpSkipReason::Unknown
-            };
-            self.enqueue_gap(expected, progress.next_seq - 1, reason);
-            self.next_expected_seq = Some(progress.next_seq);
-        }
-
-        if !stale || progress.terminal {
-            self.pending.push_back(UdpEvent::Progress {
-                start_seq: progress.start_seq,
-                next_seq: progress.next_seq,
-                end_seq: progress.end_seq,
-                terminal: progress.terminal,
-                retention_gap: progress.retention_gap,
-            });
-        }
+        self.pending.push_back(UdpEvent::Progress {
+            start_seq: progress.start_seq,
+            next_seq: progress.next_seq,
+            end_seq: progress.end_seq,
+            terminal: progress.terminal,
+            retention_gap: progress.retention_gap,
+        });
         if progress.terminal {
             self.terminal_seen = true;
         }
@@ -567,19 +515,6 @@ impl UdpFollow {
                 .with_source(error)
         })?;
 
-        if self
-            .next_expected_seq
-            .is_some_and(|expected| seq < expected)
-        {
-            return Ok(());
-        }
-        self.first_observed_seq.get_or_insert(seq);
-        if let Some(expected) = self.next_expected_seq
-            && seq > expected
-        {
-            self.enqueue_gap(expected, seq - 1, UdpSkipReason::Unknown);
-        }
-        self.next_expected_seq = Some(seq.saturating_add(1));
         let since = match &self.selection.start {
             UdpStart::Since(since) => Some(*since),
             _ => None,
@@ -595,65 +530,15 @@ impl UdpFollow {
     }
 
     fn accept_skip(&mut self, skip: wire::Skip) -> Result<(), Error> {
-        if skip.first > skip.last {
-            return Err(protocol_error("UDP skip range is invalid"));
-        }
-        self.first_observed_seq.get_or_insert(skip.first);
-        let Some(expected) = self.next_expected_seq else {
-            self.enqueue_gap(skip.first, skip.last, skip.reason);
-            self.next_expected_seq = Some(skip.last.saturating_add(1));
-            return Ok(());
-        };
-        if skip.last < expected {
-            return Ok(());
-        }
-        if skip.first > expected {
-            self.enqueue_gap(expected, skip.first - 1, UdpSkipReason::Unknown);
-        }
-        let first = skip.first.max(expected);
-        self.enqueue_gap(first, skip.last, skip.reason);
-        self.next_expected_seq = Some(skip.last.saturating_add(1));
-        Ok(())
-    }
-
-    fn enqueue_gap(&mut self, first: u64, last: u64, reason: UdpSkipReason) {
-        if first > last {
-            return;
-        }
-        if self.opening {
-            if let Some(UdpEvent::Gap {
-                first: queued_first,
-                last: queued_last,
-                reason: queued_reason,
-            }) = self.pending.back_mut()
-                && first <= queued_last.saturating_add(1)
-                && last.saturating_add(1) >= *queued_first
-            {
-                *queued_first = (*queued_first).min(first);
-                *queued_last = (*queued_last).max(last);
-                if *queued_reason != reason {
-                    *queued_reason = UdpSkipReason::Unknown;
-                }
-                return;
-            }
-            if self.pending.len() >= MAX_PENDING_EVENTS
-                && let Some(UdpEvent::Gap {
-                    first: queued_first,
-                    last: queued_last,
-                    reason: queued_reason,
-                }) = self.pending.back_mut()
-            {
-                *queued_first = (*queued_first).min(first);
-                *queued_last = (*queued_last).max(last);
-                *queued_reason = UdpSkipReason::Unknown;
-                return;
-            }
+        if skip.first > skip.last || matches!(skip.reason, UdpSkipReason::Unknown) {
+            return Err(protocol_error("UDP skip range or reason is invalid"));
         }
         self.pending.push_back(UdpEvent::Gap {
-            first,
-            last,
-            reason,
+            first: skip.first,
+            last: skip.last,
+            reason: skip.reason,
         });
+        Ok(())
     }
 
     fn refresh_liveness(&mut self) {

@@ -1,5 +1,10 @@
 # UDP and HTTP feed/follow on loopback
 
+These runs used the original increasing-sequence UDP receiver, which discarded
+late and duplicate DATA and inferred gaps. They do not validate the
+[arrival-order policy](../../spec/udp/v1/SPEC.md#receive-ordering-and-notices)
+approved on 2026-11-11. Keep these measurements as historical evidence.
+
 On this Mac, both transports delivered about 195–199 useful messages per second when one sender offered 200 per second. That rate comes from the fixed workload, so it says nothing about either transport's maximum throughput. UDP delivered 8,997 of 9,000 expected follower copies. HTTP delivered 9,000 of 9,000. The three UDP skips occurred with 16 KiB data and four followers. Every send returned success in the final run, which shows why a successful UDP send cannot stand in for delivery or storage confirmation.
 
 The Rust API uses separate paths. `UdpPool::send_lite3` returns when the operating system accepts a datagram. `RemotePool::append_lite3` returns a committed sequence from the HTTP server. UDP follow uses its connected UDP socket; it does not call HTTP. The table measures send start to receipt of the full, exact Lite3 attachment by a follower. It does not use the pool timestamp as a commit clock.

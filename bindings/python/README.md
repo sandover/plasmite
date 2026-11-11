@@ -104,8 +104,13 @@ Use `append_json(...)` / `get_json(...)` only when you explicitly need raw wire 
 
 The UDP client names its server endpoint explicitly. `send_json` and
 `send_lite3` return no storage receipt: success means the operating system
-accepted the datagram. A follower yields original Lite3 frames, sequence gaps,
-and progress records. The server must opt in with `serve --udp-follow`.
+accepted the datagram. A follower yields original Lite3 frames, explicit server
+skip notices, and progress records. The server must opt in with `serve --udp-follow`.
+The [receive policy](../../spec/udp/v1/SPEC.md#receive-ordering-and-notices)
+requires arrival-order delivery, including late messages and duplicates;
+sequence/progress jumps never establish loss or suppress frames. This source
+change awaits a major release. Finite follows end on terminal progress and may
+leave DATA in flight.
 
 ```python
 from plasmite import UdpClient, UdpFollowOptions, UdpFrame, UdpStart

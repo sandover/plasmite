@@ -33,14 +33,26 @@ These are invariants, not preferences. Each states a violation condition.
 In scope:
 
 - Durable bounded pools with concurrent readers/writers.
-- CLI + bindings + HTTP interfaces over one shared correctness core.
+- CLI, bindings, HTTP, and optional UDP interfaces over one shared correctness core.
+- Documented stream subscriptions with bounded, temporary state for selection,
+  routing, leases, cancellation, and finite completion.
 - Versioned specs and canonical docs of record for decisions that affect compatibility.
 
 Out of scope — these are hard stops, not positioning decisions:
 
 - Cluster-scale message broker features. Plasmite will never add distributed coordination, leader election, or consumer groups.
 - Complex schema or type systems beyond the JSON envelope. The envelope (`seq`, `time`, `meta`, `data`) is the full contract; mandatory schema validation or typed fields are violations.
-- Hidden server-side state machines. Any feature that requires the server to maintain per-client session state that affects message delivery is out of scope.
+- Durable reader progress on the server. Plasmite does not persist per-consumer
+  offsets, track per-message reader acknowledgements, retry individual message
+  deliveries, or choose a consumer's recovery policy. Consumers own those
+  decisions. A stream may keep
+  bounded, temporary subscription state to send the selected messages and
+  reclaim resources when the reader closes or disappears. That state expires
+  with the subscription and never changes pool contents or stores durable
+  progress for readers.
+- Transport rules that discard valid received messages to impose an unrequested
+  delivery guarantee. UDP follow exposes matching messages in arrival order,
+  including late messages and duplicates; consumers choose their ordering policy.
 - Implicit behavior. Features that change observable output based on undocumented heuristics violate the JSON-first and predictable-contracts principles.
 
 ## Success criteria

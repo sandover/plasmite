@@ -116,12 +116,12 @@ typedef enum plsm_udp_start_kind {
 
 typedef enum plsm_udp_event_kind {
     PLSM_UDP_EVENT_FRAME = 1,
-    PLSM_UDP_EVENT_GAP = 2,
+    PLSM_UDP_EVENT_GAP = 2, /* Compatibility name: an explicit server SKIP. */
     PLSM_UDP_EVENT_PROGRESS = 3
 } plsm_udp_event_kind_t;
 
 typedef enum plsm_udp_skip_reason {
-    PLSM_UDP_SKIP_UNKNOWN = 0,
+    PLSM_UDP_SKIP_UNKNOWN = 0, /* Reserved ABI value; invalid in wire SKIP packets. */
     PLSM_UDP_SKIP_OVERSIZED = 1,
     PLSM_UDP_SKIP_RETENTION = 2,
     PLSM_UDP_SKIP_PRESSURE = 3
@@ -254,6 +254,11 @@ void plsm_error_free(plsm_error_t *err);
  * UDP uses one explicit endpoint and a separate client/pool/follow handle.
  * `pool_name` must be a named pool. Send calls report local validation and OS
  * send errors only; success does not confirm that the server stored a message.
+ * Follow delivers matching DATA in arrival order, including late messages and
+ * duplicates. Only explicit server skips produce gap events. Progress describes
+ * server attempts and never suppresses a later-arriving DATA packet.
+ * Finite follows end on terminal progress after draining accepted events;
+ * DATA still in flight may go unread. Completion does not confirm full delivery.
  */
 int plsm_udp_client_new(
     const char *endpoint,

@@ -1,9 +1,13 @@
 # UDP feed and follow for Plasmite
 
-Status: implemented on main. This document records the design. The
+Status: historical design. The implemented arrival-order receive policy
+approved on 2026-11-11 supersedes this document's increasing-sequence rule,
+duplicate/late-packet suppression, and inferred gap accounting. The source now
+implements that policy; shipment awaits a major release. Preserve the original
+rationale below as design history. The
 [UDP v1 specification](../../spec/udp/v1/SPEC.md), [serving guide](../record/serving.md#send-udp-messages),
-and SDK READMEs describe the current contract. Existing append-only senders keep
-working.
+and SDK READMEs describe the current source contract and release status.
+Existing append-only senders keep working.
 
 ## What a user does
 

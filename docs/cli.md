@@ -22,10 +22,15 @@ is for credential-free use on the server machine.
 
 `feed`, `follow`, and `duplex` also accept `udp://HOST:PORT/POOL`. Give an
 explicit port and one pool name. UDP sends confirm only that the local operating
-system accepted the datagram. Follow discards duplicate and late arrivals,
-reports skipped sequence ranges, and keeps output in pool order. It never
-repairs gaps or switches to HTTP. The maximum datagram size is 65,507 bytes,
-including routing and application framing. Other commands reject UDP URLs.
+system accepted the datagram. The
+[UDP receive policy](../spec/udp/v1/SPEC.md#receive-ordering-and-notices) requires
+follow to deliver matching messages in arrival order, including late messages
+and duplicates, and report only explicit server skips. Sequence/progress jumps
+never justify dropping a packet or inferring a gap. This source change awaits
+a major release. A finite follow ends on terminal progress and can leave DATA
+in flight. It never repairs data or switches to HTTP. The maximum datagram size
+is 65,507 bytes, including routing and application framing. Other commands
+reject UDP URLs.
 
 | Command | Local name/path | Remote URL |
 | --- | --- | --- |
@@ -288,6 +293,10 @@ native binary redirection; earlier versions need `cmd.exe` redirection.
 `follow POOL` waits for new messages. `--tail N` adds the last N retained
 messages, and `--since TIME` adds messages since an RFC 3339 or relative time
 such as `5m`. Local and remote reads follow these same rules.
+
+UDP uses the same history selection and filters with its separate
+[arrival-order delivery policy](../spec/udp/v1/SPEC.md#receive-ordering-and-notices).
+Its finite completion gives no assurance that every selected message arrived.
 
 Use `--no-follow` alone to read all currently retained history and exit, or add
 `--tail` or `--since` to select a smaller history:

@@ -437,6 +437,20 @@ pub struct Pool {
     snapshot_lock: Mutex<()>,
 }
 
+/// Keep an opened file's identity after releasing its pool mapping.
+/// Holding the original file prevents native file-ID reuse while this guard lives.
+pub struct PoolPathGuard {
+    path: PathBuf,
+    file: File,
+}
+
+impl PoolPathGuard {
+    /// Fail if the path no longer names the original opened pool file.
+    pub fn check_current_path(&self) -> Result<(), Error> {
+        require_current_path(&self.file, &self.path)
+    }
+}
+
 impl Pool {
     pub fn create(path: impl AsRef<Path>, options: PoolOptions) -> Result<Self, Error> {
         let path = path.as_ref().to_path_buf();
@@ -636,6 +650,14 @@ impl Pool {
     /// Fail if the path no longer names this opened pool instance.
     pub fn check_current_path(&self) -> Result<(), Error> {
         require_current_path(&self.file, &self.path)
+    }
+
+    /// Release the mapping and keep only the file and path for identity checks.
+    pub fn into_path_guard(self) -> PoolPathGuard {
+        PoolPathGuard {
+            path: self.path,
+            file: self.file,
+        }
     }
 
     pub fn bounds(&self) -> Result<Bounds, Error> {
@@ -3085,6 +3107,26 @@ mod tests {
         let reopened = Pool::open(&path).expect("pool remains reopenable");
         let header = reopened.header_from_mmap().expect("header");
         crate::core::validate::validate_pool_state(header, &reopened.mmap).expect("valid state");
+    }
+
+    #[test]
+    fn path_guard_keeps_original_identity_after_releasing_pool() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("pool.plasmite");
+        let pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).unwrap();
+        let guard = pool.into_path_guard();
+        guard.check_current_path().unwrap();
+        std::fs::rename(&path, directory.path().join("old.plasmite")).unwrap();
+        assert_eq!(
+            guard.check_current_path().unwrap_err().kind(),
+            ErrorKind::NotFound
+        );
+        let replacement = Pool::create(&path, PoolOptions::new(1024 * 1024)).unwrap();
+        assert_eq!(
+            guard.check_current_path().unwrap_err().kind(),
+            ErrorKind::NotFound
+        );
+        replacement.check_current_path().unwrap();
     }
 
     #[cfg(unix)]

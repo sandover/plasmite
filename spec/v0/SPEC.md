@@ -359,7 +359,15 @@ rules follow the [UDP v1 contract](../udp/v1/SPEC.md).
 
 UDP feed never emits a stored-message receipt. Exit 0 means local socket
 submission, not storage. UDP follow/history use the normal filters and formats
-with best-effort delivery. Delivery gaps produce notices and finite exit 1;
-confirmed retained-history gaps exit 9; no-matching-output timeout exits 124.
+with best-effort delivery. The
+[arrival-order policy](../udp/v1/SPEC.md#receive-ordering-and-notices) describes
+unreleased source behavior; see that specification's source status. Deliver
+matching DATA
+in arrival order, including late messages and duplicates. Sequence/progress
+jumps never create inferred gaps or suppress DATA. Explicit oversized/pressure
+skips produce notices and finite exit 1; confirmed server retention gaps exit 9.
+A finite follow ends on terminal progress and drains accepted events. Exit 0
+requires no observed server skip/error; it gives no assurance of complete
+delivery. No-matching-output timeout exits 124.
 No automatic write retry, HTTP fallback, or gap repair. Unsupported commands or
 options reject a UDP target before work, with Usage.

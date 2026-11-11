@@ -1546,6 +1546,130 @@ mod tests {
     }
 
     #[test]
+    fn abi_smoke_udp_delivers_late_and_duplicate_frames() {
+        use crate::udp_wire as wire;
+        use std::net::UdpSocket;
+        let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let endpoint = CString::new(format!("udp://{}", peer.local_addr().unwrap())).unwrap();
+        let base = 1u64 << 53;
+        let timestamp = 1_700_000_000_000_000_001u64;
+        let payload =
+            crate::api::lite3::encode_message(&["tag".into()], &serde_json::json!({"value":17}))
+                .unwrap();
+        let expected = payload.as_slice().to_vec();
+        let worker = std::thread::spawn(move || {
+            let mut buffer = [0; 4096];
+            let (len, address) = peer.recv_from(&mut buffer).unwrap();
+            let (op, id, _) = wire::parse(&buffer[..len]).unwrap();
+            assert_eq!(op, wire::SUBSCRIBE);
+            peer.send_to(
+                &wire::control(
+                    wire::CHALLENGE,
+                    id,
+                    &serde_json::json!({
+                        "cookie": {"expires_ms":10_000, "mac":"test-cookie"}
+                    }),
+                )
+                .unwrap(),
+                address,
+            )
+            .unwrap();
+            peer.recv_from(&mut buffer).unwrap();
+            let send = |packet: Vec<u8>| {
+                peer.send_to(&packet, address).unwrap();
+            };
+            send(wire::data(id, base + 10, timestamp, payload.as_slice()).unwrap());
+            let progress = |terminal| {
+                wire::control(
+                    wire::PROGRESS,
+                    id,
+                    &wire::Progress {
+                        start_seq: base + 10,
+                        next_seq: base + 13,
+                        end_seq: Some(base + 12),
+                        lease_ms: wire::LEASE_MS,
+                        terminal,
+                        retention_gap: false,
+                    },
+                )
+                .unwrap()
+            };
+            send(progress(false));
+            send(
+                wire::control(
+                    wire::SKIP,
+                    id,
+                    &wire::Skip {
+                        first: base + 11,
+                        last: base + 11,
+                        reason: wire::Reason::Pressure,
+                    },
+                )
+                .unwrap(),
+            );
+            for seq in [base + 12, base + 11, base + 12] {
+                send(wire::data(id, seq, timestamp, payload.as_slice()).unwrap());
+            }
+            send(progress(true));
+        });
+        let mut client = ptr::null_mut();
+        let mut pool = ptr::null_mut();
+        let mut follow = ptr::null_mut();
+        let mut error = ptr::null_mut();
+        let name = CString::new("sensors").unwrap();
+        assert_eq!(
+            plsm_udp_client_new(endpoint.as_ptr(), &mut client, &mut error),
+            0
+        );
+        assert_eq!(
+            plsm_udp_client_open_pool(client, name.as_ptr(), &mut pool, &mut error),
+            0
+        );
+        assert_eq!(
+            plsm_udp_pool_follow(pool, 1, 4, 0, &mut follow, &mut error),
+            0
+        );
+        let mut sequences = Vec::new();
+        let mut skips = Vec::new();
+        loop {
+            let mut event = plsm_udp_event::default();
+            let status = plsm_udp_follow_next(follow, 1000, &mut event, &mut error);
+            if status == 2 {
+                break;
+            }
+            assert_eq!(status, 1);
+            match event.kind {
+                1 => {
+                    sequences.push(event.seq);
+                    assert_eq!(event.timestamp_ns, timestamp);
+                    assert_eq!(
+                        unsafe {
+                            std::slice::from_raw_parts(event.payload.data, event.payload.len)
+                        },
+                        expected
+                    );
+                    let mut message = plsm_buf::default();
+                    assert_eq!(plsm_udp_event_message(&event, &mut message, &mut error), 0);
+                    assert_eq!(parse_buf(&message)["seq"], event.seq);
+                    plsm_buf_free(&mut message);
+                }
+                2 => skips.push((event.first, event.last, event.reason)),
+                3 => assert_eq!(event.next_seq, base + 13),
+                _ => panic!("unexpected UDP event"),
+            }
+            plsm_udp_event_free(&mut event);
+        }
+        assert!(error.is_null());
+        assert_eq!(sequences, [base + 10, base + 12, base + 11, base + 12]);
+        assert_eq!(skips, [(base + 11, base + 11, 3)]);
+        plsm_udp_follow_close(follow);
+        plsm_udp_pool_free(pool);
+        plsm_udp_client_free(client);
+        worker.join().unwrap();
+    }
+
+    #[test]
     fn udp_event_decodes_unaligned_payload() {
         let data = serde_json::json!({"value": 17});
         let document = crate::api::lite3::encode_message(&["tag".into()], &data).unwrap();

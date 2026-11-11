@@ -158,6 +158,7 @@ export type UdpEvent =
       payload: Buffer
       message: Message
     }
+  // "gap" is the compatibility name for a server skip; "unknown" is reserved.
   | { kind: "gap"; first: bigint; last: bigint; reason: "unknown" | "oversized" | "retention" | "pressure" }
   | {
       kind: "progress"

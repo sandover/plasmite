@@ -336,29 +336,37 @@ fn input_only_server_refuses_reads_and_verified_capacity_is_bounded() -> TestRes
             .kind(),
         ErrorKind::Permission
     );
-    let server = Server::start(true, 1)?;
-    let mut first = server.udp()?.follow(UdpFollowOptions::new())?;
-    assert_eq!(
-        server
-            .udp()?
-            .follow(UdpFollowOptions::new())
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::Busy
-    );
-    first.close();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        match server.udp()?.follow(UdpFollowOptions::new()) {
-            Ok(mut stream) => {
-                stream.close();
-                break;
+    for live in [true, false] {
+        let server = Server::start(true, 1)?;
+        let mut first = server.udp()?.follow(UdpFollowOptions {
+            start: UdpStart::Last(1),
+            live,
+        })?;
+        if !live {
+            while first.next_event()?.is_some() {}
+        }
+        assert_eq!(
+            server
+                .udp()?
+                .follow(UdpFollowOptions::new())
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::Busy
+        );
+        first.close();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match server.udp()?.follow(UdpFollowOptions::new()) {
+                Ok(mut stream) => {
+                    stream.close();
+                    break;
+                }
+                Err(err) if err.kind() == ErrorKind::Busy && Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(50))
+                }
+                Err(err) => return Err(err.into()),
             }
-            Err(err) if err.kind() == ErrorKind::Busy && Instant::now() < deadline => {
-                thread::sleep(Duration::from_millis(50))
-            }
-            Err(err) => return Err(err.into()),
         }
     }
     Ok(())
@@ -447,6 +455,23 @@ fn completed_follow_rejects_pool_replacement_before_answering_renewal() -> TestR
             .terminal
     );
 
+    let cookie = challenge(&socket, server.address, id, &selection)?;
+    prove(&socket, server.address, id, &selection, cookie)?;
+    let (_, repeated) = receive_control(&socket, id, wire::PROGRESS)?;
+    assert!(wire::decode::<wire::Progress>(&repeated).unwrap().terminal);
+    let conflicting = wire::Selection {
+        start: wire::Start::New,
+        ..selection.clone()
+    };
+    let cookie = challenge(&socket, server.address, id, &conflicting)?;
+    prove(&socket, server.address, id, &conflicting, cookie)?;
+    let (_, error) = receive_control(&socket, id, wire::ERROR)?;
+    assert_eq!(wire::decode::<wire::Failure>(&error).unwrap().kind, "Usage");
+    let cookie = challenge(&socket, server.address, id, &selection)?;
+    prove(&socket, server.address, id, &selection, cookie)?;
+    let (_, repeated) = receive_control(&socket, id, wire::PROGRESS)?;
+    assert!(wire::decode::<wire::Progress>(&repeated).unwrap().terminal);
+
     let old = server.pools.join("events.plasmite");
     fs::rename(&old, server.pools.join("old.plasmite"))?;
     server
@@ -467,6 +492,31 @@ fn completed_follow_rejects_pool_replacement_before_answering_renewal() -> TestR
         wire::decode::<wire::Failure>(&error).unwrap().kind,
         "NotFound"
     );
+    Ok(())
+}
+
+#[test]
+fn completed_subscription_expiry_releases_capacity() -> TestResult {
+    let server = Server::start(true, 1)?;
+    let mut finite = server.udp()?.follow(UdpFollowOptions {
+        start: UdpStart::Last(1),
+        live: false,
+    })?;
+    while finite.next_event()?.is_some() {}
+    assert_eq!(
+        server
+            .udp()?
+            .follow(UdpFollowOptions::new())
+            .err()
+            .unwrap()
+            .kind(),
+        ErrorKind::Busy
+    );
+    // Keep the finished client socket open: CLOSE must not release the record.
+    thread::sleep(Duration::from_secs(31));
+    let mut next = server.udp()?.follow(UdpFollowOptions::new())?;
+    next.close();
+    finite.close();
     Ok(())
 }
 
@@ -872,7 +922,7 @@ impl Drop for Proxy {
     }
 }
 #[test]
-fn loss_duplicate_reorder_and_lost_opening_progress_never_repair_or_repeat_data() -> TestResult {
+fn loss_duplicate_reorder_and_lost_opening_progress_preserve_received_data() -> TestResult {
     let server = Server::start(true, 64)?;
     for n in 1..=4 {
         server.append(json!({"sample":n}), n)?;
@@ -893,8 +943,8 @@ fn loss_duplicate_reorder_and_lost_opening_progress_never_repair_or_repeat_data(
             _ => {}
         }
     }
-    assert_eq!(frames, vec![1, 4]);
-    assert!(gaps.contains(&(2, 3)), "{gaps:?}");
+    assert_eq!(frames, vec![1, 1, 4, 3]);
+    assert!(gaps.is_empty(), "{gaps:?}");
     Ok(())
 }
 #[test]

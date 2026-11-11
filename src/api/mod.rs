@@ -20,7 +20,7 @@ pub use crate::core::error::{Error, ErrorKind};
 pub use crate::core::lite3::{self, Lite3DocRef};
 pub use crate::core::pool::{
     AppendOptions, Bounds, Durability, Pool, PoolAgeMetrics, PoolInfo, PoolMetrics, PoolOptions,
-    PoolUtilization, SeqOffsetCache,
+    PoolPathGuard, PoolUtilization, SeqOffsetCache,
 };
 pub use crate::core::ring_layout::{FrameSpan, RingLayout};
 pub use client::{LocalClient, PoolRef};

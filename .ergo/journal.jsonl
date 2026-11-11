@@ -517,3 +517,13 @@
 {"version":1,"task_id":"4W4IUB","kind":"done","at":"2026-11-11T18:51:40.627887Z","agent":"codex@plasmite-implementation","text":"Implemented and verified; final evidence recorded in task body."}
 {"version":1,"task_id":"CMXVAD","kind":"result","at":"2026-11-11T18:51:40.676426Z","agent":"codex@plasmite-implementation","text":"Implemented; just check, focused bindings, C ABI and Node packaging checks passed. See implementation notes."}
 {"version":1,"task_id":"CMXVAD","kind":"done","at":"2026-11-11T18:51:40.699348Z","agent":"codex@plasmite-implementation","text":"Implemented and verified; final evidence recorded in task body."}
+{"version":1,"task_id":"BQZZUT","kind":"created","at":"2026-11-11T19:26:20.082638Z"}
+{"version":1,"task_id":"Y4G5SV","kind":"created","at":"2026-11-11T19:26:20.082655Z"}
+{"version":1,"task_id":"UVHKN2","kind":"created","at":"2026-11-11T19:26:20.082659Z"}
+{"version":1,"task_id":"Y4G5SV","kind":"open","at":"2026-11-11T19:26:38.884219Z"}
+{"version":1,"task_id":"UVHKN2","kind":"open","at":"2026-11-11T19:26:38.912624Z"}
+{"version":1,"task_id":"Y4G5SV","kind":"claim","at":"2026-11-11T19:29:45.984896Z","agent":"codex"}
+{"version":1,"task_id":"Y4G5SV","kind":"done","at":"2026-11-11T19:34:28.756328Z","agent":"codex","text":"Implemented arrival-order DATA delivery, removed receive cutoffs and inferred gaps, preserved explicit skip reasons, and updated CLI help/notices.\n\nPassed UDP client (6), transport (15), and CLI (3) regression tests, including reordering, duplicates, progress ahead of DATA, explicit skip exits, lost DATA, filters, and finite terminal overtaking DATA. Formatting passed; full handoff checks follow after binding verification."}
+{"version":1,"task_id":"UVHKN2","kind":"claim","at":"2026-11-11T19:34:28.787019Z","agent":"codex"}
+{"version":1,"task_id":"UVHKN2","kind":"result","at":"2026-11-11T19:43:40.575331Z","agent":"codex","text":"C, Python, Node and Go preserve arrival order, duplicates, exact Lite3 bytes and uint64 metadata."}
+{"version":1,"task_id":"UVHKN2","kind":"done","at":"2026-11-11T19:43:40.60759Z","agent":"codex","text":"Completed native binding conformance, C header documentation, source-status updates, and the next-major compatibility/changelog entry. Numeric version changes and publication remain release preparation.\n\nFull local just release-gate passed: formatting, Clippy with warnings denied, Rust tests, version/distribution checks, cookbook, ABI smoke/adversarial checks, Go, Python (51), Node (42), package/type checks, browser smoke (20), release-library build, and Python wheel installation/runtime. Log: /private/tmp/plasmite-udp-release-gate.log. Policy links and git diff --check passed."}

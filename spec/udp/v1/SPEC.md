@@ -5,6 +5,12 @@ the unchanged [v0 append format](../v0/SPEC.md). UDP provides no acknowledgement
 of stored writes, retransmission of messages, authentication, or encryption.
 Use loopback or a separately protected controlled network.
 
+**Source status (2026-11-11):** Clients implement the arrival-order policy below.
+This unreleased change replaces 1.x late/duplicate suppression and inferred gaps.
+It keeps the packet format; shipping the changed client behavior requires a
+major release under the product's
+[compatibility policy](../../../docs/record/releasing.md#versioning-policy).
+
 ## Enablement and targets
 
 `serve --udp` retains append-only behavior. `--udp-follow` explicitly enables
@@ -98,12 +104,12 @@ timestamp; no match selects after the upper bound. Sequence begins at the
 specified sequence, with retained-gap accounting. Empty pools begin at 1.
 Finite streams fix the opening upper bound; live streams keep following.
 A core cursor performs reads/retention checks. Preparation must not block the
-UDP receive loop. Timestamp filtering continues client-side after accounting
-for sequence; timestamps need not increase with sequence.
+UDP receive loop. Timestamp filtering continues client-side on each received
+message; timestamps need not increase with sequence.
 
 Opening PROGRESS precedes DATA in server send order, but arrivals may reorder.
-The client accepts DATA before PROGRESS and keeps the first received sequence;
-later progress can disclose an initially missed range. Only initial controls
+The client accepts DATA before PROGRESS. Later progress describes server attempts
+and never establishes which messages the client received. Only initial controls
 retry (one-second spacing, five-second deadline). Writes/DATA never retry.
 
 Renew every ten seconds using SUBSCRIBE without selection. Only an existing
@@ -115,24 +121,44 @@ subscriptions. Pool deletion/replacement ends with NotFound; no stream may
 silently follow a replacement with reused sequence numbers. Check native file
 identity before sends and on idle renewal.
 
-Completed finite streams retain only their terminal progress until close/expiry.
+Completed finite streams retain terminal progress and the original pool identity
+until close/expiry. Completion releases the pool mapping and reader worker.
 A dropped terminal packet can therefore survive normal renewal without DATA
 replay. No per-message acknowledgement or confirmation of complete delivery.
 
 ## Receive ordering and notices
 
-Expose strictly increasing sequences; discard duplicate/late DATA. Account for
-sequence before filters. A jump emits a skipped-range event, not a claim about
-confirmed network loss. Progress can expose a lost final message; accept only
-advancing progress and never rewind. Oversized stored messages produce SKIP and
-advance whole; never truncate them. Finite delivery gaps exit 1; confirmed core
-retention gaps exit 9. Live gaps continue with a structured udp-gap Notice;
-quiet-drops suppresses notices without suppressing accounting.
+- Deliver each valid DATA packet received for the active subscription immediately
+  in arrival order, subject to the requested selection and filters.
+- Deliver late messages and duplicates. Sequence numbers identify messages;
+  they never act as a receive cutoff. Arrivals `10, 12, 11, 12` produce
+  `10, 12, 11, 12` when all four messages match the filters.
+- Do not buffer for reordering, suppress duplicates, retransmit DATA, or fetch
+  missing messages through another transport.
+- A sequence jump or advancing PROGRESS does not establish loss. Neither
+  produces an inferred gap notice or prevents later DATA delivery.
+- Report explicit server skips. A SKIP or PROGRESS record never makes a
+  later-arriving DATA packet ineligible. Oversized messages produce SKIP;
+  the server never truncates them. Filters never create skip notices.
+- Keep subscription setup, renewal, expiry, and close behavior.
+- A finite follow ends on the first valid terminal PROGRESS and drains events
+  it already accepted. DATA still in flight may go unread; completion gives
+  no assurance of complete delivery. Add no grace period or repair exchange.
 
-Follow timeout retains its no-matching-output meaning (exit 124). Finite exit 0
-means the server attempted the selected range and no gap appeared, not proof of
-complete delivery. A lost terminal record/unavailable peer eventually produces
+Explicit oversized/pressure skips produce structured `udp-gap` notices and
+finite exit 1. Confirmed server retention gaps, including `retention_gap` in
+PROGRESS, produce finite exit 9. If only the retention flag arrives, report
+retention without inventing a sequence range. Live follows report server skips
+and continue.
+`--quiet-drops` suppresses notices without changing the exit result. A finite
+follow with terminal progress and no observed server skip/error exits 0, even
+if the network lost DATA or SKIP packets. Follow timeout retains its
+no-matching-output meaning (exit 124). An unavailable peer eventually produces
 Io. Unsupported remote follow options retain Usage errors.
+
+Public `Gap` event names and the CLI notice kind `udp-gap` are compatibility
+names for explicit server skips. The public/ABI `Unknown` reason remains reserved;
+SKIP packets must name `oversized`, `retention`, or `pressure`.
 
 ## Resource and shutdown rules
 

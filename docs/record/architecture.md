@@ -6,6 +6,7 @@ Normative behavior lives in:
 - `spec/v0/SPEC.md` (CLI contract)
 - `spec/api/v0/SPEC.md` (public API)
 - `spec/remote/v0/SPEC.md` (HTTP protocol)
+- `spec/udp/v1/SPEC.md` (UDP subscriptions and delivery)
 
 ## Design principles
 
@@ -29,7 +30,9 @@ Interface layer  →  Core domain layer  →  Platform layer
 - Must: parse and validate inputs, invoke core operations, map results to user-facing formats.
 - Must not: duplicate storage correctness logic across multiple interface surfaces.
 - Allowed exception: one shared validation-report implementation may perform read-only ring/frame checks when exposed through API/CLI diagnostics.
-- Must not: hold pool state across requests beyond what `Pool` and `Cursor` already encapsulate.
+- May retain bounded subscription state for documented selection, routing,
+  leases, cancellation, and finite completion. Readers own durable progress.
+- Must release pool mappings and cursors when data delivery ends.
 
 **Core domain layer** (`src/core/*`):
 - Must: own all append/get/tail semantics, validation, sequencing, and corruption detection.
@@ -165,7 +168,7 @@ payload bytes, so retaining a frame cannot observe a later overwrite. Internal
 frame views remain inside the lock lifetime; scans do not copy skipped
 payloads. Corrupt stable frames return `Corrupt` rather than retrying forever.
 
-Tail path:
+Core tail path (network adapters apply their own delivery contracts):
 
 1. Resolve start position (`tail`, `since`, `from`).
 2. Stream committed messages in order.
@@ -201,9 +204,20 @@ Plasmite is transport-agnostic at the core.
 - Optional UDP: the same server routes input to the existing append operation.
   With `--udp-follow`, bounded workers read through core cursors and send
   sequence, timestamp, and original Lite3 bytes to subscribers. A cookie proves
-  return reachability before a worker opens a pool. A worker holds the opened
-  file identity through its lease and checks it before replying to renewals.
-  The client exposes increasing sequences and gap events, without data retries.
+  return reachability before a worker opens a pool. Active workers hold their
+  opened pool and cursor. A finite worker returns after terminal progress and
+  releases its mapping. The receive loop keeps a bounded completion record,
+  a file identity guard, and the existing lease. Short jobs check
+  identity and answer renewals without blocking the receive loop. Close or
+  expiry removes the record; idle completed reads keep no worker or polling loop.
+  The [receive policy](../../spec/udp/v1/SPEC.md#receive-ordering-and-notices)
+  requires arrival-order delivery of valid matching messages, including late
+  messages and duplicates; consumers choose whether to reorder or discard them.
+  Only explicit server skips produce gap reports; DATA/progress sequence jumps
+  never suppress a message or establish loss. Opening and normal reception share
+  packet validation and event handling; their wait and retry rules stay separate.
+  The client performs no data repair. Public `Gap`/`udp-gap` names describe server
+  skips for compatibility; the reserved `Unknown` value is not a wire skip reason.
   Standalone UDP APIs return local send success; HTTP append still returns a
   committed receipt. The private wire codec serves the CLI/server and library.
 - Process capture mode (`plasmite tap`): CLI spawns a child process, reads stdout/stderr on separate threads, and appends line messages through the same local append path as `feed`.

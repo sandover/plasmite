@@ -1172,6 +1172,8 @@ class UdpFrame:
 
 @dataclass(frozen=True)
 class UdpGap:
+    """Compatibility name for an explicit server skip, never inferred packet loss."""
+
     first: int
     last: int
     reason: str

@@ -31,6 +31,8 @@ type StartKind = api.UDPStartKind
 type FollowOptions = api.UDPFollowOptions
 type Event = api.UDPEvent
 type Frame = api.UDPFrame
+
+// Gap keeps the public name for an explicit server skip.
 type Gap = api.UDPGap
 type Progress = api.UDPProgress
 

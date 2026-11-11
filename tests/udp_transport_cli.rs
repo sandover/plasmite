@@ -291,3 +291,162 @@ fn unsupported_udp_commands_reject_without_server_work() -> Result<(), Box<dyn s
     }
     Ok(())
 }
+
+#[test]
+fn udp_cli_preserves_arrival_order_and_reports_only_server_skips()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (skip, retained, quiet, filtered, code) in [
+        (None, false, false, false, 0),
+        (Some("oversized"), false, false, false, 1),
+        (Some("pressure"), false, false, false, 1),
+        (Some("retention"), true, false, false, 9),
+        (None, true, false, false, 9), // Retention progress survives a lost SKIP.
+        (Some("pressure"), false, true, false, 1),
+        (None, false, false, true, 0),
+    ] {
+        let peer = UdpSocket::bind("127.0.0.1:0")?;
+        peer.set_read_timeout(Some(Duration::from_secs(3)))?;
+        let address = peer.local_addr()?;
+        let server = thread::spawn(move || {
+            let mut buffer = [0; 4096];
+            let (len, client) = peer.recv_from(&mut buffer).unwrap();
+            assert_eq!(&buffer[..8], b"\0PUDP\x01\x01\0");
+            let id = buffer[8..24].to_vec();
+            let subscribe: Value = serde_json::from_slice(&buffer[24..len]).unwrap();
+            assert_eq!(subscribe["selection"]["live"], false);
+            let packet = |op, body: &[u8]| {
+                let mut bytes = b"\0PUDP\x01".to_vec();
+                bytes.extend_from_slice(&[op, 0]);
+                bytes.extend_from_slice(&id);
+                bytes.extend_from_slice(body);
+                bytes
+            };
+            let cookie = serde_json::json!({"expires_ms": 10_000, "mac": "test-cookie"});
+            peer.send_to(
+                &packet(
+                    3,
+                    &serde_json::to_vec(&serde_json::json!({"cookie": cookie})).unwrap(),
+                ),
+                client,
+            )
+            .unwrap();
+            let (len, source) = peer.recv_from(&mut buffer).unwrap();
+            assert_eq!(source, client);
+            let verified: Value = serde_json::from_slice(&buffer[24..len]).unwrap();
+            assert_eq!(verified["cookie"], cookie);
+            let data = |seq: u64| {
+                let payload = plasmite::api::lite3::encode_message(
+                    &["sensor".into()],
+                    &serde_json::json!({"sample": seq}),
+                )
+                .unwrap();
+                let mut bytes = seq.to_be_bytes().to_vec();
+                bytes.extend_from_slice(&1_700_000_000_000_000_000u64.to_be_bytes());
+                bytes.extend_from_slice(payload.as_slice());
+                packet(7, &bytes)
+            };
+            peer.send_to(&data(10), client).unwrap(); // Open with DATA first.
+            let progress = |terminal| {
+                packet(
+                    4,
+                    &serde_json::to_vec(&serde_json::json!({
+                        "start_seq": 10, "next_seq": 16, "end_seq": 15,
+                        "lease_ms": 30_000, "terminal": terminal, "retention_gap": retained && terminal,
+                    }))
+                    .unwrap(),
+                )
+            };
+            peer.send_to(&progress(false), client).unwrap(); // Progress overtakes DATA.
+            if let Some(reason) = skip {
+                peer.send_to(
+                    &packet(
+                        5,
+                        &serde_json::to_vec(&serde_json::json!({
+                            "first": 11, "last": 11, "reason": reason,
+                        }))
+                        .unwrap(),
+                    ),
+                    client,
+                )
+                .unwrap();
+            }
+            for seq in [12, 11, 12] {
+                peer.send_to(&data(seq), client).unwrap();
+            }
+            // DATA 13 through 15 never arrive. Their absence creates no notice.
+            peer.send_to(&progress(true), client).unwrap();
+        });
+        let temp = tempfile::tempdir()?;
+        let mut command = Command::new(env!("CARGO_BIN_EXE_plasmite"));
+        command
+            .env("HOME", temp.path())
+            .env("PLASMITE_ACCESS_HOME", temp.path())
+            .args([
+                "follow",
+                &format!("udp://{address}/sensors"),
+                "--tail",
+                "6",
+                "--no-follow",
+                "--timeout",
+                "3s",
+                "--format",
+                "json",
+            ]);
+        if quiet {
+            command.arg("--quiet-drops");
+        }
+        if filtered {
+            command.args(["--tag", "sensor", "--where", ".data.sample == 12"]);
+        }
+        let output = command.output()?;
+        server.join().unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(code),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let messages = output
+            .stdout
+            .split(|b| *b == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(serde_json::from_slice::<Value>)
+            .collect::<Result<Vec<_>, _>>()?;
+        let sequences: Vec<_> = messages
+            .iter()
+            .map(|m| m["seq"].as_u64().unwrap())
+            .collect();
+        assert_eq!(
+            sequences,
+            if filtered {
+                vec![12, 12]
+            } else {
+                vec![10, 12, 11, 12]
+            }
+        );
+        for message in &messages {
+            assert_eq!(message["data"]["sample"], message["seq"]);
+        }
+        if let Some(reason) = skip
+            && !quiet
+        {
+            let notice: Value = serde_json::from_slice(&output.stderr)?;
+            assert_eq!(notice["notice"]["kind"], "udp-gap");
+            assert_eq!(notice["notice"]["details"]["first_seq"], 11);
+            assert_eq!(notice["notice"]["details"]["last_seq"], 11);
+            assert_eq!(notice["notice"]["details"]["reason"], reason);
+        } else if retained && !quiet {
+            let notice: Value = serde_json::from_slice(&output.stderr)?;
+            assert_eq!(notice["notice"]["details"]["reason"], "retention");
+            assert!(notice["notice"]["details"].get("first_seq").is_none());
+            assert!(notice["notice"]["details"].get("last_seq").is_none());
+        } else {
+            assert!(
+                output.stderr.is_empty(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+    Ok(())
+}

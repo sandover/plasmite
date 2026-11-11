@@ -3,13 +3,17 @@ package udp
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -333,4 +337,136 @@ func repositoryRoot(t *testing.T) string {
 	}
 	root := filepath.Clean(filepath.Join(filepath.Dir(file), "../../.."))
 	return root
+}
+
+func TestNativeFramesRetainArrivalOrderAndDuplicates(t *testing.T) {
+	localClient, err := local.NewClient(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer localClient.Close()
+	localPool, err := localClient.CreatePool(local.PoolRefName("udp-order"), testPoolSizeBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer localPool.Close()
+	original, err := localPool.Append(map[string]any{"value": 17}, []string{"tag"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := localPool.GetLite3(original.Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	const base uint64 = 1 << 53
+	const timestamp uint64 = 1700000000000000001
+	finished := make(chan error, 1)
+	go func() {
+		finished <- func() error {
+			if err := peer.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+				return err
+			}
+			buffer := make([]byte, 4096)
+			_, address, err := peer.ReadFromUDP(buffer)
+			if err != nil {
+				return err
+			}
+			id := append([]byte(nil), buffer[8:24]...)
+			send := func(op byte, body []byte) error {
+				packet := append([]byte{0, 'P', 'U', 'D', 'P', 1, op, 0}, id...)
+				_, err := peer.WriteToUDP(append(packet, body...), address)
+				return err
+			}
+			if err := send(3, []byte(`{"cookie":{"expires_ms":10000,"mac":"test-cookie"}}`)); err != nil {
+				return err
+			}
+			if _, _, err := peer.ReadFromUDP(buffer); err != nil {
+				return err
+			}
+			data := func(seq uint64) error {
+				body := make([]byte, 16)
+				binary.BigEndian.PutUint64(body, seq)
+				binary.BigEndian.PutUint64(body[8:], timestamp)
+				return send(7, append(body, stored.Payload...))
+			}
+			progress := func(terminal bool) error {
+				return send(4, []byte(fmt.Sprintf(`{"start_seq":%d,"next_seq":%d,"end_seq":%d,"lease_ms":30000,"terminal":%t}`, base+10, base+13, base+12, terminal)))
+			}
+			if err := data(base + 10); err != nil {
+				return err
+			}
+			if err := progress(false); err != nil {
+				return err
+			}
+			if err := send(5, []byte(fmt.Sprintf(`{"first":%d,"last":%d,"reason":"pressure"}`, base+11, base+11))); err != nil {
+				return err
+			}
+			for _, seq := range []uint64{base + 12, base + 11, base + 12} {
+				if err := data(seq); err != nil {
+					return err
+				}
+			}
+			return progress(true)
+		}()
+	}()
+	client, err := NewClient("udp://" + peer.LocalAddr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	pool, err := client.OpenPool("sensors")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	follow, err := pool.Follow(FollowOptions{Start: Last(4), Live: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer follow.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var sequences []uint64
+	var skips []*Gap
+	var progress []*Progress
+	for {
+		event, err := follow.Next(ctx)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch event := event.(type) {
+		case *Frame:
+			sequences = append(sequences, event.Seq)
+			if event.TimestampNs != timestamp || !bytes.Equal(event.Payload, stored.Payload) {
+				t.Fatal("frame bytes or timestamp changed")
+			}
+			if event.Message.Seq != event.Seq {
+				t.Fatal("decoded sequence changed")
+			}
+		case *Gap:
+			skips = append(skips, event)
+		case *Progress:
+			progress = append(progress, event)
+		}
+	}
+	if !slices.Equal(sequences, []uint64{base + 10, base + 12, base + 11, base + 12}) {
+		t.Fatalf("arrival order changed: %v", sequences)
+	}
+	if len(skips) != 1 || skips[0].First != base+11 || skips[0].Last != base+11 || skips[0].Reason != "pressure" {
+		t.Fatalf("unexpected skips: %#v", skips)
+	}
+	if len(progress) != 2 || progress[0].NextSeq != base+13 || !progress[1].Terminal {
+		t.Fatalf("unexpected progress: %#v", progress)
+	}
+	if err := <-finished; err != nil {
+		t.Fatal(err)
+	}
 }

@@ -60,6 +60,13 @@ allows unauthenticated, unencrypted reads on that socket. A send call reports
 local validation or operating-system errors; it never returns a storage
 receipt.
 
+The [UDP receive policy](../../spec/udp/v1/SPEC.md#receive-ordering-and-notices)
+requires arrival-order delivery, including late messages and duplicates. Only
+explicit server skips produce gap events; sequence/progress jumps never suppress
+frames or establish loss. This source change awaits a major release. Finite
+follows end on terminal
+progress and may leave DATA in flight.
+
 ```js
 const { UdpClient, UdpStart } = require("plasmite");
 

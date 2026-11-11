@@ -333,7 +333,10 @@ Use --replay SPEED with history for local timed playback; it implies --no-follow
 LOCAL AND REMOTE
   Local, HTTP(S), and UDP refs support history, filters, and JSON, YAML, or framed Lite3.
   HTTP(S) refs reject --create, --replay, --no-notify, and --quiet-drops.
-  UDP refs reject --create, --replay, and --no-notify; UDP gaps appear on stderr.
+  UDP refs reject --create, --replay, and --no-notify.
+  UDP delivers messages in arrival order, including late messages and duplicates.
+  Only explicit server skips produce UDP gap notices; sequence jumps do not prove loss.
+  Finite UDP reads end on terminal progress and may leave packets in flight.
   --no-follow alone reads all retained history and stops at the starting history bound.
   --tail counts retained messages before filters; filters apply to history and new messages.
   Finite reads exit nonzero if retention removes selected messages.

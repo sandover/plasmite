@@ -74,6 +74,7 @@ pub struct Progress {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Reason {
+    /// Reserved public/ABI value; the wire contract requires a concrete skip reason.
     Unknown,
     Oversized,
     Retention,

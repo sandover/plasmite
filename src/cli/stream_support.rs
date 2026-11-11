@@ -498,7 +498,7 @@ pub(crate) fn follow_udp(
         live: !cfg.no_follow,
     })?;
     let mut deadline = FollowDeadline::new(cfg.timeout);
-    let mut had_gap = false;
+    let mut server_skipped = false;
     let mut retention_gap = false;
     loop {
         if follow_should_stop(cfg.stop.as_ref()) {
@@ -514,7 +514,7 @@ pub(crate) fn follow_udp(
             if follow.is_finished() {
                 return Ok(RunOutcome::with_code(if retention_gap {
                     9
-                } else if had_gap {
+                } else if server_skipped {
                     1
                 } else {
                     0
@@ -528,7 +528,7 @@ pub(crate) fn follow_udp(
                 last,
                 reason,
             } => {
-                had_gap = true;
+                server_skipped = true;
                 if matches!(reason, plasmite::api::UdpSkipReason::Retention) {
                     retention_gap = true;
                 }
@@ -543,7 +543,7 @@ pub(crate) fn follow_udp(
                             time: notice_time_now().unwrap_or_default(),
                             cmd: "follow".into(),
                             pool: pool.into(),
-                            message: format!("UDP skipped sequences {first} through {last}"),
+                            message: format!("UDP server skipped sequences {first} through {last}"),
                             details,
                         },
                         cfg.color_mode,
@@ -555,8 +555,23 @@ pub(crate) fn follow_udp(
                 retention_gap: retained,
                 ..
             } => {
+                if retained && !retention_gap && !cfg.quiet_drops {
+                    emit_notice(
+                        &Notice {
+                            kind: "udp-gap".into(),
+                            time: notice_time_now().unwrap_or_default(),
+                            cmd: "follow".into(),
+                            pool: pool.into(),
+                            message: "UDP server reported a retention gap; range unavailable"
+                                .into(),
+                            details: Map::from_iter([("reason".into(), json!("retention"))]),
+                        },
+                        cfg.color_mode,
+                        cfg.output_mode,
+                    );
+                }
                 retention_gap |= retained;
-                had_gap |= retained;
+                server_skipped |= retained;
             }
             UdpEvent::Frame(frame) => {
                 let value = if needs_message(cfg) {

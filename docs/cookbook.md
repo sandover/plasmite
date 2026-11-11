@@ -178,11 +178,17 @@ plasmite feed udp://127.0.0.1:9701/sensors '{"temperature_c":22.4}' --tag sensor
 ```
 
 `feed` writes no receipt to stdout. Its successful exit confirms local send,
-not storage. `follow` reports skipped sequence ranges on stderr and continues.
-Use `--tail 10 --no-follow` for a best-effort finite read; a known skipped range
-makes it exit 1, and a confirmed retention gap makes it exit 9. A filter does
-not turn the messages it rejects into delivery gaps. Use HTTP when you need
-reliable history or a committed write receipt.
+not storage. The
+[UDP receive policy](../spec/udp/v1/SPEC.md#receive-ordering-and-notices) requires
+`follow` to deliver matching messages in arrival order, including late messages
+and duplicates, and report only explicit server skips. This source change awaits
+a major release. Sequence jumps never create notices or
+discard messages. Use `--tail 10 --no-follow` for a best-effort finite read;
+explicit oversized/pressure skips make it exit 1, and a confirmed retention
+gap makes it exit 9. Terminal progress ends the read and can leave DATA in
+flight. Exit 0 gives no assurance of complete delivery. Filters never create
+skip notices. Use HTTP when you need reliable history or a committed write
+receipt.
 
 The same commands accept JSON, YAML, and framed Lite3 input or output through
 the existing format options. The maximum datagram size is 65,507 bytes including
