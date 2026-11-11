@@ -109,6 +109,11 @@ pub struct Lite3Tail<'a>(TailReader<'a>);
 
 struct TailReader<'a> {
     pool: &'a Pool,
+    state: TailState,
+}
+
+// Shared policy, independent of whether the adapter borrows or owns its Pool.
+pub(crate) struct TailState {
     cursor: Cursor,
     options: TailOptions,
     seen: usize,
@@ -116,6 +121,13 @@ struct TailReader<'a> {
     notify: Option<PoolSemaphore>,
     expected_seq: Option<u64>,
     terminated: bool,
+}
+
+pub(crate) enum TailOutcome<T> {
+    Item(T),
+    WaitExpired,
+    Finished,
+    Cancelled,
 }
 
 #[derive(Clone, Debug)]
@@ -250,6 +262,22 @@ fn collect_replay_snapshot(
 
 impl<'a> TailReader<'a> {
     fn new(pool: &'a Pool, options: TailOptions) -> Self {
+        Self {
+            pool,
+            state: TailState::new(pool, options),
+        }
+    }
+
+    fn next<T>(
+        &mut self,
+        select: impl Fn(FrameRef, &[String]) -> Result<Option<T>, Error>,
+    ) -> Result<Option<T>, Error> {
+        self.state.next(self.pool, select)
+    }
+}
+
+impl TailState {
+    pub(crate) fn new(pool: &Pool, options: TailOptions) -> Self {
         let deadline = options.timeout.map(|duration| Instant::now() + duration);
         let expected_seq = options.since_seq;
         let notify = if options.notify {
@@ -258,7 +286,6 @@ impl<'a> TailReader<'a> {
             None
         };
         Self {
-            pool,
             cursor: Cursor::new(),
             options,
             seen: 0,
@@ -269,19 +296,40 @@ impl<'a> TailReader<'a> {
         }
     }
 
-    fn next<T>(
+    pub(crate) fn next<T>(
         &mut self,
+        pool: &Pool,
         select: impl Fn(FrameRef, &[String]) -> Result<Option<T>, Error>,
     ) -> Result<Option<T>, Error> {
+        match self.next_wait(pool, None, select)? {
+            TailOutcome::Item(item) => Ok(Some(item)),
+            _ => Ok(None),
+        }
+    }
+
+    pub(crate) fn next_wait<T>(
+        &mut self,
+        pool: &Pool,
+        wait: Option<Duration>,
+        select: impl Fn(FrameRef, &[String]) -> Result<Option<T>, Error>,
+    ) -> Result<TailOutcome<T>, Error> {
+        let wait_deadline = wait
+            .map(|duration| {
+                Instant::now().checked_add(duration).ok_or_else(|| {
+                    Error::new(ErrorKind::Usage).with_message("stream wait is too large")
+                })
+            })
+            .transpose()?;
         if self.terminated {
-            return Ok(None);
+            return Ok(TailOutcome::Finished);
         }
         if let Some(max) = self.options.max_messages
             && self.seen >= max
         {
-            return Ok(None);
+            return Ok(TailOutcome::Finished);
         }
 
+        let mut polled = false;
         loop {
             if self
                 .options
@@ -289,15 +337,20 @@ impl<'a> TailReader<'a> {
                 .as_ref()
                 .is_some_and(|cancel| cancel.load(Ordering::Acquire))
             {
-                return Ok(None);
+                return Ok(TailOutcome::Cancelled);
             }
             if let Some(deadline) = self.deadline
                 && Instant::now() >= deadline
             {
-                return Ok(None);
+                return Ok(TailOutcome::Finished);
             }
 
-            match self.cursor.next(self.pool)? {
+            if polled && wait_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                return Ok(TailOutcome::WaitExpired);
+            }
+            polled = true;
+
+            match self.cursor.next(pool)? {
                 CursorResult::Message(frame) => {
                     let should_process = match observe_sequence(
                         &mut self.expected_seq,
@@ -313,13 +366,27 @@ impl<'a> TailReader<'a> {
                     if !should_process {
                         continue;
                     }
+                    // Sequence space cannot advance after the last u64 value.
+                    self.terminated = frame.seq == u64::MAX;
                     if let Some(item) = select(frame, &self.options.tags)? {
                         self.seen += 1;
-                        return Ok(Some(item));
+                        return Ok(TailOutcome::Item(item));
+                    }
+                    if self.terminated {
+                        return Ok(TailOutcome::Finished);
                     }
                 }
                 CursorResult::WouldBlock => {
-                    let wait_for = wait_interval(self.deadline, self.options.poll_interval);
+                    if wait_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                        return Ok(TailOutcome::WaitExpired);
+                    }
+                    let poll_interval = if self.options.cancel.is_some() {
+                        self.options.poll_interval.min(Duration::from_millis(50))
+                    } else {
+                        self.options.poll_interval
+                    };
+                    let wait_for =
+                        wait_interval(wait_deadline, wait_interval(self.deadline, poll_interval));
                     if let Some(notify) = &mut self.notify {
                         match notify.wait(wait_for) {
                             Ok(WaitOutcome::Signaled) | Ok(WaitOutcome::TimedOut) => {}
@@ -356,7 +423,12 @@ impl Tail<'_> {
 impl Lite3Tail<'_> {
     pub fn next_frame(&mut self) -> Result<Option<FrameRef>, Error> {
         self.0.next(|frame, tags| {
-            let (meta, _) = decode_payload(&frame.payload)?;
+            let doc = Lite3DocRef::new(&frame.payload);
+            let meta = decode_meta(doc)?;
+            // Check readability without constructing a discarded data tree.
+            let json = data_json(doc)?;
+            let _: serde::de::IgnoredAny =
+                serde_json::from_str(&json).map_err(payload_json_error)?;
             Ok(has_required_tags(&meta.tags, tags).then_some(frame))
         })
     }
@@ -551,8 +623,28 @@ pub(crate) fn message_from_udp_payload(
     Message::from_lite3(seq, timestamp_ns, &aligned)
 }
 
+#[cfg(test)]
+std::thread_local! {
+    static DATA_TREE_DECODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn decode_payload(payload: &[u8]) -> Result<(Meta, Value), Error> {
     let doc = Lite3DocRef::new(payload);
+    let meta = decode_meta(doc)?;
+    let json = data_json(doc)?;
+    #[cfg(test)]
+    DATA_TREE_DECODES.with(|count| count.set(count.get() + 1));
+    let data = serde_json::from_str(&json).map_err(payload_json_error)?;
+    Ok((meta, data))
+}
+
+fn payload_json_error(err: serde_json::Error) -> Error {
+    Error::new(ErrorKind::Corrupt)
+        .with_message("invalid payload json")
+        .with_source(err)
+}
+
+fn decode_meta(doc: Lite3DocRef<'_>) -> Result<Meta, Error> {
     let meta_type = doc
         .type_at_key(0, "meta")
         .map_err(|err| err.with_message("missing meta"))?;
@@ -585,17 +677,14 @@ fn decode_payload(payload: &[u8]) -> Result<(Meta, Value), Error> {
         tags.push(tag);
     }
 
+    Ok(Meta { tags })
+}
+
+fn data_json(doc: Lite3DocRef<'_>) -> Result<String, Error> {
     let data_ofs = doc
         .key_offset("data")
         .map_err(|err| err.with_message("missing data"))?;
-    let data_json = doc.to_json_at(data_ofs, false)?;
-    let data: Value = serde_json::from_str(&data_json).map_err(|err| {
-        Error::new(ErrorKind::Corrupt)
-            .with_message("invalid payload json")
-            .with_source(err)
-    })?;
-
-    Ok((Meta { tags }, data))
+    doc.to_json_at(data_ofs, false)
 }
 
 fn now_ns() -> Result<u64, Error> {
@@ -674,6 +763,79 @@ mod tests {
         let (full, partial) = json_counter_snapshot();
         assert_eq!(full, 0);
         assert_eq!(partial, 1);
+    }
+
+    #[test]
+    fn raw_tail_checks_readability_and_tags_without_a_data_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut pool =
+            Pool::create(dir.path().join("raw.plasmite"), PoolOptions::new(65536)).unwrap();
+        let payload =
+            encode_message(&["keep".into()], &json!({"nested": [{"text": "original"}]})).unwrap();
+        pool.append_with_timestamp(payload.as_slice(), 123).unwrap();
+        super::DATA_TREE_DECODES.with(|count| count.set(0));
+        let options = TailOptions {
+            tags: vec!["keep".into()],
+            max_messages: Some(1),
+            ..TailOptions::default()
+        };
+        let frame = pool.tail_lite3(options).next_frame().unwrap().unwrap();
+        assert_eq!(frame.seq, 1);
+        assert_eq!(frame.timestamp_ns, 123);
+        assert_eq!(frame.payload, payload.as_slice());
+        super::DATA_TREE_DECODES.with(|count| assert_eq!(count.get(), 0));
+        pool.get_message(1).unwrap();
+        super::DATA_TREE_DECODES.with(|count| assert_eq!(count.get(), 1));
+
+        let payload = encode_message(&[], &json!({"text": "broken"})).unwrap();
+        let doc = payload.as_doc();
+        let data = doc.key_offset("data").unwrap();
+        let text = doc.key_offset_at(data, "text").unwrap();
+        let mut bytes = payload.as_slice().to_vec();
+        bytes[text + 1..text + 5].copy_from_slice(&0u32.to_le_bytes());
+        let seq = pool.append(&bytes).unwrap(); // Simulate damaged bytes after publication.
+        let options = TailOptions {
+            since_seq: Some(seq),
+            tags: vec!["never".into()],
+            ..TailOptions::default()
+        };
+        assert_eq!(
+            pool.tail_lite3(options.clone())
+                .next_frame()
+                .unwrap_err()
+                .kind(),
+            ErrorKind::Corrupt
+        );
+        assert_eq!(
+            pool.tail(options).next_message().unwrap_err().kind(),
+            ErrorKind::Corrupt
+        );
+    }
+
+    #[test]
+    fn tails_finish_after_the_last_sequence_without_wrapping_a_checkpoint() {
+        use std::io::{Seek, SeekFrom, Write};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("last.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(65536)).unwrap();
+        pool.append_json_now(&json!({"last": true}), &[], Durability::Fast)
+            .unwrap();
+        let header = pool.header_from_mmap().unwrap();
+        let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        for offset in [88, 96, header.ring_offset + 16] {
+            file.seek(SeekFrom::Start(offset)).unwrap();
+            file.write_all(&u64::MAX.to_le_bytes()).unwrap();
+        }
+        let options = TailOptions {
+            since_seq: Some(u64::MAX),
+            ..TailOptions::default()
+        };
+        let mut raw = pool.tail_lite3(options.clone());
+        assert_eq!(raw.next_frame().unwrap().unwrap().seq, u64::MAX);
+        assert!(raw.next_frame().unwrap().is_none());
+        let mut decoded = pool.tail(options);
+        assert_eq!(decoded.next_message().unwrap().unwrap().seq, u64::MAX);
+        assert!(decoded.next_message().unwrap().is_none());
     }
 
     #[test]

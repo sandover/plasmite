@@ -11,7 +11,9 @@
 //! Notes: Remote pool refs are not supported in v0.
 #![allow(clippy::result_large_err)]
 
-use crate::api::{GapPolicy, LocalClient, PoolApiExt, PoolOptions, PoolRef, observe_sequence};
+use crate::api::{
+    GapPolicy, LocalClient, PoolApiExt, PoolOptions, PoolRef, TailOptions, TailOutcome, TailState,
+};
 use crate::core::error::{Error, ErrorKind};
 use crate::core::pool::Pool;
 use serde_json::Value;
@@ -19,8 +21,8 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::path::PathBuf;
 use std::ptr;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 #[repr(C)]
@@ -36,27 +38,15 @@ pub struct plsm_pool {
 #[repr(C)]
 pub struct plsm_stream {
     pool: Pool,
-    cursor: crate::api::Cursor,
-    expected_seq: Option<u64>,
-    gap_policy: GapPolicy,
-    terminated: bool,
-    max_messages: Option<usize>,
-    seen: usize,
-    poll_interval: Duration,
-    deadline: Option<Instant>,
+    state: Mutex<TailState>,
+    cancel: Arc<AtomicBool>,
 }
 
 #[repr(C)]
 pub struct plsm_lite3_stream {
     pool: Pool,
-    cursor: crate::api::Cursor,
-    expected_seq: Option<u64>,
-    gap_policy: GapPolicy,
-    terminated: bool,
-    max_messages: Option<usize>,
-    seen: usize,
-    poll_interval: Duration,
-    deadline: Option<Instant>,
+    state: Mutex<TailState>,
+    cancel: Arc<AtomicBool>,
 }
 
 #[repr(C)]
@@ -449,7 +439,19 @@ pub extern "C" fn plsm_stream_open_ex(
             Error::new(ErrorKind::Usage).with_message("out_stream is null"),
         );
     }
-    let deadline = options.timeout.map(|duration| Instant::now() + duration);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let state = TailState::new(
+        &pool.pool,
+        TailOptions {
+            since_seq: options.since_seq,
+            max_messages: options.max_messages,
+            timeout: options.timeout,
+            gap_policy: options.gap_policy,
+            notify: false,
+            cancel: Some(cancel.clone()),
+            ..TailOptions::default()
+        },
+    );
     let info = match pool.pool.info() {
         Ok(info) => info,
         Err(err) => return fail(out_err, err),
@@ -460,14 +462,8 @@ pub extern "C" fn plsm_stream_open_ex(
     };
     let handle = Box::new(plsm_stream {
         pool,
-        cursor: crate::api::Cursor::new(),
-        expected_seq: options.since_seq,
-        gap_policy: options.gap_policy,
-        terminated: false,
-        max_messages: options.max_messages,
-        seen: 0,
-        poll_interval: Duration::from_millis(50),
-        deadline,
+        state: Mutex::new(state),
+        cancel,
     });
     unsafe {
         *out_stream = Box::into_raw(handle);
@@ -491,48 +487,13 @@ pub extern "C" fn plsm_stream_next(
         Ok(stream) => stream,
         Err(code) => return code,
     };
-    if stream.terminated {
-        return 0;
-    }
-    if let Some(max) = stream.max_messages
-        && stream.seen >= max
-    {
-        return 0;
-    }
-
-    loop {
-        if let Some(deadline) = stream.deadline
-            && Instant::now() >= deadline
-        {
-            return 0;
-        }
-
-        match stream.cursor.next(&stream.pool) {
-            Ok(crate::api::CursorResult::Message(frame)) => {
-                match observe_sequence(&mut stream.expected_seq, frame.seq, stream.gap_policy) {
-                    Ok(true) => {}
-                    Ok(false) => continue,
-                    Err(err) => {
-                        stream.terminated = true;
-                        return fail(out_err, err);
-                    }
-                }
-                let message = match crate::api::message_from_frame(&frame) {
-                    Ok(message) => message,
-                    Err(err) => return fail(out_err, err),
-                };
-                stream.seen += 1;
-                if let Err(err) = write_message_buf(out_message, message) {
-                    return fail(out_err, err);
-                }
-                return 1;
-            }
-            Ok(crate::api::CursorResult::WouldBlock) => {
-                std::thread::sleep(stream.poll_interval);
-            }
-            Ok(crate::api::CursorResult::FellBehind) => continue,
-            Err(err) => return fail(out_err, err),
-        }
+    match read_stream(stream, None) {
+        Ok(TailOutcome::Item(message)) => match write_message_buf(out_message, message) {
+            Ok(()) => 1,
+            Err(err) => fail(out_err, err),
+        },
+        Ok(_) => 0,
+        Err(err) => fail(out_err, err),
     }
 }
 
@@ -583,7 +544,19 @@ pub extern "C" fn plsm_lite3_stream_open_ex(
             Error::new(ErrorKind::Usage).with_message("out_stream is null"),
         );
     }
-    let deadline = options.timeout.map(|duration| Instant::now() + duration);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let state = TailState::new(
+        &pool.pool,
+        TailOptions {
+            since_seq: options.since_seq,
+            max_messages: options.max_messages,
+            timeout: options.timeout,
+            gap_policy: options.gap_policy,
+            notify: false,
+            cancel: Some(cancel.clone()),
+            ..TailOptions::default()
+        },
+    );
     let info = match pool.pool.info() {
         Ok(info) => info,
         Err(err) => return fail(out_err, err),
@@ -594,14 +567,8 @@ pub extern "C" fn plsm_lite3_stream_open_ex(
     };
     let handle = Box::new(plsm_lite3_stream {
         pool,
-        cursor: crate::api::Cursor::new(),
-        expected_seq: options.since_seq,
-        gap_policy: options.gap_policy,
-        terminated: false,
-        max_messages: options.max_messages,
-        seen: 0,
-        poll_interval: Duration::from_millis(50),
-        deadline,
+        state: Mutex::new(state),
+        cancel,
     });
     unsafe {
         *out_stream = Box::into_raw(handle);
@@ -625,44 +592,110 @@ pub extern "C" fn plsm_lite3_stream_next(
         Ok(stream) => stream,
         Err(code) => return code,
     };
-    if stream.terminated {
-        return 0;
+    match read_lite3_stream(stream, None) {
+        Ok(TailOutcome::Item(frame)) => match write_lite3_frame(out_frame, frame) {
+            Ok(()) => 1,
+            Err(err) => fail(out_err, err),
+        },
+        Ok(_) => 0,
+        Err(err) => fail(out_err, err),
     }
-    if let Some(max) = stream.max_messages
-        && stream.seen >= max
-    {
-        return 0;
+}
+
+// Legacy and bounded waits use the same reader and retain the original open-time deadline.
+fn read_stream(
+    stream: &plsm_stream,
+    wait: Option<Duration>,
+) -> Result<TailOutcome<crate::api::Message>, Error> {
+    let mut state = stream
+        .state
+        .lock()
+        .map_err(|_| Error::new(ErrorKind::Internal).with_message("stream state is unavailable"))?;
+    state.next_wait(&stream.pool, wait, |frame, _| {
+        crate::api::message_from_frame(&frame).map(Some)
+    })
+}
+
+fn read_lite3_stream(
+    stream: &plsm_lite3_stream,
+    wait: Option<Duration>,
+) -> Result<TailOutcome<crate::api::FrameRef>, Error> {
+    let mut state = stream
+        .state
+        .lock()
+        .map_err(|_| Error::new(ErrorKind::Internal).with_message("stream state is unavailable"))?;
+    state.next_wait(&stream.pool, wait, |frame, _| Ok(Some(frame)))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_stream_next_wait(
+    stream: *mut plsm_stream,
+    timeout_ms: u64,
+    out_message: *mut plsm_buf,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    if out_message.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("out_message is null"),
+        );
     }
+    let stream = match borrow_stream(stream, out_err) {
+        Ok(stream) => stream,
+        Err(code) => return code,
+    };
+    match read_stream(stream, Some(Duration::from_millis(timeout_ms))) {
+        Ok(TailOutcome::Item(message)) => match write_message_buf(out_message, message) {
+            Ok(()) => 1,
+            Err(err) => fail(out_err, err),
+        },
+        Ok(TailOutcome::WaitExpired) => 0,
+        Ok(TailOutcome::Finished) => 2,
+        Ok(TailOutcome::Cancelled) => 3,
+        Err(err) => fail(out_err, err),
+    }
+}
 
-    loop {
-        if let Some(deadline) = stream.deadline
-            && Instant::now() >= deadline
-        {
-            return 0;
-        }
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_lite3_stream_next_wait(
+    stream: *mut plsm_lite3_stream,
+    timeout_ms: u64,
+    out_frame: *mut plsm_lite3_frame,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    if out_frame.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("out_frame is null"),
+        );
+    }
+    let stream = match borrow_lite3_stream(stream, out_err) {
+        Ok(stream) => stream,
+        Err(code) => return code,
+    };
+    match read_lite3_stream(stream, Some(Duration::from_millis(timeout_ms))) {
+        Ok(TailOutcome::Item(frame)) => match write_lite3_frame(out_frame, frame) {
+            Ok(()) => 1,
+            Err(err) => fail(out_err, err),
+        },
+        Ok(TailOutcome::WaitExpired) => 0,
+        Ok(TailOutcome::Finished) => 2,
+        Ok(TailOutcome::Cancelled) => 3,
+        Err(err) => fail(out_err, err),
+    }
+}
 
-        match stream.cursor.next(&stream.pool) {
-            Ok(crate::api::CursorResult::Message(frame)) => {
-                match observe_sequence(&mut stream.expected_seq, frame.seq, stream.gap_policy) {
-                    Ok(true) => {}
-                    Ok(false) => continue,
-                    Err(err) => {
-                        stream.terminated = true;
-                        return fail(out_err, err);
-                    }
-                }
-                stream.seen += 1;
-                if let Err(err) = write_lite3_frame(out_frame, frame) {
-                    return fail(out_err, err);
-                }
-                return 1;
-            }
-            Ok(crate::api::CursorResult::WouldBlock) => {
-                std::thread::sleep(stream.poll_interval);
-            }
-            Ok(crate::api::CursorResult::FellBehind) => continue,
-            Err(err) => return fail(out_err, err),
-        }
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_stream_cancel(stream: *mut plsm_stream) {
+    if let Some(stream) = unsafe { stream.as_ref() } {
+        stream.cancel.store(true, Ordering::Release);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_lite3_stream_cancel(stream: *mut plsm_lite3_stream) {
+    if let Some(stream) = unsafe { stream.as_ref() } {
+        stream.cancel.store(true, Ordering::Release);
     }
 }
 
@@ -1129,27 +1162,27 @@ fn borrow_pool<'a>(
 fn borrow_stream<'a>(
     stream: *mut plsm_stream,
     out_err: *mut *mut plsm_error,
-) -> Result<&'a mut plsm_stream, i32> {
+) -> Result<&'a plsm_stream, i32> {
     if stream.is_null() {
         return Err(fail(
             out_err,
             Error::new(ErrorKind::Usage).with_message("stream is null"),
         ));
     }
-    unsafe { Ok(&mut *stream) }
+    unsafe { Ok(&*stream) }
 }
 
 fn borrow_lite3_stream<'a>(
     stream: *mut plsm_lite3_stream,
     out_err: *mut *mut plsm_error,
-) -> Result<&'a mut plsm_lite3_stream, i32> {
+) -> Result<&'a plsm_lite3_stream, i32> {
     if stream.is_null() {
         return Err(fail(
             out_err,
             Error::new(ErrorKind::Usage).with_message("stream is null"),
         ));
     }
-    unsafe { Ok(&mut *stream) }
+    unsafe { Ok(&*stream) }
 }
 
 fn parse_pool_ref(input: *const c_char, out_err: *mut *mut plsm_error) -> Result<PoolRef, i32> {
@@ -1386,6 +1419,130 @@ mod tests {
     fn parse_buf(buf: &plsm_buf) -> Value {
         let slice = unsafe { std::slice::from_raw_parts(buf.data, buf.len) };
         serde_json::from_slice(slice).expect("valid json")
+    }
+
+    #[test]
+    fn streams_own_their_pool_and_keep_legacy_count_and_deadline_behavior() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut storage =
+            Pool::create(temp.path().join("stream.plasmite"), PoolOptions::new(65536)).unwrap();
+        storage
+            .append_json_now(
+                &serde_json::json!({"value": 1}),
+                &[],
+                crate::api::Durability::Fast,
+            )
+            .unwrap();
+        let pool = Box::into_raw(Box::new(plsm_pool { pool: storage }));
+        let mut options = default_stream_options();
+        options.has_max = 1;
+        options.max_messages = 1;
+        options.has_timeout = 1;
+        options.timeout_ms = 1000;
+        let mut json = ptr::null_mut();
+        let mut raw = ptr::null_mut();
+        let mut expired = ptr::null_mut();
+        let mut err = ptr::null_mut();
+        assert_eq!(plsm_stream_open_ex(pool, &options, &mut json, &mut err), 0);
+        assert_eq!(
+            plsm_lite3_stream_open_ex(pool, &options, &mut raw, &mut err),
+            0
+        );
+        options.timeout_ms = 0;
+        assert_eq!(
+            plsm_stream_open_ex(pool, &options, &mut expired, &mut err),
+            0
+        );
+        plsm_pool_free(pool);
+
+        let mut buf = plsm_buf::default();
+        assert_eq!(plsm_stream_next(expired, &mut buf, &mut err), 0);
+        assert_eq!(plsm_stream_next(json, &mut buf, &mut err), 1);
+        assert_eq!(parse_buf(&buf)["data"]["value"], 1);
+        plsm_buf_free(&mut buf);
+        assert_eq!(plsm_stream_next(json, &mut buf, &mut err), 0);
+        let mut frame = plsm_lite3_frame {
+            seq: 0,
+            timestamp_ns: 0,
+            flags: 0,
+            payload: plsm_buf::default(),
+        };
+        assert_eq!(plsm_lite3_stream_next(raw, &mut frame, &mut err), 1);
+        assert_eq!(frame.seq, 1);
+        crate::api::lite3::validate_bytes(&take_lite3_payload(&frame)).unwrap();
+        plsm_lite3_frame_free(&mut frame);
+        assert_eq!(plsm_lite3_stream_next(raw, &mut frame, &mut err), 0);
+        assert!(err.is_null());
+        plsm_stream_free(expired);
+        plsm_stream_free(json);
+        plsm_lite3_stream_free(raw);
+    }
+
+    #[test]
+    fn bounded_waits_retain_position_and_distinguish_expiry_completion_and_cancel() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage =
+            Pool::create(temp.path().join("wait.plasmite"), PoolOptions::new(65536)).unwrap();
+        let pool = Box::into_raw(Box::new(plsm_pool { pool: storage }));
+        let mut options = default_stream_options();
+        options.has_max = 1;
+        options.max_messages = 2;
+        let mut json = ptr::null_mut();
+        let mut raw = ptr::null_mut();
+        let mut err = ptr::null_mut();
+        assert_eq!(plsm_stream_open_ex(pool, &options, &mut json, &mut err), 0);
+        assert_eq!(
+            plsm_lite3_stream_open_ex(pool, &options, &mut raw, &mut err),
+            0
+        );
+        let mut buf = plsm_buf::default();
+        let mut frame = plsm_lite3_frame {
+            seq: 0,
+            timestamp_ns: 0,
+            flags: 0,
+            payload: plsm_buf::default(),
+        };
+        assert_eq!(plsm_stream_next_wait(json, 0, &mut buf, &mut err), 0);
+        assert_eq!(plsm_lite3_stream_next_wait(raw, 1, &mut frame, &mut err), 0);
+        for seq in 1..=2 {
+            append_json_for_test(pool, &serde_json::json!({"seq":seq}), &mut err);
+            assert_eq!(plsm_stream_next_wait(json, 0, &mut buf, &mut err), 1);
+            assert_eq!(parse_buf(&buf)["seq"], seq);
+            plsm_buf_free(&mut buf);
+            assert_eq!(plsm_lite3_stream_next_wait(raw, 0, &mut frame, &mut err), 1);
+            assert_eq!(frame.seq, seq);
+            plsm_lite3_frame_free(&mut frame);
+        }
+        assert_eq!(plsm_stream_next_wait(json, 0, &mut buf, &mut err), 2);
+        assert_eq!(plsm_lite3_stream_next_wait(raw, 0, &mut frame, &mut err), 2);
+        plsm_stream_free(json);
+        plsm_lite3_stream_free(raw);
+
+        options.has_max = 0;
+        options.has_since = 1;
+        options.since_seq = 3;
+        assert_eq!(plsm_stream_open_ex(pool, &options, &mut json, &mut err), 0);
+        let address = json as usize;
+        let reader = std::thread::spawn(move || {
+            let mut buf = plsm_buf::default();
+            let mut err = ptr::null_mut();
+            let status =
+                plsm_stream_next_wait(address as *mut plsm_stream, 5000, &mut buf, &mut err);
+            assert!(err.is_null());
+            status
+        });
+        plsm_stream_cancel(json);
+        assert_eq!(reader.join().unwrap(), 3);
+        assert_eq!(plsm_stream_next(json, &mut buf, &mut err), 0);
+        plsm_stream_free(json);
+        assert_eq!(
+            plsm_lite3_stream_open_ex(pool, &options, &mut raw, &mut err),
+            0
+        );
+        plsm_lite3_stream_cancel(raw);
+        assert_eq!(plsm_lite3_stream_next_wait(raw, 1, &mut frame, &mut err), 3);
+        plsm_lite3_stream_free(raw);
+        plsm_pool_free(pool);
     }
 
     #[test]

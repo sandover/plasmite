@@ -162,7 +162,11 @@ Each opened stream owns an independent handle. `tail()` and `replay()` release
 handle locks between reads, including while yielding messages or sleeping for
 replay timing. Consume each generator from one thread at a time.
 
-`close()` waits for an active native call to finish; it does not interrupt a
-blocking stream read. Pass a finite `timeout_ms` when opening a stream if another
-thread needs to close it within a bounded wait. A stream without a timeout can
-keep `close()` waiting indefinitely.
+A stream's `cancel()` interrupts a read while it waits for messages; `close()`
+cancels first, then waits for the active call and its result copy before freeing
+the handle. `next_wait(timeout_ms)` returns `(status, value)`: 0 means wait expired,
+1 carries a message/frame, 2 means finished, and 3 means cancelled. A zero budget
+polls once; wait expiry retains position. The original open-time `timeout_ms`
+still bounds the stream's lifetime. High-level `tail(cancel=event)` accepts a
+`threading.Event` and checks it during bounded waits. Cancellation cannot interrupt
+an operating-system file lock already in progress.

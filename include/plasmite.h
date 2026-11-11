@@ -26,7 +26,8 @@ Ownership rules:
 
 Caller obligations:
   - Serialize all calls on each opaque client, pool, or stream handle,
-    including reads and free. UDP pool send/follow calls may overlap while the
+    including reads and free. Local stream cancel may overlap a read; wait for
+    the read before freeing. UDP pool send/follow calls may overlap while the
     handle stays alive; wait for all calls before freeing it. UDP follow cancel
     may run during next; cancel and wait for active calls before close.
     Distinct handles may run concurrently. Do not use a freed handle.
@@ -305,6 +306,23 @@ int plsm_udp_event_message(
     const plsm_udp_event_t *event,
     plsm_buf_t *out_message,
     plsm_error_t **out_err);
+
+/*
+ * Bounded local-stream waits: 1=message, 0=wait expired, 2=stream finished,
+ * 3=cancelled, -1=error. Wait expiry retains the cursor and message count.
+ * Zero polls once; the original open-time deadline still ends the stream.
+ * The budget cannot interrupt a file operation already waiting on an OS lock.
+ * Use one reader per handle. Cancel may overlap next/next_wait, is permanent,
+ * and is observed within 50 ms while idle. Cancel and wait for active reads
+ * before free. Output buffers belong to the caller only on status 1.
+ * The legacy next functions retain their original 1/0/-1 results.
+ */
+int plsm_stream_next_wait(plsm_stream_t *stream, uint64_t timeout_ms,
+                          plsm_buf_t *out_message, plsm_error_t **out_err);
+int plsm_lite3_stream_next_wait(plsm_lite3_stream_t *stream, uint64_t timeout_ms,
+                               plsm_lite3_frame_t *out_frame, plsm_error_t **out_err);
+void plsm_stream_cancel(plsm_stream_t *stream);
+void plsm_lite3_stream_cancel(plsm_lite3_stream_t *stream);
 
 #ifdef __cplusplus
 } // extern "C"

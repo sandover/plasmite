@@ -135,8 +135,9 @@ func main() {
 
 `TailOptions.Tags` applies exact tag matching and composes with other filters
 via AND semantics. `SinceSeq` is inclusive; save the last handled sequence
-plus one to resume. `Timeout` bounds each blocking read so the goroutine can
-check cancellation; it does not end the tail on its own. Use a context deadline
+plus one to resume. Tails retain one native reader across quiet waits.
+`Timeout` bounds each wait; waits also check context cancellation at least every
+50 milliseconds while idle. It does not end the tail on its own. Use a context deadline
 to bound the whole operation, or `MaxMessages` to stop after a chosen number
 of delivered messages.
 
@@ -243,7 +244,7 @@ the server's explicit `--udp-follow` setting; it never switches to HTTP.
 ### Concurrent use
 
 Client, Pool, Stream, and Lite3Stream methods serialize access to each native
-handle, including Close. A Tail goroutine can reopen its independent stream
-while foreground pool operations run. Handles must not be copied. Close waits
+handle, including Close. A Tail goroutine retains an independent stream while
+foreground pool operations run; closing its Pool ends the high-level tail. Handles must not be copied. Close waits
 for an active native read; set a finite stream timeout for bounded shutdown.
 Independent handles may run concurrently, and message values are owned snapshots.

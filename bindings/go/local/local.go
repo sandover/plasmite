@@ -359,10 +359,14 @@ func (p *Pool) GetLite3(seq uint64) (*Lite3Frame, error) {
 }
 
 func (p *Pool) OpenStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (api.Stream, error) {
-	return p.openStream(sinceSeq, maxMessages, timeoutMs, false)
+	stream, err := p.openStream(sinceSeq, maxMessages, timeoutMs, false)
+	if err != nil {
+		return nil, err
+	}
+	return stream, nil
 }
 
-func (p *Pool) openStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64, errorOnGap bool) (api.Stream, error) {
+func (p *Pool) openStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64, errorOnGap bool) (*Stream, error) {
 	if p == nil {
 		return nil, closedError("pool")
 	}
@@ -425,10 +429,14 @@ func (p *Pool) openStream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint
 }
 
 func (p *Pool) OpenLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (api.Lite3Stream, error) {
-	return p.openLite3Stream(sinceSeq, maxMessages, timeoutMs, false)
+	stream, err := p.openLite3Stream(sinceSeq, maxMessages, timeoutMs, false)
+	if err != nil {
+		return nil, err
+	}
+	return stream, nil
 }
 
-func (p *Pool) openLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64, errorOnGap bool) (api.Lite3Stream, error) {
+func (p *Pool) openLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64, errorOnGap bool) (*Lite3Stream, error) {
 	if p == nil {
 		return nil, closedError("pool")
 	}
@@ -570,164 +578,165 @@ func streamTimeoutMillis(timeout time.Duration) uint64 {
 	return uint64(timeout.Milliseconds())
 }
 
-// Tail streams JSON messages on a buffered channel.
-// Backpressure: when the buffer is full, tailing blocks until the caller drains it.
-// Cancellation: the stream is reopened after Timeout to check ctx; set Timeout for responsiveness.
+// tailPoolOpen preserves the high-level tail's Close behavior while its native
+// stream retains an independent handle. Low-level streams outlive their Pool.
+func (p *Pool) tailPoolOpen() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.ptr != nil
+}
+
+// Tail streams matching JSON messages through one native reader. Bounded waits
+// check context cancellation at least every 50 ms while the pool is idle.
 func (p *Pool) Tail(ctx context.Context, opts TailOptions) (<-chan *api.Message, <-chan error) {
 	out := make(chan *api.Message, bufferSize(opts.Buffer))
 	errs := make(chan error, 1)
-
 	go func() {
 		defer close(out)
 		defer close(errs)
-
-		var delivered uint64
-		var since *uint64
-		if opts.SinceSeq != nil {
-			start := *opts.SinceSeq
-			since = &start
+		if opts.MaxMessages != nil && *opts.MaxMessages == 0 {
+			return
 		}
-
+		limit := opts.MaxMessages
+		if len(opts.Tags) > 0 {
+			limit = nil
+		}
+		stream, err := p.openStream(opts.SinceSeq, limit, nil, opts.ErrorOnGap)
+		if err != nil {
+			errs <- err
+			return
+		}
+		defer stream.Close()
+		var delivered uint64
+		wait := min(streamTimeoutMillis(opts.Timeout), uint64(50))
 		for {
-			if opts.MaxMessages != nil && delivered >= *opts.MaxMessages {
-				return
-			}
-			select {
-			case <-ctx.Done():
+			if ctx.Err() != nil {
 				errs <- ctx.Err()
 				return
-			default:
 			}
-
-			timeoutValue := streamTimeoutMillis(opts.Timeout)
-			var remaining *uint64
-			if opts.MaxMessages != nil {
-				left := *opts.MaxMessages - delivered
-				remaining = &left
+			if !p.tailPoolOpen() {
+				errs <- closedError("pool")
+				return
 			}
-			stream, err := p.openStream(since, remaining, &timeoutValue, opts.ErrorOnGap)
+			raw, status, err := stream.nextWait(wait)
 			if err != nil {
 				errs <- err
 				return
 			}
-
-			for {
-				raw, err := stream.NextJSON()
-				if err == io.EOF {
-					stream.Close()
-					break
-				}
-				if err != nil {
-					stream.Close()
-					errs <- err
-					return
-				}
-				msg, err := api.DecodeMessage(raw)
-				if err != nil {
-					stream.Close()
-					errs <- err
-					return
-				}
-				next := msg.Seq + 1
-				since = &next
-				if !messageHasTags(msg, opts.Tags) {
-					continue
-				}
-				delivered++
+			if status == 2 || status == 3 {
+				return
+			}
+			if status == 0 {
+				continue
+			}
+			msg, err := api.DecodeMessage(raw)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if messageHasTags(msg, opts.Tags) {
 				select {
 				case out <- msg:
-					if opts.MaxMessages != nil && delivered >= *opts.MaxMessages {
-						stream.Close()
-						return
-					}
+					delivered++
 				case <-ctx.Done():
-					stream.Close()
 					errs <- ctx.Err()
 					return
 				}
 			}
+			if (opts.MaxMessages != nil && delivered >= *opts.MaxMessages) || msg.Seq == ^uint64(0) {
+				return
+			}
 		}
 	}()
-
 	return out, errs
 }
 
-// TailLite3 streams Lite3 frames on a buffered channel.
-// Backpressure: when the buffer is full, tailing blocks until the caller drains it.
-// Cancellation: the stream is reopened after Timeout to check ctx; set Timeout for responsiveness.
+// TailLite3 streams raw frames through one native reader. Bounded waits retain
+// its checkpoint while checking context cancellation and Pool.Close.
 func (p *Pool) TailLite3(ctx context.Context, opts TailOptions) (<-chan *Lite3Frame, <-chan error) {
 	out := make(chan *Lite3Frame, bufferSize(opts.Buffer))
 	errs := make(chan error, 1)
-
 	go func() {
 		defer close(out)
 		defer close(errs)
-
-		var delivered uint64
-		var since *uint64
-		if opts.SinceSeq != nil {
-			start := *opts.SinceSeq
-			since = &start
+		if opts.MaxMessages != nil && *opts.MaxMessages == 0 {
+			return
 		}
-
+		stream, err := p.openLite3Stream(opts.SinceSeq, opts.MaxMessages, nil, opts.ErrorOnGap)
+		if err != nil {
+			errs <- err
+			return
+		}
+		defer stream.Close()
+		wait := min(streamTimeoutMillis(opts.Timeout), uint64(50))
 		for {
-			if opts.MaxMessages != nil && delivered >= *opts.MaxMessages {
-				return
-			}
-			select {
-			case <-ctx.Done():
+			if ctx.Err() != nil {
 				errs <- ctx.Err()
 				return
-			default:
 			}
-
-			timeoutValue := streamTimeoutMillis(opts.Timeout)
-			var remaining *uint64
-			if opts.MaxMessages != nil {
-				left := *opts.MaxMessages - delivered
-				remaining = &left
+			if !p.tailPoolOpen() {
+				errs <- closedError("pool")
+				return
 			}
-			stream, err := p.openLite3Stream(since, remaining, &timeoutValue, opts.ErrorOnGap)
+			frame, status, err := stream.nextWait(wait)
 			if err != nil {
 				errs <- err
 				return
 			}
-
-			for {
-				frame, err := stream.Next()
-				if err == io.EOF {
-					stream.Close()
-					break
-				}
-				if err != nil {
-					stream.Close()
-					errs <- err
-					return
-				}
-				delivered++
-				if opts.MaxMessages != nil && delivered >= *opts.MaxMessages {
-					stream.Close()
-					select {
-					case out <- frame:
-					case <-ctx.Done():
-						errs <- ctx.Err()
-					}
-					return
-				}
-				select {
-				case out <- frame:
-					next := frame.Seq + 1
-					since = &next
-				case <-ctx.Done():
-					stream.Close()
-					errs <- ctx.Err()
-					return
-				}
+			if status == 2 || status == 3 {
+				return
+			}
+			if status == 0 {
+				continue
+			}
+			select {
+			case out <- frame:
+			case <-ctx.Done():
+				errs <- ctx.Err()
+				return
+			}
+			if frame.Seq == ^uint64(0) {
+				return
 			}
 		}
 	}()
-
 	return out, errs
+}
+
+func (s *Stream) nextWait(wait uint64) ([]byte, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ptr == nil {
+		return nil, -1, closedError("stream")
+	}
+	var buf C.plsm_buf_t
+	var err *C.plsm_error_t
+	status := int(C.plsm_stream_next_wait(s.ptr, C.uint64_t(wait), &buf, &err))
+	if status < 0 {
+		return nil, status, fromCError(err)
+	}
+	if status == 1 {
+		return copyAndFreeBuf(&buf), status, nil
+	}
+	return nil, status, nil
+}
+
+func (s *Lite3Stream) nextWait(wait uint64) (*Lite3Frame, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ptr == nil {
+		return nil, -1, closedError("stream")
+	}
+	var frame C.plsm_lite3_frame_t
+	var err *C.plsm_error_t
+	status := int(C.plsm_lite3_stream_next_wait(s.ptr, C.uint64_t(wait), &frame, &err))
+	if status < 0 {
+		return nil, status, fromCError(err)
+	}
+	if status == 1 {
+		return copyAndFreeLite3Frame(&frame), status, nil
+	}
+	return nil, status, nil
 }
 
 // Replay collects messages until Timeout or MaxMessages, then yields them with

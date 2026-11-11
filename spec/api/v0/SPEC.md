@@ -122,6 +122,27 @@ Stable error kinds:
 
 ### Streaming Semantics
 
+The C interface adds bounded waits without changing legacy `*_next` calls:
+
+- `plsm_stream_next_wait` and `plsm_lite3_stream_next_wait` take a per-call
+  wait budget in milliseconds. They return 1 for a message, 0 for wait expiry,
+  2 for stream completion (including the original open-time deadline), 3 for
+  cancellation, and -1 for an error. Wait expiry retains the cursor and counts.
+  A zero budget polls once. A file operation already in progress may exceed the
+  wait budget; the budget cannot interrupt an operating-system file lock.
+- `plsm_stream_cancel` and `plsm_lite3_stream_cancel` may run during a read.
+  Cancellation is permanent and the reader checks it at most every 50 ms while
+  waiting for messages. The caller must wait for active reads before freeing
+  the handle. Each stream accepts one reader at a time.
+- Legacy `*_next` still returns 1 for a message, 0 for completion, and -1 for
+  errors. Stream handles own their pool independently of the originating pool.
+- Node local asynchronous tails run bounded native reads on worker threads and
+  accept an `AbortSignal`. Go local tails use bounded waits to check context
+  cancellation. Both retain one native stream instead of reopening it at wait
+  expiry. Matching-message limits apply after tag filtering. Python local
+  streams expose bounded waits and concurrent cancellation; high-level tails
+  accept an optional `threading.Event` cancellation flag.
+
 - Ordering is strictly by `seq` within a pool.
 - Streams support explicit caller cancellation.
 - Implementations must respect backpressure and avoid unbounded buffering.

@@ -173,6 +173,14 @@ Tail path:
 
 Invariant: Correctness of the tail path must not depend on notify delivery. Notify is a latency optimization; a tail that never receives a notification must still eventually return all committed messages. Removing notify must not cause failures in non-timing tests.
 
+Rust and C tails share private reader state with an explicit pool input. Rust
+tails borrow their pool; C streams own an independently opened pool. Encoding
+adapters select decoded messages or raw frames. A bounded wait can expire without
+ending the reader or losing its sequence checkpoint. C streams serialize reader
+state and expose a separate atomic cancellation signal; callers retain handles
+until active reads finish. Node workers hold shared ownership through an active
+read, so closing a JavaScript wrapper cancels without freeing a worker's handle.
+
 The CLI's interactive `follow` loop and the public API's `Tail` and `Replay`
 share `Pool` and `Cursor`, but have different contracts. CLI follow selects
 retained `--tail` history before filtering, resets its timeout after output,

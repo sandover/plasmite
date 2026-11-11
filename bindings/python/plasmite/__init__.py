@@ -28,7 +28,7 @@ from ctypes import (
 from datetime import datetime, timezone
 from enum import IntEnum
 from functools import wraps
-from threading import Lock, RLock
+from threading import Event, Lock, RLock
 import json
 import os
 import re
@@ -365,6 +365,15 @@ _LIB.plsm_stream_next.argtypes = [
     POINTER(POINTER(plsm_error_t)),
 ]
 _LIB.plsm_stream_next.restype = c_int
+_LIB.plsm_stream_next_wait.argtypes = [POINTER(plsm_stream_t), c_uint64, POINTER(plsm_buf_t), POINTER(POINTER(plsm_error_t))]
+_LIB.plsm_stream_next_wait.restype = c_int
+_LIB.plsm_stream_cancel.argtypes = [POINTER(plsm_stream_t)]
+_LIB.plsm_stream_cancel.restype = None
+_LIB.plsm_lite3_stream_next_wait.argtypes = [POINTER(plsm_lite3_stream_t), c_uint64, POINTER(plsm_lite3_frame_t), POINTER(POINTER(plsm_error_t))]
+_LIB.plsm_lite3_stream_next_wait.restype = c_int
+_LIB.plsm_lite3_stream_cancel.argtypes = [POINTER(plsm_lite3_stream_t)]
+_LIB.plsm_lite3_stream_cancel.restype = None
+
 
 _LIB.plsm_lite3_stream_next.argtypes = [
     POINTER(plsm_lite3_stream_t),
@@ -913,8 +922,11 @@ class Pool:
         timeout_ms: Optional[int] = None,
         tags: Optional[Iterable[str]] = None,
         error_on_gap: bool = False,
+        cancel: Event | None = None,
     ) -> Generator[Message, None, None]:
         """Tail JSON messages and optionally filter by exact tags."""
+        if max_messages == 0:
+            return
         required_tags = list(tags or [])
         stream_max_messages = (
             None if (max_messages is not None and required_tags) else max_messages
@@ -928,9 +940,13 @@ class Pool:
         try:
             delivered = 0
             filter_by_tags = bool(required_tags)
-            while True:
-                msg = stream.next_json()
-                if msg is None:
+            while cancel is None or not cancel.is_set():
+                status, msg = stream.next_wait(50)
+                if status == 0:
+                    continue
+                if status == 2 or status == 3:
+                    break
+                if cancel is not None and cancel.is_set():
                     break
                 message = parse_message(msg)
                 if filter_by_tags:
@@ -964,6 +980,7 @@ class Pool:
 class Stream:
     def __init__(self, ptr: POINTER(plsm_stream_t)) -> None:
         self._lock = RLock()
+        self._state_lock = RLock()
         self._ptr = ptr
 
     @_serialized_handle
@@ -978,6 +995,24 @@ class Stream:
             return None
         raise _take_error(out_err)
 
+    @_serialized_handle
+    def next_wait(self, timeout_ms: int) -> tuple[int, bytes | None]:
+        """Return (status, value): 0=wait expired, 1=value, 2=finished, 3=cancelled."""
+        _require_open(self._ptr, "stream")
+        timeout_ms = _ensure_non_negative_int(timeout_ms, "timeout_ms")
+        value = plsm_buf_t()
+        out_err = POINTER(plsm_error_t)()
+        status = _LIB.plsm_stream_next_wait(self._ptr, c_uint64(timeout_ms), byref(value), byref(out_err))
+        if status < 0:
+            raise _take_error(out_err)
+        return status, _buf_to_bytes(value) if status == 1 else None
+
+    def cancel(self) -> None:
+        """Permanently cancel a read, including one running on another thread."""
+        with self._state_lock:
+            if self._ptr:
+                _LIB.plsm_stream_cancel(self._ptr)
+
     def __iter__(self) -> Stream:
         return self
 
@@ -987,11 +1022,15 @@ class Stream:
             raise StopIteration
         return message
 
-    @_serialized_handle
     def close(self) -> None:
-        if getattr(self, "_ptr", None):
-            _LIB.plsm_stream_free(self._ptr)
-            self._ptr = None
+        if not hasattr(self, "_state_lock"):
+            return
+        self.cancel()
+        with self._lock:
+            with self._state_lock:
+                if self._ptr:
+                    _LIB.plsm_stream_free(self._ptr)
+                    self._ptr = None
 
     def __enter__(self) -> Stream:
         with self._lock:
@@ -1008,6 +1047,7 @@ class Stream:
 class Lite3Stream:
     def __init__(self, ptr: POINTER(plsm_lite3_stream_t)) -> None:
         self._lock = RLock()
+        self._state_lock = RLock()
         self._ptr = ptr
 
     @_serialized_handle
@@ -1022,6 +1062,24 @@ class Lite3Stream:
             return None
         raise _take_error(out_err)
 
+    @_serialized_handle
+    def next_wait(self, timeout_ms: int) -> tuple[int, Lite3Frame | None]:
+        """Return (status, value): 0=wait expired, 1=value, 2=finished, 3=cancelled."""
+        _require_open(self._ptr, "stream")
+        timeout_ms = _ensure_non_negative_int(timeout_ms, "timeout_ms")
+        value = plsm_lite3_frame_t()
+        out_err = POINTER(plsm_error_t)()
+        status = _LIB.plsm_lite3_stream_next_wait(self._ptr, c_uint64(timeout_ms), byref(value), byref(out_err))
+        if status < 0:
+            raise _take_error(out_err)
+        return status, _frame_to_py(value) if status == 1 else None
+
+    def cancel(self) -> None:
+        """Permanently cancel a read, including one running on another thread."""
+        with self._state_lock:
+            if self._ptr:
+                _LIB.plsm_lite3_stream_cancel(self._ptr)
+
     def __iter__(self) -> Lite3Stream:
         return self
 
@@ -1031,11 +1089,15 @@ class Lite3Stream:
             raise StopIteration
         return frame
 
-    @_serialized_handle
     def close(self) -> None:
-        if getattr(self, "_ptr", None):
-            _LIB.plsm_lite3_stream_free(self._ptr)
-            self._ptr = None
+        if not hasattr(self, "_state_lock"):
+            return
+        self.cancel()
+        with self._lock:
+            with self._state_lock:
+                if self._ptr:
+                    _LIB.plsm_lite3_stream_free(self._ptr)
+                    self._ptr = None
 
     def __enter__(self) -> Lite3Stream:
         with self._lock:

@@ -192,6 +192,36 @@ class ThreadSafetyTests(unittest.TestCase):
         client.close()
         self.assertIsNone(client._ptr)
 
+    def test_bounded_waits_keep_position_and_allow_concurrent_cancel(self):
+        for opener in (self.pool.open_stream, self.pool.open_lite3_stream):
+            with self.subTest(opener=opener.__name__):
+                stream = opener(since_seq=1, max_messages=1)
+                self.addCleanup(stream.close)
+                status, value = stream.next_wait(0)
+                if status == 0:
+                    self.pool.append({"after_wait": True})
+                    status, value = stream.next_wait(0)
+                self.assertEqual(status, 1)
+                message = plasmite.parse_message(value) if isinstance(value, bytes) else value
+                self.assertEqual(message.seq, 1)
+                self.assertEqual(stream.next_wait(0)[0], 2)
+
+                quiet = opener(since_seq=999, timeout_ms=3000)
+                self.addCleanup(quiet.close)
+                with ThreadPoolExecutor(max_workers=1) as threads:
+                    pending = threads.submit(quiet.next_wait, 3000)
+                    quiet.cancel()
+                    self.assertEqual(pending.result(timeout=1)[0], 3)
+                quiet.close()
+
+    def test_tail_event_cancels_a_quiet_wait(self):
+        cancel = Event()
+        with ThreadPoolExecutor(max_workers=1) as threads:
+            pending = threads.submit(list, self.pool.tail(since_seq=999, cancel=cancel, timeout_ms=3000))
+            cancel.set()
+            self.assertEqual(pending.result(timeout=1), [])
+        self.assertEqual(list(self.pool.tail(max_messages=0)), [])
+
 
 if __name__ == "__main__":
     unittest.main()

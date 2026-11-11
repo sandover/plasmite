@@ -305,52 +305,37 @@ class Pool {
 
   /**
    * Tail parsed messages with optional filtering.
-   * @param {{sinceSeq?: number|bigint, maxMessages?: number|bigint, timeoutMs?: number|bigint, tags?: string[], errorOnGap?: boolean}} [options]
+   * @param {{sinceSeq?: number|bigint, maxMessages?: number|bigint, timeoutMs?: number|bigint, tags?: string[], errorOnGap?: boolean, signal?: AbortSignal}} [options]
    * @returns {AsyncGenerator<Message, void, unknown>}
    */
   async *tail(options = {}) {
-    const { sinceSeq, maxMessages, timeoutMs, tags, errorOnGap = false } = options;
+    const { sinceSeq, maxMessages, timeoutMs, tags, errorOnGap = false, signal } = options;
     const requiredTags = normalizeTagFilter(tags);
     const limit = normalizeOptionalCount(maxMessages, "maxMessages");
-    const pollTimeoutMs = normalizePollingTimeout(timeoutMs);
-
+    const waitMs = BigInt(Math.floor(normalizePollingTimeout(timeoutMs)));
+    if (limit === 0 || signal?.aborted) return;
+    const stream = this.openStream(sinceSeq ?? null, requiredTags.length ? null : limit, null, errorOnGap);
+    const abort = () => stream.cancel();
+    signal?.addEventListener("abort", abort, { once: true });
     let delivered = 0;
-    let cursor = sinceSeq ?? null;
-    while (true) {
-      if (limit !== null && delivered >= limit) {
-        return;
-      }
-
-      const remaining = limit === null ? null : limit - delivered;
-      const streamLimit = requiredTags.length && remaining !== null ? null : remaining;
-      const stream = this.openStream(
-        cursor,
-        streamLimit,
-        pollTimeoutMs,
-        errorOnGap,
-      );
-      let sawRawMessage = false;
-      try {
-        for (const message of stream) {
-          sawRawMessage = true;
-          const parsed = parseMessage(message);
-          cursor = nextSinceSeq(parsed, cursor);
-          if (!messageHasTags(parsed, requiredTags)) {
-            continue;
-          }
-          delivered += 1;
-          yield parsed;
-          if (limit !== null && delivered >= limit) {
-            return;
-          }
+    try {
+      while (!signal?.aborted) {
+        const result = await stream.nextJsonWait(waitMs);
+        if (signal?.aborted || result.status === 2 || result.status === 3) return;
+        if (result.status === 0) {
+          if (limit !== null) return;
+          continue;
         }
-      } finally {
-        stream.close();
+        const message = parseMessage(result.message);
+        if (messageHasTags(message, requiredTags)) {
+          delivered++;
+          yield message;
+          if (limit !== null && delivered >= limit) return;
+        }
       }
-      if (limit !== null && !sawRawMessage) {
-        return;
-      }
-      await sleep(0);
+    } finally {
+      signal?.removeEventListener("abort", abort);
+      stream.close();
     }
   }
 
@@ -450,19 +435,6 @@ function messageTimeMs(message) {
   return Number.isFinite(value) ? value : null;
 }
 
-function nextSinceSeq(message, fallback) {
-  if (!message) {
-    return fallback;
-  }
-  if (typeof message.seq === "bigint") {
-    return message.seq + 1n;
-  }
-  if (typeof message.seq === "number" && Number.isFinite(message.seq)) {
-    return message.seq + 1;
-  }
-  return fallback;
-}
-
 function decorateLite3Frame(frame) {
   if (!frame || typeof frame !== "object") {
     return frame;
@@ -549,10 +521,20 @@ class Stream {
     }
   }
 
-  /**
-   * Close the stream handle.
-   * @returns {void}
-   */
+  /** Read on a native worker: 0=wait expired, 1=value, 2=finished, 3=cancelled. */
+  async nextJsonWait(timeoutMs) {
+    try {
+      const result = await this._inner.nextJsonWait(normalizeUint64(timeoutMs, "timeoutMs"));
+      return result;
+    } catch (err) {
+      throw wrapNativeError(err);
+    }
+  }
+
+  cancel() {
+    this._inner.cancel();
+  }
+
   close() {
     this._inner.close();
   }
@@ -597,10 +579,21 @@ class Lite3Stream {
     }
   }
 
-  /**
-   * Close the Lite3 stream handle.
-   * @returns {void}
-   */
+  /** Read on a native worker: 0=wait expired, 1=value, 2=finished, 3=cancelled. */
+  async nextWait(timeoutMs) {
+    try {
+      const result = await this._inner.nextWait(normalizeUint64(timeoutMs, "timeoutMs"));
+      if (result.frame) decorateLite3Frame(result.frame);
+      return result;
+    } catch (err) {
+      throw wrapNativeError(err);
+    }
+  }
+
+  cancel() {
+    this._inner.cancel();
+  }
+
   close() {
     this._inner.close();
   }

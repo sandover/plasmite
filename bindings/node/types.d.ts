@@ -103,6 +103,8 @@ export class Pool {
 export class Stream {
   [Symbol.iterator](): Iterator<Buffer>
   nextJson(): Buffer | null
+  nextJsonWait(timeoutMs: number | bigint): Promise<{ status: 0 | 1 | 2 | 3; message?: Buffer | null }>
+  cancel(): void
   close(): void
   [Symbol.dispose](): void
 }
@@ -110,6 +112,8 @@ export class Stream {
 export class Lite3Stream {
   [Symbol.iterator](): Iterator<Lite3Frame>
   next(): Lite3Frame | null
+  nextWait(timeoutMs: number | bigint): Promise<{ status: 0 | 1 | 2 | 3; frame?: Lite3Frame | null }>
+  cancel(): void
   close(): void
   [Symbol.dispose](): void
 }
@@ -128,6 +132,7 @@ export interface LocalTailOptions {
   timeoutMs?: number | bigint
   tags?: string[]
   errorOnGap?: boolean
+  signal?: AbortSignal
 }
 
 export type UdpStart =

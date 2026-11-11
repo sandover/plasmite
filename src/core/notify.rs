@@ -153,8 +153,10 @@ pub(crate) type PoolSemaphore = Semaphore<OsSemaphoreBackend>;
 pub(crate) fn pool_semaphore_name(path: &Path) -> String {
     let bytes = canonical_path_bytes(path);
     let digest = Sha256::digest(&bytes);
-    let mut hex = String::with_capacity(digest.len() * 2);
-    for byte in digest {
+    // Darwin permits at most 30 name bytes plus the terminating NUL. Leave
+    // room for the leading slash and prefix; 96 hash bits distinguish pools.
+    let mut hex = String::with_capacity(24);
+    for byte in &digest[..12] {
         use std::fmt::Write;
         let _ = write!(hex, "{byte:02x}");
     }
@@ -300,10 +302,38 @@ mod tests {
             assert_eq!(first, pool_semaphore_name(&first_path));
             assert_ne!(first, pool_semaphore_name(&second_path));
             assert!(first.starts_with("plsm-"));
+            assert!(first.len() + 1 < 31, "include the leading slash");
         }
         assert_eq!(
             pool_semaphore_name(&existing),
             pool_semaphore_name(&temp.path().join(".").join("first.plasmite"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_handles_share_signals_with_a_platform_sized_name() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let name = pool_semaphore_name(&temp.path().join("native.plasmite"));
+        struct Unlink(CString);
+        impl Drop for Unlink {
+            fn drop(&mut self) {
+                unsafe { libc::sem_unlink(self.0.as_ptr()) };
+            }
+        }
+        let _cleanup = Unlink(CString::new(format!("/{name}")).unwrap());
+        // Exercise the real backend directly: unavailable notifications must
+        // fail this test rather than silently turn it into a polling test.
+        let sender = Semaphore::open_with_backend(name.clone(), OsSemaphoreBackend).unwrap();
+        let receiver = Semaphore::open_with_backend(name, OsSemaphoreBackend).unwrap();
+        assert_eq!(
+            receiver.wait(Duration::ZERO).unwrap(),
+            WaitOutcome::TimedOut
+        );
+        sender.post().unwrap();
+        assert_eq!(
+            receiver.wait(Duration::from_secs(1)).unwrap(),
+            WaitOutcome::Signaled
         );
     }
 

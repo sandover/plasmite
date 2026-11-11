@@ -254,6 +254,88 @@ test("tail timeout with no messages returns done", async () => {
   });
 });
 
+test("a quiet native tail leaves timers free to append and abort", async () => {
+  await withPoolAsync("responsive-tail", async ({ pool }) => {
+    let timer;
+    try {
+      timer = setTimeout(() => pool.append({ from: "timer" }), 10);
+      const result = await pool.tail({ maxMessages: 1, timeoutMs: 1000 }).next();
+      assert.equal(result.done, false);
+      assert.equal(result.value.data.from, "timer");
+    } finally {
+      clearTimeout(timer);
+    }
+    const controller = new AbortController();
+    const tail = pool.tail({ sinceSeq: 2n, timeoutMs: 5000, signal: controller.signal });
+    const next = tail.next();
+    const abortTimer = setTimeout(() => controller.abort(), 10);
+    let deadline;
+    try {
+      const result = await Promise.race([next, new Promise((_, reject) => {
+        deadline = setTimeout(() => reject(new Error("abort did not end quiet read")), 1000);
+      })]);
+      assert.equal(result.done, true);
+    } finally {
+      controller.abort();
+      clearTimeout(abortTimer);
+      clearTimeout(deadline);
+      await tail.return();
+    }
+  });
+});
+
+test("worker waits preserve position and close keeps an active handle alive", async () => {
+  await withPoolAsync("worker-waits", async ({ pool }) => {
+    const stream = pool.openStream(1n, 1n);
+    try {
+      assert.equal((await stream.nextJsonWait(0)).status, 0);
+      const message = pool.append({ value: 7 });
+      const read = await stream.nextJsonWait(0);
+      assert.equal(read.status, 1);
+      assert.equal(parseMessage(read.message).seq, message.seq);
+      assert.equal((await stream.nextJsonWait(0)).status, 2);
+      const raw = pool.openLite3Stream(1n, 1n);
+      try {
+        const result = await raw.nextWait(0);
+        assert.equal(result.status, 1);
+        assert.equal(result.frame.seq, message.seq);
+        assert.ok(result.frame.time instanceof Date);
+        assert.equal((await raw.nextWait(0)).status, 2);
+      } finally { raw.close(); }
+    } finally { stream.close(); }
+    for (const [stream, wait] of [
+      [pool.openStream(2n), (s) => s.nextJsonWait(5000)],
+      [pool.openLite3Stream(2n), (s) => s.nextWait(5000)],
+    ]) {
+      const pending = wait(stream);
+      await assert.rejects(wait(stream), /active reader/);
+      stream.close();
+      assert.equal((await pending).status, 3);
+      stream.close();
+    }
+  });
+});
+
+test("local tail finishes at u64 maximum without reopening from zero", async () => {
+  await withPoolAsync("last-sequence", async ({ pool, poolDir }) => {
+    pool.append({ last: true });
+    const file = fs.openSync(path.join(poolDir, "last-sequence.plasmite"), "r+");
+    const header = Buffer.alloc(104);
+    fs.readSync(file, header, 0, header.length, 0);
+    const last = (1n << 64n) - 1n;
+    const bytes = Buffer.alloc(8);
+    bytes.writeBigUInt64LE(last);
+    try {
+      for (const offset of [88, 96, Number(header.readBigUInt64LE(40)) + 16]) {
+        fs.writeSync(file, bytes, 0, 8, offset);
+      }
+    } finally { fs.closeSync(file); }
+    const messages = [];
+    for await (const message of pool.tail({ sinceSeq: last, timeoutMs: 100 })) messages.push(message.seq);
+    assert.deepEqual(messages, [last]);
+  });
+});
+
 test("local tails can fail closed on retention gaps", async () => {
   await withPoolAsync(
     "tail-gap",

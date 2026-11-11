@@ -13,7 +13,7 @@ import (
 	"github.com/sandover/plasmite/bindings/go/api"
 )
 
-// Tail owns a hidden goroutine that reopens streams. Applications cannot
+// Tail owns a hidden goroutine that reads an independent stream. Applications cannot
 // serialize its pool access with foreground native calls or Close themselves.
 func TestPoolTailConcurrentNativeCallsAndClose(t *testing.T) {
 	client := newTestClient(t)
@@ -159,6 +159,81 @@ func TestPoolTailConcurrentNativeCallsAndClose(t *testing.T) {
 	}
 	if _, err := pool.Get(seed.Seq); !errors.Is(err, ErrClosed) {
 		t.Fatalf("read after close: expected ErrClosed, got %v", err)
+	}
+}
+
+func TestTailBoundedWaitsCancelAndCountMatches(t *testing.T) {
+	client := newTestClient(t)
+	pool := newTestPool(t, client, "bounded-tail")
+	for i := 0; i < 5; i++ {
+		tag := "skip"
+		if i == 3 || i == 4 {
+			tag = "keep"
+		}
+		if _, err := pool.Append(map[string]any{"i": i}, []string{tag}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, stop := context.WithTimeout(context.Background(), 2*time.Second)
+	defer stop()
+	out, errs := pool.Tail(ctx, TailOptions{Tags: []string{"keep"}, MaxMessages: uint64Ptr(2), Timeout: time.Millisecond})
+	var sequences []uint64
+	for message := range out {
+		sequences = append(sequences, message.Seq)
+	}
+	for err := range errs {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(sequences) != "[4 5]" {
+		t.Fatalf("matching limit returned %v", sequences)
+	}
+
+	for _, raw := range []bool{false, true} {
+		ctx, cancel := context.WithCancel(context.Background())
+		opts := TailOptions{SinceSeq: uint64Ptr(6), Timeout: 10 * time.Second}
+		var errs <-chan error
+		if raw {
+			_, errs = pool.TailLite3(ctx, opts)
+		} else {
+			_, errs = pool.Tail(ctx, opts)
+		}
+		cancel()
+		select {
+		case err := <-errs:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancel: %v", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("quiet tail ignored cancellation")
+		}
+	}
+}
+
+func TestNativeWaitExpiryKeepsTheCursor(t *testing.T) {
+	client := newTestClient(t)
+	pool := newTestPool(t, client, "wait-position")
+	stream, err := pool.(*Pool).openStream(uint64Ptr(1), uint64Ptr(1), nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	if _, status, err := stream.nextWait(0); err != nil || status != 0 {
+		t.Fatalf("initial poll: %d %v", status, err)
+	}
+	seed, err := pool.Append(map[string]any{"waited": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, status, err := stream.nextWait(0)
+	if err != nil || status != 1 {
+		t.Fatalf("next poll: %d %v", status, err)
+	}
+	message, err := api.DecodeMessage(raw)
+	if err != nil || message.Seq != seed.Seq {
+		t.Fatalf("checkpoint changed: %v %v", message, err)
+	}
+	if _, status, err := stream.nextWait(0); err != nil || status != 2 {
+		t.Fatalf("completion: %d %v", status, err)
 	}
 }
 

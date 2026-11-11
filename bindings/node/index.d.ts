@@ -24,6 +24,11 @@ export interface Lite3Frame {
   flags: number
   payload: Buffer
 }
+export interface StreamWait {
+  status: number
+  message?: Buffer
+  frame?: Lite3Frame
+}
 export interface UdpEvent {
   kind: string
   seq?: bigint
@@ -61,10 +66,14 @@ export declare class Pool {
 }
 export declare class Stream {
   nextJson(): Buffer | null
+  nextJsonWait(timeoutMs: number | bigint): Promise<StreamWait>
+  cancel(): void
   close(): void
 }
 export declare class Lite3Stream {
   next(): Lite3Frame | null
+  nextWait(timeoutMs: number | bigint): Promise<StreamWait>
+  cancel(): void
   close(): void
 }
 export declare class UdpClient {

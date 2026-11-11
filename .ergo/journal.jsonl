@@ -372,3 +372,148 @@
 {"version":1,"task_id":"TS3TYT","kind":"result","at":"2026-10-13T18:59:59.562895Z","agent":"gpt-6@local","text":"Final 1.2.0 local release gate and audit pass; performance comparison and CI follow.","file":{"path":".scratch/release/evidence-v1.2.0.md","sha256":"f33597ba753ddab63433e39776f8f1e4b0fbb66a19bdba9171b83145f2b37476","mtime":"2026-10-13T18:59:47.015329755Z","git_commit":"22cc6a741b80033b67e7ca5d6ca9b9d43baaa085"}}
 {"version":1,"task_id":"TS3TYT","kind":"result","at":"2026-10-13T20:11:39.567667Z","agent":"gpt-6@local","text":"Published 1.2.0 on all required channels; fresh installs and release gates pass.","file":{"path":".scratch/release/v1.2.0-live/REPORT.md","sha256":"1d58a0abd27192b096816fed09db10f3ca1423167b2f4218b8d1757b39d8cb4b","mtime":"2026-10-13T20:11:39.493461179Z","git_commit":"e78ec51370f135421c1c5947b8cc720da34d5253"}}
 {"version":1,"task_id":"TS3TYT","kind":"done","at":"2026-10-13T20:11:39.596377Z","agent":"gpt-6@local","text":"Released v1.2.0 from e78ec51; all required delivery checks pass; build cleanup complete."}
+{"version":1,"task_id":"LRPHBP","kind":"created","at":"2026-11-11T17:01:22.273285Z"}
+{"version":1,"task_id":"5F3SO6","kind":"created","at":"2026-11-11T17:01:22.273322Z"}
+{"version":1,"task_id":"4UYTFS","kind":"created","at":"2026-11-11T17:01:22.273332Z"}
+{"version":1,"task_id":"DM4MBQ","kind":"created","at":"2026-11-11T17:01:22.273338Z"}
+{"version":1,"task_id":"PZIH32","kind":"created","at":"2026-11-11T17:01:22.273343Z"}
+{"version":1,"task_id":"IDBBW7","kind":"created","at":"2026-11-11T17:01:22.330727Z"}
+{"version":1,"task_id":"4XFTOH","kind":"created","at":"2026-11-11T17:01:22.330747Z"}
+{"version":1,"task_id":"X7RXIS","kind":"created","at":"2026-11-11T17:01:22.330754Z"}
+{"version":1,"task_id":"NGYSOW","kind":"created","at":"2026-11-11T17:01:22.33076Z"}
+{"version":1,"task_id":"JAHH2L","kind":"created","at":"2026-11-11T17:01:22.330765Z"}
+{"version":1,"task_id":"YW7XJY","kind":"created","at":"2026-11-11T17:01:22.388388Z"}
+{"version":1,"task_id":"5NFXDR","kind":"created","at":"2026-11-11T17:01:22.388409Z"}
+{"version":1,"task_id":"XK3UQL","kind":"created","at":"2026-11-11T17:01:22.388416Z"}
+{"version":1,"task_id":"65FLAC","kind":"created","at":"2026-11-11T17:01:22.388421Z"}
+{"version":1,"task_id":"3J724W","kind":"created","at":"2026-11-11T17:01:22.44425Z"}
+{"version":1,"task_id":"MPXRCW","kind":"created","at":"2026-11-11T17:01:22.444269Z"}
+{"version":1,"task_id":"6M2KKV","kind":"created","at":"2026-11-11T17:01:22.444586Z"}
+{"version":1,"task_id":"TIMSAF","kind":"created","at":"2026-11-11T17:01:22.444594Z"}
+{"version":1,"task_id":"5DI7G4","kind":"created","at":"2026-11-11T17:01:22.444606Z"}
+{"version":1,"task_id":"5GCMFW","kind":"created","at":"2026-11-11T17:01:22.444612Z"}
+{"version":1,"task_id":"FEXKGZ","kind":"created","at":"2026-11-11T17:01:22.500862Z"}
+{"version":1,"task_id":"NEDOL7","kind":"created","at":"2026-11-11T17:01:22.500894Z"}
+{"version":1,"task_id":"OHYK3P","kind":"created","at":"2026-11-11T17:01:22.500907Z"}
+{"version":1,"task_id":"LXXFB5","kind":"created","at":"2026-11-11T17:01:22.500913Z"}
+{"version":1,"task_id":"JNGWSQ","kind":"created","at":"2026-11-11T17:01:22.500918Z"}
+{"version":1,"task_id":"VUFXAE","kind":"created","at":"2026-11-11T17:01:22.500923Z"}
+{"version":1,"task_id":"6N4RP6","kind":"created","at":"2026-11-11T17:01:22.500928Z"}
+{"version":1,"task_id":"5F3SO6","kind":"open","at":"2026-11-11T17:01:23.257247Z"}
+{"version":1,"task_id":"4UYTFS","kind":"open","at":"2026-11-11T17:01:23.290129Z"}
+{"version":1,"task_id":"DM4MBQ","kind":"open","at":"2026-11-11T17:01:23.324906Z"}
+{"version":1,"task_id":"PZIH32","kind":"open","at":"2026-11-11T17:01:23.356417Z"}
+{"version":1,"task_id":"4XFTOH","kind":"open","at":"2026-11-11T17:01:23.38966Z"}
+{"version":1,"task_id":"X7RXIS","kind":"open","at":"2026-11-11T17:01:23.422076Z"}
+{"version":1,"task_id":"NGYSOW","kind":"open","at":"2026-11-11T17:01:23.454068Z"}
+{"version":1,"task_id":"JAHH2L","kind":"open","at":"2026-11-11T17:01:23.486869Z"}
+{"version":1,"task_id":"5NFXDR","kind":"open","at":"2026-11-11T17:01:23.518626Z"}
+{"version":1,"task_id":"XK3UQL","kind":"open","at":"2026-11-11T17:01:23.550703Z"}
+{"version":1,"task_id":"65FLAC","kind":"open","at":"2026-11-11T17:01:23.583756Z"}
+{"version":1,"task_id":"MPXRCW","kind":"open","at":"2026-11-11T17:01:23.617102Z"}
+{"version":1,"task_id":"6M2KKV","kind":"open","at":"2026-11-11T17:01:23.651361Z"}
+{"version":1,"task_id":"TIMSAF","kind":"open","at":"2026-11-11T17:01:23.685115Z"}
+{"version":1,"task_id":"5DI7G4","kind":"open","at":"2026-11-11T17:01:23.716782Z"}
+{"version":1,"task_id":"5GCMFW","kind":"open","at":"2026-11-11T17:01:23.754915Z"}
+{"version":1,"task_id":"NEDOL7","kind":"open","at":"2026-11-11T17:01:23.787449Z"}
+{"version":1,"task_id":"OHYK3P","kind":"open","at":"2026-11-11T17:01:23.821972Z"}
+{"version":1,"task_id":"LXXFB5","kind":"open","at":"2026-11-11T17:01:23.85713Z"}
+{"version":1,"task_id":"JNGWSQ","kind":"open","at":"2026-11-11T17:01:23.890372Z"}
+{"version":1,"task_id":"VUFXAE","kind":"open","at":"2026-11-11T17:01:23.924085Z"}
+{"version":1,"task_id":"6N4RP6","kind":"open","at":"2026-11-11T17:01:23.956727Z"}
+{"version":1,"task_id":"5F3SO6","kind":"claim","at":"2026-11-11T17:31:53.321367Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"A2GV2J","kind":"created","at":"2026-11-11T17:32:57.201269Z"}
+{"version":1,"task_id":"5F3SO6","kind":"result","at":"2026-11-11T17:33:02.529926Z","agent":"codex@plasmite-spikes","text":"SIMPLIFY: Share private tail state with explicit Pool; draft A2GV2J."}
+{"version":1,"task_id":"5F3SO6","kind":"done","at":"2026-11-11T17:33:33.357857Z","agent":"codex@plasmite-spikes","text":"SIMPLIFY: share private tail state; draft A2GV2J."}
+{"version":1,"task_id":"4UYTFS","kind":"claim","at":"2026-11-11T17:33:41.086599Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"DM4MBQ","kind":"claim","at":"2026-11-11T17:33:57.935192Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"PZIH32","kind":"claim","at":"2026-11-11T17:33:57.972611Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"CMXVAD","kind":"created","at":"2026-11-11T17:35:14.6456Z"}
+{"version":1,"task_id":"4UYTFS","kind":"result","at":"2026-11-11T17:35:14.744093Z","agent":"codex@plasmite-spikes","text":"SIMPLIFY: details in task body; draft implementation CMXVAD."}
+{"version":1,"task_id":"4UYTFS","kind":"done","at":"2026-11-11T17:35:14.776277Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation SIMPLIFY; draft follow-up CMXVAD."}
+{"version":1,"task_id":"DM4MBQ","kind":"result","at":"2026-11-11T17:35:14.840558Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"DM4MBQ","kind":"done","at":"2026-11-11T17:35:14.871264Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"PZIH32","kind":"result","at":"2026-11-11T17:35:14.936777Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"PZIH32","kind":"done","at":"2026-11-11T17:35:14.968231Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"4XFTOH","kind":"claim","at":"2026-11-11T17:35:15.003563Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"X7RXIS","kind":"claim","at":"2026-11-11T17:35:15.03765Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"NGYSOW","kind":"claim","at":"2026-11-11T17:35:15.072074Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"JAHH2L","kind":"claim","at":"2026-11-11T17:35:15.107174Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"4XFTOH","kind":"result","at":"2026-11-11T17:37:17.500962Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"4XFTOH","kind":"done","at":"2026-11-11T17:37:17.533399Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"X7RXIS","kind":"result","at":"2026-11-11T17:37:17.59865Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"X7RXIS","kind":"done","at":"2026-11-11T17:37:17.631356Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"4W4IUB","kind":"created","at":"2026-11-11T17:37:17.665686Z"}
+{"version":1,"task_id":"NGYSOW","kind":"result","at":"2026-11-11T17:37:17.757722Z","agent":"codex@plasmite-spikes","text":"SIMPLIFY: details in task body; draft implementation 4W4IUB."}
+{"version":1,"task_id":"NGYSOW","kind":"done","at":"2026-11-11T17:37:17.788866Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation SIMPLIFY; draft follow-up 4W4IUB."}
+{"version":1,"task_id":"JAHH2L","kind":"result","at":"2026-11-11T17:37:17.854753Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"JAHH2L","kind":"done","at":"2026-11-11T17:37:17.886165Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"5NFXDR","kind":"claim","at":"2026-11-11T17:37:17.919866Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"XK3UQL","kind":"claim","at":"2026-11-11T17:37:17.9558Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"65FLAC","kind":"claim","at":"2026-11-11T17:37:17.990598Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"5NFXDR","kind":"result","at":"2026-11-11T17:38:08.094702Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"5NFXDR","kind":"done","at":"2026-11-11T17:38:08.127349Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"XK3UQL","kind":"result","at":"2026-11-11T17:38:08.195853Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"XK3UQL","kind":"done","at":"2026-11-11T17:38:08.226716Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"65FLAC","kind":"result","at":"2026-11-11T17:38:08.293302Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"65FLAC","kind":"done","at":"2026-11-11T17:38:08.324984Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"MPXRCW","kind":"claim","at":"2026-11-11T17:38:08.359635Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"6M2KKV","kind":"claim","at":"2026-11-11T17:38:08.396709Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"TIMSAF","kind":"claim","at":"2026-11-11T17:38:08.431963Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"5DI7G4","kind":"claim","at":"2026-11-11T17:38:08.467354Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"5GCMFW","kind":"claim","at":"2026-11-11T17:38:08.505386Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"MPXRCW","kind":"result","at":"2026-11-11T17:40:20.858668Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"MPXRCW","kind":"done","at":"2026-11-11T17:40:20.89112Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"M7KPU6","kind":"created","at":"2026-11-11T17:40:20.928814Z"}
+{"version":1,"task_id":"6M2KKV","kind":"result","at":"2026-11-11T17:40:20.995265Z","agent":"codex@plasmite-spikes","text":"SIMPLIFY: details in task body; draft implementation M7KPU6."}
+{"version":1,"task_id":"6M2KKV","kind":"done","at":"2026-11-11T17:40:21.027613Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation SIMPLIFY; draft follow-up M7KPU6."}
+{"version":1,"task_id":"TIMSAF","kind":"result","at":"2026-11-11T17:40:21.092967Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"TIMSAF","kind":"done","at":"2026-11-11T17:40:21.126289Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"5DI7G4","kind":"result","at":"2026-11-11T17:40:21.191255Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"5DI7G4","kind":"done","at":"2026-11-11T17:40:21.223187Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"UIHYFF","kind":"created","at":"2026-11-11T17:40:21.259062Z"}
+{"version":1,"task_id":"5GCMFW","kind":"result","at":"2026-11-11T17:40:21.32682Z","agent":"codex@plasmite-spikes","text":"SIMPLIFY: details in task body; draft implementation UIHYFF."}
+{"version":1,"task_id":"5GCMFW","kind":"done","at":"2026-11-11T17:40:21.359783Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation SIMPLIFY; draft follow-up UIHYFF."}
+{"version":1,"task_id":"NEDOL7","kind":"claim","at":"2026-11-11T17:40:21.394826Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"OHYK3P","kind":"claim","at":"2026-11-11T17:40:21.430589Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"LXXFB5","kind":"claim","at":"2026-11-11T17:40:21.465833Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"JNGWSQ","kind":"claim","at":"2026-11-11T17:40:21.500959Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"VUFXAE","kind":"claim","at":"2026-11-11T17:40:21.537972Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"6N4RP6","kind":"claim","at":"2026-11-11T17:40:21.574602Z","agent":"codex@plasmite-spikes"}
+{"version":1,"task_id":"NEDOL7","kind":"result","at":"2026-11-11T17:43:09.034683Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"NEDOL7","kind":"done","at":"2026-11-11T17:43:09.06888Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"OHYK3P","kind":"result","at":"2026-11-11T17:43:09.140148Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"OHYK3P","kind":"done","at":"2026-11-11T17:43:09.173787Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"LXXFB5","kind":"result","at":"2026-11-11T17:43:09.244522Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"LXXFB5","kind":"done","at":"2026-11-11T17:43:09.276915Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"JNGWSQ","kind":"result","at":"2026-11-11T17:43:09.347638Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"JNGWSQ","kind":"done","at":"2026-11-11T17:43:09.381504Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"VUFXAE","kind":"result","at":"2026-11-11T17:43:09.448285Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"VUFXAE","kind":"done","at":"2026-11-11T17:43:09.483746Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"6N4RP6","kind":"result","at":"2026-11-11T17:43:09.557121Z","agent":"codex@plasmite-spikes","text":"KEEP: details in task body; retain current implementation; no follow-up."}
+{"version":1,"task_id":"6N4RP6","kind":"done","at":"2026-11-11T17:43:09.590948Z","agent":"codex@plasmite-spikes","text":"Completed evidence review; recommendation KEEP; retain current design."}
+{"version":1,"task_id":"UIHYFF","kind":"open","at":"2026-11-11T18:28:39.176384Z"}
+{"version":1,"task_id":"UIHYFF","kind":"claim","at":"2026-11-11T18:28:39.212681Z","agent":"codex@plasmite-implementation"}
+{"version":1,"task_id":"M7KPU6","kind":"open","at":"2026-11-11T18:28:39.249249Z"}
+{"version":1,"task_id":"M7KPU6","kind":"claim","at":"2026-11-11T18:28:39.285167Z","agent":"codex@plasmite-implementation"}
+{"version":1,"task_id":"A2GV2J","kind":"open","at":"2026-11-11T18:28:39.320124Z"}
+{"version":1,"task_id":"A2GV2J","kind":"claim","at":"2026-11-11T18:28:39.352841Z","agent":"codex@plasmite-implementation"}
+{"version":1,"task_id":"A2GV2J","kind":"result","at":"2026-11-11T18:31:46.627053Z","agent":"codex@plasmite-implementation","text":"Shared private TailState; Rust/C ownership and legacy count/deadline tests pass."}
+{"version":1,"task_id":"A2GV2J","kind":"done","at":"2026-11-11T18:31:46.6606Z","agent":"codex@plasmite-implementation","text":"Shared Rust/C state; 200 library tests and focused ABI ownership regression passed."}
+{"version":1,"task_id":"4W4IUB","kind":"open","at":"2026-11-11T18:31:46.698003Z"}
+{"version":1,"task_id":"4W4IUB","kind":"claim","at":"2026-11-11T18:31:46.732765Z","agent":"codex@plasmite-implementation"}
+{"version":1,"task_id":"CMXVAD","kind":"open","at":"2026-11-11T18:31:46.765663Z"}
+{"version":1,"task_id":"CMXVAD","kind":"claim","at":"2026-11-11T18:31:46.799627Z","agent":"codex@plasmite-implementation"}
+{"version":1,"task_id":"UIHYFF","kind":"result","at":"2026-11-11T18:47:10.853606Z","agent":"codex@plasmite-implementation","text":"Real macOS semaphore handles now open, signal across handles, and clean up; polling fallback tests pass."}
+{"version":1,"task_id":"M7KPU6","kind":"result","at":"2026-11-11T18:47:10.881978Z","agent":"codex@plasmite-implementation","text":"Indexed cold-cache fixture passes; same debug probe median fell from 7258us to 1.947us; not a release claim."}
+{"version":1,"task_id":"4W4IUB","kind":"result","at":"2026-11-11T18:47:10.905038Z","agent":"codex@plasmite-implementation","text":"Raw-tail counter proves zero data Value trees; payload identity, corruption, filters and gaps pass."}
+{"version":1,"task_id":"CMXVAD","kind":"result","at":"2026-11-11T18:47:10.926369Z","agent":"codex@plasmite-implementation","text":"C wait statuses and lifetime tests pass; Python 50, Node 41, Go packages and Node typechecks pass."}
+{"version":1,"task_id":"UIHYFF","kind":"result","at":"2026-11-11T18:51:40.416548Z","agent":"codex@plasmite-implementation","text":"Implemented; just check, focused bindings, C ABI and Node packaging checks passed. See implementation notes."}
+{"version":1,"task_id":"UIHYFF","kind":"done","at":"2026-11-11T18:51:40.439366Z","agent":"codex@plasmite-implementation","text":"Implemented and verified; final evidence recorded in task body."}
+{"version":1,"task_id":"M7KPU6","kind":"result","at":"2026-11-11T18:51:40.490185Z","agent":"codex@plasmite-implementation","text":"Implemented; just check, focused bindings, C ABI and Node packaging checks passed. See implementation notes."}
+{"version":1,"task_id":"M7KPU6","kind":"done","at":"2026-11-11T18:51:40.512859Z","agent":"codex@plasmite-implementation","text":"Implemented and verified; final evidence recorded in task body."}
+{"version":1,"task_id":"A2GV2J","kind":"result","at":"2026-11-11T18:51:40.560044Z","text":"Implemented; just check, focused bindings, C ABI and Node packaging checks passed. See implementation notes."}
+{"version":1,"task_id":"4W4IUB","kind":"result","at":"2026-11-11T18:51:40.604663Z","agent":"codex@plasmite-implementation","text":"Implemented; just check, focused bindings, C ABI and Node packaging checks passed. See implementation notes."}
+{"version":1,"task_id":"4W4IUB","kind":"done","at":"2026-11-11T18:51:40.627887Z","agent":"codex@plasmite-implementation","text":"Implemented and verified; final evidence recorded in task body."}
+{"version":1,"task_id":"CMXVAD","kind":"result","at":"2026-11-11T18:51:40.676426Z","agent":"codex@plasmite-implementation","text":"Implemented; just check, focused bindings, C ABI and Node packaging checks passed. See implementation notes."}
+{"version":1,"task_id":"CMXVAD","kind":"done","at":"2026-11-11T18:51:40.699348Z","agent":"codex@plasmite-implementation","text":"Implemented and verified; final evidence recorded in task body."}

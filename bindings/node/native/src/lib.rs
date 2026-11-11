@@ -211,6 +211,10 @@ unsafe extern "C" {
         out_err: *mut *mut plsm_error_t,
     ) -> c_int;
 
+    fn plsm_stream_next_wait(stream: *mut plsm_stream_t, timeout_ms: u64, out: *mut plsm_buf_t, err: *mut *mut plsm_error_t) -> c_int;
+    fn plsm_lite3_stream_next_wait(stream: *mut plsm_lite3_stream_t, timeout_ms: u64, out: *mut plsm_lite3_frame_t, err: *mut *mut plsm_error_t) -> c_int;
+    fn plsm_stream_cancel(stream: *mut plsm_stream_t);
+    fn plsm_lite3_stream_cancel(stream: *mut plsm_lite3_stream_t);
     fn plsm_stream_free(stream: *mut plsm_stream_t);
     fn plsm_lite3_stream_free(stream: *mut plsm_lite3_stream_t);
 
@@ -472,7 +476,12 @@ impl Pool {
         if rc != 0 {
             return Err(take_error(env, err)?);
         }
-        Ok(Stream { ptr: out })
+        Ok(Stream {
+            handle: Some(Arc::new(StreamHandle {
+                pointer: StreamPointer::Json(out),
+                reading: std::sync::atomic::AtomicBool::new(false),
+            })),
+        })
     }
 
     #[napi]
@@ -510,7 +519,12 @@ impl Pool {
         if rc != 0 {
             return Err(take_error(env, err)?);
         }
-        Ok(Lite3Stream { ptr: out })
+        Ok(Lite3Stream {
+            handle: Some(Arc::new(StreamHandle {
+                pointer: StreamPointer::Lite3(out),
+                reading: std::sync::atomic::AtomicBool::new(false),
+            })),
+        })
     }
 
     #[napi]
@@ -528,34 +542,138 @@ impl Drop for Pool {
     }
 }
 
+
+// C serializes reader state and accepts concurrent cancellation. Each task owns
+// an Arc, so closing a JS wrapper cancels work without freeing an active handle.
+#[derive(Clone, Copy)]
+enum StreamPointer {
+    Json(*mut plsm_stream_t),
+    Lite3(*mut plsm_lite3_stream_t),
+}
+
+struct StreamHandle {
+    pointer: StreamPointer,
+    reading: std::sync::atomic::AtomicBool,
+}
+
+// SAFETY: The C stream permits one reader plus concurrent cancel. ReadLease
+// enforces the reader rule; the final Arc frees the handle after active work.
+unsafe impl Send for StreamHandle {}
+unsafe impl Sync for StreamHandle {}
+
+impl StreamHandle {
+    fn cancel(&self) {
+        unsafe {
+            match self.pointer {
+                StreamPointer::Json(ptr) => plsm_stream_cancel(ptr),
+                StreamPointer::Lite3(ptr) => plsm_lite3_stream_cancel(ptr),
+            }
+        }
+    }
+}
+
+impl Drop for StreamHandle {
+    fn drop(&mut self) {
+        unsafe {
+            match self.pointer {
+                StreamPointer::Json(ptr) => plsm_stream_free(ptr),
+                StreamPointer::Lite3(ptr) => plsm_lite3_stream_free(ptr),
+            }
+        }
+    }
+}
+
+struct ReadLease {
+    handle: Arc<StreamHandle>,
+    active: bool,
+}
+impl ReadLease {
+    fn new(handle: &Option<Arc<StreamHandle>>) -> Result<Self> {
+        let handle = handle
+            .as_ref()
+            .ok_or_else(|| Error::new(Status::GenericFailure, "stream is closed"))?;
+        if handle
+            .reading
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
+            return Err(Error::new(
+                Status::GenericFailure,
+                "stream already has an active reader",
+            ));
+        }
+        Ok(Self {
+            handle: handle.clone(),
+            active: true,
+        })
+    }
+}
+impl ReadLease {
+    fn release(&mut self) {
+        if self.active {
+            self.handle
+                .reading
+                .store(false, std::sync::atomic::Ordering::Release);
+            self.active = false;
+        }
+    }
+}
+impl Drop for ReadLease {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
 #[napi]
 pub struct Stream {
-    ptr: *mut plsm_stream_t,
+    handle: Option<Arc<StreamHandle>>,
 }
 
 #[napi]
 impl Stream {
     #[napi]
     pub fn next_json(&self, env: Env) -> Result<Option<Buffer>> {
-        let mut out = plsm_buf_t { data: ptr::null_mut(), len: 0 };
+        let read = ReadLease::new(&self.handle)?;
+        let StreamPointer::Json(ptr) = read.handle.pointer else {
+            unreachable!()
+        };
+        let mut out = plsm_buf_t {
+            data: ptr::null_mut(),
+            len: 0,
+        };
         let mut err = ptr::null_mut();
-        let rc = unsafe { plsm_stream_next(self.ptr, &mut out, &mut err) };
-        match rc {
+        match unsafe { plsm_stream_next(ptr, &mut out, &mut err) } {
             1 => Ok(Some(copy_and_free_buf(out))),
             0 => Ok(None),
             _ => Err(take_error(env, err)?),
         }
     }
 
+    #[napi(ts_return_type = "Promise<StreamWait>")]
+    pub fn next_json_wait(
+        &self,
+        timeout_ms: Either<u32, BigInt>,
+    ) -> Result<AsyncTask<StreamReadTask>> {
+        let timeout_ms = to_u64(timeout_ms, "timeout_ms")?;
+        Ok(AsyncTask::new(StreamReadTask {
+            read: ReadLease::new(&self.handle)?,
+            timeout_ms,
+        }))
+    }
+
+    #[napi]
+    pub fn cancel(&self) {
+        if let Some(handle) = &self.handle {
+            handle.cancel();
+        }
+    }
+
     #[napi]
     pub fn close(&mut self) {
-        if !self.ptr.is_null() {
-            unsafe { plsm_stream_free(self.ptr) };
-            self.ptr = ptr::null_mut();
+        if let Some(handle) = self.handle.take() {
+            handle.cancel();
         }
     }
 }
-
 impl Drop for Stream {
     fn drop(&mut self) {
         self.close();
@@ -564,40 +682,156 @@ impl Drop for Stream {
 
 #[napi]
 pub struct Lite3Stream {
-    ptr: *mut plsm_lite3_stream_t,
+    handle: Option<Arc<StreamHandle>>,
 }
 
 #[napi]
 impl Lite3Stream {
     #[napi]
     pub fn next(&self, env: Env) -> Result<Option<Lite3Frame>> {
-        let mut out = plsm_lite3_frame_t {
-            seq: 0,
-            timestamp_ns: 0,
-            flags: 0,
-            payload: plsm_buf_t { data: ptr::null_mut(), len: 0 },
+        let read = ReadLease::new(&self.handle)?;
+        let StreamPointer::Lite3(ptr) = read.handle.pointer else {
+            unreachable!()
         };
+        let mut out = empty_lite3_frame();
         let mut err = ptr::null_mut();
-        let rc = unsafe { plsm_lite3_stream_next(self.ptr, &mut out, &mut err) };
-        match rc {
+        match unsafe { plsm_lite3_stream_next(ptr, &mut out, &mut err) } {
             1 => Ok(Some(copy_and_free_lite3_frame(out))),
             0 => Ok(None),
             _ => Err(take_error(env, err)?),
         }
     }
 
+    #[napi(ts_return_type = "Promise<StreamWait>")]
+    pub fn next_wait(&self, timeout_ms: Either<u32, BigInt>) -> Result<AsyncTask<StreamReadTask>> {
+        let timeout_ms = to_u64(timeout_ms, "timeout_ms")?;
+        Ok(AsyncTask::new(StreamReadTask {
+            read: ReadLease::new(&self.handle)?,
+            timeout_ms,
+        }))
+    }
+
+    #[napi]
+    pub fn cancel(&self) {
+        if let Some(handle) = &self.handle {
+            handle.cancel();
+        }
+    }
+
     #[napi]
     pub fn close(&mut self) {
-        if !self.ptr.is_null() {
-            unsafe { plsm_lite3_stream_free(self.ptr) };
-            self.ptr = ptr::null_mut();
+        if let Some(handle) = self.handle.take() {
+            handle.cancel();
+        }
+    }
+}
+impl Drop for Lite3Stream {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+fn empty_lite3_frame() -> plsm_lite3_frame_t {
+    plsm_lite3_frame_t {
+        seq: 0,
+        timestamp_ns: 0,
+        flags: 0,
+        payload: plsm_buf_t {
+            data: ptr::null_mut(),
+            len: 0,
+        },
+    }
+}
+
+#[napi(object)]
+pub struct StreamWait {
+    pub status: u32,
+    pub message: Option<Buffer>,
+    pub frame: Option<Lite3Frame>,
+}
+
+pub struct StreamReadTask {
+    read: ReadLease,
+    timeout_ms: u64,
+}
+
+pub struct StreamReadOutput {
+    status: i32,
+    bytes: Vec<u8>,
+    seq: u64,
+    timestamp_ns: u64,
+    flags: u32,
+    error: usize,
+}
+impl Drop for StreamReadOutput {
+    fn drop(&mut self) {
+        if self.error != 0 {
+            unsafe { plsm_error_free(self.error as *mut plsm_error_t) };
         }
     }
 }
 
-impl Drop for Lite3Stream {
-    fn drop(&mut self) {
-        self.close();
+impl Task for StreamReadTask {
+    type Output = StreamReadOutput;
+    type JsValue = StreamWait;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let mut frame = empty_lite3_frame();
+        let mut err = ptr::null_mut();
+        let status = unsafe {
+            match self.read.handle.pointer {
+                StreamPointer::Json(ptr) => {
+                    plsm_stream_next_wait(ptr, self.timeout_ms, &mut frame.payload, &mut err)
+                }
+                StreamPointer::Lite3(ptr) => {
+                    plsm_lite3_stream_next_wait(ptr, self.timeout_ms, &mut frame, &mut err)
+                }
+            }
+        };
+        let bytes = if status == 1 {
+            unsafe { std::slice::from_raw_parts(frame.payload.data, frame.payload.len) }.to_vec()
+        } else {
+            Vec::new()
+        };
+        let output = StreamReadOutput {
+            status,
+            bytes,
+            seq: frame.seq,
+            timestamp_ns: frame.timestamp_ns,
+            flags: frame.flags,
+            error: err as usize,
+        };
+        unsafe { plsm_buf_free(&mut frame.payload) };
+        Ok(output)
+    }
+
+    fn resolve(&mut self, env: Env, mut output: Self::Output) -> Result<Self::JsValue> {
+        // The JS promise may immediately start the next read.
+        self.read.release();
+        if output.status < 0 {
+            let error = std::mem::replace(&mut output.error, 0);
+            return Err(take_error(env, error as *mut plsm_error_t)?);
+        }
+        let mut result = StreamWait {
+            status: output.status as u32,
+            message: None,
+            frame: None,
+        };
+        if output.status == 1 {
+            let payload = Buffer::from(std::mem::take(&mut output.bytes));
+            match self.read.handle.pointer {
+                StreamPointer::Json(_) => result.message = Some(payload),
+                StreamPointer::Lite3(_) => {
+                    result.frame = Some(Lite3Frame {
+                        seq: BigInt::from(output.seq),
+                        timestamp_ns: BigInt::from(output.timestamp_ns),
+                        flags: output.flags,
+                        payload,
+                    })
+                }
+            }
+        }
+        Ok(result)
     }
 }
 

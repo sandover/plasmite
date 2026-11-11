@@ -239,9 +239,14 @@ const options = {
 };
 ```
 
-Local `tail()` reopens timed streams while following; `timeoutMs` controls
-its polling interval, not a total deadline. Use `maxMessages` to stop after
-a chosen number of matching messages. Remote `tail()` makes one request and
+Local `tail()` retains one native reader and waits on worker threads, so timers
+and other JavaScript work keep running. `timeoutMs` controls each wait, not a
+total deadline. With `maxMessages`, a quiet wait also ends the tail. Pass
+`signal: controller.signal` to cancel a quiet tail through an `AbortController`.
+Matching-message limits apply after tag filtering. Low-level streams offer
+`nextJsonWait(timeoutMs)` or `nextWait(timeoutMs)` with statuses 0 (wait expired),
+1 (message/frame), 2 (finished), and 3 (cancelled). Their `cancel()` and `close()`
+methods interrupt active waits; worker handles stay alive until the calls finish. Remote `tail()` makes one request and
 ends when that server stream closes or times out. Breaking out of either async iterator closes its stream.
 
 Remote JSON tails surface a fail-closed gap as `RemoteError` with
