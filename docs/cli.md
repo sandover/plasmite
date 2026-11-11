@@ -281,9 +281,11 @@ succeed without appending anything.
 Reports use the same JSON/YAML formatting rule but remain reports.
 Binary formats require message commands; raw output requires `fetch`.
 Help and completion remain text. `tap` passes through its child's output;
-`mcp` keeps JSON-RPC. Terminal `duplex` creates chat messages with `--me`;
-piped `duplex` accepts application objects and complete messages, streams received messages, and
-ends when stdin closes. Use `feed` when every input needs an echoed append.
+`mcp` keeps JSON-RPC. `duplex` accepts the same messages as `feed` on terminal
+and piped stdin and streams received complete messages, including its own appends.
+Input EOF closes sending while reception continues. Choose `--timeout` for a
+bounded receive session; use `feed` for finite copying. See the
+[next major upgrade guide](record/upgrading-next-major.md) for migration.
 
 Bash and Zsh preserve binary pipes. PowerShell 7.4 and later preserves
 native binary redirection; earlier versions need `cmd.exe` redirection.

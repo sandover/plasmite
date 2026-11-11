@@ -485,7 +485,7 @@ fn replay_timeout_includes_playback_delay_without_output() {
 }
 
 #[test]
-fn remote_finite_reads_adapt_to_short_server_tail_limits() {
+fn remote_finite_reads_continue_after_server_shortens_streams() {
     for cap in ["20", "1"] {
         let temp = tempfile::tempdir().expect("tempdir");
         seed(temp.path(), 5, 0);

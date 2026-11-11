@@ -136,9 +136,9 @@ fn short_help_exposes_material_command_constraints() {
         (
             &["duplex", "-h"],
             &[
-                "Terminal input creates chat messages and requires --me",
-                "stdin EOF ends the session",
-                "copy a finite stream",
+                "JSON, marked YAML, and framed Lite3 use the same rules as feed.",
+                "Input EOF closes sending while reception continues.",
+                "including your own appends",
             ],
         ),
         (
@@ -498,7 +498,7 @@ fn errors_are_json_when_explicitly_requested() {
             .ends_with("missing.plasmite")
     );
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(hint.contains("--create") || hint.contains("exact command"));
+    assert!(hint.contains("--create"));
 }
 
 #[test]

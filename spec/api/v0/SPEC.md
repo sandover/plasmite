@@ -1,6 +1,9 @@
-# Plasmite Public API Spec (1.x)
+# Plasmite Public API Spec (source checkout)
 
-This document defines the normative public API contract for Plasmite 1.x across bindings.
+This document defines the public API contract across bindings. The source checkout
+includes breaking changes that await the next major release; see the
+[next major upgrade guide](../../../docs/record/upgrading-next-major.md).
+Published 1.x APIs retain their release-specific contract.
 The historical path is retained; Rust source-level breaking changes are
 documented in [the upgrade guide](../../../docs/record/upgrading-1.0.md).
 It is intentionally signature-free: language-level method/function signatures live in code-level API docs.
@@ -16,7 +19,8 @@ It is intentionally signature-free: language-level method/function signatures li
 
 ## Versioning + Compatibility
 
-- The API surface follows the package major version: `1.x`.
+- The API surface follows the package major version. Do not ship the pending
+  SDK replay removals or UDP behavior changes under a 1.x package version.
 - Compatibility within 1.x is additive-only.
 - Existing field/operation meanings must not be removed or redefined.
 - New fields must be optional with defaults that preserve old behavior.
@@ -197,14 +201,13 @@ do not change into SDK `RetentionGap` errors.
 A binding is conformant when it implements the operation families above and preserves error kinds/semantics.
 Conformance suites may rely on CLI spec formatting rules for shared message validation behavior.
 
-### Replay
+### Playback timing
 
-Rust replay captures its initial retained-history boundary; later appends do
-not prolong construction. A requested tail retains at most that many matches
-after the API's time filter. Replay speed must be finite and nonnegative;
-zero delivers immediately. Unrepresentable playback delays return `Usage`.
-This API eagerly owns its selected messages; CLI replay separately streams
-bounded cursor state.
+SDKs expose ordinary message streams. Applications own playback timing,
+cancellation during delays, and any collection needed to protect a dataset from
+later overwrite. CLI `follow --replay` remains available. The next major release
+removes the earlier binding-specific replay APIs; ordinary stream operations and
+the C ABI retain their contracts.
 
 ## Non-Contract Surface
 

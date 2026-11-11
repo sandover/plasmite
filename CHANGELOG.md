@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Simpler message workflows (next major release)
+
+- Make duplex a generic two-way stream. Terminal and pipe input use feed's parser;
+  remove --me, --echo-self, built-in chat data, and sender suppression. Input EOF
+  closes sending while reception continues. Establish reception before sending.
+- Keep timed playback in CLI follow --replay and remove the separate Rust, Go,
+  Python and Node replay APIs. SDK applications control timing over ordinary streams.
+- Clamp HTTP tail waits to the server maximum and remove CLI error-text probing.
+- Replace reconstructed retry commands with concise guidance tied to the pool path.
+
+The command/API changes await a major release. Package versions remain unchanged.
+See the [migration guide](docs/record/upgrading-next-major.md) for removed symbols,
+EOF behavior, client/server compatibility, and playback examples.
+
+### Security maintenance
+
+Update the test-only `rustix` dependency to 1.1.6 for RUSTSEC-2026-0486.
+The production dependency tree does not include it.
+
 ### Breaking UDP follow behavior (next major release)
 
 UDP follow now delivers matching messages in arrival order, including late

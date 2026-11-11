@@ -95,16 +95,7 @@ pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandRes
                     Pool::create(&path, PoolOptions::new(size))?
                 }
                 Err(err) => {
-                    return Err(add_missing_pool_create_hint(
-                        err,
-                        "feed",
-                        &args.pool,
-                        &args.pool,
-                        Some(format!(
-                            "plasmite pool create {}",
-                            super::support::render_shell_agnostic_token(&args.pool)
-                        )),
-                    ));
+                    return Err(add_missing_pool_create_hint(err));
                 }
             };
             ingest_from_stdin(
@@ -129,7 +120,7 @@ pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandRes
             let client = remote_client(base_url)?;
             let pool = client
                 .open_pool(&PoolRef::name(&name))
-                .map_err(|err| add_missing_pool_hint(err, &args.pool, &args.pool))?;
+                .map_err(|err| add_missing_pool_hint(err, &args.pool))?;
             ingest_from_stdin_remote(
                 reader,
                 RemoteFeedIngestContext {
@@ -171,7 +162,7 @@ pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandRes
 pub(super) fn fetch(pool: &str, seq: u64, context: &CliContext) -> Result<CommandResult, Error> {
     match resolve_pool_target(pool, context.pool_dir())? {
         PoolTarget::LocalPath(path) => {
-            let handle = Pool::open(&path).map_err(|err| add_missing_pool_hint(err, pool, pool))?;
+            let handle = Pool::open(&path).map_err(|err| add_missing_pool_hint(err, pool))?;
             let frame = handle
                 .get(seq)
                 .map_err(|err| add_missing_seq_hint(err, pool))?;
@@ -197,7 +188,7 @@ pub(super) fn fetch(pool: &str, seq: u64, context: &CliContext) -> Result<Comman
             let client = remote_client(base_url)?;
             let handle = client
                 .open_pool(&PoolRef::name(name))
-                .map_err(|err| add_missing_pool_hint(err, pool, pool))?;
+                .map_err(|err| add_missing_pool_hint(err, pool))?;
             if context.output_mode().is_binary() {
                 let ns = if context.output_mode() == super::output::OutputMode::Lite3Raw {
                     0

@@ -57,9 +57,7 @@ pub(super) fn run(mut args: TapArgs, context: &CliContext) -> Result<CommandResu
             Pool::create(&path, PoolOptions::new(size))?
         }
         Err(err) => {
-            return Err(add_missing_pool_create_hint(
-                err, "tap", &args.pool, &args.pool, None,
-            ));
+            return Err(add_missing_pool_create_hint(err));
         }
     };
 

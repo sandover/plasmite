@@ -1,18 +1,16 @@
-//! Purpose: Define public message types and append/get/tail/replay helpers for the API.
-//! Exports: `Message`, `Meta`, `TailOptions`, `Tail`, `Lite3Tail`, `ReplayOptions`, `Replay`.
+//! Purpose: Define public message types and append/get/tail helpers for the API.
+//! Exports: `Message`, `Meta`, `TailOptions`, `Tail`, `Lite3Tail`.
 //! Role: Stable message envelope aligned with the CLI contract.
 //! Invariants: Message fields mirror CLI JSON; time is RFC3339 UTC.
 //! Invariants: Tail streams preserve ordering and avoid unbounded buffering.
-//! Invariants: Replay is bounded; all messages are collected up front.
 #![allow(clippy::result_large_err)]
 
 use crate::core::cursor::{Cursor, CursorResult, FrameRef};
 use crate::core::error::{Error, ErrorKind};
 use crate::core::lite3::{Lite3DocRef, sys, validate_bytes};
 use crate::core::notify::{NotifyError, PoolSemaphore, WaitOutcome, open_for_path};
-use crate::core::pool::{AppendOptions, Durability, Pool, PoolHeader};
+use crate::core::pool::{AppendOptions, Durability, Pool};
 use serde_json::Value;
-use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -128,136 +126,6 @@ pub(crate) enum TailOutcome<T> {
     WaitExpired,
     Finished,
     Cancelled,
-}
-
-#[derive(Clone, Debug)]
-pub struct ReplayOptions {
-    /// Playback multiplier; zero emits immediately. Must be finite and non-negative.
-    pub speed: f64,
-    /// Keep the last N retained messages that match `since_ns`.
-    pub tail: Option<u64>,
-    pub since_ns: Option<u64>,
-}
-
-impl ReplayOptions {
-    pub fn new(speed: f64) -> Self {
-        Self {
-            speed,
-            tail: None,
-            since_ns: None,
-        }
-    }
-}
-
-pub struct Replay {
-    messages: Vec<Message>,
-    timestamps_ns: Vec<u64>,
-    index: usize,
-    speed: f64,
-}
-
-impl Replay {
-    fn new(pool: &Pool, options: ReplayOptions) -> Result<Self, Error> {
-        if !options.speed.is_finite() || options.speed < 0.0 {
-            return Err(Error::new(ErrorKind::Usage)
-                .with_message("replay speed must be finite and non-negative"));
-        }
-        let header = pool.header_from_mmap()?;
-        let entries = collect_replay_snapshot(pool, &options, header)?;
-        let (timestamps_ns, messages): (Vec<u64>, Vec<Message>) = entries.into_iter().unzip();
-        if options.speed > 0.0 {
-            for pair in timestamps_ns.windows(2) {
-                let delay_ns = pair[1].saturating_sub(pair[0]) as f64 / options.speed;
-                if !delay_ns.is_finite() || delay_ns >= u64::MAX as f64 {
-                    return Err(Error::new(ErrorKind::Usage)
-                        .with_message("replay speed produces a delay that is too large"));
-                }
-            }
-        }
-        Ok(Self {
-            messages,
-            timestamps_ns,
-            index: 0,
-            speed: options.speed,
-        })
-    }
-
-    pub fn next_message(&mut self) -> Option<&Message> {
-        if self.index >= self.messages.len() {
-            return None;
-        }
-
-        if self.index > 0 && self.speed > 0.0 {
-            let prev_ts = self.timestamps_ns[self.index - 1];
-            let curr_ts = self.timestamps_ns[self.index];
-            if curr_ts > prev_ts {
-                let delta_ns = curr_ts - prev_ts;
-                let sleep_ns = (delta_ns as f64 / self.speed) as u64;
-                if sleep_ns > 0 {
-                    std::thread::sleep(Duration::from_nanos(sleep_ns));
-                }
-            }
-        }
-
-        let msg = &self.messages[self.index];
-        self.index += 1;
-        Some(msg)
-    }
-}
-
-// Selection uses a fixed upper sequence and keeps at most the requested tail
-// of timestamp matches. Unlike CLI tail selection, API replay applies since
-// before choosing the last N messages.
-fn collect_replay_snapshot(
-    pool: &Pool,
-    options: &ReplayOptions,
-    header: PoolHeader,
-) -> Result<VecDeque<(u64, Message)>, Error> {
-    let mut entries = VecDeque::new();
-    if header.oldest_seq == 0 || options.tail == Some(0) {
-        return Ok(entries);
-    }
-    let upper = header.newest_seq;
-    let mut next_seq = header.oldest_seq;
-    let tail = options
-        .tail
-        .map(|n| usize::try_from(n).unwrap_or(usize::MAX));
-    let mut cursor = Cursor::new();
-    cursor.seek_to(header.tail_off as usize);
-    while next_seq <= upper {
-        match cursor.next(pool)? {
-            CursorResult::Message(frame) => {
-                if frame.seq < next_seq {
-                    continue;
-                }
-                if frame.seq > upper {
-                    break;
-                }
-                next_seq = frame.seq.saturating_add(1);
-                if options
-                    .since_ns
-                    .is_none_or(|since| frame.timestamp_ns >= since)
-                {
-                    if tail.is_some_and(|limit| entries.len() == limit) {
-                        entries.pop_front();
-                    }
-                    entries.push_back((frame.timestamp_ns, message_from_frame(&frame)?));
-                }
-                if frame.seq == upper {
-                    break;
-                }
-            }
-            CursorResult::WouldBlock => break,
-            CursorResult::FellBehind => {
-                let current = pool.header_from_mmap()?;
-                if current.oldest_seq == 0 {
-                    break;
-                }
-                next_seq = next_seq.max(current.oldest_seq);
-            }
-        }
-    }
-    Ok(entries)
 }
 
 impl<'a> TailReader<'a> {
@@ -539,10 +407,6 @@ pub trait PoolApiExt {
 
     /// Tail frames without JSON decoding.
     fn tail_lite3(&self, options: TailOptions) -> Lite3Tail<'_>;
-
-    /// Collect a finite retained-history snapshot for timed playback.
-    /// Returns Usage for invalid speeds or an unrepresentable playback delay.
-    fn replay(&self, options: ReplayOptions) -> Result<Replay, Error>;
 }
 
 impl PoolApiExt for Pool {
@@ -601,10 +465,6 @@ impl PoolApiExt for Pool {
 
     fn tail_lite3(&self, options: TailOptions) -> Lite3Tail<'_> {
         Lite3Tail(TailReader::new(self, options))
-    }
-
-    fn replay(&self, options: ReplayOptions) -> Result<Replay, Error> {
-        Replay::new(self, options)
     }
 }
 
@@ -715,7 +575,7 @@ fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GapPolicy, PoolApiExt, ReplayOptions, TailOptions, decode_payload};
+    use super::{GapPolicy, PoolApiExt, TailOptions, decode_payload};
     use crate::core::error::ErrorKind;
     use crate::core::lite3::{encode_message, json_counter_snapshot, reset_json_counters};
     use crate::core::pool::{Durability, Pool, PoolOptions};
@@ -1146,7 +1006,7 @@ mod tests {
     }
 
     #[test]
-    fn tail_and_replay_read_wrapped_messages_in_sequence_order() {
+    fn tail_reads_wrapped_messages_in_sequence_order() {
         const RING_SIZE: u64 = 4096;
 
         let dir = tempdir().expect("tempdir");
@@ -1200,194 +1060,5 @@ mod tests {
             );
         }
         assert_eq!(tailed, expected);
-
-        let mut replay = pool.replay(ReplayOptions::new(100.0)).expect("replay");
-        let mut replayed = Vec::new();
-        while let Some(message) = replay.next_message() {
-            replayed.push(message.seq);
-        }
-        assert_eq!(replayed, expected);
-    }
-
-    #[test]
-    fn replay_returns_messages_in_order() {
-        let dir = tempdir().expect("tempdir");
-        let path = dir.path().join("pool.plasmite");
-        let mut pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
-
-        let values = [json!({"n": 1}), json!({"n": 2}), json!({"n": 3})];
-        for (i, data) in values.iter().enumerate() {
-            let ts = 1_000_000_000 + (i as u64) * 10_000_000;
-            let opts =
-                crate::core::pool::AppendOptions::new(ts, crate::core::pool::Durability::Flush);
-            pool.append_json(data, &["tag".to_string()], opts)
-                .expect("append");
-        }
-
-        let options = ReplayOptions::new(100.0);
-        let mut replay = pool.replay(options).expect("replay");
-
-        let mut collected = Vec::new();
-        while let Some(msg) = replay.next_message() {
-            collected.push(msg.data.clone());
-        }
-
-        assert_eq!(collected.len(), 3);
-        assert_eq!(collected[0], values[0]);
-        assert_eq!(collected[1], values[1]);
-        assert_eq!(collected[2], values[2]);
-    }
-    #[test]
-    fn replay_zero_speed_returns_immediately() {
-        let dir = tempdir().expect("tempdir");
-        let mut pool = Pool::create(
-            dir.path().join("pool.plasmite"),
-            PoolOptions::new(1024 * 1024),
-        )
-        .expect("create");
-        for timestamp in [1, 1_000_000_001] {
-            pool.append_json(
-                &json!({"timestamp": timestamp}),
-                &[],
-                crate::core::pool::AppendOptions::new(timestamp, Durability::Fast),
-            )
-            .expect("append");
-        }
-        let mut replay = pool.replay(ReplayOptions::new(0.0)).expect("replay");
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let mut seqs = Vec::new();
-            while let Some(message) = replay.next_message() {
-                seqs.push(message.seq);
-            }
-            tx.send(seqs).expect("send");
-        });
-        assert_eq!(
-            rx.recv_timeout(std::time::Duration::from_secs(2))
-                .expect("speed zero must not wait"),
-            vec![1, 2]
-        );
-    }
-
-    #[test]
-    fn replay_rejects_invalid_or_unrepresentable_speeds() {
-        let dir = tempdir().expect("tempdir");
-        let mut pool = Pool::create(
-            dir.path().join("pool.plasmite"),
-            PoolOptions::new(1024 * 1024),
-        )
-        .expect("create");
-        for timestamp in [1, 1_000_000_001] {
-            pool.append_json(
-                &json!({"timestamp": timestamp}),
-                &[],
-                crate::core::pool::AppendOptions::new(timestamp, Durability::Fast),
-            )
-            .expect("append");
-        }
-        for speed in [
-            -1.0,
-            f64::NAN,
-            f64::INFINITY,
-            f64::NEG_INFINITY,
-            f64::MIN_POSITIVE,
-        ] {
-            let error = pool
-                .replay(ReplayOptions::new(speed))
-                .err()
-                .expect("invalid speed");
-            assert_eq!(error.kind(), ErrorKind::Usage);
-        }
-    }
-
-    #[test]
-    fn replay_tail_keeps_last_timestamp_matches() {
-        let dir = tempdir().expect("tempdir");
-        let mut pool = Pool::create(
-            dir.path().join("pool.plasmite"),
-            PoolOptions::new(1024 * 1024),
-        )
-        .expect("create");
-        for timestamp in [10, 1, 20, 1, 30] {
-            pool.append_json(
-                &json!({"timestamp": timestamp}),
-                &[],
-                crate::core::pool::AppendOptions::new(timestamp, Durability::Fast),
-            )
-            .expect("append");
-        }
-        let mut options = ReplayOptions::new(0.0);
-        options.since_ns = Some(5);
-        options.tail = Some(2);
-        let mut replay = pool.replay(options.clone()).expect("replay");
-        assert_eq!(replay.messages.len(), 2);
-        assert_eq!(replay.next_message().expect("first").seq, 3);
-        assert_eq!(replay.next_message().expect("second").seq, 5);
-        assert!(replay.next_message().is_none());
-        options.tail = Some(0);
-        assert!(
-            pool.replay(options)
-                .expect("empty replay")
-                .next_message()
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn replay_snapshot_finishes_while_an_independent_writer_continues() {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::{Arc, mpsc};
-        use std::time::Duration;
-        let dir = tempdir().expect("tempdir");
-        let path = dir.path().join("pool.plasmite");
-        let mut pool = Pool::create(&path, PoolOptions::new(8 * 1024 * 1024)).expect("create");
-        for n in 0..128 {
-            pool.append_json_now(
-                &json!({"n":n,"padding":"x".repeat(1024)}),
-                &[],
-                Durability::Fast,
-            )
-            .expect("seed");
-        }
-        let header = pool.header_from_mmap().expect("initial snapshot");
-        let reader = Pool::open(&path).expect("reader");
-        let stop = Arc::new(AtomicBool::new(false));
-        let writer_stop = stop.clone();
-        let (ready_tx, ready_rx) = mpsc::channel();
-        let writer = std::thread::spawn(move || {
-            let payload = encode_message(&[], &json!({"live":true})).expect("payload");
-            pool.append_lite3_now(payload.as_slice(), Durability::Fast)
-                .expect("first new write");
-            ready_tx.send(()).expect("ready");
-            while !writer_stop.load(Ordering::Acquire) {
-                pool.append_lite3_now(payload.as_slice(), Durability::Fast)
-                    .expect("write");
-            }
-        });
-        ready_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("writer active");
-        let (done_tx, done_rx) = mpsc::channel();
-        let replay_reader = std::thread::spawn(move || {
-            let entries = super::collect_replay_snapshot(&reader, &ReplayOptions::new(0.0), header);
-            let _ = done_tx.send(entries);
-        });
-        let result = done_rx.recv_timeout(Duration::from_secs(2));
-        stop.store(true, Ordering::Release);
-        writer.join().expect("writer");
-        replay_reader.join().expect("reader");
-        let entries = result
-            .expect("construction must finish while writer is active")
-            .expect("snapshot");
-        assert!(
-            entries
-                .iter()
-                .all(|(_, message)| message.seq <= header.newest_seq)
-        );
-        assert!(
-            entries
-                .iter()
-                .all(|(_, message)| message.data.get("live").is_none())
-        );
     }
 }

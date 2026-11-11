@@ -2301,15 +2301,11 @@ fn prepare_tail_runtime(
             "remote Lite3 tails do not support gap_policy=error because the stream has no error frame",
         ));
     }
-    if let Some(timeout_ms) = query.timeout_ms
-        && timeout_ms > state.max_tail_timeout_ms
-    {
-        return Err(Error::new(ErrorKind::Usage)
-            .with_message("tail timeout exceeds server limit")
-            .with_hint(format!("Use timeout_ms <= {}.", state.max_tail_timeout_ms)));
-    }
     let permit = acquire_tail_permit(state)?;
-    let timeout_ms = query.timeout_ms.unwrap_or(state.max_tail_timeout_ms);
+    let timeout_ms = query
+        .timeout_ms
+        .unwrap_or(state.max_tail_timeout_ms)
+        .min(state.max_tail_timeout_ms);
     let timeout = Duration::from_millis(timeout_ms);
     let deadline = Instant::now()
         .checked_add(timeout)

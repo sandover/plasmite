@@ -533,7 +533,7 @@ fn emit_create_flag_creates_missing_pool() {
 #[test]
 fn emit_missing_pool_hint_suggests_create() {
     let temp = tempfile::tempdir().expect("tempdir");
-    let pool_dir = temp.path().join("pools");
+    let pool_dir = temp.path().join("pools with spaces");
 
     let output = cmd()
         .args([
@@ -552,8 +552,12 @@ fn emit_missing_pool_hint_suggests_create() {
     let inner = err.get("error").and_then(|v| v.as_object()).expect("error");
     assert_eq!(inner.get("kind").and_then(|v| v.as_str()), Some("NotFound"));
     let hint = inner.get("hint").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(hint.contains("exact command"));
-    assert!(hint.contains("plasmite pool create missing"));
+    assert!(hint.contains("--create"));
+    assert_eq!(
+        inner["path"],
+        pool_dir.join("missing.plasmite").to_str().unwrap()
+    );
+    assert!(!pool_dir.exists());
 }
 
 #[test]

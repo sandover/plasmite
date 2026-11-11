@@ -1,6 +1,6 @@
 /*
 Purpose: JavaScript entry point for the Plasmite Node binding.
-Key Exports: Client, Pool, Message, Stream, Durability, ErrorKind, replay.
+Key Exports: Client, Pool, Message, Stream, Durability, ErrorKind.
 Role: Thin wrapper around the native N-API addon.
 Invariants: Exports align with native symbols and v0 API semantics.
 Notes: Requires libplasmite to be discoverable at runtime.
@@ -340,61 +340,6 @@ class Pool {
   }
 
   /**
-   * Replay parsed messages with original timing.
-   * @param {{speed?: number, sinceSeq?: number|bigint, maxMessages?: number|bigint, timeoutMs?: number|bigint, tags?: string[]}} [options]
-   * @returns {AsyncGenerator<Message, void, unknown>}
-   */
-  async *replay(options = {}) {
-    const { speed = 1.0, sinceSeq, maxMessages, timeoutMs, tags } = options;
-    if (speed <= 0) {
-      throw new Error("speed must be positive");
-    }
-
-    const requiredTags = normalizeTagFilter(tags);
-    const limit = normalizeOptionalCount(maxMessages, "maxMessages");
-    const pollTimeoutMs = normalizePollingTimeout(timeoutMs);
-    const streamLimit = requiredTags.length && limit !== null ? null : limit;
-    const stream = this.openStream(
-      sinceSeq ?? null,
-      streamLimit,
-      pollTimeoutMs,
-    );
-
-    const messages = [];
-    try {
-      for (const message of stream) {
-        const parsed = parseMessage(message);
-        if (!messageHasTags(parsed, requiredTags)) {
-          continue;
-        }
-        messages.push({
-          message: parsed,
-          timeMs: messageTimeMs(parsed),
-        });
-        if (limit !== null && messages.length >= limit) {
-          break;
-        }
-      }
-    } finally {
-      stream.close();
-    }
-
-    let prevMs = null;
-    for (const entry of messages) {
-      if (prevMs !== null && entry.timeMs !== null && speed > 0) {
-        const delay = (entry.timeMs - prevMs) / speed;
-        if (delay > 0) {
-          await sleep(delay);
-        }
-      }
-      if (entry.timeMs !== null) {
-        prevMs = entry.timeMs;
-      }
-      yield entry.message;
-    }
-  }
-
-  /**
    * Close the pool handle.
    * @returns {void}
    */
@@ -425,14 +370,6 @@ function messageHasTags(message, requiredTags) {
     return false;
   }
   return requiredTags.every((tag) => messageTags.includes(tag));
-}
-
-function messageTimeMs(message) {
-  if (!message || !(message.time instanceof Date)) {
-    return null;
-  }
-  const value = message.time.getTime();
-  return Number.isFinite(value) ? value : null;
 }
 
 function decorateLite3Frame(frame) {
@@ -859,16 +796,6 @@ function normalizeUint64(value, name) {
   return integer;
 }
 
-/**
- * Backward-compatible replay helper.
- * @param {Pool} pool
- * @param {object} [options]
- * @returns {AsyncGenerator<Message, void, unknown>}
- */
-async function* replay(pool, options = {}) {
-  yield* pool.replay(options);
-}
-
 module.exports = {
   Client,
   Pool,
@@ -889,5 +816,4 @@ module.exports = {
   RemoteError,
   RemotePool,
   parseMessage,
-  replay,
 };

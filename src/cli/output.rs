@@ -23,15 +23,6 @@ impl OutputMode {
     pub(crate) fn is_binary(self) -> bool {
         matches!(self, Self::Lite3 | Self::Lite3Raw)
     }
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Human => "pretty",
-            Self::Json => "json",
-            Self::Yaml => "yaml",
-            Self::Lite3 => "lite3",
-            Self::Lite3Raw => "lite3-raw",
-        }
-    }
     pub(crate) fn is_structured(self) -> bool {
         matches!(self, Self::Json | Self::Yaml)
     }

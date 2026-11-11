@@ -100,8 +100,6 @@ type Lite3Frame = api.Lite3Frame
 
 type TailOptions = api.TailOptions
 
-type ReplayOptions = api.ReplayOptions
-
 type AppendOption = api.AppendOption
 
 func WithDurability(d Durability) AppendOption { return api.WithDurability(d) }
@@ -737,85 +735,6 @@ func (s *Lite3Stream) nextWait(wait uint64) (*Lite3Frame, int, error) {
 		return copyAndFreeLite3Frame(&frame), status, nil
 	}
 	return nil, status, nil
-}
-
-// Replay collects messages until Timeout or MaxMessages, then yields them with
-// inter-message delays scaled by Speed. Collection can include concurrent appends.
-func (p *Pool) Replay(ctx context.Context, opts ReplayOptions) (<-chan *api.Message, <-chan error) {
-	out := make(chan *api.Message, 64)
-	errs := make(chan error, 1)
-
-	go func() {
-		defer close(out)
-		defer close(errs)
-
-		timeoutValue := streamTimeoutMillis(opts.Timeout)
-
-		stream, err := p.OpenStream(opts.SinceSeq, opts.MaxMessages, &timeoutValue)
-		if err != nil {
-			errs <- err
-			return
-		}
-
-		var messages []*api.Message
-		for {
-			raw, err := stream.NextJSON()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				stream.Close()
-				errs <- err
-				return
-			}
-			msg, err := api.DecodeMessage(raw)
-			if err != nil {
-				stream.Close()
-				errs <- err
-				return
-			}
-			messages = append(messages, msg)
-		}
-		stream.Close()
-
-		if len(messages) == 0 {
-			return
-		}
-
-		speed := opts.Speed
-		if speed <= 0 {
-			speed = 1.0
-		}
-
-		timestamps := make([]time.Time, len(messages))
-		for i, msg := range messages {
-			timestamps[i] = msg.Time
-		}
-
-		for i, msg := range messages {
-			if i > 0 && !timestamps[i-1].IsZero() && !timestamps[i].IsZero() {
-				delta := timestamps[i].Sub(timestamps[i-1])
-				if delta > 0 {
-					delay := time.Duration(float64(delta) / speed)
-					select {
-					case <-time.After(delay):
-					case <-ctx.Done():
-						errs <- ctx.Err()
-						return
-					}
-				}
-			}
-
-			select {
-			case out <- msg:
-			case <-ctx.Done():
-				errs <- ctx.Err()
-				return
-			}
-		}
-	}()
-
-	return out, errs
 }
 
 func copyAndFreeBuf(buf *C.plsm_buf_t) []byte {

@@ -217,12 +217,12 @@ test("stream and lite3 stream support for-of iteration", () => {
   });
 });
 
-test("tail filters by tags and replay works as a pool method", async () => {
-  await withPoolAsync("tail-replay", async ({ pool }) => {
+test("tail filters by tags before limiting matching messages", async () => {
+  await withPoolAsync("tail-matching", async ({ pool }) => {
     pool.append({ kind: "drop", i: 1 }, ["drop"]);
-    const keep1 = pool.append({ kind: "keep", i: 2 }, ["keep"]);
+    pool.append({ kind: "keep", i: 2 }, ["keep"]);
     pool.append({ kind: "drop", i: 3 }, ["drop"]);
-    const keep2 = pool.append({ kind: "keep", i: 4 }, ["keep"]);
+    pool.append({ kind: "keep", i: 4 }, ["keep"]);
 
     const tailed = [];
     for await (const message of pool.tail({ tags: ["keep"], maxMessages: 2, timeoutMs: 10 })) {
@@ -230,16 +230,7 @@ test("tail filters by tags and replay works as a pool method", async () => {
     }
     assert.deepEqual(tailed, [2, 4]);
 
-    const replayed = [];
-    for await (const message of pool.replay({
-      sinceSeq: keep1.seq,
-      maxMessages: 2,
-      speed: 2.0,
-      tags: ["keep"],
-    })) {
-      replayed.push(message.seq);
-    }
-    assert.deepEqual(replayed, [keep1.seq, keep2.seq]);
+
   });
 });
 

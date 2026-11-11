@@ -23,7 +23,7 @@ COMMANDS
                 [--tag TAG] [--where EXPR] [--one] [--timeout DURATION]
     fetch POOL SEQ                      Read one message
     tap POOL -- COMMAND...              Capture command output
-    duplex POOL [--me NAME]              Send and receive in one session
+    duplex POOL                         Send and receive in one session
 
   Manage pools
     pool create NAME... [--size SIZE]    Create local pools
@@ -445,36 +445,27 @@ CAPTURE AND EXIT
         arg_required_else_help = true,
         display_order = 4,
         about = "Send and follow from one command",
-        long_about = r#"Read and write a pool from one process.
+        long_about = r#"Send messages from stdin and receive complete messages on stdout.
 
-`duplex` follows a pool on stdout (like `follow`) while also sending input from stdin:
+Terminal and piped stdin accept the same JSON, marked YAML, and framed Lite3
+messages as feed. Duplex assigns no meaning to fields inside data.
 
-- TTY stdin: requires `--me`; each non-empty line appends a message with `.data = {"from": ME, "msg": LINE}`.
-  Your own messages are hidden from output unless `--echo-self` is set.
-- Non-TTY stdin: ingests stdin as a JSON stream (like `feed`, defaults: automatic input detection).
-  Duplex exits when stdin ends (EOF) or when the receive side ends (e.g. timeout/error).
-
-Notes:
-- Remote refs do not support --create. Both targets support --tail and --since."#,
+Input EOF closes sending; reception continues until cancellation, an output
+failure, or --timeout. Choose --timeout for a bounded session."#,
         after_help = r#"EXAMPLES
-  $ plasmite duplex chat --me alice
-  $ plasmite follow source | plasmite duplex destination
+  $ plasmite duplex events --create
+  $ printf '{"ping":true}\n' | plasmite duplex events --timeout 5s
 
 INPUT AND OUTPUT
-  Terminal input creates chat messages and requires --me.
-  Piped stdin accepts complete JSON, marked YAML, or framed Lite3 messages.
-  stdout streams received complete messages; stderr holds errors and notices.
-  stdin EOF ends the session; use feed to copy a finite stream and echo every appended message.
-  --echo-self includes received messages whose from field matches --me."#
+  JSON, marked YAML, and framed Lite3 use the same rules as feed.
+  stdout streams received complete messages, including your own appends.
+  Input EOF closes sending while reception continues.
+  --timeout exits 124 after a period without output.
+  HTTP(S) and UDP refs do not support --create."#
     )]
     Duplex {
         #[arg(help = "Pool name/path or http(s)://host:port/<pool> or udp://host:port/<pool>")]
         pool: String,
-        #[arg(
-            long,
-            help = "Sender identity for TTY mode and default self-suppression"
-        )]
-        me: Option<String>,
         #[arg(long, help = "Create local pool if missing before following")]
         create: bool,
         #[arg(
@@ -495,8 +486,6 @@ INPUT AND OUTPUT
             conflicts_with = "tail"
         )]
         since: Option<String>,
-        #[arg(long, help = "Also emit your own messages in the receive stream")]
-        echo_self: bool,
     },
     #[command(
         arg_required_else_help = true,

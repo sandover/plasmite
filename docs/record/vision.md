@@ -26,7 +26,7 @@ These are invariants, not preferences. Each states a violation condition.
 
 **Progressive capability.** Remote access and advanced features are always opt-in. The single-host workflow must be fully functional with zero flags beyond pool name. Users must not need to understand remote concepts to do local work. Explicit HTTPS pool refs (`https://host:port/<pool>`) are the opt-in path for remote mode from core commands; loopback HTTP serves credential-free use on the server machine.
 
-**Operational clarity.** Every error must be actionable. No error may be emitted without either a concrete resolution hint or a reference to documentation. Vague errors that name the failure without guiding resolution are violations.
+**Operational clarity.** Errors explain what failed and identify the affected resource when known. Add recovery guidance when it helps the user act; a clear error needs no redundant hint.
 
 ## Scope boundaries
 
@@ -63,7 +63,7 @@ These are checkable, not aspirational.
 - Any script written against the current CLI major version runs without modification within that major version.
 - Message readers and writers share one complete-message shape and matching encodings; default read/write pipes preserve data and tags.
 - Pool operations complete without requiring network access when operating on local pools.
-- Every error returned by the CLI includes either a `hint` field or a documentation reference.
+- CLI errors identify the failure and affected resource, with useful recovery guidance when known.
 - A user can capture and replay any command's stdout/stderr using only `tap` and `follow`, with no changes to the wrapped program.
 
 ## Strategy implications

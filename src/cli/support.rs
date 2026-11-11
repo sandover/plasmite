@@ -114,72 +114,25 @@ pub(crate) const DEFAULT_MAX_BODY_BYTES: u64 = 1024 * 1024;
 pub(crate) const DEFAULT_MAX_TAIL_TIMEOUT_MS: u64 = 30_000;
 pub(crate) const DEFAULT_MAX_TAIL_CONCURRENCY: usize = 64;
 
-// ── Missing-pool remediation hint policy ──────────────────────────────────
-//
-// When a pool is not found, the CLI tries to suggest a retry command with
-// `--create`.  The rendering strategy is *shell-agnostic argv echo*:
-//
-//   • Render an exact command only when the CLI has a stable, unambiguous argv
-//     token sequence available at error time (inline JSON, --file, repeated
-//     flags, etc.).
-//   • When the data source is stdin/pipe, exact reconstruction is unsafe —
-//     fall back to generic wording ("add --create to your invocation").
-//   • Never infer data not present in argv context.
-//   • Tokens that contain special characters are JSON-escaped rather than
-//     shell-quoted, keeping the hint correct across bash/zsh/fish/PowerShell.
-//
-// Coverage checklist (each shape should have a matching integration test):
-//   1. Inline JSON payload         → exact command emitted
-//   2. Paths with spaces (--file)  → exact command with quoted path args
-//   3. Repeated flags (--tag …)    → exact command preserves repeated flags
-//   4. Stdin/pipe usage            → fallback wording (no exact command)
-//
-// See also: `render_shell_agnostic_token`, `render_shell_agnostic_command`,
-//           `feed_exact_create_command_hint`, `follow_exact_create_command_hint`.
-// ──────────────────────────────────────────────────────────────────────────
-
-pub(crate) fn add_missing_pool_hint(err: Error, pool_ref: &str, input: &str) -> Error {
+pub(crate) fn add_missing_pool_hint(err: Error, input: &str) -> Error {
     if err.kind() != ErrorKind::NotFound || err.hint().is_some() {
         return err;
     }
-    if input.chars().any(std::path::is_separator) {
-        return err.with_hint(
-            "Pool path not found. Check the path or pass --dir for a different pool directory.",
-        );
-    }
-    err.with_hint(format!(
-        "Create it first: plasmite pool create {pool_ref} (or pass --dir for a different pool directory)."
-    ))
+    err.with_hint(if input.contains("://") {
+        "Remote pool not found. Create it with server-side tooling first."
+    } else {
+        "Check the displayed pool path, or use pool create with --dir for that directory."
+    })
 }
 
-pub(crate) fn add_missing_pool_create_hint(
-    err: Error,
-    command: &str,
-    pool_ref: &str,
-    input: &str,
-    exact_command: Option<String>,
-) -> Error {
+pub(crate) fn add_missing_pool_create_hint(err: Error) -> Error {
     if err.kind() != ErrorKind::NotFound || err.hint().is_some() {
         return err;
     }
-    if input.contains("://") {
-        return err.with_hint("Remote pool not found. Create it with server-side tooling first.");
-    }
-    if input.chars().any(std::path::is_separator) {
-        return err.with_hint(
-            "Pool path not found. Check the path or pass --dir for a different pool directory.",
-        );
-    }
-    if let Some(exact_command) = exact_command {
-        return err.with_hint(format!(
-            "Pool is missing. Retry with exact command: {exact_command}"
-        ));
-    }
-    err.with_hint(format!(
-        "Pool is missing. Re-run with --create (local refs only), e.g. plasmite {command} {pool_ref} --create."
-    ))
+    err.with_hint("Add --create to your existing invocation to create this local pool, or check the displayed path.")
 }
 
+// Display argv as readable text; this does not produce portable shell quoting.
 pub(crate) fn render_shell_agnostic_token(token: &str) -> String {
     if !token.is_empty()
         && token
@@ -198,61 +151,6 @@ pub(crate) fn render_shell_agnostic_command(tokens: &[String]) -> String {
         .map(|token| render_shell_agnostic_token(token))
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn follow_exact_create_command_hint(
-    pool: &str,
-    tail: u64,
-    one: bool,
-    timeout: Option<&str>,
-    since: Option<&str>,
-    where_expr: &[String],
-    tags: &[String],
-    quiet_drops: bool,
-    no_notify: bool,
-    replay: Option<f64>,
-) -> String {
-    let mut tokens = vec![
-        "plasmite".to_string(),
-        "follow".to_string(),
-        pool.to_string(),
-        "--create".to_string(),
-    ];
-    if tail > 0 {
-        tokens.push("--tail".to_string());
-        tokens.push(tail.to_string());
-    }
-    if one {
-        tokens.push("--one".to_string());
-    }
-    if let Some(timeout) = timeout {
-        tokens.push("--timeout".to_string());
-        tokens.push(timeout.to_string());
-    }
-    if let Some(since) = since {
-        tokens.push("--since".to_string());
-        tokens.push(since.to_string());
-    }
-    for expr in where_expr {
-        tokens.push("--where".to_string());
-        tokens.push(expr.clone());
-    }
-    for tag in tags {
-        tokens.push("--tag".to_string());
-        tokens.push(tag.clone());
-    }
-    if quiet_drops {
-        tokens.push("--quiet-drops".to_string());
-    }
-    if no_notify {
-        tokens.push("--no-notify".to_string());
-    }
-    if let Some(replay) = replay {
-        tokens.push("--replay".to_string());
-        tokens.push(replay.to_string());
-    }
-    render_shell_agnostic_command(&tokens)
 }
 
 pub(crate) fn add_missing_seq_hint(err: Error, pool_ref: &str) -> Error {

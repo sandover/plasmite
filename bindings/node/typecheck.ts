@@ -14,7 +14,6 @@ import {
   parseMessage,
   RemoteClient,
   RemoteError,
-  replay,
 } from ".";
 
 const client = new Client("./data");
@@ -58,7 +57,7 @@ async function smokeRemote() {
   }
 }
 
-async function smokeReplay() {
+async function smokeLocalStreams() {
   for await (const message of pool.tail({
     maxMessages: 1,
     timeoutMs: 10,
@@ -72,14 +71,6 @@ async function smokeReplay() {
   stream.close();
   const lite3Stream = pool.openLite3Stream(1n, 1n, 10n, true);
   lite3Stream.close();
-  for await (const message of pool.replay({ speed: 1, tags: ["tag"] })) {
-    void message;
-    break;
-  }
-  for await (const message of replay(pool, { speed: 1 })) {
-    void message;
-    break;
-  }
 }
 
 function handleRemoteError(err: unknown) {
@@ -97,6 +88,6 @@ function handleNativeError(err: unknown) {
 }
 
 void smokeRemote;
-void smokeReplay;
+void smokeLocalStreams;
 void handleRemoteError;
 void handleNativeError;

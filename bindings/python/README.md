@@ -94,7 +94,7 @@ with Client("./data") as client:
         print("pool not found")
 ```
 
-`Pool.append(...)`, `Pool.get(...)`, `Pool.tail(...)`, and `Pool.replay(...)` return typed `Message` values by default.
+`Pool.append(...)`, `Pool.get(...)`, and `Pool.tail(...)` return typed `Message` values by default.
 
 Use `append_json(...)` / `get_json(...)` only when you explicitly need raw wire bytes.
 
@@ -163,9 +163,9 @@ threads without racing its native handle or freeing it during a call. Independen
 handles can operate concurrently. Message values are owned snapshots and can
 outlive the pool.
 
-Each opened stream owns an independent handle. `tail()` and `replay()` release
-handle locks between reads, including while yielding messages or sleeping for
-replay timing. Consume each generator from one thread at a time.
+Each opened stream owns an independent handle. `tail()` releases handle locks
+between reads, including while yielding messages. Consume each generator from
+one thread at a time.
 
 A stream's `cancel()` interrupts a read while it waits for messages; `close()`
 cancels first, then waits for the active call and its result copy before freeing
@@ -175,3 +175,6 @@ polls once; wait expiry retains position. The original open-time `timeout_ms`
 still bounds the stream's lifetime. High-level `tail(cancel=event)` accepts a
 `threading.Event` and checks it during bounded waits. Cancellation cannot interrupt
 an operating-system file lock already in progress.
+
+For playback timing, use ordinary streams and an application scheduler; see the
+[next major upgrade guide](../../docs/record/upgrading-next-major.md#sdk-applications-control-playback-timing).

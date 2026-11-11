@@ -248,9 +248,7 @@ mod tests {
     use crate::cli::output_support::{
         format_bytes, format_relative_time, format_seq_range, format_timestamp_human,
     };
-    use crate::cli::stream_support::{
-        duplex_requires_me_when_tty, matches_required_tags, parse_duplex_tty_line,
-    };
+    use crate::cli::stream_support::matches_required_tags;
     use crate::cli::support::{
         RetryConfig, parse_duration, parse_size, resolve_pool_target, retry_append,
     };
@@ -330,16 +328,7 @@ mod tests {
             ("plasmite doctor", vec!["all", "format", "help"]),
             (
                 "plasmite duplex",
-                vec![
-                    "create",
-                    "echo-self",
-                    "format",
-                    "help",
-                    "me",
-                    "since",
-                    "tail",
-                    "timeout",
-                ],
+                vec!["create", "format", "help", "since", "tail", "timeout"],
             ),
             (
                 "plasmite feed",
@@ -603,27 +592,6 @@ mod tests {
         assert_eq!(parse_duration("500ms").unwrap(), Duration::from_millis(500));
         assert_eq!(parse_duration("5s").unwrap(), Duration::from_secs(5));
         assert_eq!(parse_duration("1m").unwrap(), Duration::from_secs(60));
-    }
-
-    #[test]
-    fn duplex_requires_me_when_tty_inputs() {
-        assert!(duplex_requires_me_when_tty(true, None));
-        assert!(!duplex_requires_me_when_tty(false, None));
-        assert!(!duplex_requires_me_when_tty(true, Some("alice")));
-        assert!(!duplex_requires_me_when_tty(false, Some("alice")));
-    }
-
-    #[test]
-    fn parse_duplex_tty_line_supports_text_and_crlf() {
-        let value = parse_duplex_tty_line("alice", "hello world\r\n").expect("value");
-        assert_eq!(value.get("from").and_then(|v| v.as_str()), Some("alice"));
-        assert_eq!(
-            value.get("msg").and_then(|v| v.as_str()),
-            Some("hello world")
-        );
-
-        assert!(parse_duplex_tty_line("alice", "\n").is_none());
-        assert!(parse_duplex_tty_line("alice", "   \r\n").is_none());
     }
 
     #[test]

@@ -184,7 +184,7 @@ state and expose a separate atomic cancellation signal; callers retain handles
 until active reads finish. Node workers hold shared ownership through an active
 read, so closing a JavaScript wrapper cancels without freeing a worker's handle.
 
-The CLI's interactive `follow` loop and the public API's `Tail` and `Replay`
+The CLI's interactive `follow` loop and the public API's `Tail`
 share `Pool` and `Cursor`, but have different contracts. CLI follow selects
 retained `--tail` history before filtering, resets its timeout after output,
 and reports dropped messages. Finite CLI follow and replay stop at the initial
@@ -192,7 +192,12 @@ sequence boundary and hold only one owned message at a time. Remote history
 uses the existing bounds and tail protocol. API tails use sequence checkpoints,
 an absolute timeout, and an optional retention-gap error. Keep those policies at their interface
 boundaries; sharing a loop would make either interface inherit the other's
-behavior. Extract a rule only when both interfaces require the same result.
+behavior. Extract a rule only when both interfaces require the same result. Timed playback
+belongs to CLI follow; SDK callers use ordinary streams and control their own
+scheduling. Duplex uses the same input parser for terminals and pipes. It starts
+sending after the receiver chooses its initial position; successful input EOF
+closes sending while reception continues. It assigns no meaning to application
+fields.
 
 ## Transport architecture
 

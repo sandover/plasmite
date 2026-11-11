@@ -156,18 +156,12 @@ while let Some(msg) = tail.next_message()? {
 }
 ```
 
-### Replay
+### Playback timing
 
-Play back messages with timing preserved:
-
-```rust
-use plasmite::api::{PoolApiExt, ReplayOptions};
-
-let mut replay = pool.replay(ReplayOptions::new(10.0))?; // 10x speed
-while let Some(msg) = replay.next_message() {
-    println!("{}: {}", msg.time, msg.data);
-}
-```
+SDK callers read ordinary tails and control their own scheduling. For command-line
+playback, use `pls follow POOL --since 1h --replay 10`. See the
+[next major upgrade guide](docs/record/upgrading-next-major.md#sdk-applications-control-playback-timing)
+for Rust and binding migration examples.
 
 ### Remote pools
 

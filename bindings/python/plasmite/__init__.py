@@ -34,7 +34,6 @@ import os
 import re
 from pathlib import Path
 import sys
-import time as _time
 from typing import Any, Generator, Iterable, Optional
 
 
@@ -861,59 +860,6 @@ class Pool:
         if rc != 0:
             raise _take_error(out_err)
         return Lite3Stream(out_stream)
-
-    def replay(
-        self,
-        speed: float = 1.0,
-        since_seq: Optional[int] = None,
-        max_messages: Optional[int] = None,
-        timeout_ms: Optional[int] = None,
-        tags: Optional[Iterable[str]] = None,
-    ) -> Generator[Message, None, None]:
-        """Replay messages with original timing scaled by speed.
-
-        Yields Message objects with inter-message delays derived from
-        each message's ``time``. The first message is yielded
-        immediately; subsequent messages are delayed by
-        ``(current_time - prev_time) / speed``.
-        """
-        if speed <= 0:
-            raise ValueError("speed must be positive")
-
-        required_tags = list(tags or [])
-        stream_max_messages = (
-            None if (max_messages is not None and required_tags) else max_messages
-        )
-
-        stream = self.open_stream(
-            since_seq=since_seq,
-            max_messages=stream_max_messages,
-            timeout_ms=timeout_ms,
-        )
-        try:
-            prev_dt: Optional[datetime] = None
-            delivered = 0
-            filter_by_tags = bool(required_tags)
-            while True:
-                msg = stream.next_json()
-                if msg is None:
-                    break
-                message = parse_message(msg)
-                if filter_by_tags and not _message_has_tags(message, required_tags):
-                    continue
-                cur_dt = message.time
-                if prev_dt is not None and cur_dt is not None:
-                    delta = (cur_dt - prev_dt).total_seconds() / speed
-                    if delta > 0:
-                        _time.sleep(delta)
-                if cur_dt is not None:
-                    prev_dt = cur_dt
-                delivered += 1
-                yield message
-                if max_messages is not None and delivered >= max_messages:
-                    break
-        finally:
-            stream.close()
 
     def tail(
         self,

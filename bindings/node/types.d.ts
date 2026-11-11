@@ -1,6 +1,6 @@
 /*
 Purpose: Stable TypeScript declarations for the public Node bindings API.
-Key Exports: Client, Pool, Stream, Lite3Stream, parseMessage, replay, and remote client types.
+Key Exports: Client, Pool, Stream, Lite3Stream, parseMessage, and remote client types.
 Role: Preserve complete JS + native type surface independently of generated files.
 Invariants: Public runtime exports from index.js are represented here.
 Invariants: Numeric sequence fields accept number or bigint input.
@@ -83,7 +83,6 @@ export class Pool {
   getJson(seq: number | bigint): Buffer
   getLite3(seq: number | bigint): Lite3Frame
   tail(options?: LocalTailOptions): AsyncGenerator<Message, void, unknown>
-  replay(options?: ReplayOptions): AsyncGenerator<Message, void, unknown>
   openStream(
     sinceSeq?: number | bigint | null,
     maxMessages?: number | bigint | null,
@@ -116,14 +115,6 @@ export class Lite3Stream {
   cancel(): void
   close(): void
   [Symbol.dispose](): void
-}
-
-export interface ReplayOptions {
-  speed?: number
-  sinceSeq?: number | bigint
-  maxMessages?: number | bigint
-  timeoutMs?: number | bigint
-  tags?: string[]
 }
 
 export interface LocalTailOptions {
@@ -202,11 +193,6 @@ export class UdpFollow {
 }
 
 export function parseMessage(payload: Buffer | Message | MessageEnvelope): Message
-
-export function replay(
-  pool: Pool,
-  options?: ReplayOptions,
-): AsyncGenerator<Message, void, unknown>
 
 export interface RemoteClientOptions {
   token?: string

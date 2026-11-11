@@ -7,7 +7,7 @@
 - [Record TouchOSC messages with OSC](#record-touchosc-messages-with-open-sound-control-osc)
 - [Lite3 Documents](#lite3-documents)
 - [Process Capture with tap](#process-capture-with-tap)
-- [Duplex Chat](#duplex-chat)
+- [Two-way communication](#two-way-communication)
 - [System Log Ring Buffer](#system-log-ring-buffer)
 - [Replay & Debug](#replay--debug)
 - [Remote Pool Access](#remote-pool-access)
@@ -544,54 +544,34 @@ pls tap api --create-size 64M -- ./server
 
 ---
 
-## Duplex Chat
+## Two-way communication
 
-`duplex` runs send and follow in one process. Type a line and it's appended; messages from the other side print as they arrive.
-
-### Two-party chat
-
-**Terminal 1** — Alice creates the pool and starts chatting:
-
-```bash
-pls duplex chat --create --me alice
-```
-
-**Terminal 2** — Bob joins and catches up on the last 20 messages:
+`duplex` sends messages from stdin while receiving complete messages on stdout.
+It uses the same JSON, marked YAML, and framed Lite3 input rules as `feed`,
+including when stdin is a terminal. Application data has no reserved sender or
+chat fields. Both sides can use this command against the same pool:
 
 ```bash
-pls duplex chat --me bob --tail 20
+pls duplex events --create --tail 20
 ```
 
-Each non-empty line typed becomes `{"from": "alice", "msg": "..."}`. By default, the sender's own messages are hidden. Add `--echo-self` to see everything:
+Enter a JSON object such as `{"event":"ready"}`. The receive stream includes
+all matching messages, including your own appends. Applications can use data and
+tags for their own conventions. For remote use, connect with `access connect`,
+then run `pls duplex https://192.0.2.10:9743/events --tail 20`.
+
+Input EOF closes sending while reception continues, so a script can send a
+request and wait for another process's reply:
 
 ```bash
-pls duplex chat --me alice --echo-self
+printf '{"ping": true}\n' | pls duplex events --timeout 5s || [ $? -eq 124 ]
 ```
 
-### Remote duplex
-
-After `access connect` below, duplex works over the network too:
-
-```bash
-pls duplex https://192.0.2.10:9743/chat --me alice --tail 10
-```
-
-Note: `--create` is not supported for remote pools. Use `--tail` or `--since` to catch up on history.
-
-### Scripted duplex (non-TTY)
-
-When stdin is not a TTY, duplex ingests a JSON stream (like `feed`). The session ends when stdin reaches EOF.
-
-```bash
-printf '{"from":"alice","msg":"boot complete"}\n{"from":"alice","msg":"ready"}' \
-  | pls duplex chat --me alice
-```
-
-Use `--timeout` to bound how long the follow side waits for new messages:
-
-```bash
-printf '{"ping": true}' | pls duplex chat --me healthcheck --timeout 5s
-```
+The shell example accepts exit 124 as the chosen end of the receive session.
+`--timeout` exits 124 after a period without output. Ctrl+C or closed stdout
+also ends the session. Use `feed` for a finite copy that exits at input EOF.
+See the [next major upgrade guide](record/upgrading-next-major.md) when replacing
+older `--me`/`--echo-self` usage.
 
 ---
 

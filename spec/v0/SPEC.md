@@ -38,6 +38,10 @@ Language APIs, HTTP, MCP, and pool files keep their separately versioned contrac
 form the current command inventory. The separately versioned MCP contract
 owns its protocol guarantees.
 
+The source checkout includes next-major duplex changes described in the
+[upgrade guide](../../docs/record/upgrading-next-major.md); do not ship them
+under the current 1.x package version.
+
 ### Messages, input, and output
 
 - Global `--dir` selects one local pool directory in every command scope.
@@ -83,6 +87,11 @@ owns its protocol guarantees.
   Live follow reports loss on stderr and continues. access status prints its
   report and returns nonzero when reachability or acceptance fails.
 - --data, --json, --yaml, --jsonl, --in, --data-only and --errors are removed.
+- Duplex accepts the same input formats on terminals and pipes. It gives no
+  meaning to application fields and delivers its own appends. --me and
+  --echo-self are removed. Successful input EOF closes sending; reception
+  continues until cancellation, output failure, or the idle-output timeout.
+  The receiver chooses its starting position before the first send.
 - Binary output requires a message command. Reports retain their JSON/YAML
   fields. Help/completion remain text, tap preserves child output, MCP keeps
   JSON-RPC. Product version output uses the shared development/release identity.

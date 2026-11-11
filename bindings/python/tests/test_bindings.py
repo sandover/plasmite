@@ -254,43 +254,6 @@ class BindingTests(unittest.TestCase):
                 stream.close()
                 pool.close()
 
-    def test_replay_filters_by_tags_before_max_messages(self) -> None:
-        with self._client_pool("replay-tags") as (_, pool):
-            pool.append_json(b'{"kind":"drop"}', ["drop"], Durability.FAST)
-            pool.append_json(b'{"kind":"keep"}', ["keep"], Durability.FAST)
-
-            results = list(
-                pool.replay(speed=1.0, max_messages=1, timeout_ms=50, tags=["keep"])
-            )
-            self.assertEqual(len(results), 1)
-            message = results[0]
-            self.assertIsInstance(message, Message)
-            self.assertEqual(message.data["kind"], "keep")
-
-    def test_tail_no_tags_skips_tag_filter_helper(self) -> None:
-        with self._client_pool("tail-no-tags-fast-path") as (_, pool):
-            pool.append_json(b'{"kind":"keep"}', ["keep"], Durability.FAST)
-
-            with mock.patch(
-                "plasmite._message_has_tags",
-                side_effect=AssertionError("tail should bypass tag helper without tags"),
-            ):
-                results = list(pool.tail(max_messages=1, timeout_ms=50))
-            self.assertEqual(len(results), 1)
-            self.assertEqual(results[0].data["kind"], "keep")
-
-    def test_replay_no_tags_skips_tag_filter_helper(self) -> None:
-        with self._client_pool("replay-no-tags-fast-path") as (_, pool):
-            pool.append_json(b'{"kind":"keep"}', ["keep"], Durability.FAST)
-
-            with mock.patch(
-                "plasmite._message_has_tags",
-                side_effect=AssertionError("replay should bypass tag helper without tags"),
-            ):
-                results = list(pool.replay(speed=1.0, max_messages=1, timeout_ms=50))
-            self.assertEqual(len(results), 1)
-            self.assertEqual(results[0].data["kind"], "keep")
-
     def test_closed_handles_error(self) -> None:
         client = self._new_client()
         pool = self._new_pool(client, "closed")

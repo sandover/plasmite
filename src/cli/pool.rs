@@ -91,7 +91,7 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                     client.pool_info(&PoolRef::path(path)).map_err(|err| {
                         if err.kind() == ErrorKind::NotFound {
                             let base = Error::new(ErrorKind::NotFound).with_message("not found");
-                            add_missing_pool_hint(base, &name, &name)
+                            add_missing_pool_hint(base, &name)
                         } else {
                             err
                         }

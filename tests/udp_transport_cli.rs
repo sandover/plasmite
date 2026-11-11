@@ -1,7 +1,7 @@
 //! Actual CLI processes send and follow through the UDP endpoint.
 
 use plasmite::api::{Pool, PoolApiExt};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::fs;
 use std::io::Write;
 use std::net::UdpSocket;
@@ -193,7 +193,7 @@ fn udp_cli_feed_and_finite_follow_keep_send_receipt_free() -> Result<(), Box<dyn
     assert!(timed_out.stdout.is_empty());
 
     let mut duplex = command()
-        .args(["duplex", &url, "--format", "json"])
+        .args(["duplex", &url, "--timeout", "150ms", "--format", "json"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -205,21 +205,18 @@ fn udp_cli_feed_and_finite_follow_keep_send_receipt_free() -> Result<(), Box<dyn
         .write_all(b"{\"from\":\"peer\",\"duplex\":true}\n")?;
     let duplex_output = duplex.wait_with_output()?;
     assert!(
-        duplex_output.status.success(),
+        duplex_output.status.code() == Some(124),
         "{}",
         String::from_utf8_lossy(&duplex_output.stderr)
     );
-    for line in duplex_output
+    let messages: Vec<Value> = duplex_output
         .stdout
-        .split(|byte| *byte == b'\n')
+        .split(|b| *b == b'\n')
         .filter(|line| !line.is_empty())
-    {
-        let received: Value = serde_json::from_slice(line)?;
-        assert!(
-            received.get("seq").is_some(),
-            "duplex output must be a received message"
-        );
-    }
+        .map(serde_json::from_slice)
+        .collect::<Result<_, _>>()?;
+    assert_eq!(messages.len(), 1, "duplex must receive its actual input");
+    assert_eq!(messages[0]["data"], json!({"from":"peer","duplex":true}));
     wait_for_seq(&pool_path, 4)?;
     let all = command()
         .args([

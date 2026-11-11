@@ -1,7 +1,7 @@
 # Plasmite Go Bindings
 
 These bindings wrap the `libplasmite` C ABI via cgo and expose typed Go contracts.
-`Append`, `Get`, `Tail`, and `Replay` return `*Message` values, while Lite3 APIs
+`Append`, `Get`, and `Tail` return `*Message` values, while Lite3 APIs
 provide raw binary frames. These bindings operate on local pools; they do
 not expose the Rust/CLI secure native access-key client. Messages disappear
 when the bounded ring fills, independent of consumer progress.
@@ -254,3 +254,6 @@ handle, including Close. A Tail goroutine retains an independent stream while
 foreground pool operations run; closing its Pool ends the high-level tail. Handles must not be copied. Close waits
 for an active native read; set a finite stream timeout for bounded shutdown.
 Independent handles may run concurrently, and message values are owned snapshots.
+
+For playback timing, use ordinary streams and an application scheduler; see the
+[next major upgrade guide](../../docs/record/upgrading-next-major.md#sdk-applications-control-playback-timing).

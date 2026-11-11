@@ -163,7 +163,6 @@ const { RemoteClient } = require("plasmite");
 | | `.close()` | Release resources |
 | | `[Symbol.dispose]()` | Alias for `.close()` (used by explicit resource-management syntax when enabled) |
 | `Module` | `.parseMessage(value)` | Normalize a raw envelope or `Message` into a typed `Message` |
-| | `.replay(pool, opts?)` | Backward-compatible replay wrapper (delegates to `pool.replay`) |
 | `Pool` | `.appendJson(payload, tags, durability)` | Append JSON payload (Buffer or JSON-serializable value); returns message envelope as `Buffer` |
 | | `.append(data, tags?, durability?)` | Append any JSON-serializable value; returns typed `Message` |
 | | `.appendLite3(buf, durability?)` | Append raw bytes (lite3 framing); returns sequence `bigint` |
@@ -171,7 +170,6 @@ const { RemoteClient } = require("plasmite");
 | | `.getJson(seq)` | Get message by sequence number; returns `Buffer` |
 | | `.getLite3(seq)` | Get lite3 frame by sequence number |
 | | `.tail(opts?)` | Async generator of typed `Message` values with optional tag filter |
-| | `.replay(opts?)` | Async generator of typed `Message` values with speed/timing controls |
 | | `.openStream(sinceSeq?, max?, timeoutMs?, errorOnGap?)` | Open a message stream |
 | | `.openLite3Stream(sinceSeq?, max?, timeoutMs?, errorOnGap?)` | Open a lite3 frame stream |
 | | `.close()` | Close the pool |
@@ -324,3 +322,6 @@ and remote-access changes.
 ## License
 
 MIT
+
+For playback timing, use the asynchronous tail and an application scheduler; see the
+[next major upgrade guide](../../docs/record/upgrading-next-major.md#sdk-applications-control-playback-timing).

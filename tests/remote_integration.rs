@@ -1312,3 +1312,51 @@ fn remote_mcp_origin_header_validation() -> TestResult<()> {
     assert_eq!(valid.status(), 200);
     Ok(())
 }
+
+#[test]
+fn tail_waits_are_upper_bounds_clamped_to_the_server_lifetime() -> TestResult<()> {
+    use std::io::Read;
+    let temp = tempfile::tempdir()?;
+    let server = TestServer::start_with_args_and_scheme(
+        temp.path(),
+        &["--max-tail-timeout-ms", "500"],
+        "http",
+    );
+    let client = server.client()?;
+    client.create_pool(&PoolRef::name("bounded"), PoolOptions::new(1024 * 1024))?;
+    for route in ["tail", "tail_lite3", "events"] {
+        let prefix = if route == "events" {
+            "v0/ui/pools"
+        } else {
+            "v0/pools"
+        };
+        for requested in [None, Some("18446744073709551615"), Some("20"), Some("0")] {
+            let query = requested
+                .map(|n| format!("?timeout_ms={n}"))
+                .unwrap_or_default();
+            let url = format!("{}/{prefix}/bounded/{route}{query}", server.local_url);
+            let began = std::time::Instant::now();
+            let response = ureq::get(&url).timeout(Duration::from_secs(3)).call()?;
+            let mut bytes = Vec::new();
+            response.into_reader().read_to_end(&mut bytes)?;
+            assert!(bytes.is_empty(), "quiet pool: {route}");
+            let elapsed = began.elapsed();
+            if matches!(requested, None | Some("18446744073709551615")) {
+                assert!(
+                    elapsed >= Duration::from_millis(400),
+                    "{route} ended before its configured lifetime: {elapsed:?}"
+                );
+            } else {
+                assert!(
+                    elapsed < Duration::from_millis(300),
+                    "{route} ignored the shorter requested wait: {elapsed:?}"
+                );
+            }
+            assert!(
+                elapsed < Duration::from_secs(2),
+                "{route} {requested:?} exceeded the server cap"
+            );
+        }
+    }
+    Ok(())
+}

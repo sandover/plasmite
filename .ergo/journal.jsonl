@@ -527,3 +527,41 @@
 {"version":1,"task_id":"UVHKN2","kind":"claim","at":"2026-11-11T19:34:28.787019Z","agent":"codex"}
 {"version":1,"task_id":"UVHKN2","kind":"result","at":"2026-11-11T19:43:40.575331Z","agent":"codex","text":"C, Python, Node and Go preserve arrival order, duplicates, exact Lite3 bytes and uint64 metadata."}
 {"version":1,"task_id":"UVHKN2","kind":"done","at":"2026-11-11T19:43:40.60759Z","agent":"codex","text":"Completed native binding conformance, C header documentation, source-status updates, and the next-major compatibility/changelog entry. Numeric version changes and publication remain release preparation.\n\nFull local just release-gate passed: formatting, Clippy with warnings denied, Rust tests, version/distribution checks, cookbook, ABI smoke/adversarial checks, Go, Python (51), Node (42), package/type checks, browser smoke (20), release-library build, and Python wheel installation/runtime. Log: /private/tmp/plasmite-udp-release-gate.log. Policy links and git diff --check passed."}
+{"version":1,"task_id":"FNJDIQ","kind":"created","at":"2026-11-11T20:13:50.584342Z"}
+{"version":1,"task_id":"7Q3HKA","kind":"created","at":"2026-11-11T20:13:50.584355Z"}
+{"version":1,"task_id":"RVNPO5","kind":"created","at":"2026-11-11T20:13:50.584359Z"}
+{"version":1,"task_id":"X3OOM3","kind":"created","at":"2026-11-11T20:13:50.584364Z"}
+{"version":1,"task_id":"NBVQWB","kind":"created","at":"2026-11-11T20:13:50.584367Z"}
+{"version":1,"task_id":"7Q3HKA","kind":"claim","at":"2026-11-11T20:14:15.598851Z","agent":"codex@plasmite-design-spikes"}
+{"version":1,"task_id":"RVNPO5","kind":"claim","at":"2026-11-11T20:16:15.174043Z","agent":"codex@plasmite-design-spikes"}
+{"version":1,"task_id":"X3OOM3","kind":"claim","at":"2026-11-11T20:18:13.315156Z","agent":"codex@plasmite-design-spikes"}
+{"version":1,"task_id":"NBVQWB","kind":"claim","at":"2026-11-11T20:18:34.364255Z","agent":"codex@plasmite-design-spikes"}
+{"version":1,"task_id":"NKQT5F","kind":"created","at":"2026-11-11T20:23:02.861504Z"}
+{"version":1,"task_id":"7Q3HKA","kind":"result","at":"2026-11-11T20:23:02.93531Z","agent":"codex@plasmite-design-spikes","text":"SIMPLIFY: evidence and recommendation in body; draft follow-up NKQT5F."}
+{"version":1,"task_id":"7Q3HKA","kind":"done","at":"2026-11-11T20:23:02.957747Z","agent":"codex@plasmite-design-spikes","text":"Investigated with source and focused evidence; recommendation in draft NKQT5F."}
+{"version":1,"task_id":"DUOFZL","kind":"created","at":"2026-11-11T20:23:02.985236Z"}
+{"version":1,"task_id":"RVNPO5","kind":"result","at":"2026-11-11T20:23:03.055287Z","agent":"codex@plasmite-design-spikes","text":"SIMPLIFY: evidence and recommendation in body; draft follow-up DUOFZL."}
+{"version":1,"task_id":"RVNPO5","kind":"done","at":"2026-11-11T20:23:03.079017Z","agent":"codex@plasmite-design-spikes","text":"Investigated with source and focused evidence; recommendation in draft DUOFZL."}
+{"version":1,"task_id":"A6YDRO","kind":"created","at":"2026-11-11T20:23:03.105699Z"}
+{"version":1,"task_id":"X3OOM3","kind":"result","at":"2026-11-11T20:23:03.178511Z","agent":"codex@plasmite-design-spikes","text":"SIMPLIFY: evidence and recommendation in body; draft follow-up A6YDRO."}
+{"version":1,"task_id":"X3OOM3","kind":"done","at":"2026-11-11T20:23:03.202255Z","agent":"codex@plasmite-design-spikes","text":"Investigated with source and focused evidence; recommendation in draft A6YDRO."}
+{"version":1,"task_id":"ECNG77","kind":"created","at":"2026-11-11T20:23:03.229418Z"}
+{"version":1,"task_id":"NBVQWB","kind":"result","at":"2026-11-11T20:23:03.30436Z","agent":"codex@plasmite-design-spikes","text":"SIMPLIFY: evidence and recommendation in body; draft follow-up ECNG77."}
+{"version":1,"task_id":"NBVQWB","kind":"done","at":"2026-11-11T20:23:03.32839Z","agent":"codex@plasmite-design-spikes","text":"Investigated with source and focused evidence; recommendation in draft ECNG77."}
+{"version":1,"task_id":"NBVQWB","kind":"result","at":"2026-11-11T20:23:42.819364Z","text":"Both existing hint tests pass despite directory-losing advice; replace prose checks with target-aware outcomes."}
+{"version":1,"task_id":"NKQT5F","kind":"open","at":"2026-11-11T20:26:09.258354Z"}
+{"version":1,"task_id":"NKQT5F","kind":"claim","at":"2026-11-11T20:26:23.820038Z","agent":"codex@plasmite-implementation"}
+{"version":1,"task_id":"DUOFZL","kind":"open","at":"2026-11-11T20:30:10.910369Z"}
+{"version":1,"task_id":"DUOFZL","kind":"claim","at":"2026-11-11T20:30:10.941753Z","agent":"codex@plasmite-implementation"}
+{"version":1,"task_id":"A6YDRO","kind":"open","at":"2026-11-11T20:30:10.971153Z"}
+{"version":1,"task_id":"A6YDRO","kind":"claim","at":"2026-11-11T20:30:10.998994Z","agent":"codex@plasmite-implementation"}
+{"version":1,"task_id":"ECNG77","kind":"open","at":"2026-11-11T20:30:11.025175Z"}
+{"version":1,"task_id":"ECNG77","kind":"claim","at":"2026-11-11T20:30:11.052566Z","agent":"codex@plasmite-implementation"}
+{"version":1,"task_id":"NKQT5F","kind":"result","at":"2026-11-11T20:50:26.552542Z","agent":"codex@plasmite-implementation","text":"Implemented and Opus-reviewed; final release-gate and audit pass. Next-major behavior documented."}
+{"version":1,"task_id":"NKQT5F","kind":"done","at":"2026-11-11T20:50:26.575458Z","agent":"codex@plasmite-implementation","text":"Implemented approved recommendation; reviewed and validated before commit/push."}
+{"version":1,"task_id":"DUOFZL","kind":"result","at":"2026-11-11T20:50:26.625823Z","agent":"codex@plasmite-implementation","text":"Implemented and Opus-reviewed; final release-gate and audit pass. Next-major behavior documented."}
+{"version":1,"task_id":"DUOFZL","kind":"done","at":"2026-11-11T20:50:26.649024Z","agent":"codex@plasmite-implementation","text":"Implemented approved recommendation; reviewed and validated before commit/push."}
+{"version":1,"task_id":"A6YDRO","kind":"result","at":"2026-11-11T20:50:26.696459Z","agent":"codex@plasmite-implementation","text":"Implemented and Opus-reviewed; final release-gate and audit pass. Next-major behavior documented."}
+{"version":1,"task_id":"A6YDRO","kind":"done","at":"2026-11-11T20:50:26.719386Z","agent":"codex@plasmite-implementation","text":"Implemented approved recommendation; reviewed and validated before commit/push."}
+{"version":1,"task_id":"ECNG77","kind":"result","at":"2026-11-11T20:50:26.76861Z","agent":"codex@plasmite-implementation","text":"Implemented and Opus-reviewed; final release-gate and audit pass. Next-major behavior documented."}
+{"version":1,"task_id":"ECNG77","kind":"done","at":"2026-11-11T20:50:26.791849Z","agent":"codex@plasmite-implementation","text":"Implemented approved recommendation; reviewed and validated before commit/push."}

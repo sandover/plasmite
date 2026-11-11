@@ -156,30 +156,6 @@ class ThreadSafetyTests(unittest.TestCase):
         with self.assertRaises(StopIteration):
             next(tail)
 
-    def test_replay_sleep_does_not_hold_pool_lock(self):
-        self.pool.append({"index": 1})
-        self.pool.append({"index": 2})
-        replay = self.pool.replay(max_messages=2, timeout_ms=50)
-        self.addCleanup(replay.close)
-        next(replay)
-        entered, release = Event(), Event()
-
-        def pause(_delay):
-            entered.set()
-            if not release.wait(timeout=5):
-                raise TimeoutError("test did not release replay delay")
-
-        with mock.patch("plasmite._time.sleep", side_effect=pause), ThreadPoolExecutor(
-            max_workers=2
-        ) as threads:
-            replaying = threads.submit(next, replay)
-            try:
-                self.assertTrue(entered.wait(timeout=5))
-                threads.submit(self.pool.append, {"index": 3}).result(timeout=5)
-            finally:
-                release.set()
-                self.assertEqual(replaying.result(timeout=5).data, {"index": 2})
-
     def test_failed_client_constructor_can_close_safely(self):
         client = plasmite.Client.__new__(plasmite.Client)
         with self.assertRaises(ValueError):

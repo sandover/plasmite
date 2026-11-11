@@ -1,6 +1,6 @@
 /*
 Purpose: Backend-agnostic Go contracts and shared model types for Plasmite.
-Key Exports: Client, Pool, Message, MessageMeta, Stream, TailOptions, ReplayOptions, Error.
+Key Exports: Client, Pool, Message, MessageMeta, Stream, TailOptions, Error.
 Role: Stable pure-Go surface consumed by local/fake/future transport backends.
 Invariants: No cgo imports; error kinds are stable; stream APIs remain cancel-safe.
 Invariants: Pool ordering and bounded buffering semantics are preserved by implementations.
@@ -169,13 +169,6 @@ type TailOptions struct {
 	ErrorOnGap  bool
 }
 
-type ReplayOptions struct {
-	Speed       float64
-	SinceSeq    *uint64
-	MaxMessages *uint64
-	Timeout     time.Duration
-}
-
 type Client interface {
 	Close()
 	CreatePool(ref PoolRef, sizeBytes uint64) (Pool, error)
@@ -195,7 +188,6 @@ type Pool interface {
 	OpenLite3Stream(sinceSeq *uint64, maxMessages *uint64, timeoutMs *uint64) (Lite3Stream, error)
 	Tail(ctx context.Context, opts TailOptions) (<-chan *Message, <-chan error)
 	TailLite3(ctx context.Context, opts TailOptions) (<-chan *Lite3Frame, <-chan error)
-	Replay(ctx context.Context, opts ReplayOptions) (<-chan *Message, <-chan error)
 }
 
 type Stream interface {

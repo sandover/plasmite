@@ -51,7 +51,7 @@ impl DropNotice {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct FollowConfig {
     pub(crate) tail: u64,
     pub(crate) output_mode: OutputMode,
@@ -65,8 +65,15 @@ pub(crate) struct FollowConfig {
     pub(crate) notify: bool,
     pub(crate) color_mode: ColorMode,
     pub(crate) replay_speed: Option<f64>,
-    pub(crate) suppress_sender: Option<String>,
+    pub(crate) ready: Option<std::sync::mpsc::Sender<()>>,
     pub(crate) stop: Option<Arc<AtomicBool>>,
+}
+
+// Duplex starts sending only after the receiver has chosen its starting position.
+fn signal_ready(cfg: &FollowConfig) {
+    if let Some(ready) = &cfg.ready {
+        let _ = ready.send(());
+    }
 }
 
 pub(crate) fn matches_required_tags(required_tags: &[String], message: &Value) -> bool {
@@ -84,35 +91,6 @@ pub(crate) fn matches_required_tags(required_tags: &[String], message: &Value) -
         tags.iter()
             .any(|tag| tag.as_str().is_some_and(|value| value == required))
     })
-}
-
-pub(crate) fn should_suppress_sender(message: &Value, sender: &str) -> bool {
-    message
-        .get("data")
-        .and_then(|data| data.get("from"))
-        .and_then(Value::as_str)
-        .is_some_and(|value| value == sender)
-}
-
-pub(crate) fn duplex_requires_me_when_tty(stdin_is_terminal: bool, me: Option<&str>) -> bool {
-    stdin_is_terminal && me.is_none()
-}
-
-pub(crate) fn parse_duplex_tty_line(me: &str, line: &str) -> Option<Value> {
-    let trimmed = line.trim_end_matches(&['\r', '\n'][..]);
-    if trimmed.trim().is_empty() {
-        return None;
-    }
-    Some(json!({
-        "from": me,
-        "msg": trimmed,
-    }))
-}
-
-pub(crate) fn should_suppress_message(cfg: &FollowConfig, message: &Value) -> bool {
-    cfg.suppress_sender
-        .as_deref()
-        .is_some_and(|sender| should_suppress_sender(message, sender))
 }
 
 pub(crate) fn follow_should_stop(stop: Option<&Arc<AtomicBool>>) -> bool {
@@ -174,7 +152,6 @@ fn matches_message(
     message: &Value,
 ) -> Result<bool, Error> {
     Ok(since_ns.is_none_or(|since| timestamp_ns >= since)
-        && !should_suppress_message(cfg, message)
         && matches_required_tags(&cfg.required_tags, message)
         && matches_all(&cfg.where_predicates, message)?)
 }
@@ -271,7 +248,6 @@ impl<'a> DropReporter<'a> {
 
 fn needs_message(cfg: &FollowConfig) -> bool {
     !cfg.output_mode.is_binary()
-        || cfg.suppress_sender.is_some()
         || !cfg.required_tags.is_empty()
         || !cfg.where_predicates.is_empty()
 }
@@ -343,12 +319,12 @@ pub(crate) fn follow_remote(
     let upper = bounds.newest_seq.unwrap_or(0);
     let mut expected = history_start(bounds.oldest_seq.unwrap_or(0), upper, cfg);
     let since_ns = cfg.since_ns;
+    signal_ready(cfg);
     let mut drops = DropReporter::new(cfg, pool, format!("{}/{}", client.base_url(), pool));
     if cfg.no_follow && expected > upper {
         return Ok(drops.finish(0));
     }
     let mut deadline = FollowDeadline::new(cfg.timeout);
-    let mut remote_wait_ms = 100;
     loop {
         if follow_should_stop(cfg.stop.as_ref()) {
             return Ok(drops.finish(0));
@@ -365,7 +341,7 @@ pub(crate) fn follow_remote(
         // so they can observe retention/cancellation without another message.
         // An ordinary unbounded follow uses the server's streaming lifetime.
         options.timeout = (cfg.no_follow || cfg.stop.is_some() || cfg.timeout.is_some())
-            .then(|| deadline.limit_wait(Duration::from_millis(remote_wait_ms)));
+            .then(|| deadline.limit_wait(Duration::from_millis(100)));
         if cfg.no_follow {
             options.max_messages = Some(
                 usize::try_from(upper.saturating_sub(expected).saturating_add(1))
@@ -377,21 +353,7 @@ pub(crate) fn follow_remote(
         } else {
             remote_pool.tail(options).map(RemoteStream::Json)
         };
-        let mut tail = match result {
-            Ok(tail) => tail,
-            Err(err)
-                if err.kind() == ErrorKind::Usage
-                    && err.message() == Some("tail timeout exceeds server limit")
-                    && remote_wait_ms > 1 =>
-            {
-                // The v0 protocol reports this limit as an error rather than
-                // metadata. At most seven smaller waits reach every supported
-                // positive limit, and the accepted wait persists for this run.
-                remote_wait_ms = (remote_wait_ms / 2).max(1);
-                continue;
-            }
-            Err(err) => return Err(err),
-        };
+        let mut tail = result?;
         while let Some(record) = tail.next_record()? {
             if follow_should_stop(cfg.stop.as_ref()) {
                 return Ok(drops.finish(0));
@@ -497,6 +459,7 @@ pub(crate) fn follow_udp(
         start,
         live: !cfg.no_follow,
     })?;
+    signal_ready(cfg);
     let mut deadline = FollowDeadline::new(cfg.timeout);
     let mut server_skipped = false;
     let mut retention_gap = false;
@@ -629,6 +592,7 @@ pub(crate) fn follow_pool(
     } else {
         header.head_off
     } as usize);
+    signal_ready(&cfg);
     let finite = cfg.no_follow || cfg.replay_speed.is_some();
     let mut previous_timestamp = None::<u64>;
     let mut drops = DropReporter::new(&cfg, pool_ref, pool_path.display().to_string());
