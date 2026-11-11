@@ -246,17 +246,10 @@ socket. This check limits spoofed bulk replies; it grants no identity or access
 rights. Old `--udp` configurations keep reads disabled.
 
 Clients use `feed`, `follow`, or `duplex` with `udp://HOST:PORT/POOL`. Follow
-supports new messages and selected history. The approved
-[receive policy](../../spec/udp/v1/SPEC.md#receive-ordering-and-notices) requires
-arrival-order delivery, including late messages and duplicates. Current clients
-still discard those packets; implementation of the new policy remains pending.
-Under that policy, only explicit server skips produce notices; sequence jumps
-and progress never prove network loss or block later DATA. A finite follow ends
-on terminal progress, so packets still in flight may go unread.
-
-Follow renews a 30-second lease every 10 seconds while receiving. It never
-retries message delivery or falls back to HTTP. Outgoing DATA includes 40 bytes
-of framing within the same 65,507-byte maximum. See the
+supports new messages and selected history, discards duplicates and late
+arrivals, and reports gaps. It renews a 30-second lease every 10 seconds while
+receiving. It never retries message delivery or falls back to HTTP. Outgoing
+DATA includes 40 bytes of framing within the same 65,507-byte maximum. See the
 [UDP transport contract](../../spec/udp/v1/SPEC.md) for controls and events.
 
 `--max-tail-concurrency` limits UDP followers separately from HTTP tails. A
