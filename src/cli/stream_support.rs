@@ -246,10 +246,25 @@ impl<'a> DropReporter<'a> {
     }
 }
 
+// UDP retains the full-message path and its aligned payload copy.
 fn needs_message(cfg: &FollowConfig) -> bool {
     !cfg.output_mode.is_binary()
         || !cfg.required_tags.is_empty()
         || !cfg.where_predicates.is_empty()
+}
+
+fn needs_data_value(cfg: &FollowConfig) -> bool {
+    !cfg.output_mode.is_binary() || !cfg.where_predicates.is_empty()
+}
+
+fn matches_raw(cfg: &FollowConfig, timestamp_ns: u64, payload: &[u8]) -> Result<bool, Error> {
+    if !cfg.required_tags.is_empty() {
+        let meta = plasmite::api::Meta::from_lite3(payload)?;
+        if !cfg.required_tags.iter().all(|tag| meta.tags.contains(tag)) {
+            return Ok(false);
+        }
+    }
+    Ok(cfg.since_ns.is_none_or(|since| timestamp_ns >= since))
 }
 
 enum RemoteStream {
@@ -373,7 +388,7 @@ pub(crate) fn follow_remote(
             let (value, frame) = match record {
                 RemoteRecord::Json(message) => (Some(message_to_json(message)), None),
                 RemoteRecord::Lite3(frame) => {
-                    let value = if needs_message(cfg) {
+                    let value = if needs_data_value(cfg) {
                         Some(message_from_lite3(
                             frame.seq,
                             frame.timestamp_ns,
@@ -385,9 +400,10 @@ pub(crate) fn follow_remote(
                     (value, Some(frame))
                 }
             };
-            let matches = match value.as_ref() {
-                Some(value) => matches_message(cfg, since_ns, timestamp_ns, value)?,
-                None => since_ns.is_none_or(|since| timestamp_ns >= since),
+            let matches = match (value.as_ref(), frame.as_ref()) {
+                (Some(value), _) => matches_message(cfg, since_ns, timestamp_ns, value)?,
+                (None, Some(frame)) => matches_raw(cfg, timestamp_ns, &frame.payload)?,
+                (None, None) => since_ns.is_none_or(|since| timestamp_ns >= since),
             };
             if matches {
                 // Receiving a matching line after the deadline must not reset
@@ -621,14 +637,14 @@ pub(crate) fn follow_pool(
                 }
                 drops.gap(expected, frame.seq);
                 expected = frame.seq.saturating_add(1);
-                let message = if needs_message(&cfg) {
+                let message = if needs_data_value(&cfg) {
                     Some(message_from_frame(&frame)?)
                 } else {
                     None
                 };
                 let matches = match message.as_ref() {
                     Some(message) => matches_message(&cfg, since_ns, frame.timestamp_ns, message)?,
-                    None => since_ns.is_none_or(|since| frame.timestamp_ns >= since),
+                    None => matches_raw(&cfg, frame.timestamp_ns, &frame.payload)?,
                 };
                 if matches {
                     if let (Some(speed), Some(previous)) = (cfg.replay_speed, previous_timestamp)
@@ -721,5 +737,84 @@ pub(crate) fn follow_pool(
                 backoff = (backoff * 2).min(Duration::from_millis(50));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod metadata_tests {
+    use super::*;
+    use plasmite::api::lite3::{Lite3Buf, encode_message};
+
+    fn config() -> FollowConfig {
+        FollowConfig {
+            tail: 0,
+            output_mode: OutputMode::Lite3,
+            one: false,
+            timeout: None,
+            since_ns: Some(1000),
+            no_follow: true,
+            required_tags: vec!["absent".into()],
+            where_predicates: vec![],
+            quiet_drops: false,
+            notify: false,
+            color_mode: ColorMode::Never,
+            replay_speed: None,
+            ready: None,
+            stop: None,
+        }
+    }
+
+    #[test]
+    fn raw_tags_preserve_corruption_errors_before_tag_and_time_rejection() {
+        let cfg = config();
+        for json in [
+            r#"{"data":{}}"#,
+            r#"{"meta":0,"data":{}}"#,
+            r#"{"meta":{"tags":[1]},"data":{}}"#,
+            r#"{"meta":{"tags":null},"data":{}}"#,
+            r#"{"meta":{"tags":["other"]}}"#,
+        ] {
+            let bytes = Lite3Buf::from_json_str(json).unwrap();
+            assert_eq!(
+                matches_raw(&cfg, 1, bytes.as_slice()).unwrap_err().kind(),
+                ErrorKind::Corrupt
+            );
+        }
+        let encoded = encode_message(&["other".into()], &json!({"text":"broken"})).unwrap();
+        let data = encoded.as_doc().key_offset("data").unwrap();
+        let text = encoded.as_doc().key_offset_at(data, "text").unwrap();
+        let mut bytes = encoded.as_slice().to_vec();
+        bytes[text + 1..text + 5].copy_from_slice(&0u32.to_le_bytes());
+        assert_eq!(
+            matches_raw(&cfg, 1, &bytes).unwrap_err().kind(),
+            ErrorKind::Corrupt
+        );
+        let valid = encode_message(&["other".into()], &json!({"nested":[{"x":1}]})).unwrap();
+        assert!(!matches_raw(&cfg, 1, valid.as_slice()).unwrap());
+    }
+
+    #[test]
+    fn raw_no_filter_preserves_the_unvalidated_path() {
+        let mut cfg = config();
+        cfg.required_tags.clear();
+        cfg.since_ns = None;
+        assert!(!needs_data_value(&cfg));
+        assert!(matches_raw(&cfg, 0, b"not a Lite3 document").unwrap());
+    }
+
+    #[test]
+    fn raw_tag_only_skips_data_but_json_and_jq_still_require_it() {
+        let mut cfg = config();
+        assert!(!needs_data_value(&cfg));
+        assert!(
+            needs_message(&cfg),
+            "UDP keeps its aligned full-message path"
+        );
+        cfg.output_mode = OutputMode::Json;
+        assert!(needs_data_value(&cfg));
+        cfg.output_mode = OutputMode::Lite3;
+        cfg.where_predicates
+            .push(JqFilter::compile(".data.x == 1").unwrap());
+        assert!(needs_data_value(&cfg));
     }
 }

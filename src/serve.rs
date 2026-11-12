@@ -153,6 +153,21 @@ fn check_grant(grant: Option<&AccessGrant>) -> Result<(), Error> {
     }
 }
 
+// Apply the default error policy; explicit status overrides stay at their call sites.
+struct HttpError(Error);
+
+impl From<Error> for HttpError {
+    fn from(error: Error) -> Self {
+        Self(error)
+    }
+}
+
+impl IntoResponse for HttpError {
+    fn into_response(self) -> Response {
+        error_response(self.0)
+    }
+}
+
 struct AppState {
     client: LocalClient,
     secure_access: Option<Arc<AccessStore>>,
@@ -1677,97 +1692,70 @@ async fn create_pool(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Json(payload): Json<CreatePoolRequest>,
-) -> Response {
-    let grant = match authorize(&headers, &state) {
-        Ok(grant) => grant,
-        Err(err) => return error_response(err),
-    };
-    let pool_ref = match pool_ref_from_request(&payload.pool) {
-        Ok(pool_ref) => pool_ref,
-        Err(err) => return error_response(err),
-    };
+) -> Result<Response, HttpError> {
+    let grant = authorize(&headers, &state)?;
+    let pool_ref = pool_ref_from_request(&payload.pool)?;
     let size_bytes = payload.size_bytes.unwrap_or(1024 * 1024);
     let client = state.client.clone();
-    let result = state
+    let info = state
         .storage_executor
         .run_authorized(grant, move || {
             client.create_pool(&pool_ref, PoolOptions::new(size_bytes))
         })
-        .await;
-    match result {
-        Ok(info) => json_response(json!({ "pool": pool_info_json(&payload.pool, &info) })),
-        Err(err) => error_response(err),
-    }
+        .await?;
+    Ok(json_response(
+        json!({ "pool": pool_info_json(&payload.pool, &info) }),
+    ))
 }
 
 async fn open_pool(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Json(payload): Json<PoolRequest>,
-) -> Response {
-    let grant = match authorize(&headers, &state) {
-        Ok(grant) => grant,
-        Err(err) => return error_response(err),
-    };
-    let pool_ref = match pool_ref_from_request(&payload.pool) {
-        Ok(pool_ref) => pool_ref,
-        Err(err) => return error_response(err),
-    };
+) -> Result<Response, HttpError> {
+    let grant = authorize(&headers, &state)?;
+    let pool_ref = pool_ref_from_request(&payload.pool)?;
     let client = state.client.clone();
-    match state
+    let info = state
         .storage_executor
         .run_authorized(grant, move || client.pool_info(&pool_ref))
-        .await
-    {
-        Ok(info) => json_response(json!({ "pool": pool_info_json(&payload.pool, &info) })),
-        Err(err) => error_response(err),
-    }
+        .await?;
+    Ok(json_response(
+        json!({ "pool": pool_info_json(&payload.pool, &info) }),
+    ))
 }
 
 async fn pool_info(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     AxumPath(pool): AxumPath<String>,
-) -> Response {
-    let grant = match authorize(&headers, &state) {
-        Ok(grant) => grant,
-        Err(err) => return error_response(err),
-    };
-    let pool_ref = match pool_ref_from_request(&pool) {
-        Ok(pool_ref) => pool_ref,
-        Err(err) => return error_response(err),
-    };
+) -> Result<Response, HttpError> {
+    let grant = authorize(&headers, &state)?;
+    let pool_ref = pool_ref_from_request(&pool)?;
     let client = state.client.clone();
-    match state
+    let info = state
         .storage_executor
         .run_authorized(grant, move || client.pool_info(&pool_ref))
-        .await
-    {
-        Ok(info) => json_response(json!({ "pool": pool_info_json(&pool, &info) })),
-        Err(err) => error_response(err),
-    }
+        .await?;
+    Ok(json_response(
+        json!({ "pool": pool_info_json(&pool, &info) }),
+    ))
 }
 
-async fn list_pools(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
-    let grant = match authorize(&headers, &state) {
-        Ok(grant) => grant,
-        Err(err) => return error_response(err),
-    };
+async fn list_pools(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Response, HttpError> {
+    let grant = authorize(&headers, &state)?;
+
     let client = state.client.clone();
-    match state
+    let pools = state
         .storage_executor
         .run_authorized(grant, move || client.list_pools())
-        .await
-    {
-        Ok(pools) => {
-            let out: Vec<Value> = pools
-                .iter()
-                .map(|info| pool_info_json(&pool_file_name(&info.path), info))
-                .collect();
-            json_response(json!({ "pools": out }))
-        }
-        Err(err) => error_response(err),
-    }
+        .await?;
+    Ok(json_response(
+        json!({ "pools": pools.iter().map(|info| pool_info_json(&pool_file_name(&info.path), info)).collect::<Vec<_>>() }),
+    ))
 }
 
 /// The pool name is the file name without its one `.plasmite` extension.
@@ -1826,26 +1814,17 @@ async fn ui_pool_info(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     AxumPath(name): AxumPath<String>,
-) -> Response {
-    let grant = match authorize(&headers, &state) {
-        Ok(grant) => grant,
-        Err(err) => return error_response(err),
-    };
-    let pool_ref = match pool_ref_from_request(&name) {
-        Ok(pool_ref) => pool_ref,
-        Err(err) => return error_response(err),
-    };
+) -> Result<Response, HttpError> {
+    let grant = authorize(&headers, &state)?;
+    let pool_ref = pool_ref_from_request(&name)?;
     let client = state.client.clone();
-    match state
+    let info = state
         .storage_executor
         .run_authorized(grant, move || {
             ui_pool_info_json(&name, &client.open_pool(&pool_ref)?)
         })
-        .await
-    {
-        Ok(info) => json_response(json!({ "pool": info })),
-        Err(err) => error_response(err),
-    }
+        .await?;
+    Ok(json_response(json!({ "pool": info })))
 }
 
 /// Pool info without message ages. Ages grow on every read, so comparing them
@@ -1903,22 +1882,19 @@ fn ui_pool_snapshot(client: &LocalClient, cache: &mut UiPoolCache) -> Result<(Va
 }
 
 /// The pool list plus each pool's ring layout, so the map can draw each message where it sits.
-async fn ui_list_pools(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
-    let grant = match authorize(&headers, &state) {
-        Ok(grant) => grant,
-        Err(err) => return error_response(err),
-    };
+async fn ui_list_pools(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Response, HttpError> {
+    let grant = authorize(&headers, &state)?;
     let client = state.client.clone();
-    match state
+    let snapshot = state
         .storage_executor
         .run_authorized(grant, move || {
             ui_pool_snapshot(&client, &mut UiPoolCache::new()).map(|(snapshot, _)| snapshot)
         })
-        .await
-    {
-        Ok(snapshot) => json_response(snapshot),
-        Err(err) => error_response(err),
-    }
+        .await?;
+    Ok(json_response(snapshot))
 }
 
 async fn ui_activity(State(state): State<Arc<AppState>>) -> Response {
@@ -2075,24 +2051,15 @@ async fn delete_pool(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     AxumPath(pool): AxumPath<String>,
-) -> Response {
-    let grant = match authorize(&headers, &state) {
-        Ok(grant) => grant,
-        Err(err) => return error_response(err),
-    };
-    let pool_ref = match pool_ref_from_request(&pool) {
-        Ok(pool_ref) => pool_ref,
-        Err(err) => return error_response(err),
-    };
+) -> Result<Response, HttpError> {
+    let grant = authorize(&headers, &state)?;
+    let pool_ref = pool_ref_from_request(&pool)?;
     let client = state.client.clone();
-    match state
+    state
         .storage_executor
         .run_authorized(grant, move || client.delete_pool(&pool_ref))
-        .await
-    {
-        Ok(()) => json_response(json!({ "ok": true })),
-        Err(err) => error_response(err),
-    }
+        .await?;
+    Ok(json_response(json!({ "ok": true })))
 }
 
 async fn append_message(
@@ -2100,32 +2067,25 @@ async fn append_message(
     headers: HeaderMap,
     AxumPath(pool): AxumPath<String>,
     Json(payload): Json<AppendRequest>,
-) -> Response {
-    let grant = match authorize(&headers, &state) {
-        Ok(grant) => grant,
-        Err(err) => return error_response(err),
-    };
-    let pool_ref = match pool_ref_from_request(&pool) {
-        Ok(pool_ref) => pool_ref,
-        Err(err) => return error_response(err),
-    };
+) -> Result<Response, HttpError> {
+    let grant = authorize(&headers, &state)?;
+    let pool_ref = pool_ref_from_request(&pool)?;
     let durability = durability_from_str(payload.durability.as_deref());
     let tags = payload.tags.unwrap_or_default();
     let data = payload.data;
-
     let client = state.client.clone();
-    let result = state
+    let message = state
         .storage_executor
         .run_authorized(grant, move || {
             client
                 .open_pool(&pool_ref)
                 .and_then(|mut pool| pool.append_json_now(&data, &tags, durability))
         })
-        .await;
-    match result {
-        Ok(message) => json_response(Value::from_iter([("message", message_json(message))])),
-        Err(err) => error_response(err),
-    }
+        .await?;
+    Ok(json_response(Value::from_iter([(
+        "message",
+        message_json(message),
+    )])))
 }
 
 async fn append_lite3(
@@ -2134,90 +2094,71 @@ async fn append_lite3(
     AxumPath(pool): AxumPath<String>,
     Query(query): Query<AppendLite3Query>,
     payload: Bytes,
-) -> Response {
-    let grant = match authorize(&headers, &state) {
-        Ok(grant) => grant,
-        Err(err) => return error_response(err),
-    };
+) -> Result<Response, HttpError> {
+    let grant = authorize(&headers, &state)?;
     if let Some(content_type) = headers
         .get("content-type")
         .and_then(|value| value.to_str().ok())
         && !content_type.starts_with("application/x-plasmite-lite3")
     {
-        return error_response(
-            Error::new(ErrorKind::Usage).with_message("invalid content-type for lite3 append"),
-        );
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("invalid content-type for lite3 append")
+            .into());
     }
     if payload.is_empty() {
-        return error_response(
-            Error::new(ErrorKind::Usage).with_message("lite3 payload is required"),
-        );
+        return Err(Error::new(ErrorKind::Usage)
+            .with_message("lite3 payload is required")
+            .into());
     }
-    let pool_ref = match pool_ref_from_request(&pool) {
-        Ok(pool_ref) => pool_ref,
-        Err(err) => return error_response(err),
-    };
+    let pool_ref = pool_ref_from_request(&pool)?;
     let durability = durability_from_str(query.durability.as_deref());
     let payload = payload.to_vec();
     let client = state.client.clone();
-    let result = state
+    let message = state
         .storage_executor
         .run_authorized(grant, move || {
             client
                 .open_pool(&pool_ref)
                 .and_then(|mut pool| pool.append_lite3_with_receipt_now(&payload, durability))
         })
-        .await;
-    match result {
-        Ok(message) => json_response(Value::from_iter([("message", message_json(message))])),
-        Err(err) => error_response(err),
-    }
+        .await?;
+    Ok(json_response(Value::from_iter([(
+        "message",
+        message_json(message),
+    )])))
 }
 
 async fn get_message(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     AxumPath((pool, seq)): AxumPath<(String, u64)>,
-) -> Response {
-    let grant = match authorize(&headers, &state) {
-        Ok(grant) => grant,
-        Err(err) => return error_response(err),
-    };
-    let pool_ref = match pool_ref_from_request(&pool) {
-        Ok(pool_ref) => pool_ref,
-        Err(err) => return error_response(err),
-    };
+) -> Result<Response, HttpError> {
+    let grant = authorize(&headers, &state)?;
+    let pool_ref = pool_ref_from_request(&pool)?;
     let client = state.client.clone();
-    let result = state
+    let message = state
         .storage_executor
         .run_authorized(grant, move || {
             client
                 .open_pool(&pool_ref)
                 .and_then(|pool| pool.get_message(seq))
         })
-        .await;
-
-    match result {
-        Ok(message) => json_response(Value::from_iter([("message", message_json(message))])),
-        Err(err) => error_response(err),
-    }
+        .await?;
+    Ok(json_response(Value::from_iter([(
+        "message",
+        message_json(message),
+    )])))
 }
 
 async fn get_lite3(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     AxumPath((pool, seq)): AxumPath<(String, u64)>,
-) -> Response {
-    let grant = match authorize(&headers, &state) {
-        Ok(grant) => grant,
-        Err(err) => return error_response(err),
-    };
-    let pool_ref = match pool_ref_from_request(&pool) {
-        Ok(pool_ref) => pool_ref,
-        Err(err) => return error_response(err),
-    };
+) -> Result<Response, HttpError> {
+    let grant = authorize(&headers, &state)?;
+    let pool_ref = pool_ref_from_request(&pool)?;
     let client = state.client.clone();
-    let result = state
+    let frame = state
         .storage_executor
         .run_authorized(grant, move || {
             client.open_pool(&pool_ref).and_then(|pool| {
@@ -2226,31 +2167,27 @@ async fn get_lite3(
                 Ok(frame)
             })
         })
-        .await;
-    match result {
-        Ok(frame) => {
-            let mut response = Response::new(Body::from(frame.payload));
-            response.headers_mut().insert(
-                "content-type",
-                HeaderValue::from_static("application/x-plasmite-lite3"),
-            );
-            response.headers_mut().insert(
-                "plasmite-seq",
-                HeaderValue::from_str(&frame.seq.to_string())
-                    .expect("decimal u64 is a valid header"),
-            );
-            response.headers_mut().insert(
-                "plasmite-timestamp-ns",
-                HeaderValue::from_str(&frame.timestamp_ns.to_string())
-                    .expect("decimal u64 is a valid header"),
-            );
-            response
-                .headers_mut()
-                .insert("plasmite-version", HeaderValue::from_static("0"));
-            response
-        }
-        Err(err) => error_response(err),
-    }
+        .await?;
+    Ok({
+        let mut response = Response::new(Body::from(frame.payload));
+        response.headers_mut().insert(
+            "content-type",
+            HeaderValue::from_static("application/x-plasmite-lite3"),
+        );
+        response.headers_mut().insert(
+            "plasmite-seq",
+            HeaderValue::from_str(&frame.seq.to_string()).expect("decimal u64 is a valid header"),
+        );
+        response.headers_mut().insert(
+            "plasmite-timestamp-ns",
+            HeaderValue::from_str(&frame.timestamp_ns.to_string())
+                .expect("decimal u64 is a valid header"),
+        );
+        response
+            .headers_mut()
+            .insert("plasmite-version", HeaderValue::from_static("0"));
+        response
+    })
 }
 
 async fn tail_messages(
@@ -2769,6 +2706,7 @@ mod tests {
     use axum::Json;
     use axum::extract::State;
     use axum::http::{HeaderMap, HeaderValue, Uri, header};
+    use axum::response::IntoResponse;
     use plasmite::api::PoolApiExt;
     use serde_json::json;
     use std::sync::{Arc, Mutex};
@@ -3228,6 +3166,14 @@ mod tests {
         started_rx.await.unwrap();
         access.revoke(&id).unwrap();
         assert!(grant.is_revoked());
+        let rejected = executor
+            .run_authorized(Some(grant.clone()), || Ok(8))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error_response(rejected).status(),
+            axum::http::StatusCode::LOCKED
+        );
         release_tx.send(()).unwrap();
         let seq = admitted.await.unwrap().unwrap();
         assert_eq!(
@@ -3280,6 +3226,7 @@ mod tests {
         assert_eq!(
             list_pools(State(state.clone()), HeaderMap::new())
                 .await
+                .into_response()
                 .status(),
             axum::http::StatusCode::LOCKED
         );
@@ -3321,6 +3268,41 @@ mod tests {
         );
         release_tx.send(()).unwrap();
         active.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn ordinary_http_preserves_auth_and_extractor_precedence() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = Arc::new(AppState {
+            client: LocalClient::new().with_pool_dir(temp.path()),
+            secure_access: None,
+            oauth: None,
+            browser_sessions: BrowserSessions::new(None).unwrap(),
+            local_admin: false,
+            max_tail_timeout_ms: 30_000,
+            tail_semaphore: Arc::new(Semaphore::new(1)),
+            mcp_semaphore: Arc::new(Semaphore::new(1)),
+            storage_executor: StorageExecutor::new(1),
+            ui_pool_watch: Mutex::new(None),
+            activity: Default::default(),
+        });
+        use tower_service::Service;
+        let mut app = axum::Router::new()
+            .route("/json", axum::routing::post(super::create_pool))
+            .route("/raw/:pool", axum::routing::post(super::append_lite3))
+            .with_state(state);
+        for (uri, content_type, body, expected) in [
+            ("/json", "application/json", "{", 400),
+            ("/json", "application/json", r#"{"pool":"../bad"}"#, 401),
+            ("/raw/chat", "text/plain", "x", 401),
+            ("/raw/..", "application/x-plasmite-lite3", "x", 401),
+        ] {
+            let request = axum::http::Request::post(uri)
+                .header("content-type", content_type)
+                .body(axum::body::Body::from(body))
+                .unwrap();
+            assert_eq!(app.call(request).await.unwrap().status().as_u16(), expected);
+        }
     }
 
     #[test]

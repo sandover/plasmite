@@ -1,5 +1,5 @@
 //! Purpose: Define public message types and append/get/tail helpers for the API.
-//! Exports: `Message`, `Meta`, `TailOptions`, `Tail`, `Lite3Tail`.
+//! Exports: `Message`, `Meta` (including validated `Meta::from_lite3`), `TailOptions`, `Tail`, `Lite3Tail`.
 //! Role: Stable message envelope aligned with the CLI contract.
 //! Invariants: Message fields mirror CLI JSON; time is RFC3339 UTC.
 //! Invariants: Tail streams preserve ordering and avoid unbounded buffering.
@@ -18,6 +18,19 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Meta {
     pub tags: Vec<String>,
+}
+
+impl Meta {
+    /// Decode metadata and validate the entire data payload without building its tree.
+    ///
+    /// This exports data to JSON and scans it; it does not skip data validation.
+    pub fn from_lite3(payload: &[u8]) -> Result<Self, Error> {
+        let doc = Lite3DocRef::new(payload);
+        let meta = decode_meta(doc)?;
+        let json = data_json(doc)?;
+        let _: serde::de::IgnoredAny = serde_json::from_str(&json).map_err(payload_json_error)?;
+        Ok(meta)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -291,12 +304,7 @@ impl Tail<'_> {
 impl Lite3Tail<'_> {
     pub fn next_frame(&mut self) -> Result<Option<FrameRef>, Error> {
         self.0.next(|frame, tags| {
-            let doc = Lite3DocRef::new(&frame.payload);
-            let meta = decode_meta(doc)?;
-            // Check readability without constructing a discarded data tree.
-            let json = data_json(doc)?;
-            let _: serde::de::IgnoredAny =
-                serde_json::from_str(&json).map_err(payload_json_error)?;
+            let meta = Meta::from_lite3(&frame.payload)?;
             Ok(has_required_tags(&meta.tags, tags).then_some(frame))
         })
     }
@@ -612,6 +620,19 @@ mod tests {
         let error = pool.get_message(seq).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Corrupt);
         assert_eq!(error.message(), Some("meta.tags must be string array"));
+    }
+
+    #[test]
+    fn metadata_accessor_avoids_data_tree_and_matches_full_decode_failures() {
+        let bytes = encode_message(&["keep".into()], &json!({"nested":[{"x":"y"}]})).unwrap();
+        super::DATA_TREE_DECODES.with(|count| count.set(0));
+        assert_eq!(
+            super::Meta::from_lite3(bytes.as_slice()).unwrap().tags,
+            ["keep"]
+        );
+        super::DATA_TREE_DECODES.with(|count| assert_eq!(count.get(), 0));
+        super::Message::from_lite3(1, u64::MAX, bytes.as_slice()).unwrap();
+        super::DATA_TREE_DECODES.with(|count| assert_eq!(count.get(), 1));
     }
 
     #[test]

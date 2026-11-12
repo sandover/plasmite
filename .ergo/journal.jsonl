@@ -579,3 +579,192 @@
 {"version":1,"task_id":"KPRMEV","kind":"claim","at":"2026-11-12T17:01:46.81278Z","agent":"codex@lite3-hardening"}
 {"version":1,"task_id":"KPRMEV","kind":"result","at":"2026-11-12T17:16:05.005952Z","agent":"codex@lite3-hardening","text":"Fixed both Lite3 defects; Linux ASan/UBSan O0/O2, vendoring reproduction, audit and release gate pass."}
 {"version":1,"task_id":"KPRMEV","kind":"done","at":"2026-11-12T17:16:05.033846Z","agent":"codex@lite3-hardening"}
+{"version":1,"task_id":"NBMK3B","kind":"created","at":"2026-11-12T17:41:30.260303Z"}
+{"version":1,"task_id":"MBDZI5","kind":"created","at":"2026-11-12T17:41:30.260333Z"}
+{"version":1,"task_id":"BPS6MK","kind":"created","at":"2026-11-12T17:41:30.260337Z"}
+{"version":1,"task_id":"JZKH4W","kind":"created","at":"2026-11-12T17:41:30.260341Z"}
+{"version":1,"task_id":"S6XTUF","kind":"created","at":"2026-11-12T17:41:30.260344Z"}
+{"version":1,"task_id":"SROZBH","kind":"created","at":"2026-11-12T17:41:30.260347Z"}
+{"version":1,"task_id":"OMHEHX","kind":"created","at":"2026-11-12T17:41:30.260349Z"}
+{"version":1,"task_id":"T2AZ53","kind":"created","at":"2026-11-12T17:41:30.260352Z"}
+{"version":1,"task_id":"2PLTOG","kind":"created","at":"2026-11-12T17:41:30.260354Z"}
+{"version":1,"task_id":"ASKWKT","kind":"created","at":"2026-11-12T17:41:30.260356Z"}
+{"version":1,"task_id":"PUVAGD","kind":"created","at":"2026-11-12T17:41:30.260358Z"}
+{"version":1,"task_id":"VYYSHY","kind":"created","at":"2026-11-12T17:41:30.26036Z"}
+{"version":1,"task_id":"YZYJR7","kind":"created","at":"2026-11-12T17:41:30.260362Z"}
+{"version":1,"task_id":"ZKWYVP","kind":"created","at":"2026-11-12T17:41:30.260365Z"}
+{"version":1,"task_id":"YHLM3S","kind":"created","at":"2026-11-12T17:41:30.260367Z"}
+{"version":1,"task_id":"MWBAKO","kind":"created","at":"2026-11-12T17:41:30.260369Z"}
+{"version":1,"task_id":"2YO2OC","kind":"created","at":"2026-11-12T17:41:30.260371Z"}
+{"version":1,"task_id":"3PQTKC","kind":"created","at":"2026-11-12T17:41:30.260374Z"}
+{"version":1,"task_id":"VRXDIB","kind":"created","at":"2026-11-12T17:41:30.260376Z"}
+{"version":1,"task_id":"TFKLMG","kind":"created","at":"2026-11-12T17:41:30.260379Z"}
+{"version":1,"task_id":"3U7BC5","kind":"created","at":"2026-11-12T17:41:30.260381Z"}
+{"version":1,"task_id":"RCVDXF","kind":"created","at":"2026-11-12T17:41:30.260383Z"}
+{"version":1,"task_id":"PIOEWO","kind":"created","at":"2026-11-12T17:41:30.260385Z"}
+{"version":1,"task_id":"CKISOK","kind":"created","at":"2026-11-12T17:41:30.260387Z"}
+{"version":1,"task_id":"BOG2ST","kind":"created","at":"2026-11-12T17:41:30.260389Z"}
+{"version":1,"task_id":"LRF7UU","kind":"created","at":"2026-11-12T17:41:30.260391Z"}
+{"version":1,"task_id":"2PLTOG","kind":"claim","at":"2026-11-12T17:42:55.39293Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"2YO2OC","kind":"claim","at":"2026-11-12T17:42:55.449046Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"3PQTKC","kind":"claim","at":"2026-11-12T17:42:55.497978Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"3U7BC5","kind":"claim","at":"2026-11-12T17:42:55.546969Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"ASKWKT","kind":"claim","at":"2026-11-12T17:42:55.595678Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"BOG2ST","kind":"claim","at":"2026-11-12T17:42:55.644275Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"BPS6MK","kind":"claim","at":"2026-11-12T17:42:55.696361Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"CKISOK","kind":"claim","at":"2026-11-12T17:42:55.746999Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"JZKH4W","kind":"claim","at":"2026-11-12T17:42:55.796334Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"LRF7UU","kind":"claim","at":"2026-11-12T17:42:55.847886Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"MBDZI5","kind":"claim","at":"2026-11-12T17:42:55.900353Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"MWBAKO","kind":"claim","at":"2026-11-12T17:42:55.951963Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"OMHEHX","kind":"claim","at":"2026-11-12T17:42:56.00296Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"PIOEWO","kind":"claim","at":"2026-11-12T17:42:56.056229Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"PUVAGD","kind":"claim","at":"2026-11-12T17:42:56.108414Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"RCVDXF","kind":"claim","at":"2026-11-12T17:42:56.163074Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"S6XTUF","kind":"claim","at":"2026-11-12T17:42:56.215146Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"SROZBH","kind":"claim","at":"2026-11-12T17:42:56.267522Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"T2AZ53","kind":"claim","at":"2026-11-12T17:42:56.320422Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"TFKLMG","kind":"claim","at":"2026-11-12T17:42:56.372631Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"VRXDIB","kind":"claim","at":"2026-11-12T17:42:56.423123Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"VYYSHY","kind":"claim","at":"2026-11-12T17:42:56.473566Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"YHLM3S","kind":"claim","at":"2026-11-12T17:42:56.521986Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"YZYJR7","kind":"claim","at":"2026-11-12T17:42:56.572812Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"ZKWYVP","kind":"claim","at":"2026-11-12T17:42:56.622417Z","agent":"codex@compensation-spikes"}
+{"version":1,"task_id":"BPS6MK","kind":"result","at":"2026-11-12T18:05:51.260451Z","agent":"codex@compensation-spikes","text":"Recorded isolated peer request trace; see preserved probe log.","file":{"path":".scratch/compensation-spikes-runtime-probe.log","sha256":"25d3df4fe0f54f81517f30475905f5b8c8f0bc6d6aecbb9b3fb9cb8b29e66d56","mtime":"2026-11-12T17:52:19.825835801Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"6YYPR5","kind":"created","at":"2026-11-12T18:09:20.991475Z"}
+{"version":1,"task_id":"XFIBEH","kind":"created","at":"2026-11-12T18:09:20.991489Z"}
+{"version":1,"task_id":"DZHNLH","kind":"created","at":"2026-11-12T18:09:20.991493Z"}
+{"version":1,"task_id":"WCCZJI","kind":"created","at":"2026-11-12T18:09:20.991495Z"}
+{"version":1,"task_id":"OEPCGK","kind":"created","at":"2026-11-12T18:09:20.991498Z"}
+{"version":1,"task_id":"JZYHYF","kind":"created","at":"2026-11-12T18:09:20.991501Z"}
+{"version":1,"task_id":"SQOFH4","kind":"created","at":"2026-11-12T18:09:20.991503Z"}
+{"version":1,"task_id":"WZGRR5","kind":"created","at":"2026-11-12T18:09:20.991505Z"}
+{"version":1,"task_id":"SIEKHQ","kind":"created","at":"2026-11-12T18:09:20.991507Z"}
+{"version":1,"task_id":"EYO5BU","kind":"created","at":"2026-11-12T18:09:20.991509Z"}
+{"version":1,"task_id":"LYM22Z","kind":"created","at":"2026-11-12T18:09:20.991512Z"}
+{"version":1,"task_id":"BPS6MK","kind":"result","at":"2026-11-12T18:11:18.896078Z","agent":"codex@compensation-spikes","text":"SIMPLIFY: Return Lite3 point metadata with its payload; draft XFIBEH","file":{"path":".scratch/compensation-spikes-runtime-probe.log","sha256":"25d3df4fe0f54f81517f30475905f5b8c8f0bc6d6aecbb9b3fb9cb8b29e66d56","mtime":"2026-11-12T17:52:19.825835801Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"BPS6MK","kind":"done","at":"2026-11-12T18:11:18.95595Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"JZKH4W","kind":"result","at":"2026-11-12T18:11:19.02564Z","agent":"codex@compensation-spikes","text":"SIMPLIFY: Traverse one bounded retained window for MCP; draft DZHNLH","file":{"path":".scratch/compensation-spikes-storage-probe.log","sha256":"b64901837173ba959d37d5af1281db5f1616e2b4a31b52dd1d5bbfd157e2a300","mtime":"2026-11-12T17:46:50.27502229Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"JZKH4W","kind":"done","at":"2026-11-12T18:11:19.07333Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"S6XTUF","kind":"result","at":"2026-11-12T18:11:19.141713Z","agent":"codex@compensation-spikes","text":"SIMPLIFY: Present the validation snapshot; draft WCCZJI","file":{"path":".scratch/compensation-spikes-storage-probe.log","sha256":"b64901837173ba959d37d5af1281db5f1616e2b4a31b52dd1d5bbfd157e2a300","mtime":"2026-11-12T17:46:50.27502229Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"S6XTUF","kind":"done","at":"2026-11-12T18:11:19.1817Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"SROZBH","kind":"result","at":"2026-11-12T18:11:19.250439Z","agent":"codex@compensation-spikes","text":"KEEP: Keep interface-specific listing policies; keep current design","file":{"path":".scratch/compensation-spikes-catalog-probe.log","sha256":"5b25c70e9b89aaa036c5d610624349397c25c6adb6dcabc90773900d0def5e0e","mtime":"2026-11-12T17:58:09.213661961Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"SROZBH","kind":"done","at":"2026-11-12T18:11:19.28773Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"PUVAGD","kind":"result","at":"2026-11-12T18:11:19.353208Z","agent":"codex@compensation-spikes","text":"SIMPLIFY: Share platform-aware string reference inference; draft SQOFH4","file":{"path":".scratch/compensation-spikes-independent-reviews.json","sha256":"261f1d6d4a7b1c96101bba81c34839180358e1f44060fc3af32cf1ea20098b03","mtime":"2026-11-12T18:09:20.965677304Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"PUVAGD","kind":"done","at":"2026-11-12T18:11:19.388621Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"3PQTKC","kind":"result","at":"2026-11-12T18:11:19.452536Z","agent":"codex@compensation-spikes","text":"SIMPLIFY: Keep geometric retry and always try the cap; draft EYO5BU","file":{"path":".scratch/compensation-spikes-encoding-limit.log","sha256":"bc788de23e985026d4ea34a3748b5962581163ada482ca3a220624a62eb54c11","mtime":"2026-11-12T17:51:18.183637425Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"3PQTKC","kind":"done","at":"2026-11-12T18:11:19.492184Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"2YO2OC","kind":"result","at":"2026-11-12T18:11:19.557106Z","agent":"codex@compensation-spikes","text":"KEEP: Keep bounded JSON object discovery; keep current design","file":{"path":".scratch/compensation-spikes-independent-reviews.json","sha256":"261f1d6d4a7b1c96101bba81c34839180358e1f44060fc3af32cf1ea20098b03","mtime":"2026-11-12T18:09:20.965677304Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"2YO2OC","kind":"done","at":"2026-11-12T18:11:19.593402Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"MBDZI5","kind":"result","at":"2026-11-12T18:11:19.655959Z","agent":"codex@compensation-spikes","text":"KEEP: Keep exact-number jaq adapter; keep current design","file":{"path":".scratch/compensation-spikes-independent-reviews.json","sha256":"261f1d6d4a7b1c96101bba81c34839180358e1f44060fc3af32cf1ea20098b03","mtime":"2026-11-12T18:09:20.965677304Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"MBDZI5","kind":"done","at":"2026-11-12T18:11:19.693496Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"VYYSHY","kind":"result","at":"2026-11-12T18:11:19.755985Z","agent":"codex@compensation-spikes","text":"REPLACE: Define default-location policy across runtimes; draft WZGRR5","file":{"path":".scratch/compensation-spikes-path-build-probe.log","sha256":"c193f851cb82b35f1b3c99ca02aade1372a40ee215a0775d5d10b79328edde91","mtime":"2026-11-12T17:55:14.055089959Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"VYYSHY","kind":"done","at":"2026-11-12T18:11:19.79622Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"OMHEHX","kind":"result","at":"2026-11-12T18:11:19.863099Z","agent":"codex@compensation-spikes","text":"REPLACE: Keep subscriber-scoped polling; replace PoolInfo equality as proof of file identity and separate ; draft OEPCGK","file":{"path":".scratch/compensation-spikes-storage-probe.log","sha256":"b64901837173ba959d37d5af1281db5f1616e2b4a31b52dd1d5bbfd157e2a300","mtime":"2026-11-12T17:46:50.27502229Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"OMHEHX","kind":"done","at":"2026-11-12T18:11:19.902162Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"T2AZ53","kind":"result","at":"2026-11-12T18:11:19.969068Z","agent":"codex@compensation-spikes","text":"REPLACE: Replace name-only UI resume with private instance-aware recovery; keep exact cursor and retention; draft OEPCGK","file":{"path":".scratch/compensation-spikes-ui-probe.log","sha256":"fa432920070c841cb067716001389eb35a78673c0034162ce05a07b958735696","mtime":"2026-11-12T17:50:23.627004581Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"T2AZ53","kind":"done","at":"2026-11-12T18:11:20.006125Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"2PLTOG","kind":"result","at":"2026-11-12T18:11:20.072208Z","agent":"codex@compensation-spikes","text":"KEEP: Keep bounded history over the existing SSE endpoint; no new paging protocol has earned its co; keep current design","file":{"path":".scratch/compensation-spikes-independent-reviews.json","sha256":"261f1d6d4a7b1c96101bba81c34839180358e1f44060fc3af32cf1ea20098b03","mtime":"2026-11-12T18:09:20.965677304Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"2PLTOG","kind":"done","at":"2026-11-12T18:11:20.108618Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"ASKWKT","kind":"result","at":"2026-11-12T18:11:20.175578Z","agent":"codex@compensation-spikes","text":"REPLACE: Replace lossy Node error-context conversion; retain the C layout and avoid a speculative rich-err; draft JZYHYF","file":{"path":".scratch/compensation-spikes-error-probe.log","sha256":"9051469f06bc91f333de831979db1af1a1864b21a367923f54af46e9e0f68dbb","mtime":"2026-11-12T17:53:06.950879011Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"ASKWKT","kind":"done","at":"2026-11-12T18:11:20.212501Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"VRXDIB","kind":"result","at":"2026-11-12T18:11:20.278481Z","agent":"codex@compensation-spikes","text":"KEEP: Keep separate runtime transports; repair the proven exact-error loss through ASKWKT rather th; keep current design","file":{"path":".scratch/compensation-spikes-independent-reviews.json","sha256":"261f1d6d4a7b1c96101bba81c34839180358e1f44060fc3af32cf1ea20098b03","mtime":"2026-11-12T18:09:20.965677304Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"VRXDIB","kind":"done","at":"2026-11-12T18:11:20.318941Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"BOG2ST","kind":"result","at":"2026-11-12T18:11:20.382631Z","agent":"codex@compensation-spikes","text":"KEEP: Keep the existing VM policy checks and their explicit no-browser scope; no replacement harnes; keep current design","file":{"path":".scratch/compensation-spikes-independent-reviews.json","sha256":"261f1d6d4a7b1c96101bba81c34839180358e1f44060fc3af32cf1ea20098b03","mtime":"2026-11-12T18:09:20.965677304Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"BOG2ST","kind":"done","at":"2026-11-12T18:11:20.418276Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"MWBAKO","kind":"result","at":"2026-11-12T18:11:20.475389Z","agent":"codex@compensation-spikes","text":"KEEP: Keep the two-reader bounded supervisor; each major part follows from the capture contract.; keep current design","file":{"path":".scratch/compensation-spikes-independent-reviews.json","sha256":"261f1d6d4a7b1c96101bba81c34839180358e1f44060fc3af32cf1ea20098b03","mtime":"2026-11-12T18:09:20.965677304Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"MWBAKO","kind":"done","at":"2026-11-12T18:11:20.507793Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"PIOEWO","kind":"result","at":"2026-11-12T18:11:20.564097Z","agent":"codex@compensation-spikes","text":"SIMPLIFY: Replace the fixed startup sleep with existing readiness; keep conservative detached-process owne; draft SIEKHQ","file":{"path":".scratch/compensation-spikes-dev-probe.log","sha256":"e1b8b9161bedeadbd153195c43981cef0cb0f655091f1d0c90e1f5c89582434e","mtime":"2026-11-12T17:52:37.030887984Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"PIOEWO","kind":"done","at":"2026-11-12T18:11:20.598191Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"YZYJR7","kind":"result","at":"2026-11-12T18:11:20.655099Z","agent":"codex@compensation-spikes","text":"KEEP: Keep fresh path-based Windows authority checks until native evidence establishes a safe conte; keep current design","file":{"path":".scratch/compensation-spikes-independent-reviews.json","sha256":"261f1d6d4a7b1c96101bba81c34839180358e1f44060fc3af32cf1ea20098b03","mtime":"2026-11-12T18:09:20.965677304Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"YZYJR7","kind":"done","at":"2026-11-12T18:11:20.686196Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"ZKWYVP","kind":"result","at":"2026-11-12T18:11:20.743262Z","agent":"codex@compensation-spikes","text":"KEEP: Keep the small fact readers and distinct trust checks; do not adopt a full parser or unify tr; keep current design","file":{"path":".scratch/compensation-spikes-independent-reviews.json","sha256":"261f1d6d4a7b1c96101bba81c34839180358e1f44060fc3af32cf1ea20098b03","mtime":"2026-11-12T18:09:20.965677304Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"ZKWYVP","kind":"done","at":"2026-11-12T18:11:20.777Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"YHLM3S","kind":"result","at":"2026-11-12T18:11:20.8438Z","agent":"codex@compensation-spikes","text":"KEEP: Keep separate OAuth and browser stores with AccessStore as shared authority.; keep current design","file":{"path":".scratch/compensation-spikes-independent-reviews.json","sha256":"261f1d6d4a7b1c96101bba81c34839180358e1f44060fc3af32cf1ea20098b03","mtime":"2026-11-12T18:09:20.965677304Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"YHLM3S","kind":"done","at":"2026-11-12T18:11:20.890502Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"TFKLMG","kind":"result","at":"2026-11-12T18:11:20.951653Z","agent":"codex@compensation-spikes","text":"KEEP: Keep truthful whole-checkout identity; native build separation needs an end-to-end cost compa; keep current design","file":{"path":".scratch/compensation-spikes-path-build-probe.log","sha256":"c193f851cb82b35f1b3c99ca02aade1372a40ee215a0775d5d10b79328edde91","mtime":"2026-11-12T17:55:14.055089959Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"TFKLMG","kind":"done","at":"2026-11-12T18:11:20.985812Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"3U7BC5","kind":"result","at":"2026-11-12T18:11:21.045994Z","agent":"codex@compensation-spikes","text":"KEEP: Keep explicit shell status propagation and the existing retry budget.; keep current design","file":{"path":".scratch/compensation-spikes-independent-reviews.json","sha256":"261f1d6d4a7b1c96101bba81c34839180358e1f44060fc3af32cf1ea20098b03","mtime":"2026-11-12T18:09:20.965677304Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"3U7BC5","kind":"done","at":"2026-11-12T18:11:21.078503Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"RCVDXF","kind":"result","at":"2026-11-12T18:11:21.134735Z","agent":"codex@compensation-spikes","text":"SIMPLIFY: Extract release build selection and provenance validation into a behavioral offline-testable res; draft LYM22Z","file":{"path":".scratch/compensation-spikes-independent-reviews.json","sha256":"261f1d6d4a7b1c96101bba81c34839180358e1f44060fc3af32cf1ea20098b03","mtime":"2026-11-12T18:09:20.965677304Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"RCVDXF","kind":"done","at":"2026-11-12T18:11:21.167068Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"CKISOK","kind":"result","at":"2026-11-12T18:11:21.224294Z","agent":"codex@compensation-spikes","text":"KEEP: Keep bounded fixture port selection/retry; no production listener API change.; keep current design","file":{"path":".scratch/compensation-spikes-oauth-bind-probe.log","sha256":"88d1e09342182e75a310e83aa89a6e4ba4b5985a5a0c39d8dd73645defee21e6","mtime":"2026-11-12T18:10:09.364592156Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"CKISOK","kind":"done","at":"2026-11-12T18:11:21.255713Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"LRF7UU","kind":"result","at":"2026-11-12T18:11:21.316182Z","agent":"codex@compensation-spikes","text":"KEEP: Keep exact live-instance probing; no cleanup or coordinator without real accumulation evidenc; keep current design","file":{"path":".scratch/compensation-spikes-runtime-probe.log","sha256":"25d3df4fe0f54f81517f30475905f5b8c8f0bc6d6aecbb9b3fb9cb8b29e66d56","mtime":"2026-11-12T17:52:19.825835801Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"LRF7UU","kind":"done","at":"2026-11-12T18:11:21.352712Z","agent":"codex@compensation-spikes","text":"Investigation complete; decision, evidence and follow-up recorded."}
+{"version":1,"task_id":"JZYHYF","kind":"result","at":"2026-11-12T18:21:03.663259Z","text":"Approved bigint error seq/offset for 2.0; native and HTTP adapters must change together."}
+{"version":1,"task_id":"XFIBEH","kind":"open","at":"2026-11-12T18:28:01.256215Z"}
+{"version":1,"task_id":"XFIBEH","kind":"claim","at":"2026-11-12T18:28:08.870917Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"XFIBEH","kind":"open","at":"2026-11-12T18:28:15.458387Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"XFIBEH","kind":"claim","at":"2026-11-12T18:28:15.493139Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"DZHNLH","kind":"open","at":"2026-11-12T18:28:15.525683Z"}
+{"version":1,"task_id":"DZHNLH","kind":"claim","at":"2026-11-12T18:28:15.56373Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"WCCZJI","kind":"open","at":"2026-11-12T18:28:15.595525Z"}
+{"version":1,"task_id":"WCCZJI","kind":"claim","at":"2026-11-12T18:28:15.627439Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"OEPCGK","kind":"open","at":"2026-11-12T18:28:15.659252Z"}
+{"version":1,"task_id":"OEPCGK","kind":"claim","at":"2026-11-12T18:28:15.691253Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"JZYHYF","kind":"open","at":"2026-11-12T18:28:15.723949Z"}
+{"version":1,"task_id":"JZYHYF","kind":"claim","at":"2026-11-12T18:28:15.758734Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"SQOFH4","kind":"open","at":"2026-11-12T18:28:15.791859Z"}
+{"version":1,"task_id":"SQOFH4","kind":"claim","at":"2026-11-12T18:28:15.822373Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"WZGRR5","kind":"open","at":"2026-11-12T18:28:15.852651Z"}
+{"version":1,"task_id":"WZGRR5","kind":"claim","at":"2026-11-12T18:28:15.882203Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"SIEKHQ","kind":"open","at":"2026-11-12T18:28:15.914467Z"}
+{"version":1,"task_id":"SIEKHQ","kind":"claim","at":"2026-11-12T18:28:15.945921Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"EYO5BU","kind":"open","at":"2026-11-12T18:28:15.978378Z"}
+{"version":1,"task_id":"EYO5BU","kind":"claim","at":"2026-11-12T18:28:16.009969Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"LYM22Z","kind":"open","at":"2026-11-12T18:28:16.041295Z"}
+{"version":1,"task_id":"LYM22Z","kind":"claim","at":"2026-11-12T18:28:16.074583Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"SIEKHQ","kind":"result","at":"2026-11-12T18:34:57.08697Z","agent":"codex@plasmite","text":"Ready-file startup implemented; immediate/delayed/failing/never-ready and ownership fixtures pass."}
+{"version":1,"task_id":"LYM22Z","kind":"result","at":"2026-11-12T18:34:57.11953Z","agent":"codex@plasmite","text":"Extracted release selection; offline selection/provenance, workflow and delivery fixtures pass."}
+{"version":1,"task_id":"XFIBEH","kind":"result","at":"2026-11-12T18:47:01.404084Z","agent":"codex@plasmite","text":"One-response Lite3 identity fetch and legacy fallback pass fake-peer, CLI and remote tests."}
+{"version":1,"task_id":"XFIBEH","kind":"done","at":"2026-11-12T18:47:01.436034Z","agent":"codex@plasmite","text":"Implemented; just check and just integration passed."}
+{"version":1,"task_id":"DZHNLH","kind":"result","at":"2026-11-12T18:47:01.472449Z","agent":"codex@plasmite","text":"Cursor-based MCP scans pass checkpoint/filter tests; no-index probe matches point-read results."}
+{"version":1,"task_id":"DZHNLH","kind":"done","at":"2026-11-12T18:47:01.501207Z","agent":"codex@plasmite","text":"Implemented; just check and just integration passed."}
+{"version":1,"task_id":"WCCZJI","kind":"result","at":"2026-11-12T18:47:01.5335Z","agent":"codex@plasmite","text":"Doctor uses captured validation facts; append/replacement/removal fixtures and unchanged JSON pass."}
+{"version":1,"task_id":"WCCZJI","kind":"done","at":"2026-11-12T18:47:01.56308Z","agent":"codex@plasmite","text":"Implemented; just check and just integration passed."}
+{"version":1,"task_id":"OEPCGK","kind":"result","at":"2026-11-12T18:47:01.595814Z","agent":"codex@plasmite","text":"Identity-aware UI reset/cache and stale-catalog recovery pass 27 browser tests and native Windows checks."}
+{"version":1,"task_id":"OEPCGK","kind":"done","at":"2026-11-12T18:47:01.627275Z","agent":"codex@plasmite","text":"Implemented; just check and just integration passed."}
+{"version":1,"task_id":"JZYHYF","kind":"result","at":"2026-11-12T18:47:01.661835Z","agent":"codex@plasmite","text":"Exact bigint native/HTTP error context passes Node tests, types and package checks; 2.0 guide updated."}
+{"version":1,"task_id":"JZYHYF","kind":"done","at":"2026-11-12T18:47:01.693316Z","agent":"codex@plasmite","text":"Implemented; just check and just integration passed."}
+{"version":1,"task_id":"SIEKHQ","kind":"result","at":"2026-11-12T18:47:01.730536Z","agent":"codex@plasmite","text":"Ready-file startup and owned-process cleanup pass immediate/delayed/failure/timeout fixtures."}
+{"version":1,"task_id":"SIEKHQ","kind":"done","at":"2026-11-12T18:47:01.762372Z","agent":"codex@plasmite","text":"Implemented; just check and just integration passed."}
+{"version":1,"task_id":"EYO5BU","kind":"result","at":"2026-11-12T18:47:01.794323Z","agent":"codex@plasmite","text":"Encoder tries exact cap; fitting, expanded, oversized and malformed boundary fixtures pass."}
+{"version":1,"task_id":"EYO5BU","kind":"done","at":"2026-11-12T18:47:01.822929Z","agent":"codex@plasmite","text":"Implemented; just check and just integration passed."}
+{"version":1,"task_id":"LYM22Z","kind":"result","at":"2026-11-12T18:47:01.857086Z","agent":"codex@plasmite","text":"Offline release-selection/provenance matrix, workflow wiring and delivery fixtures pass."}
+{"version":1,"task_id":"LYM22Z","kind":"done","at":"2026-11-12T18:47:01.886313Z","agent":"codex@plasmite","text":"Implemented; just check and just integration passed."}
+{"version":1,"task_id":"SQOFH4","kind":"result","at":"2026-11-12T18:49:30.95427Z","agent":"codex@plasmite","text":"Native Windows ABI paths, Go path constructors and CLI build pass; public string ABI remains unchanged."}
+{"version":1,"task_id":"SQOFH4","kind":"done","at":"2026-11-12T18:49:30.986144Z","agent":"codex@plasmite","text":"Implemented and verified on macOS and native Windows; integrated gates passed."}
+{"version":1,"task_id":"WZGRR5","kind":"result","at":"2026-11-12T18:49:31.020684Z","agent":"codex@plasmite","text":"Home defaults aligned; native Windows/Rust/Node/Python/Go fixtures pass; explicit recovery documented.","file":{"path":"docs/record/upgrading-next-major.md","sha256":"5a7073f1396642a78eabdc22ab84ab6d82e263f8b1b6ebd147a5ea4ee24e86aa","mtime":"2026-11-12T18:47:30.469834163Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"WZGRR5","kind":"done","at":"2026-11-12T18:49:31.05945Z","agent":"codex@plasmite","text":"Implemented and verified on macOS and native Windows; integrated gates passed."}
+{"version":1,"task_id":"ABMVNH","kind":"created","at":"2026-11-12T20:13:40.386769Z"}
+{"version":1,"task_id":"72EGJU","kind":"created","at":"2026-11-12T20:13:40.386783Z"}
+{"version":1,"task_id":"COP2D4","kind":"created","at":"2026-11-12T20:13:40.38679Z"}
+{"version":1,"task_id":"5F4SXU","kind":"created","at":"2026-11-12T20:13:40.386794Z"}
+{"version":1,"task_id":"346LXD","kind":"created","at":"2026-11-12T20:13:40.386798Z"}
+{"version":1,"task_id":"6SXWY6","kind":"created","at":"2026-11-12T20:13:40.386801Z"}
+{"version":1,"task_id":"72EGJU","kind":"claim","at":"2026-11-12T20:14:45.31049Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"COP2D4","kind":"claim","at":"2026-11-12T20:14:45.35047Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"5F4SXU","kind":"claim","at":"2026-11-12T20:14:45.387261Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"346LXD","kind":"claim","at":"2026-11-12T20:14:45.421896Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"6SXWY6","kind":"claim","at":"2026-11-12T20:14:45.459897Z","agent":"codex@plasmite"}
+{"version":1,"task_id":"PQ6AEE","kind":"created","at":"2026-11-12T20:40:36.739511Z"}
+{"version":1,"task_id":"SPQ3MC","kind":"created","at":"2026-11-12T20:45:23.883063Z"}
+{"version":1,"task_id":"72EGJU","kind":"result","at":"2026-11-12T20:51:49.113932Z","agent":"codex@plasmite","text":"KEEP: typed settings add47lines and serialization cost; exact job spelling changes. Evidence attached.","file":{"path":"docs/proposals/implementation-distillation/service-settings.md","sha256":"7fb11fb3deea0a60be78d70a31687216f9d0244c726e6fc60b3b73c555c0804f","mtime":"2026-11-12T20:49:14.964657658Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"72EGJU","kind":"done","at":"2026-11-12T20:51:49.148446Z","agent":"codex@plasmite","text":"Prototype comparisons and measurements complete; report and reproducible evidence preserved."}
+{"version":1,"task_id":"COP2D4","kind":"result","at":"2026-11-12T20:51:49.204733Z","agent":"codex@plasmite","text":"SIMPLIFY tag-only binary filtering; keep models. 98-99% fewer Rust allocs; draft SPQ3MC; flat-string cost.","file":{"path":"docs/proposals/implementation-distillation/message-path.md","sha256":"3840ac1e61fce488c319e91056d3403239b42eaea556515f8aa5affb9b799bf9","mtime":"2026-11-12T20:49:14.965093077Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"COP2D4","kind":"done","at":"2026-11-12T20:51:49.236571Z","agent":"codex@plasmite","text":"Prototype comparisons and measurements complete; report and reproducible evidence preserved."}
+{"version":1,"task_id":"5F4SXU","kind":"result","at":"2026-11-12T20:51:49.295764Z","agent":"codex@plasmite","text":"KEEP: browser progress model adds16lines/four fields with no measured gain; evidence attached.","file":{"path":"docs/proposals/implementation-distillation/browser-state.md","sha256":"4c8882b2385315ac2a33696d4f72f160ba8e850a8e07ef875213e2031617ac40","mtime":"2026-11-12T20:49:14.965502621Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"5F4SXU","kind":"done","at":"2026-11-12T20:51:49.329148Z","agent":"codex@plasmite","text":"Prototype comparisons and measurements complete; report and reproducible evidence preserved."}
+{"version":1,"task_id":"346LXD","kind":"result","at":"2026-11-12T20:51:49.388258Z","agent":"codex@plasmite","text":"KEEP: shared follow model adds57lines; allocations unchanged and no consistent speed gain.","file":{"path":"docs/proposals/implementation-distillation/ordered-follow.md","sha256":"5d33859512fabb1752adcf3c95e9ba7e1b857e204a011a015a47286df9590a8e","mtime":"2026-11-12T20:49:14.965759955Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"346LXD","kind":"done","at":"2026-11-12T20:51:49.422345Z","agent":"codex@plasmite","text":"Prototype comparisons and measurements complete; report and reproducible evidence preserved."}
+{"version":1,"task_id":"6SXWY6","kind":"result","at":"2026-11-12T20:51:49.478768Z","agent":"codex@plasmite","text":"SIMPLIFY Result-only HTTP errors:61fewer production lines, neutral runtime; draft PQ6AEE.","file":{"path":"docs/proposals/implementation-distillation/http-handlers.md","sha256":"298c473e8a8dffe6f23ca54c6b14fa3501839ec80c58925b1c0cf34f5c2462b8","mtime":"2026-11-12T20:49:14.966006956Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"6SXWY6","kind":"done","at":"2026-11-12T20:51:49.510492Z","agent":"codex@plasmite","text":"Prototype comparisons and measurements complete; report and reproducible evidence preserved."}
+{"version":1,"task_id":"PQ6AEE","kind":"open","at":"2026-11-12T22:13:24.351006Z"}
+{"version":1,"task_id":"PQ6AEE","kind":"claim","at":"2026-11-12T22:13:24.392031Z","agent":"codex"}
+{"version":1,"task_id":"SPQ3MC","kind":"open","at":"2026-11-12T22:13:24.42642Z"}
+{"version":1,"task_id":"SPQ3MC","kind":"claim","at":"2026-11-12T22:13:24.458184Z","agent":"codex"}
+{"version":1,"task_id":"PQ6AEE","kind":"result","at":"2026-11-12T22:20:23.869924Z","agent":"codex","text":"Implemented eleven Result handlers; precedence and admission tests pass; just check passes.","file":{"path":"docs/proposals/implementation-distillation/implementation.md","sha256":"2d51192e966fbd34abe4d1bab12f263b796a8e7a0e8357bf674220dbe6c0d787","mtime":"2026-11-12T22:19:05.006540959Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"PQ6AEE","kind":"done","at":"2026-11-12T22:20:23.907226Z","agent":"codex","text":"Implemented and verified; review and evidence saved."}
+{"version":1,"task_id":"SPQ3MC","kind":"result","at":"2026-11-12T22:20:23.941146Z","agent":"codex","text":"Shared validated Meta reader; 98–99% fewer structured Rust allocation requests; 25-sample controls checked.","file":{"path":"docs/proposals/implementation-distillation/implementation.md","sha256":"2d51192e966fbd34abe4d1bab12f263b796a8e7a0e8357bf674220dbe6c0d787","mtime":"2026-11-12T22:19:05.006540959Z","git_commit":"ddcc67fd4db281b101f1c2b099242dfabccd3a79"}}
+{"version":1,"task_id":"SPQ3MC","kind":"done","at":"2026-11-12T22:20:23.976061Z","agent":"codex","text":"Implemented and verified; flat-string regression did not reproduce."}

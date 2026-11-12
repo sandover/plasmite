@@ -2487,3 +2487,61 @@ fn follow_replay_zero_speed_emits_without_delay() {
         "--replay 0 should emit without the {gap:?} delay, took {elapsed:?}"
     );
 }
+
+#[test]
+fn binary_follow_keeps_raw_bytes_and_validates_before_filtering() {
+    use plasmite::api::{AppendOptions, Durability, Pool, PoolOptions, lite3::Lite3Buf};
+    let temp = tempfile::tempdir().unwrap();
+    let payload =
+        Lite3Buf::from_json_str(r#"{"meta":{"tags":[7]},"data":{"nested":[1,2]}}"#).unwrap();
+    let mut pool =
+        Pool::create(temp.path().join("broken.plasmite"), PoolOptions::new(65536)).unwrap();
+    pool.append_with_options(payload.as_slice(), AppendOptions::new(1, Durability::Fast))
+        .unwrap();
+    drop(pool);
+    let server = ServeProcess::start_with_args_and_scheme(temp.path(), &[], "http");
+    for reference in ["broken".to_owned(), format!("{}/broken", server.local_url)] {
+        let raw = cmd()
+            .arg("--dir")
+            .arg(temp.path())
+            .args(["follow", &reference, "--no-follow", "--format", "lite3"])
+            .output()
+            .unwrap();
+        if reference == "broken" {
+            assert!(
+                raw.status.success(),
+                "{}",
+                String::from_utf8_lossy(&raw.stderr)
+            );
+            let mut expected = b"PLS1".to_vec();
+            expected.extend_from_slice(&1u64.to_be_bytes());
+            expected.extend_from_slice(&1u64.to_be_bytes());
+            expected.extend_from_slice(&(payload.as_slice().len() as u32).to_be_bytes());
+            expected.extend_from_slice(payload.as_slice());
+            assert_eq!(raw.stdout, expected);
+        } else {
+            // The HTTP server's SDK tail already validates payloads before sending.
+            assert!(!raw.status.success());
+            assert!(
+                String::from_utf8_lossy(&raw.stderr).contains("meta.tags must be string array")
+            );
+        }
+        for extra in [
+            vec!["--tag", "absent"],
+            vec!["--tag", "absent", "--since", "2100-01-01T00:00:00Z"],
+        ] {
+            let filtered = cmd()
+                .arg("--dir")
+                .arg(temp.path())
+                .args(["follow", &reference, "--no-follow", "--format", "lite3"])
+                .args(extra)
+                .output()
+                .unwrap();
+            assert!(!filtered.status.success());
+            assert!(
+                String::from_utf8_lossy(&filtered.stderr)
+                    .contains("meta.tags must be string array")
+            );
+        }
+    }
+}

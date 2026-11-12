@@ -56,6 +56,9 @@ policies. Start with [vision](record/vision.md) for product scope and
 Proposals record design history. Current setup and behavior live in the guides
 and specifications above:
 
+- [Measured implementation distillation](proposals/implementation-distillation/README.md):
+  compare five prototypes, their measured savings and costs, and the resulting
+  implementation recommendations.
 - [Secure sharing design history](proposals/serve-mcp-native.md)
 - [Earlier invitation design](proposals/serve-access-mvp.md)
 - [MCP server design](proposals/mcp-server.md)

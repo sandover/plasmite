@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Binary follow filtering
+
+- Binary `follow --tag` over local pools and HTTP now checks tags and data
+  readability without building a discarded application-data tree. Structured
+  payloads need fewer allocations; JSON output and jq filters keep full decoding.
+  Original bytes and corruption errors retain their existing behavior.
+- Rust adds `Meta::from_lite3` for the same validated metadata read.
+
 ### Predictable pool access and reliable reads (2.0)
 
 The CLI and language bindings now agree on where named pools live. Remote frames

@@ -93,6 +93,9 @@ unsupported. Go's `PoolRefPath` adds a relative prefix to bare filenames.
 
 ### Core Data Types
 
+- Rust `Meta::from_lite3` reads metadata and validates the entire data payload
+  without constructing its JSON value tree. It exports and scans the data;
+  malformed metadata or unreadable data returns `Corrupt`.
 - `Message` envelope semantics match `spec/v0/SPEC.md` (`seq`, `time`, `meta`, `data`).
 - `PoolInfo` includes canonical local `path` and capacity/bounds diagnostics.
 - `PoolInfo` fields are additive-only within 1.x.

@@ -1373,3 +1373,15 @@ fn tail_waits_are_upper_bounds_clamped_to_the_server_lifetime() -> TestResult<()
     }
     Ok(())
 }
+
+#[test]
+fn ordinary_http_rejects_untrusted_origin_before_body_extraction() -> TestResult<()> {
+    let temp = tempfile::tempdir()?;
+    let server = TestServer::try_start(temp.path())?;
+    let response = ureq::post(&format!("{}/v0/pools", server.local_url))
+        .set("Origin", "https://untrusted.example")
+        .set("Content-Type", "application/json")
+        .send_string("{");
+    assert!(matches!(response, Err(ureq::Error::Status(403, _))));
+    Ok(())
+}

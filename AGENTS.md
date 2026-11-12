@@ -19,6 +19,14 @@ docs/
 ├── performance/consumer-latency.rs             — Read when reproducing the full-consumer latency measurements
 │
 │   Design audits and proposals
+├── proposals/implementation-distillation/      — Read when judging measured implementation simplification proposals
+├── proposals/implementation-distillation/implementation.md — Read when checking review decisions and validation of the two implemented follow-ups
+│   ├── README.md                              — Read when comparing the five recommendations and their limits
+│   ├── service-settings.md                    — Read when considering complete persisted service settings
+│   ├── message-path.md                        — Read when evaluating message models or tag-only binary filtering
+│   ├── browser-state.md                       — Read when evaluating shared browser subscription state
+│   ├── ordered-follow.md                      — Read when evaluating shared local and remote follow processing
+│   └── http-handlers.md                       — Read when simplifying ordinary web-handler error propagation
 ├── proposals/cli-help-system.md               — CLI/help audit and reform model; read before redesigning command discovery
 ├── proposals/cli-surface.md                   — Proposed command surface; read when reviewing CLI naming, shared rules, or help
 ├── proposals/mcp-server.md                    — MCP design history; read when revisiting the MCP surface
