@@ -43,11 +43,13 @@ pub(super) fn run(mut args: TapArgs, context: &CliContext) -> Result<CommandResu
             .with_hint("Use `plasmite tap <pool> -- <command...>`."));
     }
     let durability = parse_durability(&args.durability)?;
-    let path = resolve_poolref(&args.pool, context.pool_dir())?;
+    let path = resolve_poolref(&args.pool, context.optional_pool_dir())?;
     let mut pool_handle = match Pool::open(&path) {
         Ok(pool_handle) => pool_handle,
         Err(err) if args.create && err.kind() == ErrorKind::NotFound => {
-            ensure_pool_dir(context.pool_dir())?;
+            if let Some(directory) = context.optional_pool_dir() {
+                ensure_pool_dir(directory)?;
+            }
             let size = args
                 .create_size
                 .as_deref()
@@ -495,7 +497,7 @@ mod tests {
                 pid_path.to_str().unwrap().into(), (capacity + 1).to_string()],
         };
         let context = CliContext::new(
-            temporary.path().to_path_buf(),
+            Some(temporary.path().to_path_buf()),
             crate::ColorMode::Never,
             crate::cli::output::OutputMode::Human,
         );

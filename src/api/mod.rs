@@ -30,4 +30,7 @@ pub use remote::{RemoteClient, RemoteLite3Frame, RemoteLite3Tail, RemotePool, Re
 pub use udp::{
     UdpClient, UdpEvent, UdpFollow, UdpFollowOptions, UdpFrame, UdpPool, UdpSkipReason, UdpStart,
 };
-pub use validation::{ValidationIssue, ValidationReport, ValidationStatus};
+pub use validation::{
+    ValidationIssue, ValidationMessageStats, ValidationObservation, ValidationReport,
+    ValidationStatus,
+};

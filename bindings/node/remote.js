@@ -9,7 +9,7 @@ Invariants: Tail streams are JSONL and exposed as async iterables.
 
 const { Readable } = require("node:stream");
 const readline = require("node:readline");
-const { messageFromEnvelope, parseMessageJson } = require("./message");
+const { messageFromEnvelope, parseMessageJson, normalizeMessageSeq } = require("./message");
 const { ERROR_KIND_VALUES, mapDurability, mapErrorKind } = require("./mappings");
 
 class RemoteError extends Error {
@@ -28,8 +28,8 @@ class RemoteError extends Error {
     this.kind = mapErrorKind(error && error.kind, ERROR_KIND_VALUES.Io);
     this.hint = error && error.hint ? error.hint : undefined;
     this.path = error && error.path ? error.path : undefined;
-    this.seq = error && error.seq !== undefined ? error.seq : undefined;
-    this.offset = error && error.offset !== undefined ? error.offset : undefined;
+    this.seq = error && error.seq !== undefined ? normalizeMessageSeq(error.seq) : undefined;
+    this.offset = error && error.offset !== undefined ? normalizeMessageSeq(error.offset) : undefined;
   }
 }
 
@@ -309,9 +309,9 @@ function buildUrl(baseUrl, segments) {
 async function parseRemoteError(response) {
   let payload = null;
   try {
-    payload = await response.json();
+    payload = parseMessageJson(await response.text(), "error");
   } catch (err) {
-    payload = null;
+    if (!(err instanceof SyntaxError)) throw err;
   }
   return new RemoteError(payload, response.status);
 }

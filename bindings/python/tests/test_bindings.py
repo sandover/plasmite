@@ -133,15 +133,47 @@ class BindingTests(unittest.TestCase):
             first.close()
             second.close()
 
+    @unittest.skipIf(os.name == "nt", "Unix account database policy")
+    def test_default_directory_uses_account_for_invalid_home(self) -> None:
+        import pwd
+        account_home = pwd.getpwuid(os.getuid()).pw_dir
+        for value in [None, "", "relative", "/tmp/home space 東京"]:
+            with mock.patch.dict(os.environ, {}, clear=False):
+                if value is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = value
+                expected = value if value and os.path.isabs(value) else account_home
+                self.assertEqual(plasmite.default_pool_dir(), os.path.join(expected, ".plasmite", "pools"))
+        with mock.patch.dict(os.environ, {"HOME": "relative"}), mock.patch("pwd.getpwuid", side_effect=KeyError):
+            with self.assertRaisesRegex(ValueError, "explicit pool directory"):
+                plasmite.default_pool_dir()
+            client = Client(str(self.pool_dir))
+            client.close()
+
+    @unittest.skipUnless(os.name == "nt", "Windows profile-directory policy")
+    def test_default_directory_uses_profile_for_invalid_userprofile(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("USERPROFILE", None)
+            account_directory = plasmite.default_pool_dir()
+            self.assertTrue(os.path.isabs(account_directory))
+            self.assertTrue(account_directory.endswith(os.path.join(".plasmite", "pools")))
+            for value in ["", "relative"]:
+                os.environ["USERPROFILE"] = value
+                self.assertEqual(plasmite.default_pool_dir(), account_directory)
+            home = str(self.temp / "home space 東京")
+            os.environ["USERPROFILE"] = home
+            self.assertEqual(plasmite.default_pool_dir(), os.path.join(home, ".plasmite", "pools"))
+
     def test_default_client_creates_pool_dir_in_fresh_home(self) -> None:
         import tempfile
 
-        home = Path(tempfile.mkdtemp(prefix="plasmite-py-home-"))
+        home = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="plasmite-py-home-")))
         expected_pool_dir = home / ".plasmite" / "pools"
         expected_pool_path = expected_pool_dir / "work.plasmite"
         self.assertFalse(expected_pool_dir.exists())
 
-        with mock.patch.dict(os.environ, {"HOME": str(home)}, clear=False):
+        with mock.patch.dict(os.environ, {"USERPROFILE" if os.name == "nt" else "HOME": str(home)}, clear=False):
             client = Client()
             pool = client.pool("work", TEST_POOL_SIZE_BYTES)
             msg = pool.append({"kind": "one"}, ["alpha"])

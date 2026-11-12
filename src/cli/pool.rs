@@ -22,7 +22,7 @@ use std::collections::HashSet;
 use std::io::{self, IsTerminal};
 
 pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandResult, Error> {
-    let pool_dir = context.pool_dir();
+    let pool_dir = context.optional_pool_dir();
     let output_mode = context.output_mode();
     match command {
         PoolCommand::Create {
@@ -39,7 +39,7 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                     .with_message("pool create accepts local pool names or paths only")
                     .with_hint("Create a pool on the server with its local CLI."));
             }
-            let client = LocalClient::new().with_pool_dir(pool_dir);
+            let client = LocalClient::new();
             let size = size
                 .as_deref()
                 .map(parse_size)
@@ -70,7 +70,9 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                         .with_hint("Choose a different name or remove the existing pool file."));
                 }
             }
-            ensure_pool_dir(pool_dir)?;
+            if let Some(directory) = pool_dir {
+                ensure_pool_dir(directory)?;
+            }
             let mut results = Vec::new();
             for (name, path) in names.into_iter().zip(paths) {
                 let pool_ref = PoolRef::path(path);
@@ -87,7 +89,7 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
         PoolCommand::Info { name, .. } => {
             let info = match resolve_pool_target(&name, pool_dir)? {
                 PoolTarget::LocalPath(path) => {
-                    let client = LocalClient::new().with_pool_dir(pool_dir);
+                    let client = LocalClient::new();
                     client.pool_info(&PoolRef::path(path)).map_err(|err| {
                         if err.kind() == ErrorKind::NotFound {
                             let base = Error::new(ErrorKind::NotFound).with_message("not found");
@@ -113,7 +115,7 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
             if names.iter().any(|name| name.starts_with("udp://")) {
                 return Err(super::support::udp_unsupported());
             }
-            let client = LocalClient::new().with_pool_dir(pool_dir);
+            let client = LocalClient::new();
             let mut deleted = Vec::new();
             let mut failed = Vec::new();
             let mut table_rows = Vec::new();
@@ -154,7 +156,7 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
 
                 match result {
                     Ok(path) => {
-                        let display_path = short_display_path(path.as_path(), Some(pool_dir));
+                        let display_path = short_display_path(path.as_path(), pool_dir);
                         deleted.push(json!({
                             "pool": name,
                             "path": path.display().to_string(),
@@ -173,7 +175,7 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                         }
                         let display_path = err
                             .path()
-                            .map(|path| short_display_path(path, Some(pool_dir)))
+                            .map(|path| short_display_path(path, pool_dir))
                             .unwrap_or_else(|| "-".to_string());
                         let detail = err.message().unwrap_or("error").to_string();
                         failed.push(json!({
@@ -235,7 +237,9 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                                 super::output::write_stdout(
                                     format!(
                                         "  Pool directory: {}\n",
-                                        display_pool_dir_for_humans(pool_dir)
+                                        pool_dir.map(display_pool_dir_for_humans).unwrap_or_else(
+                                            || "not selected (explicit pool path)".to_string()
+                                        )
                                     )
                                     .as_bytes(),
                                 )?;
@@ -260,7 +264,9 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                                 super::output::write_stdout(
                                     format!(
                                         "  Pool directory: {}\n",
-                                        display_pool_dir_for_humans(pool_dir)
+                                        pool_dir.map(display_pool_dir_for_humans).unwrap_or_else(
+                                            || "not selected (explicit pool path)".to_string()
+                                        )
                                     )
                                     .as_bytes(),
                                 )?;
@@ -284,7 +290,9 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                     super::output::write_stdout(
                         format!(
                             "  Pool directory: {}\n",
-                            display_pool_dir_for_humans(pool_dir)
+                            pool_dir
+                                .map(display_pool_dir_for_humans)
+                                .unwrap_or_else(|| "not selected (explicit pool path)".to_string())
                         )
                         .as_bytes(),
                     )?;
@@ -315,7 +323,9 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                     super::output::write_stdout(
                         format!(
                             "  Pool directory: {}\n",
-                            display_pool_dir_for_humans(pool_dir)
+                            pool_dir
+                                .map(display_pool_dir_for_humans)
+                                .unwrap_or_else(|| "not selected (explicit pool path)".to_string())
                         )
                         .as_bytes(),
                     )?;
@@ -359,8 +369,8 @@ pub(super) fn run(command: PoolCommand, context: &CliContext) -> Result<CommandR
                     pools
                 }
                 None => {
-                    let client = LocalClient::new().with_pool_dir(pool_dir);
-                    list_pools(pool_dir, &client)?
+                    let client = LocalClient::new();
+                    list_pools(context.pool_dir()?, &client)?
                 }
             };
             if output_mode.is_structured() {

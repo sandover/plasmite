@@ -143,6 +143,10 @@ fn remote_append_get_tail_lite3() -> TestResult<()> {
         Err(err) => return Err(format!("get_lite3 failed: {err}").into()),
     };
     assert_eq!(fetched, payload);
+    let frame = pool.get_lite3_frame(seq)?;
+    assert_eq!(frame.seq, seq);
+    assert_eq!(frame.payload, payload);
+    assert_eq!(frame.timestamp_ns, pool.get_message(seq)?.timestamp_ns()?);
 
     let options = TailOptions {
         since_seq: Some(seq),
@@ -963,6 +967,8 @@ fn local_ui_events_stream_sends_sse() -> TestResult<()> {
     assert_eq!(response.status(), 200);
     assert_eq!(response.header("content-type"), Some("text/event-stream"));
     let body = response.into_string()?;
+    assert!(body.contains("event: pool"));
+    assert!(body.contains("\"incarnation\":"));
     assert!(body.contains("event: message"));
     assert!(body.contains("\"seq\":1"));
     Ok(())
@@ -994,8 +1000,9 @@ fn local_ui_tail_reads_reported_oldest_after_small_pool_wrap() -> TestResult<()>
     let body = response.into_string()?;
     assert!(body.contains("event: message"), "{body}");
     let data = body
-        .lines()
-        .find_map(|line| line.strip_prefix("data: "))
+        .split("event: message\n")
+        .nth(1)
+        .and_then(|event| event.lines().find_map(|line| line.strip_prefix("data: ")))
         .expect("message data");
     let message: Value = serde_json::from_str(data)?;
     assert_eq!(message["seq"], oldest);
@@ -1339,7 +1346,13 @@ fn tail_waits_are_upper_bounds_clamped_to_the_server_lifetime() -> TestResult<()
             let response = ureq::get(&url).timeout(Duration::from_secs(3)).call()?;
             let mut bytes = Vec::new();
             response.into_reader().read_to_end(&mut bytes)?;
-            assert!(bytes.is_empty(), "quiet pool: {route}");
+            if route == "events" {
+                let body = String::from_utf8(bytes)?;
+                assert!(!body.contains("event: message"), "quiet UI pool");
+                assert!(!body.contains("event: error"), "{body}");
+            } else {
+                assert!(bytes.is_empty(), "quiet pool: {route}");
+            }
             let elapsed = began.elapsed();
             if matches!(requested, None | Some("18446744073709551615")) {
                 assert!(

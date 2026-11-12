@@ -989,6 +989,12 @@ Invariants: Message data enters the DOM as text.
         // Takes one pool snapshot: sizes each ring once, counts new messages since
         // the last snapshot, then lays out and draws.
         function showPools(payload) {
+          if (payload.available === false) {
+            setStatus("Pool list unavailable", true);
+            $("map-error").textContent = "Showing the last known pools. " + (payload.error || "Could not read the pool directory.");
+            return;
+          }
+          const prior = currentPool();
           const pools = (Array.isArray(payload.pools) ? payload.pools : []).slice().sort((a, b) => a.name.localeCompare(b.name));
           const inner = sharedInner(pools);
           const names = new Set(pools.map((pool) => pool.name));
@@ -1002,6 +1008,10 @@ Invariants: Message data enters the DOM as text.
           const arrived = pools.filter((pool) => before.get(pool.name) != null && pool.bounds && pool.bounds.newest > before.get(pool.name));
           state.pools = pools;
           if (state.selected && !currentPool()) closePeek();
+          else if (prior && currentPool()?.incarnation !== prior.incarnation) {
+            openPeek(prior.name);
+            showNotice("This pool was replaced. Showing its retained messages.");
+          }
           showPeekSummary();
           if (topology() !== state.topology) relayout();
           updateCards();
@@ -1014,6 +1024,7 @@ Invariants: Message data enters the DOM as text.
           }
           setStatus(pools.length + (pools.length === 1 ? " pool" : " pools"));
           $("map-error").textContent = "";
+          if (state.selected && !state.stopReader && cursor(state.nextSeq) != null) startReader(state.selected);
           if (state.requested) {
             const requested = state.requested;
             state.requested = null;
@@ -1032,8 +1043,9 @@ Invariants: Message data enters the DOM as text.
               return response.status !== 403 && response.status !== 404;
             },
             onEvent(event) {
+              if (controller.signal.aborted) return false;
               if (event.name === "error") throw new Error(event.data.error?.message || "Stream error");
-              try { onEvent(event); } catch (error) { console.error(error); }
+              return onEvent(event);
             },
           }).finally(onEnd);
           return () => controller.abort();
@@ -1063,7 +1075,24 @@ Invariants: Message data enters the DOM as text.
             const query = new URLSearchParams({ gap_policy: "continue" });
             if (state.nextSeq != null) query.set("since_seq", cursor(state.nextSeq));
             return "/v0/ui/pools/" + encodeURIComponent(name) + "/events?" + query;
-          }, (event) => { if (event.name === "message") addMessage(event.data); }, {
+          }, (event) => {
+            if (event.name === "pool") {
+              const pool = currentPool();
+              if (!pool || pool.name !== name) return false;
+              if (pool.incarnation !== event.data.incarnation) {
+                Object.assign(pool, event.data, { ring: null });
+                state.spotSeq = null;
+                hover(null);
+                state.nextSeq = tailStart(event.data.bounds || {}, maxMessages);
+                messages.replaceChildren();
+                showPeekSummary();
+                updateCards();
+                showNotice("This pool was replaced. Showing its retained messages.");
+                throw new Error("Pool replaced");
+              }
+            }
+            if (event.name === "message") addMessage(event.data);
+          }, {
             onEnd: () => { if (state.stopReader === stop) state.stopReader = null; },
           });
           state.stopReader = stop;
@@ -1289,7 +1318,7 @@ Invariants: Message data enters the DOM as text.
         // A hidden tab does no work. Its first snapshot back brings the map current.
         document.addEventListener("visibilitychange", () => {
           if (document.visibilityState === "visible") { startList(); refreshActivity(); }
-          else { stopList(); stopActivity(); }
+          else { stopList(); stopReader(); stopActivity(); }
         });
 
         function showError(error) {

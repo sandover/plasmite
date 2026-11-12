@@ -79,7 +79,7 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
         ready: None,
         stop: None,
     };
-    let target = resolve_pool_target(&args.pool, context.pool_dir())?;
+    let target = resolve_pool_target(&args.pool, context.optional_pool_dir())?;
     match target {
         PoolTarget::LocalPath(path) => {
             if let Some(speed) = args.replay {
@@ -104,7 +104,9 @@ pub(super) fn follow(args: FollowArgs, context: &CliContext) -> Result<CommandRe
             let pool_handle = match Pool::open(&path) {
                 Ok(pool_handle) => pool_handle,
                 Err(err) if args.create && err.kind() == ErrorKind::NotFound => {
-                    ensure_pool_dir(context.pool_dir())?;
+                    if let Some(directory) = context.optional_pool_dir() {
+                        ensure_pool_dir(directory)?;
+                    }
                     Pool::create(&path, PoolOptions::new(DEFAULT_POOL_SIZE))?
                 }
                 Err(err) => {
@@ -193,12 +195,14 @@ pub(super) fn duplex(args: DuplexArgs, context: &CliContext) -> Result<CommandRe
     }
     let (event_tx, event_rx) = mpsc::channel();
     let color_mode = context.color_mode();
-    match resolve_pool_target(&args.pool, context.pool_dir())? {
+    match resolve_pool_target(&args.pool, context.optional_pool_dir())? {
         PoolTarget::LocalPath(path) => {
             let follow_pool_handle = match Pool::open(&path) {
                 Ok(pool) => pool,
                 Err(err) if args.create && err.kind() == ErrorKind::NotFound => {
-                    ensure_pool_dir(context.pool_dir())?;
+                    if let Some(directory) = context.optional_pool_dir() {
+                        ensure_pool_dir(directory)?;
+                    }
                     Pool::create(&path, PoolOptions::new(DEFAULT_POOL_SIZE))?
                 }
                 Err(err) => return Err(add_missing_pool_create_hint(err)),

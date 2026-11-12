@@ -157,7 +157,10 @@ recipe has been removed.
 For a server that lasts only as long as a command, use
 `just serve-with '<command>'`; it stops its own server when the command ends.
 Both developer recipes use the fixed local port `9009` and report a startup
-failure if another process already owns it.
+failure if another process already owns it. They wait up to ten seconds for the
+server's atomic ready file, which it writes after binding its listeners. The
+command starts only after readiness. Early exit or timeout reports the server
+log and cleans up the owned process and readiness scratch directory.
 
 For a repeatable review of command help, human output, explicit JSON, finite
 history, and recovery errors, run:
@@ -315,6 +318,14 @@ gh workflow run release-publish.yml -f release_tag=<vX.Y.Z> -f rehearsal=false
 ```
 
 If you need to force a specific build run (for example, during incident recovery), you can still pass `build_run_id` instead of `release_tag`.
+
+The publish workflow calls `scripts/resolve_release_build.sh REPOSITORY RUN_ID TAG REHEARSAL`.
+Pass an empty string for either `RUN_ID` or `TAG`; supply exactly one. The script
+searches at most forty recent runs for a tag, then validates the selected build's
+metadata against the tag's current remote commit. It emits `build_run_id`, `tag`,
+`version`, `source_sha`, and `rehearsal` as `key=value` lines only after all checks
+pass. It never publishes. Run `python3 scripts/test_release_build.py` for offline
+selection and provenance fixtures.
 
 ## Performance monitoring policy
 

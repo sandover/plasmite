@@ -25,7 +25,11 @@ pub struct Lite3Buf {
 
 impl Lite3Buf {
     pub fn from_json_str(json: &str) -> Result<Self, Error> {
-        let mut buf_len = json.len().saturating_mul(2).max(256);
+        Self::from_json_str_with_limit(json, MAX_LITE3_BUF)
+    }
+
+    fn from_json_str_with_limit(json: &str, max_bytes: usize) -> Result<Self, Error> {
+        let mut buf_len = json.len().saturating_mul(2).max(256).min(max_bytes);
         let json_cstr = CString::new(json).map_err(|err| {
             Error::new(ErrorKind::Usage)
                 .with_message("json contains null")
@@ -33,12 +37,6 @@ impl Lite3Buf {
         })?;
 
         loop {
-            if buf_len > MAX_LITE3_BUF {
-                return Err(
-                    Error::new(ErrorKind::Usage).with_message("lite3 buffer exceeded max size")
-                );
-            }
-
             let mut buf = vec![0u8; buf_len];
             let mut out_len: usize = 0;
             let ret = unsafe {
@@ -58,7 +56,12 @@ impl Lite3Buf {
 
             let err_no = unsafe { sys::plasmite_lite3_last_errno() };
             if err_no == libc::ENOBUFS {
-                buf_len = buf_len.saturating_mul(2);
+                if buf_len == max_bytes {
+                    return Err(
+                        Error::new(ErrorKind::Usage).with_message("lite3 buffer exceeded max size")
+                    );
+                }
+                buf_len = buf_len.saturating_mul(2).min(max_bytes);
                 continue;
             }
 
@@ -428,6 +431,32 @@ pub(crate) fn json_counter_snapshot() -> (usize, usize) {
 mod tests {
     use super::{Lite3Buf, Lite3DocRef, encode_message, validate_bytes};
     use serde_json::json;
+
+    #[test]
+    fn encoding_tries_the_exact_limit_before_rejecting() {
+        let limit = 64 * 1024;
+        let overestimated = format!(r#"{{"x":"{}"}}"#, "a".repeat(40_000));
+        assert!(overestimated.len() * 2 > limit);
+        assert!(Lite3Buf::from_json_str_with_limit(&overestimated, limit).is_ok());
+        let expanded = serde_json::to_string(&(1000..2000).collect::<Vec<_>>()).unwrap();
+        let encoded = Lite3Buf::from_json_str_with_limit(&expanded, limit).unwrap();
+        assert!(encoded.len() > expanded.len() * 2 * 4);
+        let oversized = format!(r#"{{"x":"{}"}}"#, "a".repeat(limit));
+        assert!(
+            Lite3Buf::from_json_str_with_limit(&oversized, limit)
+                .unwrap_err()
+                .message()
+                .unwrap()
+                .contains("exceeded max")
+        );
+        assert!(
+            Lite3Buf::from_json_str_with_limit("{", limit)
+                .unwrap_err()
+                .message()
+                .unwrap()
+                .contains("failed to encode")
+        );
+    }
 
     #[test]
     fn round_trip_json() {

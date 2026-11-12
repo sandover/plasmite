@@ -318,7 +318,7 @@ fn follow_pool(
         terminal: false,
         retention_gap: false,
     };
-    let path = crate::pool_paths::resolve_named_pool_path(&sub.selection.pool, client.pool_dir())
+    let path = crate::pool_paths::resolve_named_pool_path(&sub.selection.pool, client.pool_dir()?)
         .map_err(|_| Error::new(ErrorKind::Usage).with_message("invalid UDP pool name"))?;
     let mut notify = plasmite::api::notify::open_for_path(&path);
     pool.check_current_path()?;
@@ -556,7 +556,8 @@ pub(crate) async fn run(
             }
             continue;
         };
-        if crate::pool_paths::resolve_named_pool_path(&selection.pool, client.pool_dir()).is_err() {
+        if crate::pool_paths::resolve_named_pool_path(&selection.pool, client.pool_dir()?).is_err()
+        {
             continue;
         }
         let Some(cookie) = request.cookie else {

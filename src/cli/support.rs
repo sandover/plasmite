@@ -17,14 +17,21 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use url::Url;
 
-pub(crate) fn resolve_poolref(input: &str, pool_dir: &Path) -> Result<PathBuf, Error> {
+pub(crate) fn missing_pool_dir() -> Error {
+    Error::new(ErrorKind::Usage)
+        .with_message("cannot determine the user home directory")
+        .with_hint("Supply --dir PATH to select a pool directory.")
+}
+
+pub(crate) fn resolve_poolref(input: &str, pool_dir: Option<&Path>) -> Result<PathBuf, Error> {
     if input.starts_with("udp://") {
         return Err(udp_unsupported());
     }
     if input.chars().any(std::path::is_separator) {
         return Ok(PathBuf::from(input));
     }
-    resolve_named_pool_path(input, pool_dir).map_err(map_pool_name_resolve_error)
+    resolve_named_pool_path(input, pool_dir.ok_or_else(missing_pool_dir)?)
+        .map_err(map_pool_name_resolve_error)
 }
 
 pub(crate) fn map_pool_name_resolve_error(err: PoolNameResolveError) -> Error {
@@ -37,7 +44,10 @@ pub(crate) fn map_pool_name_resolve_error(err: PoolNameResolveError) -> Error {
     }
 }
 
-pub(crate) fn resolve_pool_target(input: &str, pool_dir: &Path) -> Result<PoolTarget, Error> {
+pub(crate) fn resolve_pool_target(
+    input: &str,
+    pool_dir: Option<&Path>,
+) -> Result<PoolTarget, Error> {
     if input.starts_with("http://") || input.starts_with("https://") {
         return parse_remote_pool_target(input);
     }

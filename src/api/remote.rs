@@ -538,6 +538,58 @@ impl RemotePool {
         )
     }
 
+    /// Fetch payload and identity from one stored frame on current servers.
+    /// Older servers without timestamp metadata require an extra JSON lookup.
+    pub fn get_lite3_frame(&self, seq: u64) -> ApiResult<RemoteLite3Frame> {
+        let url = build_url(
+            &self.base_url,
+            &[
+                "v0",
+                "pools",
+                &self.pool,
+                "messages",
+                &seq.to_string(),
+                "lite3",
+            ],
+        )?;
+        let response = request_result(
+            self.client
+                .request("GET", &url)?
+                .set("Accept", "application/x-plasmite-lite3")
+                .call(),
+        )?;
+        let returned_seq = parse_frame_header(response.header("plasmite-seq"), "plasmite-seq")?;
+        if returned_seq != seq {
+            return Err(Error::new(ErrorKind::Corrupt)
+                .with_message("remote Lite3 frame sequence does not match request")
+                .with_seq(seq));
+        }
+        let timestamp_ns = response
+            .header("plasmite-timestamp-ns")
+            .map(|value| parse_frame_header(Some(value), "plasmite-timestamp-ns"))
+            .transpose()?;
+        let payload = read_lite3_response(response.into_reader(), MAX_REMOTE_RESPONSE_BYTES)?;
+        let timestamp_ns = match timestamp_ns {
+            Some(timestamp_ns) => timestamp_ns,
+            // Legacy servers do not carry frame time with the bytes. This extra
+            // read preserves interoperability but cannot provide a single observation.
+            None => {
+                let message = self.get_message(seq)?;
+                if message.seq != seq {
+                    return Err(Error::new(ErrorKind::Corrupt)
+                        .with_message("remote message sequence does not match request")
+                        .with_seq(seq));
+                }
+                message.timestamp_ns()?
+            }
+        };
+        Ok(RemoteLite3Frame {
+            seq: returned_seq,
+            timestamp_ns,
+            payload,
+        })
+    }
+
     pub fn tail(&self, options: TailOptions) -> ApiResult<RemoteTail> {
         Ok(RemoteTail {
             reader: Some(self.open_tail("tail", "application/json", options)?),
@@ -819,6 +871,16 @@ where
     })
 }
 
+fn parse_frame_header(value: Option<&str>, name: &str) -> ApiResult<u64> {
+    value
+        .filter(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+        .and_then(|value| value.parse().ok())
+        .ok_or_else(|| {
+            Error::new(ErrorKind::Corrupt)
+                .with_message(format!("missing or invalid remote {name} header"))
+        })
+}
+
 fn read_lite3_response(reader: impl Read, max_bytes: usize) -> ApiResult<Vec<u8>> {
     let mut out = Vec::new();
     reader
@@ -989,6 +1051,115 @@ mod tests {
     use crate::core::error::ErrorKind;
     use crate::core::pool::PoolOptions;
     use std::io::{BufReader, Cursor, Read};
+
+    #[test]
+    fn point_frame_metadata_is_exact_and_legacy_fallback_is_explicit() {
+        use std::io::Write;
+        use std::net::TcpListener;
+        use std::time::{Duration, Instant};
+        let cases = [
+            (
+                "plasmite-seq: 9007199254740993\r\nplasmite-timestamp-ns: 18446744073709551615\r\n",
+                None,
+                true,
+            ),
+            ("plasmite-seq: 9007199254740993\r\n", Some(200), true),
+            ("plasmite-seq: 9007199254740993\r\n", Some(404), false),
+            (
+                "plasmite-seq: 9007199254740993\r\nplasmite-timestamp-ns: +1\r\n",
+                None,
+                false,
+            ),
+            ("plasmite-timestamp-ns: 1\r\n", None, false),
+            (
+                "plasmite-seq: 9007199254740992\r\nplasmite-timestamp-ns: 1\r\n",
+                None,
+                false,
+            ),
+        ];
+        for (headers, legacy, succeeds) in cases {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let client = RemoteClient::new(base).unwrap();
+            let pool = super::RemotePool {
+                base_url: client.inner.base_url.clone(),
+                client,
+                pool: "test".into(),
+                pool_ref: PoolRef::name("test"),
+            };
+            let server = std::thread::spawn(move || {
+                let mut requests = Vec::new();
+                for response_index in 0..=usize::from(legacy.is_some()) {
+                    let deadline = Instant::now() + Duration::from_secs(3);
+                    let mut socket = loop {
+                        match listener.accept() {
+                            Ok((socket, _)) => break socket,
+                            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                                assert!(
+                                    Instant::now() < deadline,
+                                    "expected request did not arrive"
+                                );
+                                std::thread::sleep(Duration::from_millis(1));
+                            }
+                            Err(err) => panic!("{err}"),
+                        }
+                    };
+                    socket.set_nonblocking(false).unwrap();
+                    socket
+                        .set_read_timeout(Some(Duration::from_secs(3)))
+                        .unwrap();
+                    let mut request = Vec::new();
+                    while !request.ends_with(b"\r\n\r\n") {
+                        let mut byte = [0];
+                        socket.read_exact(&mut byte).unwrap();
+                        request.push(byte[0]);
+                    }
+                    requests.push(
+                        String::from_utf8(request)
+                            .unwrap()
+                            .lines()
+                            .next()
+                            .unwrap()
+                            .to_string(),
+                    );
+                    let (status, metadata, body) = if response_index == 0 {
+                        (200, headers, "bytes")
+                    } else if legacy == Some(200) {
+                        (
+                            200,
+                            "Content-Type: application/json\r\n",
+                            r#"{"message":{"seq":9007199254740993,"time":"1970-01-01T00:00:00.000000001Z","meta":{"tags":[]},"data":{}}}"#,
+                        )
+                    } else {
+                        (
+                            404,
+                            "Content-Type: application/json\r\n",
+                            r#"{"error":{"kind":"NotFound","message":"removed"}}"#,
+                        )
+                    };
+                    write!(socket, "HTTP/1.1 {status} Test\r\n{metadata}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                }
+                requests
+            });
+            let result = pool.get_lite3_frame(9_007_199_254_740_993);
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), 1 + usize::from(legacy.is_some()));
+            assert!(requests[0].ends_with("/lite3 HTTP/1.1"));
+            assert_eq!(result.is_ok(), succeeds);
+            if let Ok(frame) = result {
+                assert_eq!(frame.seq, 9_007_199_254_740_993);
+                assert_eq!(frame.payload, b"bytes");
+                assert_eq!(
+                    frame.timestamp_ns,
+                    if legacy.is_some() { 1 } else { u64::MAX }
+                );
+            }
+        }
+        for value in ["", "-1", "1.0", "18446744073709551616", " 1"] {
+            assert!(super::parse_frame_header(Some(value), "test").is_err());
+        }
+    }
 
     #[test]
     fn normalize_base_url_strips_path() {

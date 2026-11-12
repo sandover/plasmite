@@ -471,7 +471,7 @@ async fn prepare_server_with_access(
         .route("/v0/pools/:pool/tail_lite3", get(tail_lite3))
         .route("/v0/ui/pools", get(ui_list_pools))
         .route("/v0/ui/pools/stream", get(ui_pool_stream))
-        .route("/v0/ui/pools/:pool/info", get(pool_info))
+        .route("/v0/ui/pools/:pool/info", get(ui_pool_info))
         .route("/v0/ui/pools/:pool/events", get(ui_events))
         .route("/v0/ui/activity", get(ui_activity))
         .layer(middleware::from_fn_with_state(
@@ -1087,14 +1087,17 @@ async fn access_status(State(state): State<Arc<AppState>>) -> Response {
             Error::new(ErrorKind::Permission).with_message("access administration is local only"),
         );
     }
-    let pool_dir_identity = match crate::serve_registry::directory_identity(state.client.pool_dir())
-    {
+    let directory = match state.client.pool_dir() {
+        Ok(directory) => directory,
+        Err(err) => return error_response(err),
+    };
+    let pool_dir_identity = match crate::serve_registry::directory_identity(directory) {
         Ok(identity) => identity,
         Err(err) => return error_response(err),
     };
     // The pool directory and this machine's addresses let the page show the
     // exact command to start sharing.
-    let pool_dir = state.client.pool_dir().display().to_string();
+    let pool_dir = directory.display().to_string();
     let addresses = share_addresses::candidates();
     let Some(access) = &state.secure_access else {
         return json_response(json!({
@@ -1803,7 +1806,47 @@ fn ring_json(pool: &Pool) -> Value {
     }
 }
 
-type UiPoolCache = BTreeMap<PathBuf, (PoolInfo, Value)>;
+struct UiCachedPool {
+    info: PoolInfo,
+    incarnation: String,
+    ring: Value,
+    // Keep the native file ID alive until the pool leaves the watched catalog.
+    _guard: plasmite::api::PoolPathGuard,
+}
+
+type UiPoolCache = BTreeMap<PathBuf, UiCachedPool>;
+
+fn ui_pool_info_json(name: &str, pool: &Pool) -> Result<Value, Error> {
+    let mut info = pool_info_json(name, &pool.info()?);
+    info["incarnation"] = json!(pool.incarnation()?);
+    Ok(info)
+}
+
+async fn ui_pool_info(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    AxumPath(name): AxumPath<String>,
+) -> Response {
+    let grant = match authorize(&headers, &state) {
+        Ok(grant) => grant,
+        Err(err) => return error_response(err),
+    };
+    let pool_ref = match pool_ref_from_request(&name) {
+        Ok(pool_ref) => pool_ref,
+        Err(err) => return error_response(err),
+    };
+    let client = state.client.clone();
+    match state
+        .storage_executor
+        .run_authorized(grant, move || {
+            ui_pool_info_json(&name, &client.open_pool(&pool_ref)?)
+        })
+        .await
+    {
+        Ok(info) => json_response(json!({ "pool": info })),
+        Err(err) => error_response(err),
+    }
+}
 
 /// Pool info without message ages. Ages grow on every read, so comparing them
 /// would count every pool that holds messages as changed on every scan.
@@ -1824,23 +1867,39 @@ fn ui_pool_snapshot(client: &LocalClient, cache: &mut UiPoolCache) -> Result<(Va
     let mut next = UiPoolCache::new();
     let mut pools = Vec::with_capacity(infos.len());
     let mut changed = infos.len() != cache.len();
-    for info in infos {
+    for listed in infos {
+        // Read metadata and layout from the same opened file, even if the name
+        // changed after list_pools opened it during the directory scan.
+        let opened = Pool::open(&listed.path)?;
+        let info = opened.info()?;
+        let incarnation = opened.incarnation()?;
         let ring = match cache.get(&info.path) {
-            Some((prior, ring)) if settled(prior) == settled(&info) => ring.clone(),
+            Some(prior)
+                if prior.incarnation == incarnation && settled(&prior.info) == settled(&info) =>
+            {
+                prior.ring.clone()
+            }
             _ => {
                 changed = true;
-                Pool::open(&info.path)
-                    .map(|pool| ring_json(&pool))
-                    .unwrap_or(Value::Null)
+                ring_json(&opened)
             }
         };
         let mut pool = pool_info_json(&pool_file_name(&info.path), &info);
+        pool["incarnation"] = json!(incarnation);
         pool["ring"] = ring.clone();
-        next.insert(info.path.clone(), (info, ring));
+        next.insert(
+            info.path.clone(),
+            UiCachedPool {
+                info,
+                incarnation,
+                ring,
+                _guard: opened.into_path_guard(),
+            },
+        );
         pools.push(pool);
     }
     *cache = next;
-    Ok((json!({ "pools": pools }), changed))
+    Ok((json!({ "pools": pools, "available": true }), changed))
 }
 
 /// The pool list plus each pool's ring layout, so the map can draw each message where it sits.
@@ -1989,8 +2048,25 @@ async fn watch_ui_pools(state: Arc<AppState>, tx: watch::Sender<Value>, cache: U
             .storage_executor
             .run(move || ui_pool_snapshot(&client, &mut cache.lock().unwrap()))
             .await;
-        if let Ok((snapshot, true)) = result {
+        publish_ui_snapshot(&tx, result);
+    }
+}
+
+fn publish_ui_snapshot(tx: &watch::Sender<Value>, result: Result<(Value, bool), Error>) {
+    let was_unavailable = tx.borrow()["available"] == false;
+    match result {
+        Ok((snapshot, changed)) if changed || was_unavailable => {
             tx.send_replace(snapshot);
+        }
+        Ok(_) => {}
+        Err(err) => {
+            let mut stale = tx.borrow().clone();
+            stale["available"] = json!(false);
+            stale["error"] = json!(err.to_string());
+            let changed = *tx.borrow() != stale;
+            if changed {
+                tx.send_replace(stale);
+            }
         }
     }
 }
@@ -2146,23 +2222,27 @@ async fn get_lite3(
         .run_authorized(grant, move || {
             client.open_pool(&pool_ref).and_then(|pool| {
                 let frame = pool.get_lite3(seq)?;
-                let payload = frame.payload;
-                lite3::validate_bytes(&payload)?;
-                Ok(payload)
+                lite3::validate_bytes(&frame.payload)?;
+                Ok(frame)
             })
         })
         .await;
     match result {
-        Ok(payload) => {
-            let mut response = Response::new(Body::from(Bytes::copy_from_slice(&payload)));
+        Ok(frame) => {
+            let mut response = Response::new(Body::from(frame.payload));
             response.headers_mut().insert(
                 "content-type",
                 HeaderValue::from_static("application/x-plasmite-lite3"),
             );
             response.headers_mut().insert(
                 "plasmite-seq",
-                HeaderValue::from_str(&seq.to_string())
-                    .unwrap_or_else(|_| HeaderValue::from_static("0")),
+                HeaderValue::from_str(&frame.seq.to_string())
+                    .expect("decimal u64 is a valid header"),
+            );
+            response.headers_mut().insert(
+                "plasmite-timestamp-ns",
+                HeaderValue::from_str(&frame.timestamp_ns.to_string())
+                    .expect("decimal u64 is a valid header"),
             );
             response
                 .headers_mut()
@@ -2404,6 +2484,14 @@ fn stream_tail_bytes(
     grant: Option<&AccessGrant>,
     deadline: Instant,
 ) -> Result<(), Error> {
+    if encoding == TailStreamEncoding::Sse {
+        // Private UI streams identify the actual file opened for this reader.
+        let info = ui_pool_info_json(&pool_file_name(&pool.info()?.path), pool)?;
+        let encoded = Bytes::from(format!("event: pool\ndata: {}\n\n", info));
+        if !send_tail_result(tx, Ok(encoded), grant, deadline) {
+            return Ok(());
+        }
+    }
     // Admission, producer scheduling, reads, and backpressure share one budget.
     options.timeout = Some(deadline.saturating_duration_since(Instant::now()));
     match encoding {
@@ -2887,6 +2975,70 @@ mod tests {
         assert!(changed);
         assert_ne!(before, after);
         assert_eq!(after["pools"][0]["file_size"], 128 * 1024);
+    }
+
+    #[test]
+    fn pool_snapshot_invalidates_equal_summary_layout_on_replacement() {
+        use plasmite::api::{AppendOptions, Durability, Pool, PoolApiExt, PoolOptions, PoolRef};
+        let dir = tempfile::tempdir().unwrap();
+        let client = LocalClient::new().with_pool_dir(dir.path());
+        let name = PoolRef::name("same");
+        let path = dir.path().join("same.plasmite");
+        let mut cache = Default::default();
+        let write = |large_first: bool| {
+            let mut pool = Pool::create(&path, PoolOptions::new(64 * 1024)).unwrap();
+            for large in [large_first, !large_first] {
+                pool.append_json(
+                    &json!({"body": if large { "x".repeat(2000) } else { "x".into() }}),
+                    &[],
+                    AppendOptions::new(1_000_000_000, Durability::Fast),
+                )
+                .unwrap();
+            }
+            super::settled(&pool.info().unwrap())
+        };
+        let first_info = write(true);
+        let (before, _) = ui_pool_snapshot(&client, &mut cache).unwrap();
+        client.delete_pool(&name).unwrap();
+        let second_info = write(false);
+        assert_eq!(first_info, second_info);
+        let (after, changed) = ui_pool_snapshot(&client, &mut cache).unwrap();
+        assert!(changed);
+        assert_ne!(
+            before["pools"][0]["incarnation"],
+            after["pools"][0]["incarnation"]
+        );
+        assert_ne!(
+            before["pools"][0]["ring"]["frames"],
+            after["pools"][0]["ring"]["frames"]
+        );
+        let (_, unchanged) = ui_pool_snapshot(&client, &mut cache).unwrap();
+        assert!(!unchanged);
+        client.delete_pool(&name).unwrap();
+        let (empty, changed) = ui_pool_snapshot(&client, &mut cache).unwrap();
+        assert!(changed);
+        assert!(empty["pools"].as_array().unwrap().is_empty());
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn catalog_failure_marks_last_snapshot_stale_and_recovers_without_pool_changes() {
+        let good = json!({"available": true, "pools": [{"name": "events"}]});
+        let (tx, _rx) = tokio::sync::watch::channel(good.clone());
+        super::publish_ui_snapshot(
+            &tx,
+            Err(Error::new(ErrorKind::Io).with_message("directory unavailable")),
+        );
+        assert_eq!(tx.borrow()["available"], false);
+        assert_eq!(tx.borrow()["pools"], good["pools"]);
+        assert!(
+            tx.borrow()["error"]
+                .as_str()
+                .unwrap()
+                .contains("directory unavailable")
+        );
+        super::publish_ui_snapshot(&tx, Ok((good.clone(), false)));
+        assert_eq!(*tx.borrow(), good);
     }
 
     fn config() -> ServeConfig {

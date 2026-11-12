@@ -58,16 +58,26 @@ function sequenceFromJsonNumber(source) {
 // identity, then restore only the selected envelope's sequence after parsing.
 // Numbers in the user's data and unrelated response fields keep JSON semantics.
 function parseMessageJson(text, envelopeKey = null) {
-  const seqSources = new WeakMap();
+  const sources = new WeakMap();
   const parsed = JSON.parse(text, function (key, value, context) {
-    if (key === "seq" && typeof value === "number") {
-      seqSources.set(this, context.source);
+    if ((key === "seq" || key === "offset") && typeof value === "number") {
+      const fields = sources.get(this) || {};
+      fields[key] = context.source;
+      sources.set(this, fields);
     }
     return value;
   });
   const envelope = envelopeKey === null ? parsed : parsed?.[envelopeKey];
   if (envelope && typeof envelope === "object" && typeof envelope.seq === "number") {
-    envelope.seq = sequenceFromJsonNumber(seqSources.get(envelope));
+    envelope.seq = sequenceFromJsonNumber(sources.get(envelope).seq);
+  }
+  const error = parsed?.error;
+  if (error && typeof error === "object") {
+    for (const key of ["seq", "offset"]) {
+      if (typeof error[key] === "number") {
+        error[key] = sequenceFromJsonNumber(sources.get(error)[key]);
+      }
+    }
   }
   return parsed;
 }
@@ -147,4 +157,5 @@ module.exports = {
   messageFromEnvelope,
   parseMessage,
   parseMessageJson,
+  normalizeMessageSeq,
 };

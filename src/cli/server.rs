@@ -16,7 +16,7 @@ pub(super) fn run(
 ) -> Result<CommandResult, Error> {
     let output_mode = context.output_mode();
     match command {
-        None => crate::secure_serve::run(context.pool_dir(), &run)?,
+        None => crate::secure_serve::run(context.pool_dir()?, &run)?,
         Some(ServeSubcommand::Install {
             run,
             no_udp,
@@ -24,31 +24,31 @@ pub(super) fn run(
             ..
         }) => emit_action(
             "install",
-            serve_service::install(context.pool_dir(), &run, no_udp, no_udp_follow)?,
+            serve_service::install(context.pool_dir()?, &run, no_udp, no_udp_follow)?,
             output_mode,
         )?,
         Some(ServeSubcommand::Start { .. }) => emit_action(
             "start",
-            serve_service::control(context.pool_dir(), "start")?,
+            serve_service::control(context.pool_dir()?, "start")?,
             output_mode,
         )?,
         Some(ServeSubcommand::Stop { .. }) => emit_action(
             "stop",
-            serve_service::control(context.pool_dir(), "stop")?,
+            serve_service::control(context.pool_dir()?, "stop")?,
             output_mode,
         )?,
         Some(ServeSubcommand::Restart { .. }) => emit_action(
             "restart",
-            serve_service::control(context.pool_dir(), "restart")?,
+            serve_service::control(context.pool_dir()?, "restart")?,
             output_mode,
         )?,
         Some(ServeSubcommand::Uninstall { .. }) => emit_action(
             "uninstall",
-            serve_service::control(context.pool_dir(), "uninstall")?,
+            serve_service::control(context.pool_dir()?, "uninstall")?,
             output_mode,
         )?,
         Some(ServeSubcommand::Logs { tail, follow, .. }) => {
-            serve_service::logs(context.pool_dir(), tail.unwrap_or(50), follow, output_mode)?
+            serve_service::logs(context.pool_dir()?, tail.unwrap_or(50), follow, output_mode)?
         }
         Some(ServeSubcommand::Status { all: true, .. }) => {
             let (servers, errors) = serve_service::all()?;

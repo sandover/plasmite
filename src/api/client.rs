@@ -6,7 +6,10 @@
 #![allow(clippy::result_large_err)]
 
 use super::validation::validate_pool_state_report;
-use super::{ValidationIssue, ValidationReport};
+use super::{
+    ValidationIssue, ValidationMessageStats, ValidationObservation, ValidationReport,
+    ValidationStatus,
+};
 use crate::core::error::{Error, ErrorKind};
 use crate::core::pool::{Pool, PoolInfo, PoolOptions};
 use crate::pool_paths::{PoolNameResolveError, default_pool_dir, resolve_named_pool_path};
@@ -54,7 +57,7 @@ impl PoolRef {
 
 #[derive(Clone, Debug)]
 pub struct LocalClient {
-    pool_dir: PathBuf,
+    pool_dir: Option<PathBuf>,
 }
 
 impl LocalClient {
@@ -65,40 +68,55 @@ impl LocalClient {
     }
 
     pub fn with_pool_dir(mut self, pool_dir: impl Into<PathBuf>) -> Self {
-        self.pool_dir = pool_dir.into();
+        self.pool_dir = Some(pool_dir.into());
         self
     }
 
-    pub fn pool_dir(&self) -> &Path {
-        &self.pool_dir
+    /// Return the selected directory, or require an explicit directory when no home exists.
+    pub fn pool_dir(&self) -> ApiResult<&Path> {
+        self.pool_dir.as_deref().ok_or_else(|| {
+            Error::new(ErrorKind::Usage)
+                .with_message("cannot determine the user home directory")
+                .with_hint("Set an absolute home directory or supply an explicit pool directory.")
+        })
+    }
+
+    fn resolve_pool_path(&self, pool_ref: &PoolRef) -> ApiResult<PathBuf> {
+        match pool_ref {
+            PoolRef::Path(path) => Ok(path.clone()),
+            PoolRef::Uri(_) => Err(Error::new(ErrorKind::Usage)
+                .with_message("remote pool refs are not supported in v0")),
+            PoolRef::Name(_) => pool_ref.resolve_local_path(self.pool_dir()?),
+        }
     }
 
     pub fn create_pool(&self, pool_ref: &PoolRef, options: PoolOptions) -> ApiResult<PoolInfo> {
-        let path = pool_ref.resolve_local_path(&self.pool_dir)?;
+        let path = self.resolve_pool_path(pool_ref)?;
         let pool = Pool::create(&path, options)?;
         pool.info()
     }
 
     pub fn open_pool(&self, pool_ref: &PoolRef) -> ApiResult<Pool> {
-        let path = pool_ref.resolve_local_path(&self.pool_dir)?;
+        let path = self.resolve_pool_path(pool_ref)?;
         Pool::open(&path)
     }
 
     pub fn pool_info(&self, pool_ref: &PoolRef) -> ApiResult<PoolInfo> {
-        let path = pool_ref.resolve_local_path(&self.pool_dir)?;
+        let path = self.resolve_pool_path(pool_ref)?;
         let pool = Pool::open(&path)?;
         pool.info()
     }
 
     pub fn list_pools(&self) -> ApiResult<Vec<PoolInfo>> {
         let mut pools = Vec::new();
-        let entries = match std::fs::read_dir(&self.pool_dir) {
+        let pool_dir = self.pool_dir()?;
+        let entries = match std::fs::read_dir(pool_dir) {
             Ok(entries) => entries,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(pools),
             Err(err) => {
                 return Err(Error::new(map_io_error_kind(&err))
                     .with_message("failed to read pool directory")
-                    .with_path(&self.pool_dir)
+                    .with_path(pool_dir)
                     .with_source(err));
             }
         };
@@ -107,7 +125,7 @@ impl LocalClient {
             let entry = entry.map_err(|err| {
                 Error::new(ErrorKind::Io)
                     .with_message("failed to read pool directory entry")
-                    .with_path(&self.pool_dir)
+                    .with_path(pool_dir)
                     .with_source(err)
             })?;
             let path = entry.path();
@@ -127,12 +145,21 @@ impl LocalClient {
     }
 
     pub fn delete_pool(&self, pool_ref: &PoolRef) -> ApiResult<()> {
-        let path = pool_ref.resolve_local_path(&self.pool_dir)?;
+        let path = self.resolve_pool_path(pool_ref)?;
         crate::core::pool::delete_pool_file(&path)
     }
 
     pub fn validate_pool(&self, pool_ref: &PoolRef) -> ApiResult<ValidationReport> {
-        let path = pool_ref.resolve_local_path(&self.pool_dir)?;
+        Ok(self.validate_pool_observation(pool_ref)?.report)
+    }
+
+    /// Capture retained message facts under the validation scan's shared lock.
+    /// Later appends, deletion or replacement do not update this observation.
+    pub fn validate_pool_observation(
+        &self,
+        pool_ref: &PoolRef,
+    ) -> ApiResult<ValidationObservation> {
+        let path = self.resolve_pool_path(pool_ref)?;
         let pool = match Pool::open(&path) {
             Ok(pool) => pool,
             Err(err) if err.kind() == ErrorKind::Usage => {
@@ -153,7 +180,10 @@ impl LocalClient {
                 if let Some(hint) = err.hint() {
                     report.remediation_hints = vec![hint.to_string()];
                 }
-                return Ok(report.with_pool_ref(pool_ref.describe()));
+                return Ok(ValidationObservation {
+                    report: report.with_pool_ref(pool_ref.describe()),
+                    messages: None,
+                });
             }
             Err(err) => return Err(err),
         };
@@ -161,7 +191,25 @@ impl LocalClient {
         let header = pool.header_locked()?;
         let report = validate_pool_state_report(header, pool.mmap(), &path)
             .with_pool_ref(pool_ref.describe());
-        Ok(report)
+        let messages = if report.status == ValidationStatus::Ok {
+            let (oldest_seq, newest_seq, count) = if header.oldest_seq == 0 {
+                (None, None, 0)
+            } else {
+                (
+                    Some(header.oldest_seq),
+                    Some(header.newest_seq),
+                    header.newest_seq - header.oldest_seq + 1,
+                )
+            };
+            Some(ValidationMessageStats {
+                count,
+                oldest_seq,
+                newest_seq,
+            })
+        } else {
+            None
+        };
+        Ok(ValidationObservation { report, messages })
     }
 }
 
@@ -228,9 +276,39 @@ mod tests {
     }
 
     #[test]
+    fn missing_home_requires_directory_only_for_named_operations() {
+        let client = LocalClient { pool_dir: None };
+        assert_eq!(
+            client.list_pools().unwrap_err().kind(),
+            super::ErrorKind::Usage
+        );
+        assert!(
+            client
+                .resolve_pool_path(&super::PoolRef::name("work"))
+                .is_err()
+        );
+        assert_eq!(
+            client
+                .resolve_pool_path(&super::PoolRef::path("./work.plasmite"))
+                .unwrap(),
+            PathBuf::from("./work.plasmite")
+        );
+        assert_eq!(
+            client.with_pool_dir("./chosen").pool_dir().unwrap(),
+            std::path::Path::new("./chosen")
+        );
+    }
+
+    #[test]
     fn local_client_defaults_pool_dir() {
         let client = LocalClient::new();
-        assert!(client.pool_dir().to_string_lossy().contains(".plasmite"));
+        assert!(
+            client
+                .pool_dir()
+                .unwrap()
+                .to_string_lossy()
+                .contains(".plasmite")
+        );
     }
 
     #[test]

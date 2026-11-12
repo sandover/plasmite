@@ -250,12 +250,42 @@ _UINT64_MAX = (1 << 64) - 1
 
 
 def default_pool_dir() -> str:
-    # Compute lazily so tests/tools can override HOME in-process without re-importing.
-    # `expanduser("~")` consults HOME at call time on Unix.
-    return os.path.join(os.path.expanduser("~"), ".plasmite", "pools")
+    if os.name == "nt":
+        home = os.environ.get("USERPROFILE", "")
+        if not os.path.isabs(home):
+            import ctypes
+            import uuid
+            profile_id = ctypes.create_string_buffer(uuid.UUID("5e6c858f-0e22-4760-9afe-ea3317b67173").bytes_le)
+            directory = ctypes.c_void_p()
+            shell = ctypes.WinDLL("shell32")
+            shell.SHGetKnownFolderPath.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+            shell.SHGetKnownFolderPath.restype = ctypes.c_long
+            status = shell.SHGetKnownFolderPath(profile_id, 0, None, ctypes.byref(directory))
+            home = ""
+            if status >= 0 and directory.value:
+                try:
+                    home = ctypes.wstring_at(directory)
+                finally:
+                    ole = ctypes.WinDLL("ole32")
+                    ole.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+                    ole.CoTaskMemFree(directory)
+    else:
+        home = os.environ.get("HOME", "")
+        if not os.path.isabs(home):
+            import pwd
+            try:
+                home = pwd.getpwuid(os.getuid()).pw_dir
+            except (KeyError, OSError):
+                home = ""
+    if not home or not os.path.isabs(home):
+        raise ValueError("cannot determine the user home directory; supply an explicit pool directory")
+    return os.path.join(home, ".plasmite", "pools")
 
 
-DEFAULT_POOL_DIR = default_pool_dir()
+try:
+    DEFAULT_POOL_DIR = default_pool_dir()
+except ValueError:
+    DEFAULT_POOL_DIR = None
 
 _LIB.plsm_client_new.argtypes = [c_char_p, POINTER(POINTER(plsm_client_t)), POINTER(POINTER(plsm_error_t))]
 _LIB.plsm_client_new.restype = c_int

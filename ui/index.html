@@ -560,6 +560,18 @@ Invariants: Pool names are rendered as text (never injected as HTML).
         // list on screen until the new one arrives.
         // Follows the server's pool snapshots; the server sends one when anything
         // but message ages changes, and the page ages the times itself.
+        function receivePools(payload) {
+          if (payload.available === false) {
+            if (list.pools == null) list.pools = payload.pools || [];
+            list.error = "Showing the last known pools. " + (payload.error || "Could not read the pool directory.");
+          } else {
+            list.pools = payload.pools || [];
+            list.error = "";
+          }
+          list.reconnecting = false;
+          renderPoolList();
+        }
+
         async function followPoolList() {
           if (state.stopped || listController) return;
           const controller = new AbortController();
@@ -578,10 +590,7 @@ Invariants: Pool names are rendered as text (never injected as HTML).
               onEvent(event) {
                 if (event.name === "error") throw new Error("Pool list stream failed.");
                 if (event.name !== "pools") return;
-                list.pools = event.data.pools || [];
-                list.error = "";
-                list.reconnecting = false;
-                renderPoolList();
+                receivePools(event.data);
               },
               onDrop(error) {
                 if (error && !list.pools) list.error = String(error.message || error);

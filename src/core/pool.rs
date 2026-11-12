@@ -652,6 +652,17 @@ impl Pool {
         require_current_path(&self.file, &self.path)
     }
 
+    /// An opaque native file identity for detecting replacement of an opened pool.
+    /// It stays stable across appends and server restarts. Retain a path guard when
+    /// comparing identities over time, so the OS cannot reuse the original file ID.
+    pub fn incarnation(&self) -> Result<String, Error> {
+        file_incarnation(&self.file).map_err(|err| {
+            Error::new(map_io_error_kind(&err))
+                .with_path(&self.path)
+                .with_source(err)
+        })
+    }
+
     /// Release the mapping and keep only the file and path for identity checks.
     pub fn into_path_guard(self) -> PoolPathGuard {
         PoolPathGuard {
@@ -722,6 +733,18 @@ impl Pool {
             }
             _ => None,
         }
+    }
+
+    // Start a range at the validated index entry when available. Without an
+    // index the cursor traverses the ring once, rather than once per lookup.
+    pub(crate) fn cursor_from_seq(&self, seq: u64) -> Result<crate::core::cursor::Cursor, Error> {
+        let _lock = self.read_lock()?;
+        let header = self.header_locked()?;
+        let mut cursor = crate::core::cursor::Cursor::new();
+        if let Some((offset, _)) = self.get_via_index(header, seq) {
+            cursor.seek_to(offset);
+        }
+        Ok(cursor)
     }
 
     /// Fetch a frame using a caller-managed seq->offset cache for faster repeats.
@@ -1147,24 +1170,39 @@ fn same_file_identity(first: &File, second: &File) -> io::Result<bool> {
     Ok(first.dev() == second.dev() && first.ino() == second.ino())
 }
 
+#[cfg(unix)]
+fn file_incarnation(file: &File) -> io::Result<String> {
+    use std::os::unix::fs::MetadataExt;
+    let info = file.metadata()?;
+    Ok(format!("{:x}:{:x}", info.dev(), info.ino()))
+}
+
 #[cfg(windows)]
-fn same_file_identity(first: &File, second: &File) -> io::Result<bool> {
+fn windows_file_identity(file: &File) -> io::Result<(u32, u32, u32)> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
     };
-    fn identity(file: &File) -> io::Result<(u32, u32, u32)> {
-        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
-        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok((
-            info.dwVolumeSerialNumber,
-            info.nFileIndexHigh,
-            info.nFileIndexLow,
-        ))
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+        return Err(io::Error::last_os_error());
     }
-    Ok(identity(first)? == identity(second)?)
+    Ok((
+        info.dwVolumeSerialNumber,
+        info.nFileIndexHigh,
+        info.nFileIndexLow,
+    ))
+}
+
+#[cfg(windows)]
+fn file_incarnation(file: &File) -> io::Result<String> {
+    let (volume, high, low) = windows_file_identity(file)?;
+    Ok(format!("{volume:x}:{high:x}:{low:x}"))
+}
+
+#[cfg(windows)]
+fn same_file_identity(first: &File, second: &File) -> io::Result<bool> {
+    Ok(windows_file_identity(first)? == windows_file_identity(second)?)
 }
 
 fn lock_error_kind(err: &io::Error) -> ErrorKind {
@@ -1784,6 +1822,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn lock_errors_map_to_expected_kinds() {
         let err = std::io::Error::from_raw_os_error(libc::EAGAIN);
         assert_eq!(super::lock_error_kind(&err), ErrorKind::Busy);
@@ -3107,6 +3146,22 @@ mod tests {
         let reopened = Pool::open(&path).expect("pool remains reopenable");
         let header = reopened.header_from_mmap().expect("header");
         crate::core::validate::validate_pool_state(header, &reopened.mmap).expect("valid state");
+    }
+
+    #[test]
+    fn pool_incarnation_tracks_file_replacement() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("identity.plasmite");
+        let mut original = Pool::create(&path, PoolOptions::new(64 * 1024)).expect("create");
+        let identity = original.incarnation().expect("identity");
+        original.append(b"one").expect("append");
+        assert_eq!(original.incarnation().unwrap(), identity);
+        assert_eq!(Pool::open(&path).unwrap().incarnation().unwrap(), identity);
+        let guard = original.into_path_guard();
+        std::fs::remove_file(&path).expect("remove");
+        let replacement = Pool::create(&path, PoolOptions::new(64 * 1024)).expect("replace");
+        assert_ne!(replacement.incarnation().unwrap(), identity);
+        assert!(guard.check_current_path().is_err());
     }
 
     #[test]

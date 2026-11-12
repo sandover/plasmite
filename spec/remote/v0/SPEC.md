@@ -100,7 +100,7 @@ It captures stable wire-level compatibility guarantees only.
   data returns `Corrupt` without appending. Successful appends preserve the
   document bytes and return the new destination message in the response.
 - `GET /v0/pools/{pool}/messages/{seq}` -> success body `{ "message": ... }`.
-- `GET /v0/pools/{pool}/messages/{seq}/lite3` -> raw Lite3 bytes with `Content-Type: application/x-plasmite-lite3` and `plasmite-seq` header.
+- `GET /v0/pools/{pool}/messages/{seq}/lite3` -> raw Lite3 bytes with `Content-Type: application/x-plasmite-lite3` and decimal unsigned `plasmite-seq` and `plasmite-timestamp-ns` headers. Both identify the same stored frame as the payload. Older servers may omit the timestamp header.
 
 ### Streaming
 

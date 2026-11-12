@@ -152,7 +152,7 @@ fn run() -> Result<RunOutcome, (Error, ColorMode, OutputMode)> {
             output_mode,
         ));
     }
-    let pool_dir = cli.dir.into_iter().next().unwrap_or_else(default_pool_dir);
+    let pool_dir = cli.dir.into_iter().next().or_else(default_pool_dir);
     let result = cli::dispatch(
         cli.command,
         CliContext::new(pool_dir, color_mode, output_mode),
@@ -643,7 +643,7 @@ mod tests {
     #[test]
     fn resolve_pool_target_classifies_local_name() {
         let pool_dir = Path::new("/tmp/pools");
-        let target = resolve_pool_target("demo", pool_dir).expect("target");
+        let target = resolve_pool_target("demo", Some(pool_dir)).expect("target");
         match target {
             PoolTarget::LocalPath(path) => assert_eq!(path, pool_dir.join("demo.plasmite")),
             _ => panic!("expected local path"),
@@ -652,8 +652,9 @@ mod tests {
 
     #[test]
     fn resolve_pool_target_accepts_remote_shorthand() {
-        let target = resolve_pool_target("http://localhost:9170/demo", Path::new("/tmp/pools"))
-            .expect("target");
+        let target =
+            resolve_pool_target("http://localhost:9170/demo", Some(Path::new("/tmp/pools")))
+                .expect("target");
         assert_eq!(
             target,
             PoolTarget::Remote {
@@ -667,7 +668,7 @@ mod tests {
     fn resolve_pool_target_accepts_one_decoded_udp_name() {
         let target = resolve_pool_target(
             "udp://localhost:9701/sensor%20data",
-            Path::new("/tmp/pools"),
+            Some(Path::new("/tmp/pools")),
         )
         .expect("UDP target");
         assert_eq!(
@@ -678,7 +679,7 @@ mod tests {
             }
         );
         assert_eq!(
-            resolve_pool_target("udp://[::1]:9701/sensors", Path::new("/tmp/pools")).unwrap(),
+            resolve_pool_target("udp://[::1]:9701/sensors", Some(Path::new("/tmp/pools"))).unwrap(),
             PoolTarget::Udp {
                 endpoint: "udp://[::1]:9701".into(),
                 pool: "sensors".into()
@@ -700,7 +701,7 @@ mod tests {
             "udp://localhost:9701/sensors#x",
         ] {
             assert!(
-                resolve_pool_target(input, Path::new("/tmp/pools")).is_err(),
+                resolve_pool_target(input, Some(Path::new("/tmp/pools"))).is_err(),
                 "{input}"
             );
         }
@@ -710,7 +711,7 @@ mod tests {
     fn resolve_pool_target_rejects_api_shaped_remote_ref() {
         let err = resolve_pool_target(
             "http://localhost:9170/v0/pools/demo/append",
-            Path::new("/tmp/pools"),
+            Some(Path::new("/tmp/pools")),
         )
         .expect_err("err");
         assert_eq!(err.kind(), ErrorKind::Usage);
@@ -718,25 +719,31 @@ mod tests {
 
     #[test]
     fn resolve_pool_target_rejects_trailing_slash_remote_ref() {
-        let err = resolve_pool_target("http://localhost:9170/demo/", Path::new("/tmp/pools"))
+        let err = resolve_pool_target("http://localhost:9170/demo/", Some(Path::new("/tmp/pools")))
             .expect_err("err");
         assert_eq!(err.kind(), ErrorKind::Usage);
     }
 
     #[test]
     fn resolve_pool_target_rejects_unsupported_scheme() {
-        let err = resolve_pool_target("tcp://localhost:9170/demo", Path::new("/tmp/pools"))
+        let err = resolve_pool_target("tcp://localhost:9170/demo", Some(Path::new("/tmp/pools")))
             .expect_err("err");
         assert_eq!(err.kind(), ErrorKind::Usage);
     }
 
     #[test]
     fn resolve_pool_target_rejects_query_and_fragment() {
-        let err = resolve_pool_target("http://localhost:9170/demo?x=1", Path::new("/tmp/pools"))
-            .expect_err("err");
+        let err = resolve_pool_target(
+            "http://localhost:9170/demo?x=1",
+            Some(Path::new("/tmp/pools")),
+        )
+        .expect_err("err");
         assert_eq!(err.kind(), ErrorKind::Usage);
-        let err = resolve_pool_target("http://localhost:9170/demo#frag", Path::new("/tmp/pools"))
-            .expect_err("err");
+        let err = resolve_pool_target(
+            "http://localhost:9170/demo#frag",
+            Some(Path::new("/tmp/pools")),
+        )
+        .expect_err("err");
         assert_eq!(err.kind(), ErrorKind::Usage);
     }
 
@@ -744,7 +751,7 @@ mod tests {
     #[test]
     fn resolve_pool_target_treats_windows_backslash_path_as_local_path() {
         let input = r"C:\pools\demo.plasmite";
-        let target = resolve_pool_target(input, Path::new("C:\\ignored")).expect("target");
+        let target = resolve_pool_target(input, Some(Path::new("C:\\ignored"))).expect("target");
         match target {
             PoolTarget::LocalPath(path) => assert_eq!(path, PathBuf::from(input)),
             _ => panic!("expected local path"),

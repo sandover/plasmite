@@ -45,7 +45,7 @@ pub(super) fn run(command: UtilityCommand, context: &CliContext) -> Result<Comma
             Ok(CommandResult::ok())
         }
         UtilityCommand::Mcp => {
-            mcp_stdio::serve(context.pool_dir().to_path_buf())?;
+            mcp_stdio::serve(context.pool_dir()?.to_path_buf())?;
             Ok(CommandResult::ok())
         }
     }

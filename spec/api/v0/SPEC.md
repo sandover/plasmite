@@ -39,6 +39,20 @@ It is intentionally signature-free: language-level method/function signatures li
   shorthand form. A connected client uses the saved credentials for that
   destination.
 
+### Default local directories and string references
+
+The default pool directory is the current user's `.plasmite/pools` directory.
+Unix clients select an absolute, nonempty `HOME`, then the account home;
+Windows clients select an absolute `USERPROFILE`, then the platform profile.
+Failure to resolve an absolute home requires an explicit directory. Clients do
+not silently choose the working directory or temporary storage. Explicit client
+directories and pool paths take precedence and may be relative.
+
+The C ABI and its string wrappers distinguish names from paths through native
+path separators. A bare filename is a name; prefix it with `./` (or `.\` on
+Windows) for a file in the working directory. Windows drive-relative paths are
+unsupported. Go's `PoolRefPath` adds a relative prefix to bare filenames.
+
 ### Client + Pool Capabilities
 
 - Rust clients expose pool lifecycle operations: create, open, info, list, delete.
@@ -256,3 +270,21 @@ Replacement/deletion ends the old UDP stream, including completion renewal.
 Public `Gap` names denote explicit server skips for compatibility. `Unknown`
 remains a reserved public reason; clients reject it in SKIP packets.
 Wire behavior and network limits live in [UDP v1](../../udp/v1/SPEC.md).
+
+### Point Lite3 frame metadata
+
+`RemotePool::get_lite3_frame` returns sequence, nanosecond timestamp and original
+payload from one HTTP response on current servers. It validates integer headers
+and the requested sequence. Older servers without `plasmite-timestamp-ns` require
+a separate JSON metadata lookup; that compatibility path does not provide one
+atomic observation. `get_lite3` remains the payload-only operation.
+
+### Validation observations
+
+`LocalClient::validate_pool_observation` returns the existing `ValidationReport`
+and optional retained bounds/count captured under the same shared pool lock as
+validation. Counts describe observed retained messages, not a separate count of
+verified frames. A failed validation leaves the count unknown. Later file changes
+do not update these facts. `validate_pool` and the CLI machine report keep their
+existing shape; human doctor output uses the captured observation without reopening
+its path.

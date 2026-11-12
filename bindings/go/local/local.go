@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -128,15 +129,34 @@ func NewClient(poolDir string) (*Client, error) {
 }
 
 func NewDefaultClient() (*Client, error) {
-	return NewClient(DefaultPoolDir())
+	directory, err := DefaultPoolDir()
+	if err != nil {
+		return nil, err
+	}
+	return NewClient(directory)
 }
 
-func DefaultPoolDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return filepath.Join(os.TempDir(), "plasmite", "pools")
+func DefaultPoolDir() (string, error) {
+	var home string
+	if runtime.GOOS == "windows" {
+		home, _ = os.UserHomeDir()
+		if !filepath.IsAbs(home) {
+			if account, err := user.Current(); err == nil {
+				home = account.HomeDir
+			}
+		}
+	} else {
+		home = os.Getenv("HOME")
+		if !filepath.IsAbs(home) {
+			if account, err := user.Current(); err == nil {
+				home = account.HomeDir
+			}
+		}
 	}
-	return filepath.Join(home, ".plasmite", "pools")
+	if !filepath.IsAbs(home) {
+		return "", invalidArgumentError("cannot determine the user home directory; supply an explicit pool directory")
+	}
+	return filepath.Join(home, ".plasmite", "pools"), nil
 }
 
 func (c *Client) Close() {

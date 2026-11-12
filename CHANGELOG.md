@@ -4,6 +4,53 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Predictable pool access and reliable reads (2.0)
+
+The CLI and language bindings now agree on where named pools live. Remote frames
+carry their sequence and timestamp together, browser caches track file identity,
+and doctor reports use facts captured during validation.
+
+- **Find the same pools across clients.** Keep defaults under `~/.plasmite/pools`
+  on every platform. Use the account home when the home environment value is
+  missing or invalid, and require an explicit directory if lookup fails. Remove
+  silent working-directory and temporary-directory fallbacks. Explicit paths
+  and remote commands remain usable without a default home.
+- **Use Windows file paths consistently.** Recognize drive, UNC, and backslash
+  paths through the native interface. Preserve Go's explicit bare-file path
+  intent while keeping pool names distinct from file paths.
+- **Keep exact Node error context.** Native and HTTP errors expose sequence and
+  offset fields as `bigint`, preserving every unsigned 64-bit value. Applications
+  can identify the failing message without rounding its ID.
+- **Fetch a complete remote frame together.** Current servers return Lite3 bytes,
+  sequence, and timestamp in one response, removing the extra metadata request
+  and its timing gap. Older servers retain an explicit compatibility lookup.
+- **Recover correctly when a pool file changes.** The browser detects replacement
+  even when the name and summary metadata match. It refreshes ring layout and
+  resets messages, selection, and resume position to the new file's retained
+  history. Directory scan failures mark the last known catalog unavailable;
+  ordinary append, retention, and unchanged-file restarts preserve resume state.
+- **Make doctor reports internally consistent.** Capture counts and bounds during
+  validation rather than reopening the pathname while formatting. Report unknown
+  counts when corruption prevents a trustworthy observation.
+- **Read MCP history with less repeated work.** Traverse history ranges with a
+  cursor while preserving filtering, ordering, and checkpoint behavior.
+- **Accept data that fits the encoder limit.** Try the exact allocation cap before
+  rejecting a value whose encoded form may fit. Keep the existing memory bound.
+
+The [migration guide](docs/record/upgrading-next-major.md) covers bigint error
+fields, fallible Rust and Go directory accessors, and explicit recovery of pools
+created under earlier directory fallbacks. Plasmite does not move files or
+search alternate stores automatically. These changes require no pool-file
+format migration.
+
+### Development and release reliability
+
+- Start development commands after the server reports bound listeners, with
+  bounded waits and owned-process cleanup.
+- Exercise release-build selection and provenance rejection through offline
+  behavioral tests, including moved tags and inconsistent metadata. Keep the
+  existing build/publication separation and artifact checks.
+
 ### Simpler message workflows (next major release)
 
 - Make duplex a generic two-way stream. Terminal and pipe input use feed's parser;

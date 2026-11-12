@@ -45,7 +45,7 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
             name, legacy_name, ..
         } => {
             let name = name.or(legacy_name).expect("clap requires one client name");
-            let access_key = crate::secure_serve::invite(context.pool_dir(), &name)?;
+            let access_key = crate::secure_serve::invite(context.pool_dir()?, &name)?;
             if !output_mode.is_structured() {
                 super::output::write_stdout(
                     format!("Access key for {}: {access_key}\n", human_literal(&name)).as_bytes(),
@@ -129,12 +129,12 @@ pub(super) fn run(command: AccessSubcommand, context: &CliContext) -> Result<Com
             Ok(CommandResult::ok())
         }
         AccessSubcommand::Keys { .. } => {
-            let keys = crate::secure_serve::keys(context.pool_dir())?;
+            let keys = crate::secure_serve::keys(context.pool_dir()?)?;
             emit_keys(&keys, output_mode)?;
             Ok(CommandResult::ok())
         }
         AccessSubcommand::Revoke { id, .. } => {
-            crate::secure_serve::revoke(context.pool_dir(), &id)?;
+            crate::secure_serve::revoke(context.pool_dir()?, &id)?;
             if !output_mode.is_structured() {
                 super::output::write_stdout(
                     format!("Revoked access key {}.\n", human_literal(&id)).as_bytes(),

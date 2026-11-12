@@ -52,9 +52,13 @@ function browser(page, exports = '') {
 }
 
 const poolExports = `window.testPage = { state, addMessage, flush, appendRows, fromRaw, loadEarlier,
-    copy, toLogin, messageLink, boot, followPool, get pending() { return pending; },
-  quietRendering() { renderFacts = () => {}; renderRows = () => {}; applyFilter = () => {}; } };`;
-const mapExports = 'window.testPage = { state, addMessage, segmentOf, ageGroups, follow, startList };';
+    copy, toLogin, messageLink, boot, followPool, acceptPool, showMissing, get pending() { return pending; },
+  quietRendering() { renderFacts = () => {}; renderRows = () => {}; renderDetail = () => {}; applyFilter = () => {}; } };`;
+const mapExports = `window.testPage = { state, addMessage, segmentOf, ageGroups, follow, startList, showPools, startReader, stopReader,
+  quietPresentation() {
+    sharedInner = () => 1; trackShape = () => ({}); layTrack = () => ({}); topology = () => null;
+    updateCards = () => {}; showPeekSummary = () => {}; updateActivityButtons = () => {}; placePeek = () => {}; hover = () => {};
+  } };`;
 const raw = (api, seq) => api.parseJSON(`{"seq":${seq},"time":"2026-01-01T00:00:00Z","meta":{},"data":{"value":1}}`);
 
 test('all inline scripts compile', () => {
@@ -351,4 +355,137 @@ test('clipboard and session failures surface useful status', async () => {
   env.context.fetch = async () => { throw new Error('offline'); };
   await env.page.boot();
   assert.match(env.nodes.get('ui-notice').textContent, /check your session.*Reload/);
+});
+
+
+test('replacement discards old rows and resumes the new retained history', async () => {
+  const env = browser('pool', poolExports);
+  env.page.quietRendering();
+  const { state } = env.page;
+  state.info = { incarnation: 'old', bounds: { oldest: 1n, newest: 100n } };
+  env.page.addMessage(raw(env.api, '100'));
+  state.selected = { seq: 100n };
+  state.target = 100n;
+  const changed = env.page.acceptPool({ incarnation: 'new', bounds: { oldest: 1n, newest: 2n } }, false);
+  assert.equal(changed, true);
+  assert.equal(state.nextSeq, 1n);
+  assert.equal(state.selected, null);
+  assert.equal(state.target, null);
+  assert.equal(env.page.pending.length, 0);
+  assert.equal(state.messages.length, 0);
+  env.page.addMessage(raw(env.api, '1'));
+  env.page.addMessage(raw(env.api, '2'));
+  assert.deepEqual(Array.from(env.page.pending, message => message.seq), [1n, 2n]);
+  assert.match(env.nodes.get('ui-notice').textContent, /replaced/);
+  const generation = state.generation;
+  assert.equal(env.page.acceptPool({ incarnation: 'new', bounds: { oldest: 2n, newest: 3n } }, false), false);
+  assert.equal(state.generation, generation, 'retention and append preserve the view');
+  assert.equal(state.nextSeq, 3n);
+});
+
+test('stream incarnation catches replacement after the info request', async () => {
+  const env = browser('pool', poolExports);
+  env.page.quietRendering();
+  env.page.state.info = { incarnation: 'old' };
+  env.page.state.nextSeq = 101n;
+  const requests = [];
+  env.context.fetch = async url => {
+    requests.push(new URL(url, env.context.location.origin));
+    if (requests.length === 1) return stream('event: pool\ndata: {"incarnation":"new","bounds":{"oldest":1,"newest":2}}\n\nevent: message\ndata: {"seq":101,"data":{}}\n\n');
+    return stream('event: pool\ndata: {"incarnation":"new","bounds":{"oldest":1,"newest":2}}\n\nevent: message\ndata: {"seq":1,"data":{}}\n\nevent: message\ndata: {"seq":2,"data":{}}\n\n');
+  };
+  const running = env.page.followPool();
+  await new Promise(setImmediate);
+  assert.equal(env.page.pending.length, 0, 'old request contributes no messages');
+  for (const timer of [...env.timers.values()]) if (timer.delay === 1000) timer.fn();
+  await new Promise(setImmediate);
+  assert.equal(requests[1].searchParams.get('since_seq'), '1');
+  assert.deepEqual(Array.from(env.page.pending, message => message.seq), [1n, 2n]);
+  env.page.state.reader.abort();
+  await running;
+});
+
+test('history from an old incarnation cannot repopulate a reset view', async () => {
+  const env = historyBrowser();
+  env.page.state.info.incarnation = 'old';
+  let release;
+  env.context.fetch = async () => new Promise(resolve => { release = resolve; });
+  const loading = env.page.loadEarlier();
+  env.page.acceptPool({ incarnation: 'new', bounds: { oldest: 1n, newest: 2n } }, false);
+  release(info(9007199254740990n));
+  await loading;
+  assert.equal(env.page.state.info.incarnation, 'new');
+  assert.equal(env.page.state.messages.length, 0);
+});
+
+
+test('catalog failures mark retained pools stale and a successful scan clears the error', () => {
+  const env = browser('index', `window.testPage = { list, receivePools }; renderPoolList = () => {};`);
+  env.page.receivePools({ available: true, pools: [{ name: 'events' }] });
+  env.page.receivePools({ available: false, pools: [], error: 'Permission denied' });
+  assert.equal(env.page.list.pools[0].name, 'events');
+  assert.match(env.page.list.error, /last known pools.*Permission denied/);
+  env.page.receivePools({ available: true, pools: [{ name: 'new' }] });
+  assert.equal(env.page.list.error, '');
+  assert.equal(env.page.list.pools[0].name, 'new');
+});
+
+
+test('map resets a selected same-name replacement and ignores an old reader after cancellation', async () => {
+  const env = browser('map', mapExports);
+  env.page.quietPresentation();
+  env.context.location.href = 'http://localhost/ui/map';
+  env.page.state.pools = [{ name: 'test', incarnation: 'old', bounds: { oldest: 1n, newest: 100n } }];
+  env.page.state.selected = 'test';
+  env.page.state.nextSeq = 101n;
+  let aborted = false;
+  env.page.state.stopReader = () => { aborted = true; };
+  env.context.fetch = async () => ({ ok: false, status: 404 });
+  env.page.showPools({ available: true, pools: [{ name: 'test', incarnation: 'new', bounds: { oldest: 1n, newest: 2n } }] });
+  assert.equal(aborted, true);
+  assert.equal(env.page.state.selected, 'test');
+  assert.equal(env.page.state.nextSeq, 1n);
+  assert.equal(env.nodes.get('messages').children.length, 0);
+  assert.match(env.nodes.get('ui-notice').textContent, /replaced/);
+  await new Promise(setImmediate);
+  env.page.stopReader();
+});
+
+test('map stream-start identity resets an info-to-stream replacement before accepting messages', async () => {
+  const env = browser('map', mapExports);
+  env.page.quietPresentation();
+  env.context.location.href = 'http://localhost/ui/map';
+  env.page.state.pools = [{ name: 'test', incarnation: 'old', bounds: { oldest: 1n, newest: 100n } }];
+  env.page.state.selected = 'test';
+  env.page.state.nextSeq = 101n;
+  const requests = [];
+  env.context.fetch = async url => {
+    requests.push(new URL(url, env.context.location.origin));
+    if (requests.length === 1) return stream('event: pool\ndata: {"name":"test","incarnation":"new","bounds":{"oldest":1,"newest":2}}\n\nevent: message\ndata: {"seq":101,"data":{}}\n\n');
+    return stream('event: pool\ndata: {"name":"test","incarnation":"new","bounds":{"oldest":1,"newest":2}}\n\nevent: message\ndata: {"seq":1,"data":{}}\n\nevent: message\ndata: {"seq":2,"data":{}}\n\n');
+  };
+  env.page.startReader('test');
+  await new Promise(setImmediate);
+  assert.equal(env.nodes.get('messages').children.length, 0);
+  for (const timer of [...env.timers.values()]) if (timer.delay === 1200) timer.fn();
+  await new Promise(setImmediate);
+  assert.equal(requests[1].searchParams.get('since_seq'), '1');
+  assert.deepEqual(env.nodes.get('messages').children.map(row => row.dataset.seq), ['1', '2']);
+  env.page.stopReader();
+});
+
+
+test('a deleted pool clears old rows and recreation restores the controls', () => {
+  const env = browser('pool', poolExports);
+  env.page.quietRendering();
+  env.page.state.info = { incarnation: 'old' };
+  env.page.addMessage(raw(env.api, '100'));
+  env.page.showMissing();
+  assert.equal(env.page.pending.length, 0);
+  assert.equal(env.nodes.get('append').hidden, true);
+  env.page.acceptPool({ incarnation: 'new', bounds: { oldest: 1n, newest: 2n } }, false);
+  assert.equal(env.nodes.get('append').hidden, false);
+  assert.equal(env.nodes.get('log-head').hidden, false);
+  assert.equal(env.nodes.get('live').hidden, false);
+  assert.equal(env.page.state.nextSeq, 1n);
 });

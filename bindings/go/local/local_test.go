@@ -14,7 +14,9 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -551,4 +553,29 @@ func decodeObject(raw json.RawMessage) (map[string]any, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func TestDefaultPoolDirectory(t *testing.T) {
+	account, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "HOME"
+	if runtime.GOOS == "windows" {
+		key = "USERPROFILE"
+	}
+	for _, value := range []string{"", "relative", filepath.Join(t.TempDir(), "home space 東京")} {
+		t.Setenv(key, value)
+		directory, err := DefaultPoolDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		home := value
+		if !filepath.IsAbs(home) {
+			home = account.HomeDir
+		}
+		if want := filepath.Join(home, ".plasmite", "pools"); directory != want {
+			t.Fatalf("got %q, want %q", directory, want)
+		}
+	}
 }

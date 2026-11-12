@@ -181,7 +181,7 @@ pub(crate) fn list_pools(pool_dir: &Path, client: &LocalClient) -> Result<Vec<Po
 
 pub(crate) fn emit_pool_list_table(
     pools: &[PoolListRow],
-    pool_dir: &Path,
+    pool_dir: Option<&Path>,
     server: Option<&str>,
 ) -> Result<(), Error> {
     let interactive = io::stdout().is_terminal();
@@ -194,7 +194,9 @@ pub(crate) fn emit_pool_list_table(
             super::output::write_stdout(
                 format!(
                     "No pools found in {}\n",
-                    display_pool_dir_for_humans(pool_dir)
+                    pool_dir
+                        .map(display_pool_dir_for_humans)
+                        .unwrap_or_else(|| "unspecified".to_string())
                 )
                 .as_bytes(),
             )?;
@@ -221,7 +223,7 @@ pub(crate) fn emit_pool_list_table(
             let display_path = if server.is_some() {
                 pool.path().to_string()
             } else {
-                short_display_path(Path::new(pool.path()), Some(pool_dir))
+                short_display_path(Path::new(pool.path()), pool_dir)
             };
 
             match pool {
@@ -288,7 +290,10 @@ pub(crate) fn emit_pool_list_table(
     Ok(())
 }
 
-pub(crate) fn emit_pool_create_table(created: &[Value], pool_dir: &Path) -> Result<(), Error> {
+pub(crate) fn emit_pool_create_table(
+    created: &[Value],
+    pool_dir: Option<&Path>,
+) -> Result<(), Error> {
     if io::stdout().is_terminal() {
         if created.len() == 1 {
             if let Some(pool) = created.first() {
@@ -309,7 +314,7 @@ pub(crate) fn emit_pool_create_table(created: &[Value], pool_dir: &Path) -> Resu
                 let path = pool
                     .get("path")
                     .and_then(|value| value.as_str())
-                    .map(|value| short_display_path(Path::new(value), Some(pool_dir)))
+                    .map(|value| short_display_path(Path::new(value), pool_dir))
                     .unwrap_or_else(|| "-".to_string());
                 super::output::write_stdout(
                     format!(
@@ -342,7 +347,7 @@ pub(crate) fn emit_pool_create_table(created: &[Value], pool_dir: &Path) -> Resu
             let path = pool
                 .get("path")
                 .and_then(|value| value.as_str())
-                .map(|value| short_display_path(Path::new(value), Some(pool_dir)))
+                .map(|value| short_display_path(Path::new(value), pool_dir))
                 .unwrap_or_else(|| "-".to_string());
             super::output::write_stdout(
                 format!("  - {} ({})\n", human_literal(name), human_literal(&path)).as_bytes(),
@@ -373,7 +378,7 @@ pub(crate) fn emit_pool_create_table(created: &[Value], pool_dir: &Path) -> Resu
             let path = pool
                 .get("path")
                 .and_then(|value| value.as_str())
-                .map(|value| short_display_path(Path::new(value), Some(pool_dir)))
+                .map(|value| short_display_path(Path::new(value), pool_dir))
                 .unwrap_or_else(|| "-".to_string());
             vec![name, size, index, path]
         })

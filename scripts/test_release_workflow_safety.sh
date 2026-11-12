@@ -120,18 +120,17 @@ assert "RELEASE_TAG_INPUT: ${{ inputs.release_tag }}" in publish
 assert 'requested_build_run_id="${{ inputs.build_run_id }}"' not in publish
 assert 'requested_release_tag="${{ inputs.release_tag }}"' not in publish
 assert "source_sha: ${{ steps.resolve.outputs.source_sha }}" in publish
-assert "tag_source_sha=\"$(./scripts/resolve_release_tag_sha.sh" in publish
-assert '"$source_sha" != "$tag_source_sha"' in publish
-assert '"$requested_build_run_id" =~ ^[1-9][0-9]*$' in publish
-assert 'selected_run_dir="$tmp_dir/selected-run"' in publish
 assert 'ref: ${{ needs.resolve-build-run.outputs.tag }}' not in publish
-assert "source_sha=$source_sha" in publish
+
+assert './scripts/resolve_release_build.sh "$GITHUB_REPOSITORY"' in publish
+assert '"$RELEASE_BUILD_RUN_ID_INPUT" "$RELEASE_TAG_INPUT"' in publish
+assert '"$RELEASE_REHEARSAL_INPUT" >> "$GITHUB_OUTPUT"' in publish
 
 def checkout_blocks(text):
     lines = text.splitlines()
     blocks = []
     for index, line in enumerate(lines):
-        if line.strip() != "- uses: actions/checkout@v4":
+        if line.split("#", 1)[0].strip() != "- uses: actions/checkout@v4":
             continue
         indent = len(line) - len(line.lstrip())
         block = [line]
@@ -143,7 +142,7 @@ def checkout_blocks(text):
     return blocks
 
 release_checkout_refs = [
-    next(line.strip().removeprefix("ref:").strip() for line in block.splitlines() if "ref:" in line)
+    next(line.split("#", 1)[0].strip().removeprefix("ref:").strip() for line in block.splitlines() if "ref:" in line)
     for block in checkout_blocks(release)
 ]
 assert release_checkout_refs == [
@@ -158,7 +157,7 @@ for block in checkout_blocks(publish):
     if "repository: ${{ env.HOMEBREW_TAP_REPO }}" in block:
         continue
     publish_checkout_refs.append(
-        next(line.strip().removeprefix("ref:").strip() for line in block.splitlines() if "ref:" in line)
+        next(line.split("#", 1)[0].strip().removeprefix("ref:").strip() for line in block.splitlines() if "ref:" in line)
     )
 assert publish_checkout_refs == [
     "${{ github.sha }}",
@@ -179,3 +178,5 @@ assert 'release-inputs/CHANGELOG.md)' in publish
 
 print("release workflow safety checks passed")
 PY
+
+PYTHONDONTWRITEBYTECODE=1 python3 "$root_dir/scripts/test_release_build.py"

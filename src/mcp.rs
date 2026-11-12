@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1619,15 +1620,29 @@ fn read_messages_for_tool(
         ));
     }
 
-    let mut messages = Vec::new();
+    let mut messages = VecDeque::new();
     let mut next_after_seq = after_seq;
-    for seq in start_seq..=newest {
-        next_after_seq = Some(seq);
-        let message = match pool.get_message(seq) {
-            Ok(message) => message,
-            Err(err) if err.kind() == ErrorKind::NotFound => continue,
-            Err(err) => return Err(Box::new(err)),
+    let mut cursor = pool.cursor_from_seq(start_seq).map_err(Box::new)?;
+    loop {
+        let frame = match cursor.next(pool).map_err(Box::new)? {
+            crate::core::cursor::CursorResult::Message(frame) => frame,
+            crate::core::cursor::CursorResult::FellBehind => continue,
+            crate::core::cursor::CursorResult::WouldBlock => {
+                next_after_seq = Some(newest);
+                break;
+            }
         };
+        if frame.seq > newest {
+            next_after_seq = Some(newest);
+            break;
+        }
+        if frame.seq < start_seq || next_after_seq.is_some_and(|seq| frame.seq <= seq) {
+            continue;
+        }
+        next_after_seq = Some(frame.seq);
+        let message =
+            crate::api::Message::from_lite3(frame.seq, frame.timestamp_ns, &frame.payload)
+                .map_err(Box::new)?;
         if !message_has_tags(&message.meta.tags, required_tags) {
             continue;
         }
@@ -1644,21 +1659,21 @@ fn read_messages_for_tool(
             }
         }
 
-        messages.push(message_json_value(message));
+        messages.push_back(message_json_value(message));
         if after_seq.is_some() {
             if messages.len() >= count {
                 break;
             }
         } else if messages.len() > count {
-            messages.remove(0);
+            messages.pop_front();
         }
     }
     let last_returned_seq = messages
-        .last()
+        .back()
         .and_then(|message| message.get("seq"))
         .and_then(Value::as_u64);
     Ok(ReadBatch {
-        messages,
+        messages: messages.into_iter().collect(),
         next_after_seq,
         last_returned_seq,
         oldest_available_seq: Some(oldest),
@@ -2707,6 +2722,87 @@ mod tests {
         assert_eq!(structured["oldest_available_seq"], json!(oldest));
         assert_eq!(structured["messages"][0]["seq"], json!(oldest));
         assert_eq!(structured["next_after_seq"], json!(oldest));
+    }
+
+    #[test]
+    fn read_without_index_keeps_bounded_latest_matches_and_checkpoints() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut pool = Pool::create(
+            dir.path().join("linear.plasmite"),
+            PoolOptions::new(1024 * 1024).with_index_capacity(0),
+        )
+        .unwrap();
+        for seq in 1..=1000 {
+            let tags = if seq % 2 == 0 {
+                vec!["even".to_string()]
+            } else {
+                vec![]
+            };
+            pool.append_json(
+                &json!({"seq": seq}),
+                &tags,
+                AppendOptions::new(seq * 1_000_000, Durability::Fast),
+            )
+            .unwrap();
+        }
+        let info = pool.info().unwrap();
+        let tags = vec!["even".to_string()];
+        let batch = super::read_messages_for_tool(&pool, &info, 3, None, None, &tags).unwrap();
+        assert_eq!(
+            batch
+                .messages
+                .iter()
+                .map(|value| value["seq"].as_u64().unwrap())
+                .collect::<Vec<_>>(),
+            [996, 998, 1000]
+        );
+        assert_eq!(batch.next_after_seq, Some(1000));
+        let batch = super::read_messages_for_tool(&pool, &info, 2, Some(995), None, &tags).unwrap();
+        assert_eq!(batch.next_after_seq, Some(998));
+        assert_eq!(batch.last_returned_seq, Some(998));
+        let batch =
+            super::read_messages_for_tool(&pool, &info, 2, Some(u64::MAX), None, &tags).unwrap();
+        assert!(batch.messages.is_empty());
+        assert_eq!(batch.next_after_seq, Some(u64::MAX));
+    }
+
+    #[test]
+    fn indexed_checkpoint_does_not_scan_an_unrelated_prefix() {
+        use std::io::{Seek, SeekFrom, Write};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("indexed.plasmite");
+        let mut pool =
+            Pool::create(&path, PoolOptions::new(65536).with_index_capacity(16)).unwrap();
+        for seq in 1..=3 {
+            pool.append_json_now(&json!({"seq": seq}), &[], Durability::Fast)
+                .unwrap();
+        }
+        let info = pool.info().unwrap();
+        let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.seek(SeekFrom::Start(info.ring_offset)).unwrap();
+        file.write_all(b"bad!").unwrap();
+        let batch = super::read_messages_for_tool(&pool, &info, 1, Some(2), None, &[]).unwrap();
+        assert_eq!(batch.last_returned_seq, Some(3));
+    }
+
+    #[test]
+    fn read_at_last_sequence_does_not_wrap() {
+        use std::io::{Seek, SeekFrom, Write};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("last.plasmite");
+        let mut pool = Pool::create(&path, PoolOptions::new(65536).with_index_capacity(0)).unwrap();
+        pool.append_json_now(&json!({"last": true}), &[], Durability::Fast)
+            .unwrap();
+        let offset = pool.info().unwrap().ring_offset;
+        let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        for offset in [88, 96, offset + 16] {
+            file.seek(SeekFrom::Start(offset)).unwrap();
+            file.write_all(&u64::MAX.to_le_bytes()).unwrap();
+        }
+        let info = pool.info().unwrap();
+        let batch = super::read_messages_for_tool(&pool, &info, 1, None, None, &[]).unwrap();
+        assert_eq!(batch.last_returned_seq, Some(u64::MAX));
+        assert_eq!(batch.next_after_seq, Some(u64::MAX));
     }
 
     #[test]

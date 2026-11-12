@@ -34,6 +34,22 @@ pub struct ValidationReport {
     pub snapshot_path: Option<PathBuf>,
 }
 
+/// Facts captured while validation holds the pool's shared lock.
+/// The report layout and its machine representation remain unchanged.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValidationObservation {
+    pub report: ValidationReport,
+    /// Retained bounds/count, available only after a successful validation scan.
+    pub messages: Option<ValidationMessageStats>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ValidationMessageStats {
+    pub count: u64,
+    pub oldest_seq: Option<u64>,
+    pub newest_seq: Option<u64>,
+}
+
 impl ValidationReport {
     pub fn ok(path: PathBuf) -> Self {
         Self {

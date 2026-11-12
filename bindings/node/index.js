@@ -36,7 +36,29 @@ function resolveNativeAddonPath() {
   return path.join(__dirname, "native", platformDir, "index.node");
 }
 
-const DEFAULT_POOL_DIR = path.join(os.homedir(), ".plasmite", "pools");
+function defaultPoolDir() {
+  let home;
+  try {
+    if (process.platform !== "win32" && process.env.HOME && path.isAbsolute(process.env.HOME)) {
+      home = process.env.HOME;
+    } else if (process.platform === "win32") {
+      home = process.env.USERPROFILE;
+      if (!home || !path.isAbsolute(home)) home = os.userInfo().homedir;
+    } else {
+      home = os.userInfo().homedir;
+    }
+  } catch (cause) {
+    throw new Error("cannot determine the user home directory; supply an explicit pool directory", { cause });
+  }
+  if (!home || !path.isAbsolute(home)) {
+    throw new Error("cannot determine the user home directory; supply an explicit pool directory");
+  }
+  return path.join(home, ".plasmite", "pools");
+}
+
+// An unavailable default must not prevent remote-only or explicit-directory use.
+let DEFAULT_POOL_DIR;
+try { DEFAULT_POOL_DIR = defaultPoolDir(); } catch {}
 const DEFAULT_POOL_SIZE = 1024 * 1024;
 const DEFAULT_POOL_SIZE_BYTES = DEFAULT_POOL_SIZE;
 const UINT64_MAX = (1n << 64n) - 1n;
@@ -108,7 +130,7 @@ class Client {
    * @param {string} [poolDir]
    * @returns {Client}
    */
-  constructor(poolDir = DEFAULT_POOL_DIR) {
+  constructor(poolDir = defaultPoolDir()) {
     if (!native) {
       throw makeNativeUnavailableError();
     }

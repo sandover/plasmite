@@ -260,7 +260,8 @@ policy because their frame format has no terminal error representation.
 
 ### Error handling
 
-Local operations throw `PlasmiteNativeError` with structured fields:
+Local operations throw `PlasmiteNativeError` with structured fields. Optional
+`seq` and `offset` use `bigint`, as do the corresponding `RemoteError` fields:
 
 ```js
 try {

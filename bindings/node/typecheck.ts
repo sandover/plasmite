@@ -76,7 +76,9 @@ async function smokeLocalStreams() {
 function handleRemoteError(err: unknown) {
   if (err instanceof RemoteError) {
     const kind: ErrorKind = err.kind;
-    void kind;
+    const seq: bigint | undefined = err.seq;
+    const offset: bigint | undefined = err.offset;
+    void kind; void seq; void offset;
   }
 }
 

@@ -165,6 +165,9 @@ typedef struct plsm_error {
 int plsm_client_new(const char *pool_dir, plsm_client_t **out_client, plsm_error_t **out_err);
 void plsm_client_free(plsm_client_t *client);
 
+/* pool_ref names resolve in the client's directory. Native path separators
+ * select a file path; use ./bare.plasmite (or .\bare.plasmite on Windows)
+ * for an explicit bare file. Windows drive-relative forms are unsupported. */
 int plsm_pool_create(plsm_client_t *client, const char *pool_ref, uint64_t size_bytes, plsm_pool_t **out_pool, plsm_error_t **out_err);
 int plsm_pool_open(plsm_client_t *client, const char *pool_ref, plsm_pool_t **out_pool, plsm_error_t **out_err);
 void plsm_pool_free(plsm_pool_t *pool);

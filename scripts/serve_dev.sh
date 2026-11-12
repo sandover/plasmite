@@ -87,38 +87,68 @@ status_tracked() {
   echo "serve-status: not running"
 }
 
+# The server atomically publishes this file after binding both listeners.
+wait_ready() {
+  local pid="$1" bin="$2" pool_dir="$3" bind="$4" ready_file="$5" log_file="$6" label="$7"
+  local attempt
+  for ((attempt=0; attempt<100; attempt++)); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "${label}: server exited before readiness; check ${log_file}" >&2
+      cat "$log_file" >&2
+      return 1
+    fi
+    # The child may still be exec'ing nohup/the binary on the first poll.
+    # Readiness authorizes use only after the exact process matches too.
+    if [[ -s "$ready_file" ]] && owned_pid "$pid" "$bin" "$pool_dir" "$bind"; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "${label}: server did not become ready within 10 seconds; check ${log_file}" >&2
+  cat "$log_file" >&2
+  return 1
+}
+
+cleanup_started() {
+  stop_pid "${serve_dev_cleanup_args[@]}" >/dev/null 2>&1 || true
+  rm -rf -- "$serve_dev_ready_dir"
+}
+
 start_detached() {
   local bin="$1" pool_dir="$2" bind="$3" log_file="$4" pid_file="$5" label="$6"
   bin="$(canonical_bin "$bin")"
   pool_dir="$(cd -- "$pool_dir" && pwd)"
+  serve_dev_ready_dir="$(mktemp -d "${TMPDIR:-/tmp}/plasmite-dev-ready.XXXXXX")"
+  local ready_file="$serve_dev_ready_dir/address"
   local -a args=(--dir "$pool_dir" serve --bind "$bind" --remote-bind 127.0.0.1:0)
-  nohup "$bin" "${args[@]}" >"$log_file" 2>&1 &
+  PLASMITE_SERVE_READY_FILE="$ready_file" nohup "$bin" "${args[@]}" >"$log_file" 2>&1 &
   local pid=$!
+  serve_dev_cleanup_args=("$pid" "$bin" "$pool_dir" "$bind" "$label")
+  trap cleanup_started EXIT
   echo "$pid" >"$pid_file"
-  sleep 0.5
-  if ! owned_pid "$pid" "$bin" "$pool_dir" "$bind"; then
-    rm -f "$pid_file"
-    echo "${label}: server exited immediately; check ${log_file}" >&2
-    cat "$log_file" >&2
+  if ! wait_ready "$pid" "$bin" "$pool_dir" "$bind" "$ready_file" "$log_file" "$label"; then
+    if stop_pid "${serve_dev_cleanup_args[@]}"; then rm -f "$pid_file"; fi
     return 1
   fi
+  rm -rf -- "$serve_dev_ready_dir"
+  trap - EXIT
 }
 
 run_with() {
   local bin="$1" pool_dir="$2" bind="$3" log_file="$4" label="$5" cmd="$6"
   bin="$(canonical_bin "$bin")"
   pool_dir="$(cd -- "$pool_dir" && pwd)"
-  "$bin" --dir "$pool_dir" serve --bind "$bind" --remote-bind 127.0.0.1:0 >"$log_file" 2>&1 &
+  serve_dev_ready_dir="$(mktemp -d "${TMPDIR:-/tmp}/plasmite-dev-ready.XXXXXX")"
+  local ready_file="$serve_dev_ready_dir/address"
+  PLASMITE_SERVE_READY_FILE="$ready_file" "$bin" --dir "$pool_dir" serve --bind "$bind" --remote-bind 127.0.0.1:0 >"$log_file" 2>&1 &
   local pid=$!
   # EXIT runs after this function's local variables disappear.
   serve_dev_cleanup_args=("$pid" "$bin" "$pool_dir" "$bind" "$label")
-  trap 'stop_pid "${serve_dev_cleanup_args[@]}" >/dev/null 2>&1 || true' EXIT
-  sleep 0.5
-  if ! owned_pid "$pid" "$bin" "$pool_dir" "$bind"; then
-    echo "${label}: server exited immediately; check ${log_file}" >&2
-    cat "$log_file" >&2
+  trap cleanup_started EXIT
+  if ! wait_ready "$pid" "$bin" "$pool_dir" "$bind" "$ready_file" "$log_file" "$label"; then
     return 1
   fi
+  rm -rf -- "$serve_dev_ready_dir"
   local status=0
   bash -lc "$cmd" || status=$?
   stop_pid "$pid" "$bin" "$pool_dir" "$bind" "$label"

@@ -30,15 +30,15 @@ pub(super) fn run(args: DoctorArgs, context: &CliContext) -> Result<CommandResul
             .with_hint("Use `plasmite doctor <pool>` or `plasmite doctor --all`."));
     }
 
-    let pool_dir = context.pool_dir();
-    let client = LocalClient::new().with_pool_dir(pool_dir);
+    let pool_dir = context.optional_pool_dir();
+    let client = LocalClient::new();
     let reports = if let Some(pool) = args.pool {
         let path = resolve_poolref(&pool, pool_dir)?;
         let pool_ref = PoolRef::path(path.clone());
         vec![doctor_report(&client, pool_ref, pool, path)?]
     } else {
         let mut reports = Vec::new();
-        for path in list_pool_paths(pool_dir)? {
+        for path in list_pool_paths(context.pool_dir()?)? {
             let label = path.to_string_lossy().to_string();
             let pool_ref = PoolRef::path(path.clone());
             reports.push(doctor_report(&client, pool_ref, label, path)?);
@@ -47,7 +47,10 @@ pub(super) fn run(args: DoctorArgs, context: &CliContext) -> Result<CommandResul
     };
 
     if output_mode.is_structured() {
-        let values = reports.iter().map(report_json).collect::<Vec<_>>();
+        let values = reports
+            .iter()
+            .map(|observation| report_json(&observation.report))
+            .collect::<Vec<_>>();
         emit_output(serde_json::json!({ "reports": values }), output_mode)?;
     } else if args.all {
         emit_doctor_human_summary(&reports)?;
@@ -59,7 +62,7 @@ pub(super) fn run(args: DoctorArgs, context: &CliContext) -> Result<CommandResul
 
     let has_corrupt = reports
         .iter()
-        .any(|report| report.status == ValidationStatus::Corrupt);
+        .any(|observation| observation.report.status == ValidationStatus::Corrupt);
     let exit_code = if has_corrupt {
         to_exit_code(ErrorKind::Corrupt)
     } else {

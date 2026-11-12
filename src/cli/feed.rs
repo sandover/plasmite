@@ -32,7 +32,7 @@ pub(super) struct FeedArgs {
 
 pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandResult, Error> {
     args.create |= args.create_size.is_some();
-    let target = resolve_pool_target(&args.pool, context.pool_dir())?;
+    let target = resolve_pool_target(&args.pool, context.optional_pool_dir())?;
     if args.create && matches!(target, PoolTarget::Remote { .. }) {
         return Err(Error::new(ErrorKind::Usage)
             .with_message("remote feed does not support --create or --create-size")
@@ -85,7 +85,9 @@ pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandRes
             let mut pool = match Pool::open(&path) {
                 Ok(pool) => pool,
                 Err(err) if args.create && err.kind() == ErrorKind::NotFound => {
-                    ensure_pool_dir(context.pool_dir())?;
+                    if let Some(directory) = context.optional_pool_dir() {
+                        ensure_pool_dir(directory)?;
+                    }
                     let size = args
                         .create_size
                         .as_deref()
@@ -160,7 +162,7 @@ pub(super) fn run(mut args: FeedArgs, context: &CliContext) -> Result<CommandRes
 }
 
 pub(super) fn fetch(pool: &str, seq: u64, context: &CliContext) -> Result<CommandResult, Error> {
-    match resolve_pool_target(pool, context.pool_dir())? {
+    match resolve_pool_target(pool, context.optional_pool_dir())? {
         PoolTarget::LocalPath(path) => {
             let handle = Pool::open(&path).map_err(|err| add_missing_pool_hint(err, pool))?;
             let frame = handle
@@ -190,18 +192,22 @@ pub(super) fn fetch(pool: &str, seq: u64, context: &CliContext) -> Result<Comman
                 .open_pool(&PoolRef::name(name))
                 .map_err(|err| add_missing_pool_hint(err, pool))?;
             if context.output_mode().is_binary() {
-                let ns = if context.output_mode() == super::output::OutputMode::Lite3Raw {
-                    0
+                if context.output_mode() == super::output::OutputMode::Lite3Raw {
+                    let payload = handle
+                        .get_lite3(seq)
+                        .map_err(|err| add_missing_seq_hint(err, pool))?;
+                    emit_lite3(seq, 0, &payload, context.output_mode())?;
                 } else {
-                    handle
-                        .get_message(seq)
-                        .map_err(|err| add_missing_seq_hint(err, pool))?
-                        .timestamp_ns()?
-                };
-                let payload = handle
-                    .get_lite3(seq)
-                    .map_err(|err| add_missing_seq_hint(err, pool))?;
-                emit_lite3(seq, ns, &payload, context.output_mode())?;
+                    let frame = handle
+                        .get_lite3_frame(seq)
+                        .map_err(|err| add_missing_seq_hint(err, pool))?;
+                    emit_lite3(
+                        frame.seq,
+                        frame.timestamp_ns,
+                        &frame.payload,
+                        context.output_mode(),
+                    )?;
+                }
             } else {
                 let message = handle
                     .get_message(seq)

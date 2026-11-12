@@ -23,7 +23,7 @@ export const enum ErrorKind {
   Io = 8,
   RetentionGap = 9,
 }
-export const DEFAULT_POOL_DIR: string
+export const DEFAULT_POOL_DIR: string | undefined
 export const DEFAULT_POOL_SIZE_BYTES: number
 export const DEFAULT_POOL_SIZE: number
 
@@ -61,8 +61,8 @@ export interface MessageEnvelope {
 export class PlasmiteNativeError extends Error {
   kind?: ErrorKind
   path?: string
-  seq?: number
-  offset?: number
+  seq?: bigint
+  offset?: bigint
   cause?: unknown
 }
 
@@ -224,8 +224,8 @@ export class RemoteError extends Error {
   kind: ErrorKind
   hint?: string
   path?: string
-  seq?: number
-  offset?: number
+  seq?: bigint
+  offset?: bigint
 }
 
 export class RemoteClient {

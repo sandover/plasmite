@@ -22,6 +22,16 @@ PyPI and Homebrew. Versions agree across the product's distribution surfaces.
 - Record target, source SHA, build/publish run IDs and evidence so recovery resumes
   the intended release instead of whichever workflow ran most recently.
 
+## Release notes
+
+Keep release-worthy outcomes in `CHANGELOG.md` under Unreleased as work lands.
+Move the selected notes into a versioned section when preparing the release;
+the publish workflow uses that section. Explain what users can now rely on,
+which failure or cost changed, and any action an upgrade requires.
+Group related implementation work around those outcomes. Keep symbol-by-symbol
+migration instructions in the upgrade guide and detailed investigation evidence
+in Ergo. Give performance claims the scope supported by their measurements.
+
 ## Build and publication
 
 `release.yml` builds the tagged commit, smoke-tests every matrix target and stores

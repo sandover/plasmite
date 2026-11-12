@@ -365,6 +365,9 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         const state = {
           local: false,
           info: null,
+          generation: 0,
+          reader: null,
+          infoRequest: 0,
           messages: [],      // oldest first, at most state.keep
           keep: pageSize,    // grows by each batch of earlier messages the reader loads
           pins: [],          // field paths this pool's lines show first, in the order pinned
@@ -900,6 +903,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         // Opens the message a link names: from the log when it is there, or fetched on
         // its own when it is older than the log reaches.
         async function openTarget() {
+          const generation = state.generation;
           const target = state.target;
           if (target == null || !state.messages.length) return;
           const found = state.messages.find((message) => message.seq === target);
@@ -908,7 +912,10 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           if (target > state.messages[state.messages.length - 1].seq) return;
           try {
             const response = await fetch("/v0/pools/" + encodeURIComponent(poolName) + "/messages/" + target, { cache: "no-store" });
-            if (response.ok) select(fromRaw(parseJSON(await response.text()).message));
+            if (response.ok) {
+              const message = parseJSON(await response.text()).message;
+              if (generation === state.generation) select(fromRaw(message));
+            }
           } catch (_) { /* The address stays; the log is still here. */ }
         }
 
@@ -1004,17 +1011,58 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           location.assign(loginURL());
         }
 
+        // A pathname can acquire a new pool whose sequence numbers start over.
+        function acceptPool(info, restart = true) {
+          state.infoRequest++;
+          const replaced = state.info?.incarnation != null && info?.incarnation !== state.info.incarnation;
+          state.info = info;
+          $("live").hidden = false;
+          $("log-head").hidden = false;
+          $("append").hidden = false;
+          if (replaced) {
+            state.generation++;
+            state.messages = [];
+            pending = [];
+            state.rows.clear();
+            state.keep = pageSize;
+            state.tagged = false;
+            state.tagsWidth = 4;
+            state.unseen = 0;
+            state.target = null;
+            state.nextSeq = tailStart(info.bounds || {}, state.keep);
+            select(null);
+            renderRows();
+            applyFilter();
+            showNotice("This pool was replaced. Showing its retained messages.");
+            if (restart) followPool();
+          }
+          renderFacts();
+          return replaced;
+        }
+
         async function loadInfo(signal) {
+          const request = ++state.infoRequest;
           const response = await fetch("/v0/ui/pools/" + encodeURIComponent(poolName) + "/info", { cache: "no-store", signal });
+          if (request !== state.infoRequest) return false;
           if (response.status === 401) { toLogin(); return false; }
           if (response.status === 404) { showMissing(); return false; }
           if (!response.ok) throw new Error("Pool info failed (" + response.status + ")");
-          state.info = parseJSON(await response.text()).pool || null;
-          renderFacts();
+          const info = parseJSON(await response.text()).pool || null;
+          if (request !== state.infoRequest) return false;
+          acceptPool(info);
           return true;
         }
 
         function showMissing() {
+          state.generation++;
+          state.infoRequest++;
+          state.reader?.abort();
+          state.messages = [];
+          pending = [];
+          state.rows.clear();
+          state.target = null;
+          select(null);
+          renderRows();
           $("live").hidden = true;
           $("log-head").hidden = true;
           $("empty").hidden = false;
@@ -1043,12 +1091,13 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
           if ($("earlier").disabled) return;
           const first = state.messages[0];
           if (!first) return;
+          const generation = state.generation;
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), 5000);
           const older = [];
           $("earlier").disabled = true;
           try {
-            if (!(await loadInfo(controller.signal))) return;
+            if (!(await loadInfo(controller.signal)) || generation !== state.generation) return;
             const oldest = oldestHeld();
             if (oldest == null || first.seq <= oldest) {
               showNotice("Those earlier messages have been overwritten. The log shows the retained messages.");
@@ -1062,6 +1111,8 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
             if (response.status === 401) { toLogin(); return; }
             if (!response.ok || !response.body) throw new Error("Earlier messages failed (" + response.status + ")");
             await readEvents(response.body, event => {
+              if (generation !== state.generation) return false;
+              if (event.name === "pool" && acceptPool(event.data)) return false;
               if (event.name === "error") throw new Error(event.data.error?.message || "Earlier messages were overwritten");
               if (event.name !== "message") return;
               if (event.data.seq >= first.seq) return false;
@@ -1078,7 +1129,7 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
             $("earlier").disabled = false;
             showEarlier();
           }
-          if (!older.length) return;
+          if (!older.length || generation !== state.generation) return;
           // Keep the reader's place: the rows they were reading stay where they were.
           const log = $("log");
           const fromBottom = log.scrollHeight - log.scrollTop;
@@ -1094,20 +1145,30 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
 
         // Follows the pool from the next unseen message, reconnecting after any drop.
         async function followPool() {
+          state.reader?.abort();
+          const controller = new AbortController();
+          state.reader = controller;
+          let generation = state.generation;
           if (state.nextSeq != null && cursor(state.nextSeq) == null) return;
           await followEvents({
-            retryMs,
+            retryMs, signal: controller.signal,
             url() {
               const query = new URLSearchParams({ gap_policy: "continue" });
               if (state.nextSeq != null) query.set("since_seq", cursor(state.nextSeq));
               return "/v0/ui/pools/" + encodeURIComponent(poolName) + "/events?" + query;
             },
             onResponse(response) {
+              generation = state.generation;
               if (response.status === 401) { toLogin(); return false; }
               if (response.status === 404) { showMissing(); return false; }
               if (response.ok && response.body) setLive(true);
             },
             onEvent(event) {
+              if (generation !== state.generation) return false;
+              if (event.name === "pool") {
+                if (acceptPool(event.data, false)) throw new Error("Pool replaced");
+                return;
+              }
               if (event.name === "error") throw new Error("Stream error");
               if (event.name === "message") {
                 addMessage(event.data);
@@ -1119,6 +1180,14 @@ Invariants: Columns are the protocol's own: sequence, time, and tags. A message'
         }
 
         // Page events.
+
+        document.addEventListener("visibilitychange", async () => {
+          if (document.hidden) state.reader?.abort();
+          else {
+            try { if (await loadInfo()) followPool(); }
+            catch (_) { followPool(); }
+          }
+        });
 
         $("rows").addEventListener("click", (event) => {
           const row = event.target.closest(".row");

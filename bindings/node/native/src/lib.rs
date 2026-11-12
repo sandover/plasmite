@@ -1302,8 +1302,8 @@ fn take_error(env: Env, err: *mut plsm_error_t) -> Result<Error> {
     ))?;
     object.set_named_property("kind", kind)?;
     if !path.is_empty() { object.set_named_property("path", path)?; }
-    if let Some(seq) = seq { object.set_named_property("seq", seq as f64)?; }
-    if let Some(offset) = offset { object.set_named_property("offset", offset as f64)?; }
+    if let Some(seq) = seq { object.set_named_property("seq", BigInt::from(seq))?; }
+    if let Some(offset) = offset { object.set_named_property("offset", BigInt::from(offset))?; }
     Ok(Error::from(object.into_unknown()))
 }
 

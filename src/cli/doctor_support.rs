@@ -5,6 +5,7 @@ use plasmite::api::ErrorKind;
 use plasmite::api::LocalClient;
 use plasmite::api::PoolRef;
 use plasmite::api::ValidationIssue;
+use plasmite::api::ValidationObservation;
 use plasmite::api::ValidationReport;
 use plasmite::api::ValidationStatus;
 use serde_json::Value;
@@ -15,9 +16,9 @@ use std::path::PathBuf;
 
 use super::output_support::format_seq_range;
 use super::output_support::short_display_path;
-use super::pool_support::message_count_from_info;
 
-pub(crate) fn emit_doctor_human(report: &ValidationReport) -> Result<(), Error> {
+pub(crate) fn emit_doctor_human(observation: &ValidationObservation) -> Result<(), Error> {
+    let report = &observation.report;
     if !io::stdout().is_terminal() {
         let label = report
             .pool_ref
@@ -56,7 +57,7 @@ pub(crate) fn emit_doctor_human(report: &ValidationReport) -> Result<(), Error> 
         ValidationStatus::Ok => {
             super::output::write_stdout(format!("{label}: healthy\n").as_bytes())?;
             super::output::write_stdout(
-                format!("  messages:  {}\n", doctor_messages_summary(report)).as_bytes(),
+                format!("  messages:  {}\n", doctor_messages_summary(observation)).as_bytes(),
             )?;
             super::output::write_stdout(
                 "  checked:   header, index, ring — 0 issues\n".as_bytes(),
@@ -70,7 +71,7 @@ pub(crate) fn emit_doctor_human(report: &ValidationReport) -> Result<(), Error> 
                 .unwrap_or_else(|| "corruption detected".to_string());
             super::output::write_stdout(format!("{label}: corrupt\n").as_bytes())?;
             super::output::write_stdout(
-                format!("  messages:  {}\n", doctor_messages_summary(report)).as_bytes(),
+                format!("  messages:  {}\n", doctor_messages_summary(observation)).as_bytes(),
             )?;
             super::output::write_stdout(
                 format!(
@@ -91,7 +92,7 @@ pub(crate) fn emit_doctor_human(report: &ValidationReport) -> Result<(), Error> 
     Ok(())
 }
 
-pub(crate) fn emit_doctor_human_summary(reports: &[ValidationReport]) -> Result<(), Error> {
+pub(crate) fn emit_doctor_human_summary(reports: &[ValidationObservation]) -> Result<(), Error> {
     if reports.is_empty() {
         super::output::write_stdout(b"No pools found.\n")?;
         return Ok(());
@@ -105,9 +106,12 @@ pub(crate) fn emit_doctor_human_summary(reports: &[ValidationReport]) -> Result<
 
     let corrupt = reports
         .iter()
-        .filter(|report| report.status == ValidationStatus::Corrupt)
+        .filter(|observation| observation.report.status == ValidationStatus::Corrupt)
         .count();
-    let labels = reports.iter().map(doctor_display_label).collect::<Vec<_>>();
+    let labels = reports
+        .iter()
+        .map(|observation| doctor_display_label(&observation.report))
+        .collect::<Vec<_>>();
     let message_labels = reports
         .iter()
         .map(doctor_messages_count_label)
@@ -135,7 +139,8 @@ pub(crate) fn emit_doctor_human_summary(reports: &[ValidationReport]) -> Result<
             format!("{corrupt} of {} pools unhealthy.\n", reports.len()).as_bytes(),
         )?;
         super::output::write_stdout(b"\n")?;
-        for (idx, report) in reports.iter().enumerate() {
+        for (idx, observation) in reports.iter().enumerate() {
+            let report = &observation.report;
             let label = &labels[idx];
             let messages = &message_labels[idx];
             if report.status == ValidationStatus::Corrupt {
@@ -170,8 +175,8 @@ pub(crate) fn doctor_display_label(report: &ValidationReport) -> String {
     super::output_support::human_literal(&short_display_path(&report.path, report.path.parent()))
 }
 
-pub(crate) fn doctor_messages_summary(report: &ValidationReport) -> String {
-    if let Some(stats) = doctor_message_stats(report) {
+pub(crate) fn doctor_messages_summary(observation: &ValidationObservation) -> String {
+    if let Some(stats) = observation.messages {
         let seq_range = format_seq_range(stats.oldest_seq, stats.newest_seq);
         if stats.count == 0 {
             return "empty".to_string();
@@ -182,44 +187,14 @@ pub(crate) fn doctor_messages_summary(report: &ValidationReport) -> String {
         return format!("{} ({seq_range})", stats.count);
     }
 
-    let seq_range = format_seq_range(report.last_good_seq, report.last_good_seq);
-    if seq_range == "-" {
-        "empty".to_string()
-    } else {
-        format!("visible count unavailable ({seq_range})")
-    }
+    "messages unknown".to_string()
 }
 
-pub(crate) fn doctor_messages_count_label(report: &ValidationReport) -> String {
-    if let Some(stats) = doctor_message_stats(report) {
-        return format!("{} messages", stats.count);
-    }
-    if report.status == ValidationStatus::Ok {
-        "messages unknown".to_string()
-    } else {
-        report
-            .last_good_seq
-            .map(|seq| format!("up to seq {seq}"))
-            .unwrap_or_else(|| "messages unknown".to_string())
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct DoctorMessageStats {
-    count: u64,
-    oldest_seq: Option<u64>,
-    newest_seq: Option<u64>,
-}
-
-pub(crate) fn doctor_message_stats(report: &ValidationReport) -> Option<DoctorMessageStats> {
-    let info = LocalClient::new()
-        .pool_info(&PoolRef::path(report.path.clone()))
-        .ok()?;
-    Some(DoctorMessageStats {
-        count: message_count_from_info(&info),
-        oldest_seq: info.bounds.oldest_seq,
-        newest_seq: info.bounds.newest_seq,
-    })
+pub(crate) fn doctor_messages_count_label(observation: &ValidationObservation) -> String {
+    observation
+        .messages
+        .map(|stats| format!("{} messages", stats.count))
+        .unwrap_or_else(|| "messages unknown".to_string())
 }
 
 pub(crate) fn report_json(report: &ValidationReport) -> Value {
@@ -255,12 +230,16 @@ pub(crate) fn doctor_report(
     pool_ref: PoolRef,
     label: String,
     path: PathBuf,
-) -> Result<ValidationReport, Error> {
-    match client.validate_pool(&pool_ref) {
-        Ok(report) => Ok(report.with_pool_ref(label)),
-        Err(err) if err.kind() == ErrorKind::Corrupt => {
-            Ok(ValidationReport::corrupt(path, error_issue(&err), None).with_pool_ref(label))
+) -> Result<ValidationObservation, Error> {
+    match client.validate_pool_observation(&pool_ref) {
+        Ok(mut observation) => {
+            observation.report = observation.report.with_pool_ref(label);
+            Ok(observation)
         }
+        Err(err) if err.kind() == ErrorKind::Corrupt => Ok(ValidationObservation {
+            report: ValidationReport::corrupt(path, error_issue(&err), None).with_pool_ref(label),
+            messages: None,
+        }),
         Err(err) => Err(err),
     }
 }
@@ -271,5 +250,49 @@ pub(crate) fn error_issue(err: &Error) -> ValidationIssue {
         message: err.message().unwrap_or("corrupt").to_string(),
         seq: err.seq(),
         offset: err.offset(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plasmite::api::{Durability, PoolApiExt, PoolOptions};
+
+    #[test]
+    fn diagnostic_facts_survive_append_replacement_and_removal() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = LocalClient::new().with_pool_dir(dir.path());
+        let reference = PoolRef::name("observed");
+        client
+            .create_pool(&reference, PoolOptions::new(65536))
+            .unwrap();
+        let mut pool = client.open_pool(&reference).unwrap();
+        for _ in 0..2 {
+            pool.append_json_now(&json!({"x": 1}), &[], Durability::Fast)
+                .unwrap();
+        }
+        let observation = client.validate_pool_observation(&reference).unwrap();
+        let json_before = report_json(&observation.report);
+        pool.append_json_now(&json!({"x": 2}), &[], Durability::Fast)
+            .unwrap();
+        assert_eq!(doctor_messages_summary(&observation), "2 (seq 1..2)");
+        drop(pool);
+        client.delete_pool(&reference).unwrap();
+        assert_eq!(doctor_messages_count_label(&observation), "2 messages");
+        client
+            .create_pool(&reference, PoolOptions::new(65536))
+            .unwrap();
+        assert_eq!(doctor_messages_summary(&observation), "2 (seq 1..2)");
+        assert_eq!(report_json(&observation.report), json_before);
+        client.delete_pool(&reference).unwrap();
+        std::fs::write(dir.path().join("observed.plasmite"), b"invalid").unwrap();
+        let corrupt = doctor_report(
+            &client,
+            reference,
+            "observed".into(),
+            dir.path().join("observed.plasmite"),
+        )
+        .unwrap();
+        assert_eq!(doctor_messages_summary(&corrupt), "messages unknown");
     }
 }

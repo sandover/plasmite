@@ -144,3 +144,56 @@ func playback(ctx context.Context, pool api.Pool) error {
 The Go function uses `context`, `fmt`, `time`, and
 `github.com/sandover/plasmite/bindings/go/api` imports. Give it a cancellable
 context and cancel that context when the caller stops consuming.
+
+## Default pools stay in the user's home directory
+
+The default remains `~/.plasmite/pools` (`%USERPROFILE%\.plasmite\pools` on
+Windows). Every client now follows the same home policy. Unix clients use an
+absolute, nonempty `HOME`, then the current account's home. Windows clients use
+an absolute `USERPROFILE`, then the platform's profile directory. Empty or
+relative environment values do not select a relative directory. If no home can
+be resolved, supply `--dir PATH` or an explicit client directory. Explicit paths
+can remain relative. Installed services keep their configured directories.
+
+No migration is necessary for pools already in the home directory. Earlier Rust
+clients with missing `HOME` could create `.plasmite/pools` beneath their working
+directory; Go clients could select a temporary `plasmite/pools` directory.
+Inspect those locations before upgrading. Select an old location explicitly,
+or stop its writers and move the pool files into your chosen directory. Plasmite
+does not move files or search alternate stores automatically. Earlier Windows
+Rust clients followed `HOME`; if it differs from `USERPROFILE`, select the old
+`HOME/.plasmite/pools` location explicitly. If you used a relative home value,
+inspect the corresponding directory beneath the old working directory too.
+
+Rust's `LocalClient::pool_dir()` now returns `Result<&Path, Error>`; propagate
+or handle its missing-home error. `LocalClient::new()` remains an infallible
+configuration builder, and `with_pool_dir` and explicit `PoolRef::Path` operations
+work without a default home. Go's `local.DefaultPoolDir()` now returns
+`(string, error)`; `NewDefaultClient()` propagates that error. Node's
+`DEFAULT_POOL_DIR` and Python's equivalent are unavailable (`undefined`/`None`)
+when home resolution fails; explicit clients remain usable.
+
+## Node error sequence and offset fields use bigint
+
+Both `PlasmiteNativeError` and `RemoteError` now expose optional `seq` and
+`offset` fields as `bigint`. This preserves every unsigned 64-bit value, including
+IDs above JavaScript's safe-integer limit. Absence remains `undefined`, and zero
+remains `0n`. Compare with bigint literals and convert to decimal strings when
+serializing error context to JSON:
+
+```javascript
+if (error.seq !== undefined) {
+  console.error(`Message ${error.seq.toString()} failed`);
+}
+```
+
+## Explicit local paths through string bindings
+
+C, Node, and Python distinguish names from paths by native path separators.
+Use `./work.plasmite` (or `.\work.plasmite` on Windows) for a bare file in the
+working directory; `work.plasmite` selects that name in the client's pool
+directory. Absolute Windows drive paths, UNC paths, and backslash-relative paths
+now reach the local file API. Drive-relative forms such as `C:work.plasmite`
+remain unsupported. Go's `PoolRefPath("work.plasmite")` now preserves explicit
+path intent by adding the relative prefix. `PoolRefName` and raw string names
+retain their meaning. POSIX names can still contain a literal backslash.

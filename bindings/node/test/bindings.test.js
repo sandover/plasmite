@@ -170,11 +170,12 @@ test("default client creates pool dir in fresh HOME", () => {
   `;
   const output = childProcess.spawnSync(process.execPath, ["-e", script], {
     cwd: path.join(__dirname, ".."),
-    env: { ...process.env, HOME: home },
+    env: { ...process.env, HOME: home, ...(process.platform === "win32" ? { USERPROFILE: home } : {}) },
     encoding: "utf8",
   });
   assert.equal(output.status, 0, output.stderr || output.stdout);
   assert.equal(fs.existsSync(expectedPoolPath), true);
+  fs.rmSync(home, { recursive: true, force: true });
 });
 
 test("tail timeout returns no message and close is safe", () => {
@@ -356,7 +357,7 @@ test("local tails can fail closed on retention gaps", async () => {
         (err) => {
           assert.ok(err instanceof PlasmiteNativeError);
           assert.equal(err.kind, ErrorKind.RetentionGap);
-          assert.equal(err.seq, Number(first.seq));
+          assert.equal(err.seq, first.seq);
           return true;
         },
       );
@@ -375,7 +376,7 @@ test("an open stream reports the first unread sequence after overwrite", () => {
       fillPast(pool, lost.seq);
       assert.throws(() => stream.nextJson(), {
         kind: ErrorKind.RetentionGap,
-        seq: Number(lost.seq),
+        seq: lost.seq,
       });
       assert.equal(stream.nextJson(), null);
     } finally {
@@ -397,7 +398,7 @@ test("lite3 streams can fail closed on retention gaps", () => {
         (err) => {
           assert.ok(err instanceof PlasmiteNativeError);
           assert.equal(err.kind, ErrorKind.RetentionGap);
-          assert.equal(err.seq, Number(first.seq));
+          assert.equal(err.seq, first.seq);
           return true;
         },
       );
@@ -456,7 +457,7 @@ test("missing sequences and corrupt pool files carry different error details", (
   withPool("damaged", ({ client, pool, poolDir }) => {
     assert.throws(() => pool.get(42n), {
       kind: ErrorKind.NotFound,
-      seq: 42,
+      seq: 42n,
       path: undefined,
     });
     pool.close();
@@ -467,6 +468,37 @@ test("missing sequences and corrupt pool files carry different error details", (
       path: poolPath,
       seq: undefined,
     });
+  });
+});
+
+test("native corrupt-frame errors retain a zero bigint offset", () => {
+  withPool("offset-error", ({ pool, poolDir }) => {
+    pool.append({ value: 1 });
+    const filename = path.join(poolDir, "offset-error.plasmite");
+    const header = fs.readFileSync(filename);
+    const ring = Number(header.readBigUInt64LE(40));
+    const file = fs.openSync(filename, "r+");
+    try { fs.writeSync(file, Buffer.from("X"), 0, 1, ring); }
+    finally { fs.closeSync(file); }
+    assert.throws(() => pool.get(1n), (err) => {
+      assert.ok(err instanceof PlasmiteNativeError);
+      assert.equal(err.kind, ErrorKind.Corrupt);
+      assert.equal(err.offset, 0n);
+      return true;
+    });
+  });
+});
+
+test("native missing-message errors retain exact uint64 sequences", () => {
+  withPool("exact-errors", ({ pool }) => {
+    for (const seq of [0n, 9007199254740992n, 9007199254740993n, (1n << 64n) - 1n]) {
+      assert.throws(() => pool.get(seq), (err) => {
+        assert.ok(err instanceof PlasmiteNativeError);
+        assert.equal(err.seq, seq);
+        assert.equal(err.offset, undefined);
+        return true;
+      });
+    }
   });
 });
 
@@ -597,7 +629,7 @@ test("remote tail preserves terminal retention-gap errors", async () => {
       (err) => {
         assert.ok(err instanceof RemoteError);
         assert.equal(err.kind, ErrorKind.RetentionGap);
-        assert.equal(err.seq, 7);
+        assert.equal(err.seq, 7n);
         return true;
       },
     );
@@ -611,13 +643,8 @@ test("remote errors with unknown kind map to Io", async () => {
   global.fetch = async () => ({
     ok: false,
     status: 400,
-    async json() {
-      return {
-        error: {
-          kind: "NoSuchKind",
-          message: "bad request",
-        },
-      };
+    async text() {
+      return '{"error":{"kind":"NoSuchKind","message":"bad request"}}';
     },
   });
 

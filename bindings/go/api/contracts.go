@@ -14,6 +14,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -98,7 +100,12 @@ type PoolRef string
 
 func PoolRefName(name string) PoolRef { return PoolRef(name) }
 
-func PoolRefPath(path string) PoolRef { return PoolRef(path) }
+func PoolRefPath(path string) PoolRef {
+	if path != "" && !filepath.IsAbs(path) && filepath.VolumeName(path) == "" && !strings.ContainsAny(path, string(filepath.Separator)+"/") {
+		return PoolRef("." + string(filepath.Separator) + path)
+	}
+	return PoolRef(path)
+}
 
 func PoolRefURI(uri string) PoolRef { return PoolRef(uri) }
 

@@ -85,12 +85,16 @@ ui-smoke:
 benchmark-harness-test:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_bench_transport_comparison.py
 
+# Check development server readiness and process ownership with disposable children.
+serve-dev-test:
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_serve_dev.py
+
 # Check the OSC example through a live receiver and persistent CLI pipe.
 osc-example-test:
 	PYTHONDONTWRITEBYTECODE=1 uv run --with python-osc==1.10.2 python scripts/test_osc_example.py
 
 # Core, deterministic checks for every local change and pull request.
-check: _trim-target fmt clippy test benchmark-harness-test check-version-alignment check-release-targets verify-lite3
+check: _trim-target fmt clippy test benchmark-harness-test serve-dev-test check-version-alignment check-release-targets verify-lite3
 
 # Cargo never removes builds that newer ones replace, so target/ grows without bound.
 # A clean build is about 1 GB and takes under a minute, so past 2 GB start over.

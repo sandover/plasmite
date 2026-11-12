@@ -1202,7 +1202,16 @@ fn parse_pool_ref(input: *const c_char, out_err: *mut *mut plsm_error) -> Result
             Error::new(ErrorKind::Usage).with_message("remote pool refs are not supported in v0"),
         ));
     }
-    if raw.contains('/') {
+    #[cfg(windows)]
+    if !std::path::Path::new(raw).has_root()
+        && matches!(
+            std::path::Path::new(raw).components().next(),
+            Some(std::path::Component::Prefix(_))
+        )
+    {
+        return Err(fail(out_err, Error::new(ErrorKind::Usage).with_message("drive-relative pool paths are not supported; use an absolute or explicit relative path")));
+    }
+    if raw.chars().any(std::path::is_separator) {
         Ok(PoolRef::path(raw))
     } else {
         Ok(PoolRef::name(raw))
@@ -2091,6 +2100,54 @@ mod tests {
         let (kind, message, _path, _seq, _offset) = take_error(err);
         assert_eq!(kind, error_kind_code(ErrorKind::Usage));
         assert_eq!(message, "out_client is null");
+    }
+
+    #[test]
+    fn abi_pool_reference_path_matrix() {
+        let mut err = std::ptr::null_mut();
+        for raw in [
+            "./bare.plasmite",
+            "./space 東京.plasmite",
+            "/tmp/pool.plasmite",
+        ] {
+            let input = CString::new(raw).unwrap();
+            assert_eq!(
+                parse_pool_ref(input.as_ptr(), &mut err).unwrap(),
+                PoolRef::path(raw)
+            );
+        }
+        let raw = "bare.plasmite";
+        let input = CString::new(raw).unwrap();
+        assert_eq!(
+            parse_pool_ref(input.as_ptr(), &mut err).unwrap(),
+            PoolRef::name(raw)
+        );
+        #[cfg(unix)]
+        {
+            let input = CString::new(r"literal\name").unwrap();
+            assert_eq!(
+                parse_pool_ref(input.as_ptr(), &mut err).unwrap(),
+                PoolRef::name(r"literal\name")
+            );
+        }
+        #[cfg(windows)]
+        {
+            for raw in [
+                r"C:\data\space 東京.plasmite",
+                r"\\server\share\pool.plasmite",
+                r".\bare.plasmite",
+                r"relative\pool.plasmite",
+            ] {
+                let input = CString::new(raw).unwrap();
+                assert_eq!(
+                    parse_pool_ref(input.as_ptr(), &mut err).unwrap(),
+                    PoolRef::path(raw)
+                );
+            }
+            let input = CString::new(r"C:relative\pool.plasmite").unwrap();
+            assert!(parse_pool_ref(input.as_ptr(), &mut err).is_err());
+            take_error(err);
+        }
     }
 
     #[test]

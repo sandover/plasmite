@@ -655,3 +655,16 @@ This major version replaces the earlier token-based setup. It removes
 `serve init`, `serve check`, token and verification-bypass flags, remote
 plaintext, and read-only, write-only, and cross-origin access modes. Use
 the access-key workflow when updating older configurations.
+
+
+## Replacing a pool while a browser watches it
+
+The pool page and map identify each opened pool by its native file identity.
+Replacing a named pool resets its displayed messages, selection, and resume
+position to the replacement's retained history. The browser shows a replacement
+notice. Ordinary appends, retention, and a server restart with the same files
+preserve the view's resume position.
+
+If the server cannot scan the pool directory, the pool list and map mark the
+last known list unavailable. They resume live updates after a successful scan;
+a failed scan never represents an empty or partial catalog.

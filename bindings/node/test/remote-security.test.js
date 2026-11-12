@@ -99,3 +99,21 @@ test("stream requests also enforce transport security and reject redirects", asy
     assert.equal(calls.length, 0);
   });
 });
+
+
+test("HTTP errors retain exact uint64 seq and offset tokens", async () => {
+  for (const value of ["0", "9007199254740992", "9007199254740993", "18446744073709551615"]) {
+    await withFetchStub(() => new Response(`{"error":{"kind":"Corrupt","message":"bad","seq":${value},"offset":${value},"hint":"repair","path":"pool"}}`, { status: 500 }), async () => {
+      const client = new RemoteClient("http://localhost:9700");
+      await assert.rejects(client.listPools(), (err) => {
+        assert.ok(err instanceof RemoteError);
+        assert.equal(err.seq, BigInt(value));
+        assert.equal(err.offset, BigInt(value));
+        assert.equal(err.path, "pool");
+        assert.equal(err.hint, "repair");
+        return true;
+      });
+    });
+  }
+  assert.equal(new RemoteError({ error: { kind: "Io" } }, 500).seq, undefined);
+});
