@@ -20,6 +20,11 @@ EOF behavior, client/server compatibility, and playback examples.
 
 ### Security maintenance
 
+Check Lite3 reader node bounds and alignment before making compiler alignment
+assumptions, and correct iterator prefetch indexes for wide objects. Preserve the
+correction as a checksummed local patch over the pinned upstream snapshot.
+Linux sanitizer checks now cover both bugs and run at `-O0` and `-O2`.
+
 Update the test-only `rustix` dependency to 1.1.6 for RUSTSEC-2026-0486.
 The production dependency tree does not include it.
 

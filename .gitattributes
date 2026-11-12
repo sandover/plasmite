@@ -1,1 +1,2 @@
 vendor/lite3/** whitespace=-trailing-space
+vendor/lite3-read-safety.patch -whitespace

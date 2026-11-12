@@ -454,6 +454,106 @@ mod tests {
     }
 
     #[test]
+    fn wide_nested_objects_preserve_every_value() {
+        // Seven slots fill one node; larger objects exercise child traversal,
+        // iterator ascent, and the prefetch at the end of each node.
+        for count in [7, 8, 100, 1000] {
+            let fields: serde_json::Map<_, _> =
+                (0..count).map(|i| (format!("key{i}"), json!(i))).collect();
+            let data = json!({"nested": [{"fields": fields}]});
+            let buf = encode_message(&["event".into()], &data).expect("encode");
+            let doc = buf.as_doc();
+            doc.validate().expect("valid wide message");
+            let data_ofs = doc.key_offset("data").expect("data");
+            let nested = doc.key_offset_at(data_ofs, "nested").expect("nested");
+            assert_eq!(doc.count_at(nested).expect("array count"), 1);
+            for pretty in [false, true] {
+                let decoded: serde_json::Value =
+                    serde_json::from_str(&doc.to_json(pretty).expect("decode")).expect("JSON");
+                assert_eq!(decoded, json!({"meta": {"tags": ["event"]}, "data": data}));
+            }
+            // Lookup must also traverse the B-tree, independently of iteration.
+            let direct = Lite3Buf::from_json_str(&serde_json::to_string(&fields).unwrap())
+                .expect("encode fields");
+            for i in 0..count {
+                assert_eq!(
+                    direct.as_doc().i64_at_key(0, &format!("key{i}")).unwrap(),
+                    i
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_internal_children_are_rejected() {
+        let fields: serde_json::Map<_, _> =
+            (0..1000).map(|i| (format!("key{i}"), json!(i))).collect();
+        let buf = encode_message(&[], &json!({"nested": fields})).expect("encode");
+        let data = buf.as_doc().key_offset("data").unwrap();
+        let nested = buf.as_doc().key_offset_at(data, "nested").unwrap();
+        // Lite3 nodes have eight u32 child offsets starting at byte 64.
+        let first_child =
+            u32::from_le_bytes(buf.as_slice()[nested + 64..nested + 68].try_into().unwrap())
+                as usize;
+        assert_ne!(
+            first_child, 0,
+            "fixture must contain multiple B-tree levels"
+        );
+        for (parent, edge) in [(data, 0), (nested, 0), (nested, 1), (first_child, 0)] {
+            for bad_offset in [1u32, 2, 3, u32::MAX - 3] {
+                let mut bytes = buf.as_slice().to_vec();
+                let child = parent + 64 + edge * 4;
+                bytes[child..child + 4].copy_from_slice(&bad_offset.to_le_bytes());
+                let doc = Lite3DocRef::new(&bytes);
+                for pretty in [false, true] {
+                    assert!(
+                        doc.to_json_at(data, pretty).is_err(),
+                        "parent={parent}, offset={bad_offset}"
+                    );
+                }
+                assert!(validate_bytes(&bytes).is_err());
+            }
+        }
+        // Force lookup down a bad edge, regardless of the key's hash position.
+        let mut bytes = buf.as_slice().to_vec();
+        for child in bytes[nested + 64..nested + 96].as_chunks_mut::<4>().0 {
+            child.copy_from_slice(&1u32.to_le_bytes());
+        }
+        assert!(
+            Lite3DocRef::new(&bytes)
+                .i64_at_key(nested, "missing")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn malformed_child_append_leaves_pool_unchanged() {
+        use crate::api::{AppendOptions, Durability, ErrorKind, Pool, PoolApiExt, PoolOptions};
+
+        let payload = encode_message(&[], &json!({"x": true})).expect("encode");
+        let data = payload.as_doc().key_offset("data").unwrap();
+        let mut bytes = payload.as_slice().to_vec();
+        bytes[data + 64..data + 68].copy_from_slice(&1u32.to_le_bytes());
+        let temp = tempfile::tempdir().unwrap();
+        let mut pool = Pool::create(
+            temp.path().join("children.plasmite"),
+            PoolOptions::new(1024 * 1024),
+        )
+        .unwrap();
+        let before = pool.info().unwrap().bounds;
+        let options = AppendOptions::new(123, Durability::Fast);
+        assert_eq!(
+            pool.append_lite3(&bytes, options).unwrap_err().kind(),
+            ErrorKind::Corrupt
+        );
+        assert_eq!(pool.info().unwrap().bounds, before);
+        let appended = pool
+            .append_lite3(payload.as_slice(), options)
+            .expect("valid append after rejection");
+        assert_eq!(appended, 1);
+    }
+
+    #[test]
     fn invalid_bytes_are_rejected() {
         let buf = [0u8; 8];
         let err = validate_bytes(&buf).expect_err("should fail");

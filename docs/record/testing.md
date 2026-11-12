@@ -262,8 +262,10 @@ just abi-smoke
 The adversarial harness checks documented safe failure and cleanup behavior,
 including null arguments and repeated cleanup of reset output structs. On Linux,
 `just test-lite3-sanitizers` also runs this harness against an AddressSanitizer
-and UndefinedBehaviorSanitizer instrumented library. It deliberately does not
-probe arbitrary invalid addresses, stale handles, incorrect nonzero lengths, or
+and UndefinedBehaviorSanitizer instrumented library at `-O0` and `-O2`. The
+Rust boundary tests cover valid wide/nested objects, malformed internal child
+offsets, and public C append rejection without consuming a sequence. The harness
+does not probe arbitrary invalid addresses, stale handles, incorrect nonzero lengths, or
 handle/error double-free: those violate the caller obligations in
 `include/plasmite.h` and are undefined behavior before the library can validate
 them.

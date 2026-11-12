@@ -60,16 +60,20 @@ for path in "${tracked_files[@]}"; do
   cp "$source_path" "$snapshot_dir/$path"
 done
 
+# Apply the local reader correction before replacing any installed source.
+# Stop for review if upstream changes make this overlay inapplicable.
+git -C "$snapshot_dir" apply "$repo_root/vendor/lite3-read-safety.patch"
+
 mkdir -p "$vendor_dir"
 rsync -a --delete "$snapshot_dir/" "$vendor_dir/"
 
 pin_date="$(git -C "$work_dir/upstream" show -s --format=%cs "$resolved_commit")"
-printf '{\n  "repository": "%s",\n  "commit": "%s",\n  "commit_date": "%s"\n}\n' \
+printf '{\n  "repository": "%s",\n  "commit": "%s",\n  "commit_date": "%s",\n  "patch": "vendor/lite3-read-safety.patch"\n}\n' \
   "$upstream_url" "$resolved_commit" "$pin_date" >"$lock_file"
 
 (
   cd "$repo_root"
-  find vendor/lite3 -type f | LC_ALL=C sort | xargs shasum -a 256
+  find vendor/lite3 vendor/lite3-read-safety.patch -type f | LC_ALL=C sort | xargs shasum -a 256
 ) >"$manifest_file"
 
 "$repo_root/scripts/verify-lite3.sh"

@@ -16,10 +16,15 @@ manifest_file="$repo_root/vendor/lite3.sha256"
 
 repository="$(jq -er '.repository' "$lock_file")"
 commit="$(jq -er '.commit' "$lock_file")"
+patch="$(jq -er '.patch' "$lock_file")"
 commit_date="$(jq -er '.commit_date' "$lock_file")"
 
 [[ "$repository" == "https://github.com/fastserial/lite3.git" ]] || {
   echo "unexpected Lite3 repository in vendor/lite3.lock.json" >&2
+  exit 1
+}
+[[ "$patch" == "vendor/lite3-read-safety.patch" ]] || {
+  echo "unexpected Lite3 patch in vendor/lite3.lock.json" >&2
   exit 1
 }
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || {
@@ -41,7 +46,7 @@ expected_files="$(
 )"
 actual_files="$(
   cd "$repo_root"
-  find vendor/lite3 -type f | LC_ALL=C sort
+  find vendor/lite3 vendor/lite3-read-safety.patch -type f | LC_ALL=C sort
 )"
 if [[ "$actual_files" != "$expected_files" ]]; then
   echo "vendor/lite3 contains files not represented by vendor/lite3.sha256" >&2

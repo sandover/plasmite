@@ -565,3 +565,17 @@
 {"version":1,"task_id":"A6YDRO","kind":"done","at":"2026-11-11T20:50:26.719386Z","agent":"codex@plasmite-implementation","text":"Implemented approved recommendation; reviewed and validated before commit/push."}
 {"version":1,"task_id":"ECNG77","kind":"result","at":"2026-11-11T20:50:26.76861Z","agent":"codex@plasmite-implementation","text":"Implemented and Opus-reviewed; final release-gate and audit pass. Next-major behavior documented."}
 {"version":1,"task_id":"ECNG77","kind":"done","at":"2026-11-11T20:50:26.791849Z","agent":"codex@plasmite-implementation","text":"Implemented approved recommendation; reviewed and validated before commit/push."}
+{"version":1,"task_id":"RL7UPI","kind":"open","at":"2026-11-11T23:12:22.819946Z"}
+{"version":1,"task_id":"RL7UPI","kind":"claim","at":"2026-11-11T23:12:22.848933Z","agent":"codex@lite3-boundary"}
+{"version":1,"task_id":"RL7UPI","kind":"result","at":"2026-11-11T23:12:22.876483Z","agent":"codex@lite3-boundary","text":"Reconciled: Linux ASan/UBSan and C ABI evidence passes; #11 closed, #20 remains a separate investigation."}
+{"version":1,"task_id":"RL7UPI","kind":"done","at":"2026-11-11T23:12:22.899558Z","agent":"codex@lite3-boundary","text":"Closed stale missing-sanitizer-evidence blocker using verified Linux CI; no claim that #20 is resolved."}
+{"version":1,"task_id":"SMDOVH","kind":"created","at":"2026-11-11T23:12:22.926051Z"}
+{"version":1,"task_id":"SMDOVH","kind":"claim","at":"2026-11-11T23:12:22.953407Z","agent":"codex@lite3-boundary"}
+{"version":1,"task_id":"KPRMEV","kind":"created","at":"2026-11-11T23:33:45.611794Z"}
+{"version":1,"task_id":"SMDOVH","kind":"result","at":"2026-11-11T23:33:45.690353Z","agent":"codex@lite3-boundary","text":"Confirmed alignment UB via public append and prefetch UB on valid data; tested candidate; draft fix KPRMEV."}
+{"version":1,"task_id":"SMDOVH","kind":"done","at":"2026-11-11T23:33:45.715601Z","agent":"codex@lite3-boundary","text":"Investigation complete: boundary gap reproduced; hold 2.0 pending draft correction KPRMEV."}
+{"version":1,"task_id":"RL7UPI","kind":"result","at":"2026-11-11T23:33:45.745739Z","text":"Stale evidence blocker closed; separate investigation SMDOVH confirmed defects, with draft correction KPRMEV."}
+{"version":1,"task_id":"KPRMEV","kind":"open","at":"2026-11-12T17:01:46.781839Z"}
+{"version":1,"task_id":"KPRMEV","kind":"claim","at":"2026-11-12T17:01:46.81278Z","agent":"codex@lite3-hardening"}
+{"version":1,"task_id":"KPRMEV","kind":"result","at":"2026-11-12T17:16:05.005952Z","agent":"codex@lite3-hardening","text":"Fixed both Lite3 defects; Linux ASan/UBSan O0/O2, vendoring reproduction, audit and release gate pass."}
+{"version":1,"task_id":"KPRMEV","kind":"done","at":"2026-11-12T17:16:05.033846Z","agent":"codex@lite3-hardening"}

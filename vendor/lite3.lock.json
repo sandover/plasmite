@@ -1,5 +1,6 @@
 {
   "repository": "https://github.com/fastserial/lite3.git",
   "commit": "48ab0e98d7b3a758afc017e2445c8e70508f1352",
-  "commit_date": "2026-08-06"
+  "commit_date": "2026-08-06",
+  "patch": "vendor/lite3-read-safety.patch"
 }

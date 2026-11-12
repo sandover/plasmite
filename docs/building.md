@@ -34,8 +34,8 @@ See [Windows support](#windows-support-policy) for the target and checks.
 
 Plasmite pins Lite3 to an exact upstream commit in
 `vendor/lite3.lock.json`. An integrity manifest at `vendor/lite3.sha256`
-covers the curated files compiled into Plasmite. Normal builds and integrity
-checks never access the network.
+covers the curated files compiled into Plasmite and the local reader patch.
+Normal builds and integrity checks never access the network.
 
 `build.rs` does three things:
 
@@ -68,9 +68,14 @@ To review and adopt a new upstream revision, select a full commit SHA and run:
 just update-lite3 <40-character-commit>
 ```
 
-The update command reconstructs `vendor/lite3/` from a fixed allowlist and
-updates both provenance and integrity metadata. It accesses the network; normal
-builds and `just check` do not.
+The update command reconstructs `vendor/lite3/` from a fixed allowlist, applies
+`vendor/lite3-read-safety.patch`, and updates provenance and integrity metadata.
+The patch checks node bounds and alignment before compiler alignment assumptions
+and keeps iterator prefetch indexes inside the seven-slot array. The lock records
+the upstream revision and patch path. If the patch cannot apply, the updater
+stops before replacing the installed snapshot. Review upstream changes and retire
+the patch when upstream supplies an equivalent fix. The updater accesses the
+network; normal builds and `just check` do not.
 
 Scheduled CI detects new commits on Lite3's `main` branch. Run the same
 networked check on demand with:
@@ -81,7 +86,8 @@ just check-lite3-upstream
 
 Linux CI also compiles the vendored C sources with AddressSanitizer and
 UndefinedBehaviorSanitizer, links their runtimes into the Rust test binary, and
-runs the focused Lite3 suite. Reproduce that environment on a Linux host with
+runs the focused Lite3 suite and public C append regression with C optimization
+levels `-O0` and `-O2`. Reproduce that environment on a Linux host with
 Clang by running:
 
 ```bash

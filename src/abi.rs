@@ -2248,6 +2248,35 @@ mod tests {
         let (kind, _message, _path, _seq, _offset) = take_error(err);
         assert_eq!(kind, error_kind_code(ErrorKind::Corrupt));
 
+        // An aligned frame can still contain an unaligned internal child.
+        let valid = crate::core::lite3::encode_message(&[], &serde_json::json!({"x": true}))
+            .expect("encode");
+        let data = valid.as_doc().key_offset("data").expect("data");
+        let mut malformed = valid.as_slice().to_vec();
+        malformed[data + 64..data + 68].copy_from_slice(&1u32.to_le_bytes());
+        let rc = plsm_pool_append_lite3(
+            pool,
+            malformed.as_ptr(),
+            malformed.len(),
+            0,
+            &mut seq,
+            &mut err,
+        );
+        assert_eq!(rc, -1);
+        assert_eq!(seq, 0, "rejection leaves the sequence output unchanged");
+        let (kind, ..) = take_error(err);
+        assert_eq!(kind, error_kind_code(ErrorKind::Corrupt));
+        let rc = plsm_pool_append_lite3(
+            pool,
+            valid.as_slice().as_ptr(),
+            valid.len(),
+            0,
+            &mut seq,
+            &mut err,
+        );
+        assert_eq!(rc, 0, "valid append after rejection");
+        assert_eq!(seq, 1, "rejection consumes no sequence");
+
         plsm_pool_free(pool);
         plsm_client_free(client);
     }
