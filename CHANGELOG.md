@@ -12,6 +12,20 @@ All notable changes to this project will be documented in this file.
   Original bytes and corruption errors retain their existing behavior.
 - Rust adds `Meta::from_lite3` for the same validated metadata read.
 
+### Local append performance
+
+- Enable notifications for native JSON and Lite3 streams, which previously
+  polled at 50 ms intervals. In the paced Python comparison, median delivery
+  latency fell from 26.9 to 4.2 ms. Remove redundant Python buffer wrappers and
+  timestamp normalization on Python 3.11+, and borrow length-delimited JSON
+  input during Lite3 encoding. The follow-up measurements document the CPU
+  tradeoff and the remaining conversion costs.
+- Derive each pool's notification name once when opening or creating it,
+  removing repeated path resolution and hashing from appends. In one Mac's
+  ordinary Python producer/reader benchmark, throughput rose 54% and combined
+  worker CPU time fell 28%. See the [pipe comparison](docs/performance/pipe-comparison.md)
+  for the workload, baseline, and limits.
+
 ### Predictable pool access and reliable reads (2.0)
 
 The CLI and language bindings now agree on where named pools live. Remote frames

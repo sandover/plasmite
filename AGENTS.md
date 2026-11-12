@@ -17,8 +17,12 @@ docs/
 ├── performance/1.0-release.md                  — Read when assessing 1.0 read costs, writer contention, or benchmark results
 ├── performance/windows-access-1.0.md          — Read when comparing local, HTTP, and MCP access costs on Windows
 ├── performance/consumer-latency.rs             — Read when reproducing the full-consumer latency measurements
+├── performance/pipe-comparison.md              — Read when comparing a Python pipe with ordinary Plasmite calls
+├── performance/pipe-comparison-results/         — Read when checking the raw pipe runs and append timing evidence
 │
 │   Design audits and proposals
+├── proposals/language-boundary-performance.md — Read when removing conversion and runtime costs across bindings
+├── proposals/language-boundary-performance-review.md — Read when checking Opus feedback and ticket revisions
 ├── proposals/implementation-distillation/      — Read when judging measured implementation simplification proposals
 ├── proposals/implementation-distillation/implementation.md — Read when checking review decisions and validation of the two implemented follow-ups
 │   ├── README.md                              — Read when comparing the five recommendations and their limits

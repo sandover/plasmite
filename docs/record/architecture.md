@@ -142,6 +142,11 @@ Append (high level):
 5. Update index slot (when enabled).
 6. Publish header updates and notify waiters.
 
+Each pool derives its canonical notification name when it opens or creates the
+file. Appends reuse that name instead of resolving the path and hashing it for
+every message. Each append still opens, posts, and closes the notification
+semaphore after releasing the writer lock; polling remains the fallback.
+
 Invariants:
 
 - The writer lock must be held for the full duration of steps 3–6. Releasing it between planning and committing is a violation.
@@ -183,6 +188,8 @@ ending the reader or losing its sequence checkpoint. C streams serialize reader
 state and expose a separate atomic cancellation signal; callers retain handles
 until active reads finish. Node workers hold shared ownership through an active
 read, so closing a JavaScript wrapper cancels without freeing a worker's handle.
+Native JSON and Lite3 streams enable the same best-effort notifications as Rust
+tails. They retain bounded polling when notification setup or waiting fails.
 
 The CLI's interactive `follow` loop and the public API's `Tail`
 share `Pool` and `Cursor`, but have different contracts. CLI follow selects

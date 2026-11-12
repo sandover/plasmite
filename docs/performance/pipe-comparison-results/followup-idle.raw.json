@@ -1,0 +1,84 @@
+{
+  "runs": [
+    {
+      "elapsed_seconds": 2.00029870896833,
+      "cpu_seconds": 0.0012230000000000019,
+      "cpu_core_percent": 0.06114086833714819,
+      "variant": "baseline",
+      "repeat": 1
+    },
+    {
+      "elapsed_seconds": 2.001959374989383,
+      "cpu_seconds": 0.005076000000000004,
+      "cpu_core_percent": 0.25355159866952465,
+      "variant": "notify",
+      "repeat": 1
+    },
+    {
+      "elapsed_seconds": 2.000321209023241,
+      "cpu_seconds": 0.016314000000000002,
+      "cpu_core_percent": 0.8155690159365028,
+      "variant": "wake",
+      "repeat": 1
+    },
+    {
+      "elapsed_seconds": 2.0006372080533765,
+      "cpu_seconds": 0.017053000000000006,
+      "cpu_core_percent": 0.8523784288003222,
+      "variant": "wake",
+      "repeat": 2
+    },
+    {
+      "elapsed_seconds": 2.001358125009574,
+      "cpu_seconds": 0.005471999999999998,
+      "cpu_core_percent": 0.2734143345771173,
+      "variant": "notify",
+      "repeat": 2
+    },
+    {
+      "elapsed_seconds": 2.0041783340275288,
+      "cpu_seconds": 0.0013729999999999992,
+      "cpu_core_percent": 0.06850687769091211,
+      "variant": "baseline",
+      "repeat": 2
+    },
+    {
+      "elapsed_seconds": 2.004854124970734,
+      "cpu_seconds": 0.0012999999999999956,
+      "cpu_core_percent": 0.06484262290250031,
+      "variant": "baseline",
+      "repeat": 3
+    },
+    {
+      "elapsed_seconds": 2.0026131659979,
+      "cpu_seconds": 0.005178000000000002,
+      "cpu_core_percent": 0.25856216706833696,
+      "variant": "notify",
+      "repeat": 3
+    },
+    {
+      "elapsed_seconds": 2.00022116699256,
+      "cpu_seconds": 0.016737999999999996,
+      "cpu_core_percent": 0.8368074629050385,
+      "variant": "wake",
+      "repeat": 3
+    }
+  ],
+  "medians": {
+    "baseline": {
+      "elapsed_seconds": 2.0041783340275288,
+      "cpu_seconds": 0.0012999999999999956,
+      "cpu_core_percent": 0.06484262290250031
+    },
+    "notify": {
+      "elapsed_seconds": 2.001959374989383,
+      "cpu_seconds": 0.005178000000000002,
+      "cpu_core_percent": 0.25856216706833696
+    },
+    "wake": {
+      "elapsed_seconds": 2.000321209023241,
+      "cpu_seconds": 0.016737999999999996,
+      "cpu_core_percent": 0.8368074629050385
+    }
+  }
+}

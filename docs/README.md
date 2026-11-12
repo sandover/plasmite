@@ -34,6 +34,8 @@ Start with the task you want to do:
   local libraries, command-line tools, HTTP, and MCP in Plasmite 1.0.0.
 - [1.0 performance measurements](performance/1.0-release.md): measured writer
   improvements, small-read costs and consumer latency on one Mac.
+- [JSON pipe comparison](performance/pipe-comparison.md): compare a Python
+  producer and reader with ordinary Plasmite calls and measure append savings.
 
 For exact contracts, start with the [specifications](../spec/README.md):
 
@@ -56,6 +58,10 @@ policies. Start with [vision](record/vision.md) for product scope and
 Proposals record design history. Current setup and behavior live in the guides
 and specifications above:
 
+- [Language-boundary performance](proposals/language-boundary-performance.md):
+  read when assessing conversions, memory ownership and runtime costs across bindings.
+  The [Opus review](proposals/language-boundary-performance-review.md) records
+  checked findings, ticket revisions and remaining uncertainty.
 - [Measured implementation distillation](proposals/implementation-distillation/README.md):
   compare five prototypes, their measured savings and costs, and the resulting
   implementation recommendations.

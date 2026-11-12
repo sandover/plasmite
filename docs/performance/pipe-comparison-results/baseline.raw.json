@@ -1,0 +1,429 @@
+{
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "library": "/Users/brandonharvey/src/plasmite/target/release/libplasmite.dylib",
+  "library_sha256": "e1ae65cca7e6ba3f4b81fce03d66c4eed53a654d6c3d9592d19bb73221f9ac18",
+  "script_sha256": "93c488a5fb1048617b2483bb68b6a65dcf706bbf09d03d41e6ea921c960dfac2",
+  "messages": 20000,
+  "repeats": 7,
+  "first_record_json_bytes": 925,
+  "runs": [
+    {
+      "lane": "plasmite",
+      "elapsed_seconds": 0.694889375,
+      "messages_per_second": 28781.559654729215,
+      "cpu_seconds": 0.8927369999999999,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.6651239999999999,
+          "started_ns": 472210021402750,
+          "ended_ns": 472210690509583,
+          "messages": 20000,
+          "checksum": 0
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.227613,
+          "started_ns": 472210021396708,
+          "ended_ns": 472210716267250,
+          "messages": 20000,
+          "checksum": 599970000
+        }
+      ],
+      "verified_messages": 20000,
+      "profiled": false,
+      "repeat": 1
+    },
+    {
+      "lane": "pipe",
+      "elapsed_seconds": 0.065965667,
+      "messages_per_second": 303188.02051982586,
+      "cpu_seconds": 0.128296,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.06451899999999999,
+          "started_ns": 472210784552166,
+          "ended_ns": 472210850141916,
+          "messages": 20000,
+          "checksum": 0
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.063777,
+          "started_ns": 472210784502750,
+          "ended_ns": 472210850495708,
+          "messages": 20000,
+          "checksum": 599970000
+        }
+      ],
+      "verified_messages": 20000,
+      "profiled": false,
+      "repeat": 1
+    },
+    {
+      "lane": "pipe",
+      "elapsed_seconds": 0.065355167,
+      "messages_per_second": 306020.1804701991,
+      "cpu_seconds": 0.12659399999999998,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.064174,
+          "started_ns": 472210889578541,
+          "ended_ns": 472210954557708,
+          "messages": 20000,
+          "checksum": 0
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.06242,
+          "started_ns": 472210889480291,
+          "ended_ns": 472210954915625,
+          "messages": 20000,
+          "checksum": 599970000
+        }
+      ],
+      "verified_messages": 20000,
+      "profiled": false,
+      "repeat": 2
+    },
+    {
+      "lane": "plasmite",
+      "elapsed_seconds": 0.697663333,
+      "messages_per_second": 28667.122169082086,
+      "cpu_seconds": 0.8806369999999999,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.657477,
+          "started_ns": 472211030332125,
+          "ended_ns": 472211688457916,
+          "messages": 20000,
+          "checksum": 0
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.22315999999999997,
+          "started_ns": 472211030324208,
+          "ended_ns": 472211727970166,
+          "messages": 20000,
+          "checksum": 599970000
+        }
+      ],
+      "verified_messages": 20000,
+      "profiled": false,
+      "repeat": 2
+    },
+    {
+      "lane": "plasmite",
+      "elapsed_seconds": 0.700234291,
+      "messages_per_second": 28561.86887311407,
+      "cpu_seconds": 0.8714390000000001,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.6512300000000001,
+          "started_ns": 472211825426833,
+          "ended_ns": 472212477225666,
+          "messages": 20000,
+          "checksum": 0
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.22020899999999996,
+          "started_ns": 472211825420666,
+          "ended_ns": 472212525637791,
+          "messages": 20000,
+          "checksum": 599970000
+        }
+      ],
+      "verified_messages": 20000,
+      "profiled": false,
+      "repeat": 3
+    },
+    {
+      "lane": "pipe",
+      "elapsed_seconds": 0.065779084,
+      "messages_per_second": 304048.0162356776,
+      "cpu_seconds": 0.12729199999999996,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.06473699999999999,
+          "started_ns": 472212588665208,
+          "ended_ns": 472212654070833,
+          "messages": 20000,
+          "checksum": 0
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.06255499999999999,
+          "started_ns": 472212588554958,
+          "ended_ns": 472212654424250,
+          "messages": 20000,
+          "checksum": 599970000
+        }
+      ],
+      "verified_messages": 20000,
+      "profiled": false,
+      "repeat": 3
+    },
+    {
+      "lane": "pipe",
+      "elapsed_seconds": 0.066231375,
+      "messages_per_second": 301971.68637975585,
+      "cpu_seconds": 0.127838,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.064928,
+          "started_ns": 472212696485208,
+          "ended_ns": 472212762346291,
+          "messages": 20000,
+          "checksum": 0
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.06291000000000001,
+          "started_ns": 472212696287375,
+          "ended_ns": 472212762699458,
+          "messages": 20000,
+          "checksum": 599970000
+        }
+      ],
+      "verified_messages": 20000,
+      "profiled": false,
+      "repeat": 4
+    },
+    {
+      "lane": "plasmite",
+      "elapsed_seconds": 0.701428709,
+      "messages_per_second": 28513.232696895502,
+      "cpu_seconds": 0.878074,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.655838,
+          "started_ns": 472212840168833,
+          "ended_ns": 472213496522500,
+          "messages": 20000,
+          "checksum": 0
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.222236,
+          "started_ns": 472212840163708,
+          "ended_ns": 472213541572625,
+          "messages": 20000,
+          "checksum": 599970000
+        }
+      ],
+      "verified_messages": 20000,
+      "profiled": false,
+      "repeat": 4
+    },
+    {
+      "lane": "plasmite",
+      "elapsed_seconds": 0.691522875,
+      "messages_per_second": 28921.67522296352,
+      "cpu_seconds": 0.8883749999999999,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.6657029999999999,
+          "started_ns": 472213631544416,
+          "ended_ns": 472214310296250,
+          "messages": 20000,
+          "checksum": 0
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.22267199999999998,
+          "started_ns": 472213631540208,
+          "ended_ns": 472214323042166,
+          "messages": 20000,
+          "checksum": 599970000
+        }
+      ],
+      "verified_messages": 20000,
+      "profiled": false,
+      "repeat": 5
+    },
+    {
+      "lane": "pipe",
+      "elapsed_seconds": 0.066039792,
+      "messages_per_second": 302847.7133907387,
+      "cpu_seconds": 0.127039,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.064479,
+          "started_ns": 472214365689166,
+          "ended_ns": 472214431355375,
+          "messages": 20000,
+          "checksum": 0
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.06256,
+          "started_ns": 472214365607000,
+          "ended_ns": 472214431707000,
+          "messages": 20000,
+          "checksum": 599970000
+        }
+      ],
+      "verified_messages": 20000,
+      "profiled": false,
+      "repeat": 5
+    },
+    {
+      "lane": "pipe",
+      "elapsed_seconds": 0.066102333,
+      "messages_per_second": 302561.18191773957,
+      "cpu_seconds": 0.127264,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.06501199999999999,
+          "started_ns": 472214471338000,
+          "ended_ns": 472214537061958,
+          "messages": 20000,
+          "checksum": 0
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.062251999999999995,
+          "started_ns": 472214471281041,
+          "ended_ns": 472214537419708,
+          "messages": 20000,
+          "checksum": 599970000
+        }
+      ],
+      "verified_messages": 20000,
+      "profiled": false,
+      "repeat": 6
+    },
+    {
+      "lane": "plasmite",
+      "elapsed_seconds": 0.706198209,
+      "messages_per_second": 28320.660892528547,
+      "cpu_seconds": 0.884359,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.660047,
+          "started_ns": 472214610826958,
+          "ended_ns": 472215271434250,
+          "messages": 20000,
+          "checksum": 0
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.22431199999999996,
+          "started_ns": 472214610823458,
+          "ended_ns": 472215317000000,
+          "messages": 20000,
+          "checksum": 599970000
+        }
+      ],
+      "verified_messages": 20000,
+      "profiled": false,
+      "repeat": 6
+    },
+    {
+      "lane": "plasmite",
+      "elapsed_seconds": 0.695628,
+      "messages_per_second": 28750.999097218628,
+      "cpu_seconds": 0.8859170000000001,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.6621600000000001,
+          "started_ns": 472215404810416,
+          "ended_ns": 472216067661083,
+          "messages": 20000,
+          "checksum": 0
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.22375699999999996,
+          "started_ns": 472215404804791,
+          "ended_ns": 472216100409166,
+          "messages": 20000,
+          "checksum": 599970000
+        }
+      ],
+      "verified_messages": 20000,
+      "profiled": false,
+      "repeat": 7
+    },
+    {
+      "lane": "pipe",
+      "elapsed_seconds": 0.066561209,
+      "messages_per_second": 300475.31137843366,
+      "cpu_seconds": 0.12764799999999998,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.065467,
+          "started_ns": 472216154711791,
+          "ended_ns": 472216220901208,
+          "messages": 20000,
+          "checksum": 0
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.062181,
+          "started_ns": 472216154640916,
+          "ended_ns": 472216221255125,
+          "messages": 20000,
+          "checksum": 599970000
+        }
+      ],
+      "verified_messages": 20000,
+      "profiled": false,
+      "repeat": 7
+    }
+  ],
+  "medians": {
+    "pipe": {
+      "elapsed_seconds": 0.066039792,
+      "messages_per_second": 302847.7133907387,
+      "cpu_seconds": 0.12729199999999996
+    },
+    "plasmite": {
+      "elapsed_seconds": 0.697663333,
+      "messages_per_second": 28667.122169082086,
+      "cpu_seconds": 0.884359
+    }
+  },
+  "profile_run": {
+    "lane": "plasmite",
+    "elapsed_seconds": 0.84152475,
+    "messages_per_second": 23766.383579330257,
+    "cpu_seconds": 1.188073,
+    "workers": [
+      {
+        "role": "writer",
+        "cpu_seconds": 0.831256,
+        "started_ns": 472216317029916,
+        "ended_ns": 472217149300291,
+        "messages": 20000,
+        "checksum": 0
+      },
+      {
+        "role": "reader",
+        "cpu_seconds": 0.356817,
+        "started_ns": 472216317030458,
+        "ended_ns": 472217158532083,
+        "messages": 20000,
+        "checksum": 599970000
+      }
+    ],
+    "verified_messages": 20000,
+    "profiled": true
+  }
+}

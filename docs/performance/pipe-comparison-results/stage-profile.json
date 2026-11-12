@@ -1,0 +1,27 @@
+{
+  "lock": {
+    "median_ns": 2916.0,
+    "mean_ns": 3128.434,
+    "calls": 20000
+  },
+  "commit": {
+    "median_ns": 459.0,
+    "mean_ns": 815.5555,
+    "calls": 20000
+  },
+  "notify": {
+    "median_ns": 12542.0,
+    "mean_ns": 13483.06075,
+    "calls": 20000
+  },
+  "encode": {
+    "median_ns": 2417.0,
+    "mean_ns": 2599.17315,
+    "calls": 20000
+  },
+  "store": {
+    "median_ns": 18584.0,
+    "mean_ns": 19755.1819,
+    "calls": 20000
+  }
+}

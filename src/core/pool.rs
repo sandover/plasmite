@@ -429,6 +429,8 @@ pub struct PoolAgeMetrics {
 
 pub struct Pool {
     path: PathBuf,
+    // Derive the canonical wake-up name once, outside the append path.
+    notify_name: String,
     file: File,
     #[cfg(unix)]
     file_identity: (u64, u64),
@@ -524,6 +526,7 @@ impl Pool {
         let mut pool = Self {
             #[cfg(unix)]
             file_identity: unix_file_identity(&file, &path)?,
+            notify_name: notify::pool_semaphore_name(&path),
             path,
             file,
             mmap,
@@ -587,6 +590,7 @@ impl Pool {
                 use std::os::unix::fs::MetadataExt;
                 (metadata.dev(), metadata.ino())
             },
+            notify_name: notify::pool_semaphore_name(&path),
             path,
             file,
             mmap,
@@ -918,7 +922,7 @@ impl Pool {
         let seq = self.append_locked(payload, options)?;
         drop(lock);
         // Notification is optional wake-up work after committed storage publication.
-        let _ = notify::post_for_path(&self.path);
+        let _ = notify::post_for_name(&self.notify_name);
         Ok(seq)
     }
 

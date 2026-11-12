@@ -1,0 +1,22 @@
+{
+  "encode": {
+    "median_ns": 2542.0,
+    "mean_ns": 2682.6477
+  },
+  "store": {
+    "median_ns": 4958.0,
+    "mean_ns": 5443.8528
+  },
+  "clone_and_time": {
+    "median_ns": 583.0,
+    "mean_ns": 585.9389
+  },
+  "parse": {
+    "median_ns": 1375.0,
+    "mean_ns": 1404.6102
+  },
+  "serialize": {
+    "median_ns": 1125.0,
+    "mean_ns": 1138.3226
+  }
+}

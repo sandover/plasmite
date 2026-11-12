@@ -24,6 +24,7 @@ from ctypes import (
     c_void_p,
     cast,
     sizeof,
+    string_at,
 )
 from datetime import datetime, timezone
 from enum import IntEnum
@@ -312,7 +313,7 @@ _LIB.plsm_pool_free.restype = None
 
 _LIB.plsm_pool_append_json.argtypes = [
     POINTER(plsm_pool_t),
-    POINTER(c_uint8),
+    c_char_p,
     c_size_t,
     POINTER(c_char_p),
     c_size_t,
@@ -324,7 +325,7 @@ _LIB.plsm_pool_append_json.restype = c_int
 
 _LIB.plsm_pool_append_lite3.argtypes = [
     POINTER(plsm_pool_t),
-    POINTER(c_uint8),
+    c_char_p,
     c_size_t,
     c_uint32,
     POINTER(c_uint64),
@@ -540,8 +541,7 @@ def _buf_to_bytes(buf: plsm_buf_t) -> bytes:
     if not buf.data or buf.len == 0:
         _LIB.plsm_buf_free(byref(buf))
         return b""
-    data = (c_uint8 * buf.len).from_address(buf.data)
-    out = bytes(data)
+    out = string_at(buf.data, buf.len)
     _LIB.plsm_buf_free(byref(buf))
     return out
 
@@ -552,8 +552,7 @@ def _frame_to_py(frame: plsm_lite3_frame_t) -> Lite3Frame:
     flags = int(frame.flags)
     payload = b""
     if frame.payload.data and frame.payload.len:
-        data = (c_uint8 * frame.payload.len).from_address(frame.payload.data)
-        payload = bytes(data)
+        payload = string_at(frame.payload.data, frame.payload.len)
     _LIB.plsm_lite3_frame_free(byref(frame))
     return Lite3Frame(seq=seq, timestamp_ns=timestamp_ns, flags=flags, payload=payload)
 
@@ -741,14 +740,14 @@ class Pool:
         buf = plsm_buf_t()
         out_err = POINTER(plsm_error_t)()
         arr, _keep = _tag_array(tags)
-        payload_buf = (c_uint8 * len(payload)).from_buffer_copy(payload)
+        # The native call borrows these immutable bytes only until it returns.
         rc = _LIB.plsm_pool_append_json(
             self._ptr,
-            payload_buf,
-            c_size_t(len(payload)),
+            payload,
+            len(payload),
             arr,
-            c_size_t(len(_keep)),
-            c_uint32(int(durability)),
+            len(_keep),
+            int(durability),
             byref(buf),
             byref(out_err),
         )
@@ -777,12 +776,11 @@ class Pool:
             raise ValueError("payload is required")
         out_seq = c_uint64()
         out_err = POINTER(plsm_error_t)()
-        payload_buf = (c_uint8 * len(payload)).from_buffer_copy(payload)
         rc = _LIB.plsm_pool_append_lite3(
             self._ptr,
-            payload_buf,
-            c_size_t(len(payload)),
-            c_uint32(int(durability)),
+            payload,
+            len(payload),
+            int(durability),
             byref(out_seq),
             byref(out_err),
         )
@@ -978,7 +976,7 @@ class Stream:
         timeout_ms = _ensure_non_negative_int(timeout_ms, "timeout_ms")
         value = plsm_buf_t()
         out_err = POINTER(plsm_error_t)()
-        status = _LIB.plsm_stream_next_wait(self._ptr, c_uint64(timeout_ms), byref(value), byref(out_err))
+        status = _LIB.plsm_stream_next_wait(self._ptr, timeout_ms, byref(value), byref(out_err))
         if status < 0:
             raise _take_error(out_err)
         return status, _buf_to_bytes(value) if status == 1 else None
@@ -1419,8 +1417,10 @@ def _udp_event_to_python(event: plsm_udp_event_t) -> UdpEvent:
 def _parse_rfc3339_utc(raw_time: str) -> datetime:
     # Python 3.10 accepts only 3 or 6 fractional digits. datetime keeps
     # microseconds; the original nanosecond timestamp remains in Message.raw.
-    raw_time = re.sub(r"\.(\d+)", lambda match: "." + match[1][:6].ljust(6, "0"), raw_time)
-    parsed = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
+    if sys.version_info < (3, 11):
+        raw_time = re.sub(r"\.(\d+)", lambda match: "." + match[1][:6].ljust(6, "0"), raw_time)
+        raw_time = raw_time.replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(raw_time)
     if parsed.tzinfo is None:
         raise ValueError("message time must include timezone")
     return parsed.astimezone(timezone.utc)

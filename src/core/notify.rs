@@ -1,5 +1,5 @@
 //! Purpose: Provide best-effort per-pool notifications via named semaphores.
-//! Exports: `PoolSemaphore`, `NotifyError`, `WaitOutcome`, `pool_semaphore_name`, `post_for_path`.
+//! Exports: `PoolSemaphore`, `NotifyError`, `WaitOutcome`, `pool_semaphore_name`, `post_for_name`.
 //! Role: Optimization for tail-style consumers; correctness must not depend on notify.
 //! Invariants: Name derivation is deterministic; failures never panic or block progress.
 //! Invariants: Unsupported semaphore operations surface as `NotifyError::Unavailable`.
@@ -172,12 +172,12 @@ pub(crate) fn open_for_path(path: &Path) -> Result<PoolSemaphore, NotifyError> {
     PoolSemaphore::open_with_backend(name, OsSemaphoreBackend)
 }
 
-pub(crate) fn post_for_path(path: &Path) -> Result<(), NotifyError> {
+pub(crate) fn post_for_name(name: &str) -> Result<(), NotifyError> {
     #[cfg(test)]
     if FORCE_UNAVAILABLE.load(Ordering::SeqCst) {
         return Err(NotifyError::Unavailable);
     }
-    let semaphore = open_for_path(path)?;
+    let semaphore = PoolSemaphore::open_with_backend(name.to_owned(), OsSemaphoreBackend)?;
     semaphore.post()
 }
 
@@ -324,13 +324,12 @@ mod tests {
         let _cleanup = Unlink(CString::new(format!("/{name}")).unwrap());
         // Exercise the real backend directly: unavailable notifications must
         // fail this test rather than silently turn it into a polling test.
-        let sender = Semaphore::open_with_backend(name.clone(), OsSemaphoreBackend).unwrap();
-        let receiver = Semaphore::open_with_backend(name, OsSemaphoreBackend).unwrap();
+        let receiver = Semaphore::open_with_backend(name.clone(), OsSemaphoreBackend).unwrap();
         assert_eq!(
             receiver.wait(Duration::ZERO).unwrap(),
             WaitOutcome::TimedOut
         );
-        sender.post().unwrap();
+        post_for_name(&name).unwrap();
         assert_eq!(
             receiver.wait(Duration::from_secs(1)).unwrap(),
             WaitOutcome::Signaled

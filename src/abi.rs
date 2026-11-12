@@ -447,7 +447,7 @@ pub extern "C" fn plsm_stream_open_ex(
             max_messages: options.max_messages,
             timeout: options.timeout,
             gap_policy: options.gap_policy,
-            notify: false,
+            notify: true,
             cancel: Some(cancel.clone()),
             ..TailOptions::default()
         },
@@ -552,7 +552,7 @@ pub extern "C" fn plsm_lite3_stream_open_ex(
             max_messages: options.max_messages,
             timeout: options.timeout,
             gap_policy: options.gap_policy,
-            notify: false,
+            notify: true,
             cancel: Some(cancel.clone()),
             ..TailOptions::default()
         },

@@ -119,6 +119,25 @@ class BindingTests(unittest.TestCase):
                 self.assertEqual(message.time.microsecond, micros)
                 self.assertEqual(message.time.utcoffset().total_seconds(), 0)
                 self.assertEqual(message.raw, payload)
+                with mock.patch("plasmite.sys.version_info", (3, 10)):
+                    legacy = parse_message(payload)
+                self.assertEqual(legacy.time, message.time)
+
+    def test_append_borrows_immutable_input_and_keeps_owned_results(self) -> None:
+        with self._client_pool("buffers") as (_, pool):
+            payload = bytearray(b'{"text":"caf\\u00e9","values":[0,1,2]}')
+            raw = pool.append_json(memoryview(payload), [], Durability.FAST)
+            payload[:] = b"x" * len(payload)
+            expected = {"text": "caf\u00e9", "values": [0, 1, 2]}
+            self.assertEqual(parse_message(raw).data, expected)
+            frame = pool.get_lite3(1)
+            # Lite3 contains zero bytes; a C string argument must preserve length.
+            self.assertIn(b"\0", frame.payload)
+            self.assertEqual(pool.append_lite3(frame.payload, Durability.FAST), 2)
+            self.assertEqual(pool.get(2).data, expected)
+            with self.assertRaises(PlasmiteError):
+                pool.append_json(b'{"x":1}\0{"x":2}', [], Durability.FAST)
+        self.assertEqual(parse_message(raw).data, expected)
 
     def test_default_pool_size_constant_matches_core_default(self) -> None:
         self.assertEqual(plasmite.DEFAULT_POOL_SIZE_BYTES, 1024 * 1024)

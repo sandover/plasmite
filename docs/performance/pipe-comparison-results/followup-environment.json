@@ -1,0 +1,22 @@
+{
+  "head": "ca913b4a6104d8fa1837f7bc9da3880b15062835",
+  "baseline": "working tree after the first notification-name optimization, including pre-existing uncommitted work",
+  "python": "3.15.2",
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: aarch64-apple-darwin\nrelease: 1.99.1\nLLVM version: 23.1.1\n",
+  "retained_files": {
+    "src/abi.rs": "50ab008de0388a898c286e948b9539a5ad790ebac56913d3c6a05ea41b215549",
+    "src/core/lite3/mod.rs": "e0070c0f5b652073149b86bc4d897fb98f9a18a36e46fb7d51b4517d7c0ee425",
+    "src/core/notify.rs": "db13aaab51a9e93b20d7ee7192344256b1a93e5b27e64910ed0e43c7cdb23e3c",
+    "src/core/pool.rs": "62fc937485fdbb7b9b2444db62debf07dcca68a482c097222123b28620a1f9db",
+    "bindings/python/plasmite/__init__.py": "c8f4fa750ac7aa4a5f7eae104f3a01b88c160b0b42ffc0e14f6bbf2211eaf079",
+    "scripts/bench_pipe_comparison.py": "7b11951d84a403bf117a54ed3788e5013737e9fcdccb3e12552bdf7eec70cb69"
+  },
+  "rejected_lto_flags": {
+    "CARGO_PROFILE_RELEASE_LTO": "thin",
+    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "1"
+  },
+  "final_bulk_library_sha256": "65533ba49e8c9b33fa55647a43e6f082129f3d359ddedb7902436c4cef150199",
+  "baseline_library_sha256": "3c71357469da3d9fe39214cb74d05d7eb1bb14f113d9ca7bd82e37d3e09d7b65"
+}

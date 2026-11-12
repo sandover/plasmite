@@ -30,18 +30,19 @@ impl Lite3Buf {
 
     fn from_json_str_with_limit(json: &str, max_bytes: usize) -> Result<Self, Error> {
         let mut buf_len = json.len().saturating_mul(2).max(256).min(max_bytes);
-        let json_cstr = CString::new(json).map_err(|err| {
-            Error::new(ErrorKind::Usage)
+        if json.as_bytes().contains(&0) {
+            return Err(Error::new(ErrorKind::Usage)
                 .with_message("json contains null")
-                .with_source(err)
-        })?;
+                .with_source(CString::new(json).expect_err("contains null")));
+        }
 
         loop {
             let mut buf = vec![0u8; buf_len];
             let mut out_len: usize = 0;
             let ret = unsafe {
                 sys::plasmite_lite3_json_dec(
-                    json_cstr.as_ptr(),
+                    // yyjson reads the explicit length and does not modify input.
+                    json.as_ptr().cast(),
                     json.len(),
                     buf.as_mut_ptr(),
                     &mut out_len as *mut usize,
@@ -456,6 +457,15 @@ mod tests {
                 .unwrap()
                 .contains("failed to encode")
         );
+    }
+
+    #[test]
+    fn encoding_borrows_only_the_supplied_json_slice() {
+        let storage = r#"{"x":1}not JSON"#;
+        let encoded = Lite3Buf::from_json_str(&storage[..7]).expect("bounded input");
+        assert_eq!(encoded.as_doc().to_json(false).unwrap(), r#"{"x":1}"#);
+        let error = Lite3Buf::from_json_str("{\"x\":1}\0").unwrap_err();
+        assert_eq!(error.message(), Some("json contains null"));
     }
 
     #[test]
