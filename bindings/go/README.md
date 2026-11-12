@@ -257,3 +257,9 @@ Independent handles may run concurrently, and message values are owned snapshots
 
 For playback timing, use ordinary streams and an application scheduler; see the
 [next major upgrade guide](../../docs/record/upgrading-next-major.md#sdk-applications-control-playback-timing).
+
+Native readers transfer their fresh JSON buffer into `Message.Raw` without a
+second copy. `Message.Data` keeps independent storage, so changing Raw does not
+change Data. `api.DecodeMessage` still copies caller-provided raw bytes;
+`api.DecodeOwnedMessage` lets an adapter transfer a fresh buffer explicitly.
+After that transfer, the caller must not mutate or reuse the input slice.

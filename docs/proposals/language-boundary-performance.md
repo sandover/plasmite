@@ -266,3 +266,33 @@ Only the C field interface (`6N22SX`) is a hard prerequisite for its Go consumer
 without blocking them. Python and Node prototypes do not require Rust Serde.
 A finished experiment can recommend keeping current code, so downstream work
 must inspect the result before assuming an API exists.
+
+## Implementation progress
+
+Brandon authorized implementation of all tickets on 2026-11-12. Unstarted tasks
+now use todo state; experimental tickets retain their measured keep/adopt criteria.
+
+- Baseline commit `1b6bcb1` preserves prior measured pipe optimizations and this plan.
+- `24252b1` moves the existing Rust HTTP payload tree. The remote unit suite
+  passed 12 tests with loopback enabled; two focused nested/missing-data tests
+  also passed. Full-path allocation and throughput acceptance remains pending.
+- `0aea3df` adds native-only Node message parsing. Eight exact-message tests pass.
+  Seven alternating 20,000-parse diagnostics on Node 26.13.0, using a 1,448-byte
+  nested record, measured general parsing at median 460.305 ms and native parsing
+  at 66.933 ms. Each run verified its identity checksum. This isolates parsing;
+  complete native append/tail acceptance remains pending. Raw general/native
+  time pairs in ms: 471.056/66.128, 475.439/67.900, 460.305/66.525,
+  458.607/66.933, 463.951/67.669, 459.485/66.433, 456.286/67.550.
+- Python UDP send now borrows immutable encoded bytes for the native call;
+  mutable Lite3 inputs still copy into an immutable snapshot. Receive copies use
+  string_at without an address-array wrapper. The Python suite passed 50 tests
+  (one skip), including mutation of the send buffer before receiving the frame.
+  General JSON parsing and eager datetime validation remain unchanged.
+- Go native readers now transfer fresh Go-owned JSON into DecodeOwnedMessage,
+  retaining independent Data storage and the defensive public DecodeMessage.
+  Tags use one native allocation/free per list. Go local/UDP suites and ownership
+  tests pass. Three 1-KiB decode diagnostics on Go 1.27.3 measured defensive
+  decoding at 1155/1165/1165 ns, 3667 B and five allocations per operation;
+  ownership transfer at 1080/1082/1102 ns, 2514 B and four allocations. The
+  benchmark includes a fresh input allocation in both cases. These isolate
+  decoding and do not establish a complete transport gain.

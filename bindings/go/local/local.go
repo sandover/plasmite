@@ -295,7 +295,7 @@ func (p *Pool) Append(value any, tags []string, opts ...AppendOption) (*api.Mess
 	if err != nil {
 		return nil, err
 	}
-	return api.DecodeMessage(raw)
+	return api.DecodeOwnedMessage(raw)
 }
 
 // AppendLite3 appends a pre-encoded Lite3 payload without JSON encoding.
@@ -354,7 +354,7 @@ func (p *Pool) Get(seq uint64) (*api.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	return api.DecodeMessage(raw)
+	return api.DecodeOwnedMessage(raw)
 }
 
 // GetLite3 returns the raw Lite3 payload and metadata for the given sequence.
@@ -647,7 +647,7 @@ func (p *Pool) Tail(ctx context.Context, opts TailOptions) (<-chan *api.Message,
 			if status == 0 {
 				continue
 			}
-			msg, err := api.DecodeMessage(raw)
+			msg, err := api.DecodeOwnedMessage(raw)
 			if err != nil {
 				errs <- err
 				return
@@ -815,15 +815,21 @@ func cStringArray(values []string) (**C.char, func()) {
 	if len(values) == 0 {
 		return nil, func() {}
 	}
+	// One C allocation owns all tag bytes. The pointer array contains only C
+	// pointers and remains pinned for the duration of the native call.
+	var data []byte
+	for _, value := range values {
+		data = append(data, value...)
+		data = append(data, 0)
+	}
+	base := C.CBytes(data)
 	cValues := make([]*C.char, len(values))
+	offset := 0
 	for i, value := range values {
-		cValues[i] = C.CString(value)
+		cValues[i] = (*C.char)(unsafe.Add(base, offset))
+		offset += len(value) + 1
 	}
-	cleanup := func() {
-		for _, value := range cValues {
-			C.free(unsafe.Pointer(value))
-		}
-	}
+	cleanup := func() { C.free(base) }
 	return (**C.char)(unsafe.Pointer(&cValues[0])), cleanup
 }
 

@@ -322,7 +322,7 @@ func eventFromC(event *C.plsm_udp_event_t) (api.UDPEvent, error) {
 		if rc := C.plsm_udp_event_message(event, &messageBuf, &cErr); rc != 0 {
 			return nil, fromCError(cErr)
 		}
-		message, err := api.DecodeMessage(copyAndFreeBuf(&messageBuf))
+		message, err := api.DecodeOwnedMessage(copyAndFreeBuf(&messageBuf))
 		if err != nil {
 			return nil, err
 		}
@@ -369,15 +369,21 @@ func cStringArray(values []string) (**C.char, func()) {
 	if len(values) == 0 {
 		return nil, func() {}
 	}
+	// One C allocation owns all tag bytes. The pointer array contains only C
+	// pointers and remains pinned for the duration of the native call.
+	var data []byte
+	for _, value := range values {
+		data = append(data, value...)
+		data = append(data, 0)
+	}
+	base := C.CBytes(data)
 	cValues := make([]*C.char, len(values))
+	offset := 0
 	for i, value := range values {
-		cValues[i] = C.CString(value)
+		cValues[i] = (*C.char)(unsafe.Add(base, offset))
+		offset += len(value) + 1
 	}
-	cleanup := func() {
-		for _, value := range cValues {
-			C.free(unsafe.Pointer(value))
-		}
-	}
+	cleanup := func() { C.free(base) }
 	return (**C.char)(unsafe.Pointer(&cValues[0])), cleanup
 }
 

@@ -130,6 +130,16 @@ func (m *Message) Tags() []string {
 }
 
 func DecodeMessage(raw []byte) (*Message, error) {
+	return decodeMessage(raw, false)
+}
+
+// DecodeOwnedMessage takes ownership of raw. The caller must not mutate or reuse
+// it after this call. Data keeps its own copy, independent of Raw.
+func DecodeOwnedMessage(raw []byte) (*Message, error) {
+	return decodeMessage(raw, true)
+}
+
+func decodeMessage(raw []byte, owned bool) (*Message, error) {
 	var payload struct {
 		Seq  uint64          `json:"seq"`
 		Time string          `json:"time"`
@@ -143,13 +153,16 @@ func DecodeMessage(raw []byte) (*Message, error) {
 	if err != nil {
 		return nil, fmt.Errorf("plasmite: parse message time: %w", err)
 	}
+	if !owned {
+		raw = append([]byte(nil), raw...)
+	}
 	return &Message{
 		Seq:         payload.Seq,
 		Time:        parsedTime.UTC(),
 		TimeRFC3339: payload.Time,
 		Data:        payload.Data,
 		Meta:        payload.Meta,
-		Raw:         append([]byte(nil), raw...),
+		Raw:         raw,
 	}, nil
 }
 

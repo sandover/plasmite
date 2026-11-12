@@ -796,3 +796,30 @@
 {"version":1,"task_id":"32VKBS","kind":"claim","at":"2026-11-12T23:31:18.552693Z","agent":"codex"}
 {"version":1,"task_id":"7ECLTU","kind":"open","at":"2026-11-12T23:32:24.133844Z"}
 {"version":1,"task_id":"7ECLTU","kind":"claim","at":"2026-11-12T23:32:24.171346Z","agent":"codex"}
+{"version":1,"task_id":"BTS4ZI","kind":"open","at":"2026-11-12T23:32:58.930598Z"}
+{"version":1,"task_id":"BTS4ZI","kind":"claim","at":"2026-11-12T23:32:58.971099Z","agent":"codex"}
+{"version":1,"task_id":"NTY2GK","kind":"open","at":"2026-11-12T23:33:45.355246Z"}
+{"version":1,"task_id":"NTY2GK","kind":"claim","at":"2026-11-12T23:33:45.392232Z","agent":"codex"}
+{"version":1,"task_id":"32VKBS","kind":"result","at":"2026-11-12T23:34:58.585988Z","agent":"codex","text":"Payload-tree move committed; focused tests pass; end-to-end acceptance pending.","file":{"path":"docs/proposals/language-boundary-performance.md","sha256":"feb4a93caaa270d92f2136a4524763fda4e9a5af1606af62036e20115d0fd17f","mtime":"2026-11-12T23:34:58.552829412Z","git_commit":"0aea3dfffe2589bda4d423961eb5e3bd7d629e3f"}}
+{"version":1,"task_id":"7ECLTU","kind":"result","at":"2026-11-12T23:34:58.631288Z","agent":"codex","text":"Native parser committed; exactness tests and parse diagnostics pass; transport acceptance pending.","file":{"path":"docs/proposals/language-boundary-performance.md","sha256":"feb4a93caaa270d92f2136a4524763fda4e9a5af1606af62036e20115d0fd17f","mtime":"2026-11-12T23:34:58.552829412Z","git_commit":"0aea3dfffe2589bda4d423961eb5e3bd7d629e3f"}}
+{"version":1,"task_id":"27CHGI","kind":"open","at":"2026-11-12T23:35:18.638865Z"}
+{"version":1,"task_id":"2UB4UH","kind":"open","at":"2026-11-12T23:35:18.674386Z"}
+{"version":1,"task_id":"6N22SX","kind":"open","at":"2026-11-12T23:35:18.709033Z"}
+{"version":1,"task_id":"7CA5OC","kind":"open","at":"2026-11-12T23:35:18.745543Z"}
+{"version":1,"task_id":"A2YASO","kind":"open","at":"2026-11-12T23:35:18.781921Z"}
+{"version":1,"task_id":"ECNBVJ","kind":"open","at":"2026-11-12T23:35:18.817764Z"}
+{"version":1,"task_id":"F5MEFX","kind":"open","at":"2026-11-12T23:35:18.852158Z"}
+{"version":1,"task_id":"GSYEYP","kind":"open","at":"2026-11-12T23:35:18.884428Z"}
+{"version":1,"task_id":"IXNZWI","kind":"open","at":"2026-11-12T23:35:18.918409Z"}
+{"version":1,"task_id":"KAUJM5","kind":"open","at":"2026-11-12T23:35:18.952247Z"}
+{"version":1,"task_id":"M2FNWG","kind":"open","at":"2026-11-12T23:35:18.993521Z"}
+{"version":1,"task_id":"MJAQRU","kind":"open","at":"2026-11-12T23:35:19.030899Z"}
+{"version":1,"task_id":"Q2YAUP","kind":"open","at":"2026-11-12T23:35:19.067596Z"}
+{"version":1,"task_id":"QXY2OM","kind":"open","at":"2026-11-12T23:35:19.100836Z"}
+{"version":1,"task_id":"UJHEZU","kind":"open","at":"2026-11-12T23:35:19.135618Z"}
+{"version":1,"task_id":"UO7FVO","kind":"open","at":"2026-11-12T23:35:19.173559Z"}
+{"version":1,"task_id":"VXOTFT","kind":"open","at":"2026-11-12T23:35:19.209611Z"}
+{"version":1,"task_id":"WBA6TN","kind":"open","at":"2026-11-12T23:35:19.244182Z"}
+{"version":1,"task_id":"WVJROC","kind":"open","at":"2026-11-12T23:35:19.280168Z"}
+{"version":1,"task_id":"NTY2GK","kind":"result","at":"2026-11-12T23:36:38.139966Z","agent":"codex","text":"Go ownership and tag allocation changes pass suites; decode saves one allocation; full-path acceptance pending.","file":{"path":"docs/proposals/language-boundary-performance.md","sha256":"9847a263853eb2cdb226689a821b820cfe5d6e2e6ff3c69db8fb1e1da07d17ab","mtime":"2026-11-12T23:36:38.109803039Z","git_commit":"0aea3dfffe2589bda4d423961eb5e3bd7d629e3f"}}
+{"version":1,"task_id":"BTS4ZI","kind":"result","at":"2026-11-12T23:36:38.1798Z","agent":"codex","text":"UDP byte copies removed; 50 Python tests pass (one skip); full-path timing acceptance pending.","file":{"path":"docs/proposals/language-boundary-performance.md","sha256":"9847a263853eb2cdb226689a821b820cfe5d6e2e6ff3c69db8fb1e1da07d17ab","mtime":"2026-11-12T23:36:38.109803039Z","git_commit":"0aea3dfffe2589bda4d423961eb5e3bd7d629e3f"}}
