@@ -653,7 +653,7 @@ impl RemoteTail {
                 if line.trim().is_empty() {
                     continue;
                 }
-                let value: Value = serde_json::from_str(&line).map_err(|err| {
+                let mut value: Value = serde_json::from_str(&line).map_err(|err| {
                     Error::new(ErrorKind::Internal)
                         .with_message("invalid tail message json")
                         .with_source(err)
@@ -667,11 +667,18 @@ impl RemoteTail {
                         })?;
                     return Err(error_from_remote(envelope.error));
                 }
-                let message: MessageWire = serde_json::from_value(value).map_err(|err| {
+                // Keep the payload's existing containers. Deserializing Value into
+                // Value rebuilds every map and array; only the envelope needs it.
+                // Leave null in place so serde still enforces required fields.
+                let data = value.get_mut("data").map(Value::take);
+                let mut message: MessageWire = serde_json::from_value(value).map_err(|err| {
                     Error::new(ErrorKind::Internal)
                         .with_message("invalid tail message json")
                         .with_source(err)
                 })?;
+                if let Some(data) = data {
+                    message.data = data;
+                }
                 return Ok(Some(message_from_remote(message)));
             }
         })();
@@ -1242,6 +1249,26 @@ mod tests {
         let err = read_jsonl_line(&mut reader, 4).expect_err("oversized line");
         assert_eq!(err.kind(), ErrorKind::Io);
         assert!(reader.is_none());
+    }
+
+    #[test]
+    fn jsonl_tail_preserves_nested_payload_and_missing_data_errors() {
+        let payload = serde_json::json!({"array": [{"integer": u64::MAX}, null, [true, "x"]], "object": {"seq": 3}});
+        let line = serde_json::json!({"seq": u64::MAX, "time": "2026-01-01T00:00:00Z", "meta": {"tags": ["nested"]}, "data": payload}).to_string();
+        let mut tail = RemoteTail {
+            reader: Some(BufReader::new(Box::new(Cursor::new(line)))),
+        };
+        let message = tail.next_message().unwrap().unwrap();
+        assert_eq!(message.seq, u64::MAX);
+        assert_eq!(message.data, payload);
+        assert_eq!(message.meta.tags, ["nested"]);
+        let mut missing = RemoteTail {
+            reader: Some(BufReader::new(Box::new(Cursor::new(
+                r#"{"seq":1,"time":"2026-01-01T00:00:00Z","meta":{"tags":[]}}"#,
+            )))),
+        };
+        assert!(missing.next_message().is_err());
+        assert!(missing.reader.is_none());
     }
 
     #[test]
