@@ -152,10 +152,22 @@ function parseMessage(payload) {
   throw new TypeError("payload must be Buffer, Message, or message envelope object");
 }
 
+// Only call for bytes returned directly by the native ABI. MessageWire emits
+// seq first as decimal digits. Other sources retain the general exact parser.
+function parseNativeMessage(raw) {
+  const text = raw.toString("utf8");
+  const prefix = /^\{"seq":([0-9]{1,20}),"time":"/.exec(text);
+  if (!prefix) return parseMessage(raw);
+  const envelope = JSON.parse(text);
+  envelope.seq = normalizeMessageSeq(prefix[1]);
+  return messageFromEnvelope(envelope, raw);
+}
+
 module.exports = {
   Message,
   messageFromEnvelope,
   parseMessage,
+  parseNativeMessage,
   parseMessageJson,
   normalizeMessageSeq,
 };

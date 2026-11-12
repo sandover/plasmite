@@ -7,7 +7,7 @@ Notes: Requires libplasmite to be discoverable at runtime.
 */
 
 const { RemoteClient, RemoteError, RemotePool } = require("./remote");
-const { Message, parseMessage } = require("./message");
+const { Message, parseMessage, parseNativeMessage } = require("./message");
 const { ERROR_KIND_VALUES, mapErrorKind } = require("./mappings");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -232,7 +232,7 @@ class Pool {
    * @returns {Message}
    */
   append(payload, tags, durability) {
-    return parseMessage(this.appendJson(payload, tags, durability));
+    return parseNativeMessage(this.appendJson(payload, tags, durability));
   }
 
   /**
@@ -268,7 +268,7 @@ class Pool {
    * @returns {Message}
    */
   get(seq) {
-    return parseMessage(this.getJson(seq));
+    return parseNativeMessage(this.getJson(seq));
   }
 
   /**
@@ -348,7 +348,7 @@ class Pool {
           if (limit !== null) return;
           continue;
         }
-        const message = parseMessage(result.message);
+        const message = parseNativeMessage(result.message);
         if (messageHasTags(message, requiredTags)) {
           delivered++;
           yield message;
