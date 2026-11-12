@@ -446,7 +446,7 @@ _LIB.plsm_udp_pool_free.argtypes = [POINTER(plsm_udp_pool_t)]
 _LIB.plsm_udp_pool_free.restype = None
 _LIB.plsm_udp_pool_send_json.argtypes = [
     POINTER(plsm_udp_pool_t),
-    POINTER(c_uint8),
+    c_char_p,
     c_size_t,
     POINTER(c_char_p),
     c_size_t,
@@ -455,7 +455,7 @@ _LIB.plsm_udp_pool_send_json.argtypes = [
 _LIB.plsm_udp_pool_send_json.restype = c_int
 _LIB.plsm_udp_pool_send_lite3.argtypes = [
     POINTER(plsm_udp_pool_t),
-    POINTER(c_uint8),
+    c_char_p,
     c_size_t,
     POINTER(POINTER(plsm_error_t)),
 ]
@@ -1226,12 +1226,11 @@ class UdpPool:
     def send_json(self, value: Any, tags: Iterable[str] = ()) -> None:
         _require_open(self._ptr, "UDP pool")
         payload = json.dumps(value, separators=(",", ":")).encode("utf-8")
-        payload_buf = (c_uint8 * len(payload)).from_buffer_copy(payload)
         tag_arr, keepalive = _tag_array(tags)
         out_err = POINTER(plsm_error_t)()
         rc = _LIB.plsm_udp_pool_send_json(
             self._ptr,
-            payload_buf,
+            payload,
             c_size_t(len(payload)),
             tag_arr,
             c_size_t(len(keepalive)),
@@ -1246,11 +1245,10 @@ class UdpPool:
         payload = _ensure_bytes(payload, "payload")
         if not payload:
             raise ValueError("payload is required")
-        payload_buf = (c_uint8 * len(payload)).from_buffer_copy(payload)
         out_err = POINTER(plsm_error_t)()
         rc = _LIB.plsm_udp_pool_send_lite3(
             self._ptr,
-            payload_buf,
+            payload,
             c_size_t(len(payload)),
             byref(out_err),
         )
@@ -1396,7 +1394,7 @@ def _udp_event_to_python(event: plsm_udp_event_t) -> UdpEvent:
         if event.kind == 1:
             payload = b""
             if event.payload.data and event.payload.len:
-                payload = bytes((c_uint8 * event.payload.len).from_address(event.payload.data))
+                payload = string_at(event.payload.data, event.payload.len)
             return UdpFrame(int(event.seq), int(event.timestamp_ns), payload)
         if event.kind == 2:
             reasons = {0: "unknown", 1: "oversized", 2: "retention", 3: "pressure"}

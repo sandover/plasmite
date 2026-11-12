@@ -555,7 +555,9 @@ class BindingTests(unittest.TestCase):
                                 stored_json = local_pool.get(json_frame.seq)
                                 self.assertEqual(stored_json.data, json_message.data)
 
-                                self.assertIsNone(udp_pool.send_lite3(original_lite3))
+                                mutable_lite3 = bytearray(original_lite3)
+                                self.assertIsNone(udp_pool.send_lite3(mutable_lite3))
+                                mutable_lite3[:] = b"\x00" * len(mutable_lite3)
                                 lite3_frame = _next_udp_frame(self, follow)
                                 self.assertEqual(lite3_frame.payload, original_lite3)
                                 self.assertEqual(lite3_frame.message().data, original.data)
