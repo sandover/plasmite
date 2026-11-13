@@ -89,8 +89,11 @@ def worker(args):
                     if pool.append_lite3(fixture, plasmite.Durability.FAST) != index + 1:
                         raise RuntimeError("binary append identity mismatch")
                 else:
-                    receipt = pool.append(value)
-                    if receipt.seq != index + 1 or receipt.data != value:
+                    receipt = (pool.append_identity(value) if args.receipt == "identity"
+                               else pool.append(value))
+                    if (receipt.seq != index + 1
+                            or (args.receipt == "full" and receipt.data != value)
+                            or (args.receipt == "identity" and receipt.timestamp_ns <= 0)):
                         raise RuntimeError("append receipt mismatch")
             if pool is None:
                 sys.stdout.buffer.flush()
@@ -144,7 +147,7 @@ def trial(args, lane, directory, profile=False):
     command = [sys.executable, str(Path(__file__).resolve()), "--worker",
                "--lane", lane, "--messages", str(args.messages),
                "--directory", directory, "--bindings", str(args.bindings),
-               "--interval-ms", str(args.interval_ms)]
+               "--interval-ms", str(args.interval_ms), "--receipt", args.receipt]
     if args.binary:
         command.append("--binary")
     processes = []
@@ -154,7 +157,7 @@ def trial(args, lane, directory, profile=False):
             setup = (
                 "import plasmite; "
                 f"c=plasmite.Client({directory!r}); "
-                f"p=c.create_pool('events', {max(16 * 1024 * 1024, args.messages * 8192)}); "
+                f"p=c.create_pool('events', {max(16 * 1024 * 1024, args.messages * max(8192, 2 * len(json.dumps(record()).encode()) + 4096))}); "
                 "p.close(); c.close()"
             )
             if args.binary:
@@ -232,6 +235,9 @@ def main():
     parser.add_argument("--bindings", type=Path, default=ROOT / "bindings" / "python")
     parser.add_argument("--baseline-bindings", type=Path,
                         help="Python bindings to use with the saved baseline library")
+    parser.add_argument("--receipt", choices=["full", "identity"], default="full",
+                        help="producer receipt work; the consumer still decodes and verifies complete data")
+    parser.add_argument("--baseline-receipt", choices=["full", "identity"], default="full")
     parser.add_argument("--binary", action="store_true",
                         help="compare verified repeated Lite3 forwarding; omit the JSON pipe")
     parser.add_argument("--messages", type=int, default=20_000)
@@ -247,6 +253,8 @@ def main():
     args = parser.parse_args()
     if args.messages < 1 or args.repeats < 1 or args.interval_ms < 0:
         parser.error("messages and repeats must be positive; interval must be nonnegative")
+    if args.binary and (args.receipt != "full" or args.baseline_receipt != "full"):
+        parser.error("receipt choices apply to JSON producers only")
     if args.binary and args.interval_ms:
         parser.error("binary forwarding currently measures saturated traffic only")
     if args.worker:
@@ -267,6 +275,7 @@ def main():
               "messages": args.messages, "repeats": args.repeats,
               "interval_ms": args.interval_ms,
               "format": "lite3-repeat" if args.binary else "json-object",
+              "receipt": args.receipt, "baseline_receipt": args.baseline_receipt,
               "first_record_json_bytes": len(json.dumps(record()).encode()),
               "runs": []}
     libraries = {"plasmite": args.library}
@@ -290,6 +299,8 @@ def main():
             lane = "pipe" if label == "pipe" else "plasmite"
             trial_args = argparse.Namespace(**vars(args))
             trial_args.library = libraries.get(label, args.library)
+            if label == "baseline":
+                trial_args.receipt = args.baseline_receipt
             if label == "baseline" and args.baseline_bindings:
                 trial_args.bindings = args.baseline_bindings
             with tempfile.TemporaryDirectory(prefix="plasmite-pipe-") as directory:

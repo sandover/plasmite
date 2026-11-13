@@ -263,3 +263,17 @@ second copy. `Message.Data` keeps independent storage, so changing Raw does not
 change Data. `api.DecodeMessage` still copies caller-provided raw bytes;
 `api.DecodeOwnedMessage` lets an adapter transfer a fresh buffer explicitly.
 After that transfer, the caller must not mutate or reuse the input slice.
+
+## Numeric append receipts
+
+```go
+receipt, err := api.AppendIdentity(pool, map[string]any{"temperature": 23.5}, []string{"sensor"})
+// receipt.Seq and receipt.TimestampNs are exact uint64 values.
+```
+
+`api.AppendJSONIdentity` accepts JSON bytes and `api.AppendLite3Identity` accepts
+encoded Lite3 bytes. These helpers return only the committed identity, avoiding
+receipt data decoding. The local backend also provides these methods directly.
+They require the matching C SDK/library. The original `api.Pool` interface gains
+no required methods: unsupported backends return an error before they append.
+Existing append methods keep full Message results where they already did.

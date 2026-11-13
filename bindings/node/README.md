@@ -326,3 +326,15 @@ MIT
 
 For playback timing, use the asynchronous tail and an application scheduler; see the
 [next major upgrade guide](../../docs/record/upgrading-next-major.md#sdk-applications-control-playback-timing).
+
+## Numeric append receipts
+
+```js
+const receipt = pool.appendIdentity({ temperature: 23.5 }, ["sensor"]);
+console.log(receipt.seq, receipt.timestampNs); // exact bigint values
+```
+
+`appendLite3Identity` accepts encoded Lite3 bytes. These local methods return
+only the committed sequence and Unix nanoseconds, without echoing or decoding
+the data. Existing `append` returns a full Message. Use the native library from
+the matching SDK. Validation, durability and commit ordering stay the same.

@@ -88,6 +88,30 @@ class BindingTests(unittest.TestCase):
             pool.close()
             client.close()
 
+    def test_numeric_append_receipts_match_stored_frames(self) -> None:
+        with self._client_pool("identities") as (_, pool):
+            value = {"nested": [1, {"text": "hello"}]}
+            first = pool.append_identity(value, ["tag"], Durability.FLUSH)
+            self.assertIsInstance(first, plasmite.AppendReceipt)
+            self.assertEqual(first.seq, 1)
+            stored = pool.get_lite3(first.seq)
+            self.assertEqual(first.timestamp_ns, stored.timestamp_ns)
+            self.assertGreater(first.timestamp_ns, 2**53)
+            value["nested"].clear()
+            self.assertEqual(pool.get(first.seq).data, {"nested": [1, {"text": "hello"}]})
+            second = pool.append_lite3_identity(bytearray(stored.payload), Durability.FAST)
+            self.assertEqual(second.seq, 2)
+            self.assertEqual(second.timestamp_ns, pool.get_lite3(2).timestamp_ns)
+            with self.assertRaises(PlasmiteError):
+                pool.append_json_identity(b"bad", [], Durability.FAST)
+            with self.assertRaises(PlasmiteError):
+                pool.append_lite3_identity(b"bad", Durability.FAST)
+            self.assertEqual(pool.append_identity({}).seq, 3)
+            with mock.patch.object(plasmite._LIB, "plsm_pool_append_json_identity", None):
+                with self.assertRaises(NotImplementedError):
+                    pool.append_identity({})
+            self.assertEqual(pool.append_identity({}).seq, 4)
+
     def test_append_get_large_payload(self) -> None:
         with self._client_pool("big") as (_, pool):
             payload = {"blob": "0123456789abcdef" * 4096}

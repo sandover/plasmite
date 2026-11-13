@@ -39,7 +39,8 @@ hashes and worker verification counts. The small run used the binary benchmark
 before its later configurable text size and dynamic pool capacity changes;
 its script hash records that distinction. The large run uses the current script.
 The no-cache baseline comes from commit 53a6bcd. For validation, the baseline
-adds the writer-handle change below and the candidate adds binary validation.
+adds the writer-handle change below (commit `1e29a6a`) and the candidate adds
+the change titled `Validate binary message readability without exporting JSON`.
 Use the exact SHA-256 fields in each raw file to identify these builds.
 Both libraries use the same vendored source and optimized build profile.
 
@@ -75,3 +76,6 @@ cover malformed child links, depth, tags, canonical types and rejection before
 sequence advance. Full metadata callers still receive owned tags. Full message
 callers retain JSON decoding. No entry point gains stronger validation merely
 to share this code.
+
+Historical source snapshots and full build logs stay outside Git. This report
+keeps the scripts, summaries and readable results.

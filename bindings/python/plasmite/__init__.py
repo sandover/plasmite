@@ -180,6 +180,10 @@ class plsm_udp_event_t(Structure):
     ]
 
 
+class plsm_append_identity_t(Structure):
+    _fields_ = [("seq", c_uint64), ("timestamp_ns", c_uint64)]
+
+
 class plsm_lite3_frame_t(Structure):
     _fields_ = [
         ("seq", c_uint64),
@@ -332,6 +336,19 @@ _LIB.plsm_pool_append_lite3.argtypes = [
     POINTER(POINTER(plsm_error_t)),
 ]
 _LIB.plsm_pool_append_lite3.restype = c_int
+
+# Older libraries keep the existing methods; identity methods require the new ABI.
+for _name, _arguments in [
+    ("plsm_pool_append_json_identity", [POINTER(plsm_pool_t), c_char_p, c_size_t,
+        POINTER(c_char_p), c_size_t, c_uint32]),
+    ("plsm_pool_append_lite3_identity", [POINTER(plsm_pool_t), c_char_p, c_size_t,
+        c_uint32]),
+]:
+    if hasattr(_LIB, _name):
+        _function = getattr(_LIB, _name)
+        _function.argtypes = [*_arguments, POINTER(plsm_append_identity_t),
+                             POINTER(POINTER(plsm_error_t))]
+        _function.restype = c_int
 
 _LIB.plsm_pool_get_json.argtypes = [
     POINTER(plsm_pool_t),
@@ -712,6 +729,13 @@ class Client:
 
 
 @dataclass(frozen=True)
+class AppendReceipt:
+    """Identity from the successful commit; timestamp_ns is unsigned Unix nanoseconds."""
+    seq: int
+    timestamp_ns: int
+
+
+@dataclass(frozen=True)
 class Lite3Frame:
     seq: int
     timestamp_ns: int
@@ -787,6 +811,66 @@ class Pool:
         if rc != 0:
             raise _take_error(out_err)
         return int(out_seq.value)
+
+    @_serialized_handle
+    def append_json_identity(self, payload: bytes, tags: Iterable[str], durability: Durability) -> AppendReceipt:
+        _require_open(self._ptr, "pool")
+        payload = _ensure_bytes(payload, "payload")
+        if not payload:
+            raise ValueError("payload is required")
+        function = getattr(_LIB, "plsm_pool_append_json_identity", None)
+        if function is None:
+            raise NotImplementedError("append identity requires a newer libplasmite")
+        receipt = plsm_append_identity_t()
+        out_err = POINTER(plsm_error_t)()
+        arr, _keep = _tag_array(tags)
+        # The native call borrows these immutable bytes only until it returns.
+        rc = function(
+            self._ptr,
+            payload,
+            len(payload),
+            arr,
+            len(_keep),
+            int(durability),
+            byref(receipt),
+            byref(out_err),
+        )
+        if rc != 0:
+            raise _take_error(out_err)
+        return AppendReceipt(int(receipt.seq), int(receipt.timestamp_ns))
+
+    def append_identity(
+        self, value, tags: Optional[Iterable[str]] = None,
+        durability: Durability = Durability.FAST,
+    ) -> AppendReceipt:
+        """Append without returning or decoding the input payload."""
+        return self.append_json_identity(
+            json.dumps(value).encode("utf-8"),
+            [] if tags is None else tags, durability,
+        )
+
+    @_serialized_handle
+    def append_lite3_identity(self, payload: bytes, durability: Durability) -> AppendReceipt:
+        _require_open(self._ptr, "pool")
+        payload = _ensure_bytes(payload, "payload")
+        if not payload:
+            raise ValueError("payload is required")
+        function = getattr(_LIB, "plsm_pool_append_lite3_identity", None)
+        if function is None:
+            raise NotImplementedError("append identity requires a newer libplasmite")
+        receipt = plsm_append_identity_t()
+        out_err = POINTER(plsm_error_t)()
+        rc = function(
+            self._ptr,
+            payload,
+            len(payload),
+            int(durability),
+            byref(receipt),
+            byref(out_err),
+        )
+        if rc != 0:
+            raise _take_error(out_err)
+        return AppendReceipt(int(receipt.seq), int(receipt.timestamp_ns))
 
     @_serialized_handle
     def get_json(self, seq: int) -> bytes:
@@ -1457,6 +1541,7 @@ def _message_has_tags(message: Message, required_tags: list[str]) -> bool:
 
 
 __all__ = [
+    "AppendReceipt",
     "Client",
     "Pool",
     "Message",

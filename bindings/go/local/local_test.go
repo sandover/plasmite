@@ -579,3 +579,58 @@ func TestDefaultPoolDirectory(t *testing.T) {
 		}
 	}
 }
+
+func TestNumericAppendReceipts(t *testing.T) {
+	pool := newTestPool(t, newTestClient(t), "identities")
+	value := map[string]any{"text": "hello"}
+	first, err := api.AppendIdentity(pool, value, []string{"tag"}, api.WithDurability(api.DurabilityFlush))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := pool.GetLite3(first.Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Seq != 1 || first.TimestampNs != stored.TimestampNs || first.TimestampNs <= 1<<53 {
+		t.Fatalf("receipt mismatch: %+v / %+v", first, stored)
+	}
+	value["text"] = "changed"
+	message, err := pool.Get(first.Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(message.Data) != `{"text":"hello"}` {
+		t.Fatalf("stored data: %s", message.Data)
+	}
+	second, err := api.AppendLite3Identity(pool, stored.Payload, api.DurabilityFast)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := pool.GetLite3(second.Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Seq != 2 || second.TimestampNs != frame.TimestampNs {
+		t.Fatalf("binary identity: %+v", second)
+	}
+	if _, err := api.AppendJSONIdentity(pool, []byte("bad"), nil, api.DurabilityFast); err == nil {
+		t.Fatal("accepted bad JSON")
+	}
+	if _, err := api.AppendLite3Identity(pool, []byte("bad"), api.DurabilityFast); err == nil {
+		t.Fatal("accepted bad binary")
+	}
+	third, err := api.AppendIdentity(pool, map[string]any{}, nil)
+	if err != nil || third.Seq != 3 {
+		t.Fatalf("advanced on rejected append: %+v / %v", third, err)
+	}
+	// Embedding just the original contract proves third-party implementations
+	// need no new methods and unsupported identity calls cannot append.
+	wrapper := struct{ api.Pool }{pool}
+	if _, err := api.AppendIdentity(wrapper, value, nil); !errors.Is(err, api.ErrInvalidArgument) {
+		t.Fatalf("unsupported: %v", err)
+	}
+	fourth, err := api.AppendIdentity(pool, map[string]any{}, nil)
+	if err != nil || fourth.Seq != 4 {
+		t.Fatalf("unsupported call appended: %+v / %v", fourth, err)
+	}
+}

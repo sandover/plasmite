@@ -1023,3 +1023,24 @@ test("UDP native frames retain arrival order, duplicates, and uint64 metadata", 
   assert.deepEqual(progress.map((event) => event.nextSeq), [base + 13n, base + 13n]);
   assert.equal(progress.at(-1).terminal, true);
 });
+
+
+test("numeric append receipts match stored frames without echoing data", () => {
+  withPool("identities", ({ pool }) => {
+    const value = { nested: [1, { text: "hello" }] };
+    const first = pool.appendIdentity(value, ["tag"], Durability.Flush);
+    assert.deepEqual(Object.keys(first).sort(), ["seq", "timestampNs"]);
+    assert.equal(first.seq, 1n);
+    const stored = pool.getLite3(first.seq);
+    assert.equal(first.timestampNs, stored.timestampNs);
+    assert.ok(first.timestampNs > 2n ** 53n);
+    value.nested.length = 0;
+    assert.deepEqual(pool.get(first.seq).data, { nested: [1, { text: "hello" }] });
+    const second = pool.appendLite3Identity(stored.payload);
+    assert.equal(second.seq, 2n);
+    assert.equal(second.timestampNs, pool.getLite3(2n).timestampNs);
+    assert.throws(() => pool.appendIdentity(Buffer.from("bad")), PlasmiteNativeError);
+    assert.throws(() => pool.appendLite3Identity(Buffer.from("bad")), PlasmiteNativeError);
+    assert.equal(pool.appendIdentity({}).seq, 3n);
+  });
+});

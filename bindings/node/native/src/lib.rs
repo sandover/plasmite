@@ -57,6 +57,13 @@ struct plsm_buf_t {
 }
 
 #[repr(C)]
+#[derive(Default)]
+struct plsm_append_identity_t {
+    seq: u64,
+    timestamp_ns: u64,
+}
+
+#[repr(C)]
 struct plsm_udp_event_t {
     kind: u32,
     reason: u32,
@@ -147,6 +154,25 @@ unsafe extern "C" {
         durability: u32,
         out_seq: *mut u64,
         out_err: *mut *mut plsm_error_t,
+    ) -> c_int;
+
+    fn plsm_pool_append_json_identity(
+        pool: *mut plsm_pool_t,
+        payload: *const u8,
+        len: usize,
+        tags: *const *const c_char,
+        tags_len: usize,
+        durability: u32,
+        out: *mut plsm_append_identity_t,
+        err: *mut *mut plsm_error_t,
+    ) -> c_int;
+    fn plsm_pool_append_lite3_identity(
+        pool: *mut plsm_pool_t,
+        payload: *const u8,
+        len: usize,
+        durability: u32,
+        out: *mut plsm_append_identity_t,
+        err: *mut *mut plsm_error_t,
     ) -> c_int;
 
     fn plsm_pool_get_json(
@@ -378,6 +404,22 @@ pub struct Pool {
 }
 
 #[napi(object)]
+pub struct AppendReceipt {
+    pub seq: BigInt,
+    #[napi(js_name = "timestampNs")]
+    pub timestamp_ns: BigInt,
+}
+
+impl From<plsm_append_identity_t> for AppendReceipt {
+    fn from(identity: plsm_append_identity_t) -> Self {
+        Self {
+            seq: BigInt::from(identity.seq),
+            timestamp_ns: BigInt::from(identity.timestamp_ns),
+        }
+    }
+}
+
+#[napi(object)]
 pub struct Lite3Frame {
     pub seq: BigInt,
     #[napi(js_name = "timestampNs")]
@@ -443,6 +485,60 @@ impl Pool {
             return Err(take_error(env, err)?);
         }
         Ok(BigInt::from(seq))
+    }
+
+    #[napi]
+    pub fn append_json_identity(
+        &self,
+        env: Env,
+        payload: Buffer,
+        tags: Vec<String>,
+        durability: Durability,
+    ) -> Result<AppendReceipt> {
+        let c_tags = CStringArray::new(&tags)?;
+        let mut out = plsm_append_identity_t::default();
+        let mut err = ptr::null_mut();
+        let rc = unsafe {
+            plsm_pool_append_json_identity(
+                self.ptr,
+                payload.as_ptr(),
+                payload.len(),
+                c_tags.as_ptr(),
+                tags.len(),
+                durability as u32,
+                &mut out,
+                &mut err,
+            )
+        };
+        if rc != 0 {
+            return Err(take_error(env, err)?);
+        }
+        Ok(out.into())
+    }
+
+    #[napi]
+    pub fn append_lite3_identity(
+        &self,
+        env: Env,
+        payload: Buffer,
+        durability: Durability,
+    ) -> Result<AppendReceipt> {
+        let mut out = plsm_append_identity_t::default();
+        let mut err = ptr::null_mut();
+        let rc = unsafe {
+            plsm_pool_append_lite3_identity(
+                self.ptr,
+                payload.as_ptr(),
+                payload.len(),
+                durability as u32,
+                &mut out,
+                &mut err,
+            )
+        };
+        if rc != 0 {
+            return Err(take_error(env, err)?);
+        }
+        Ok(out.into())
     }
 
     #[napi]

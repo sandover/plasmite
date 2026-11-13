@@ -178,3 +178,16 @@ an operating-system file lock already in progress.
 
 For playback timing, use ordinary streams and an application scheduler; see the
 [next major upgrade guide](../../docs/record/upgrading-next-major.md#sdk-applications-control-playback-timing).
+
+## Numeric append receipts
+
+```python
+receipt = pool.append_identity({"temperature": 23.5}, tags=["sensor"])
+print(receipt.seq, receipt.timestamp_ns)  # Unix nanoseconds, exact integers
+```
+
+`append_json_identity` accepts JSON bytes and `append_lite3_identity` accepts
+encoded Lite3 bytes. They return `AppendReceipt` without echoing or decoding the
+data. Existing `append` returns a full Message. New identity methods require a
+matching native library; older libraries raise `NotImplementedError` before
+commit. Input validation and durability follow the existing append methods.

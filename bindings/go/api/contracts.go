@@ -196,6 +196,50 @@ type Client interface {
 	Pool(ref PoolRef, sizeBytes uint64) (Pool, error)
 }
 
+// AppendReceipt identifies a successful commit without echoing its payload.
+// TimestampNs is unsigned Unix time in nanoseconds.
+type AppendReceipt struct {
+	Seq         uint64
+	TimestampNs uint64
+}
+
+// AppendIdentity requests only a numeric receipt from a supporting backend.
+// Unsupported backends fail before appending; a later Get cannot recover an
+// identity reliably once another writer overwrites the record.
+func AppendIdentity(pool Pool, value any, tags []string, opts ...AppendOption) (*AppendReceipt, error) {
+	writer, ok := pool.(interface {
+		AppendJSONIdentity([]byte, []string, Durability) (*AppendReceipt, error)
+	})
+	if !ok {
+		return nil, InvalidArgumentError("backend does not support append identity")
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("plasmite: marshal payload: %w", err)
+	}
+	return writer.AppendJSONIdentity(payload, tags, ApplyAppendOptions(opts...).Durability)
+}
+
+func AppendJSONIdentity(pool Pool, payload []byte, tags []string, durability Durability) (*AppendReceipt, error) {
+	writer, ok := pool.(interface {
+		AppendJSONIdentity([]byte, []string, Durability) (*AppendReceipt, error)
+	})
+	if !ok {
+		return nil, InvalidArgumentError("backend does not support append identity")
+	}
+	return writer.AppendJSONIdentity(payload, tags, durability)
+}
+
+func AppendLite3Identity(pool Pool, payload []byte, durability Durability) (*AppendReceipt, error) {
+	writer, ok := pool.(interface {
+		AppendLite3Identity([]byte, Durability) (*AppendReceipt, error)
+	})
+	if !ok {
+		return nil, InvalidArgumentError("backend does not support append identity")
+	}
+	return writer.AppendLite3Identity(payload, durability)
+}
+
 type Pool interface {
 	Close()
 	AppendJSON(payload []byte, tags []string, durability Durability) ([]byte, error)

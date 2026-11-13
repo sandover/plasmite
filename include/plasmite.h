@@ -145,6 +145,15 @@ typedef struct plsm_udp_event {
     plsm_buf_t payload;
 } plsm_udp_event_t;
 
+/* Numeric identity from the successful append itself. No allocation or free.
+ * timestamp_ns is unsigned Unix time in nanoseconds, not a formatted date.
+ * Output remains untouched on error. Use matching SDK/library versions.
+ */
+typedef struct plsm_append_identity {
+    uint64_t seq;
+    uint64_t timestamp_ns;
+} plsm_append_identity_t;
+
 typedef struct plsm_lite3_frame {
     uint64_t seq;
     uint64_t timestamp_ns;
@@ -188,6 +197,16 @@ int plsm_pool_append_lite3(
     size_t payload_len,
     uint32_t durability,
     uint64_t *out_seq,
+    plsm_error_t **out_err);
+
+/* Identity-only variants preserve validation, durability and commit ordering.
+ * They avoid constructing a full message receipt and never reread the ring.
+ */
+int plsm_pool_append_json_identity(plsm_pool_t *pool, const uint8_t *json_bytes,
+    size_t json_len, const char *const *tags, size_t tags_len, uint32_t durability,
+    plsm_append_identity_t *out_identity, plsm_error_t **out_err);
+int plsm_pool_append_lite3_identity(plsm_pool_t *pool, const uint8_t *payload,
+    size_t payload_len, uint32_t durability, plsm_append_identity_t *out_identity,
     plsm_error_t **out_err);
 
 int plsm_pool_get_json(

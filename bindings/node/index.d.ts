@@ -18,6 +18,10 @@ export const enum ErrorKind {
   Io = 8,
   RetentionGap = 9
 }
+export interface AppendReceipt {
+  seq: bigint
+  timestampNs: bigint
+}
 export interface Lite3Frame {
   seq: bigint
   timestampNs: bigint
@@ -58,6 +62,8 @@ export declare class Client {
 export declare class Pool {
   appendJson(payload: Buffer, tags: Array<string>, durability: Durability): Buffer
   appendLite3(payload: Buffer, durability: Durability): bigint
+  appendJsonIdentity(payload: Buffer, tags: Array<string>, durability: Durability): AppendReceipt
+  appendLite3Identity(payload: Buffer, durability: Durability): AppendReceipt
   getJson(seq: number | bigint): Buffer
   getLite3(seq: number | bigint): Lite3Frame
   openStream(sinceSeq: number | bigint | undefined | null, maxMessages: number | bigint | undefined | null, timeoutMs: number | bigint | undefined | null, errorOnGap: boolean): Stream

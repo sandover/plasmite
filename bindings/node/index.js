@@ -249,6 +249,27 @@ class Pool {
     }
   }
 
+  /** Return the committed sequence and Unix timestamp in nanoseconds. */
+  appendIdentity(payload, tags, durability) {
+    const input = Buffer.isBuffer(payload)
+      ? payload
+      : Buffer.from(JSON.stringify(payload));
+    try {
+      return this._inner.appendJsonIdentity(input, tags ?? [], durability ?? Durability.Fast);
+    } catch (err) {
+      throw wrapNativeError(err);
+    }
+  }
+
+  /** Append binary data and return its committed numeric identity. */
+  appendLite3Identity(payload, durability) {
+    try {
+      return this._inner.appendLite3Identity(payload, durability ?? Durability.Fast);
+    } catch (err) {
+      throw wrapNativeError(err);
+    }
+  }
+
   /**
    * Get raw message bytes by sequence.
    * @param {number|bigint} seq

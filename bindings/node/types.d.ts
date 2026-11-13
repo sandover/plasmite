@@ -75,7 +75,15 @@ export class Client {
   [Symbol.dispose](): void
 }
 
+/** Committed identity; timestampNs is unsigned Unix time in nanoseconds. */
+export interface AppendReceipt {
+  seq: bigint
+  timestampNs: bigint
+}
+
 export class Pool {
+  appendIdentity(payload: unknown, tags?: string[], durability?: Durability): AppendReceipt
+  appendLite3Identity(payload: Buffer, durability?: Durability): AppendReceipt
   append(payload: unknown, tags?: string[], durability?: Durability): Message
   appendJson(payload: unknown, tags?: string[], durability?: Durability): Buffer
   appendLite3(payload: Buffer, durability?: Durability): bigint

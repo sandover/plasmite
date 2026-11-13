@@ -383,6 +383,45 @@ pub trait PoolApiExt {
         durability: Durability,
     ) -> Result<Message, Error>;
 
+    /// Append and return only the committed sequence and Unix timestamp in nanoseconds.
+    /// The identity comes from this commit; it never requires a later pool read.
+    fn append_json_identity(
+        &mut self,
+        data: &Value,
+        tags: &[String],
+        options: AppendOptions,
+    ) -> Result<(u64, u64), Error> {
+        let seq = self.append_json(data, tags, options)?.seq;
+        Ok((seq, options.timestamp_ns))
+    }
+
+    fn append_json_identity_now(
+        &mut self,
+        data: &Value,
+        tags: &[String],
+        durability: Durability,
+    ) -> Result<(u64, u64), Error> {
+        self.append_json_identity(data, tags, AppendOptions::new(now_ns()?, durability))
+    }
+
+    /// Append validated binary input and return its committed numeric identity.
+    fn append_lite3_identity(
+        &mut self,
+        payload: &[u8],
+        options: AppendOptions,
+    ) -> Result<(u64, u64), Error> {
+        let seq = self.append_lite3(payload, options)?;
+        Ok((seq, options.timestamp_ns))
+    }
+
+    fn append_lite3_identity_now(
+        &mut self,
+        payload: &[u8],
+        durability: Durability,
+    ) -> Result<(u64, u64), Error> {
+        self.append_lite3_identity(payload, AppendOptions::new(now_ns()?, durability))
+    }
+
     /// Validate and append a pre-encoded Lite3 payload without re-encoding it.
     fn append_lite3(&mut self, payload: &[u8], options: AppendOptions) -> Result<u64, Error>;
 
@@ -428,6 +467,17 @@ pub trait PoolApiExt {
 }
 
 impl PoolApiExt for Pool {
+    fn append_json_identity(
+        &mut self,
+        data: &Value,
+        tags: &[String],
+        options: AppendOptions,
+    ) -> Result<(u64, u64), Error> {
+        let payload = crate::core::lite3::encode_message(tags, data)?;
+        let seq = self.append_with_options(payload.as_slice(), options)?;
+        Ok((seq, options.timestamp_ns))
+    }
+
     fn append_json(
         &mut self,
         data: &Value,
@@ -604,10 +654,10 @@ fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GapPolicy, PoolApiExt, TailOptions, decode_payload};
+    use super::{GapPolicy, PoolApiExt, TailOptions, decode_payload, message_from_frame};
     use crate::core::error::ErrorKind;
     use crate::core::lite3::{encode_message, json_counter_snapshot, reset_json_counters};
-    use crate::core::pool::{Durability, Pool, PoolOptions};
+    use crate::core::pool::{AppendOptions, Durability, Pool, PoolOptions};
     use serde_json::json;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -738,6 +788,56 @@ mod tests {
         let mut decoded = pool.tail(options);
         assert_eq!(decoded.next_message().unwrap().unwrap().seq, u64::MAX);
         assert!(decoded.next_message().unwrap().is_none());
+    }
+
+    #[test]
+    fn numeric_receipts_keep_exact_commit_identity_across_writers_and_overwrite() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("identities.plasmite");
+        let pool = Pool::create(&path, PoolOptions::new(64 * 1024)).unwrap();
+        let mut workers = Vec::new();
+        for writer in 0..2_u64 {
+            let path = path.clone();
+            workers.push(std::thread::spawn(move || {
+                let mut pool = Pool::open(path).unwrap();
+                let data = json!({"writer": writer, "padding": "x".repeat(4096)});
+                let payload = encode_message(&[], &data).unwrap();
+                (0..32_u64)
+                    .map(|i| {
+                        let timestamp = u64::MAX - writer * 32 - i;
+                        let options = AppendOptions::new(timestamp, Durability::Fast);
+                        let identity = if i % 2 == 0 {
+                            pool.append_json_identity(&data, &[], options)
+                        } else {
+                            pool.append_lite3_identity(payload.as_slice(), options)
+                        }
+                        .unwrap();
+                        assert_eq!(identity.1, timestamp);
+                        (identity, writer)
+                    })
+                    .collect::<Vec<_>>()
+            }));
+        }
+        let mut receipts: Vec<_> = workers
+            .into_iter()
+            .flat_map(|w| w.join().unwrap())
+            .collect();
+        receipts.sort_by_key(|((seq, _), _)| *seq);
+        let mut overwritten = 0;
+        for (index, ((seq, timestamp), writer)) in receipts.into_iter().enumerate() {
+            assert_eq!(seq, index as u64 + 1);
+            match pool.get_lite3(seq) {
+                Ok(frame) => {
+                    assert_eq!(frame.timestamp_ns, timestamp);
+                    assert_eq!(message_from_frame(&frame).unwrap().data["writer"], writer);
+                }
+                Err(error) => {
+                    assert_eq!(error.kind(), ErrorKind::NotFound);
+                    overwritten += 1;
+                }
+            }
+        }
+        assert!(overwritten > 0);
     }
 
     #[test]

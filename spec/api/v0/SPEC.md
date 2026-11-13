@@ -134,6 +134,20 @@ Stable error kinds:
 - Lite3 message appends validate the required message shape and readable nested
   data before writing. Invalid input returns `Corrupt` without advancing the pool.
   Valid appends preserve the input bytes and assign destination sequence/time.
+- `PoolApiExt::append_json_identity` and `append_lite3_identity` return
+  `(sequence, timestamp_ns)` from the successful append. Their `_now` variants
+  generate unsigned Unix nanoseconds once and use that exact timestamp for both
+  storage and result. They preserve input validation, durability and ordering.
+  The local Pool implementation never rereads the ring or formats a timestamp
+  string. Full-message append
+  methods keep their existing snapshot semantics.
+- The C identity variants write a caller-owned `plsm_append_identity_t` only on
+  success. Python exposes `AppendReceipt` through `append_identity`,
+  `append_json_identity` and `append_lite3_identity`. Node exposes
+  `appendIdentity` and `appendLite3Identity`, with both fields as `bigint`.
+  Go exposes `api.AppendReceipt` and optional backend helpers without adding
+  required methods to the `api.Pool` interface. Unsupported Go backends fail
+  before appending. UDP send provides no committed identity.
 - `PoolApiExt::append_lite3_with_receipt` prepares the message from input before
   writing and returns its destination sequence/time without reading the pool
   again. `RemotePool::append_lite3_with_receipt` returns that message from the

@@ -197,3 +197,22 @@ now reach the local file API. Drive-relative forms such as `C:work.plasmite`
 remain unsupported. Go's `PoolRefPath("work.plasmite")` now preserves explicit
 path intent by adding the relative prefix. `PoolRefName` and raw string names
 retain their meaning. POSIX names can still contain a literal backslash.
+
+## Numeric append receipts
+
+Local producers can request only the committed sequence and Unix timestamp in
+nanoseconds. Use `append_json_identity_now` or `append_lite3_identity_now` in
+Rust, `append_identity` or `append_lite3_identity` in Python, `appendIdentity`
+or `appendLite3Identity` in Node, and the `api.AppendIdentity` or
+`api.AppendLite3Identity` helpers in Go. Existing full-message methods keep their
+current behavior. Choose the numeric receipt when the producer only needs to
+confirm its append; the consumer can still read the complete message.
+
+The C ABI adds `plsm_pool_append_json_identity` and
+`plsm_pool_append_lite3_identity` with caller-owned numeric output. These new
+symbols require a matching library build that includes this addition. Rebuild
+Go and Node with the updated SDK and distribute the matching native library.
+Python keeps existing methods available with older libraries and raises
+`NotImplementedError` before commit if an identity method's symbol is missing.
+Go backends that implement only the existing Pool interface still compile;
+identity helpers return an unsupported-operation error before they append.

@@ -331,6 +331,80 @@ func (p *Pool) AppendLite3(payload []byte, durability Durability) (uint64, error
 	return uint64(cSeq), nil
 }
 
+// AppendIdentity appends an object without returning or decoding its data.
+func (p *Pool) AppendIdentity(value any, tags []string, opts ...AppendOption) (*api.AppendReceipt, error) {
+	return api.AppendIdentity(p, value, tags, opts...)
+}
+
+func (p *Pool) AppendJSONIdentity(payload []byte, tags []string, durability Durability) (*api.AppendReceipt, error) {
+	if p == nil {
+		return nil, closedError("pool")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ptr == nil {
+		return nil, closedError("pool")
+	}
+	if len(payload) == 0 {
+		return nil, invalidArgumentError("payload is required")
+	}
+	cPayload := (*C.uint8_t)(unsafe.Pointer(&payload[0]))
+	cLen := C.size_t(len(payload))
+
+	cTags, cleanup := cStringArray(tags)
+	defer cleanup()
+
+	var identity C.plsm_append_identity_t
+	var cErr *C.plsm_error_t
+	rc := C.plsm_pool_append_json_identity(
+		p.ptr,
+		cPayload,
+		cLen,
+		cTags,
+		C.size_t(len(tags)),
+		C.uint32_t(durability),
+		&identity,
+		&cErr,
+	)
+	runtime.KeepAlive(tags)
+	if rc != 0 {
+		return nil, fromCError(cErr)
+	}
+	return &api.AppendReceipt{Seq: uint64(identity.seq), TimestampNs: uint64(identity.timestamp_ns)}, nil
+}
+
+func (p *Pool) AppendLite3Identity(payload []byte, durability Durability) (*api.AppendReceipt, error) {
+	if p == nil {
+		return nil, closedError("pool")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ptr == nil {
+		return nil, closedError("pool")
+	}
+	if len(payload) == 0 {
+		return nil, invalidArgumentError("payload is required")
+	}
+	cPayload := (*C.uint8_t)(unsafe.Pointer(&payload[0]))
+	cLen := C.size_t(len(payload))
+
+	var identity C.plsm_append_identity_t
+	var cErr *C.plsm_error_t
+	rc := C.plsm_pool_append_lite3_identity(
+		p.ptr,
+		cPayload,
+		cLen,
+		C.uint32_t(durability),
+		&identity,
+		&cErr,
+	)
+	runtime.KeepAlive(payload)
+	if rc != 0 {
+		return nil, fromCError(cErr)
+	}
+	return &api.AppendReceipt{Seq: uint64(identity.seq), TimestampNs: uint64(identity.timestamp_ns)}, nil
+}
+
 func (p *Pool) GetJSON(seq uint64) ([]byte, error) {
 	if p == nil {
 		return nil, closedError("pool")

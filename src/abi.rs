@@ -73,6 +73,13 @@ pub struct plsm_buf {
 }
 
 #[repr(C)]
+#[derive(Default)]
+pub struct plsm_append_identity {
+    seq: u64,
+    timestamp_ns: u64,
+}
+
+#[repr(C)]
 pub struct plsm_lite3_frame {
     seq: u64,
     timestamp_ns: u64,
@@ -346,6 +353,101 @@ pub extern "C" fn plsm_pool_append_lite3(
     };
     unsafe {
         *out_seq = seq;
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_pool_append_json_identity(
+    pool: *mut plsm_pool,
+    json_bytes: *const u8,
+    json_len: usize,
+    tags: *const *const c_char,
+    tags_len: usize,
+    durability: u32,
+    out_identity: *mut plsm_append_identity,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    if out_identity.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("out_identity is null"),
+        );
+    }
+    let pool = match borrow_pool(pool, out_err) {
+        Ok(pool) => pool,
+        Err(code) => return code,
+    };
+    let data = match parse_json_bytes(json_bytes, json_len) {
+        Ok(value) => value,
+        Err(err) => return fail(out_err, err),
+    };
+    let tags = match parse_tags(tags, tags_len) {
+        Ok(tags) => tags,
+        Err(err) => return fail(out_err, err),
+    };
+    let durability = match durability {
+        0 => crate::api::Durability::Fast,
+        1 => crate::api::Durability::Flush,
+        _ => {
+            return fail(
+                out_err,
+                Error::new(ErrorKind::Usage).with_message("invalid durability"),
+            );
+        }
+    };
+    let (seq, timestamp_ns) = match pool.pool.append_json_identity_now(&data, &tags, durability) {
+        Ok(identity) => identity,
+        Err(err) => return fail(out_err, err),
+    };
+    unsafe {
+        *out_identity = plsm_append_identity { seq, timestamp_ns };
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_pool_append_lite3_identity(
+    pool: *mut plsm_pool,
+    payload: *const u8,
+    payload_len: usize,
+    durability: u32,
+    out_identity: *mut plsm_append_identity,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    let pool = match borrow_pool(pool, out_err) {
+        Ok(pool) => pool,
+        Err(code) => return code,
+    };
+    if out_identity.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("out_identity is null"),
+        );
+    }
+    if payload.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("lite3_bytes is null"),
+        );
+    }
+    let payload = unsafe { std::slice::from_raw_parts(payload, payload_len) };
+    let durability = match durability {
+        0 => crate::api::Durability::Fast,
+        1 => crate::api::Durability::Flush,
+        _ => {
+            return fail(
+                out_err,
+                Error::new(ErrorKind::Usage).with_message("invalid durability"),
+            );
+        }
+    };
+    let (seq, timestamp_ns) = match pool.pool.append_lite3_identity_now(payload, durability) {
+        Ok(identity) => identity,
+        Err(err) => return fail(out_err, err),
+    };
+    unsafe {
+        *out_identity = plsm_append_identity { seq, timestamp_ns };
     }
     0
 }
@@ -1801,6 +1903,101 @@ mod tests {
             }
         }
         panic!("pool bounds did not advance beyond sequence {seq}");
+    }
+
+    #[test]
+    fn numeric_receipts_preserve_output_and_sequence_on_rejected_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut owner = plsm_pool {
+            pool: Pool::create(dir.path().join("identities"), PoolOptions::new(64 * 1024)).unwrap(),
+        };
+        let pool = &mut owner as *mut plsm_pool;
+        let mut error = ptr::null_mut();
+        let mut identity = plsm_append_identity {
+            seq: 999,
+            timestamp_ns: 888,
+        };
+        let json = br#"{"x":1}"#;
+        assert_eq!(
+            plsm_pool_append_json_identity(
+                pool,
+                json.as_ptr(),
+                json.len(),
+                ptr::null(),
+                0,
+                0,
+                ptr::null_mut(),
+                &mut error
+            ),
+            -1
+        );
+        plsm_error_free(error);
+        error = ptr::null_mut();
+        for (input, durability) in [(b"bad".as_slice(), 0), (json.as_slice(), 42)] {
+            assert_ne!(
+                plsm_pool_append_json_identity(
+                    pool,
+                    input.as_ptr(),
+                    input.len(),
+                    ptr::null(),
+                    0,
+                    durability,
+                    &mut identity,
+                    &mut error
+                ),
+                0
+            );
+            assert_eq!((identity.seq, identity.timestamp_ns), (999, 888));
+            plsm_error_free(error);
+            error = ptr::null_mut();
+        }
+        assert_ne!(
+            plsm_pool_append_lite3_identity(
+                pool,
+                json.as_ptr(),
+                json.len(),
+                0,
+                &mut identity,
+                &mut error
+            ),
+            0
+        );
+        assert_eq!((identity.seq, identity.timestamp_ns), (999, 888));
+        plsm_error_free(error);
+        error = ptr::null_mut();
+        assert_eq!(
+            plsm_pool_append_json_identity(
+                pool,
+                json.as_ptr(),
+                json.len(),
+                ptr::null(),
+                0,
+                1,
+                &mut identity,
+                &mut error
+            ),
+            0
+        );
+        assert_eq!(identity.seq, 1);
+        let frame = owner.pool.get(1).unwrap();
+        assert_eq!(identity.timestamp_ns, frame.timestamp_ns);
+        assert!(identity.timestamp_ns > (1_u64 << 53));
+        assert_eq!(
+            plsm_pool_append_lite3_identity(
+                pool,
+                frame.payload.as_ptr(),
+                frame.payload.len(),
+                0,
+                &mut identity,
+                &mut error
+            ),
+            0
+        );
+        assert_eq!(identity.seq, 2);
+        assert_eq!(
+            identity.timestamp_ns,
+            owner.pool.get(2).unwrap().timestamp_ns
+        );
     }
 
     #[test]
