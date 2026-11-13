@@ -25,7 +25,7 @@ impl Builder {
         b.data = b.container(0, Some("data"), false)?;
         Ok(b)
     }
-    fn put(
+    pub(crate) fn put(
         &mut self,
         parent: usize,
         key: Option<&str>,

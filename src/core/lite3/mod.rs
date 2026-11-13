@@ -13,7 +13,7 @@ use serde_json::Value;
 
 use crate::core::error::{Error, ErrorKind};
 
-mod builder;
+pub(crate) mod builder;
 mod json;
 pub mod sys;
 pub(crate) use json::JsonValue;

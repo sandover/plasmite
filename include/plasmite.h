@@ -477,6 +477,25 @@ int plsm_value_to_json_stored(plsm_value_ref_t value, plsm_buf_t *out, plsm_erro
 /* Complete seq/time/meta/data envelope, with no intermediate native object tree. */
 int plsm_view_to_json(const plsm_message_view_t *view, plsm_buf_t *out, plsm_error_t **err);
 
+/* Native input walkers. All calls on a builder require caller serialization.
+ * Text spans borrow input for the call only; embedded NUL is valid in values
+ * and tags, but object keys reject it. NULL key means an array element; a
+ * non-NULL empty span names the empty object key. Kinds match plsm_view_value_t.
+ * Use only nodes returned by this builder. Container puts return a child node.
+ * append_builder consumes the contents on both success and failure after input
+ * guards; free the handle once afterward. No publication occurs on build errors.
+ * A flush error can follow publication, as for other appends. */
+typedef struct plsm_builder plsm_builder_t;
+typedef struct { const uint8_t *data; size_t len; } plsm_text_t;
+int plsm_builder_new(const plsm_text_t *tags, size_t count,
+    plsm_builder_t **out, size_t *data_node, plsm_error_t **err);
+int plsm_builder_put(plsm_builder_t *builder, size_t parent,
+    const uint8_t *key, size_t key_len, const plsm_view_value_t *value,
+    size_t *child_node, plsm_error_t **err);
+int plsm_pool_append_builder(plsm_pool_t *pool, plsm_builder_t *builder,
+    uint32_t durability, const plsm_message_view_t **out, plsm_error_t **err);
+void plsm_builder_free(plsm_builder_t *builder);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

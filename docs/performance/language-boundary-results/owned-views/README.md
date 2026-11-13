@@ -322,5 +322,45 @@ includes an unused stored-order formatter and ABI exports; these acquisition
 lanes never call them. The strict-proof source archive supplies the baseline.
 The Node conversion measurements cover the consumer gain separately.
 
+## Follow-up: build directly from native values
+
+The new C builder lets a language binding write ordinary values into one growing
+Lite3 allocation. It copies each input string during the call and keeps no caller
+pointers. Appending returns an independent immutable view over that allocation.
+It avoids constructing JSON text and parsing that text back into values.
+
+The [matched C benchmark](native-builder.raw.json) compares this route with
+`snprintf` JSON encoding followed by `plsm_pool_append_view_json`. Both routes
+commit the same values, return the same retained view, and verify every value
+and sequence. Seven alternating pairs run after 100 warmups, with no concurrent
+builds or tests. The source archive (outside Git), runner,
+worker and library fingerprints identify the measured build.
+
+| Fixture | JSON producer | Direct producer | Complete JSON path | Complete direct path |
+| --- | ---: | ---: | ---: | ---: |
+| Small | 5.31 µs | 5.18 µs | 5.67 µs | 5.54 µs |
+| 200 extra fields | 25.28 µs | 21.47 µs | 34.91 µs | 31.47 µs |
+| 64 KiB string | 26.42 µs | 14.05 µs | 28.02 µs | 15.69 µs |
+
+The direct producer saves 15% for wide objects and 47% for the long string.
+The small difference changes sign between exploratory and final runs, so we
+claim no small-message improvement. Complete process CPU per record, including
+verification, falls from 4.56 to 4.52 µs, 31.62 to 28.17 µs, and 27.68 to
+14.71 µs respectively. Per-operation wall timing includes the same two clock
+reads on both sides; CPU timing uses two whole-run clock reads. We do not measure
+allocation counts in this run.
+
+These results measure C input conversion, not Python or JavaScript encoding.
+Each binding must benchmark its own native encoder before choosing a default.
+The controlled JSON fixture uses ASCII strings and finite exact numbers; its
+`snprintf` control does not implement a general-purpose JSON encoder.
+
+Reproduce after building outside the measurement window:
+
+```sh
+cc -O3 -Iinclude scripts/bench_builder_c.c -Ltarget/release -lplasmite -Wl,-rpath,$PWD/target/release -o target/release/bench_builder_c
+python3 scripts/bench_builder.py --repeats 7 --output native-builder.raw.json
+```
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.
