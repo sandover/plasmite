@@ -178,5 +178,58 @@ bytes, retained owners, embedded-field dominance, custom map keys, quoted tags,
 absolute depth through source/JSON subtrees and invalid text normalization.
 The full local/API race suite and strict cgo-pointer checks pass.
 
+
+## Central producer results
+
+[Seven complete runs](producer-runs/manifest.json) use the fixed checkpoint
+executable/library above, 2,000 iterations per lane, and alternating fixture/lane
+order. All seven print PASS. [The summary](producer-runs/summary.json) records
+medians, cgo calls and Go heap allocations. Values below show native versus JSON
+time in microseconds; both append routes return an independent Go-owned view.
+Pipelines append, fetch and decode selected typed fields. They do not decode the
+unrequested wide fields or large array.
+
+| Fixture | Append native / JSON | Forward native / JSON | Pipeline native / JSON |
+| --- | ---: | ---: | ---: |
+| Small map | 6.11 / 5.68 | 5.32 / 5.47 | 6.75 / 7.02 |
+| Small struct | 5.12 / 5.15 | 4.86 / 4.66 | 5.74 / 5.87 |
+| 200 extra fields | 46.08 / 42.85 | 13.59 / 18.96 | 53.76 / 54.01 |
+| 64 KiB text | 15.90 / 56.15 | 12.81 / 48.26 | 30.07 / 71.90 |
+| 64 KiB bytes | 18.50 / 59.34 | 12.65 / 75.36 | 30.22 / 172.93 |
+| 1,000 integers | 85.12 / 48.57 | 43.49 / 49.83 | 94.06 / 62.18 |
+
+Native append removes text formatting/parsing and takes 72% less time for long
+text, 69% less for bytes. Byte lanes preserve the same decoded byte output,
+while the native record stores bytes and the JSON record stores a base64 string.
+The byte pipeline takes 83% less time and uses six cgo calls versus eight.
+Forwarding long text and bytes takes 73% and 83% less time; wide forwarding takes
+28% less time. Ordinary native/JSON append both use two cgo calls. Native
+forwarding uses two versus four because it avoids the explicit JSON export.
+
+The array producer remains a material regression: native append takes 75% more
+time and the pipeline takes 51% more. Wide/small-map append also takes about 8%
+more; small structs and wide pipelines stay near their JSON controls. No
+universal native-producer speedup follows from these results.
+
+| Append fixture | Native Go bytes / allocations | JSON Go bytes / allocations |
+| --- | ---: | ---: |
+| Small map | 1,212 / 10 | 810 / 15 |
+| Small struct | 1,012 / 6 | 709 / 6 |
+| Wide | 62,829 / 22 | 20,829 / 615 |
+| Long text | 74,461 / 10 | 149,237 / 15 |
+| Bytes | 140,541 / 12 | 183,729 / 18 |
+| Array | 195,453 / 18 | 53,812 / 18 |
+
+These are Go heap counts; they exclude native writer allocations. Fewer
+allocations alone do not establish a faster producer. The native collector
+creates one 64-byte tagged descriptor per scalar/container before writing Lite3.
+A thousand small integers therefore expand into at least 64 KiB of descriptors,
+plus growing backing arrays, while JSON writes compact integer text. The array
+lane allocates 3.6 times as many Go bytes despite identical allocation counts.
+This source accounting identifies the temporary descriptor expansion; a targeted
+follow-up should remove it before attributing the remaining time to reflection,
+pinning or the native writer. The consumer and native-byte functionality pass;
+the array producer performance gap remains open.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

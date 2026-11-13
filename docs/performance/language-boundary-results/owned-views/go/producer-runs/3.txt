@@ -1,0 +1,41 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/sandover/plasmite/bindings/go/local
+cpu: Apple M5 Pro
+BenchmarkNativeInput/array/pipeline_json-15         	    2000	     63172 ns/op	         6.000 cgo/op	  104403 B/op	      24 allocs/op
+BenchmarkNativeInput/array/pipeline_native-15       	    2000	     93125 ns/op	         6.000 cgo/op	  245945 B/op	      24 allocs/op
+BenchmarkNativeInput/array/forward_json_view-15     	    2000	     49220 ns/op	         4.000 cgo/op	   53399 B/op	       5 allocs/op
+BenchmarkNativeInput/array/forward_native_view-15   	    2000	     44829 ns/op	         2.000 cgo/op	   49364 B/op	       5 allocs/op
+BenchmarkNativeInput/array/append_json_view-15      	    2000	     48567 ns/op	         2.000 cgo/op	   53807 B/op	      18 allocs/op
+BenchmarkNativeInput/array/append_native_view-15    	    2000	     80402 ns/op	         2.000 cgo/op	  195453 B/op	      18 allocs/op
+BenchmarkNativeInput/bytes/pipeline_json-15         	    2000	    172932 ns/op	         8.000 cgo/op	  436359 B/op	      26 allocs/op
+BenchmarkNativeInput/bytes/pipeline_native-15       	    2000	     29411 ns/op	         6.000 cgo/op	  281033 B/op	      18 allocs/op
+BenchmarkNativeInput/bytes/forward_json_view-15     	    2000	     74053 ns/op	         4.000 cgo/op	  180376 B/op	       5 allocs/op
+BenchmarkNativeInput/bytes/forward_native_view-15   	    2000	     12648 ns/op	         2.000 cgo/op	   73940 B/op	       5 allocs/op
+BenchmarkNativeInput/bytes/append_json_view-15      	    2000	     59170 ns/op	         2.000 cgo/op	  183729 B/op	      18 allocs/op
+BenchmarkNativeInput/bytes/append_native_view-15    	    2000	     18498 ns/op	         2.000 cgo/op	  140541 B/op	      12 allocs/op
+BenchmarkNativeInput/long_string/pipeline_json-15   	    2000	     72276 ns/op	         6.000 cgo/op	  292393 B/op	      21 allocs/op
+BenchmarkNativeInput/long_string/pipeline_native-15 	    2000	     32077 ns/op	         6.000 cgo/op	  215057 B/op	      16 allocs/op
+BenchmarkNativeInput/long_string/forward_json_view-15         	    2000	     47929 ns/op	         4.000 cgo/op	  147606 B/op	       5 allocs/op
+BenchmarkNativeInput/long_string/forward_native_view-15       	    2000	     12814 ns/op	         2.000 cgo/op	   73941 B/op	       5 allocs/op
+BenchmarkNativeInput/long_string/append_json_view-15          	    2000	     56146 ns/op	         2.000 cgo/op	  148985 B/op	      15 allocs/op
+BenchmarkNativeInput/long_string/append_native_view-15        	    2000	     15935 ns/op	         2.000 cgo/op	   74461 B/op	      10 allocs/op
+BenchmarkNativeInput/wide/pipeline_json-15                    	    2000	     61786 ns/op	         6.000 cgo/op	   33065 B/op	     621 allocs/op
+BenchmarkNativeInput/wide/pipeline_native-15                  	    2000	     53760 ns/op	         6.000 cgo/op	   75049 B/op	      28 allocs/op
+BenchmarkNativeInput/wide/forward_json_view-15                	    2000	     18549 ns/op	         4.000 cgo/op	   14228 B/op	       5 allocs/op
+BenchmarkNativeInput/wide/forward_native_view-15              	    2000	     13121 ns/op	         2.000 cgo/op	   11092 B/op	       5 allocs/op
+BenchmarkNativeInput/wide/append_json_view-15                 	    2000	     41656 ns/op	         2.000 cgo/op	   20821 B/op	     615 allocs/op
+BenchmarkNativeInput/wide/append_native_view-15               	    2000	     44138 ns/op	         2.000 cgo/op	   62829 B/op	      22 allocs/op
+BenchmarkNativeInput/small_struct/pipeline_json-15            	    2000	      7732 ns/op	         5.000 cgo/op	    2050 B/op	      11 allocs/op
+BenchmarkNativeInput/small_struct/pipeline_native-15          	    2000	      6970 ns/op	         5.000 cgo/op	    2352 B/op	      11 allocs/op
+BenchmarkNativeInput/small_struct/forward_json_view-15        	    2000	      5940 ns/op	         4.000 cgo/op	     676 B/op	       5 allocs/op
+BenchmarkNativeInput/small_struct/forward_native_view-15      	    2000	      6325 ns/op	         2.000 cgo/op	     692 B/op	       5 allocs/op
+BenchmarkNativeInput/small_struct/append_json_view-15         	    2000	      5384 ns/op	         2.000 cgo/op	     709 B/op	       6 allocs/op
+BenchmarkNativeInput/small_struct/append_native_view-15       	    2000	      4988 ns/op	         2.000 cgo/op	    1012 B/op	       6 allocs/op
+BenchmarkNativeInput/small_map/pipeline_json-15               	    2000	      7545 ns/op	         5.000 cgo/op	    2148 B/op	      20 allocs/op
+BenchmarkNativeInput/small_map/pipeline_native-15             	    2000	      7655 ns/op	         5.000 cgo/op	    2552 B/op	      15 allocs/op
+BenchmarkNativeInput/small_map/forward_json_view-15           	    2000	      6026 ns/op	         4.000 cgo/op	     676 B/op	       5 allocs/op
+BenchmarkNativeInput/small_map/forward_native_view-15         	    2000	      5317 ns/op	         2.000 cgo/op	     692 B/op	       5 allocs/op
+BenchmarkNativeInput/small_map/append_json_view-15            	    2000	      5176 ns/op	         2.000 cgo/op	     810 B/op	      15 allocs/op
+BenchmarkNativeInput/small_map/append_native_view-15          	    2000	      5290 ns/op	         2.000 cgo/op	    1212 B/op	      10 allocs/op
+PASS
