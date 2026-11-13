@@ -77,16 +77,41 @@ impl MessageView {
             timestamp_ns,
             flags,
         };
-        owner.doc().validate_view()?;
-        owner.collect_duplicates(0)?;
-        // Shape must agree with canonical last-key lookup as well as raw lookup.
+        let mut duplicates = Vec::<usize>::new();
+        unsafe extern "C" fn record_duplicate(
+            context: *mut std::ffi::c_void,
+            offset: usize,
+        ) -> i32 {
+            unsafe {
+                (&mut *context.cast::<Vec<usize>>()).push(offset);
+            }
+            0
+        }
+        if unsafe {
+            sys::plasmite_lite3_verify_view(
+                owner.bytes().as_ptr(),
+                owner.bytes().len(),
+                record_duplicate,
+                (&mut duplicates as *mut Vec<usize>).cast(),
+            )
+        } < 0
+        {
+            return Err(corrupt());
+        }
+        for offset in duplicates {
+            owner.collect_duplicates(offset)?;
+        }
+        // Shape follows canonical last-key lookup after all bytes are checked.
+        if owner.root().kind() != sys::LITE3_TYPE_OBJECT {
+            return Err(corrupt());
+        }
         let meta = owner.root().get("meta")?.ok_or_else(corrupt)?;
         let data = owner.root().get("data")?.ok_or_else(corrupt)?;
+        if meta.kind() != sys::LITE3_TYPE_OBJECT || data.kind() != sys::LITE3_TYPE_OBJECT {
+            return Err(corrupt());
+        }
         let tags = meta.get("tags")?.ok_or_else(corrupt)?;
-        if meta.kind() != sys::LITE3_TYPE_OBJECT
-            || data.kind() != sys::LITE3_TYPE_OBJECT
-            || tags.kind() != sys::LITE3_TYPE_ARRAY
-        {
+        if tags.kind() != sys::LITE3_TYPE_ARRAY {
             return Err(corrupt());
         }
         for (_, tag) in tags.entries()? {
@@ -186,12 +211,6 @@ impl MessageView {
                     ))
                 };
                 duplicate |= seen.insert(key, entry.offset).is_some();
-            }
-            if matches!(
-                self.node(entry.offset).kind,
-                sys::LITE3_TYPE_OBJECT | sys::LITE3_TYPE_ARRAY
-            ) {
-                self.collect_duplicates(entry.offset)?;
             }
         }
         if duplicate {
@@ -496,7 +515,7 @@ mod tests {
     #[test]
     fn duplicate_keys_have_one_consistent_last_winner() {
         let encoded =
-            Lite3Buf::from_json_str(r#"{"meta":{"tags":[]},"data":{"a":1,"b":2}}"#).unwrap();
+            Lite3Buf::from_json_str(r#"{"meta":{"tags":[]},"data":{"ab":1,"bA":2}}"#).unwrap();
         let initial = MessageView::from_bytes(encoded.as_slice(), 1, 1).unwrap();
         let entries = initial.raw_entries(initial.data().offset()).unwrap();
         let first = entries[0];
@@ -509,7 +528,8 @@ mod tests {
         }
         .to_owned();
         let mut changed = initial.bytes().to_vec();
-        changed[last.key as usize - initial.bytes().as_ptr() as usize] = key.as_bytes()[0];
+        let key_offset = last.key as usize - initial.bytes().as_ptr() as usize;
+        changed[key_offset..key_offset + key.len()].copy_from_slice(key.as_bytes());
         let view = MessageView::from_owned(changed, 1, 1, 0).unwrap();
         let data = view.data();
         assert_eq!(data.len().unwrap(), 1);
@@ -548,6 +568,92 @@ mod tests {
         let mut expected = vec![String::new(), "é".to_owned(), long];
         expected.sort();
         assert_eq!(keys, expected);
+    }
+    #[test]
+    fn canonical_duplicate_metadata_decides_message_shape() {
+        // meta and mfSa share DJB2's base hash; changing the second name keeps
+        // its valid quadratic-probe slot. The earlier scalar is readable but
+        // the canonical final metadata object supplies the required tags.
+        let encoded =
+            Lite3Buf::from_json_str(r#"{"data":{},"meta":7,"mfSa":{"tags":[]}}"#).unwrap();
+        let doc = Lite3DocRef::new(encoded.as_slice());
+        let mut entries = vec![sys::Entry::default(); doc.count_at(0).unwrap() as usize];
+        assert_eq!(
+            unsafe {
+                sys::plasmite_lite3_entries(
+                    encoded.as_slice().as_ptr(),
+                    encoded.len(),
+                    0,
+                    entries.as_mut_ptr(),
+                    entries.len(),
+                )
+            },
+            0
+        );
+        let entry = entries
+            .iter()
+            .find(
+                |e| unsafe { std::slice::from_raw_parts(e.key.cast::<u8>(), e.key_len) } == b"mfSa",
+            )
+            .unwrap();
+        let offset = entry.key as usize - encoded.as_slice().as_ptr() as usize;
+        let mut bytes = encoded.as_slice().to_vec();
+        bytes[offset..offset + 4].copy_from_slice(b"meta");
+        let view = MessageView::from_owned(bytes, 1, 2, 0).unwrap();
+        assert_eq!(
+            view.root().get("meta").unwrap().unwrap().kind(),
+            sys::LITE3_TYPE_OBJECT
+        );
+        assert!(view.data().is_empty().unwrap());
+    }
+    #[test]
+    fn valid_native_collision_chains_remain_readable() {
+        for prefix in ["", "sensor-", "é", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"] {
+            let a = format!("{prefix}ab");
+            let b = format!("{prefix}bA");
+            let encoded = Lite3Buf::from_json_str(
+                &serde_json::json!({"meta":{"tags":[]},"data":{a.clone():1,b.clone():2,"other":3}})
+                    .to_string(),
+            )
+            .unwrap();
+            let view = MessageView::from_bytes(encoded.as_slice(), 1, 2).unwrap();
+            assert_eq!(view.data().get(&a).unwrap().unwrap().integer(), Some(1));
+            assert_eq!(view.data().get(&b).unwrap().unwrap().integer(), Some(2));
+            assert_eq!(view.data().len().unwrap(), 3);
+        }
+    }
+    #[test]
+    fn forged_key_index_is_corrupt_only_at_the_new_view_boundary() {
+        let encoded =
+            Lite3Buf::from_json_str(r#"{"meta":{"tags":[]},"data":{"a":1,"b":2}}"#).unwrap();
+        let original = MessageView::from_bytes(encoded.as_slice(), 1, 2).unwrap();
+        let entry = original.raw_entries(original.data().offset()).unwrap()[0];
+        let mut bytes = encoded.as_slice().to_vec();
+        bytes[entry.key as usize - original.bytes().as_ptr() as usize] = b'z';
+        assert!(Lite3DocRef::new(&bytes).validate().is_ok());
+        assert!(
+            matches!(MessageView::from_owned(bytes,1,2,0),Err(e) if e.kind()==ErrorKind::Corrupt)
+        );
+    }
+    #[test]
+    fn forged_array_index_and_metadata_shape_are_corrupt() {
+        let encoded = bytes();
+        let original = MessageView::from_bytes(&encoded, 1, 2).unwrap();
+        let samples = original.data().get("samples").unwrap().unwrap();
+        let mut changed = encoded.clone();
+        changed[samples.offset() + 4..samples.offset() + 8].copy_from_slice(&1u32.to_le_bytes());
+        assert!(MessageView::from_owned(changed, 1, 2, 0).is_err());
+        for text in [
+            "[]",
+            r#"{"meta":1,"data":{}}"#,
+            r#"{"meta":{"tags":[1]},"data":{}}"#,
+            r#"{"meta":{"tags":[]},"data":[]}"#,
+        ] {
+            let bad = Lite3Buf::from_json_str(text).unwrap();
+            assert!(
+                matches!(MessageView::from_bytes(bad.as_slice(),1,2),Err(e) if e.kind()==ErrorKind::Corrupt)
+            );
+        }
     }
     #[test]
     fn input_alignment_and_threaded_owner_are_explicit() {

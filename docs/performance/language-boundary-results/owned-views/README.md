@@ -261,5 +261,44 @@ archive preserve the two measured states. The candidate archive includes the
 unused builder ABI additions. Long-key and empty/Unicode-key checks exercise
 both temporary-storage paths; the benchmark's short keys need no C allocation.
 
+## Python native container interface
+
+The [Python extension measurements](python/README.md) cover fresh selected reads,
+full native conversion, warm container slots, bounded array iteration, JSON
+formatting, explicit ctypes fallback costs and separate allocation diagnostics.
+
+## Single-pass owned-view validation
+
+Fresh owners now check the complete tree, native key indexes, UTF-8, depth and
+canonical message shape in one native traversal. The traversal reports only
+objects with duplicate keys. Ordinary objects need no Rust entry vectors or
+per-object hash maps. Duplicate objects retain their last-value correction map;
+malformed indexes fail acquisition. Legacy byte validation keeps its existing
+behavior. Valid native hash collisions and forged-index tests cover this split.
+
+Seven paired release runs alternate executable and lane order. Separate
+allocation diagnostics count Rust allocations; normal-allocator executables
+supply timings. The candidate includes unused native-builder entry points;
+legacy JSON and warm lookup controls expose changes outside acquisition.
+
+| Fresh selected read | Before ns/op | Single pass ns/op | Rust allocations before / after |
+| --- | ---: | ---: | ---: |
+| Small | 545.1 | 271.9 | 12 / 2 |
+| Wide | 32,323.9 | 15,028.8 | 418 / 2 |
+| Long string | 5,122.1 | 4,765.9 | 12 / 2 |
+| Array | 11,586.9 | 7,415.4 | 12 / 2 |
+
+Warm lookup stays near 37–43 ns. Legacy JSON controls move from 542.9 to 562.2 ns
+for small messages, 50,696.8 to 50,661.5 ns for wide messages, 18,207.9 to
+18,847.9 ns for long strings, and 23,061 to 23,333 ns for arrays. The small and
+long-string controls regress about 3.5%; these runs do not isolate the cause.
+The acquisition gains come with complete index checks and preserve snapshot
+ownership, pool overwrite safety and retained child lifetimes.
+
+[Paired raw runs](strict-proof.raw.json) record CPU time, source and binary
+fingerprints, checksums and allocator diagnostics. Exact candidate source (outside Git)
+and the preceding span-lookup source archive preserve both measured states.
+Use the same release examples and alternating `--reverse` command above.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

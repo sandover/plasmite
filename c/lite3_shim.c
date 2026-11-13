@@ -79,9 +79,50 @@ static int valid_utf8(const char *text, size_t len)
         return 1;
 }
 
+/* The pinned node index stores seven ordered hashes and eight child offsets. */
+_Static_assert(LITE3_NODE_SIZE == 96 && LITE3_NODE_SIZE_KC_OFFSET == 32,
+               "view validation targets the pinned seven-key index");
+typedef struct {
+        int (*duplicate)(void *, size_t);
+        void *context;
+} view_check;
+static uint32_t view_word(const unsigned char *buf, size_t ofs)
+{
+        uint32_t value;
+        memcpy(&value, buf + ofs, sizeof value);
+        return value;
+}
+static int verify_view_index_node(const unsigned char *buf, size_t len,
+                                  size_t ofs, uint8_t type)
+{
+        if (verify_node(buf, len, ofs) < 0 || buf[ofs] != type) return -1;
+        unsigned count = view_word(buf, ofs + 32) & 7;
+        int children = view_word(buf, ofs + 64) != 0;
+        for (unsigned i = 1; i <= count; ++i) {
+                if ((view_word(buf, ofs + 64 + 4 * i) != 0) != children) return -1;
+        }
+        return 0;
+}
+/* Collision-only lookup: no key parsing, allocation, or full-tree walk. */
+static int view_has_hash(const unsigned char *buf, size_t len, size_t ofs,
+                         uint32_t hash, uint8_t type)
+{
+        for (unsigned depth = 0; depth <= LITE3_TREE_HEIGHT_MAX; ++depth) {
+                if (verify_view_index_node(buf, len, ofs, type) < 0) return -1;
+                unsigned count = view_word(buf, ofs + 32) & 7;
+                unsigned i = 0;
+                while (i < count && view_word(buf, ofs + 4 + 4 * i) < hash) ++i;
+                if (i < count && view_word(buf, ofs + 4 + 4 * i) == hash) return 1;
+                uint32_t child = view_word(buf, ofs + 64 + 4 * i);
+                if (!child) return 0;
+                ofs = child;
+        }
+        return -1;
+}
+
 /* The vendored JSON encoder expects terminated keys and string values. */
-static int verify_json_tree(
-        const unsigned char *buf, size_t buf_len, size_t ofs, unsigned depth, int *json_safe)
+static int verify_tree(
+        const unsigned char *buf, size_t buf_len, size_t ofs, unsigned depth, int *json_safe, view_check *check)
 {
         if (depth >= LITE3_JSON_NESTING_DEPTH_MAX ||
             verify_node(buf, buf_len, ofs) < 0) {
@@ -94,6 +135,7 @@ static int verify_json_tree(
                 return -1;
         }
 
+        if (check && verify_view_index_node(buf, buf_len, ofs, type) < 0) return -1;
         lite3_iter iter;
         if (lite3_iter_create(buf, buf_len, ofs, &iter) < 0) {
                 return -1;
@@ -101,9 +143,24 @@ static int verify_json_tree(
         int ret;
         lite3_str key;
         size_t val_ofs;
-        while ((ret = lite3_iter_next(buf, buf_len, &iter,
+        size_t count = 0;
+        uint32_t previous_hash = 0;
+        int duplicate_reported = 0;
+        for (;;) {
+                uint32_t stored_hash = 0;
+                if (check) {
+                        size_t node = iter.node_ofs[iter.depth];
+                        unsigned i = iter.node_i[iter.depth];
+                        if (i > 7 || verify_view_index_node(buf, buf_len, node, type) < 0) return -1;
+                        stored_hash = view_word(buf, node + 4 + 4 * i);
+                }
+                ret = lite3_iter_next(buf, buf_len, &iter,
                                      type == LITE3_TYPE_OBJECT ? &key : NULL,
-                                     &val_ofs)) == LITE3_ITER_ITEM) {
+                                     &val_ofs);
+                if (ret != LITE3_ITER_ITEM) break;
+                if (check && ((count && stored_hash <= previous_hash) ||
+                              (type == LITE3_TYPE_ARRAY && stored_hash != count))) return -1;
+                previous_hash = stored_hash;
                 if (type == LITE3_TYPE_OBJECT) {
                         uintptr_t address = (uintptr_t)key.ptr;
                         uintptr_t start = (uintptr_t)buf;
@@ -114,6 +171,27 @@ static int verify_json_tree(
                                 return -1;
                         }
                 }
+                if (check && type == LITE3_TYPE_OBJECT) {
+                        size_t key_len = val_ofs - (size_t)((const unsigned char *)key.ptr - buf) - 1;
+                        if (memchr(key.ptr, 0, key_len) || !valid_utf8(key.ptr, key_len)) return -1;
+                        uint32_t base = lite3_get_key_data(key.ptr).hash;
+                        if (base != stored_hash) {
+                                unsigned attempt;
+                                for (attempt = 1; attempt < LITE3_HASH_PROBE_MAX; ++attempt) {
+                                        uint32_t prior = base + (attempt - 1) * (attempt - 1);
+                                        if (view_has_hash(buf, buf_len, ofs, prior, type) != 1) return -1;
+                                        if (base + attempt * attempt == stored_hash) break;
+                                }
+                                if (attempt == LITE3_HASH_PROBE_MAX) return -1;
+                                size_t first;
+                                if (plasmite_lite3_get_val_ofs(buf, buf_len, ofs, key.ptr, &first) < 0) return -1;
+                                if (first != val_ofs && !duplicate_reported) {
+                                        duplicate_reported = 1;
+                                        if (check->duplicate(check->context, ofs) < 0) return -1;
+                                }
+                        }
+                }
+                ++count;
                 if (json_safe && type == LITE3_TYPE_OBJECT &&
                     !valid_utf8(key.ptr, strlen(key.ptr))) {
                         errno = EIO;
@@ -137,7 +215,9 @@ static int verify_json_tree(
                         }
                 } else if ((val->type == LITE3_TYPE_OBJECT ||
                             val->type == LITE3_TYPE_ARRAY) &&
-                           verify_json_tree(buf, buf_len, val_ofs, depth + 1, json_safe) < 0) {
+                           verify_tree(buf, buf_len, val_ofs, depth + 1, json_safe, check) < 0) {
+                        return -1;
+                } else if (check && val->type == LITE3_TYPE_BOOL && val->val[0] > 1) {
                         return -1;
                 } else if (json_safe && val->type == LITE3_TYPE_F64) {
                         double value;
@@ -151,7 +231,23 @@ static int verify_json_tree(
                         return -1;
                 }
         }
+        if (check) {
+                uint32_t declared;
+                if (lite3_count((unsigned char *)buf, buf_len, ofs, &declared) < 0 || declared != count) return -1;
+        }
         return ret < 0 ? -1 : 0;
+}
+static int verify_json_tree(const unsigned char *buf, size_t len, size_t ofs,
+                            unsigned depth, int *json_safe)
+{
+        return verify_tree(buf, len, ofs, depth, json_safe, NULL);
+}
+int plasmite_lite3_verify_view(const unsigned char *buf, size_t len,
+                              int (*duplicate)(void *, size_t), void *context)
+{
+        int json_safe = 1;
+        view_check check = {duplicate, context};
+        return verify_tree(buf, len, 0, 0, &json_safe, &check);
 }
 
 /* 0: JSON values; 1: native bytes require base64 formatting; -1: invalid. */

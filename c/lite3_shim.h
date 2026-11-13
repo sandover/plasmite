@@ -143,6 +143,9 @@ int plasmite_lite3_cursor_next(const unsigned char *buf, size_t len, void *state
 int plasmite_lite3_lookup_span(const unsigned char *buf, size_t len, size_t ofs,
                               const char *key, size_t key_len, size_t *out);
 
+int plasmite_lite3_verify_view(const unsigned char *buf, size_t len,
+                              int (*duplicate)(void *, size_t), void *context);
+
 #ifdef __cplusplus
 }
 #endif
