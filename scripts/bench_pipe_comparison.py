@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def record():
-    return {
+    value = {
         "id": 0,
         "sensor": "motor-7",
         "metrics": {"power": 0, **{f"channel_{i}": i * 0.25 for i in range(16)}},
@@ -35,6 +35,10 @@ def record():
         "note": ("x" * int(os.environ["PLASMITE_BENCH_NOTE_BYTES"])
                  if "PLASMITE_BENCH_NOTE_BYTES" in os.environ else "sensor observation " * 25),
     }
+
+    if "PLASMITE_BENCH_EXTRA_FIELDS" in os.environ:
+        value["fields"] = {f"field_{i}": i for i in range(int(os.environ["PLASMITE_BENCH_EXTRA_FIELDS"]))}
+    return value
 
 
 def update(value, index):
@@ -135,7 +139,9 @@ def worker(args):
         result = {"role": args.role, "cpu_seconds": used_cpu,
                   "started_ns": started, "ended_ns": ended,
                   "messages": args.messages, "checksum": checksum,
-                  "latencies_ns": latencies}
+                  "latencies_ns": latencies,
+                  "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+                      * (1 if sys.platform == "darwin" else 1024)}
         if args.binary:
             result["fixture_sha256"] = hashlib.sha256(fixture).hexdigest()
         print(json.dumps(result), file=sys.stderr, flush=True)

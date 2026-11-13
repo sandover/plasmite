@@ -1,0 +1,277 @@
+diff --git a/c/lite3_shim.c b/c/lite3_shim.c
+index c3b719f..073db32 100644
+--- a/c/lite3_shim.c
++++ b/c/lite3_shim.c
+@@ -13,6 +13,7 @@ Invariants: Validate reader preconditions before forwarding to Lite3; keep busin
+ #include <string.h>
+ 
+ #include "lite3.h"
++#include "yyjson/yyjson.h"
+ 
+ /* Lite3's readers cast nodes to aligned structs after their size check. */
+ static int verify_node(const unsigned char *buf, size_t buf_len, size_t ofs)
+@@ -161,6 +162,52 @@ int plasmite_lite3_verify_json(const unsigned char *buf, size_t len, size_t ofs)
+         return json_safe ? 0 : 1;
+ }
+ 
++/* The pinned decoder's recursive builders borrow the document. Only its
++ * top-level _lite3_json_dec_doc frees it. Reuse those same builders while
++ * keeping one document alive across independent, zero-initialized attempts.
++ */
++extern int _lite3_json_dec_obj(unsigned char *, size_t *, size_t, size_t,
++                             size_t, yyjson_doc *, yyjson_val *);
++extern int _lite3_json_dec_arr(unsigned char *, size_t *, size_t, size_t,
++                             size_t, yyjson_doc *, yyjson_val *);
++
++void *plasmite_lite3_json_parse(const char *json, size_t len)
++{
++        errno = 0;
++        yyjson_doc *doc = yyjson_read_opts((char *)json, len, YYJSON_READ_NOFLAG, NULL, NULL);
++        if (!doc) errno = EINVAL;
++        return doc;
++}
++
++void plasmite_lite3_json_doc_free(void *doc)
++{
++        yyjson_doc_free((yyjson_doc *)doc);
++}
++
++int plasmite_lite3_json_build(void *parsed, unsigned char *buf, size_t *out_len, size_t buf_sz)
++{
++        errno = 0;
++        yyjson_doc *doc = (yyjson_doc *)parsed;
++        yyjson_val *root = yyjson_doc_get_root(doc);
++        int ret;
++        switch (yyjson_get_type(root)) {
++        case YYJSON_TYPE_OBJ:
++                ret = lite3_init_obj(buf, out_len, buf_sz);
++                if (ret < 0) return ret;
++                return _lite3_json_dec_obj(buf, out_len, 0, buf_sz, 0, doc, root);
++        case YYJSON_TYPE_ARR:
++                ret = lite3_init_arr(buf, out_len, buf_sz);
++                if (ret < 0) return ret;
++                return _lite3_json_dec_arr(buf, out_len, 0, buf_sz, 0, doc, root);
++        default:
++                /* Preserve the pinned decoder's empty-output scalar behavior.
++                 * Canonical message validation separately requires an object.
++                 */
++                errno = EINVAL;
++                return 0;
++        }
++}
++
+ int plasmite_lite3_json_dec(
+         const char *json_str,
+         size_t json_len,
+diff --git a/c/lite3_shim.h b/c/lite3_shim.h
+index 21fe83d..b9fc51f 100644
+--- a/c/lite3_shim.h
++++ b/c/lite3_shim.h
+@@ -19,6 +19,13 @@ extern "C" {
+ /* Check JSON readability without export; 1 requests the legacy bytes fallback. */
+ int plasmite_lite3_verify_json(const unsigned char *buf, size_t len, size_t ofs);
+ 
++/* The parsed document owns its allocations and never mutates/retains input.
++ * Build borrows it; free it once after all output-capacity attempts finish.
++ */
++void *plasmite_lite3_json_parse(const char *json, size_t len);
++void plasmite_lite3_json_doc_free(void *doc);
++int plasmite_lite3_json_build(void *doc, unsigned char *buf, size_t *out_len, size_t buf_sz);
++
+ int plasmite_lite3_json_dec(
+         const char *json_str,
+         size_t json_len,
+diff --git a/src/core/lite3/mod.rs b/src/core/lite3/mod.rs
+index 66e7bc4..4dd25b1 100644
+--- a/src/core/lite3/mod.rs
++++ b/src/core/lite3/mod.rs
+@@ -23,6 +23,34 @@ pub struct Lite3Buf {
+     bytes: Vec<u8>,
+ }
+ 
++// YYJSON_READ_NOFLAG gives the document its own storage; it borrows no input.
++// This owner never escapes encoding and frees through the matching C allocator.
++struct ParsedJson(std::ptr::NonNull<std::ffi::c_void>);
++
++impl Drop for ParsedJson {
++    fn drop(&mut self) {
++        unsafe { sys::plasmite_lite3_json_doc_free(self.0.as_ptr()) };
++    }
++}
++
++fn json_encoding_error() -> Error {
++    let errno = unsafe { sys::plasmite_lite3_last_errno() };
++    let source = if errno != 0 {
++        io::Error::from_raw_os_error(errno)
++    } else {
++        io::Error::other("unknown lite3 errno")
++    };
++    Error::new(ErrorKind::Usage)
++        .with_message("failed to encode json as lite3")
++        .with_source(source)
++}
++
++#[cfg(test)]
++thread_local! {
++    // Parse calls, output attempts, total requested output bytes. No retained cache.
++    static ENCODE_STATS: Cell<(usize, usize, usize)> = const { Cell::new((0, 0, 0)) };
++}
++
+ impl Lite3Buf {
+     pub fn from_json_str(json: &str) -> Result<Self, Error> {
+         Self::from_json_str_with_limit(json, MAX_LITE3_BUF)
+@@ -36,14 +64,29 @@ impl Lite3Buf {
+                 .with_source(CString::new(json).expect_err("contains null")));
+         }
+ 
++        #[cfg(test)]
++        ENCODE_STATS.with(|stats| {
++            let (p, a, b) = stats.get();
++            stats.set((p + 1, a, b));
++        });
++        let parsed = ParsedJson(
++            std::ptr::NonNull::new(unsafe {
++                sys::plasmite_lite3_json_parse(json.as_ptr().cast(), json.len())
++            })
++            .ok_or_else(json_encoding_error)?,
++        );
++
+         loop {
++            #[cfg(test)]
++            ENCODE_STATS.with(|stats| {
++                let (p, a, b) = stats.get();
++                stats.set((p, a + 1, b + buf_len));
++            });
+             let mut buf = vec![0u8; buf_len];
+             let mut out_len: usize = 0;
+             let ret = unsafe {
+-                sys::plasmite_lite3_json_dec(
+-                    // yyjson reads the explicit length and does not modify input.
+-                    json.as_ptr().cast(),
+-                    json.len(),
++                sys::plasmite_lite3_json_build(
++                    parsed.0.as_ptr(),
+                     buf.as_mut_ptr(),
+                     &mut out_len as *mut usize,
+                     buf.len(),
+@@ -66,15 +109,7 @@ impl Lite3Buf {
+                 continue;
+             }
+ 
+-            let err = if err_no != 0 {
+-                io::Error::from_raw_os_error(err_no)
+-            } else {
+-                io::Error::other("unknown lite3 errno")
+-            };
+-
+-            return Err(Error::new(ErrorKind::Usage)
+-                .with_message("failed to encode json as lite3")
+-                .with_source(err));
++            return Err(json_encoding_error());
+         }
+     }
+ 
+@@ -436,6 +471,83 @@ mod tests {
+     use super::{Lite3Buf, Lite3DocRef, encode_message, validate_bytes};
+     use serde_json::json;
+ 
++    #[test]
++    fn encoding_parses_once_and_matches_the_pinned_decoder() {
++        let fixtures = [
++            json!({"x": 1}),
++            json!((1000..2000).collect::<Vec<_>>()),
++            json!(
++                (0..100)
++                    .map(|i| (format!("key{i}"), json!({"nested": [i, true, "α"]})))
++                    .collect::<serde_json::Map<_, _>>()
++            ),
++            json!({"text": "x".repeat(40000)}),
++            json!({"empty": "", "zero": "a\u{0000}b", "large": u64::MAX, "float": -0.0}),
++            json!(null),
++            json!(42),
++            json!("scalar"),
++        ];
++        for fixture in fixtures {
++            let json = serde_json::to_string(&fixture).unwrap();
++            super::ENCODE_STATS.with(|stats| stats.set((0, 0, 0)));
++            let encoded = Lite3Buf::from_json_str(&json).unwrap();
++            let (parses, attempts, requested) = super::ENCODE_STATS.with(|stats| stats.get());
++            assert_eq!(parses, 1);
++            assert!(attempts >= 1 && requested >= encoded.len());
++            if fixture.is_array() {
++                assert!(attempts >= 3);
++            }
++            let mut legacy = vec![0; encoded.len().max(256)];
++            let mut len = 0;
++            assert_eq!(
++                unsafe {
++                    super::sys::plasmite_lite3_json_dec(
++                        json.as_ptr().cast(),
++                        json.len(),
++                        legacy.as_mut_ptr(),
++                        &mut len,
++                        legacy.len(),
++                    )
++                },
++                0
++            );
++            legacy.truncate(len);
++            assert_eq!(encoded.as_slice(), legacy);
++        }
++        // A large operation retains no scratch allocation for the next one.
++        super::ENCODE_STATS.with(|stats| stats.set((0, 0, 0)));
++        for _ in 0..100 {
++            Lite3Buf::from_json_str("{}").unwrap();
++        }
++        assert_eq!(
++            super::ENCODE_STATS.with(|stats| stats.get()),
++            (100, 100, 25600)
++        );
++    }
++
++    #[test]
++    fn independent_encoders_share_no_document_or_scratch() {
++        let workers = (0..4)
++            .map(|id| {
++                std::thread::spawn(move || {
++                    for n in 0..100 {
++                        let value =
++                            json!({"id": id, "n": n, "values": (0..100).collect::<Vec<_>>()});
++                        let json = serde_json::to_string(&value).unwrap();
++                        let encoded = Lite3Buf::from_json_str(&json).unwrap();
++                        let decoded: serde_json::Value =
++                            serde_json::from_str(&encoded.as_doc().to_json(false).unwrap())
++                                .unwrap();
++                        assert_eq!(value, decoded);
++                    }
++                })
++            })
++            .collect::<Vec<_>>();
++        for worker in workers {
++            worker.join().unwrap();
++        }
++    }
++
+     #[test]
+     fn encoding_tries_the_exact_limit_before_rejecting() {
+         let limit = 64 * 1024;
+diff --git a/src/core/lite3/sys.rs b/src/core/lite3/sys.rs
+index fc8e637..0922fa0 100644
+--- a/src/core/lite3/sys.rs
++++ b/src/core/lite3/sys.rs
+@@ -17,6 +17,15 @@ pub const LITE3_TYPE_INVALID: u8 = 8;
+ 
+ unsafe extern "C" {
+     pub fn plasmite_lite3_verify_json(buf: *const c_uchar, len: usize, ofs: usize) -> c_int;
++    pub fn plasmite_lite3_json_parse(json: *const c_char, len: usize) -> *mut std::ffi::c_void;
++    pub fn plasmite_lite3_json_doc_free(doc: *mut std::ffi::c_void);
++    pub fn plasmite_lite3_json_build(
++        doc: *mut std::ffi::c_void,
++        buf: *mut c_uchar,
++        out_len: *mut usize,
++        buf_sz: usize,
++    ) -> c_int;
++
+     pub fn plasmite_lite3_json_dec(
+         json_str: *const c_char,
+         json_len: usize,

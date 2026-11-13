@@ -1,0 +1,295 @@
+{
+  "array-limit": {
+    "json_bytes": 5001,
+    "values": 1001,
+    "document_allocation_bytes": 25600,
+    "cap": 65536,
+    "strategies": [
+      {
+        "name": "legacy-2x",
+        "attempt_sizes": [
+          10002,
+          20004,
+          40008,
+          65536
+        ],
+        "parses": 4,
+        "output_requested_bytes": 135550,
+        "output_allocated_bytes": 145408,
+        "final_capacity": 65536,
+        "final_allocation_bytes": 65536,
+        "encoded_bytes": 41085
+      },
+      {
+        "name": "legacy-4x",
+        "attempt_sizes": [
+          20004,
+          40008,
+          65536
+        ],
+        "parses": 3,
+        "output_requested_bytes": 125548,
+        "output_allocated_bytes": 135168,
+        "final_capacity": 65536,
+        "final_allocation_bytes": 65536,
+        "encoded_bytes": 41085
+      },
+      {
+        "name": "parse-once-2x",
+        "attempt_sizes": [
+          10002,
+          20004,
+          40008,
+          65536
+        ],
+        "parses": 1,
+        "output_requested_bytes": 135550,
+        "output_allocated_bytes": 145408,
+        "final_capacity": 65536,
+        "final_allocation_bytes": 65536,
+        "encoded_bytes": 41085
+      },
+      {
+        "name": "parse-once-values",
+        "attempt_sizes": [
+          37097,
+          65536
+        ],
+        "parses": 1,
+        "output_requested_bytes": 102633,
+        "output_allocated_bytes": 114688,
+        "final_capacity": 65536,
+        "final_allocation_bytes": 65536,
+        "encoded_bytes": 41085
+      }
+    ]
+  },
+  "large": {
+    "json_bytes": 65966,
+    "values": 59,
+    "document_allocation_bytes": 262144,
+    "cap": 268435456,
+    "strategies": [
+      {
+        "name": "legacy-2x",
+        "attempt_sizes": [
+          131932
+        ],
+        "parses": 1,
+        "output_requested_bytes": 131932,
+        "output_allocated_bytes": 147456,
+        "final_capacity": 131932,
+        "final_allocation_bytes": 147456,
+        "encoded_bytes": 67009
+      },
+      {
+        "name": "legacy-4x",
+        "attempt_sizes": [
+          263864
+        ],
+        "parses": 1,
+        "output_requested_bytes": 263864,
+        "output_allocated_bytes": 278528,
+        "final_capacity": 263864,
+        "final_allocation_bytes": 278528,
+        "encoded_bytes": 67009
+      },
+      {
+        "name": "parse-once-2x",
+        "attempt_sizes": [
+          131932
+        ],
+        "parses": 1,
+        "output_requested_bytes": 131932,
+        "output_allocated_bytes": 147456,
+        "final_capacity": 131932,
+        "final_allocation_bytes": 147456,
+        "encoded_bytes": 67009
+      },
+      {
+        "name": "parse-once-values",
+        "attempt_sizes": [
+          67918
+        ],
+        "parses": 1,
+        "output_requested_bytes": 67918,
+        "output_allocated_bytes": 81920,
+        "final_capacity": 67918,
+        "final_allocation_bytes": 81920,
+        "encoded_bytes": 67009
+      }
+    ]
+  },
+  "sensor": {
+    "json_bytes": 905,
+    "values": 59,
+    "document_allocation_bytes": 3584,
+    "cap": 268435456,
+    "strategies": [
+      {
+        "name": "legacy-2x",
+        "attempt_sizes": [
+          1810,
+          3620
+        ],
+        "parses": 2,
+        "output_requested_bytes": 5430,
+        "output_allocated_bytes": 6144,
+        "final_capacity": 3620,
+        "final_allocation_bytes": 4096,
+        "encoded_bytes": 1948
+      },
+      {
+        "name": "legacy-4x",
+        "attempt_sizes": [
+          3620
+        ],
+        "parses": 1,
+        "output_requested_bytes": 3620,
+        "output_allocated_bytes": 4096,
+        "final_capacity": 3620,
+        "final_allocation_bytes": 4096,
+        "encoded_bytes": 1948
+      },
+      {
+        "name": "parse-once-2x",
+        "attempt_sizes": [
+          1810,
+          3620
+        ],
+        "parses": 1,
+        "output_requested_bytes": 5430,
+        "output_allocated_bytes": 6144,
+        "final_capacity": 3620,
+        "final_allocation_bytes": 4096,
+        "encoded_bytes": 1948
+      },
+      {
+        "name": "parse-once-values",
+        "attempt_sizes": [
+          2857
+        ],
+        "parses": 1,
+        "output_requested_bytes": 2857,
+        "output_allocated_bytes": 3072,
+        "final_capacity": 2857,
+        "final_allocation_bytes": 3072,
+        "encoded_bytes": 1948
+      }
+    ]
+  },
+  "string-limit": {
+    "json_bytes": 40008,
+    "values": 3,
+    "document_allocation_bytes": 163840,
+    "cap": 65536,
+    "strategies": [
+      {
+        "name": "legacy-2x",
+        "attempt_sizes": [
+          65536
+        ],
+        "parses": 1,
+        "output_requested_bytes": 65536,
+        "output_allocated_bytes": 65536,
+        "final_capacity": 65536,
+        "final_allocation_bytes": 65536,
+        "encoded_bytes": 40105
+      },
+      {
+        "name": "legacy-4x",
+        "attempt_sizes": [
+          65536
+        ],
+        "parses": 1,
+        "output_requested_bytes": 65536,
+        "output_allocated_bytes": 65536,
+        "final_capacity": 65536,
+        "final_allocation_bytes": 65536,
+        "encoded_bytes": 40105
+      },
+      {
+        "name": "parse-once-2x",
+        "attempt_sizes": [
+          65536
+        ],
+        "parses": 1,
+        "output_requested_bytes": 65536,
+        "output_allocated_bytes": 65536,
+        "final_capacity": 65536,
+        "final_allocation_bytes": 65536,
+        "encoded_bytes": 40105
+      },
+      {
+        "name": "parse-once-values",
+        "attempt_sizes": [
+          40168
+        ],
+        "parses": 1,
+        "output_requested_bytes": 40168,
+        "output_allocated_bytes": 49152,
+        "final_capacity": 40168,
+        "final_allocation_bytes": 49152,
+        "encoded_bytes": 40105
+      }
+    ]
+  },
+  "wide": {
+    "json_bytes": 3896,
+    "values": 461,
+    "document_allocation_bytes": 16384,
+    "cap": 268435456,
+    "strategies": [
+      {
+        "name": "legacy-2x",
+        "attempt_sizes": [
+          7792,
+          15584
+        ],
+        "parses": 2,
+        "output_requested_bytes": 23376,
+        "output_allocated_bytes": 24576,
+        "final_capacity": 15584,
+        "final_allocation_bytes": 16384,
+        "encoded_bytes": 11936
+      },
+      {
+        "name": "legacy-4x",
+        "attempt_sizes": [
+          15584
+        ],
+        "parses": 1,
+        "output_requested_bytes": 15584,
+        "output_allocated_bytes": 16384,
+        "final_capacity": 15584,
+        "final_allocation_bytes": 16384,
+        "encoded_bytes": 11936
+      },
+      {
+        "name": "parse-once-2x",
+        "attempt_sizes": [
+          7792,
+          15584
+        ],
+        "parses": 1,
+        "output_requested_bytes": 23376,
+        "output_allocated_bytes": 24576,
+        "final_capacity": 15584,
+        "final_allocation_bytes": 16384,
+        "encoded_bytes": 11936
+      },
+      {
+        "name": "parse-once-values",
+        "attempt_sizes": [
+          18712
+        ],
+        "parses": 1,
+        "output_requested_bytes": 18712,
+        "output_allocated_bytes": 20480,
+        "final_capacity": 18712,
+        "final_allocation_bytes": 20480,
+        "encoded_bytes": 11936
+      }
+    ]
+  }
+}

@@ -2,7 +2,7 @@
 Purpose: Implement the C shim ABI that Rust binds to for selected Lite3 APIs.
 Exports: `plasmite_lite3_*` symbols declared in `c/lite3_shim.h`.
 Role: Thin adapter over the vendored Lite3 library to keep Rust FFI minimal and stable.
-Invariants: Returned heap pointers are owned by the caller and freed via `plasmite_lite3_free`.
+Invariants: Callers free JSON text with `plasmite_lite3_free` and parsed documents with `plasmite_lite3_json_doc_free`.
 Invariants: Validate reader preconditions before forwarding to Lite3; keep business logic outside this shim.
 */
 #include "lite3_shim.h"
@@ -13,6 +13,7 @@ Invariants: Validate reader preconditions before forwarding to Lite3; keep busin
 #include <string.h>
 
 #include "lite3.h"
+#include "yyjson/yyjson.h"
 
 /* Lite3's readers cast nodes to aligned structs after their size check. */
 static int verify_node(const unsigned char *buf, size_t buf_len, size_t ofs)
@@ -159,6 +160,53 @@ int plasmite_lite3_verify_json(const unsigned char *buf, size_t len, size_t ofs)
         int json_safe = 1;
         if (verify_json_tree(buf, len, ofs, 0, &json_safe) < 0) return -1;
         return json_safe ? 0 : 1;
+}
+
+/* The pinned decoder's recursive builders borrow the document. Only its
+ * top-level _lite3_json_dec_doc frees it. Reuse those same builders while
+ * keeping one document alive across independent, zero-initialized attempts.
+ */
+extern int _lite3_json_dec_obj(unsigned char *, size_t *, size_t, size_t,
+                             size_t, yyjson_doc *, yyjson_val *);
+extern int _lite3_json_dec_arr(unsigned char *, size_t *, size_t, size_t,
+                             size_t, yyjson_doc *, yyjson_val *);
+
+void *plasmite_lite3_json_parse(const char *json, size_t len, size_t *values)
+{
+        errno = 0;
+        yyjson_doc *doc = yyjson_read_opts((char *)json, len, YYJSON_READ_NOFLAG, NULL, NULL);
+        if (!doc) errno = EINVAL;
+        else *values = yyjson_doc_get_val_count(doc);
+        return doc;
+}
+
+void plasmite_lite3_json_doc_free(void *doc)
+{
+        yyjson_doc_free((yyjson_doc *)doc);
+}
+
+int plasmite_lite3_json_build(void *parsed, unsigned char *buf, size_t *out_len, size_t buf_sz)
+{
+        errno = 0;
+        yyjson_doc *doc = (yyjson_doc *)parsed;
+        yyjson_val *root = yyjson_doc_get_root(doc);
+        int ret;
+        switch (yyjson_get_type(root)) {
+        case YYJSON_TYPE_OBJ:
+                ret = lite3_init_obj(buf, out_len, buf_sz);
+                if (ret < 0) return ret;
+                return _lite3_json_dec_obj(buf, out_len, 0, buf_sz, 0, doc, root);
+        case YYJSON_TYPE_ARR:
+                ret = lite3_init_arr(buf, out_len, buf_sz);
+                if (ret < 0) return ret;
+                return _lite3_json_dec_arr(buf, out_len, 0, buf_sz, 0, doc, root);
+        default:
+                /* Preserve the pinned decoder's empty-output scalar behavior.
+                 * Canonical message validation separately requires an object.
+                 */
+                errno = EINVAL;
+                return 0;
+        }
 }
 
 int plasmite_lite3_json_dec(

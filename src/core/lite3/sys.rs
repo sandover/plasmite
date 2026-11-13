@@ -17,6 +17,19 @@ pub const LITE3_TYPE_INVALID: u8 = 8;
 
 unsafe extern "C" {
     pub fn plasmite_lite3_verify_json(buf: *const c_uchar, len: usize, ofs: usize) -> c_int;
+    pub fn plasmite_lite3_json_parse(
+        json: *const c_char,
+        len: usize,
+        values: *mut usize,
+    ) -> *mut std::ffi::c_void;
+    pub fn plasmite_lite3_json_doc_free(doc: *mut std::ffi::c_void);
+    pub fn plasmite_lite3_json_build(
+        doc: *mut std::ffi::c_void,
+        buf: *mut c_uchar,
+        out_len: *mut usize,
+        buf_sz: usize,
+    ) -> c_int;
+
     pub fn plasmite_lite3_json_dec(
         json_str: *const c_char,
         json_len: usize,

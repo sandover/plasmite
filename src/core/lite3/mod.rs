@@ -23,27 +23,80 @@ pub struct Lite3Buf {
     bytes: Vec<u8>,
 }
 
+// YYJSON_READ_NOFLAG gives the document its own storage; it borrows no input.
+// This owner never escapes encoding and frees through the matching C allocator.
+struct ParsedJson(std::ptr::NonNull<std::ffi::c_void>);
+
+impl Drop for ParsedJson {
+    fn drop(&mut self) {
+        unsafe { sys::plasmite_lite3_json_doc_free(self.0.as_ptr()) };
+    }
+}
+
+fn json_encoding_error() -> Error {
+    let errno = unsafe { sys::plasmite_lite3_last_errno() };
+    let source = if errno != 0 {
+        io::Error::from_raw_os_error(errno)
+    } else {
+        io::Error::other("unknown lite3 errno")
+    };
+    Error::new(ErrorKind::Usage)
+        .with_message("failed to encode json as lite3")
+        .with_source(source)
+}
+
+#[cfg(test)]
+thread_local! {
+    // Parse calls, output attempts, total requested output bytes. No retained cache.
+    static ENCODE_STATS: Cell<(usize, usize, usize)> = const { Cell::new((0, 0, 0)) };
+}
+
 impl Lite3Buf {
     pub fn from_json_str(json: &str) -> Result<Self, Error> {
         Self::from_json_str_with_limit(json, MAX_LITE3_BUF)
     }
 
     fn from_json_str_with_limit(json: &str, max_bytes: usize) -> Result<Self, Error> {
-        let mut buf_len = json.len().saturating_mul(2).max(256).min(max_bytes);
         if json.as_bytes().contains(&0) {
             return Err(Error::new(ErrorKind::Usage)
                 .with_message("json contains null")
                 .with_source(CString::new(json).expect_err("contains null")));
         }
 
+        #[cfg(test)]
+        ENCODE_STATS.with(|stats| {
+            let (p, a, b) = stats.get();
+            stats.set((p + 1, a, b));
+        });
+        let mut values = 0;
+        let parsed = ParsedJson(
+            std::ptr::NonNull::new(unsafe {
+                sys::plasmite_lite3_json_parse(json.as_ptr().cast(), json.len(), &mut values)
+            })
+            .ok_or_else(json_encoding_error)?,
+        );
+        // JSON bytes mostly account for text; decoded values predict structural
+        // overhead better than multiplying text length. This is an estimate,
+        // not a bound: dense arrays can still grow, always trying the cap.
+        const ESTIMATED_BYTES_PER_VALUE: usize = 32;
+        let mut buf_len = json
+            .len()
+            .saturating_add(values.saturating_mul(ESTIMATED_BYTES_PER_VALUE))
+            .saturating_add(64)
+            .max(256)
+            .min(max_bytes);
+
         loop {
+            #[cfg(test)]
+            ENCODE_STATS.with(|stats| {
+                let (p, a, b) = stats.get();
+                stats.set((p, a + 1, b + buf_len));
+            });
             let mut buf = vec![0u8; buf_len];
             let mut out_len: usize = 0;
             let ret = unsafe {
-                sys::plasmite_lite3_json_dec(
-                    // yyjson reads the explicit length and does not modify input.
-                    json.as_ptr().cast(),
-                    json.len(),
+                sys::plasmite_lite3_json_build(
+                    parsed.0.as_ptr(),
                     buf.as_mut_ptr(),
                     &mut out_len as *mut usize,
                     buf.len(),
@@ -66,15 +119,7 @@ impl Lite3Buf {
                 continue;
             }
 
-            let err = if err_no != 0 {
-                io::Error::from_raw_os_error(err_no)
-            } else {
-                io::Error::other("unknown lite3 errno")
-            };
-
-            return Err(Error::new(ErrorKind::Usage)
-                .with_message("failed to encode json as lite3")
-                .with_source(err));
+            return Err(json_encoding_error());
         }
     }
 
@@ -435,6 +480,85 @@ pub(crate) fn json_counter_snapshot() -> (usize, usize) {
 mod tests {
     use super::{Lite3Buf, Lite3DocRef, encode_message, validate_bytes};
     use serde_json::json;
+
+    #[test]
+    fn encoding_parses_once_and_matches_the_pinned_decoder() {
+        let fixtures = [
+            json!({"x": 1}),
+            json!((1000..2000).collect::<Vec<_>>()),
+            json!(
+                (0..100)
+                    .map(|i| (format!("key{i}"), json!({"nested": [i, true, "α"]})))
+                    .collect::<serde_json::Map<_, _>>()
+            ),
+            json!({"text": "x".repeat(40000)}),
+            json!({"empty": "", "zero": "a\u{0000}b", "large": u64::MAX, "float": -0.0}),
+            json!(null),
+            json!(42),
+            json!("scalar"),
+        ];
+        for fixture in fixtures {
+            let json = serde_json::to_string(&fixture).unwrap();
+            super::ENCODE_STATS.with(|stats| stats.set((0, 0, 0)));
+            let encoded = Lite3Buf::from_json_str(&json).unwrap();
+            let (parses, attempts, requested) = super::ENCODE_STATS.with(|stats| stats.get());
+            assert_eq!(parses, 1);
+            assert!(attempts >= 1 && requested >= encoded.len());
+            if fixture.is_array() {
+                assert!(attempts >= 2);
+            }
+            let mut legacy = vec![0; encoded.len().max(256)];
+            let mut len = 0;
+            assert_eq!(
+                unsafe {
+                    super::sys::plasmite_lite3_json_dec(
+                        json.as_ptr().cast(),
+                        json.len(),
+                        legacy.as_mut_ptr(),
+                        &mut len,
+                        legacy.len(),
+                    )
+                },
+                0
+            );
+            legacy.truncate(len);
+            assert_eq!(encoded.as_slice(), legacy);
+        }
+        let oversized = format!(r#"{{"x":"{}"}}"#, "a".repeat(65536));
+        assert!(Lite3Buf::from_json_str_with_limit(&oversized, 65536).is_err());
+        // A large operation retains no scratch allocation for the next one.
+        super::ENCODE_STATS.with(|stats| stats.set((0, 0, 0)));
+        for _ in 0..100 {
+            Lite3Buf::from_json_str("{}").unwrap();
+        }
+        assert_eq!(
+            super::ENCODE_STATS.with(|stats| stats.get()),
+            (100, 100, 25600)
+        );
+    }
+
+    #[test]
+    fn independent_encoders_share_no_document_or_scratch() {
+        let workers = (0..4)
+            .map(|id| {
+                std::thread::spawn(move || {
+                    for n in 0..100 {
+                        let value =
+                            json!({"id": id, "n": n, "values": (0..100).collect::<Vec<_>>()});
+                        let json = serde_json::to_string(&value).unwrap();
+                        let encoded = Lite3Buf::from_json_str(&json).unwrap();
+                        let decoded: serde_json::Value =
+                            serde_json::from_str(&encoded.as_doc().to_json(false).unwrap())
+                                .unwrap();
+                        assert_eq!(value, decoded);
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    }
 
     #[test]
     fn encoding_tries_the_exact_limit_before_rejecting() {

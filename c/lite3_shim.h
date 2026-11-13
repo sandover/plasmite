@@ -3,7 +3,7 @@ Purpose: Expose a small, stable C ABI for Lite3 functionality used by Rust.
 Exports: `plasmite_lite3_json_dec`, `plasmite_lite3_json_enc(_pretty)`, `plasmite_lite3_get_*`, `plasmite_lite3_free`.
 Role: Thin boundary between the Rust crate and the vendored Lite3 implementation.
 Invariants: Function signatures are part of the Rust FFI contract; change with care.
-Invariants: Returned heap pointers are freed by calling `plasmite_lite3_free`.
+Invariants: Free JSON text with `plasmite_lite3_free`; free parsed documents with `plasmite_lite3_json_doc_free`.
 */
 #ifndef PLASMITE_LITE3_SHIM_H
 #define PLASMITE_LITE3_SHIM_H
@@ -18,6 +18,13 @@ extern "C" {
 
 /* Check JSON readability without export; 1 requests the legacy bytes fallback. */
 int plasmite_lite3_verify_json(const unsigned char *buf, size_t len, size_t ofs);
+
+/* The parsed document owns its allocations and never mutates/retains input.
+ * Build borrows it; free it once after all output-capacity attempts finish.
+ */
+void *plasmite_lite3_json_parse(const char *json, size_t len, size_t *values);
+void plasmite_lite3_json_doc_free(void *doc);
+int plasmite_lite3_json_build(void *doc, unsigned char *buf, size_t *out_len, size_t buf_sz);
 
 int plasmite_lite3_json_dec(
         const char *json_str,

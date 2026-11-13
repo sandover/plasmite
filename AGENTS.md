@@ -18,6 +18,7 @@ docs/
 ├── performance/windows-access-1.0.md          — Read when comparing local, HTTP, and MCP access costs on Windows
 ├── performance/consumer-latency.rs             — Read when reproducing the full-consumer latency measurements
 ├── performance/language-boundary-results/    — Read when reproducing per-binding ownership and conversion measurements
+│   ├── encoding/README.md                     — Read when comparing parse-once encoding and structural size estimates
 │   ├── append-receipts/README.md              — Read when evaluating numeric receipts versus complete producer results
 │   ├── core-binary/README.md                  — Read when comparing binary validation and writer-handle measurements
 │   └── node-owned/README.md                   — Read when evaluating raw buffer transfer and JSON compaction
