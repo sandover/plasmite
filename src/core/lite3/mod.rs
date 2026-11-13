@@ -141,71 +141,8 @@ impl ParsedJson {
         if self.value().kind() != sys::LITE3_TYPE_OBJECT {
             return Err(Error::new(ErrorKind::Usage).with_message("data must be object"));
         }
-        fn copy(
-            builder: &mut builder::Builder,
-            parent: usize,
-            node: usize,
-            depth: usize,
-        ) -> Result<(), Error> {
-            if depth >= 32 {
-                return Err(
-                    Error::new(ErrorKind::Usage).with_message("message nesting limit exceeded")
-                );
-            }
-            let count = unsafe { sys::plasmite_json_count(node) };
-            let mut entries = vec![sys::Entry::default(); count];
-            if unsafe { sys::plasmite_json_entries(node, entries.as_mut_ptr(), count) } != 0 {
-                return Err(Error::new(ErrorKind::Usage).with_message("invalid JSON entries"));
-            }
-            for entry in entries {
-                let key = if entry.key.is_null() {
-                    None
-                } else {
-                    Some(unsafe {
-                        std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                            entry.key.cast(),
-                            entry.key_len,
-                        ))
-                    })
-                };
-                let mut value = sys::ValueView::default();
-                unsafe { sys::plasmite_json_value_view(entry.offset, &mut value) };
-                match value.kind {
-                    sys::LITE3_TYPE_OBJECT | sys::LITE3_TYPE_ARRAY => {
-                        let child =
-                            builder.container(parent, key, value.kind == sys::LITE3_TYPE_ARRAY)?;
-                        copy(builder, child, entry.offset, depth + 1)?;
-                    }
-                    sys::LITE3_TYPE_STRING => {
-                        let text = unsafe {
-                            std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                                value.text.cast(),
-                                value.text_len,
-                            ))
-                        };
-                        builder.string(parent, key, text)?;
-                    }
-                    sys::JSON_TYPE_U64 => {
-                        if value.integer < 0 {
-                            return Err(Error::new(ErrorKind::Usage)
-                                .with_message("integer exceeds signed 64-bit range"));
-                        }
-                        value.kind = sys::LITE3_TYPE_I64;
-                        builder.scalar(parent, key, value)?;
-                    }
-                    _ => builder.scalar(parent, key, value)?,
-                }
-            }
-            Ok(())
-        }
         let mut builder = builder::Builder::new(tags)?;
-        let root = builder.data;
-        copy(
-            &mut builder,
-            root,
-            unsafe { sys::plasmite_json_root(self.ptr.as_ptr()) },
-            1,
-        )?;
+        builder.copy_parsed(unsafe { sys::plasmite_json_root(self.ptr.as_ptr()) })?;
         builder.finish()
     }
 

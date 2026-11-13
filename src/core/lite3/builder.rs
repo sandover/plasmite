@@ -93,13 +93,55 @@ impl Builder {
         )
         .map(|_| ())
     }
-    pub fn scalar(
-        &mut self,
-        parent: usize,
-        key: Option<&str>,
-        value: sys::ValueView,
-    ) -> Result<(), Error> {
-        self.put(parent, key, value).map(|_| ())
+    pub fn copy_parsed(&mut self, root: usize) -> Result<(), Error> {
+        unsafe extern "C" {
+            fn plasmite_json_copy_growing(
+                root: usize,
+                parent: usize,
+                buf: *mut *mut u8,
+                len: *mut usize,
+                capacity: *mut usize,
+                state: *mut std::ffi::c_void,
+                grow: unsafe extern "C" fn(*mut std::ffi::c_void, *mut *mut u8, *mut usize) -> i32,
+                depth: u32,
+            ) -> i32;
+        }
+        unsafe extern "C" fn grow(
+            state: *mut std::ffi::c_void,
+            buf: *mut *mut u8,
+            capacity: *mut usize,
+        ) -> i32 {
+            let words = unsafe { &mut *state.cast::<Vec<u32>>() };
+            if words.len() * 4 >= MAX_LITE3_BUF {
+                return -1;
+            }
+            words.resize((words.len() * 2).min(MAX_LITE3_BUF / 4), 0);
+            unsafe {
+                *buf = words.as_mut_ptr().cast();
+                *capacity = words.len() * 4;
+            }
+            0
+        }
+        let mut buf = self.words.as_mut_ptr().cast();
+        let mut capacity = self.words.len() * 4;
+        // The parsed owner outlives this call. C retains no pointers; growth
+        // mutates only the word allocation, with len stored separately.
+        let ret = unsafe {
+            plasmite_json_copy_growing(
+                root,
+                self.data,
+                &mut buf,
+                &mut self.len,
+                &mut capacity,
+                (&mut self.words as *mut Vec<u32>).cast(),
+                grow,
+                1,
+            )
+        };
+        if ret < 0 {
+            return Err(Error::new(ErrorKind::Usage).with_message("failed to encode JSON view"));
+        }
+        Ok(())
     }
     pub fn finish(self) -> Result<MessageView, Error> {
         let bytes = unsafe { std::slice::from_raw_parts(self.words.as_ptr().cast(), self.len) };

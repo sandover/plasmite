@@ -19,6 +19,7 @@ fn main() {
     let include_dir = lite3_dir.join("include");
     let lib_dir = lite3_dir.join("lib");
     println!("cargo:rerun-if-changed=c/lite3_shim.c");
+    println!("cargo:rerun-if-changed=c/lite3_builder.c");
     println!("cargo:rerun-if-changed=c/lite3_shim.h");
     println!("cargo:rerun-if-changed=vendor/lite3/include/lite3.h");
     println!("cargo:rerun-if-changed=vendor/lite3/include/lite3_context_api.h");
@@ -65,7 +66,8 @@ fn main() {
         .file(lite3_dir.join("src").join("debug.c"))
         .file(lite3_dir.join("lib").join("yyjson").join("yyjson.c"))
         .file(lite3_dir.join("lib").join("nibble_base64").join("base64.c"))
-        .file(manifest_dir.join("c").join("lite3_shim.c"));
+        .file(manifest_dir.join("c").join("lite3_shim.c"))
+        .file(manifest_dir.join("c").join("lite3_builder.c"));
 
     configure_lite3_compiler(&mut build, &target);
     build.compile("lite3");

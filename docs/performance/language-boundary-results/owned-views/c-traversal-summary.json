@@ -1,0 +1,74 @@
+{
+  "c-traversal-large-full.raw": {
+    "baseline": {
+      "messages_s": 7634.154782511117,
+      "cpu_seconds": 0.4190809999999999
+    },
+    "plasmite": {
+      "messages_s": 7635.423785108634,
+      "cpu_seconds": 0.418844
+    },
+    "throughput_change_pct": 0.016622699351387382,
+    "cpu_change_pct": -0.05655231327593713
+  },
+  "c-traversal-large-view.raw": {
+    "baseline": {
+      "messages_s": 13505.202065407273,
+      "cpu_seconds": 0.291116
+    },
+    "plasmite": {
+      "messages_s": 13620.212880794677,
+      "cpu_seconds": 0.289807
+    },
+    "throughput_change_pct": 0.8516038103716816,
+    "cpu_change_pct": -0.44964893719342536
+  },
+  "c-traversal-small-full.raw": {
+    "baseline": {
+      "messages_s": 58136.52817740464,
+      "cpu_seconds": 0.582631
+    },
+    "plasmite": {
+      "messages_s": 58150.818509114775,
+      "cpu_seconds": 0.5833729999999999
+    },
+    "throughput_change_pct": 0.024580641737892428,
+    "cpu_change_pct": 0.1273533334134047
+  },
+  "c-traversal-small-view.raw": {
+    "baseline": {
+      "messages_s": 83502.83260187565,
+      "cpu_seconds": 0.4376669999999999
+    },
+    "plasmite": {
+      "messages_s": 89657.93802109922,
+      "cpu_seconds": 0.41583400000000004
+    },
+    "throughput_change_pct": 7.371133681859465,
+    "cpu_change_pct": -4.9884958198813
+  },
+  "c-traversal-wide-full.raw": {
+    "baseline": {
+      "messages_s": 17073.956450196878,
+      "cpu_seconds": 0.509371
+    },
+    "plasmite": {
+      "messages_s": 17194.980079632773,
+      "cpu_seconds": 0.506231
+    },
+    "throughput_change_pct": 0.7088200663326605,
+    "cpu_change_pct": -0.6164465585987489
+  },
+  "c-traversal-wide-view.raw": {
+    "baseline": {
+      "messages_s": 28323.216044535424,
+      "cpu_seconds": 0.347737
+    },
+    "plasmite": {
+      "messages_s": 27877.530240610908,
+      "cpu_seconds": 0.321646
+    },
+    "throughput_change_pct": -1.573570611556685,
+    "cpu_change_pct": -7.503084227447765
+  }
+}

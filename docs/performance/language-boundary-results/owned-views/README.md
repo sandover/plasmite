@@ -150,3 +150,49 @@ Set `PLASMITE_BENCH_EXTRA_FIELDS=200` for wide fixtures or
 `PLASMITE_BENCH_NOTE_BYTES=65536` for large fixtures. Use the counts and repeat
 settings in each raw file. Alternate forward/reverse core processes, and keep
 allocation probes, builds and other benchmarks out of timed runs.
+
+## Follow-up: traverse parsed JSON in C
+
+The next candidate replaces the strict JSON writer's Rust-per-value traversal
+with a C traversal of the already parsed document. It avoids per-key CString
+construction, temporary Rust entry vectors and repeated per-value foreign calls.
+The same ctypes view adapter and complete native-data consumer run on both
+libraries, so result contracts match. Seven alternating repeats use the same
+counts/fixtures as the first capture. The legacy full-result path acts as a
+control. No builds/tests ran during the timing window.
+
+| Workload | Previous view messages/s | C traversal messages/s | Throughput change | Combined CPU change |
+| --- | ---: | ---: | ---: | ---: |
+| [Small](c-traversal-small-view.raw.json) | 83,503 | 89,658 | +7.4% | −5.0% |
+| [Wide](c-traversal-wide-view.raw.json) | 28,323 | 27,878 | −1.6% | −7.5% |
+| [Large](c-traversal-large-view.raw.json) | 13,505 | 13,620 | +0.9% | −0.4% |
+
+The wide writer's median CPU falls from 0.172880 to 0.144757 seconds (−16.3%),
+while reader CPU changes from 0.174727 to 0.175933 seconds (+0.7%). Removing
+writer work does not establish a faster complete pipeline; throughput regresses
+1.6% in this capture. The remaining reader/storage/scheduling costs need their
+own attribution before making a stronger claim.
+
+Legacy full-result throughput changes 0.0%/+0.7%/0.0% for
+[small](c-traversal-small-full.raw.json), [wide](c-traversal-wide-full.raw.json)
+and [large](c-traversal-large-full.raw.json), with combined CPU within 0.6%.
+The first capture's view-versus-identity gap remains a separate result: this
+follow-up improves the new writer but does not make view ownership free.
+
+[C-traversal environment/source fingerprints](c-traversal-environment.json)
+identify both libraries, the unchanged benchmark/bindings, build command and
+source overlay. The candidate also contains unused bounded-cursor API additions
+and test-only changes; owner acquisition/normalization did not change. The
+candidate source overlay (outside Git) preserves this exact
+intermediate build over the baseline checkout. The initial saved library's
+SHA-256 remains `9a2f9478f827d610253291adb207cffab999667387c4ef8f41e97e36906c7934`;
+the new library is
+`701f655d9ad28e6b7ebc54649069d1e87e78c92638230a0e76f40be79fa97c45`.
+
+Reproduce the strict-view control with `--receipt view --baseline-receipt view`
+and the saved prior library directory. Use `--receipt full --baseline-receipt full`
+for the legacy control. The [summary](c-traversal-summary.json) retains medians;
+the raw files retain every repeat and per-worker verification/CPU.
+
+Historical source snapshots and full build logs stay outside Git. This report
+keeps the scripts, summaries and readable results.
