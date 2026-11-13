@@ -13,6 +13,7 @@ use serde_json::Value;
 
 use crate::core::error::{Error, ErrorKind};
 
+mod builder;
 mod json;
 pub mod sys;
 pub(crate) use json::JsonValue;
@@ -85,6 +86,12 @@ impl Lite3Buf {
 
 impl ParsedJson {
     pub(crate) fn parse(input: &[u8]) -> Result<Self, Error> {
+        Self::parse_with(input, false)
+    }
+    pub(crate) fn parse_view(input: &[u8]) -> Result<Self, Error> {
+        Self::parse_with(input, true)
+    }
+    fn parse_with(input: &[u8], strict: bool) -> Result<Self, Error> {
         if input.contains(&0) {
             return Err(Error::new(ErrorKind::Usage).with_message("json contains null"));
         }
@@ -95,7 +102,11 @@ impl ParsedJson {
         });
         let mut values = 0;
         let ptr = std::ptr::NonNull::new(unsafe {
-            sys::plasmite_lite3_json_parse(input.as_ptr().cast(), input.len(), &mut values)
+            if strict {
+                sys::plasmite_lite3_json_parse_view(input.as_ptr().cast(), input.len(), &mut values)
+            } else {
+                sys::plasmite_lite3_json_parse(input.as_ptr().cast(), input.len(), &mut values)
+            }
         })
         .ok_or_else(json_encoding_error)?;
         Ok(Self {
@@ -121,6 +132,81 @@ impl ParsedJson {
             })
             .collect();
         self.build(MAX_LITE3_BUF, Some(&tags))
+    }
+
+    pub(crate) fn encode_message_view(
+        &self,
+        tags: &[&str],
+    ) -> Result<crate::view::MessageView, Error> {
+        if self.value().kind() != sys::LITE3_TYPE_OBJECT {
+            return Err(Error::new(ErrorKind::Usage).with_message("data must be object"));
+        }
+        fn copy(
+            builder: &mut builder::Builder,
+            parent: usize,
+            node: usize,
+            depth: usize,
+        ) -> Result<(), Error> {
+            if depth >= 32 {
+                return Err(
+                    Error::new(ErrorKind::Usage).with_message("message nesting limit exceeded")
+                );
+            }
+            let count = unsafe { sys::plasmite_json_count(node) };
+            let mut entries = vec![sys::Entry::default(); count];
+            if unsafe { sys::plasmite_json_entries(node, entries.as_mut_ptr(), count) } != 0 {
+                return Err(Error::new(ErrorKind::Usage).with_message("invalid JSON entries"));
+            }
+            for entry in entries {
+                let key = if entry.key.is_null() {
+                    None
+                } else {
+                    Some(unsafe {
+                        std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                            entry.key.cast(),
+                            entry.key_len,
+                        ))
+                    })
+                };
+                let mut value = sys::ValueView::default();
+                unsafe { sys::plasmite_json_value_view(entry.offset, &mut value) };
+                match value.kind {
+                    sys::LITE3_TYPE_OBJECT | sys::LITE3_TYPE_ARRAY => {
+                        let child =
+                            builder.container(parent, key, value.kind == sys::LITE3_TYPE_ARRAY)?;
+                        copy(builder, child, entry.offset, depth + 1)?;
+                    }
+                    sys::LITE3_TYPE_STRING => {
+                        let text = unsafe {
+                            std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                                value.text.cast(),
+                                value.text_len,
+                            ))
+                        };
+                        builder.string(parent, key, text)?;
+                    }
+                    sys::JSON_TYPE_U64 => {
+                        if value.integer < 0 {
+                            return Err(Error::new(ErrorKind::Usage)
+                                .with_message("integer exceeds signed 64-bit range"));
+                        }
+                        value.kind = sys::LITE3_TYPE_I64;
+                        builder.scalar(parent, key, value)?;
+                    }
+                    _ => builder.scalar(parent, key, value)?,
+                }
+            }
+            Ok(())
+        }
+        let mut builder = builder::Builder::new(tags)?;
+        let root = builder.data;
+        copy(
+            &mut builder,
+            root,
+            unsafe { sys::plasmite_json_root(self.ptr.as_ptr()) },
+            1,
+        )?;
+        builder.finish()
     }
 
     fn build(&self, max_bytes: usize, tags: Option<&[sys::TextRef]>) -> Result<Lite3Buf, Error> {
@@ -609,6 +695,45 @@ mod tests {
         assert_eq!(stored["data"]["text"], "a\u{0000}b");
         assert_eq!(super::ENCODE_STATS.with(|stats| stats.get().0), 1);
         assert!(super::ParsedJson::parse(br#"{"bad\u0000key":1}"#).is_err());
+    }
+
+    #[test]
+    fn view_encoder_grows_and_enforces_exact_integer_policy() {
+        let text = format!(
+            r#"{{"items":[{}],"zero":-0,"text":"α\u0000b"}}"#,
+            (0..2000)
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let parsed = super::ParsedJson::parse(text.as_bytes()).unwrap();
+        let view = parsed.encode_message_view(&["sensor"]).unwrap();
+        assert!(view.bytes().len() > 256);
+        let data: serde_json::Value =
+            serde_json::from_slice(&view.data().to_json().unwrap()).unwrap();
+        assert_eq!(data["items"][1999], 1999);
+        assert_eq!(
+            data["zero"].as_f64().unwrap().to_bits(),
+            (-0.0_f64).to_bits()
+        );
+        assert_eq!(data["text"], "α\u{0000}b");
+        for number in [
+            "9223372036854775808",
+            "18446744073709551615",
+            "18446744073709551616",
+            "-9223372036854775809",
+        ] {
+            let text = format!("{{\"x\":{number}}}");
+            assert!(
+                super::ParsedJson::parse_view(text.as_bytes())
+                    .and_then(|parsed| parsed.encode_message_view(&[]))
+                    .is_err()
+            );
+        }
+        let exact = super::ParsedJson::parse(br#"{"x":9223372036854775807,"x":4}"#).unwrap();
+        let view = exact.encode_message_view(&[]).unwrap();
+        assert_eq!(view.data().entries().unwrap().len(), 1);
+        assert_eq!(view.data().get("x").unwrap().unwrap().integer().unwrap(), 4);
     }
 
     #[test]

@@ -4,6 +4,9 @@
 //! Invariants: Additive-only changes to `api`; internal modules remain private.
 //! Invariants: Core modules prefer explicit inputs/outputs over hidden state.
 mod abi;
+mod abi_fields;
+mod abi_views;
+pub mod view;
 pub mod api;
 mod core;
 use core::error::{Error, ErrorKind};

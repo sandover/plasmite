@@ -351,6 +351,116 @@ int plsm_lite3_stream_next_wait(plsm_lite3_stream_t *stream, uint64_t timeout_ms
 void plsm_stream_cancel(plsm_stream_t *stream);
 void plsm_lite3_stream_cancel(plsm_lite3_stream_t *stream);
 
+/* Coarse selection from data. Paths are JSON Pointers: /metrics/power,
+ * /samples/0/name, or empty for data itself. ~0 means ~ and ~1 means /.
+ * Missing members or traversal through a scalar produce MISSING. Array indices
+ * use decimal digits without leading zeroes. OBJECT/ARRAY return their member
+ * count in integer; other unused fields stay zero. STRING/BYTES refer to offset
+ * and len inside out_bytes, which owns copies of only requested values.
+ *
+ * Supply count caller-owned slots and a zero-initialized out_bytes. Free the
+ * bytes with plsm_buf_free; slots contain no pointers and need no native free.
+ * Keep payload/paths immutable for the call. Selection validates the frame once
+ * per call, accepts unaligned payload bytes, and leaves outputs untouched on
+ * error. Returned bytes survive source mutation, pool/stream close and overwrite.
+ */
+typedef enum plsm_field_kind {
+    PLSM_FIELD_MISSING = 0, PLSM_FIELD_NULL = 1, PLSM_FIELD_BOOL = 2,
+    PLSM_FIELD_I64 = 3, PLSM_FIELD_F64 = 4, PLSM_FIELD_STRING = 5,
+    PLSM_FIELD_BYTES = 6, PLSM_FIELD_OBJECT = 7, PLSM_FIELD_ARRAY = 8
+} plsm_field_kind_t;
+typedef struct plsm_field_value {
+    uint32_t kind;
+    uint32_t reserved;
+    int64_t integer;
+    double real;
+    size_t offset;
+    size_t len;
+} plsm_field_value_t;
+typedef struct plsm_selected_frame {
+    uint64_t seq;
+    uint64_t timestamp_ns;
+    uint32_t flags;
+    uint32_t reserved;
+} plsm_selected_frame_t;
+int plsm_lite3_select(const uint8_t *payload, size_t len,
+    const char *const *paths, size_t count, plsm_field_value_t *out_values,
+    plsm_buf_t *out_bytes, plsm_error_t **out_err);
+/* Fetch and select in one call: only requested bytes cross the language boundary. */
+int plsm_pool_get_fields(plsm_pool_t *pool, uint64_t seq,
+    const char *const *paths, size_t count, plsm_field_value_t *out_values,
+    plsm_buf_t *out_bytes, plsm_selected_frame_t *out_frame, plsm_error_t **out_err);
+
+/* Additive immutable snapshot API. Owners retain four-byte-aligned private
+ * bytes independently of pool/stream lifetime. Retain/release and immutable
+ * reads may run concurrently on independently held references. Keep an owner
+ * alive through every borrowed access; never alter or forge a value_ref.
+ * from_lite3 copies caller bytes. get_view moves the one pool snapshot.
+ * Value references and borrowed key/string/byte spans need no individual free.
+ * Mutation requires copying. A zero owner represents an absent value.
+ */
+typedef struct plsm_message_view plsm_message_view_t;
+typedef struct plsm_value_ref {
+    const plsm_message_view_t *owner;
+    size_t offset;
+} plsm_value_ref_t;
+typedef struct plsm_view_value {
+    uint32_t kind; /* plsm_field_kind_t; zero means absent */
+    int64_t integer;
+    double real;
+    const uint8_t *bytes;
+    size_t len; /* bytes for strings/bytes, unique count for containers */
+} plsm_view_value_t;
+typedef struct plsm_view_entry {
+    const uint8_t *key; /* NULL for array entries */
+    size_t key_len;
+    plsm_value_ref_t value;
+} plsm_view_entry_t;
+int plsm_view_from_lite3(const uint8_t *bytes, size_t len, uint64_t seq,
+    uint64_t timestamp_ns, const plsm_message_view_t **out, plsm_error_t **err);
+int plsm_pool_get_view(plsm_pool_t *pool, uint64_t seq,
+    const plsm_message_view_t **out, plsm_error_t **err);
+/* New view API: exact integer tokens must fit i64; rejects before publication. */
+int plsm_pool_append_view_json(plsm_pool_t *pool, const uint8_t *json, size_t len,
+    const char *const *tags, size_t tags_len, uint32_t durability,
+    const plsm_message_view_t **out, plsm_error_t **err);
+int plsm_pool_append_view(plsm_pool_t *pool, const plsm_message_view_t *source,
+    uint32_t durability, const plsm_message_view_t **out, plsm_error_t **err);
+void plsm_view_retain(const plsm_message_view_t *view);
+void plsm_view_release(const plsm_message_view_t *view);
+plsm_value_ref_t plsm_view_root(const plsm_message_view_t *view);
+plsm_value_ref_t plsm_view_data(const plsm_message_view_t *view);
+const uint8_t *plsm_view_bytes(const plsm_message_view_t *view, size_t *len);
+/* Four-aligned caller storage, borrowed only during this call. If capacity is
+ * insufficient, success reports required size without writing any payload.
+ * A retry may return NotFound after retention; no cursor advances here.
+ * The copied bytes require validation before becoming an immutable view. */
+int plsm_pool_get_into(plsm_pool_t *pool, uint64_t seq, uint8_t *destination,
+    size_t capacity, size_t *required, uint64_t *timestamp_ns,
+    uint32_t *flags, plsm_error_t **err);
+uint64_t plsm_view_seq(const plsm_message_view_t *view);
+uint64_t plsm_view_timestamp_ns(const plsm_message_view_t *view);
+int plsm_value_get(plsm_value_ref_t value, const uint8_t *key, size_t len,
+    plsm_value_ref_t *out, plsm_error_t **err);
+int plsm_value_index(plsm_value_ref_t value, uint32_t index,
+    plsm_value_ref_t *out, plsm_error_t **err);
+int plsm_value_read(plsm_value_ref_t value, plsm_view_value_t *out, plsm_error_t **err);
+/* out_count always receives required capacity; insufficient capacity returns
+ * Usage without filling slots. Keys use unique canonical last-entry values. */
+int plsm_value_entries(plsm_value_ref_t value, plsm_view_entry_t *slots,
+    size_t capacity, size_t *out_count, plsm_error_t **err);
+/* Compile JSON Pointers once; reuse without parsing paths or validating the
+ * immutable message again. Selection returns borrowed refs, no string copies.
+ * Keep selector immutable and alive during calls; free it independently. */
+typedef struct PlsmSelector plsm_selector_t;
+int plsm_selector_new(const char *const *paths, size_t count,
+    plsm_selector_t **out, plsm_error_t **err);
+void plsm_selector_free(plsm_selector_t *selector);
+int plsm_view_select(const plsm_message_view_t *view,
+    const plsm_selector_t *selector, plsm_value_ref_t *slots,
+    size_t capacity, plsm_error_t **err);
+int plsm_value_to_json(plsm_value_ref_t value, plsm_buf_t *out, plsm_error_t **err);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

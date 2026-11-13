@@ -1415,7 +1415,10 @@ fn write_udp_payload(payload: Vec<u8>) -> plsm_buf {
     out
 }
 
-unsafe fn tag_refs<'a>(tags: *const *const c_char, len: usize) -> Result<Vec<&'a str>, Error> {
+pub(crate) unsafe fn tag_refs<'a>(
+    tags: *const *const c_char,
+    len: usize,
+) -> Result<Vec<&'a str>, Error> {
     if tags.is_null() {
         return Ok(Vec::new());
     }

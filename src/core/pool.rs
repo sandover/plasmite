@@ -726,7 +726,7 @@ impl Pool {
         &self,
         header: PoolHeader,
         seq: u64,
-    ) -> Option<(usize, crate::core::cursor::FrameRef)> {
+    ) -> Option<(usize, crate::core::cursor::FrameView<'_>)> {
         let index_capacity = header.index_capacity as u64;
         if index_capacity == 0 {
             return None;
@@ -755,7 +755,7 @@ impl Pool {
             stored_offset as usize,
         ) {
             Ok(crate::core::cursor::ReadResult::Message { frame, .. }) if frame.seq == seq => {
-                Some((stored_offset as usize, frame.into_owned()))
+                Some((stored_offset as usize, frame))
             }
             _ => None,
         }
@@ -786,9 +786,18 @@ impl Pool {
     fn lookup(
         &self,
         seq: u64,
-        mut cache: Option<&mut SeqOffsetCache>,
+        cache: Option<&mut SeqOffsetCache>,
     ) -> Result<crate::core::cursor::FrameRef, Error> {
         let _lock = self.read_lock()?;
+        self.lookup_locked(seq, cache)
+            .map(|frame| frame.into_owned())
+    }
+
+    fn lookup_locked(
+        &self,
+        seq: u64,
+        mut cache: Option<&mut SeqOffsetCache>,
+    ) -> Result<crate::core::cursor::FrameView<'_>, Error> {
         let header = self.header_locked()?;
         let bounds = bounds_from_header(header);
         let (oldest, newest) = match (bounds.oldest_seq, bounds.newest_seq) {
@@ -817,7 +826,7 @@ impl Pool {
             if let Ok(crate::core::cursor::ReadResult::Message { frame, .. }) = cached
                 && frame.seq == seq
             {
-                return Ok(frame.into_owned());
+                return Ok(frame);
             }
             cache.remove(seq);
         }
@@ -839,7 +848,7 @@ impl Pool {
         seq: u64,
         header: PoolHeader,
         mut cache: Option<&mut SeqOffsetCache>,
-    ) -> Result<crate::core::cursor::FrameRef, Error> {
+    ) -> Result<crate::core::cursor::FrameView<'_>, Error> {
         let ring_offset = header.ring_offset as usize;
         let ring_size = header.ring_size as usize;
         let mut offset = header.tail_off as usize;
@@ -857,7 +866,7 @@ impl Pool {
                         cache.insert(frame.seq, offset);
                     }
                     if frame.seq == seq {
-                        return Ok(frame.into_owned());
+                        return Ok(frame);
                     }
                     if frame.seq > seq {
                         return Err(Error::new(ErrorKind::NotFound)
@@ -878,6 +887,22 @@ impl Pool {
                 }
             }
         }
+    }
+
+    /// Copy a stable frame directly into caller storage. An undersized buffer
+    /// receives only the required length; it never receives a partial payload.
+    pub(crate) fn get_into(
+        &self,
+        seq: u64,
+        destination: &mut [u8],
+    ) -> Result<(usize, u64, u32), Error> {
+        let _lock = self.read_lock()?;
+        let frame = self.lookup_locked(seq, None)?;
+        let len = frame.payload.len();
+        if destination.len() >= len {
+            destination[..len].copy_from_slice(frame.payload);
+        }
+        Ok((len, frame.timestamp_ns, frame.flags))
     }
 
     /// Hold an exclusive pool lock until the returned guard is dropped.

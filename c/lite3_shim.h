@@ -34,6 +34,9 @@ typedef struct {
         const char *text;
         size_t text_len;
 } plasmite_lite3_value;
+int plasmite_lite3_put(unsigned char *buf, size_t *len, size_t capacity,
+                      size_t parent, const char *key,
+                      const plasmite_lite3_value *value, size_t *child);
 int plasmite_lite3_entries(const unsigned char *buf, size_t len, size_t ofs,
                          plasmite_lite3_entry *out, size_t count);
 void plasmite_lite3_value_view(const unsigned char *buf, size_t ofs, plasmite_lite3_value *out);
@@ -42,6 +45,7 @@ void plasmite_lite3_value_view(const unsigned char *buf, size_t ofs, plasmite_li
  * Build borrows it; free it once after all output-capacity attempts finish.
  */
 void *plasmite_lite3_json_parse(const char *json, size_t len, size_t *values);
+void *plasmite_lite3_json_parse_view(const char *json, size_t len, size_t *values);
 void plasmite_lite3_json_doc_free(void *doc);
 int plasmite_lite3_json_build(void *doc, unsigned char *buf, size_t *out_len, size_t buf_sz);
 typedef struct { const char *ptr; size_t len; } plasmite_text_ref;

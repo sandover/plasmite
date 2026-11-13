@@ -210,7 +210,7 @@ extern int _lite3_json_dec_arr(unsigned char *, size_t *, size_t, size_t,
  */
 static int prepare_json_values(yyjson_val *value, unsigned depth)
 {
-        if (depth > LITE3_JSON_NESTING_DEPTH_MAX) { errno = EINVAL; return -1; }
+        if (depth > LITE3_JSON_NESTING_DEPTH_MAX || yyjson_is_raw(value)) { errno = EINVAL; return -1; }
         if (yyjson_is_sint(value) && yyjson_get_sint(value) == 0)
                 yyjson_set_real(value, -0.0);
         if (yyjson_is_obj(value)) {
@@ -231,16 +231,21 @@ static int prepare_json_values(yyjson_val *value, unsigned depth)
         return 0;
 }
 
-void *plasmite_lite3_json_parse(const char *json, size_t len, size_t *values)
+static void *json_parse(const char *json, size_t len, size_t *values, yyjson_read_flag flags)
 {
         errno = 0;
-        yyjson_doc *doc = yyjson_read_opts((char *)json, len, YYJSON_READ_NOFLAG, NULL, NULL);
+        yyjson_doc *doc = yyjson_read_opts((char *)json, len, flags, NULL, NULL);
         if (!doc) errno = EINVAL;
         else if (prepare_json_values(yyjson_doc_get_root(doc), 0) < 0) {
                 yyjson_doc_free(doc); doc = NULL;
         } else *values = yyjson_doc_get_val_count(doc);
         return doc;
 }
+
+void *plasmite_lite3_json_parse(const char *json, size_t len, size_t *values)
+{ return json_parse(json, len, values, YYJSON_READ_NOFLAG); }
+void *plasmite_lite3_json_parse_view(const char *json, size_t len, size_t *values)
+{ return json_parse(json, len, values, YYJSON_READ_BIGNUM_AS_RAW); }
 
 uintptr_t plasmite_json_root(void *doc) { return (uintptr_t)yyjson_doc_get_root(doc); }
 size_t plasmite_json_count(uintptr_t node) { return yyjson_get_len((yyjson_val *)node); }
@@ -519,4 +524,37 @@ int plasmite_lite3_last_errno(void)
 void plasmite_lite3_free(void *ptr)
 {
         free(ptr);
+}
+
+/* Retry only the insertion after ENOBUFS; the caller owns growth and value data. */
+int plasmite_lite3_put(unsigned char *buf, size_t *len, size_t capacity,
+                      size_t parent, const char *key,
+                      const plasmite_lite3_value *value, size_t *child)
+{
+        if (parent == SIZE_MAX) return lite3_init_obj(buf, len, capacity);
+        if (key) {
+                switch (value->type) {
+                case LITE3_TYPE_NULL: return lite3_set_null(buf, len, parent, capacity, key);
+                case LITE3_TYPE_BOOL: return lite3_set_bool(buf, len, parent, capacity, key, value->integer != 0);
+                case LITE3_TYPE_I64: return lite3_set_i64(buf, len, parent, capacity, key, value->integer);
+                case LITE3_TYPE_F64: return lite3_set_f64(buf, len, parent, capacity, key, value->real);
+                case LITE3_TYPE_STRING: return lite3_set_str_n(buf, len, parent, capacity, key, value->text, value->text_len);
+                case LITE3_TYPE_BYTES: return lite3_set_bytes(buf, len, parent, capacity, key, (const unsigned char *)value->text, value->text_len);
+                case LITE3_TYPE_OBJECT: return lite3_set_obj(buf, len, parent, capacity, key, child);
+                case LITE3_TYPE_ARRAY: return lite3_set_arr(buf, len, parent, capacity, key, child);
+                }
+        } else {
+                switch (value->type) {
+                case LITE3_TYPE_NULL: return lite3_arr_append_null(buf, len, parent, capacity);
+                case LITE3_TYPE_BOOL: return lite3_arr_append_bool(buf, len, parent, capacity, value->integer != 0);
+                case LITE3_TYPE_I64: return lite3_arr_append_i64(buf, len, parent, capacity, value->integer);
+                case LITE3_TYPE_F64: return lite3_arr_append_f64(buf, len, parent, capacity, value->real);
+                case LITE3_TYPE_STRING: return lite3_arr_append_str_n(buf, len, parent, capacity, value->text, value->text_len);
+                case LITE3_TYPE_BYTES: return lite3_arr_append_bytes(buf, len, parent, capacity, (const unsigned char *)value->text, value->text_len);
+                case LITE3_TYPE_OBJECT: return lite3_arr_append_obj(buf, len, parent, capacity, child);
+                case LITE3_TYPE_ARRAY: return lite3_arr_append_arr(buf, len, parent, capacity, child);
+                }
+        }
+        errno = EINVAL;
+        return -1;
 }

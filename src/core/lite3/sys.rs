@@ -41,6 +41,16 @@ pub(crate) struct ValueView {
 }
 
 unsafe extern "C" {
+    pub(crate) fn plasmite_lite3_put(
+        buf: *mut u8,
+        len: *mut usize,
+        capacity: usize,
+        parent: usize,
+        key: *const c_char,
+        value: *const ValueView,
+        child: *mut usize,
+    ) -> c_int;
+
     pub(crate) fn plasmite_json_root(doc: *mut c_void) -> usize;
     pub(crate) fn plasmite_json_value_view(value: usize, out: *mut ValueView);
     pub(crate) fn plasmite_json_count(value: usize) -> usize;
@@ -67,6 +77,11 @@ unsafe extern "C" {
         len: usize,
         values: *mut usize,
     ) -> *mut std::ffi::c_void;
+    pub(crate) fn plasmite_lite3_json_parse_view(
+        json: *const c_char,
+        len: usize,
+        values: *mut usize,
+    ) -> *mut c_void;
     pub fn plasmite_lite3_json_doc_free(doc: *mut std::ffi::c_void);
     pub fn plasmite_lite3_json_build(
         doc: *mut std::ffi::c_void,
