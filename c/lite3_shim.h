@@ -134,8 +134,15 @@ int plasmite_lite3_last_errno(void);
 
 void plasmite_lite3_free(void *ptr);
 
+/* Private fixed-capacity iterator storage, aligned to uint64_t. */
+int plasmite_lite3_cursor_init(const unsigned char *buf, size_t len, size_t ofs,
+                              void *state, size_t size);
+int plasmite_lite3_cursor_next(const unsigned char *buf, size_t len, void *state,
+                              plasmite_lite3_entry *out, uint32_t *hash);
+
 #ifdef __cplusplus
 }
 #endif
 
 #endif
+

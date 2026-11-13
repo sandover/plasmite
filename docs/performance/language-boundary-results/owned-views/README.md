@@ -194,5 +194,42 @@ and the saved prior library directory. Use `--receipt full --baseline-receipt fu
 for the legacy control. The [summary](c-traversal-summary.json) retains medians;
 the raw files retain every repeat and per-worker verification/CPU.
 
+## Bounded sequential cursor
+
+The C cursor retains one immutable owner and a fixed 256-byte private iterator
+state. It fills caller-sized chunks. Rust keeps that state inline; its borrowed
+iterator allocates no entry vector. Existing whole-collection enumeration remains
+available as the control. The shim derives key lengths from checked entry
+boundaries because the pinned native iterator reports the encoded tag length
+without its two-bit shift.
+
+Seven release processes alternate forward/reverse lane order and verify every
+array sum. Separate allocator diagnostics count Rust allocations, not C malloc.
+The timing executable uses the normal allocator. Both lanes use the same fixture
+and executable; setup and validation sit outside these warm traversal timings.
+
+| Warm operation | Median ns/op | Rust allocations/op | Requested Rust bytes/op |
+| --- | ---: | ---: | ---: |
+| Enumerate 1,000 values through temporary entry vectors | 10,888 | 10 | 89,408 |
+| Sum 1,000 values through the bounded cursor | 9,962 | 0 | 0 |
+| Sum an already decoded Rust JSON-value array | 332 | 0 | 0 |
+| Read one retained small-view field | 70.3 | 2 | 11 |
+| Read the field from an already decoded small native object | 3.9 | 0 | 0 |
+
+The cursor reduces this array traversal time about 8.5% and removes the temporary
+entry allocations. Native objects remain much faster for repeated warm reads;
+these measurements do not include their initial decoding cost. The view-field
+allocation diagnostic also identifies remaining `data`/`power` C-string work.
+Keeping a child still retains the complete encoded owner; this change does not
+alter that lifetime tradeoff.
+
+[Raw runs and fingerprints](cursor.raw.json) include process CPU, binary hashes,
+source hashes and the separate allocation probe. Exact source (outside Git)
+records the measured runtime and example files; unchanged vendor sources come
+from the recorded base commit. Build with
+`cargo build --release --example bench_owned_views --example bench_owned_view_allocations`,
+then run `target/release/examples/bench_owned_views 2000`, alternating `--reverse`.
+Use `target/release/examples/bench_owned_view_allocations 100` only for diagnostics.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

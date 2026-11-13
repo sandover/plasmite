@@ -449,6 +449,14 @@ int plsm_value_read(plsm_value_ref_t value, plsm_view_value_t *out, plsm_error_t
  * Usage without filling slots. Keys use unique canonical last-entry values. */
 int plsm_value_entries(plsm_value_ref_t value, plsm_view_entry_t *slots,
     size_t capacity, size_t *out_count, plsm_error_t **err);
+/* Sequential cursor retains one owner and bounded state. Serialize calls on
+ * each cursor. next fills at most capacity slots; zero written means end when
+ * capacity > 0. No collection-sized entry array or full scan per chunk. */
+typedef struct PlsmViewCursor plsm_view_cursor_t;
+int plsm_value_iter(plsm_value_ref_t value, plsm_view_cursor_t **out, plsm_error_t **err);
+int plsm_cursor_next(plsm_view_cursor_t *cursor, plsm_view_entry_t *slots,
+    size_t capacity, size_t *written, plsm_error_t **err);
+void plsm_cursor_free(plsm_view_cursor_t *cursor);
 /* Compile JSON Pointers once; reuse without parsing paths or validating the
  * immutable message again. Selection returns borrowed refs, no string copies.
  * Keep selector immutable and alive during calls; free it independently. */

@@ -6,9 +6,9 @@
 mod abi;
 mod abi_fields;
 mod abi_views;
-pub mod view;
 pub mod api;
 mod core;
+pub mod view;
 use core::error::{Error, ErrorKind};
 mod interface_wire;
 pub mod mcp;

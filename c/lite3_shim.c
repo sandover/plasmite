@@ -558,3 +558,49 @@ int plasmite_lite3_put(unsigned char *buf, size_t *len, size_t capacity,
         errno = EINVAL;
         return -1;
 }
+
+/* Private inline cursor state. It retains offsets only, never caller buffers. */
+typedef struct { lite3_iter iter; int object; } plasmite_cursor;
+_Static_assert(LITE3_NODE_SIZE == 96 && LITE3_NODE_SIZE_KC_OFFSET == 32, "cursor targets pinned seven-key node layout");
+_Static_assert(sizeof(plasmite_cursor) <= 256, "private cursor storage too small");
+_Static_assert(_Alignof(plasmite_cursor) <= _Alignof(uint64_t), "private cursor alignment");
+int plasmite_lite3_cursor_init(const unsigned char *buf, size_t len, size_t ofs,
+                              void *state, size_t size)
+{
+        if (!state || size < sizeof(plasmite_cursor) ||
+            (uintptr_t)state % _Alignof(plasmite_cursor) || verify_node(buf, len, ofs) < 0)
+                return -1;
+        plasmite_cursor *cursor = state;
+        cursor->object = buf[ofs] == LITE3_TYPE_OBJECT;
+        return lite3_iter_create(buf, len, ofs, &cursor->iter);
+}
+int plasmite_lite3_cursor_next(const unsigned char *buf, size_t len, void *state,
+                              plasmite_lite3_entry *out, uint32_t *hash)
+{
+        plasmite_cursor *cursor = state;
+        /* The pinned node layout begins with gen_type followed by hashes[7]. */
+        size_t node = cursor->iter.node_ofs[cursor->iter.depth];
+        uint8_t index = cursor->iter.node_i[cursor->iter.depth];
+        uint32_t stored_hash;
+        if (verify_node(buf, len, node) < 0 || index > 7) return -1;
+        memcpy(&stored_hash, buf + node + sizeof(uint32_t) * (1 + index), sizeof stored_hash);
+        lite3_str key;
+        size_t offset;
+        int result = lite3_iter_next(buf, len, &cursor->iter,
+                                    cursor->object ? &key : NULL, &offset);
+        if (result == LITE3_ITER_ITEM) {
+                size_t key_len = 0;
+                if (cursor->object) {
+                        size_t key_ofs = (size_t)((const unsigned char *)key.ptr - buf);
+                        if (offset <= key_ofs) return -1;
+                        /* The pinned iterator's key.len omits its tag shift.
+                         * Its checked value offset gives the exact key span. */
+                        key_len = offset - key_ofs - 1;
+                        if (verify_string(buf, len, key.ptr, key_len) < 0) return -1;
+                }
+                *out = (plasmite_lite3_entry){cursor->object ? key.ptr : NULL,
+                                             key_len, offset};
+                if (hash) *hash = stored_hash;
+        }
+        return result;
+}

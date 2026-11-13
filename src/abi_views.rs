@@ -635,3 +635,150 @@ mod forwarding_tests {
         }
     }
 }
+
+/// One bounded iterator state and one owner reference; no entry array is retained.
+pub struct PlsmViewCursor {
+    owner: Arc<plsm_message_view>,
+    cursor: crate::view::NodeCursor,
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_value_iter(
+    v: plsm_value_ref,
+    out: *mut *mut PlsmViewCursor,
+    err: *mut *mut plsm_error,
+) -> i32 {
+    finish(
+        (|| {
+            if out.is_null() {
+                return Err(usage());
+            }
+            let node = unsafe { value(v) }?;
+            let cursor = crate::view::NodeCursor::new(unsafe { &(*v.owner).view }, node.offset())?;
+            unsafe {
+                Arc::increment_strong_count(v.owner);
+                *out = Box::into_raw(Box::new(PlsmViewCursor {
+                    owner: Arc::from_raw(v.owner),
+                    cursor,
+                }));
+            }
+            Ok(())
+        })(),
+        err,
+    )
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_cursor_next(
+    cursor: *mut PlsmViewCursor,
+    slots: *mut plsm_view_entry,
+    capacity: usize,
+    written: *mut usize,
+    err: *mut *mut plsm_error,
+) -> i32 {
+    finish(
+        (|| {
+            let cursor = unsafe { cursor.as_mut() }.ok_or_else(usage)?;
+            if written.is_null() || (capacity > 0 && slots.is_null()) {
+                return Err(usage());
+            }
+            unsafe {
+                *written = 0;
+            }
+            for i in 0..capacity {
+                let Some((key, offset, _)) = cursor.cursor.next(&cursor.owner.view)? else {
+                    break;
+                };
+                unsafe {
+                    *slots.add(i) = plsm_view_entry {
+                        key: key.map_or(std::ptr::null(), |s| s.as_ptr()),
+                        key_len: key.map_or(0, str::len),
+                        value: plsm_value_ref {
+                            owner: Arc::as_ptr(&cursor.owner),
+                            offset,
+                        },
+                    };
+                    *written = i + 1;
+                }
+            }
+            Ok(())
+        })(),
+        err,
+    )
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn plsm_cursor_free(cursor: *mut PlsmViewCursor) {
+    if !cursor.is_null() {
+        drop(unsafe { Box::from_raw(cursor) });
+    }
+}
+
+#[cfg(test)]
+mod cursor_tests {
+    use super::*;
+    #[test]
+    fn cursor_reads_bounded_chunks_and_retains_its_owner() {
+        let samples: Vec<_> = (0..1000).collect();
+        let encoded = crate::core::lite3::Lite3Buf::from_json_str(
+            &serde_json::json!({"meta":{"tags":[]},"data":{"samples":samples}}).to_string(),
+        )
+        .unwrap();
+        let mut owner = std::ptr::null();
+        let mut err = std::ptr::null_mut();
+        assert_eq!(
+            plsm_view_from_lite3(
+                encoded.as_slice().as_ptr(),
+                encoded.len(),
+                1,
+                2,
+                &mut owner,
+                &mut err
+            ),
+            0
+        );
+        let mut array = plsm_value_ref::default();
+        assert_eq!(
+            plsm_value_get(
+                unsafe { plsm_view_data(owner) },
+                b"samples".as_ptr(),
+                7,
+                &mut array,
+                &mut err
+            ),
+            0
+        );
+        let mut cursor = std::ptr::null_mut();
+        assert_eq!(plsm_value_iter(array, &mut cursor, &mut err), 0);
+        unsafe {
+            plsm_view_release(owner);
+        }
+        let mut slots: [plsm_view_entry; 7] = std::array::from_fn(|_| plsm_view_entry {
+            key: std::ptr::null(),
+            key_len: 0,
+            value: plsm_value_ref::default(),
+        });
+        let mut sum = 0;
+        let mut count = 0;
+        loop {
+            let mut written = 0;
+            assert_eq!(
+                plsm_cursor_next(cursor, slots.as_mut_ptr(), 7, &mut written, &mut err),
+                0
+            );
+            assert!(written <= 7);
+            if written == 0 {
+                break;
+            }
+            for slot in &slots[..written] {
+                assert!(slot.key.is_null());
+                let mut scalar = plsm_view_value::default();
+                assert_eq!(plsm_value_read(slot.value, &mut scalar, &mut err), 0);
+                sum += scalar.integer;
+                count += 1;
+            }
+        }
+        assert_eq!(count, 1000);
+        assert_eq!(sum, 499500);
+        unsafe {
+            plsm_cursor_free(cursor);
+        }
+    }
+}

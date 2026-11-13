@@ -60,12 +60,16 @@ pub fn main() {
         let bytes = encoded.as_slice();
         let v = MessageView::from_bytes(bytes, 17, 1).unwrap();
         let samples = v.data().get("samples").unwrap().unwrap();
+        let native = Message::from_lite3(17, 1, bytes).unwrap();
         let mut lanes = [
             "whole_root_validation",
             "snapshot_copy",
             "cold_view_selected",
             "cold_json_selected",
             "warm_view_selected",
+            "warm_native_selected",
+            "view_array_cursor",
+            "native_array_iteration",
             "view_json",
             "view_array_enumeration",
         ];
@@ -107,6 +111,26 @@ pub fn main() {
                         black_box(v.data()).get("power").unwrap().unwrap().integer(),
                         Some(7)
                     );
+                }),
+                "warm_native_selected" => run(name, lane, n, || {
+                    assert_eq!(black_box(&native.data)["power"].as_i64(), Some(7));
+                }),
+                "view_array_cursor" => run(name, lane, n, || {
+                    let sum: i64 = samples
+                        .iter()
+                        .unwrap()
+                        .map(|entry| entry.unwrap().1.integer().unwrap())
+                        .sum();
+                    assert_eq!(black_box(sum), expected_sum);
+                }),
+                "native_array_iteration" => run(name, lane, n, || {
+                    let sum: i64 = native.data["samples"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|v| v.as_i64().unwrap())
+                        .sum();
+                    assert_eq!(black_box(sum), expected_sum);
                 }),
                 "view_json" => run(name, lane, n, || {
                     black_box(v.data().to_json().unwrap());

@@ -1,0 +1,2700 @@
+{
+  "metadata": {
+    "commit": "317a4e05a0a6eb77e4eeb114596529167dffee01",
+    "host": "macOS-27.2-arm64-arm-64bit-Mach-O",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "source_sha256": {
+      "Cargo.toml": "c80c305694472b67bb6cb7eabe089aaa41ffa11064a800755babecc54c4ba943",
+      "Cargo.lock": "8ff3448ec53e2abe93ec1670c50c3b4c3b3ce6a8207378e89c17f1bede75244e",
+      "build.rs": "bb4b02c2303b8c50eada7908a504ffc7e76fa0a9f8314902ece5d8405d8bdbe0",
+      "src/serve.rs": "ba5e4c7bf0857ee6a626d9ba8ac883cb8b5652f0e512a3d320abb88bb264bd03",
+      "src/activity.rs": "dfde0e2143fb1901d9d4aaa0494c6341fe98dacf1ce574a2074ad8790d57f6d6",
+      "src/serve_registry.rs": "537fdd0027f985bff4988421b733802812f92f488ffc9c0587af5fe44e3c9af9",
+      "src/secure_serve.rs": "b217a8be6deb73040557a94512a666e69d817b5e4fdcec6d34432c86a25c2760",
+      "src/mcp_stdio.rs": "b8c16dc74553237a342c37830d73d2325d57e21f75e0142d35399070945c8f33",
+      "src/serve_service.rs": "7115b56326c50a3a9c038b418cb81c3c6925e7cb2e93e669f03d3412d027d76f",
+      "src/browser_session.rs": "ffea50afec33348142da7cd19d6ebb9248185c415e2a9ae9b21a8feba00aabb5",
+      "src/notice.rs": "6b0613d51b67caa232fcf7e81d5b18256a54d9a9a1ed5b6499cdb3ac07c6c224",
+      "src/share_addresses.rs": "0335b825710543c2f0f23eef7bbc58a34c51b0d11698988c7d823971d7cdec07",
+      "src/lib.rs": "2944c2e33a26e4b20edf23e1646f006af79336254e47a03d3789e44e7dec22bd",
+      "src/access_store.rs": "24666d798658e7a98fcaac7beef32c7f40a949b2b76b9f57b3b9760a565e126f",
+      "src/since.rs": "a612e6683f6b2ff9404ab240dd1561b33aa21588d81fbf7d4487af594654032c",
+      "src/abi_fields.rs": "b3269117de6ef1c541b388ad7dd2987db86b170608ee44a2126b0f106a45cba5",
+      "src/abi_views.rs": "1cf6bbedca6fe7909ec764e8aa148b2fe00aa3688e1c7e2c5bd9c98349aa74d9",
+      "src/interface_wire.rs": "7fe532a4d83c5023e0ebd0868a09e9a4b1b376a42865998634c231bcabf22579",
+      "src/color_json.rs": "59f25d60beed7f87c45e3d8f09473f0594ad01acf02e4bc0b95ca8df2e67e8ef",
+      "src/oauth.rs": "ab5a49275ed48328f5eb074610a2db628095dc2ea503b09dd07f3190f470e10b",
+      "src/jq_filter.rs": "db1c104fc7d3865d4242bb7d2b24d7015e97270925d5b7adb09223272ff1bc15",
+      "src/windows_private.rs": "f6e5af915d910e5368e6f58ae19e1d2595c55748da7b929f339c4213ac098078",
+      "src/main.rs": "318949df0afa363c98397b09cc635eb4759122f5aa769c6aa6e09f4a1c957fb7",
+      "src/udp_wire.rs": "133592d8e60c194b1b1abb91c7f5079a7a86db6cade8858e99f2cc0d00ee29e5",
+      "src/udp_input.rs": "e0184ae9bcab40ab973476e83c7862204ecaf305d010fa7de72c1a55267648c9",
+      "src/pool_paths.rs": "3d4c7a775aee3eedd9bd29880397ae681e4d7c6cec8b258f0cc9db175d685e01",
+      "src/abi.rs": "350098bb9439d6b0abc3f9c8ad159bfe525f3a1f02ef11b12cbab4ed8c5c9925",
+      "src/pool_info_json.rs": "b86d0b0c78d4abc56ec67ae944c2feefecebc47dc1006b939c9b3b868cadfe23",
+      "src/bench.rs": "ffcbce6ef1476f1062971c296ed0f4d77cab7ffbb0148c2fb456d42acb0f3487",
+      "src/mcp.rs": "74dbc134804d5edf99297c182f9f84c4b68cc07ce734aaf729b3e028c69eaf9f",
+      "src/view.rs": "6db98b3936b8cf64e9cc5dc75ce64d80253370bd2a995019bf77e2d70baa3758",
+      "src/server_private.rs": "dfba79bdfa56b56442e282ad70b3ace4fc96e0ee5f61b48a63259141e0aa03fc",
+      "src/core/notify.rs": "59dee93e8f3306ea7d74f20c82dfb73e4d5403966f5be2e2166aeee30db6d6ba",
+      "src/core/format.rs": "0090d5f9706616f0fba0495380c1a363bba9b9b426aeddd5082cabfefb44ea5f",
+      "src/core/error.rs": "7ef3f0758577e99dfd422ab9c62d5847f894f54748e9269df361fe288f9c74e1",
+      "src/core/ring_layout.rs": "d5a14b4b111f108111ad26d9fb44fbd527f17db4c08a7d80508ea38f8074c8ba",
+      "src/core/plan.rs": "c614afb38c780ba947658525810829a398019214b5a78c76c6d925ae030e5bbe",
+      "src/core/mod.rs": "0a7d30ef15d8993508f33af574b3ac56e122808109037db25ab7912b5f9a4816",
+      "src/core/cursor.rs": "9b881175e647f8b22efdfae7dd6881fdaaa761daa231bf28d2707931e250039e",
+      "src/core/pool.rs": "1e711fedaf2cb1415d7f6d5d035206fd1c709cbd869a23c20809152fd447d783",
+      "src/core/frame.rs": "28c83ab8ef05f445a6528dbe04caec5588edb915e6bf81124be2115f107b1388",
+      "src/core/validate.rs": "c8303c220072dec753e50b2731b30739ca51520bf82b5444ce0ba498e1113d6f",
+      "src/bin/pls.rs": "0e639fc80aadbb1ae490b76c6880ef19a0c156c87af557f147418dd4840d076a",
+      "src/cli/access.rs": "1163f1ea57811ce80ac3f604e2a88bf67b9b67781273f4169a126d9b16b75e8c",
+      "src/cli/stream.rs": "f0d25381c77e9f7640c71ba70ebc91ff067bdbe98f524d4600f80a6bd1e3c5e2",
+      "src/cli/doctor_support.rs": "e8b2157413c4e9fc57bca9f8358d63fa6404e5ba62c8deed00a3ce1d078053e6",
+      "src/cli/message_stream.rs": "5e5a871be18d4b15cd8ec947213be21b3bf461f7e031db3e23dd6f8a5da4c0de",
+      "src/cli/feed.rs": "9f48c3eecce84e0112037b35a94effabc1602f46ad3b176768aa29a36c18ce36",
+      "src/cli/utility.rs": "0077e83871a7e31b9e53c7baea1a495113b411fb188f09d37f87eadf258c11df",
+      "src/cli/support.rs": "ec75b75c527921a36507d1e8cb1aee1f697d123666c1d37317755f6cf709ea4c",
+      "src/cli/server.rs": "0b8af1ad10e71b2bd462d110a7a97451f8274fdf02564c6aa898001040990eea",
+      "src/cli/doctor.rs": "900adb3c7924b6bd0b26ca44dafcc477dfa25745f1647f830635cf18b58fd54c",
+      "src/cli/mod.rs": "6728d0867d84c28538c508e81e4331c2bc54e5f793bce422bde9accf110335f7",
+      "src/cli/output.rs": "4e31e82c1c3f3d1778e0941cff7053b6d01fe400a2443ee188ed9a05b26443a0",
+      "src/cli/feed_support.rs": "dc1eb540b334f31c2a46a7160a108def270907c11a03f6ce7cfc814f643f7162",
+      "src/cli/output_support.rs": "456d6fba666993d02867c1a321c5d93759841af13707b9cf95faca4ae1943102",
+      "src/cli/pool.rs": "1d8ec55d99e2c9a578aae6443e9582cfc64fa47585b0778e6a3c50e036503677",
+      "src/cli/pool_support.rs": "a7def6fc920f487799f926c65bd569c6cc544217c583a67eef7976e6e0db0860",
+      "src/cli/stream_support.rs": "c4acae6f62fbe3a74f53417b5baaa1a60f9149d940a9b112d62c2af664024ef2",
+      "src/cli/args.rs": "b9e94ba5233aed50c25d0d5d9d800b5463feabdd9c548e8bcc920ad782f7851a",
+      "src/cli/result.rs": "5bc3cbeb2ba160bfd0a11bec5192f0edf0e91167fd81da197892f8e3551ad11c",
+      "src/cli/context.rs": "c2307a9d9493dc98237670630fcc972424d87d6a3f8523c469a5a2ec4c5a517b",
+      "src/cli/tap.rs": "7b0e477671bdead60a15309dfc0f188345ee8c0587ea973b16833e25b5878e98",
+      "src/api/message.rs": "bbc795d5bba9b82c6511be56ac4baa837172fc664e458b127ae65fafd7309139",
+      "src/api/notify.rs": "47e07534bb249420352b122ed46a2c1ebfdc35acad4b2c9e346d0258eb370f01",
+      "src/api/access.rs": "f2de12f23e85293d657d3ceb54aa7944f87446ff4d3d0493e2ed975e3821fc0c",
+      "src/api/remote.rs": "86ede5636c5a161721c5769a71a5d53620cae178c0cea00174552392b8ced215",
+      "src/api/client.rs": "0d8e9b0d4da98ab5893cffd29e9edf939ff2cc3cc48208e73619030712e43172",
+      "src/api/access_store.rs": "c8e1982fc2a78869cfbce6461aa70fc5ae60eb72c124be512200a64113d4cb7c",
+      "src/api/browser_trust.rs": "2b1cbd9b76a2f8db0cb3c41b9c96f9ab6685d2351da5b440f5ca9fd7520d9ea9",
+      "src/api/access_tls.rs": "91a809fca1740cb57d49442f5609af007693d569e0dac09822ac41b9b9fb44d0",
+      "src/api/mod.rs": "cfbdfc4778f0029c6ccb518cbe8fc068dcffb4ea4b2ef7b4ecc3fd3bf13acdc9",
+      "src/api/validation.rs": "7a8140aa9925473d940685a558061d9e05b1865e03d73929bc24a295b342d242",
+      "src/api/udp.rs": "f55e738f2f4467bd3b9e67ed70c3dcb3e48fc468f798b2544f4e69bb0daa4c71",
+      "src/serve_service/unix.rs": "5b3f089b6a28722ff6d59b1e3ff9a1f7696cd961961cf69c82612635f5f02fca",
+      "src/serve_service/windows.rs": "cf7f2bfadd48c756b405441236384386ec09220bfbdad9e4ae13d0c2e4ab26d7",
+      "src/core/lite3/json.rs": "4d80b00b271f8dd05ae753b2a9c95b0e389610bcd7430e4d0c01622a226362aa",
+      "src/core/lite3/mod.rs": "06a8df8af9a6274ef57c3ae28e305b8e52c7fb25b1e7fb22bf444282f8918c3c",
+      "src/core/lite3/sys.rs": "c77495747449a51d5aff15eff27ef40b3434d7665498fde601acc7d3299b2ab3",
+      "src/core/lite3/builder.rs": "c461ea362e9970f24c9a31b4009aed02c89041edc5d4610e17f2021af1a54880",
+      "c/lite3_shim.h": "ba4669a07f919be601560bf2d59dc6408f942e0b7a4cdd22c85c4224acc35c92",
+      "c/notify_shim.c": "8394a34c2d604bef5c8d1cdd3075427f371076421be73549eefeb6e2ce228a99",
+      "c/lite3_builder.c": "915322c97b6849c9987c216f801ac3109629ee0021a9cca0e209e364741fe07e",
+      "c/lite3_shim.c": "595aeb717ed9e7b24d5ec2ce999f0e99af1b909b874e0d34e4170882ae555fad",
+      "examples/bench_transport_native.rs": "a168a15c1a31e1b483842ca948f3fad92d67efb7c8dfb2fe85dc55e1a051cc42",
+      "examples/bench_owned_views.rs": "b632cb24191715ab8d000765f6355f9d14e90a9c60bd46feaccc396f5f0f3848",
+      "examples/bench_owned_view_allocations.rs": "4e3cc123fea11c23997a3ebf5d8414d9aa1c2f97ad117d68ef8b4297eae2270e",
+      "examples/plasmite-bench.rs": "083f4683dfa0cd85eb85b781ee4d91b792a8a39fcd3fbd3862d587a1e817e7dd",
+      "examples/support/owned_view_workloads.rs": "c9bb4d90bc2f7a3b02bbe04bfe838b0a853d55b60647277d4001f5a0d61357a9"
+    },
+    "note": "Same artifact and fixture for Vec versus bounded cursor. Timing binary uses normal allocator; allocation binary is separate and excludes C malloc. CPU is child user+system reported by getrusage; source archive accompanies raw runs.",
+    "binaries_sha256": {
+      "target/release/examples/bench_owned_views": "d8bbcdbc141ffb11715a90f44aa50400fe32152e783ea61c7496559227ab35e2",
+      "target/release/examples/bench_owned_view_allocations": "f0345a0d191a4d35a55391bcfbf38e8b6ffee577c7fe7c79364ecf537c0ecee5"
+    }
+  },
+  "runs": [
+    {
+      "argv": [
+        "target/release/examples/bench_owned_views",
+        "2000"
+      ],
+      "elapsed_seconds": 0.655093332985416,
+      "cpu_seconds": 0.479164,
+      "rows": [
+        {
+          "note": "Rust allocator counts exclude C malloc and mapped storage. Cold selected lanes include one snapshot copy; warm lanes reuse one validated owner. Repeat in alternating order externally. Retained child refs hold the complete encoded payload.",
+          "reverse_lane_order": false
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 215.6665
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 44.6045
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 1163.1875
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 873.604
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 136.9165
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 7.8125
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 125.229
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 14.0415
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 335.083
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 131.375
+        },
+        {
+          "fixture": "small",
+          "retained_encoded_payload_bytes_for_child": 560
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 13847.542
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 572.6875
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 36002.1045
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 49495.6665
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 66.396
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 30.3125
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 54.7915
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 33.25
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 20370.396
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 57.521
+        },
+        {
+          "fixture": "wide",
+          "retained_encoded_payload_bytes_for_child": 34932
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 3686.6045
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 587.25
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 5054.9585
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 17835.0835
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 60.9375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 5.875
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 55.208
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 10.2085
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 15323.1665
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 58.4375
+        },
+        {
+          "fixture": "long_string",
+          "retained_encoded_payload_bytes_for_child": 66108
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 4751.6875
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 425.6875
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 11223.625
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 22899.167
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 61.479
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 3.2915
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 9930.4165
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 347.625
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 9192.2915
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 10922.0835
+        },
+        {
+          "fixture": "array",
+          "retained_encoded_payload_bytes_for_child": 41520
+        }
+      ]
+    },
+    {
+      "argv": [
+        "target/release/examples/bench_owned_views",
+        "2000",
+        "--reverse"
+      ],
+      "elapsed_seconds": 0.46512466692365706,
+      "cpu_seconds": 0.4624689999999999,
+      "rows": [
+        {
+          "note": "Rust allocator counts exclude C malloc and mapped storage. Cold selected lanes include one snapshot copy; warm lanes reuse one validated owner. Repeat in alternating order externally. Retained child refs hold the complete encoded payload.",
+          "reverse_lane_order": true
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 62.958
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 154.0625
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 7.417
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 54.1045
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 3.896
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 58.6875
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 538.229
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 587.4165
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 21.5625
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 84.583
+        },
+        {
+          "fixture": "small",
+          "retained_encoded_payload_bytes_for_child": 560
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 60.2915
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 20960.5625
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 33.7915
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 59.333
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 30.625
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 66.0415
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 51672.354
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 31638.896
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 380.833
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 8926.0625
+        },
+        {
+          "fixture": "wide",
+          "retained_encoded_payload_bytes_for_child": 34932
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 56.521
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 15519.375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 9.4165
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 58.146
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 5.271
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 56.521
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 18240.125
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 5071.896
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 1063.375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 3710.9375
+        },
+        {
+          "fixture": "long_string",
+          "retained_encoded_payload_bytes_for_child": 66108
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 10912.0625
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 8931.646
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 319.9375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 9961.9795
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 4.146
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 70.479
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 22472.646
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 11697.271
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 439.4375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 5079.646
+        },
+        {
+          "fixture": "array",
+          "retained_encoded_payload_bytes_for_child": 41520
+        }
+      ]
+    },
+    {
+      "argv": [
+        "target/release/examples/bench_owned_views",
+        "2000"
+      ],
+      "elapsed_seconds": 0.4620220420183614,
+      "cpu_seconds": 0.459335,
+      "rows": [
+        {
+          "note": "Rust allocator counts exclude C malloc and mapped storage. Cold selected lanes include one snapshot copy; warm lanes reuse one validated owner. Repeat in alternating order externally. Retained child refs hold the complete encoded payload.",
+          "reverse_lane_order": false
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 94.4585
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 19.729
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 605.6045
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 534.271
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 71.708
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 3.7705
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 60.9585
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 7.2915
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 150.146
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 61.375
+        },
+        {
+          "fixture": "small",
+          "retained_encoded_payload_bytes_for_child": 560
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 9214.5415
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 405.042
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 31618.5625
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 52184.417
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 66.583
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 30.042
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 60.542
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 32.708
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 20231.1875
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 57.958
+        },
+        {
+          "fixture": "wide",
+          "retained_encoded_payload_bytes_for_child": 34932
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 3745.1875
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 571.792
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 5020.042
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 17843.4375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 59.896
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 5.2705
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 57.1875
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 8.771
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 15416.521
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 57.6875
+        },
+        {
+          "fixture": "long_string",
+          "retained_encoded_payload_bytes_for_child": 66108
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 4942.6665
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 407.4795
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 11465.9585
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 22260.75
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 65.7085
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 3.7295
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 10012.3335
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 331.8335
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 8984.0
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 10778.625
+        },
+        {
+          "fixture": "array",
+          "retained_encoded_payload_bytes_for_child": 41520
+        }
+      ]
+    },
+    {
+      "argv": [
+        "target/release/examples/bench_owned_views",
+        "2000",
+        "--reverse"
+      ],
+      "elapsed_seconds": 0.46291570796165615,
+      "cpu_seconds": 0.4604189999999998,
+      "rows": [
+        {
+          "note": "Rust allocator counts exclude C malloc and mapped storage. Cold selected lanes include one snapshot copy; warm lanes reuse one validated owner. Repeat in alternating order externally. Retained child refs hold the complete encoded payload.",
+          "reverse_lane_order": true
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 63.9375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 153.9375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 6.9375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 54.0625
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 3.6455
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 70.521
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 587.9585
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 667.375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 27.271
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 94.521
+        },
+        {
+          "fixture": "small",
+          "retained_encoded_payload_bytes_for_child": 560
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 58.3125
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 20759.854
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 35.396
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 55.042
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 33.9585
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 68.583
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 50014.458
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 32804.0
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 464.4795
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 8876.021
+        },
+        {
+          "fixture": "wide",
+          "retained_encoded_payload_bytes_for_child": 34932
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 70.4585
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 15309.4375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 8.958
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 57.729
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 5.521
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 60.8125
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 17971.3955
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 5055.0415
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 744.521
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 3732.292
+        },
+        {
+          "fixture": "long_string",
+          "retained_encoded_payload_bytes_for_child": 66108
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 10888.5
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 8943.25
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 396.5835
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 9840.604
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 4.0
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 64.229
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 22776.854
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 11406.604
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 641.875
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 5200.25
+        },
+        {
+          "fixture": "array",
+          "retained_encoded_payload_bytes_for_child": 41520
+        }
+      ]
+    },
+    {
+      "argv": [
+        "target/release/examples/bench_owned_views",
+        "2000"
+      ],
+      "elapsed_seconds": 0.4676674579968676,
+      "cpu_seconds": 0.46501099999999973,
+      "rows": [
+        {
+          "note": "Rust allocator counts exclude C malloc and mapped storage. Cold selected lanes include one snapshot copy; warm lanes reuse one validated owner. Repeat in alternating order externally. Retained child refs hold the complete encoded payload.",
+          "reverse_lane_order": false
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 91.4375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 24.604
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 627.583
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 556.0205
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 70.2915
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 4.167
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 64.354
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 7.979
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 144.8125
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 62.6875
+        },
+        {
+          "fixture": "small",
+          "retained_encoded_payload_bytes_for_child": 560
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 8881.354
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 399.0
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 32049.5625
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 52775.2705
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 76.5835
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 31.0205
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 57.708
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 33.8335
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 21462.7915
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 60.396
+        },
+        {
+          "fixture": "wide",
+          "retained_encoded_payload_bytes_for_child": 34932
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 3968.9795
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 675.042
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 5222.479
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 18109.8125
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 60.5835
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 5.5625
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 55.146
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 9.2295
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 15389.646
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 58.8335
+        },
+        {
+          "fixture": "long_string",
+          "retained_encoded_payload_bytes_for_child": 66108
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 4955.1875
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 394.4375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 11250.0625
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 22513.2085
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 60.104
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 3.875
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 9868.25
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 320.771
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 9082.25
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 10827.0625
+        },
+        {
+          "fixture": "array",
+          "retained_encoded_payload_bytes_for_child": 41520
+        }
+      ]
+    },
+    {
+      "argv": [
+        "target/release/examples/bench_owned_views",
+        "2000",
+        "--reverse"
+      ],
+      "elapsed_seconds": 0.46638620900921524,
+      "cpu_seconds": 0.4638659999999998,
+      "rows": [
+        {
+          "note": "Rust allocator counts exclude C malloc and mapped storage. Cold selected lanes include one snapshot copy; warm lanes reuse one validated owner. Repeat in alternating order externally. Retained child refs hold the complete encoded payload.",
+          "reverse_lane_order": true
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 60.25
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 140.729
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 7.4165
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 54.2085
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 3.8545
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 58.125
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 520.7705
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 584.833
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 19.896
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 76.708
+        },
+        {
+          "fixture": "small",
+          "retained_encoded_payload_bytes_for_child": 560
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 55.4375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 20306.375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 30.5
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 60.875
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 27.875
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 75.8545
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 50590.4585
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 31978.0415
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 416.9585
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 9399.625
+        },
+        {
+          "fixture": "wide",
+          "retained_encoded_payload_bytes_for_child": 34932
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 57.604
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 15937.7295
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 9.3125
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 57.25
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 6.4795
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 62.854
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 19094.8545
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 5158.1665
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 954.479
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 3719.8125
+        },
+        {
+          "fixture": "long_string",
+          "retained_encoded_payload_bytes_for_child": 66108
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 10887.792
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 9117.521
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 362.854
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 10114.0205
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 3.8125
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 62.2085
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 22365.2085
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 11641.292
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 576.6665
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 5071.875
+        },
+        {
+          "fixture": "array",
+          "retained_encoded_payload_bytes_for_child": 41520
+        }
+      ]
+    },
+    {
+      "argv": [
+        "target/release/examples/bench_owned_views",
+        "2000"
+      ],
+      "elapsed_seconds": 0.46142479206901044,
+      "cpu_seconds": 0.45877900000000005,
+      "rows": [
+        {
+          "note": "Rust allocator counts exclude C malloc and mapped storage. Cold selected lanes include one snapshot copy; warm lanes reuse one validated owner. Repeat in alternating order externally. Retained child refs hold the complete encoded payload.",
+          "reverse_lane_order": false
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 86.75
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 20.2295
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 585.9585
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 535.0835
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 61.7295
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 3.8545
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 55.917
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 7.3335
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 140.7085
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "small",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 62.979
+        },
+        {
+          "fixture": "small",
+          "retained_encoded_payload_bytes_for_child": 560
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 8899.4795
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 401.0835
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 31593.854
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 50304.6045
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 74.4375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 32.0625
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 54.5
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 37.0835
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 20266.729
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "wide",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 62.7295
+        },
+        {
+          "fixture": "wide",
+          "retained_encoded_payload_bytes_for_child": 34932
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 3468.354
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 584.646
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 4903.0415
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 18417.7295
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 62.1875
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 4.854
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 57.5415
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 7.6455
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 16042.3955
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "long_string",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 60.1665
+        },
+        {
+          "fixture": "long_string",
+          "retained_encoded_payload_bytes_for_child": 66108
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "whole_root_validation",
+          "ns_per_op": 5313.9795
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "snapshot_copy",
+          "ns_per_op": 474.3335
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "cold_view_selected",
+          "ns_per_op": 11477.104
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "cold_json_selected",
+          "ns_per_op": 22531.9165
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "warm_view_selected",
+          "ns_per_op": 63.708
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "warm_native_selected",
+          "ns_per_op": 4.125
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_array_cursor",
+          "ns_per_op": 10054.375
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "native_array_iteration",
+          "ns_per_op": 324.896
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_json",
+          "ns_per_op": 9244.1665
+        },
+        {
+          "allocation_probe": null,
+          "fixture": "array",
+          "iterations": 2000,
+          "lane": "view_array_enumeration",
+          "ns_per_op": 10845.3335
+        },
+        {
+          "fixture": "array",
+          "retained_encoded_payload_bytes_for_child": 41520
+        }
+      ]
+    }
+  ],
+  "allocation_probe": [
+    {
+      "note": "Rust allocator counts exclude C malloc and mapped storage. Cold selected lanes include one snapshot copy; warm lanes reuse one validated owner. Repeat in alternating order externally. Retained child refs hold the complete encoded payload.",
+      "reverse_lane_order": false
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 0.0,
+        "rust_requested_bytes_per_op": 0.0
+      },
+      "fixture": "small",
+      "iterations": 100,
+      "lane": "whole_root_validation",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 1.0,
+        "rust_requested_bytes_per_op": 560.0
+      },
+      "fixture": "small",
+      "iterations": 100,
+      "lane": "snapshot_copy",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 17.0,
+        "rust_requested_bytes_per_op": 1213.0
+      },
+      "fixture": "small",
+      "iterations": 100,
+      "lane": "cold_view_selected",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 14.0,
+        "rust_requested_bytes_per_op": 1467.0
+      },
+      "fixture": "small",
+      "iterations": 100,
+      "lane": "cold_json_selected",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 2.0,
+        "rust_requested_bytes_per_op": 11.0
+      },
+      "fixture": "small",
+      "iterations": 100,
+      "lane": "warm_view_selected",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 0.0,
+        "rust_requested_bytes_per_op": 0.0
+      },
+      "fixture": "small",
+      "iterations": 100,
+      "lane": "warm_native_selected",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 0.0,
+        "rust_requested_bytes_per_op": 0.0
+      },
+      "fixture": "small",
+      "iterations": 100,
+      "lane": "view_array_cursor",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 0.0,
+        "rust_requested_bytes_per_op": 0.0
+      },
+      "fixture": "small",
+      "iterations": 100,
+      "lane": "native_array_iteration",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 4.0,
+        "rust_requested_bytes_per_op": 253.0
+      },
+      "fixture": "small",
+      "iterations": 100,
+      "lane": "view_json",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 2.0,
+        "rust_requested_bytes_per_op": 200.0
+      },
+      "fixture": "small",
+      "iterations": 100,
+      "lane": "view_array_enumeration",
+      "ns_per_op": null
+    },
+    {
+      "fixture": "small",
+      "retained_encoded_payload_bytes_for_child": 560
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 0.0,
+        "rust_requested_bytes_per_op": 0.0
+      },
+      "fixture": "wide",
+      "iterations": 100,
+      "lane": "whole_root_validation",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 1.0,
+        "rust_requested_bytes_per_op": 34932.0
+      },
+      "fixture": "wide",
+      "iterations": 100,
+      "lane": "snapshot_copy",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 423.0,
+        "rust_requested_bytes_per_op": 84233.0
+      },
+      "fixture": "wide",
+      "iterations": 100,
+      "lane": "cold_view_selected",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 1043.0,
+        "rust_requested_bytes_per_op": 193421.0
+      },
+      "fixture": "wide",
+      "iterations": 100,
+      "lane": "cold_json_selected",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 2.0,
+        "rust_requested_bytes_per_op": 11.0
+      },
+      "fixture": "wide",
+      "iterations": 100,
+      "lane": "warm_view_selected",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 0.0,
+        "rust_requested_bytes_per_op": 0.0
+      },
+      "fixture": "wide",
+      "iterations": 100,
+      "lane": "warm_native_selected",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 0.0,
+        "rust_requested_bytes_per_op": 0.0
+      },
+      "fixture": "wide",
+      "iterations": 100,
+      "lane": "view_array_cursor",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 0.0,
+        "rust_requested_bytes_per_op": 0.0
+      },
+      "fixture": "wide",
+      "iterations": 100,
+      "lane": "native_array_iteration",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 211.0,
+        "rust_requested_bytes_per_op": 35629.0
+      },
+      "fixture": "wide",
+      "iterations": 100,
+      "lane": "view_json",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 2.0,
+        "rust_requested_bytes_per_op": 200.0
+      },
+      "fixture": "wide",
+      "iterations": 100,
+      "lane": "view_array_enumeration",
+      "ns_per_op": null
+    },
+    {
+      "fixture": "wide",
+      "retained_encoded_payload_bytes_for_child": 34932
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 0.0,
+        "rust_requested_bytes_per_op": 0.0
+      },
+      "fixture": "long_string",
+      "iterations": 100,
+      "lane": "whole_root_validation",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 1.0,
+        "rust_requested_bytes_per_op": 66108.0
+      },
+      "fixture": "long_string",
+      "iterations": 100,
+      "lane": "snapshot_copy",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 17.0,
+        "rust_requested_bytes_per_op": 66785.0
+      },
+      "fixture": "long_string",
+      "iterations": 100,
+      "lane": "cold_view_selected",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 16.0,
+        "rust_requested_bytes_per_op": 198101.0
+      },
+      "fixture": "long_string",
+      "iterations": 100,
+      "lane": "cold_json_selected",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 2.0,
+        "rust_requested_bytes_per_op": 11.0
+      },
+      "fixture": "long_string",
+      "iterations": 100,
+      "lane": "warm_view_selected",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 0.0,
+        "rust_requested_bytes_per_op": 0.0
+      },
+      "fixture": "long_string",
+      "iterations": 100,
+      "lane": "warm_native_selected",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 0.0,
+        "rust_requested_bytes_per_op": 0.0
+      },
+      "fixture": "long_string",
+      "iterations": 100,
+      "lane": "view_array_cursor",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 0.0,
+        "rust_requested_bytes_per_op": 0.0
+      },
+      "fixture": "long_string",
+      "iterations": 100,
+      "lane": "native_array_iteration",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 6.0,
+        "rust_requested_bytes_per_op": 196912.0
+      },
+      "fixture": "long_string",
+      "iterations": 100,
+      "lane": "view_json",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 2.0,
+        "rust_requested_bytes_per_op": 200.0
+      },
+      "fixture": "long_string",
+      "iterations": 100,
+      "lane": "view_array_enumeration",
+      "ns_per_op": null
+    },
+    {
+      "fixture": "long_string",
+      "retained_encoded_payload_bytes_for_child": 66108
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 0.0,
+        "rust_requested_bytes_per_op": 0.0
+      },
+      "fixture": "array",
+      "iterations": 100,
+      "lane": "whole_root_validation",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 1.0,
+        "rust_requested_bytes_per_op": 41520.0
+      },
+      "fixture": "array",
+      "iterations": 100,
+      "lane": "snapshot_copy",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 17.0,
+        "rust_requested_bytes_per_op": 66101.0
+      },
+      "fixture": "array",
+      "iterations": 100,
+      "lane": "cold_view_selected",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 22.0,
+        "rust_requested_bytes_per_op": 111591.0
+      },
+      "fixture": "array",
+      "iterations": 100,
+      "lane": "cold_json_selected",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 2.0,
+        "rust_requested_bytes_per_op": 11.0
+      },
+      "fixture": "array",
+      "iterations": 100,
+      "lane": "warm_view_selected",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 0.0,
+        "rust_requested_bytes_per_op": 0.0
+      },
+      "fixture": "array",
+      "iterations": 100,
+      "lane": "warm_native_selected",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 0.0,
+        "rust_requested_bytes_per_op": 0.0
+      },
+      "fixture": "array",
+      "iterations": 100,
+      "lane": "view_array_cursor",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 0.0,
+        "rust_requested_bytes_per_op": 0.0
+      },
+      "fixture": "array",
+      "iterations": 100,
+      "lane": "native_array_iteration",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 9.0,
+        "rust_requested_bytes_per_op": 32117.0
+      },
+      "fixture": "array",
+      "iterations": 100,
+      "lane": "view_json",
+      "ns_per_op": null
+    },
+    {
+      "allocation_probe": {
+        "rust_allocs_per_op": 10.0,
+        "rust_requested_bytes_per_op": 89408.0
+      },
+      "fixture": "array",
+      "iterations": 100,
+      "lane": "view_array_enumeration",
+      "ns_per_op": null
+    },
+    {
+      "fixture": "array",
+      "retained_encoded_payload_bytes_for_child": 41520
+    }
+  ]
+}

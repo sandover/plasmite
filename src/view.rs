@@ -329,6 +329,111 @@ impl<'a> ValueRef<'a> {
     }
 }
 
+/// Sequential traversal with fixed-size native state, independent of collection size.
+pub struct Entries<'a> {
+    owner: &'a MessageView,
+    cursor: NodeCursor,
+}
+
+pub(crate) type CursorEntry<'a> = (Option<&'a str>, usize, u32);
+
+pub(crate) struct NodeCursor {
+    state: [u64; 32],
+    offset: usize,
+    done: bool,
+}
+impl NodeCursor {
+    pub(crate) fn new(owner: &MessageView, offset: usize) -> Result<Self, Error> {
+        let mut cursor = Self {
+            state: [0; 32],
+            offset,
+            done: false,
+        };
+        if unsafe {
+            sys::plasmite_lite3_cursor_init(
+                owner.bytes().as_ptr(),
+                owner.bytes().len(),
+                offset,
+                cursor.state.as_mut_ptr().cast(),
+                256,
+            )
+        } < 0
+        {
+            return Err(corrupt());
+        }
+        Ok(cursor)
+    }
+    pub(crate) fn next<'a>(
+        &mut self,
+        owner: &'a MessageView,
+    ) -> Result<Option<CursorEntry<'a>>, Error> {
+        if self.done {
+            return Ok(None);
+        }
+        loop {
+            let mut entry = sys::Entry::default();
+            let mut hash = 0;
+            let result = unsafe {
+                sys::plasmite_lite3_cursor_next(
+                    owner.bytes().as_ptr(),
+                    owner.bytes().len(),
+                    self.state.as_mut_ptr().cast(),
+                    &mut entry,
+                    &mut hash,
+                )
+            };
+            if result < 0 {
+                self.done = true;
+                return Err(corrupt());
+            }
+            if result == 0 {
+                self.done = true;
+                return Ok(None);
+            }
+            let key = if entry.key.is_null() {
+                None
+            } else {
+                Some(
+                    std::str::from_utf8(unsafe {
+                        std::slice::from_raw_parts(entry.key.cast(), entry.key_len)
+                    })
+                    .map_err(|_| corrupt())?,
+                )
+            };
+            if let (Some(keys), Some(key)) = (owner.snapshot.duplicates.get(&self.offset), key)
+                && keys.get(key) != Some(&entry.offset)
+            {
+                continue;
+            }
+            return Ok(Some((key, entry.offset, hash)));
+        }
+    }
+}
+impl<'a> ValueRef<'a> {
+    pub fn iter(self) -> Result<Entries<'a>, Error> {
+        Ok(Entries {
+            owner: self.owner,
+            cursor: NodeCursor::new(self.owner, self.offset)?,
+        })
+    }
+}
+impl<'a> Iterator for Entries<'a> {
+    type Item = Result<(Option<&'a str>, ValueRef<'a>), Error>;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.cursor.next(self.owner) {
+            Ok(Some((key, offset, _))) => Some(Ok((
+                key,
+                ValueRef {
+                    owner: self.owner,
+                    offset,
+                },
+            ))),
+            Ok(None) => None,
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -393,10 +498,37 @@ mod tests {
         let data = view.data();
         assert_eq!(data.len().unwrap(), 1);
         assert_eq!(data.entries().unwrap().len(), 1);
+        assert_eq!(
+            data.iter()
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+                .len(),
+            1
+        );
         let selected = data.get(&key).unwrap().unwrap().integer().unwrap();
         let json: serde_json::Value = serde_json::from_slice(&data.to_json().unwrap()).unwrap();
         assert_eq!(json[&key].as_i64(), Some(selected));
         assert_eq!(selected, initial.node(last.offset).integer);
+    }
+    #[test]
+    fn cursor_preserves_exact_empty_unicode_and_long_keys() {
+        let long = "é".repeat(1000);
+        let encoded = Lite3Buf::from_json_str(
+            &serde_json::json!({"meta":{"tags":[]},"data":{"":1,"é":2,long.clone():3}}).to_string(),
+        )
+        .unwrap();
+        let view = MessageView::from_bytes(encoded.as_slice(), 1, 2).unwrap();
+        let mut keys = view
+            .data()
+            .iter()
+            .unwrap()
+            .map(|row| row.unwrap().0.unwrap().to_owned())
+            .collect::<Vec<_>>();
+        keys.sort();
+        let mut expected = vec![String::new(), "é".to_owned(), long];
+        expected.sort();
+        assert_eq!(keys, expected);
     }
     #[test]
     fn input_alignment_and_threaded_owner_are_explicit() {
