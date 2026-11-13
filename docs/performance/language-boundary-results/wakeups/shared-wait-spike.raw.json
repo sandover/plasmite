@@ -1,0 +1,19 @@
+{
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "source_sha256": "8b303efe6a35a4c256d56d44e4e1ba78c6b251945aa6e1fde90b019833ddb4e0",
+  "binary_sha256": "f1a31d2e0466ba5e823f927325e0a9b7f24c769e4d0d890c6156147840fbe75e",
+  "compiler": "Apple clang version 21.0.0 (clang-2100.4.1.1)\nTarget: arm64-apple-darwin27.2.0\nThread model: posix\nInstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n",
+  "result": {
+    "children": 3,
+    "different_mappings": true,
+    "wake_all_result": 0,
+    "timeout_ns": 1064000,
+    "changed_value_ns": 5000,
+    "waits_ns": [
+      23844000,
+      23457000,
+      22666000
+    ]
+  },
+  "diagnostics": "wake return=0 errno=0\nchild 0 return=2 errno=0 value=1 wait_ns=23844000 status=0\nchild 1 return=0 errno=0 value=1 wait_ns=23457000 status=0\nchild 2 return=1 errno=0 value=1 wait_ns=22666000 status=0\ntimeout return=-1 errno=60\nchanged return=0 errno=0\n"
+}
