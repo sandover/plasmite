@@ -60,6 +60,7 @@ async function main() {
           ['cold-field/current-json', async () => pool.get(seq).data.metrics.power],
           ['cold-native/view', async () => toNative((await pool.getView(seq)).data).metrics.power],
           ['cold-native/current-json', async () => pool.get(seq).data.metrics.power],
+          ['cold-native/json-parse-safe-fixture', async () => JSON.parse(toJson((await pool.getView(seq)).data)).metrics.power],
         ];
         const warm = [
           ['warm-field/view', iterations * 100, () => view.data.metrics.power],
@@ -72,6 +73,7 @@ async function main() {
           ['warm-map/native-object', arrayIterations, () => native.data.samples.map(x => x.value).length],
           ['warm-copy/view-toNative', iterations, () => toNative(view.data).metrics.power],
           ['warm-copy/native-structuredClone', iterations, () => structuredClone(native.data).metrics.power],
+          ['warm-copy/json-parse-safe-fixture', iterations, () => JSON.parse(toJson(view.data)).metrics.power],
           ['warm-json/view-toJson', iterations, () => toJson(view.data).length],
           ['warm-json/native-stringify', iterations, () => JSON.stringify(native.data).length],
         ];

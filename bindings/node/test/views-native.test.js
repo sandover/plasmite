@@ -74,3 +74,33 @@ test('native cursor supports early return and mixed values across chunks', async
   pool.close();
   assert.deepEqual([...retained], values.slice(1));
 });
+
+test('native byte views preserve bytes and export independent mutable buffers', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plasmite-native-bytes-'));
+  const client = new Client(dir), pool = client.createPool('views', 65536);
+  t.after(() => { pool.close(); client.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const token = Buffer.from('native-byte-fixture-with-zero');
+  pool.append({ blob: token.toString() });
+  const payload = pool.getLite3(1n).payload;
+  // The vendored format shares length-prefixed string/byte storage, as the
+  // core native-byte fixture does. Include the string terminator as a byte.
+  const length = Buffer.alloc(4);
+  length.writeUInt32LE(token.length + 1);
+  const needle = Buffer.concat([Buffer.from([5]), length, token, Buffer.from([0])]);
+  const position = payload.indexOf(needle);
+  assert.ok(position >= 0);
+  assert.equal(payload.indexOf(needle, position + 1), -1);
+  payload[position] = 4; // LITE3_TYPE_BYTES, formerly LITE3_TYPE_STRING.
+  const seq = pool.appendLite3(payload);
+  const view = await pool.getView(seq);
+  const expected = Buffer.concat([token, Buffer.from([0])]);
+  assert.equal(Array.isArray(view.data.blob), false);
+  assert.deepEqual([...view.data.blob], [...expected]);
+  const native = toNative(view.data);
+  assert.ok(Buffer.isBuffer(native.blob));
+  assert.deepEqual(native.blob, expected);
+  native.blob[0] = 0;
+  assert.equal(view.data.blob[0], token[0]);
+  assert.throws(() => { view.data.blob[0] = 0; }, TypeError);
+  assert.equal(toJson(view.data.blob), JSON.stringify(expected.toString('base64')));
+});

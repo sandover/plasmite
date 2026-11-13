@@ -190,6 +190,13 @@ impl NativeView {
         entries.truncate(count);
         Ok(entries)
     }
+    fn property(&self, env: Env, entry: &Entry) -> Result<Property> {
+        let child = self.native_value(env, entry.value.offset as u32)?;
+        let key =
+            std::str::from_utf8(unsafe { std::slice::from_raw_parts(entry.key, entry.key_len) })
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+        Ok(Property::new(key)?.with_value(&child))
+    }
     fn native_value(&self, env: Env, node: u32) -> Result<JsUnknown> {
         let value = self.read(env, node)?;
         if value.kind < 6 {
@@ -208,17 +215,23 @@ impl NativeView {
         } else {
             env.create_object()?
         };
-        for (index, entry) in entries.iter().enumerate() {
-            let child = self.native_value(env, entry.value.offset as u32)?;
-            if value.kind == 8 {
-                out.set_element(index as u32, child)?;
-            } else {
-                let key = std::str::from_utf8(unsafe {
-                    std::slice::from_raw_parts(entry.key, entry.key_len)
-                })
-                .map_err(|e| Error::from_reason(e.to_string()))?;
-                out.define_properties(&[Property::new(key)?.with_value(&child)])?;
+        if value.kind == 8 {
+            for (index, entry) in entries.iter().enumerate() {
+                out.set_element(
+                    index as u32,
+                    self.native_value(env, entry.value.offset as u32)?,
+                )?;
             }
+        } else if entries.len() == 1 {
+            out.define_properties(&[self.property(env, &entries[0])?])?;
+        } else if !entries.is_empty() {
+            // Property owns its key; local JS handles remain rooted in this
+            // callback's handle scope until the single definition call finishes.
+            let properties = entries
+                .iter()
+                .map(|entry| self.property(env, entry))
+                .collect::<Result<Vec<_>>>()?;
+            out.define_properties(&properties)?;
         }
         Ok(out.into_unknown())
     }

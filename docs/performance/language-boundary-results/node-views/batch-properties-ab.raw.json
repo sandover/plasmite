@@ -1,0 +1,2159 @@
+{
+  "baselineCommit": "0b7ae4d",
+  "runs": [
+    {
+      "variant": "baseline",
+      "repeat": 0,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "result": {
+        "node": "v26.13.0",
+        "platform": "darwin",
+        "arch": "arm64",
+        "iterations": 30,
+        "repeats": 1,
+        "warmOnly": true,
+        "gcExposed": true,
+        "sink": 1685549700,
+        "measurements": [
+          {
+            "fixture": "small",
+            "initialViewMs": 1.262707999999975,
+            "arrayIterations": 2000,
+            "jsonBytes": 84,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 6.349625000000003
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.10949999999996862
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 2000,
+                "elapsedMs": 11.23720800000001
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.2933750000000259
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 2000,
+                "elapsedMs": 8.359249999999975
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.22204199999998764
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 2000,
+                "elapsedMs": 10.047790999999961
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.12812499999995453
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 0.1309999999999718
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 0.14158399999996618
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 0.06908400000003212
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 0.04070899999999256
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 0.011209000000008018
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 27397072,
+                "heapTotal": 10108928,
+                "heapUsed": 5375696,
+                "external": 2464644,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 28085224,
+                "heapTotal": 10371072,
+                "heapUsed": 5434240,
+                "external": 2464648,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 28085224,
+                "heapTotal": 10371072,
+                "heapUsed": 5352944,
+                "external": 2464648,
+                "arrayBuffers": 144047
+              }
+            }
+          },
+          {
+            "fixture": "wide",
+            "initialViewMs": 0.07999999999998408,
+            "arrayIterations": 100,
+            "jsonBytes": 21576,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.6790419999999813
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.030542000000025382
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 100,
+                "elapsedMs": 8.678124999999966
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 100,
+                "elapsedMs": 0.193916999999999
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 100,
+                "elapsedMs": 0.3668330000000424
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 100,
+                "elapsedMs": 0.009957999999983258
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 100,
+                "elapsedMs": 9.306875000000048
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 100,
+                "elapsedMs": 0.09770800000001145
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 3.5405829999999696
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 1.468166999999994
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 1.3483750000000327
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 0.6762919999999895
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 0.671875
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 31509480,
+                "heapTotal": 10633216,
+                "heapUsed": 5651816,
+                "external": 2507946,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 32459752,
+                "heapTotal": 10633216,
+                "heapUsed": 5596840,
+                "external": 2507632,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 32459752,
+                "heapTotal": 10633216,
+                "heapUsed": 5513904,
+                "external": 2507632,
+                "arrayBuffers": 144047
+              }
+            }
+          },
+          {
+            "fixture": "array",
+            "initialViewMs": 0.3542500000000359,
+            "arrayIterations": 100,
+            "jsonBytes": 60366,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.7030829999999924
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.021083000000032825
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 100,
+                "elapsedMs": 234.34199999999998
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 100,
+                "elapsedMs": 2.4917500000000246
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 100,
+                "elapsedMs": 0.3980420000000322
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 100,
+                "elapsedMs": 0.007166999999981272
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 100,
+                "elapsedMs": 270.37629200000003
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 100,
+                "elapsedMs": 1.9431660000000193
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 37.68124999999998
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 21.650999999999954
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 8.846125000000029
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 5.037500000000023
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 1.5542500000000246
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 83974144,
+                "heapTotal": 28508160,
+                "heapUsed": 9999944,
+                "external": 2628510,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 78813184,
+                "heapTotal": 27279360,
+                "heapUsed": 6353576,
+                "external": 2585212,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 78813184,
+                "heapTotal": 24133632,
+                "heapUsed": 6270648,
+                "external": 2585212,
+                "arrayBuffers": 144047
+              }
+            }
+          }
+        ],
+        "hashes": {
+          "scripts/bench_views.js": "194ba02d39a5f46e435fbf415f682a5819e0ac11501e2844562a64f734e5171d",
+          "index.js": "e23723e813984b375021dfca29ccb70e5f27adacb7076dbe71547d8ec2376c14",
+          "views.js": "ce3473d088500598beb704a4316452f2894e00369c8cc80fef649189a924e3c7",
+          "native/darwin-arm64/index.node": "9ec0dd3a1c7f1983fac23878d1b1ac7c71f4b595f895685b66be0cb981c67756",
+          "native/darwin-arm64/libplasmite.dylib": "9802e35ffb7834ca72d0d5467aedb72d885c7fadbd5b09f819b3f644abc7a720"
+        },
+        "limits": [
+          "Warm native-object controls already own decoded data; they isolate view access overhead.",
+          "Cold controls perform the same requested result through the current full JSON API; initialViewMs separately captures startup including first ABI detection.",
+          "Heap/RSS samples do not prove prompt GC or a bound on retention."
+        ]
+      }
+    },
+    {
+      "variant": "candidate",
+      "repeat": 0,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "result": {
+        "node": "v26.13.0",
+        "platform": "darwin",
+        "arch": "arm64",
+        "iterations": 30,
+        "repeats": 1,
+        "warmOnly": true,
+        "gcExposed": true,
+        "sink": 1685549700,
+        "measurements": [
+          {
+            "fixture": "small",
+            "initialViewMs": 0.7143749999999969,
+            "arrayIterations": 2000,
+            "jsonBytes": 84,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.4570420000000013
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.0785410000000013
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 2000,
+                "elapsedMs": 8.106583
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.2695420000000013
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 2000,
+                "elapsedMs": 6.253542000000003
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.19316599999999085
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 2000,
+                "elapsedMs": 8.233167000000009
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.14904099999999687
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 0.16183399999999892
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 0.09675000000000011
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 0.060791999999992186
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 0.1281669999999906
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 0.015708999999986872
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 27298744,
+                "heapTotal": 10633216,
+                "heapUsed": 5387064,
+                "external": 2464644,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 28003256,
+                "heapTotal": 10371072,
+                "heapUsed": 5444904,
+                "external": 2464648,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 28003256,
+                "heapTotal": 10371072,
+                "heapUsed": 5363608,
+                "external": 2464648,
+                "arrayBuffers": 144047
+              }
+            }
+          },
+          {
+            "fixture": "wide",
+            "initialViewMs": 0.05766699999999503,
+            "arrayIterations": 100,
+            "jsonBytes": 21576,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.2226670000000013
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.025625000000005116
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 100,
+                "elapsedMs": 7.977125000000001
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 100,
+                "elapsedMs": 0.19558299999999917
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 100,
+                "elapsedMs": 0.3538330000000087
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 100,
+                "elapsedMs": 0.009042000000007988
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 100,
+                "elapsedMs": 8.469250000000002
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 100,
+                "elapsedMs": 0.08704099999999926
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 2.6713749999999976
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 1.2992919999999941
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 1.284125000000003
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 0.6283339999999953
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 0.6166249999999991
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 29838288,
+                "heapTotal": 10633216,
+                "heapUsed": 5662720,
+                "external": 2507946,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 30968784,
+                "heapTotal": 10633216,
+                "heapUsed": 5607744,
+                "external": 2507632,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 30968784,
+                "heapTotal": 10633216,
+                "heapUsed": 5524808,
+                "external": 2507632,
+                "arrayBuffers": 144047
+              }
+            }
+          },
+          {
+            "fixture": "array",
+            "initialViewMs": 0.3609170000000006,
+            "arrayIterations": 100,
+            "jsonBytes": 60366,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.59675
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.021791000000007443
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 100,
+                "elapsedMs": 224.583
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 100,
+                "elapsedMs": 2.3025420000000167
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 100,
+                "elapsedMs": 0.3521250000000009
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 100,
+                "elapsedMs": 0.006624999999985448
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 100,
+                "elapsedMs": 267.135459
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 100,
+                "elapsedMs": 1.934291999999914
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 37.26095799999996
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 21.878416000000016
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 8.972541999999976
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 4.827541999999994
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 1.5767080000000533
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 84318232,
+                "heapTotal": 28508160,
+                "heapUsed": 10010488,
+                "external": 2628510,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 79566872,
+                "heapTotal": 26755072,
+                "heapUsed": 6364120,
+                "external": 2585212,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 79566872,
+                "heapTotal": 23871488,
+                "heapUsed": 6281192,
+                "external": 2585212,
+                "arrayBuffers": 144047
+              }
+            }
+          }
+        ],
+        "hashes": {
+          "scripts/bench_views.js": "194ba02d39a5f46e435fbf415f682a5819e0ac11501e2844562a64f734e5171d",
+          "index.js": "e23723e813984b375021dfca29ccb70e5f27adacb7076dbe71547d8ec2376c14",
+          "views.js": "ce3473d088500598beb704a4316452f2894e00369c8cc80fef649189a924e3c7",
+          "native/darwin-arm64/index.node": "5365550cd9cfd652a758144352bbe3518668d903fba6a20901be5ccc2168a6a3",
+          "native/darwin-arm64/libplasmite.dylib": "9802e35ffb7834ca72d0d5467aedb72d885c7fadbd5b09f819b3f644abc7a720"
+        },
+        "limits": [
+          "Warm native-object controls already own decoded data; they isolate view access overhead.",
+          "Cold controls perform the same requested result through the current full JSON API; initialViewMs separately captures startup including first ABI detection.",
+          "Heap/RSS samples do not prove prompt GC or a bound on retention."
+        ]
+      }
+    },
+    {
+      "variant": "candidate",
+      "repeat": 1,
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "result": {
+        "node": "v26.13.0",
+        "platform": "darwin",
+        "arch": "arm64",
+        "iterations": 30,
+        "repeats": 1,
+        "warmOnly": true,
+        "gcExposed": true,
+        "sink": 1685549700,
+        "measurements": [
+          {
+            "fixture": "small",
+            "initialViewMs": 0.6334170000000015,
+            "arrayIterations": 2000,
+            "jsonBytes": 84,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.1955419999999997
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.0714579999999998
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 2000,
+                "elapsedMs": 7.729166999999997
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.24295800000000156
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 2000,
+                "elapsedMs": 6.060124999999999
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.17420800000000014
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 2000,
+                "elapsedMs": 7.5732909999999976
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.1255829999999989
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 0.11341600000000085
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 0.09062500000000284
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 0.05420799999999559
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 0.03316600000000136
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 0.009208000000000993
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 27151264,
+                "heapTotal": 10108928,
+                "heapUsed": 5387016,
+                "external": 2464644,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 27790240,
+                "heapTotal": 10108928,
+                "heapUsed": 5444904,
+                "external": 2464648,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 27839440,
+                "heapTotal": 10371072,
+                "heapUsed": 5363608,
+                "external": 2464648,
+                "arrayBuffers": 144047
+              }
+            }
+          },
+          {
+            "fixture": "wide",
+            "initialViewMs": 0.05645900000000381,
+            "arrayIterations": 100,
+            "jsonBytes": 21576,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.044792000000001
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.024500000000003297
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 100,
+                "elapsedMs": 7.431542
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 100,
+                "elapsedMs": 0.17062500000000114
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 100,
+                "elapsedMs": 0.3219579999999951
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 100,
+                "elapsedMs": 0.008625000000009209
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 100,
+                "elapsedMs": 8.64125
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 100,
+                "elapsedMs": 0.08645899999999074
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 2.670708999999988
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 1.2821670000000012
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 1.3430839999999904
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 0.6081250000000011
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 0.6375830000000065
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 29608936,
+                "heapTotal": 10895360,
+                "heapUsed": 5662720,
+                "external": 2507946,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 30854120,
+                "heapTotal": 10895360,
+                "heapUsed": 5607744,
+                "external": 2507632,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 30919704,
+                "heapTotal": 10633216,
+                "heapUsed": 5524808,
+                "external": 2507632,
+                "arrayBuffers": 144047
+              }
+            }
+          },
+          {
+            "fixture": "array",
+            "initialViewMs": 0.3346250000000026,
+            "arrayIterations": 100,
+            "jsonBytes": 60366,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.5210419999999942
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.021208000000001448
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 100,
+                "elapsedMs": 231.99275
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 100,
+                "elapsedMs": 2.3566660000000184
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 100,
+                "elapsedMs": 0.3802500000000464
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 100,
+                "elapsedMs": 0.006416999999999007
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 100,
+                "elapsedMs": 270.1173749999999
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 100,
+                "elapsedMs": 1.9161659999999756
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 38.15070800000001
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 21.583875000000035
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 8.85283400000003
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 4.9933750000000146
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 1.574124999999981
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 84007008,
+                "heapTotal": 28246016,
+                "heapUsed": 10010488,
+                "external": 2628510,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 79321184,
+                "heapTotal": 26230784,
+                "heapUsed": 6364120,
+                "external": 2585212,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 79337568,
+                "heapTotal": 23871488,
+                "heapUsed": 6281192,
+                "external": 2585212,
+                "arrayBuffers": 144047
+              }
+            }
+          }
+        ],
+        "hashes": {
+          "scripts/bench_views.js": "194ba02d39a5f46e435fbf415f682a5819e0ac11501e2844562a64f734e5171d",
+          "index.js": "e23723e813984b375021dfca29ccb70e5f27adacb7076dbe71547d8ec2376c14",
+          "views.js": "ce3473d088500598beb704a4316452f2894e00369c8cc80fef649189a924e3c7",
+          "native/darwin-arm64/index.node": "5365550cd9cfd652a758144352bbe3518668d903fba6a20901be5ccc2168a6a3",
+          "native/darwin-arm64/libplasmite.dylib": "9802e35ffb7834ca72d0d5467aedb72d885c7fadbd5b09f819b3f644abc7a720"
+        },
+        "limits": [
+          "Warm native-object controls already own decoded data; they isolate view access overhead.",
+          "Cold controls perform the same requested result through the current full JSON API; initialViewMs separately captures startup including first ABI detection.",
+          "Heap/RSS samples do not prove prompt GC or a bound on retention."
+        ]
+      }
+    },
+    {
+      "variant": "baseline",
+      "repeat": 1,
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "result": {
+        "node": "v26.13.0",
+        "platform": "darwin",
+        "arch": "arm64",
+        "iterations": 30,
+        "repeats": 1,
+        "warmOnly": true,
+        "gcExposed": true,
+        "sink": 1685549700,
+        "measurements": [
+          {
+            "fixture": "small",
+            "initialViewMs": 0.621540999999997,
+            "arrayIterations": 2000,
+            "jsonBytes": 84,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.639792
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.09962499999999963
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 2000,
+                "elapsedMs": 8.090541000000002
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.2631250000000023
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 2000,
+                "elapsedMs": 6.271291999999995
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.20833400000000069
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 2000,
+                "elapsedMs": 7.640000000000001
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.12929100000000204
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 0.12774999999999892
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 0.09941599999999795
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 0.05908300000000111
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 0.03120799999999946
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 0.010000000000005116
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 27167720,
+                "heapTotal": 10371072,
+                "heapUsed": 5375672,
+                "external": 2464642,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 27757544,
+                "heapTotal": 10371072,
+                "heapUsed": 5434216,
+                "external": 2464646,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 27757544,
+                "heapTotal": 10371072,
+                "heapUsed": 5352920,
+                "external": 2464646,
+                "arrayBuffers": 144047
+              }
+            }
+          },
+          {
+            "fixture": "wide",
+            "initialViewMs": 0.06812500000000199,
+            "arrayIterations": 100,
+            "jsonBytes": 21576,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.0563750000000027
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.026166000000003464
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 100,
+                "elapsedMs": 7.528500000000008
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 100,
+                "elapsedMs": 0.18633300000000474
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 100,
+                "elapsedMs": 0.31512499999999477
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 100,
+                "elapsedMs": 0.008665999999990959
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 100,
+                "elapsedMs": 8.416125000000008
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 100,
+                "elapsedMs": 0.08737500000000864
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 3.196832999999998
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 1.395124999999993
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 1.2834999999999894
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 0.6644579999999962
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 0.526416999999995
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 31099904,
+                "heapTotal": 10633216,
+                "heapUsed": 5651792,
+                "external": 2507944,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 32033792,
+                "heapTotal": 10633216,
+                "heapUsed": 5596816,
+                "external": 2507632,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 32033792,
+                "heapTotal": 10633216,
+                "heapUsed": 5513880,
+                "external": 2507632,
+                "arrayBuffers": 144047
+              }
+            }
+          },
+          {
+            "fixture": "array",
+            "initialViewMs": 0.3253750000000082,
+            "arrayIterations": 100,
+            "jsonBytes": 60366,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.4983330000000024
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.02174999999999727
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 100,
+                "elapsedMs": 223.66945800000002
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 100,
+                "elapsedMs": 2.318375000000003
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 100,
+                "elapsedMs": 0.33858400000002575
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 100,
+                "elapsedMs": 0.006582999999977801
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 100,
+                "elapsedMs": 265.2701670000001
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 100,
+                "elapsedMs": 1.910250000000019
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 37.363833
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 21.454541999999947
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 9.115582999999901
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 5.165083999999979
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 1.5335000000000036
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 83597312,
+                "heapTotal": 29032448,
+                "heapUsed": 9999944,
+                "external": 2628510,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 78354432,
+                "heapTotal": 25968640,
+                "heapUsed": 6353576,
+                "external": 2585212,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 78354432,
+                "heapTotal": 23871488,
+                "heapUsed": 6270648,
+                "external": 2585212,
+                "arrayBuffers": 144047
+              }
+            }
+          }
+        ],
+        "hashes": {
+          "scripts/bench_views.js": "194ba02d39a5f46e435fbf415f682a5819e0ac11501e2844562a64f734e5171d",
+          "index.js": "e23723e813984b375021dfca29ccb70e5f27adacb7076dbe71547d8ec2376c14",
+          "views.js": "ce3473d088500598beb704a4316452f2894e00369c8cc80fef649189a924e3c7",
+          "native/darwin-arm64/index.node": "9ec0dd3a1c7f1983fac23878d1b1ac7c71f4b595f895685b66be0cb981c67756",
+          "native/darwin-arm64/libplasmite.dylib": "9802e35ffb7834ca72d0d5467aedb72d885c7fadbd5b09f819b3f644abc7a720"
+        },
+        "limits": [
+          "Warm native-object controls already own decoded data; they isolate view access overhead.",
+          "Cold controls perform the same requested result through the current full JSON API; initialViewMs separately captures startup including first ABI detection.",
+          "Heap/RSS samples do not prove prompt GC or a bound on retention."
+        ]
+      }
+    },
+    {
+      "variant": "baseline",
+      "repeat": 2,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "result": {
+        "node": "v26.13.0",
+        "platform": "darwin",
+        "arch": "arm64",
+        "iterations": 30,
+        "repeats": 1,
+        "warmOnly": true,
+        "gcExposed": true,
+        "sink": 1685549700,
+        "measurements": [
+          {
+            "fixture": "small",
+            "initialViewMs": 0.5921669999999999,
+            "arrayIterations": 2000,
+            "jsonBytes": 84,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.3237919999999974
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.07375000000000043
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 2000,
+                "elapsedMs": 7.726417000000001
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.2626249999999999
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 2000,
+                "elapsedMs": 6.153666999999999
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.17312499999999886
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 2000,
+                "elapsedMs": 7.6357499999999945
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.11279100000000142
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 0.11775000000000091
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 0.07883400000000051
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 0.056708000000000425
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 0.03125
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 0.009124999999997385
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 27511640,
+                "heapTotal": 10633216,
+                "heapUsed": 5376592,
+                "external": 2464644,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 27675528,
+                "heapTotal": 10371072,
+                "heapUsed": 5434096,
+                "external": 2464648,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 27675528,
+                "heapTotal": 10371072,
+                "heapUsed": 5352800,
+                "external": 2464648,
+                "arrayBuffers": 144047
+              }
+            }
+          },
+          {
+            "fixture": "wide",
+            "initialViewMs": 0.059041000000000565,
+            "arrayIterations": 100,
+            "jsonBytes": 21576,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.1088340000000017
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.02470800000000395
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 100,
+                "elapsedMs": 7.742750000000001
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 100,
+                "elapsedMs": 0.17270800000000008
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 100,
+                "elapsedMs": 0.3254579999999976
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 100,
+                "elapsedMs": 0.008583999999999037
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 100,
+                "elapsedMs": 8.479249999999993
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 100,
+                "elapsedMs": 0.08287500000000136
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 3.1310840000000013
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 1.3463330000000013
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 1.3389170000000092
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 0.5915839999999974
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 0.6487499999999926
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 31280080,
+                "heapTotal": 10633216,
+                "heapUsed": 5651704,
+                "external": 2507946,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 32279504,
+                "heapTotal": 10633216,
+                "heapUsed": 5596936,
+                "external": 2507632,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 32279504,
+                "heapTotal": 10633216,
+                "heapUsed": 5514000,
+                "external": 2507632,
+                "arrayBuffers": 144047
+              }
+            }
+          },
+          {
+            "fixture": "array",
+            "initialViewMs": 0.335125000000005,
+            "arrayIterations": 100,
+            "jsonBytes": 60366,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.5701660000000004
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.021874999999994316
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 100,
+                "elapsedMs": 233.426
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 100,
+                "elapsedMs": 2.432208000000003
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 100,
+                "elapsedMs": 0.35733300000003965
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 100,
+                "elapsedMs": 0.006582999999977801
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 100,
+                "elapsedMs": 267.304875
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 100,
+                "elapsedMs": 1.9534170000000586
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 38.265499999999975
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 21.987040999999977
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 9.106874999999945
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 5.116916999999944
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 1.525666000000001
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 87218248,
+                "heapTotal": 28508160,
+                "heapUsed": 9999472,
+                "external": 2628510,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 78485576,
+                "heapTotal": 23871488,
+                "heapUsed": 6350512,
+                "external": 2585212,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 78501960,
+                "heapTotal": 23871488,
+                "heapUsed": 6270384,
+                "external": 2585212,
+                "arrayBuffers": 144047
+              }
+            }
+          }
+        ],
+        "hashes": {
+          "scripts/bench_views.js": "194ba02d39a5f46e435fbf415f682a5819e0ac11501e2844562a64f734e5171d",
+          "index.js": "e23723e813984b375021dfca29ccb70e5f27adacb7076dbe71547d8ec2376c14",
+          "views.js": "ce3473d088500598beb704a4316452f2894e00369c8cc80fef649189a924e3c7",
+          "native/darwin-arm64/index.node": "9ec0dd3a1c7f1983fac23878d1b1ac7c71f4b595f895685b66be0cb981c67756",
+          "native/darwin-arm64/libplasmite.dylib": "9802e35ffb7834ca72d0d5467aedb72d885c7fadbd5b09f819b3f644abc7a720"
+        },
+        "limits": [
+          "Warm native-object controls already own decoded data; they isolate view access overhead.",
+          "Cold controls perform the same requested result through the current full JSON API; initialViewMs separately captures startup including first ABI detection.",
+          "Heap/RSS samples do not prove prompt GC or a bound on retention."
+        ]
+      }
+    },
+    {
+      "variant": "candidate",
+      "repeat": 2,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "result": {
+        "node": "v26.13.0",
+        "platform": "darwin",
+        "arch": "arm64",
+        "iterations": 30,
+        "repeats": 1,
+        "warmOnly": true,
+        "gcExposed": true,
+        "sink": 1685549700,
+        "measurements": [
+          {
+            "fixture": "small",
+            "initialViewMs": 0.6856669999999987,
+            "arrayIterations": 2000,
+            "jsonBytes": 84,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.3015419999999978
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.07970800000000011
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 2000,
+                "elapsedMs": 7.698832999999997
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.23900000000000432
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 2000,
+                "elapsedMs": 6.111833999999995
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.18279199999999918
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 2000,
+                "elapsedMs": 7.6719170000000005
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 2000,
+                "elapsedMs": 0.11495900000000603
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 0.10720899999999745
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 0.0917919999999981
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 0.10758400000000279
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 0.033875000000001876
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 0.00941699999999912
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 27249616,
+                "heapTotal": 10633216,
+                "heapUsed": 5387064,
+                "external": 2464642,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 27823056,
+                "heapTotal": 10633216,
+                "heapUsed": 5444904,
+                "external": 2464646,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 27773904,
+                "heapTotal": 10371072,
+                "heapUsed": 5363608,
+                "external": 2464646,
+                "arrayBuffers": 144047
+              }
+            }
+          },
+          {
+            "fixture": "wide",
+            "initialViewMs": 0.07216600000000284,
+            "arrayIterations": 100,
+            "jsonBytes": 21576,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.0813750000000013
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.024541999999996733
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 100,
+                "elapsedMs": 7.721124999999994
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 100,
+                "elapsedMs": 0.17112500000000352
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 100,
+                "elapsedMs": 0.33020900000001063
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 100,
+                "elapsedMs": 0.00837500000000091
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 100,
+                "elapsedMs": 8.521042000000008
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 100,
+                "elapsedMs": 0.085125000000005
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 2.668417000000005
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 1.29741700000001
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 1.2739159999999998
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 0.6417919999999953
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 0.6397500000000065
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 29690832,
+                "heapTotal": 10895360,
+                "heapUsed": 5662720,
+                "external": 2507944,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 30936016,
+                "heapTotal": 10895360,
+                "heapUsed": 5607744,
+                "external": 2507632,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 30936016,
+                "heapTotal": 10895360,
+                "heapUsed": 5524808,
+                "external": 2507632,
+                "arrayBuffers": 144047
+              }
+            }
+          },
+          {
+            "fixture": "array",
+            "initialViewMs": 0.328542000000013,
+            "arrayIterations": 100,
+            "jsonBytes": 60366,
+            "rows": [
+              {
+                "repeat": 0,
+                "name": "warm-field/view",
+                "operations": 3000,
+                "elapsedMs": 3.634916000000004
+              },
+              {
+                "repeat": 0,
+                "name": "warm-field/native-object",
+                "operations": 3000,
+                "elapsedMs": 0.020624999999995453
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/view",
+                "operations": 100,
+                "elapsedMs": 228.923083
+              },
+              {
+                "repeat": 0,
+                "name": "warm-array/native-object",
+                "operations": 100,
+                "elapsedMs": 2.2860000000000014
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/view",
+                "operations": 100,
+                "elapsedMs": 0.3511249999999677
+              },
+              {
+                "repeat": 0,
+                "name": "warm-prefix/native-object",
+                "operations": 100,
+                "elapsedMs": 0.006416999999999007
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/view",
+                "operations": 100,
+                "elapsedMs": 288.53520799999995
+              },
+              {
+                "repeat": 0,
+                "name": "warm-map/native-object",
+                "operations": 100,
+                "elapsedMs": 1.946207999999956
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/view-toNative",
+                "operations": 30,
+                "elapsedMs": 38.25729100000001
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/native-structuredClone",
+                "operations": 30,
+                "elapsedMs": 22.09470799999997
+              },
+              {
+                "repeat": 0,
+                "name": "warm-copy/json-parse-safe-fixture",
+                "operations": 30,
+                "elapsedMs": 8.934292000000028
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/view-toJson",
+                "operations": 30,
+                "elapsedMs": 5.01237500000002
+              },
+              {
+                "repeat": 0,
+                "name": "warm-json/native-stringify",
+                "operations": 30,
+                "elapsedMs": 1.520791000000031
+              }
+            ],
+            "memory": {
+              "before": {
+                "rss": 84252672,
+                "heapTotal": 28770304,
+                "heapUsed": 10010488,
+                "external": 2628510,
+                "arrayBuffers": 144047
+              },
+              "retainedChildren": {
+                "rss": 79517672,
+                "heapTotal": 26492928,
+                "heapUsed": 6364120,
+                "external": 2585212,
+                "arrayBuffers": 144047
+              },
+              "releasedChildren": {
+                "rss": 79517672,
+                "heapTotal": 24133632,
+                "heapUsed": 6281192,
+                "external": 2585212,
+                "arrayBuffers": 144047
+              }
+            }
+          }
+        ],
+        "hashes": {
+          "scripts/bench_views.js": "194ba02d39a5f46e435fbf415f682a5819e0ac11501e2844562a64f734e5171d",
+          "index.js": "e23723e813984b375021dfca29ccb70e5f27adacb7076dbe71547d8ec2376c14",
+          "views.js": "ce3473d088500598beb704a4316452f2894e00369c8cc80fef649189a924e3c7",
+          "native/darwin-arm64/index.node": "5365550cd9cfd652a758144352bbe3518668d903fba6a20901be5ccc2168a6a3",
+          "native/darwin-arm64/libplasmite.dylib": "9802e35ffb7834ca72d0d5467aedb72d885c7fadbd5b09f819b3f644abc7a720"
+        },
+        "limits": [
+          "Warm native-object controls already own decoded data; they isolate view access overhead.",
+          "Cold controls perform the same requested result through the current full JSON API; initialViewMs separately captures startup including first ABI detection.",
+          "Heap/RSS samples do not prove prompt GC or a bound on retention."
+        ]
+      }
+    }
+  ]
+}

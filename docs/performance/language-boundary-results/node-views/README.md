@@ -121,3 +121,30 @@ speed improvement follows. Map uses indexed access and stays within roughly
 
 The benefit is bounded scratch storage and early termination without scanning
 all entries. GC/RSS samples remain observational, not exact ownership counters.
+
+## Defining native object properties in one call
+
+The direct walker previously called napi_define_properties separately for every
+field. napi-rs allocates a descriptor vector on each call. The next walker builds
+one property list per multi-field object and calls the stable bulk API once;
+single-field objects keep the allocation-light path. Keys own their strings and
+JS values remain rooted until definition. Own-property semantics and ordinary
+writable/enumerable/configurable attributes stay intact, including __proto__.
+
+The [matched property-batch A/B](batch-properties-ab.raw.json) uses adapter
+0b7ae4d as its rebuilt baseline and the same core library hash for both variants.
+Three alternating pairs show small native conversion 4.26→3.78 microseconds and
+wide conversion 106.56→89.02 microseconds (16.5% less time). The array-of-single-
+field-objects case stays roughly unchanged, 1,256→1,272 microseconds.
+
+A benchmark-only JSON.parse(toJson(data)) control on the verified safe-number,
+no-byte fixtures takes about 2.03/42.80/297.81 microseconds for small/wide/array.
+It still beats the direct walker. That control changes key order to canonical
+JSON order and cannot preserve large i64/byte native types in general, so it is
+not an automatic production fallback. Exact bigint and native byte conversion
+checks still exercise the direct walker.
+
+The [stable napi_define_properties API](https://nodejs.org/api/n-api.html#napi_define_properties)
+works at the Node 24 floor. The newer
+[node_api_create_object_with_properties](https://nodejs.org/download/release/latest-v24.x/docs/api/n-api.html#node_api_create_object_with_properties)
+starts at 24.12 and remains experimental; this change does not require it.
