@@ -120,6 +120,22 @@ Shared input cases live in `tests/fixtures/owned_views.json`. Run
 those API declarations already ship. Runtime tasks consume these cases and add
 lifetime, mutation, reflection and encoded-duplicate checks to their own suites.
 
+### Additive Rust view operations
+
+`PoolApiExt::append_value` serializes native data directly into a retained
+`MessageView`; `append_view` forwards an existing immutable encoding and assigns
+a fresh destination identity. `get_view` copies and validates one snapshot.
+Existing message/JSON methods keep their published behavior.
+
+`MessageView::encode` constructs an uncommitted encoding; `from_json` accepts
+explicit JSON source with the strict integer rules above. Their sequence/time
+start at zero until an append assigns them. `ValueRef::decode` builds a Serde
+target directly and can borrow strings/bytes from its owner. Struct decoding
+scans fields. `ValueRef::into_owned` returns an `OwnedValue` that explicitly
+shares the complete snapshot; `as_ref` borrows it again. Serde serialization of a `ValueRef` preserves native byte values;
+explicit `to_json` uses the canonical base64 byte representation. Re-encoding a
+value ref with different tags constructs a new encoding without a native tree.
+
 ## Stable Surface
 
 ### PoolRef

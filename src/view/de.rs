@@ -32,6 +32,65 @@ impl<'de> IntoDeserializer<'de, DecodeError> for ValueRef<'de> {
         self
     }
 }
+// Map keys are stored as text, but Serde maps may request scalar keys.
+struct Key<'de>(&'de str);
+macro_rules! numeric_key {
+    ($($method:ident),* $(,)?) => { $(
+        fn $method<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, DecodeError> {
+            // The key already is text. Reuse JSON's numeric grammar without
+            // constructing a JSON string or generic value.
+            if self.0.bytes().any(|b| b.is_ascii_whitespace()) { return Err(invalid("invalid numeric map key")); }
+            let mut parser = serde_json::Deserializer::from_str(self.0);
+            let value = de::Deserializer::$method(&mut parser, visitor).map_err(invalid)?;
+            parser.end().map_err(invalid)?;
+            Ok(value)
+        }
+    )* };
+}
+impl<'de> de::Deserializer<'de> for Key<'de> {
+    type Error = DecodeError;
+    fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, DecodeError> {
+        visitor.visit_borrowed_str(self.0)
+    }
+    fn deserialize_bool<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, DecodeError> {
+        visitor.visit_bool(self.0.parse::<bool>().map_err(invalid)?)
+    }
+    numeric_key!(
+        deserialize_i8,
+        deserialize_i16,
+        deserialize_i32,
+        deserialize_i64,
+        deserialize_i128,
+        deserialize_u8,
+        deserialize_u16,
+        deserialize_u32,
+        deserialize_u64,
+        deserialize_u128,
+        deserialize_f32,
+        deserialize_f64
+    );
+    fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, DecodeError> {
+        visitor.visit_some(self)
+    }
+    fn deserialize_newtype_struct<V: Visitor<'de>>(
+        self,
+        _: &'static str,
+        visitor: V,
+    ) -> Result<V::Value, DecodeError> {
+        visitor.visit_newtype_struct(self)
+    }
+    fn deserialize_enum<V: Visitor<'de>>(
+        self,
+        _: &'static str,
+        _: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, DecodeError> {
+        visitor.visit_enum(de::value::BorrowedStrDeserializer::<DecodeError>::new(
+            self.0,
+        ))
+    }
+    serde::forward_to_deserialize_any! { char str string bytes byte_buf unit unit_struct seq tuple tuple_struct map struct identifier ignored_any }
+}
 struct Access<'de> {
     entries: Entries<'de>,
     pending: Option<ValueRef<'de>>,
@@ -50,8 +109,7 @@ impl<'de> MapAccess<'de> for Access<'de> {
         let key = key.ok_or_else(|| invalid("missing object key"))?;
         self.remaining -= 1;
         self.pending = Some(child);
-        seed.deserialize(de::value::BorrowedStrDeserializer::new(key))
-            .map(Some)
+        seed.deserialize(Key(key)).map(Some)
     }
     fn size_hint(&self) -> Option<usize> {
         Some(self.remaining)

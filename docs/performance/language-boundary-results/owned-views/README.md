@@ -408,5 +408,62 @@ Tests cover borrowed string/byte pointers, options, enum shapes, integer range
 errors, and float/integer type errors. A compile-fail example prevents borrowed
 text from escaping its owner.
 
+## Follow-up: native Rust encoding, append results, and retained children
+
+Rust can now encode a Serde input into one growing Lite3 allocation and retain
+that encoding as the append result. Custom serializers run once across growth.
+Explicit JSON input parses once. Existing validated views can forward unchanged
+without re-encoding, or supply data for a new encoding with changed tags. A
+checked subtree copy also serves native bindings without host scalar conversion.
+
+`ValueRef::into_owned` retains a child by sharing its snapshot. The operation
+requests no heap allocation or payload copy. Its retained memory includes the
+whole snapshot. Ordinary borrowed traversal still clones no ownership handle.
+
+The [consolidated raw report](rust-codec.raw.json) and
+complete source overlay (outside Git) supersede the earlier Rust
+capture for reproduction. This overlay includes every compiled Rust/C/header
+file, including parallel Go work outside these measured routes. Source hashes
+remain unchanged through the release build and archive. Seven release processes
+alternate lane order; allocation probes run separately. No builds/tests run
+during measurements. The older Rust archive omitted an unrelated, then-untracked
+Go module needed by its crate registration; use this complete overlay instead.
+
+| Native input fixture | Direct encoding | JSON encoding + parsing | Time change |
+| --- | ---: | ---: | ---: |
+| Small | 532 ns | 616 ns | −14% |
+| Wide nested object | 42.01 µs | 34.30 µs | +22% |
+| 64 KiB string | 7.42 µs | 34.75 µs | −79% |
+| 1,000-element array | 33.37 µs | 41.57 µs | −20% |
+
+The wide direct path remains slower and requests 1,220 Rust allocations versus
+23 for the JSON route. Its generic map-key handling creates an owned key and
+then a C-terminated copy for each entry. This identifies the next optimization;
+the result does not support choosing direct encoding universally. Retagging a
+wide view is also slower: 58.93 versus 49.37 µs. Long-string retagging improves
+from 34.77 to 7.65 µs. Both routes preserve the complete data and replace tags.
+
+| Typed input fixture | Direct encode + append | JSON encode + parse + append |
+| --- | ---: | ---: |
+| Small | 3.44 µs | 3.69 µs |
+| 64 KiB string | 12.23 µs | 39.64 µs |
+| 1,000-element array | 36.92 µs | 45.65 µs |
+
+These are single-producer Fast appends that return the same retained view, with
+explicit timestamps. Both paths commit through the same pool operation. Output
+checks run before timing; each measured append verifies a nonzero identity.
+No reader runs concurrently, so this does not establish delivery throughput.
+The typed input contains `power`, `samples` and optional `note`; wide extra fields
+enter only native-tree and retag lanes, not this projected typed input.
+
+The report also repeats all cold/warm decoder controls. Retained native trees
+remain faster for repeated field access and array scans. Full output comparison
+enters decoder timings; encoder lanes verify fixture outputs before timing.
+
+Reproduce with the same command as the Rust decoder capture, using
+`--output rust-codec.raw.json`. Tests additionally cover native byte values,
+map-key types, custom serializer growth, native append/forward identity and
+lifetime, retagging, and pre-publication rejection.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

@@ -494,6 +494,12 @@ int plsm_builder_put(plsm_builder_t *builder, size_t parent,
     size_t *child_node, plsm_error_t **err);
 int plsm_pool_append_builder(plsm_pool_t *pool, plsm_builder_t *builder,
     uint32_t durability, const plsm_message_view_t **out, plsm_error_t **err);
+/* Copy a checked subtree while the source owner remains alive. SIZE_MAX parent
+ * fills an empty data object from a source object and requires NULL key/zero
+ * length. It preserves the data_node returned by builder_new; other parents use
+ * the ordinary object-key/array-item rule. No host scalar conversion occurs. */
+int plsm_builder_copy_value(plsm_builder_t *builder, size_t parent,
+    const uint8_t *key, size_t key_len, plsm_value_ref_t source, plsm_error_t **err);
 void plsm_builder_free(plsm_builder_t *builder);
 
 #ifdef __cplusplus

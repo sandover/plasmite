@@ -4,10 +4,13 @@ use crate::core::error::Error;
 use crate::core::lite3::{JsonValue, sys};
 use serde::ser::{Error as _, Serialize, SerializeMap, SerializeSeq, Serializer};
 
-struct Ordered<'a>(ValueRef<'a>);
+pub(crate) struct Ordered<'a> {
+    pub value: ValueRef<'a>,
+    pub native_bytes: bool,
+}
 impl Serialize for Ordered<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let value = self.0;
+        let value = self.value;
         let node = value.owner.node(value.offset);
         match node.kind {
             sys::LITE3_TYPE_NULL => serializer.serialize_unit(),
@@ -21,6 +24,9 @@ impl Serialize for Ordered<'_> {
             }
             sys::LITE3_TYPE_BYTES => {
                 let bytes = unsafe { std::slice::from_raw_parts(node.text.cast(), node.text_len) };
+                if self.native_bytes {
+                    return serializer.serialize_bytes(bytes);
+                }
                 serializer.collect_str(&base64::display::Base64Display::new(
                     bytes,
                     &base64::engine::general_purpose::STANDARD,
@@ -33,7 +39,10 @@ impl Serialize for Ordered<'_> {
                     let (key, child) = entry.map_err(S::Error::custom)?;
                     map.serialize_entry(
                         key.ok_or_else(|| S::Error::custom("missing object key"))?,
-                        &Ordered(child),
+                        &Ordered {
+                            value: child,
+                            native_bytes: self.native_bytes,
+                        },
                     )?;
                 }
                 map.end()
@@ -43,7 +52,10 @@ impl Serialize for Ordered<'_> {
                     serializer.serialize_seq(Some(value.len().map_err(S::Error::custom)?))?;
                 for entry in value.iter().map_err(S::Error::custom)? {
                     let (_, child) = entry.map_err(S::Error::custom)?;
-                    array.serialize_element(&Ordered(child))?;
+                    array.serialize_element(&Ordered {
+                        value: child,
+                        native_bytes: self.native_bytes,
+                    })?;
                 }
                 array.end()
             }
@@ -54,7 +66,11 @@ impl Serialize for Ordered<'_> {
 impl ValueRef<'_> {
     /// Internal native-copy route; ordinary JSON export keeps canonical key order.
     pub fn to_json_stored(self) -> Result<Vec<u8>, Error> {
-        serde_json::to_vec(&Ordered(self)).map_err(|_| corrupt())
+        serde_json::to_vec(&Ordered {
+            value: self,
+            native_bytes: false,
+        })
+        .map_err(|_| corrupt())
     }
 }
 impl MessageView {

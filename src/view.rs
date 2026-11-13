@@ -2,8 +2,12 @@
 #![allow(clippy::result_large_err)]
 mod de;
 mod json;
+mod owned;
+mod ser;
 use crate::core::error::{Error, ErrorKind};
 use crate::core::lite3::{JsonValue, Lite3DocRef, sys};
+pub use owned::OwnedValue;
+pub(crate) use ser::copy_value;
 use std::collections::HashMap;
 
 fn corrupt() -> Error {
@@ -135,19 +139,21 @@ impl MessageView {
     /// # Safety
     /// The initialized prefix must be a complete readable message with canonical
     /// unique keys, valid UTF-8/finite numbers, and the common depth/shape limits.
+    /// A true JSON property additionally requires safe-range integers and no bytes.
     pub(crate) unsafe fn from_encoded_words(
         words: Vec<u32>,
         len: usize,
         seq: u64,
         timestamp_ns: u64,
         flags: u32,
+        json_native_safe: bool,
     ) -> Self {
         assert!(len <= words.len() * 4);
         Self {
             snapshot: std::sync::Arc::new(Snapshot {
                 storage: Storage::Aligned { words, len },
                 duplicates: HashMap::new(),
-                json_native_safe: false,
+                json_native_safe,
             }),
             seq,
             timestamp_ns,
@@ -543,7 +549,7 @@ mod tests {
                 encoded.as_slice().len(),
             );
             assert!(
-                !MessageView::from_encoded_words(words, encoded.as_slice().len(), 1, 2, 0)
+                !MessageView::from_encoded_words(words, encoded.as_slice().len(), 1, 2, 0, false)
                     .json_native_safe()
             );
         }

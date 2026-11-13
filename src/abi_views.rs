@@ -39,7 +39,7 @@ fn finish(r: Result<(), Error>, err: *mut *mut plsm_error) -> i32 {
         Err(e) => fail(err, e),
     }
 }
-unsafe fn value<'a>(v: plsm_value_ref) -> Result<ValueRef<'a>, Error> {
+pub(crate) unsafe fn value<'a>(v: plsm_value_ref) -> Result<ValueRef<'a>, Error> {
     let owner = unsafe { v.owner.as_ref() }.ok_or_else(usage)?;
     // The C contract requires refs obtained from this live owner, unchanged.
     Ok(unsafe { owner.view.value_at(v.offset) })

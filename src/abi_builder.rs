@@ -147,6 +147,51 @@ pub extern "C" fn plsm_builder_put(
         err,
     )
 }
+/// Copy one checked subtree without converting its scalars in the host runtime.
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_builder_copy_value(
+    builder: *mut plsm_builder,
+    parent: usize,
+    key: *const u8,
+    key_len: usize,
+    source: crate::abi_views::plsm_value_ref,
+    err: *mut *mut plsm_error,
+) -> i32 {
+    finish(
+        (|| {
+            let builder = unsafe { builder.as_mut() }
+                .and_then(|b| b.value.as_mut())
+                .ok_or_else(|| usage("builder is finished or null"))?;
+            let source = unsafe { crate::abi_views::value(source) }?;
+            if parent == usize::MAX {
+                if !key.is_null() || key_len != 0 {
+                    return Err(usage("root copy takes no key"));
+                }
+                if source.kind() != sys::LITE3_TYPE_OBJECT || !builder.data_is_empty()? {
+                    return Err(usage(
+                        "root copy requires an object and empty data destination",
+                    ));
+                }
+                let parent = builder.data;
+                for entry in source.iter()? {
+                    let (key, value) = entry?;
+                    crate::view::copy_value(builder, parent, key, value)?;
+                }
+                return Ok(());
+            }
+            let key = if key.is_null() {
+                if key_len != 0 {
+                    return Err(usage("null key span"));
+                }
+                None
+            } else {
+                Some(text(unsafe { span(key, key_len) }?)?)
+            };
+            crate::view::copy_value(builder, parent, key, source)
+        })(),
+        err,
+    )
+}
 #[unsafe(no_mangle)]
 pub extern "C" fn plsm_pool_append_builder(
     pool: *mut plsm_pool,
@@ -197,6 +242,87 @@ mod tests {
     use super::*;
     use crate::abi_views::{plsm_view_bytes, plsm_view_release, plsm_view_seq};
     use crate::core::pool::{Pool, PoolOptions};
+    #[test]
+    fn copy_checked_subtrees_keeps_exact_values_without_source_owner() {
+        let source = crate::view::MessageView::encode(
+            &serde_json::json!({"n":i64::MAX,"zero":-0.0,"text":"a\u{0000}b"}),
+            &[],
+        )
+        .unwrap();
+        let mut owner = std::ptr::null();
+        publish(source, &mut owner).unwrap();
+        let reference = unsafe { crate::abi_views::plsm_view_data(owner) };
+        let mut builder = std::ptr::null_mut();
+        let mut data = 0;
+        let mut err = std::ptr::null_mut();
+        assert_eq!(
+            plsm_builder_new(std::ptr::null(), 0, &mut builder, &mut data, &mut err),
+            0
+        );
+        assert_eq!(
+            plsm_builder_copy_value(
+                builder,
+                usize::MAX,
+                std::ptr::null(),
+                0,
+                reference,
+                &mut err
+            ),
+            0
+        );
+        assert_eq!(
+            plsm_builder_put(
+                builder,
+                data,
+                b"extra".as_ptr(),
+                5,
+                &Input {
+                    kind: 3,
+                    integer: 42,
+                    ..input(3)
+                },
+                std::ptr::null_mut(),
+                &mut err
+            ),
+            0
+        );
+        unsafe {
+            plsm_view_release(owner);
+        }
+        let encoded = unsafe { &mut *builder }
+            .value
+            .take()
+            .unwrap()
+            .finish()
+            .unwrap();
+        unsafe {
+            plsm_builder_free(builder);
+        }
+        assert_eq!(
+            encoded.data().get("n").unwrap().unwrap().integer(),
+            Some(i64::MAX)
+        );
+        assert_eq!(
+            encoded.data().get("text").unwrap().unwrap().text(),
+            Some("a\u{0000}b")
+        );
+        assert_eq!(
+            encoded
+                .data()
+                .get("zero")
+                .unwrap()
+                .unwrap()
+                .real()
+                .unwrap()
+                .to_bits(),
+            (-0.0_f64).to_bits()
+        );
+        assert_eq!(
+            encoded.data().get("extra").unwrap().unwrap().integer(),
+            Some(42)
+        );
+        assert!(!encoded.json_native_safe());
+    }
     fn input(kind: u32) -> Input {
         Input {
             kind,

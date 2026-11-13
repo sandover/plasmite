@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure direct Rust decode against matched JSON and retained native controls.
+"""Measure direct Rust encoding/decoding against matched JSON and retained native controls.
 
 Build both examples first. Keep builds/tests and other benchmarks stopped.
 Timing and Rust allocator probes run in separate processes.
@@ -27,7 +27,10 @@ def main():
     assert args.repeats > 0 and args.iterations > 0
     timing = ROOT / 'target/release/examples/bench_owned_views'
     allocations = ROOT / 'target/release/examples/bench_owned_view_allocations'
-    sources = [ROOT / p for p in ('src/view/de.rs', 'src/view.rs', 'examples/support/owned_view_workloads.rs', 'scripts/bench_rust_decode.py')]
+    sources = sorted(set(
+        [p for directory in ('src', 'c', 'include') for p in (ROOT / directory).rglob('*') if p.suffix in ('.rs', '.c', '.h')]
+        + [ROOT / p for p in ('build.rs', 'Cargo.toml', 'Cargo.lock', 'examples/bench_owned_views.rs', 'examples/bench_owned_view_allocations.rs', 'examples/support/owned_view_workloads.rs', 'scripts/bench_rust_decode.py')]
+    ))
     report = {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'platform': platform.platform(), 'sha256': {str(p.relative_to(ROOT)): fingerprint(p) for p in [timing, allocations, *sources]}, 'runs': [], 'allocations': [], 'summary': {}}
     for repeat in range(args.repeats):
         before = resource.getrusage(resource.RUSAGE_CHILDREN)

@@ -372,6 +372,41 @@ fn wait_interval(deadline: Option<Instant>, poll_interval: Duration) -> Duration
 }
 
 pub trait PoolApiExt {
+    /// Encode native data once and retain the committed immutable encoding.
+    fn append_value<T: serde::Serialize + ?Sized>(
+        &mut self,
+        data: &T,
+        tags: &[&str],
+        options: AppendOptions,
+    ) -> Result<crate::view::MessageView, Error>
+    where
+        Self: Sized,
+    {
+        let view = crate::view::MessageView::encode(data, tags)?;
+        self.append_view(&view, options)
+    }
+
+    /// Forward an immutable payload, assigning a fresh destination identity.
+    fn append_view(
+        &mut self,
+        view: &crate::view::MessageView,
+        options: AppendOptions,
+    ) -> Result<crate::view::MessageView, Error> {
+        let seq = self.append_lite3(view.bytes(), options)?;
+        Ok(view.with_identity(seq, options.timestamp_ns, 0))
+    }
+
+    /// Copy one snapshot and validate it once, retaining its encoded bytes.
+    fn get_view(&self, seq: u64) -> Result<crate::view::MessageView, Error> {
+        let frame = self.get_lite3(seq)?;
+        crate::view::MessageView::from_owned(
+            frame.payload,
+            frame.seq,
+            frame.timestamp_ns,
+            frame.flags,
+        )
+    }
+
     fn append_json(
         &mut self,
         data: &Value,
@@ -470,6 +505,15 @@ pub trait PoolApiExt {
 }
 
 impl PoolApiExt for Pool {
+    fn append_view(
+        &mut self,
+        view: &crate::view::MessageView,
+        options: AppendOptions,
+    ) -> Result<crate::view::MessageView, Error> {
+        let seq = self.append_with_options(view.bytes(), options)?;
+        Ok(view.with_identity(seq, options.timestamp_ns, 0))
+    }
+
     fn append_json_identity(
         &mut self,
         data: &Value,

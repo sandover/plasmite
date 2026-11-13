@@ -1,10 +1,12 @@
 //! Focused immutable-view comparison; timings exclude fixture construction.
 //! Run: cargo run --release --example bench_owned_views -- 2000
-use plasmite::api::{Message, lite3::Lite3Buf};
+use plasmite::api::{
+    AppendOptions, Durability, Message, Pool, PoolApiExt, PoolOptions, lite3::Lite3Buf,
+};
 use plasmite::view::MessageView;
 use std::hint::black_box;
 use std::time::Instant;
-#[derive(serde::Deserialize, Debug, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
 struct Reading<'a> {
     power: i64,
     samples: Vec<i64>,
@@ -69,7 +71,50 @@ pub fn main() {
         let native = Message::from_lite3(17, 1, bytes).unwrap();
         let expected_typed: Reading<'_> = serde::Deserialize::deserialize(&native.data).unwrap();
         assert_eq!(v.data().decode::<Reading<'_>>().unwrap(), expected_typed);
+        let direct = MessageView::encode(&data, &[]).unwrap();
+        let json = serde_json::to_vec(&data).unwrap();
+        let via_json = MessageView::from_json(&json, &[]).unwrap();
+        assert_eq!(direct.data().decode::<serde_json::Value>().unwrap(), data);
+        assert_eq!(via_json.data().decode::<serde_json::Value>().unwrap(), data);
+        let typed_direct = MessageView::encode(&expected_typed, &[]).unwrap();
+        let typed_json = serde_json::to_vec(&expected_typed).unwrap();
+        let typed_via_json = MessageView::from_json(&typed_json, &[]).unwrap();
+        assert_eq!(
+            typed_direct.data().to_json().unwrap(),
+            typed_via_json.data().to_json().unwrap()
+        );
+        let directory = tempfile::tempdir().unwrap();
+        let mut pool = Pool::create(
+            directory.path().join("typed.plasmite"),
+            PoolOptions::new(8 * 1024 * 1024),
+        )
+        .unwrap();
+        let options = AppendOptions::new(1, Durability::Fast);
+        let committed = pool.append_value(&expected_typed, &[], options).unwrap();
+        assert_eq!(
+            committed.data().decode::<Reading<'_>>().unwrap(),
+            expected_typed
+        );
+        assert_eq!(
+            pool.get_view(committed.seq)
+                .unwrap()
+                .data()
+                .decode::<Reading<'_>>()
+                .unwrap(),
+            expected_typed
+        );
+        let retagged = MessageView::encode(&v.data(), &["changed"]).unwrap();
+        assert_eq!(retagged.data().decode::<serde_json::Value>().unwrap(), data);
         let mut lanes = [
+            "append_typed_direct",
+            "append_typed_json",
+            "retag_view_direct",
+            "retag_view_json",
+            "encode_native_direct",
+            "encode_native_json",
+            "encode_typed_direct",
+            "encode_typed_json",
+            "owned_child_share",
             "warm_view_typed",
             "warm_json_typed",
             "warm_native_typed",
@@ -93,6 +138,44 @@ pub fn main() {
         }
         for lane in lanes {
             match lane {
+                "owned_child_share" => run(name, lane, n, || {
+                    black_box(black_box(samples).into_owned());
+                }),
+                "append_typed_direct" => run(name, lane, n, || {
+                    let committed = pool
+                        .append_value(black_box(&expected_typed), &[], options)
+                        .unwrap();
+                    assert!(committed.seq > 0);
+                    black_box(committed);
+                }),
+                "append_typed_json" => run(name, lane, n, || {
+                    let json = serde_json::to_vec(black_box(&expected_typed)).unwrap();
+                    let encoded = MessageView::from_json(&json, &[]).unwrap();
+                    let committed = pool.append_view(&encoded, options).unwrap();
+                    assert!(committed.seq > 0);
+                    black_box(committed);
+                }),
+                "retag_view_direct" => run(name, lane, n, || {
+                    black_box(MessageView::encode(&black_box(v.data()), &["changed"]).unwrap());
+                }),
+                "retag_view_json" => run(name, lane, n, || {
+                    let json = black_box(v.data()).to_json().unwrap();
+                    black_box(MessageView::from_json(&json, &["changed"]).unwrap());
+                }),
+                "encode_native_direct" => run(name, lane, n, || {
+                    black_box(MessageView::encode(black_box(&data), &[]).unwrap());
+                }),
+                "encode_native_json" => run(name, lane, n, || {
+                    let json = serde_json::to_vec(black_box(&data)).unwrap();
+                    black_box(MessageView::from_json(&json, &[]).unwrap());
+                }),
+                "encode_typed_direct" => run(name, lane, n, || {
+                    black_box(MessageView::encode(black_box(&expected_typed), &[]).unwrap());
+                }),
+                "encode_typed_json" => run(name, lane, n, || {
+                    let json = serde_json::to_vec(black_box(&expected_typed)).unwrap();
+                    black_box(MessageView::from_json(&json, &[]).unwrap());
+                }),
                 "warm_view_typed" => run(name, lane, n, || {
                     let reading: Reading<'_> = black_box(v.data()).decode().unwrap();
                     assert_eq!(reading, expected_typed);

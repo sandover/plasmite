@@ -8,13 +8,20 @@ pub(crate) struct Builder {
     words: Vec<u32>,
     len: usize,
     pub data: usize,
+    json_native_safe: bool,
 }
 impl Builder {
     pub fn new(tags: &[&str]) -> Result<Self, Error> {
+        let mut b = Self::new_without_data(tags)?;
+        b.data = b.container(0, Some("data"), false)?;
+        Ok(b)
+    }
+    pub(crate) fn new_without_data(tags: &[&str]) -> Result<Self, Error> {
         let mut b = Self {
             words: vec![0; 64],
             len: 0,
             data: 0,
+            json_native_safe: true,
         };
         b.put(usize::MAX, None, sys::ValueView::default())?;
         let meta = b.container(0, Some("meta"), false)?;
@@ -22,7 +29,6 @@ impl Builder {
         for tag in tags {
             b.string(array, None, tag)?;
         }
-        b.data = b.container(0, Some("data"), false)?;
         Ok(b)
     }
     pub(crate) fn put(
@@ -31,6 +37,11 @@ impl Builder {
         key: Option<&str>,
         value: sys::ValueView,
     ) -> Result<usize, Error> {
+        // Record this while writing, without scanning the completed encoding.
+        // Replacing an unsafe value leaves a conservative false result.
+        self.json_native_safe &= value.kind != sys::LITE3_TYPE_BYTES
+            && (value.kind != sys::LITE3_TYPE_I64
+                || (-9_007_199_254_740_991..=9_007_199_254_740_991).contains(&value.integer));
         let key = key
             .map(CString::new)
             .transpose()
@@ -94,6 +105,8 @@ impl Builder {
         .map(|_| ())
     }
     pub fn copy_parsed(&mut self, root: usize) -> Result<(), Error> {
+        // The C bulk writer bypasses put; it does not yet return this property.
+        self.json_native_safe = false;
         unsafe extern "C" {
             fn plasmite_json_copy_growing(
                 root: usize,
@@ -143,11 +156,17 @@ impl Builder {
         }
         Ok(())
     }
+    pub(crate) fn data_is_empty(&self) -> Result<bool, Error> {
+        let bytes = unsafe { std::slice::from_raw_parts(self.words.as_ptr().cast(), self.len) };
+        Ok(Lite3DocRef::new(bytes).count_at(self.data)? == 0)
+    }
     pub fn finish(self) -> Result<MessageView, Error> {
         let bytes = unsafe { std::slice::from_raw_parts(self.words.as_ptr().cast(), self.len) };
         Lite3DocRef::new(bytes).validate_view()?;
         // The setters overwrite duplicate keys. Full validation establishes depth,
         // finite values, shape and text validity; the aligned allocation stays owned.
-        Ok(unsafe { MessageView::from_encoded_words(self.words, self.len, 0, 0, 0) })
+        Ok(unsafe {
+            MessageView::from_encoded_words(self.words, self.len, 0, 0, 0, self.json_native_safe)
+        })
     }
 }
