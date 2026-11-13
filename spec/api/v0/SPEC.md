@@ -441,7 +441,7 @@ its path.
 
 ### Rust owned-view streams
 
-`PoolApiExt::tail_views(TailOptions)` returns `ViewTail`, a pull-based iterator
+`Pool::tail_views(TailOptions)` returns `ViewTail`, a pull-based iterator
 whose items are `Result<MessageView, Error>`. `next_view()` also exposes the
 existing explicit `Result<Option<MessageView>, Error>` form. It uses the same
 local tail cursor, required-tag filter, matching-message limit, timeout,
@@ -458,3 +458,16 @@ late/duplicate DATA. DATA admission copies the receive-buffer payload into its
 owner, checks the complete Lite3 message once, and builds no native data tree.
 Legacy `UdpFrame` remains a public mutable byte vector; its `message()` method
 continues to validate caller-modified bytes before materializing them.
+
+C callers open owned UDP follows with `plsm_udp_pool_follow_views`, then read
+`plsm_udp_follow_next_view`. The existing numeric event fields describe DATA,
+SKIP and PROGRESS; the event payload stays empty. DATA returns one independent
+message owner, while control events return a null owner. Existing cancel/close
+operations and bounded-wait status codes apply. Callers release each DATA owner
+with `plsm_view_release` after they finish with its borrowed children.
+
+Python's `pool.follow_views(options)` uses the existing follow lifecycle and
+iteration idiom. DATA yields `MessageView`; control events retain `UdpGap` and
+`UdpProgress`. Native Python adopts the checked C owner without another payload
+copy or validation pass. The portable Python fallback keeps its documented
+readonly buffer copy. Both paths preserve independent message lifetimes.

@@ -455,6 +455,13 @@ class BindingTests(unittest.TestCase):
             self.assertIsNone(corrupt.exception.seq)
 
     def test_udp_delivers_late_and_duplicate_frames(self) -> None:
+        self._check_udp_deliveries(False)
+
+    def test_udp_views_retain_late_and_duplicate_frames(self) -> None:
+        self._check_udp_deliveries(True)
+
+    def _check_udp_deliveries(self, views):
+        from plasmite import MessageView
         with self._new_client() as client:
             with self._new_pool(client, "udp-order") as pool:
                 message = pool.append({"value": 17}, ["tag"])
@@ -499,15 +506,21 @@ class BindingTests(unittest.TestCase):
             try:
                 with UdpClient(f"udp://127.0.0.1:{peer.getsockname()[1]}") as client:
                     with client.open_pool("sensors") as pool:
-                        with pool.follow(UdpFollowOptions(start=UdpStart.last(4), live=False)) as follow:
+                        open_follow = pool.follow_views if views else pool.follow
+                        with open_follow(UdpFollowOptions(start=UdpStart.last(4), live=False)) as follow:
                             events = [follow.next_event(timeout_ms=1000) for _ in range(7)]
                             self.assertIsNone(follow.next_event(timeout_ms=0))
-                frames = [event for event in events if isinstance(event, UdpFrame)]
+                frame_type = MessageView if views else UdpFrame
+                frames = [event for event in events if isinstance(event, frame_type)]
                 self.assertEqual([frame.seq for frame in frames], [base + 10, base + 12, base + 11, base + 12])
                 for frame in frames:
-                    self.assertEqual(frame.payload, payload)
                     self.assertEqual(frame.timestamp_ns, timestamp)
-                    self.assertEqual(frame.message().data, {"value": 17})
+                    if views:
+                        self.assertEqual(frame.data["value"], 17)
+                        self.assertEqual(list(frame.meta["tags"]), ["tag"])
+                    else:
+                        self.assertEqual(frame.payload, payload)
+                        self.assertEqual(frame.message().data, {"value": 17})
                 skips = [event for event in events if isinstance(event, UdpGap)]
                 self.assertEqual([(event.first, event.last, event.reason) for event in skips], [(base + 11, base + 11, "pressure")])
                 progress = [event for event in events if isinstance(event, UdpProgress)]

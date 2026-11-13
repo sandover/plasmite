@@ -537,6 +537,15 @@ def _write_container(builder, node, value):
             _write_container(builder, next_node.value, child)
 
 
+def adopt_owner(address):
+    try:
+        _configure()
+    except BaseException:
+        lib.plsm_view_release(c.c_void_p(address))
+        raise
+    return MessageView(address)
+
+
 def next_batch(address, max_count, max_bytes, timeout_ms):
     _configure()
     owners = (c.c_void_p * max_count)()

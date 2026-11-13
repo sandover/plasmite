@@ -62,8 +62,13 @@ pub struct plsm_udp_pool {
 
 #[repr(C)]
 pub struct plsm_udp_follow {
-    follow: Mutex<crate::api::UdpFollow>,
+    follow: Mutex<UdpFollower>,
     cancelled: AtomicBool,
+}
+
+enum UdpFollower {
+    Raw(crate::api::UdpFollow),
+    Views(crate::api::UdpViewFollow),
 }
 
 #[repr(C)]
@@ -945,6 +950,46 @@ pub extern "C" fn plsm_udp_pool_follow(
     out_follow: *mut *mut plsm_udp_follow,
     out_err: *mut *mut plsm_error,
 ) -> i32 {
+    open_udp_follow(
+        pool,
+        start_kind,
+        start_value,
+        live,
+        false,
+        out_follow,
+        out_err,
+    )
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_pool_follow_views(
+    pool: *mut plsm_udp_pool,
+    start_kind: u32,
+    start_value: u64,
+    live: u32,
+    out_follow: *mut *mut plsm_udp_follow,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    open_udp_follow(
+        pool,
+        start_kind,
+        start_value,
+        live,
+        true,
+        out_follow,
+        out_err,
+    )
+}
+
+fn open_udp_follow(
+    pool: *mut plsm_udp_pool,
+    start_kind: u32,
+    start_value: u64,
+    live: u32,
+    views: bool,
+    out_follow: *mut *mut plsm_udp_follow,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
     if out_follow.is_null() {
         return fail(
             out_err,
@@ -969,10 +1014,16 @@ pub extern "C" fn plsm_udp_pool_follow(
             );
         }
     };
-    let follow = match unsafe { &*pool }.pool.follow(crate::api::UdpFollowOptions {
+    let options = crate::api::UdpFollowOptions {
         start,
         live: live != 0,
-    }) {
+    };
+    let pool = &unsafe { &*pool }.pool;
+    let follow = match if views {
+        pool.follow_views(options).map(UdpFollower::Views)
+    } else {
+        pool.follow(options).map(UdpFollower::Raw)
+    } {
         Ok(follow) => follow,
         Err(err) => return fail(out_err, err),
     };
@@ -1019,28 +1070,143 @@ pub extern "C" fn plsm_udp_follow_next(
             );
         }
     };
-    let Some(deadline) = Instant::now().checked_add(Duration::from_millis(timeout_ms)) else {
+    let UdpFollower::Raw(reader) = &mut *guard else {
         return fail(
             out_err,
-            Error::new(ErrorKind::Usage).with_message("UDP wait timeout is too large"),
+            Error::new(ErrorKind::Usage).with_message("use next_view for an owned UDP follow"),
         );
     };
+    match udp_wait(&follow.cancelled, timeout_ms, |wait| {
+        Ok((reader.next_event_timeout(wait)?, reader.is_finished()))
+    }) {
+        Ok(TailOutcome::Item(event)) => match write_udp_event(out_event, event) {
+            Ok(()) => 1,
+            Err(err) => fail(out_err, err),
+        },
+        Ok(TailOutcome::WaitExpired) => 0,
+        Ok(TailOutcome::Finished) => 2,
+        Ok(TailOutcome::Cancelled) => 3,
+        Err(err) => fail(out_err, err),
+    }
+}
+
+fn udp_wait<T>(
+    cancelled: &AtomicBool,
+    timeout_ms: u64,
+    mut next: impl FnMut(Duration) -> Result<(Option<T>, bool), Error>,
+) -> Result<TailOutcome<T>, Error> {
+    let deadline = Instant::now()
+        .checked_add(Duration::from_millis(timeout_ms))
+        .ok_or_else(|| {
+            Error::new(ErrorKind::Usage).with_message("UDP wait timeout is too large")
+        })?;
     loop {
-        if follow.cancelled.load(Ordering::Acquire) {
-            return 3;
+        if cancelled.load(Ordering::Acquire) {
+            return Ok(TailOutcome::Cancelled);
         }
         let remaining = deadline.saturating_duration_since(Instant::now());
         let wait = remaining.min(Duration::from_millis(50));
-        match guard.next_event_timeout(wait) {
-            Ok(Some(event)) => match write_udp_event(out_event, event) {
-                Ok(()) => return 1,
-                Err(err) => return fail(out_err, err),
-            },
-            Ok(None) if guard.is_finished() => return 2,
-            Ok(None) if Instant::now() >= deadline => return 0,
-            Ok(None) => continue,
-            Err(err) => return fail(out_err, err),
+        match next(wait)? {
+            (Some(event), _) => return Ok(TailOutcome::Item(event)),
+            (None, true) => return Ok(TailOutcome::Finished),
+            (None, false) if Instant::now() >= deadline => return Ok(TailOutcome::WaitExpired),
+            _ => continue,
         }
+    }
+}
+
+/// DATA returns an independent view owner; control events return a null owner.
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_udp_follow_next_view(
+    follow: *mut plsm_udp_follow,
+    timeout_ms: u64,
+    out_event: *mut plsm_udp_event,
+    out_owner: *mut *const crate::abi_views::plsm_message_view,
+    out_err: *mut *mut plsm_error,
+) -> i32 {
+    if follow.is_null() || out_event.is_null() || out_owner.is_null() {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("invalid UDP view argument"),
+        );
+    }
+    let follow = unsafe { &*follow };
+    if follow.cancelled.load(Ordering::Acquire) {
+        return 3;
+    }
+    let mut guard = match follow.follow.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return fail(
+                out_err,
+                Error::new(ErrorKind::Internal).with_message("UDP follow lock failed"),
+            );
+        }
+    };
+    let UdpFollower::Views(reader) = &mut *guard else {
+        return fail(
+            out_err,
+            Error::new(ErrorKind::Usage).with_message("owned UDP reads require follow_views"),
+        );
+    };
+    match udp_wait(&follow.cancelled, timeout_ms, |wait| {
+        Ok((reader.next_event_timeout(wait)?, reader.is_finished()))
+    }) {
+        Ok(TailOutcome::Item(event)) => {
+            use crate::api::{UdpEvent, UdpStreamEvent};
+            let control = match event {
+                UdpStreamEvent::Frame(view) => {
+                    let (seq, timestamp_ns) = (view.seq, view.timestamp_ns);
+                    if let Err(err) = crate::abi_views::publish(view, out_owner) {
+                        return fail(out_err, err);
+                    }
+                    unsafe {
+                        *out_event = plsm_udp_event {
+                            kind: 1,
+                            seq,
+                            timestamp_ns,
+                            ..Default::default()
+                        };
+                    }
+                    return 1;
+                }
+                UdpStreamEvent::Gap {
+                    first,
+                    last,
+                    reason,
+                } => UdpEvent::Gap {
+                    first,
+                    last,
+                    reason,
+                },
+                UdpStreamEvent::Progress {
+                    start_seq,
+                    next_seq,
+                    end_seq,
+                    terminal,
+                    retention_gap,
+                } => UdpEvent::Progress {
+                    start_seq,
+                    next_seq,
+                    end_seq,
+                    terminal,
+                    retention_gap,
+                },
+            };
+            match write_udp_event(out_event, control) {
+                Ok(()) => {
+                    unsafe {
+                        *out_owner = ptr::null();
+                    }
+                    1
+                }
+                Err(err) => fail(out_err, err),
+            }
+        }
+        Ok(TailOutcome::WaitExpired) => 0,
+        Ok(TailOutcome::Finished) => 2,
+        Ok(TailOutcome::Cancelled) => 3,
+        Err(err) => fail(out_err, err),
     }
 }
 
@@ -1061,7 +1227,10 @@ pub extern "C" fn plsm_udp_follow_close(follow: *mut plsm_udp_follow) {
     let follow = unsafe { Box::from_raw(follow) };
     follow.cancelled.store(true, Ordering::Release);
     if let Ok(mut inner) = follow.follow.lock() {
-        inner.close();
+        match &mut *inner {
+            UdpFollower::Raw(reader) => reader.close(),
+            UdpFollower::Views(reader) => reader.close(),
+        }
     }
 }
 
@@ -1681,6 +1850,11 @@ mod tests {
 
     #[test]
     fn abi_smoke_udp_delivers_late_and_duplicate_frames() {
+        check_udp_follow(false);
+        check_udp_follow(true);
+    }
+
+    fn check_udp_follow(views: bool) {
         use crate::udp_wire as wire;
         use std::net::UdpSocket;
         let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -1760,15 +1934,23 @@ mod tests {
             plsm_udp_client_open_pool(client, name.as_ptr(), &mut pool, &mut error),
             0
         );
-        assert_eq!(
-            plsm_udp_pool_follow(pool, 1, 4, 0, &mut follow, &mut error),
-            0
-        );
+        let open = if views {
+            plsm_udp_pool_follow_views
+        } else {
+            plsm_udp_pool_follow
+        };
+        assert_eq!(open(pool, 1, 4, 0, &mut follow, &mut error), 0);
         let mut sequences = Vec::new();
         let mut skips = Vec::new();
+        let mut retained = Vec::new();
         loop {
             let mut event = plsm_udp_event::default();
-            let status = plsm_udp_follow_next(follow, 1000, &mut event, &mut error);
+            let mut owner = ptr::null();
+            let status = if views {
+                plsm_udp_follow_next_view(follow, 1000, &mut event, &mut owner, &mut error)
+            } else {
+                plsm_udp_follow_next(follow, 1000, &mut event, &mut error)
+            };
             if status == 2 {
                 break;
             }
@@ -1777,6 +1959,14 @@ mod tests {
                 1 => {
                     sequences.push(event.seq);
                     assert_eq!(event.timestamp_ns, timestamp);
+                    if views {
+                        assert!(event.payload.data.is_null());
+                        assert_eq!(event.payload.len, 0);
+                        assert_eq!(unsafe { crate::abi_views::plsm_view_seq(owner) }, event.seq);
+                        retained.push(owner);
+                        plsm_udp_event_free(&mut event);
+                        continue;
+                    }
                     assert_eq!(
                         unsafe {
                             std::slice::from_raw_parts(event.payload.data, event.payload.len)
@@ -1788,8 +1978,14 @@ mod tests {
                     assert_eq!(parse_buf(&message)["seq"], event.seq);
                     plsm_buf_free(&mut message);
                 }
-                2 => skips.push((event.first, event.last, event.reason)),
-                3 => assert_eq!(event.next_seq, base + 13),
+                2 => {
+                    assert!(owner.is_null());
+                    skips.push((event.first, event.last, event.reason));
+                }
+                3 => {
+                    assert!(owner.is_null());
+                    assert_eq!(event.next_seq, base + 13);
+                }
                 _ => panic!("unexpected UDP event"),
             }
             plsm_udp_event_free(&mut event);
@@ -1801,6 +1997,18 @@ mod tests {
         plsm_udp_pool_free(pool);
         plsm_udp_client_free(client);
         worker.join().unwrap();
+        for owner in retained {
+            let mut len = 0;
+            let bytes = unsafe { crate::abi_views::plsm_view_bytes(owner, &mut len) };
+            assert_eq!(unsafe { std::slice::from_raw_parts(bytes, len) }, expected);
+            assert_eq!(
+                unsafe { crate::abi_views::plsm_view_timestamp_ns(owner) },
+                timestamp
+            );
+            unsafe {
+                crate::abi_views::plsm_view_release(owner);
+            }
+        }
     }
 
     #[test]

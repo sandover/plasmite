@@ -296,6 +296,21 @@ an operating-system file lock already in progress.
 For playback timing, use ordinary streams and an application scheduler; see the
 [next major upgrade guide](../../docs/record/upgrading-next-major.md#sdk-applications-control-playback-timing).
 
+## Owned UDP receiving
+
+```python
+with udp_pool.follow_views(options) as events:
+    for event in events:
+        if isinstance(event, plasmite.MessageView):
+            print(event.seq, event.data["temperature"])
+```
+
+DATA arrives as an immutable message view; gaps and progress use the existing
+event classes. A retained message stays readable after the follow closes.
+Field access reads Lite3 directly; `plasmite.to_native(event.data)` creates an
+independent native value. UDP keeps arrival order, including duplicate and late
+packets. The new methods require a matching native library.
+
 ## Numeric append receipts
 
 ```python

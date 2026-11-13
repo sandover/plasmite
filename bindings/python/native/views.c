@@ -514,6 +514,17 @@ static PyObject *snapshot_from_owner(const plsm_message_view_t *view) {
     return (PyObject *)result;
 }
 
+static PyObject *adopt_owner(PyObject *module, PyObject *arg) {
+    (void)module;
+    void *owner = PyLong_AsVoidPtr(arg);
+    if (PyErr_Occurred()) return NULL;
+    if (!owner) {
+        PyErr_SetString(PyExc_ValueError, "null message owner");
+        return NULL;
+    }
+    return snapshot_from_owner(owner);
+}
+
 static PyObject *next_snapshots(PyObject *module, PyObject *args) {
     (void)module;
     unsigned long long address, timeout;
@@ -922,6 +933,7 @@ static PyObject *configure(PyObject *module, PyObject *args) {
     Py_RETURN_NONE;
 }
 static PyMethodDef module_methods[] = {{"_configure", configure, METH_VARARGS, NULL},
+                                       {"adopt_owner", adopt_owner, METH_O, NULL},
                                        {"get", get_snapshot, METH_VARARGS, NULL},
                                        {"append", append_python, METH_VARARGS, NULL},
                                        {"from_bytes", bytes_snapshot, METH_VARARGS, NULL},

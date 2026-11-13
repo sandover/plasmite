@@ -507,6 +507,18 @@ int plsm_view_stream_next(plsm_stream_t *stream, uint64_t timeout_ms,
     size_t max_count, size_t max_bytes, const plsm_message_view_t **out,
     size_t *count, plsm_error_t **err);
 
+/* UDP views reuse cancel/close and 1/event, 0/timeout, 2/end, 3/cancelled
+ * statuses. Use next_view with follow_views handles. Initialize event to zero
+ * and free it normally; payload stays empty. DATA returns an independent owner
+ * (release with plsm_view_release); controls return NULL. Other statuses leave
+ * outputs untouched. Close only after active calls return. */
+int plsm_udp_pool_follow_views(plsm_udp_pool_t *pool, uint32_t start_kind,
+    uint64_t start_value, uint32_t live, plsm_udp_follow_t **out_follow,
+    plsm_error_t **err);
+int plsm_udp_follow_next_view(plsm_udp_follow_t *follow, uint64_t timeout_ms,
+    plsm_udp_event_t *out_event, const plsm_message_view_t **out_owner,
+    plsm_error_t **err);
+
 int plsm_builder_new(const plsm_text_t *tags, size_t count,
     plsm_builder_t **out, size_t *data_node, plsm_error_t **err);
 int plsm_builder_put(plsm_builder_t *builder, size_t parent,

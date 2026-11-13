@@ -1404,8 +1404,15 @@ class UdpPool:
         if rc != 0:
             raise _take_error(out_err)
 
-    @_serialized_handle
     def follow(self, options: UdpFollowOptions | None = None) -> UdpFollow:
+        return self._follow(options, False)
+
+    def follow_views(self, options: UdpFollowOptions | None = None) -> UdpFollow:
+        """Receive MessageViews and the existing gap/progress events."""
+        return self._follow(options, True)
+
+    @_serialized_handle
+    def _follow(self, options, views):
         _require_open(self._ptr, "UDP pool")
         options = options or UdpFollowOptions()
         if not isinstance(options, UdpFollowOptions):
@@ -1423,7 +1430,17 @@ class UdpPool:
         native_value = c_uint64(start_value)
         native_live = c_uint32(1 if options.live else 0)
         _require_open(self._ptr, "UDP pool")
-        rc = _LIB.plsm_udp_pool_follow(
+        open_follow = _LIB.plsm_udp_pool_follow
+        if views:
+            open_follow = _LIB.plsm_udp_pool_follow_views
+            open_follow.argtypes = _LIB.plsm_udp_pool_follow.argtypes
+            open_follow.restype = c_int
+            next_view = _LIB.plsm_udp_follow_next_view
+            next_view.argtypes = [POINTER(plsm_udp_follow_t), c_uint64,
+                                  POINTER(plsm_udp_event_t), POINTER(c_void_p),
+                                  POINTER(POINTER(plsm_error_t))]
+            next_view.restype = c_int
+        rc = open_follow(
             self._ptr,
             native_kind,
             native_value,
@@ -1433,7 +1450,7 @@ class UdpPool:
         )
         if rc != 0:
             raise _take_error(out_err)
-        return UdpFollow(out_follow)
+        return UdpFollow(out_follow, views=views)
 
     @_serialized_handle
     def close(self) -> None:
@@ -1456,17 +1473,21 @@ class UdpPool:
 class UdpFollow:
     """Best-effort UDP event stream. Close cancels a blocked wait."""
 
-    def __init__(self, ptr: POINTER(plsm_udp_follow_t)) -> None:
+    def __init__(self, ptr: POINTER(plsm_udp_follow_t), *, views=False) -> None:
         self._state_lock = RLock()
         self._read_lock = Lock()
         self._ptr = ptr
         self._closing = False
         self._cancelled = False
+        self._views = views
 
-    def next_event(self, timeout_ms: int | None = None) -> UdpEvent | None:
+    def next_event(self, timeout_ms: int | None = None) -> UdpEvent | MessageView | None:
         timeout_ms = _optional_non_negative_int(timeout_ms, "timeout_ms")
         if timeout_ms is not None:
             timeout_ms = c_uint64(timeout_ms).value
+        if self._views:
+            from ._views import backend
+            adopt_owner = backend.adopt_owner
         with self._read_lock:
             with self._state_lock:
                 _require_open(self._ptr, "UDP follow")
@@ -1478,13 +1499,21 @@ class UdpFollow:
                 event = plsm_udp_event_t()
                 out_err = POINTER(plsm_error_t)()
                 wait_ms = 1000 if remaining is None else remaining
-                rc = _LIB.plsm_udp_follow_next(
-                    ptr,
-                    c_uint64(wait_ms),
-                    byref(event),
-                    byref(out_err),
-                )
+                owner = c_void_p()
+                if self._views:
+                    rc = _LIB.plsm_udp_follow_next_view(
+                        ptr, c_uint64(wait_ms), byref(event), byref(owner), byref(out_err)
+                    )
+                else:
+                    rc = _LIB.plsm_udp_follow_next(
+                        ptr, c_uint64(wait_ms), byref(event), byref(out_err)
+                    )
                 if rc == 1:
+                    if self._views and event.kind == 1:
+                        try:
+                            return adopt_owner(owner.value)
+                        finally:
+                            _LIB.plsm_udp_event_free(byref(event))
                     return _udp_event_to_python(event)
                 if rc == 2 or rc == 3:
                     with self._state_lock:
@@ -1499,7 +1528,7 @@ class UdpFollow:
                     if remaining <= 0:
                         return None
 
-    def events(self) -> Generator[UdpEvent, None, None]:
+    def events(self) -> Generator[UdpEvent | MessageView, None, None]:
         while True:
             event = self.next_event()
             if event is None:
@@ -1509,7 +1538,7 @@ class UdpFollow:
     def __iter__(self) -> UdpFollow:
         return self
 
-    def __next__(self) -> UdpEvent:
+    def __next__(self) -> UdpEvent | MessageView:
         event = self.next_event()
         if event is None:
             raise StopIteration
