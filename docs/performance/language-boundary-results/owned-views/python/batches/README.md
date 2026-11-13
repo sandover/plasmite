@@ -147,7 +147,7 @@ API and does not supply the final owner-path performance claim.
 final Python source/extension (outside Git) identify the checked
 implementation after those fixes. The C stream/owner signatures stay fixed.
 
-The full Python suite passes 95 tests with one expected Windows-only skip on this
+The full Python suite passes 95 tests with one expected skip for a Windows-only test on this
 Mac. Native and fallback each pass 12 stream cases, including concurrent writers,
 retention gaps, cancellation during waits/acquisition, filtered polling, mixed
 read methods, byte-bound retries and independent child lifetime. Free-threaded
@@ -160,8 +160,8 @@ All three wheel variants rebuild from the source distribution and pass SDK byte,
 architecture, deployment-floor and tag checks. Installed wheels exercise binary
 input, whole-owner forwarding, logical array/byte slices, bounded streams and
 child lifetime. The ABI3 wheel also passes the bundled server restart smoke.
-The logs preserve [Python](python-tests.log), [free-threaded](free-threaded-tests.log)
-and [wheel](wheel-smoke.log) results.
+The logs preserve Python (outside Git), free-threaded (outside Git)
+and wheel (outside Git) results.
 
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.
