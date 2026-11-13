@@ -1,0 +1,160 @@
+[
+  {
+    "id": "nested-iteration",
+    "json": "{\"metrics\":{\"power\":42},\"samples\":[{\"value\":1},{\"value\":2}]}",
+    "outcome": "accept",
+    "fields": {
+      "metrics": {
+        "kind": "object",
+        "length": 1
+      },
+      "samples": {
+        "kind": "array",
+        "length": 2
+      }
+    }
+  },
+  {
+    "id": "missing-null-nul-lookup",
+    "json": "{\"value\":null}",
+    "outcome": "accept",
+    "fields": {
+      "value": {
+        "kind": "null"
+      },
+      "absent": {
+        "kind": "missing"
+      },
+      "bad\u0000key": {
+        "kind": "missing"
+      }
+    }
+  },
+  {
+    "id": "duplicate-source-key",
+    "json": "{\"x\":1,\"x\":2}",
+    "outcome": "accept",
+    "fields": {
+      "x": {
+        "kind": "i64",
+        "decimal": "2",
+        "javascript": "number"
+      }
+    }
+  },
+  {
+    "id": "hostile-name",
+    "json": "{\"__proto__\":{\"value\":1},\"constructor\":2,\"then\":null}",
+    "outcome": "accept",
+    "fields": {
+      "__proto__": {
+        "kind": "object",
+        "length": 1
+      }
+    }
+  },
+  {
+    "id": "integer-limits",
+    "json": "{\"low\":-9223372036854775808,\"high\":9223372036854775807,\"safe\":9007199254740991,\"wide\":9007199254740992}",
+    "outcome": "accept",
+    "fields": {
+      "low": {
+        "kind": "i64",
+        "decimal": "-9223372036854775808",
+        "javascript": "bigint"
+      },
+      "high": {
+        "kind": "i64",
+        "decimal": "9223372036854775807",
+        "javascript": "bigint"
+      },
+      "safe": {
+        "kind": "i64",
+        "decimal": "9007199254740991",
+        "javascript": "number"
+      },
+      "wide": {
+        "kind": "i64",
+        "decimal": "9007199254740992",
+        "javascript": "bigint"
+      }
+    }
+  },
+  {
+    "id": "integer-positive-overflow",
+    "json": "{\"x\":9223372036854775808}",
+    "outcome": "reject"
+  },
+  {
+    "id": "integer-negative-overflow",
+    "json": "{\"x\":-9223372036854775809}",
+    "outcome": "reject"
+  },
+  {
+    "id": "float-explicit",
+    "json": "{\"x\":1.0,\"wide\":1e20,\"negativeZero\":-0}",
+    "outcome": "accept",
+    "fields": {
+      "x": {
+        "kind": "f64",
+        "hex": "0x1.0000000000000p+0"
+      },
+      "negativeZero": {
+        "kind": "f64",
+        "hex": "-0x0.0p+0"
+      }
+    }
+  },
+  {
+    "id": "float-nonfinite",
+    "json": "{\"x\":1e999}",
+    "outcome": "reject"
+  },
+  {
+    "id": "invalid-root",
+    "json": "[1,2]",
+    "outcome": "reject"
+  },
+  {
+    "id": "nul-key",
+    "json": "{\"a\\u0000b\":1}",
+    "outcome": "reject"
+  },
+  {
+    "id": "nul-value-unicode",
+    "json": "{\"x\":\"a\\u0000b \u03b1 \ud83c\udf3f\"}",
+    "outcome": "accept",
+    "fields": {
+      "x": {
+        "kind": "string",
+        "value": "a\u0000b \u03b1 \ud83c\udf3f"
+      }
+    }
+  },
+  {
+    "id": "unpaired-surrogate",
+    "json": "{\"x\":\"\\ud800\"}",
+    "outcome": "reject"
+  },
+  {
+    "id": "paired-surrogate",
+    "json": "{\"x\":\"\\ud83c\\udf3f\"}",
+    "outcome": "accept",
+    "fields": {
+      "x": {
+        "kind": "string",
+        "value": "\ud83c\udf3f"
+      }
+    }
+  },
+  {
+    "id": "depth-last-container-31",
+    "nested_arrays": 30,
+    "outcome": "accept"
+  },
+  {
+    "id": "depth-container-32",
+    "nested_arrays": 31,
+    "outcome": "reject"
+  }
+]

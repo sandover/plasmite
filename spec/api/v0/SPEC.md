@@ -29,6 +29,97 @@ It is intentionally signature-free: language-level method/function signatures li
   release is a breaking major-version change and
   removes superseded secure connection options.
 
+## Owned-view interface (additive implementation target)
+
+This section defines the interface under development in epic `55CLVD`. Existing
+entry points keep their documented behavior. Bindings introduce explicit view
+entry points during evaluation; the next major release can make views primary.
+Implementation status and actual spellings belong in each binding's API docs.
+
+### Ownership and requested work
+
+Append, get and tail return immutable message views with exact sequence and
+nanosecond identity, tags and object-root data. Native strings never implicitly
+mean JSON source. JSON input uses an explicit input boundary. An append view
+retains the encoding that committed; forwarding with unchanged tags reuses the
+payload and receives fresh destination identity. Changing tags/subtrees rebuilds
+only the required encoding. An I/O error during flush can follow publication;
+callers must not infer rollback or retry automatically.
+
+A message owns a stable, four-byte-aligned Lite3 snapshot. Children share that
+owner and remain valid after pool/stream/root-wrapper close or ring overwrite.
+The local read copies the selected frame under the storage lock, then releases
+the lock before caller code runs. Keeping a child keeps its complete snapshot.
+C callers retain an owner through each borrowed-reference operation; independent
+owner retain/release and immutable reads need no serialization with a pool.
+
+Validate an acquired snapshot once from envelope offset zero, including metadata.
+Count the root at depth zero and reject a container at depth 32. Check bounds,
+alignment, strings, supported types and finite numbers. A checked private encoder
+can establish that proof during construction. Mutable caller storage needs
+isolation; a read-only wrapper alone does not prove immutable backing bytes.
+Binary validation does not require JSON/base64 output.
+
+Lookup, unique-key enumeration, length and conversion agree: duplicate encoded
+keys use the last entry in native iteration order. JSON input uses the last
+source occurrence. New writers reject NUL keys; NUL lookup means absent. Missing,
+null and wrong type remain distinct. Strings preserve valid Unicode and embedded
+NUL values; input conversion must not silently replace unpaired surrogates.
+
+Explicit native conversion builds independent containers for only the requested
+subtree; whole-message conversion produces `seq`, RFC3339 `time`, `meta.tags`
+and `data`. JSON conversion formats directly from Lite3. Ordinary assignment,
+child access and shallow copies retain child views. Mutable byte exports copy;
+read-only byte borrows retain the owner. Time objects and raw JSON arise on
+request rather than eagerly on arrival.
+
+### Numbers and input hooks
+
+New view writers accept exact signed 64-bit integers and finite binary64 values,
+including negative zero. Exact integers outside i64 fail before publication,
+including raw JSON integer tokens; decimal/exponent JSON tokens request binary64.
+This new policy does not redefine the legacy unsigned-to-float conversion below.
+Envelope sequence/time remain exact unsigned 64-bit identities.
+
+JavaScript reads safe stored integers as number, larger stored integers as bigint,
+and binary64 as number. Envelope identities always use bigint. Native safe
+integral numbers use i64 except negative zero; other finite numbers use binary64.
+A small input bigint can therefore read back as number. Integer arithmetic can
+normalize with BigInt(value); JSON.stringify can throw on large stored integers.
+Python uses int; Rust/C/Go use checked native conversions. Each direct encoder
+preserves its declared hooks, getters, undefined/hole and custom-serializer
+semantics, or rejects unsupported input explicitly. Buffer growth never reruns
+user hooks. A generic TypeScript schema assertion supplies no runtime validation.
+
+### Language protocols
+
+| Binding | View and conversion idiom |
+| --- | --- |
+| Rust | Owned MessageView, borrowed ValueRef and typed decoding; borrowed strings/bytes stay tied to the owner. |
+| C | Explicit owner retain/release, borrowed tagged values and sequential/coarse reads; no allocation per child handle. |
+| Python | Mapping/Sequence indexing, iteration and readonly slices; to_native/to_json and an owning readonly buffer exporter. |
+| JavaScript | Asynchronous storage operations; synchronous Proxy properties and actual arrays; module-level toNative/toJson helpers. |
+| Go | Managed immutable bytes, blocking Get, explicit typed Decode and context-aware Tail; no Close per ordinary message. |
+
+Python Mapping equality and array-view/list equality compare contents without
+building temporary native trees. JavaScript array indices/length describe data;
+Array prototype methods keep their normal behavior. Object payload names remain
+data. Reflection returns unique keys; mutation and freeze/seal throw TypeError.
+Live children keep stable identity through weak caching. Native materialization
+defines own properties so __proto__ stays data. Spread is shallow; Object.assign
+into an ordinary object follows setters. structuredClone does not accept Proxies.
+
+Each transport keeps its existing delivery contract. In particular, HTTP binary
+tails remain continue-only and cannot report terminal post-start errors; wrappers
+reject unsupported strict-gap requests. UDP keeps arrival order, duplicates,
+late packets and explicit skip/progress events without inferred repair.
+
+Shared input cases live in `tests/fixtures/owned_views.json`. Run
+`uv run python tests/owned_view_contract.py` for the input oracle. The standalone
+`examples/owned_views.ts` checks target TypeScript usage without claiming that
+those API declarations already ship. Runtime tasks consume these cases and add
+lifetime, mutation, reflection and encoded-duplicate checks to their own suites.
+
 ## Stable Surface
 
 ### PoolRef
