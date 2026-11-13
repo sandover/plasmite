@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { Client, ErrorKind, toNative, toJson } = require('..');
-const { valueReference, createNativeMessage } = require('../views');
+const { valueReference, createNativeMessage, createMessageView, messageReference } = require('../views');
 
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plasmite-node-input-'));
@@ -12,6 +12,27 @@ function fixture(t) {
   t.after(() => { pool.close(); client.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   return { client, pool };
 }
+
+test('foreign checked backends import once and preserve exact subtrees', async t => {
+  const { pool } = fixture(t);
+  const data = { exact: 9223372036854775807n, bytes: Buffer.from([0, 255]), nested: { value: 17 } };
+  const source = await pool.appendView(data, ['source']);
+  const original = messageReference(source).backend;
+  let copies = 0;
+  const backend = { ...original, encodedBytes() { copies++; return original.owner.encodedBytes(); } };
+  delete backend.owner;
+  const foreign = createMessageView(backend, source.seq, source.timestampNs);
+  const forwarded = await pool.appendView(foreign);
+  assert.deepEqual(toNative(forwarded.data), data);
+  assert.deepEqual(toNative(forwarded.meta.tags), ['source']);
+  const mixed = await pool.appendView({ subset: foreign.data, nested: foreign.data.nested });
+  assert.deepEqual(toNative(mixed.data), { subset: data, nested: { value: 17 } });
+  assert.equal(copies, 1);
+  const exported = original.owner.encodedBytes();
+  exported.fill(0);
+  assert.equal(forwarded.data.exact, data.exact);
+  assert.equal(foreign.data.nested.value, 17);
+});
 
 test('native input keeps exact numeric values, bytes and a detached receipt', async t => {
   const { pool } = fixture(t);

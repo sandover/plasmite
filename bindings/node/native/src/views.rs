@@ -40,6 +40,14 @@ impl Drop for OwnedCursor {
     }
 }
 unsafe extern "C" {
+    fn plsm_view_from_lite3(
+        bytes: *const u8,
+        len: usize,
+        seq: u64,
+        timestamp_ns: u64,
+        out: *mut *const Owner,
+        err: *mut *mut plsm_error_t,
+    ) -> i32;
     fn plsm_value_iter(value: ValueRef, out: *mut *mut Cursor, err: *mut *mut plsm_error_t) -> i32;
     fn plsm_cursor_next(
         cursor: *mut Cursor,
@@ -261,6 +269,12 @@ impl NativeView {
 #[napi]
 impl NativeView {
     #[napi]
+    pub fn encoded_bytes(&self) -> Buffer {
+        let mut len = 0;
+        let bytes = unsafe { plsm_view_bytes(self.owner.0, &mut len) };
+        Buffer::from(unsafe { std::slice::from_raw_parts(bytes, len) }.to_vec())
+    }
+    #[napi]
     pub fn root(&self, env: Env) -> Result<JsUnknown> {
         self.descriptor(env, unsafe { plsm_view_root(self.owner.0) })
     }
@@ -396,6 +410,18 @@ impl NativeView {
     pub fn retained_bytes(&self) -> u32 {
         backing_bytes(self.owner.0) as u32
     }
+}
+
+#[napi]
+pub fn native_view_from_bytes(env: Env, bytes: Buffer) -> Result<NativeView> {
+    let mut owner = ptr::null();
+    let mut err = ptr::null_mut();
+    let status =
+        unsafe { plsm_view_from_lite3(bytes.as_ptr(), bytes.len(), 0, 0, &mut owner, &mut err) };
+    if status != 0 {
+        return Err(take_error(env, err)?);
+    }
+    NativeView::new(env, Owned::new(owner))
 }
 
 #[napi(custom_finalize)]

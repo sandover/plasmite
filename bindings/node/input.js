@@ -9,6 +9,21 @@ const bufferToJSON = Buffer.prototype.toJSON;
 const bufferPrototype = Buffer.prototype;
 const bytePrototype = Uint8Array.prototype;
 const isRawJSON = JSON.isRawJSON;
+let importNative;
+const importedOwners = new WeakMap();
+function configureNativeInput(importer) { importNative = importer; }
+function nativeOwner(backend) {
+  if (backend.owner) return backend.owner;
+  let owner = importedOwners.get(backend);
+  if (!owner) {
+    if (!importNative) throw new Error('native views are unavailable');
+    const bytes = backend.encodedBytes();
+    const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    owner = importNative(buffer);
+    importedOwners.set(backend, owner);
+  }
+  return owner;
+}
 
 const inputHelpers = Object.freeze({
   bufferToJSON,
@@ -39,7 +54,7 @@ const inputHelpers = Object.freeze({
   },
   view(value) {
     const ref = valueReference(value);
-    return { owner: ref.backend.owner, node: ref.node };
+    return { owner: nativeOwner(ref.backend), node: ref.node };
   },
 });
 
@@ -51,4 +66,4 @@ function snapshotTags(tags) {
     return tag;
   });
 }
-module.exports = { inputHelpers, snapshotTags };
+module.exports = { inputHelpers, snapshotTags, configureNativeInput, nativeOwner };

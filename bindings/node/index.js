@@ -11,7 +11,7 @@ const { Message, parseMessage, parseNativeMessage } = require("./message");
 const { ERROR_KIND_VALUES, mapErrorKind } = require("./mappings");
 
 const { createNativeMessage: ownedMessage, toNative, toJson, messageReference, valueReference } = require("./views");
-const { inputHelpers, snapshotTags } = require("./input");
+const { inputHelpers, snapshotTags, configureNativeInput, nativeOwner } = require("./input");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const path = require("node:path");
@@ -79,6 +79,7 @@ try {
 } catch (err) {
   nativeLoadError = err;
 }
+configureNativeInput(native?.nativeViewFromBytes);
 
 const Durability = native ? native.Durability : Object.freeze({ Fast: 0, Flush: 1 });
 const ErrorKind = native ? native.ErrorKind : ERROR_KIND_VALUES;
@@ -296,12 +297,12 @@ class Pool {
     try {
       const tagSnapshot = snapshotTags(tags);
       const message = messageReference(data);
-      if (message && tags === undefined) pending = target.forward(message.backend.owner);
+      if (message && tags === undefined) pending = target.forward(nativeOwner(message.backend));
       else {
         const payload = message ? data.data : data;
         const ref = valueReference(payload);
-        pending = ref?.backend.owner
-          ? target.copy(ref.backend.owner, ref.node, tagSnapshot)
+        pending = ref
+          ? target.copy(nativeOwner(ref.backend), ref.node, tagSnapshot)
           : target.encode(payload, tagSnapshot, inputHelpers);
       }
     } catch (error) { target.discard(); throw error; }
