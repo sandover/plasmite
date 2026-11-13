@@ -44,7 +44,6 @@ pub(crate) trait SemaphoreBackend: Clone {
     fn close(&self, handle: &Self::Handle);
 }
 
-#[derive(Clone)]
 pub(crate) struct Semaphore<B: SemaphoreBackend> {
     handle: B::Handle,
     backend: B,
@@ -150,6 +149,14 @@ impl SemaphoreBackend for OsSemaphoreBackend {
 
 pub(crate) type PoolSemaphore = Semaphore<OsSemaphoreBackend>;
 
+// SAFETY: Each wrapper owns one sem_open reference and cannot clone it.
+// POSIX semaphore operations permit concurrent threads; Rust references keep
+// the handle alive until all operations finish and its owner closes it.
+#[cfg(unix)]
+unsafe impl Send for PoolSemaphore {}
+#[cfg(unix)]
+unsafe impl Sync for PoolSemaphore {}
+
 pub(crate) fn pool_semaphore_name(path: &Path) -> String {
     let bytes = canonical_path_bytes(path);
     let digest = Sha256::digest(&bytes);
@@ -172,13 +179,26 @@ pub(crate) fn open_for_path(path: &Path) -> Result<PoolSemaphore, NotifyError> {
     PoolSemaphore::open_with_backend(name, OsSemaphoreBackend)
 }
 
-pub(crate) fn post_for_name(name: &str) -> Result<(), NotifyError> {
+pub(crate) fn post_for_name(
+    name: &str,
+    cached: &mut Option<PoolSemaphore>,
+) -> Result<(), NotifyError> {
     #[cfg(test)]
     if FORCE_UNAVAILABLE.load(Ordering::SeqCst) {
         return Err(NotifyError::Unavailable);
     }
-    let semaphore = PoolSemaphore::open_with_backend(name.to_owned(), OsSemaphoreBackend)?;
-    semaphore.post()
+    if cached.is_none() {
+        *cached = Some(PoolSemaphore::open_with_backend(
+            name.to_owned(),
+            OsSemaphoreBackend,
+        )?);
+    }
+    let result = cached.as_ref().expect("opened semaphore").post();
+    if result.is_err() {
+        // Retry opening on the next append; committed storage remains valid.
+        *cached = None;
+    }
+    result
 }
 
 #[cfg(test)]
@@ -329,10 +349,20 @@ mod tests {
             receiver.wait(Duration::ZERO).unwrap(),
             WaitOutcome::TimedOut
         );
-        post_for_name(&name).unwrap();
+        let mut cached = None;
+        post_for_name(&name, &mut cached).unwrap();
+        post_for_name(&name, &mut cached).unwrap();
         assert_eq!(
             receiver.wait(Duration::from_secs(1)).unwrap(),
             WaitOutcome::Signaled
+        );
+        assert_eq!(
+            receiver.wait(Duration::ZERO).unwrap(),
+            WaitOutcome::Signaled
+        );
+        assert_eq!(
+            receiver.wait(Duration::ZERO).unwrap(),
+            WaitOutcome::TimedOut
         );
     }
 

@@ -431,6 +431,7 @@ pub struct Pool {
     path: PathBuf,
     // Derive the canonical wake-up name once, outside the append path.
     notify_name: String,
+    notify_writer: Option<notify::PoolSemaphore>,
     file: File,
     #[cfg(unix)]
     file_identity: (u64, u64),
@@ -527,6 +528,7 @@ impl Pool {
             #[cfg(unix)]
             file_identity: unix_file_identity(&file, &path)?,
             notify_name: notify::pool_semaphore_name(&path),
+            notify_writer: None,
             path,
             file,
             mmap,
@@ -591,6 +593,7 @@ impl Pool {
                 (metadata.dev(), metadata.ino())
             },
             notify_name: notify::pool_semaphore_name(&path),
+            notify_writer: None,
             path,
             file,
             mmap,
@@ -922,7 +925,7 @@ impl Pool {
         let seq = self.append_locked(payload, options)?;
         drop(lock);
         // Notification is optional wake-up work after committed storage publication.
-        let _ = notify::post_for_name(&self.notify_name);
+        let _ = notify::post_for_name(&self.notify_name, &mut self.notify_writer);
         Ok(seq)
     }
 

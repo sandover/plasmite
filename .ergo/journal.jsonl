@@ -827,3 +827,5 @@
 {"version":1,"task_id":"KAUJM5","kind":"claim","at":"2026-11-12T23:40:25.396857Z","agent":"codex"}
 {"version":1,"task_id":"MJAQRU","kind":"result","at":"2026-11-13T00:01:02.127287Z","agent":"codex","text":"Adopt raw ownership transfer; retain JSON compaction; release measurements and Node/GC/package tests pass.","file":{"path":"docs/performance/language-boundary-results/node-owned/README.md","sha256":"5b2658485c8d18cdec90349c326db8a532d4fd5ee06afaa3dd9129b16bcfda45","mtime":"2026-11-13T00:01:02.055709493Z","git_commit":"53a6bcd4b6d53513d9c27d159de981056996f522"}}
 {"version":1,"task_id":"MJAQRU","kind":"done","at":"2026-11-13T00:01:02.165531Z","agent":"codex","text":"Transferred raw snapshots with allocator-matched finalization; measured and retained JSON compaction."}
+{"version":1,"task_id":"Q2YAUP","kind":"claim","at":"2026-11-13T00:02:31.569735Z","agent":"codex"}
+{"version":1,"task_id":"KAUJM5","kind":"result","at":"2026-11-13T00:53:50.037537Z","agent":"codex","text":"Cache prototype: +3% JSON throughput; paced latency unchanged. Resource-pressure checks remain."}
