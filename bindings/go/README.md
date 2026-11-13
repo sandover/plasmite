@@ -314,6 +314,7 @@ pool lock after acquisition.
 
 The [Go view measurements](../../docs/performance/language-boundary-results/owned-views/go/README.md)
 cover sparse reads, typed decoding, full conversion, cgo crossings, allocation
-counts and the initial-buffer memory tradeoff. Full conversion and partial
-structs with extra fields still use the standard JSON fallback in this first
-checkpoint; the measurements show those costs.
+counts and the initial-buffer memory tradeoff. Complete exact structs use keyed lookups. Partial ASCII structs scan only
+selected objects and skip unrequested subtrees; Unicode/ambiguous aliases and
+complex Go types keep the standard JSON fallback. The measurements include full
+conversion costs and the small-read buffer retention tradeoff.

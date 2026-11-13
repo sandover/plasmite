@@ -151,6 +151,9 @@ func TestManagedViewTypedDecodeMatchesStandardJSON(t *testing.T) {
 	for _, text := range []string{
 		`{"sensor":"north","metrics":{"power":9223372036854775807},"zero":-0.0}`,
 		`{"sensor":"north","SENSOR":"later","metrics":{"power":7},"zero":1}`,
+		`{"sensor":"north","SENSOR":123,"metrics":{"power":7},"zero":1}`,
+		`{"sensor":"north","METRICS":{"power":7},"metrics":{},"zero":1}`,
+		`{"ſensor":"unicode","metrics":{"power":7},"zero":1}`,
 		`{"sensor":"north","metrics":{"power":7},"zero":1,"extra":true}`,
 		`{"sensor":"north","metrics":{},"zero":1}`,
 		`{"sensor":null,"metrics":{"power":null},"zero":1}`,
@@ -170,6 +173,8 @@ func TestManagedViewTypedDecodeMatchesStandardJSON(t *testing.T) {
 			t.Fatal(err)
 		}
 		want, got := typedReading{Sensor: "keep"}, typedReading{Sensor: "keep"}
+		want.Metrics.Power = 41
+		got.Metrics.Power = 41
 		wantErr := json.Unmarshal(raw, &want)
 		gotErr := view.Decode(&got)
 		if (wantErr == nil) != (gotErr == nil) || !reflect.DeepEqual(want, got) {
@@ -226,5 +231,29 @@ func TestManagedViewDuplicateProofCrossesBoundaryWithoutPointers(t *testing.T) {
 	json, err := view.DataJSON()
 	if err != nil || string(json) != `{"ab":2}` {
 		t.Fatalf("canonical %s %v", json, err)
+	}
+}
+
+func TestManagedViewPartialASCIIAndCaseInsensitiveFieldsStayNative(t *testing.T) {
+	pool := newTestPool(t, newTestClient(t), "partial-ascii").(*Pool)
+	receipt, err := pool.AppendIdentity(map[string]any{"SENSOR": "north", "metrics": map[string]any{"POWER": 7, "unused": "ignore"}, "ignored": strings.Repeat("x", 64*1024)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := pool.GetView(receipt.Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := typedReading{Zero: 23}
+	handled, err := view.Data().decodeStruct(&result)
+	if !handled || err != nil || result.Sensor != "north" || result.Metrics.Power != 7 || result.Zero != 23 {
+		t.Fatalf("direct partial %#v %v %v", result, handled, err)
+	}
+	type ambiguous struct {
+		First  string `json:"sensor"`
+		Second string `json:"SENSOR"`
+	}
+	if planFor(reflect.TypeOf(ambiguous{})) != nil {
+		t.Fatal("ambiguous field plan bypasses standard JSON")
 	}
 }

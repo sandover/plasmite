@@ -15,11 +15,11 @@ type decodeField struct {
 	kind  reflect.Kind
 	bits  int
 }
-type decodeStructObject struct{ slot, count int }
+type decodeStructObject struct{ slot int }
 type decodePlan struct {
-	selector *Selector
-	fields   []decodeField
-	objects  []decodeStructObject
+	decoder *structDecoder
+	fields  []decodeField
+	objects []decodeStructObject
 }
 type decodePlanResult struct{ plan *decodePlan }
 
@@ -72,11 +72,15 @@ func planFor(t reflect.Type) *decodePlan {
 					return false
 				}
 			}
-			if names[name] {
+			if !isASCII(name) {
 				return false
 			}
-			names[name] = true
-			object.count++
+			lower := strings.ToLower(name)
+			if names[lower] {
+				return false
+			}
+			names[lower] = true
+
 			childIndex := append(append([]int(nil), index...), i)
 			childPath := path + "/" + strings.ReplaceAll(strings.ReplaceAll(name, "~", "~0"), "/", "~1")
 			if hasDecodeHook(f.Type) {
@@ -110,20 +114,38 @@ func planFor(t reflect.Type) *decodePlan {
 		if err != nil {
 			plan = nil
 		} else {
-			plan.selector = selector
+			objects := make([]byte, len(paths))
+			for _, object := range plan.objects {
+				objects[object.slot] = 1
+			}
+			decoder, err := prepareStructDecoder(selector, objects)
+			selector.Close()
+			if err != nil {
+				plan = nil
+			} else {
+				plan.decoder = decoder
+			}
 		}
 	}
 	actual, loaded := decodePlans.LoadOrStore(t, decodePlanResult{plan})
 	if loaded && plan != nil {
-		plan.selector.Close()
+		plan.decoder.close()
 	}
 	return actual.(decodePlanResult).plan
 }
 
-// Fast decoding accepts complete ordinary struct shapes with exact field names.
-// This condition also excludes extra case variants which encoding/json could
-// match later. Missing/null fields, custom hooks, embedded fields, maps, slices,
-// pointers and conversion errors retain encoding/json's full semantics.
+func isASCII(text string) bool {
+	for i := 0; i < len(text); i++ {
+		if text[i] >= 128 {
+			return false
+		}
+	}
+	return true
+}
+
+// Native dispatch scans each selected object once and preserves canonical JSON
+// field precedence. Unicode or ambiguous folded names use the standard decoder.
+// Validate every assignment first so errors keep JSON's partial-update behavior.
 func (v Value) decodeStruct(destination any) (bool, error) {
 	target := reflect.ValueOf(destination)
 	if target.Kind() != reflect.Pointer || target.IsNil() || target.Elem().Kind() != reflect.Struct {
@@ -133,18 +155,24 @@ func (v Value) decodeStruct(destination any) (bool, error) {
 	if plan == nil {
 		return false, nil
 	}
-	slots, err := plan.selector.read(v.owner, v.node)
+	slots, supported, err := plan.decoder.read(v.owner, v.node)
 	if err != nil {
 		return true, err
 	}
+	if !supported {
+		return false, nil
+	}
 	for _, object := range plan.objects {
 		slot := slots[object.slot]
-		if slot.kind != 7 || uint64(slot.len) != uint64(object.count) {
+		if slot.kind != 0 && slot.kind != 7 {
 			return false, nil
 		}
 	}
 	for _, field := range plan.fields {
 		slot := slots[field.slot]
+		if slot.kind == 0 {
+			continue
+		}
 		switch field.kind {
 		case reflect.String:
 			if slot.kind != 5 {
@@ -178,6 +206,9 @@ func (v Value) decodeStruct(destination any) (bool, error) {
 	root := target.Elem()
 	for _, field := range plan.fields {
 		slot := slots[field.slot]
+		if slot.kind == 0 {
+			continue
+		}
 		target := root.FieldByIndex(field.index)
 		switch field.kind {
 		case reflect.String:

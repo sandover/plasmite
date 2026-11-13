@@ -313,3 +313,42 @@ func copyNativeJSON(buffer C.plsm_buf_t) []byte {
 	C.plsm_go_free_buffer(buffer)
 	return output
 }
+
+// Struct plans contain only native field metadata; they retain no record bytes.
+// The type cache owns them, just as encoding/json retains its type plans.
+type structDecoder struct {
+	pointer *C.plsm_go_decoder_t
+	count   int
+}
+
+func prepareStructDecoder(selector *Selector, objects []byte) (*structDecoder, error) {
+	result := C.plsm_go_prepare_decoder(selector.pointer, (*C.uint8_t)(unsafe.Pointer(&objects[0])), C.size_t(len(objects)))
+	runtime.KeepAlive(selector)
+	runtime.KeepAlive(objects)
+	if result.status != 0 {
+		return nil, fromCError(result.error)
+	}
+	decoder := &structDecoder{pointer: result.decoder, count: len(objects)}
+	runtime.SetFinalizer(decoder, (*structDecoder).close)
+	return decoder, nil
+}
+func (d *structDecoder) close() {
+	if d.pointer != nil {
+		C.plsm_go_decoder_free(d.pointer)
+		d.pointer = nil
+	}
+	runtime.SetFinalizer(d, nil)
+}
+func (d *structDecoder) read(view *MessageView, root C.size_t) ([]C.plsm_go_value, bool, error) {
+	slots := make([]C.plsm_go_value, d.count)
+	result := C.plsm_go_decode_result(view.pointer(), C.size_t(len(view.encoded)), view.proofPointer(), C.size_t(len(view.duplicates)), root, d.pointer, &slots[0], C.size_t(len(slots)))
+	runtime.KeepAlive(view)
+	runtime.KeepAlive(d)
+	if result.status == 1 {
+		return nil, false, nil
+	}
+	if result.status != 0 {
+		return nil, false, fromCError(result.error)
+	}
+	return slots, true, nil
+}

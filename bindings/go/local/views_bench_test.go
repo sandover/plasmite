@@ -2,6 +2,7 @@ package local
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -13,12 +14,16 @@ import (
 var benchmarkText string
 var benchmarkView *MessageView
 var benchmarkReading typedReading
+var benchmarkSelectedReading struct {
+	Sensor  string
+	Metrics struct{ Power int64 }
+}
 var benchmarkValues []Value
 var benchmarkBytes []byte
 var benchmarkNative map[string]any
 
 func BenchmarkOwnedViews(b *testing.B) {
-	fixtures := []string{"small", "wide", "long_string", "array"}
+	fixtures := []string{"small", "wide", "ascii_wide", "long_string", "array"}
 	reverse := os.Getenv("PLASMITE_GO_REVERSE") == "1"
 	if reverse {
 		for i, j := 0, len(fixtures)-1; i < j; i, j = i+1, j-1 {
@@ -43,9 +48,13 @@ func BenchmarkOwnedViews(b *testing.B) {
 				sensor = strings.Repeat("x", 64*1024)
 			}
 			input := map[string]any{"sensor": sensor, "metrics": map[string]any{"power": int64(7)}, "zero": math.Copysign(0, -1)}
-			if fixture == "wide" {
+			if fixture == "wide" || fixture == "ascii_wide" {
 				for i := 0; i < 200; i++ {
-					input[strings.Repeat("x", i%10)+string(rune(0x100+i))] = i
+					key := strings.Repeat("x", i%10) + string(rune(0x100+i))
+					if fixture == "ascii_wide" {
+						key = fmt.Sprintf("field_%03d", i)
+					}
+					input[key] = i
 				}
 			}
 			if fixture == "array" {
@@ -129,7 +138,7 @@ func BenchmarkOwnedViews(b *testing.B) {
 								b.Fatal(e)
 							}
 							benchmarkReading = out
-						case "cold_json_typed", "cold_json_selected":
+						case "cold_json_typed":
 							data, e := pool.GetJSON(receipt.Seq)
 							if e != nil {
 								b.Fatal(e)
@@ -139,6 +148,21 @@ func BenchmarkOwnedViews(b *testing.B) {
 								b.Fatal(e)
 							}
 							benchmarkReading = out.Data
+						case "cold_json_selected":
+							data, e := pool.GetJSON(receipt.Seq)
+							if e != nil {
+								b.Fatal(e)
+							}
+							var out struct {
+								Data struct {
+									Sensor  string
+									Metrics struct{ Power int64 }
+								}
+							}
+							if e = json.Unmarshal(data, &out); e != nil {
+								b.Fatal(e)
+							}
+							benchmarkSelectedReading = out.Data
 						case "cold_view_selected":
 							v, e := pool.GetView(receipt.Seq)
 							if e != nil {
@@ -215,7 +239,12 @@ func BenchmarkOwnedViews(b *testing.B) {
 					}
 
 					b.ReportMetric(float64(runtime.NumCgoCall()-before)/float64(b.N), "cgo/op")
-					if strings.Contains(lane, "typed") || lane == "cold_json_selected" {
+					if lane == "cold_json_selected" {
+						if benchmarkSelectedReading.Sensor != sensor || benchmarkSelectedReading.Metrics.Power != 7 {
+							b.Fatal("selected JSON mismatch")
+						}
+					}
+					if strings.Contains(lane, "typed") {
 						if benchmarkReading.Sensor != sensor || benchmarkReading.Metrics.Power != 7 {
 							b.Fatal("typed mismatch")
 						}
@@ -223,5 +252,49 @@ func BenchmarkOwnedViews(b *testing.B) {
 				})
 			}
 		})
+	}
+}
+
+func TestOwnedViewRetentionDiagnostics(t *testing.T) {
+	if os.Getenv("PLASMITE_GO_RETENTION") != "1" {
+		t.Skip("separate retention diagnostic")
+	}
+	pool := newTestPool(t, newTestClient(t), "view-retention").(*Pool)
+	receipt, err := pool.AppendIdentity(map[string]any{"sensor": "north", "metrics": map[string]any{"power": 7}, "zero": 0}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lane := range []string{"get_into", "get_into_exact", "get_c_copy"} {
+		retained := make([]*MessageView, 10000)
+		runtime.GC()
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		for i := range retained {
+			var v *MessageView
+			switch lane {
+			case "get_into":
+				v, err = pool.GetView(receipt.Seq)
+			case "get_into_exact":
+				v, err = pool.copyViewCapacity(receipt.Seq, 0)
+				if err == nil {
+					err = v.validate()
+				}
+			case "get_c_copy":
+				var frame *Lite3Frame
+				frame, err = pool.GetLite3(receipt.Seq)
+				if err == nil {
+					v = &MessageView{encoded: frame.Payload, seq: frame.Seq, timestampNs: frame.TimestampNs}
+					err = v.validate()
+				}
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			retained[i] = v
+		}
+		runtime.GC()
+		runtime.ReadMemStats(&after)
+		runtime.KeepAlive(retained)
+		t.Logf("lane=%s retained_heap_bytes_per_owner=%.2f retained_heap_objects_per_owner=%.3f", lane, float64(after.HeapAlloc-before.HeapAlloc)/float64(len(retained)), float64(after.HeapObjects-before.HeapObjects)/float64(len(retained)))
 	}
 }

@@ -8,11 +8,12 @@ after the binding releases that lock. Detached exports own their memory.
 
 Prepared selectors fill pointer-free scalar and span slots in one cgo call.
 Strings receive one final Go copy on extraction. Ordinary nested structs use a
-cached field plan and direct final assignment when the complete exact shape
-matches. Custom hooks, embedding, pointers, missing/null/type/range cases and
-extra fields use `encoding/json`. The initial complete-shape rule avoids changing
-Go's case-insensitive field precedence. A later dispatcher can widen that fast
-case without changing the API.
+cached field plan and direct final assignment. Complete exact shapes use keyed
+lookups; partial ASCII shapes scan each selected object once and skip unrequested
+subtrees. Unicode names, distinct case aliases, custom hooks, embedding, pointers
+and type/range/null cases use `encoding/json`. Missing fields preserve the
+caller's existing values. Every fast assignment passes its checks before any
+field changes, so fallback keeps the standard decoder's error/update behavior.
 
 Small C wrappers return metadata by value. This avoids separate escaping Go
 output-pointer variables. Normal acquisition needs two Go allocations: owner and
@@ -20,8 +21,9 @@ encoded buffer. Empty duplicate proof needs no native allocation or free call.
 Duplicate objects retain only offset metadata in Go; canonical lookup, count and
 JSON tests agree on the last native-order winner.
 
-## Matched release measurements
+## First consumer measurements
 
+Fresh means a new owner from a resident pool; it does not mean cold storage.
 Seven processes alternate fixture and lane order, with 2,000 operations per lane,
 `GOMAXPROCS=1` and `GOGC=100`. All lanes use the same release library and Go test
 binary. Native-call counters and Go allocation counts sit outside timing;
@@ -45,8 +47,8 @@ These warm controls exclude initial native decoding. The long-string native
 control compares the existing string and allocates nothing; view extraction
 creates a new independent string.
 
-This checkpoint has material limits. Partial typed structs with extra fields
-fall back: fresh wide reads take 32.9 us versus 29.8 us for JSON; array reads take
+The initial complete-shape plan had material limits. Partial typed structs with
+extra fields fell back: fresh wide reads take 32.9 us versus 29.8 us for JSON; array reads take
 33.1 versus 28.5 us. Warm full native-map conversion takes 846 versus 598 ns for
 small data, 44.9 versus 36.2 us wide, 60.3 versus 40.4 us for long strings, and
 82.9 versus 71.1 us for arrays. Views must format JSON before Go's full native
@@ -89,6 +91,56 @@ Alternate `PLASMITE_GO_REVERSE=0/1` and keep its dynamic-library path fixed.
 Focused correctness and race tests cover capacity retry, concurrent reads,
 retained children after close, detached exports, exact integers, negative zero
 and parity with standard JSON fallback.
+
+## Partial structs and exact-shape recovery
+
+The native dispatcher accepts unambiguous ASCII struct field names. It borrows
+the encoded key spans, matches ASCII case without allocating keys, and fills
+only requested scalar/string slots. It visits selected objects once and leaves
+unknown arrays and nested objects untouched. Distinct record case aliases defer
+to Go's decoder: earlier aliases can merge objects or produce errors even when
+a later alias has a valid value. Equal native duplicate keys keep their
+canonical last occurrence.
+
+Complete exact objects retain the cheaper point-lookup path. The encoded object
+already stores its count; when count and all original field names match, that
+proves the absence of extra aliases. A failed proof clears temporary matches
+before scanning. This needs no second host cache and no additional crossing.
+Scalar leaves now read their native value once.
+
+| Typed decode | Original frontend ns/op | Final dispatcher ns/op |
+| --- | ---: | ---: |
+| Fresh small complete struct | 1,162 | 1,109 |
+| Warm small complete struct | 218 | 211 |
+| Fresh partial struct, 200 extra ASCII fields | 24,647 | 9,843 |
+| Warm partial struct, 200 extra ASCII fields | 18,299 | 4,082 |
+| Fresh partial struct, unrequested 1,000-value array | 33,579 | 11,895 |
+| Warm partial struct, unrequested 1,000-value array | 20,999 | 255 |
+
+The final JSON controls take 21.8 us for fresh ASCII-wide typed reads and 29.9 us
+for the array fixture. Unicode-wide fallback stays near 34 us; long-string typed
+reads move about 2%, alongside similar control movement. Warm exact sparse reads
+stay near 140–153 ns. These results support the dispatcher for ordinary partial
+structs while retaining the complete-shape path.
+
+The first scan-only implementation regressed small complete reads by 6% fresh
+and 18% warm. [Its paired runs](dispatch.raw.json) retain that result; the final
+[exact-shape runs](dispatch-exact.raw.json) show the recovery. Both runs use seven
+alternating process pairs, the same updated benchmark code in both Go variants,
+and one frozen core library per comparison. Sparse JSON controls now decode the
+same two fields as the selector. The final comparison uses library `9fb9a136` and
+its verified complete source archive from the batch build; later workspace
+source changes never enter these private artifacts.
+
+Baseline source (outside Git) and
+candidate source (outside Git) combine the exact core
+archive with each compiled Go frontend. The baseline uses `4e7fa95` consumer code
+and the updated shared benchmark. Raw metadata records every file/artifact hash.
+All final ordinary/duplicate/alias cases, race checks and strict `cgocheck2`
+checks pass. A separate forced-GC diagnostic retains 10,000 small views: the
+initial buffer retains about 1,100 Go heap bytes per owner, versus 656 for exact
+sizing/native-copy controls. All retain two Go objects per owner; initial-buffer
+slack remains the deliberate small-read latency tradeoff.
 
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

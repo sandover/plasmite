@@ -50,4 +50,20 @@ static inline plsm_go_json_result_t plsm_go_message_result(const uint8_t *data,s
 }
 static inline void plsm_go_free_buffer(plsm_buf_t buffer) { plsm_buf_free(&buffer); }
 
+typedef struct plsm_go_decoder plsm_go_decoder_t;
+int plsm_go_decoder_new(const plsm_selector_t *,const uint8_t *,size_t,plsm_go_decoder_t **,plsm_error_t **);
+void plsm_go_decoder_free(plsm_go_decoder_t *);
+int plsm_go_decode_fields(const uint8_t *,size_t,const size_t *,size_t,size_t,const plsm_go_decoder_t *,plsm_go_value *,size_t,plsm_error_t **);
+typedef struct { int status; plsm_error_t *error; plsm_go_decoder_t *decoder; } plsm_go_decoder_result_t;
+static inline plsm_go_decoder_result_t plsm_go_prepare_decoder(const plsm_selector_t *selector,const uint8_t *objects,size_t count) {
+    plsm_go_decoder_result_t result={0};
+    result.status=plsm_go_decoder_new(selector,objects,count,&result.decoder,&result.error);
+    return result;
+}
+static inline plsm_go_status_t plsm_go_decode_result(const uint8_t *data,size_t len,const size_t *duplicates,size_t count,size_t root,const plsm_go_decoder_t *decoder,plsm_go_value *values,size_t capacity) {
+    plsm_go_status_t result={0};
+    result.status=plsm_go_decode_fields(data,len,duplicates,count,root,decoder,values,capacity,&result.error);
+    return result;
+}
+
 #endif

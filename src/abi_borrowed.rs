@@ -4,6 +4,7 @@
 //! private and immutable, passes them afresh for each call, and retains every Go
 //! allocation until the call returns. No function stores a caller pointer.
 #![allow(clippy::result_large_err)]
+mod decode;
 use crate::abi::{fail, plsm_buf, plsm_error, write_json_buf};
 use crate::abi_views::PlsmSelector;
 use crate::core::error::{Error, ErrorKind};
@@ -115,6 +116,31 @@ impl Reader<'_> {
         } else {
             Ok(None)
         }
+    }
+    fn packed(&self, offset: usize) -> Result<BorrowedValue, Error> {
+        let mut output = BorrowedValue::default();
+        let node = self.node(offset)?;
+        output.kind = match node.kind {
+            sys::LITE3_TYPE_NULL => 1,
+            sys::LITE3_TYPE_BOOL => 2,
+            sys::LITE3_TYPE_I64 => 3,
+            sys::LITE3_TYPE_F64 => 4,
+            sys::LITE3_TYPE_STRING => 5,
+            sys::LITE3_TYPE_BYTES => 6,
+            sys::LITE3_TYPE_OBJECT => 7,
+            sys::LITE3_TYPE_ARRAY => 8,
+            _ => return Err(corrupt()),
+        };
+        output.node = offset;
+        output.integer = node.integer;
+        output.real = node.real;
+        if matches!(node.kind, sys::LITE3_TYPE_STRING | sys::LITE3_TYPE_BYTES) {
+            output.offset = node.text as usize - self.doc.bytes().as_ptr() as usize;
+            output.len = node.text_len;
+        } else if matches!(node.kind, sys::LITE3_TYPE_OBJECT | sys::LITE3_TYPE_ARRAY) {
+            output.len = self.count(offset)?;
+        }
+        Ok(output)
     }
     fn count(&self, offset: usize) -> Result<usize, Error> {
         let count = self.doc.count_at(offset)? as usize;
@@ -324,27 +350,7 @@ pub unsafe extern "C" fn plsm_go_select(
             for (index, path) in selector.paths.iter().enumerate() {
                 let mut output = BorrowedValue::default();
                 if let Some(offset) = reader.lookup(root, path)? {
-                    let node = reader.node(offset)?;
-                    output.kind = match node.kind {
-                        sys::LITE3_TYPE_NULL => 1,
-                        sys::LITE3_TYPE_BOOL => 2,
-                        sys::LITE3_TYPE_I64 => 3,
-                        sys::LITE3_TYPE_F64 => 4,
-                        sys::LITE3_TYPE_STRING => 5,
-                        sys::LITE3_TYPE_BYTES => 6,
-                        sys::LITE3_TYPE_OBJECT => 7,
-                        sys::LITE3_TYPE_ARRAY => 8,
-                        _ => return Err(corrupt()),
-                    };
-                    output.node = offset;
-                    output.integer = node.integer;
-                    output.real = node.real;
-                    if matches!(node.kind, sys::LITE3_TYPE_STRING | sys::LITE3_TYPE_BYTES) {
-                        output.offset = node.text as usize - input.as_ptr() as usize;
-                        output.len = node.text_len;
-                    } else if matches!(node.kind, sys::LITE3_TYPE_OBJECT | sys::LITE3_TYPE_ARRAY) {
-                        output.len = reader.count(offset)?;
-                    }
+                    output = reader.packed(offset)?;
                 }
                 unsafe {
                     *slots.add(index) = output;
