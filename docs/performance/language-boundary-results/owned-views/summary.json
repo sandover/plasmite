@@ -1,0 +1,180 @@
+{
+  "large-forward.raw": {
+    "baseline": {
+      "messages_s": 40981.19219410742,
+      "cpu_seconds": 0.06877299999999999
+    },
+    "plasmite": {
+      "messages_s": 41829.08114580311,
+      "cpu_seconds": 0.05118600000000001
+    },
+    "throughput_change_pct": 2.068970926174285,
+    "cpu_change_pct": -25.572535733500036
+  },
+  "large-full.raw": {
+    "baseline": {
+      "messages_s": 6390.620266797085,
+      "cpu_seconds": 0.47097399999999995
+    },
+    "plasmite": {
+      "messages_s": 7602.848714425948,
+      "cpu_seconds": 0.42170699999999994
+    },
+    "throughput_change_pct": 18.968869953470424,
+    "cpu_change_pct": -10.460662372020535
+  },
+  "large-identity.raw": {
+    "baseline": {
+      "messages_s": 10225.367090678556,
+      "cpu_seconds": 0.35229099999999997
+    },
+    "plasmite": {
+      "messages_s": 14067.884053990823,
+      "cpu_seconds": 0.280975
+    },
+    "throughput_change_pct": 37.578278894408655,
+    "cpu_change_pct": -20.243491885969267
+  },
+  "large-view.raw": {
+    "baseline": {
+      "messages_s": 14139.57591085133,
+      "cpu_seconds": 0.279976
+    },
+    "plasmite": {
+      "messages_s": 13446.331100655216,
+      "cpu_seconds": 0.29269
+    },
+    "throughput_change_pct": -4.902868477576394,
+    "cpu_change_pct": 4.541103523159129
+  },
+  "small-forward.raw": {
+    "baseline": {
+      "messages_s": 140321.58198551528,
+      "cpu_seconds": 0.20007999999999998
+    },
+    "plasmite": {
+      "messages_s": 143620.16808615098,
+      "cpu_seconds": 0.198411
+    },
+    "throughput_change_pct": 2.350733261385396,
+    "cpu_change_pct": -0.8341663334666016
+  },
+  "small-full.raw": {
+    "baseline": {
+      "messages_s": 47762.729166738754,
+      "cpu_seconds": 0.68226
+    },
+    "plasmite": {
+      "messages_s": 57568.96336520435,
+      "cpu_seconds": 0.587648
+    },
+    "throughput_change_pct": 20.531142942506953,
+    "cpu_change_pct": -13.867440565180434
+  },
+  "small-identity.raw": {
+    "baseline": {
+      "messages_s": 76412.11995099705,
+      "cpu_seconds": 0.46468199999999993
+    },
+    "plasmite": {
+      "messages_s": 98480.9519964546,
+      "cpu_seconds": 0.38812499999999994
+    },
+    "throughput_change_pct": 28.88132414021527,
+    "cpu_change_pct": -16.47513783619766
+  },
+  "small-view.raw": {
+    "baseline": {
+      "messages_s": 98453.1978701344,
+      "cpu_seconds": 0.38806199999999996
+    },
+    "plasmite": {
+      "messages_s": 83566.85638696866,
+      "cpu_seconds": 0.43862399999999996
+    },
+    "throughput_change_pct": -15.120221389661415,
+    "cpu_change_pct": 13.029361287629303
+  },
+  "wide-forward.raw": {
+    "baseline": {
+      "messages_s": 89425.37436412746,
+      "cpu_seconds": 0.08260700000000001
+    },
+    "plasmite": {
+      "messages_s": 92449.35259290018,
+      "cpu_seconds": 0.062222
+    },
+    "throughput_change_pct": 3.3815661944667896,
+    "cpu_change_pct": -24.6770854770177
+  },
+  "wide-full.raw": {
+    "baseline": {
+      "messages_s": 13002.79787703319,
+      "cpu_seconds": 0.596868
+    },
+    "plasmite": {
+      "messages_s": 17187.008150794245,
+      "cpu_seconds": 0.507327
+    },
+    "throughput_change_pct": 32.179307202426145,
+    "cpu_change_pct": -15.001809445304492
+  },
+  "wide-identity.raw": {
+    "baseline": {
+      "messages_s": 22536.54025055837,
+      "cpu_seconds": 0.41164100000000003
+    },
+    "plasmite": {
+      "messages_s": 27778.84525707024,
+      "cpu_seconds": 0.302025
+    },
+    "throughput_change_pct": 23.261356660022315,
+    "cpu_change_pct": -26.629028692477196
+  },
+  "wide-view.raw": {
+    "baseline": {
+      "messages_s": 27710.40685112099,
+      "cpu_seconds": 0.303169
+    },
+    "plasmite": {
+      "messages_s": 28205.57534305158,
+      "cpu_seconds": 0.34833499999999995
+    },
+    "throughput_change_pct": 1.7869405331757404,
+    "cpu_change_pct": 14.897961203157294
+  },
+  "core_ns": {
+    "small": {
+      "snapshot_copy": 22.3955,
+      "whole_root_validation": 90.75,
+      "cold_view_selected": 656.875,
+      "cold_json_selected": 556.0205,
+      "warm_view_selected": 66.25,
+      "view_array_enumeration": 61.167
+    },
+    "wide": {
+      "snapshot_copy": 428.104,
+      "whole_root_validation": 9365.771,
+      "cold_view_selected": 32607.896,
+      "cold_json_selected": 50378.8335,
+      "warm_view_selected": 67.3125,
+      "view_array_enumeration": 64.625
+    },
+    "long_string": {
+      "snapshot_copy": 856.5835,
+      "whole_root_validation": 3794.5,
+      "cold_view_selected": 5228.208,
+      "cold_json_selected": 18763.9375,
+      "warm_view_selected": 64.0,
+      "view_array_enumeration": 60.5835
+    },
+    "array": {
+      "snapshot_copy": 538.125,
+      "whole_root_validation": 5239.25,
+      "cold_view_selected": 11920.2085,
+      "cold_json_selected": 23417.8335,
+      "warm_view_selected": 66.5415,
+      "view_array_enumeration": 11294.7915
+    }
+  }
+}

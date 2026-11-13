@@ -69,6 +69,14 @@ def worker(args):
             probe.plsm_bench_probe_end.restype = ctypes.c_char_p
         value = record()
         fixture = (Path(args.directory) / "fixture.lite3").read_bytes() if args.binary else None
+        views = None
+        source_view = None
+        if pool is not None and args.role == "writer" and (args.receipt == "view" or args.forward_view):
+            from bench_view_abi import ViewABI
+            views = ViewABI(plasmite)
+            if args.forward_view:
+                source_view = views.from_bytes(fixture)
+                stack.callback(views.lib.plsm_view_release, source_view)
         profile = cProfile.Profile() if args.profile else None
         print("ready", file=sys.stderr, flush=True)
         # The pipe reader starts blocked on data. Other workers await a start token.
@@ -100,14 +108,17 @@ def worker(args):
                     if args.interval_ms or args.pipe_flush:
                         sys.stdout.buffer.flush()
                 elif args.binary:
-                    if pool.append_lite3(fixture, plasmite.Durability.FAST) != index + 1:
+                    seq = (views.forward(pool, source_view).seq if args.forward_view
+                           else pool.append_lite3(fixture, plasmite.Durability.FAST))
+                    if seq != index + 1:
                         raise RuntimeError("binary append identity mismatch")
                 else:
-                    receipt = (pool.append_identity(value) if args.receipt == "identity"
+                    receipt = (views.append(pool, value) if args.receipt == "view" else
+                               pool.append_identity(value) if args.receipt == "identity"
                                else pool.append(value))
                     if (receipt.seq != index + 1
                             or (args.receipt == "full" and receipt.data != value)
-                            or (args.receipt == "identity" and receipt.timestamp_ns <= 0)):
+                            or (args.receipt in ("identity", "view") and receipt.timestamp_ns <= 0)):
                         raise RuntimeError("append receipt mismatch")
             if pool is None:
                 sys.stdout.buffer.flush()
@@ -168,6 +179,8 @@ def trial(args, lane, directory, profile=False):
                "--interval-ms", str(args.interval_ms), "--receipt", args.receipt]
     if args.binary:
         command.append("--binary")
+    if args.forward_view:
+        command.append("--forward-view")
     if args.pipe_flush:
         command.append("--pipe-flush")
     if args.native_counts:
@@ -259,9 +272,9 @@ def main():
     parser.add_argument("--bindings", type=Path, default=ROOT / "bindings" / "python")
     parser.add_argument("--baseline-bindings", type=Path,
                         help="Python bindings to use with the saved baseline library")
-    parser.add_argument("--receipt", choices=["full", "identity"], default="full",
+    parser.add_argument("--receipt", choices=["full", "identity", "view"], default="full",
                         help="producer receipt work; the consumer still decodes and verifies complete data")
-    parser.add_argument("--baseline-receipt", choices=["full", "identity"], default="full")
+    parser.add_argument("--baseline-receipt", choices=["full", "identity", "view"], default="full")
     parser.add_argument("--compare-pipe-flush", action="store_true",
                         help="include both buffered and per-record-flushed pipes")
     parser.add_argument("--pipe-flush", action="store_true",
@@ -270,6 +283,8 @@ def main():
                         help="macOS probe dylib; diagnostic counts only, not performance timing")
     parser.add_argument("--binary", action="store_true",
                         help="compare verified repeated Lite3 forwarding; omit the JSON pipe")
+    parser.add_argument("--forward-view", action="store_true",
+                        help="binary candidate forwards one validated immutable owner; baseline still validates input bytes")
     parser.add_argument("--messages", type=int, default=20_000)
     parser.add_argument("--interval-ms", type=float, default=0,
                         help="pace records and measure delivery latency (pipe flushes each record)")
@@ -281,6 +296,8 @@ def main():
     parser.add_argument("--lane", choices=["pipe", "plasmite"], help=argparse.SUPPRESS)
     parser.add_argument("--directory", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.forward_view and not args.binary:
+        parser.error("forward-view needs --binary")
     if args.compare_pipe_flush and (args.binary or args.pipe_flush):
         parser.error("compare-pipe-flush needs JSON mode without pipe-flush")
     if args.native_counts and args.profile:
@@ -314,6 +331,10 @@ def main():
               "interval_ms": args.interval_ms,
               "format": "lite3-repeat" if args.binary else "json-object",
               "receipt": args.receipt, "baseline_receipt": args.baseline_receipt,
+              "forward_owned_view": args.forward_view,
+              "view_work": "benchmark-only ctypes producer: standard json.dumps, append view, read identity, release; consumer still verifies complete data",
+              "forward_view_work": "candidate forwards one prevalidated immutable owner; baseline validates arbitrary encoded input on each append",
+              "view_adapter_sha256": hashlib.sha256((Path(__file__).parent / "bench_view_abi.py").read_bytes()).hexdigest() if args.forward_view or args.receipt == "view" or args.baseline_receipt == "view" else None,
               "pipe_flush": args.pipe_flush, "compare_pipe_flush": args.compare_pipe_flush,
               "native_operation_diagnostic": bool(args.native_counts),
               "first_record_json_bytes": len(json.dumps(record()).encode()),
@@ -341,6 +362,8 @@ def main():
         for label in lanes:
             lane = "pipe" if label in pipe_lanes else "plasmite"
             trial_args = argparse.Namespace(**vars(args))
+            if label == "baseline":
+                trial_args.forward_view = False
             if label == "pipe-flushed":
                 trial_args.pipe_flush = True
             trial_args.library = libraries.get(label, args.library)
