@@ -1,0 +1,2794 @@
+{
+  "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "backend": "native",
+  "allocation_diagnostic": false,
+  "library_sha256": "e3f59f98c9f6055f0786b584add6dcfabde43395968993dd0a2bfcee134eeae0",
+  "runner_sha256": "17ba14fcb1238fcefdb77867363de9e0090fc97254b3e903a49c5d7f94dd1a25",
+  "binding_sha256": "ac6f7202061aa78e0cd0bec18ec63b42127c56c51e0247f26fdb7e5857d09053",
+  "facade_sha256": "81d3a833763703c33a2f935b7ee54b7a7bbec85f7d2e38a3968794eaf5a506bd",
+  "native_source_sha256": "7ccba6da048df383e371e7ca7fe54d30d3b8e3779de76dcfcf4718f602b13c17",
+  "runs": [
+    {
+      "operations": 3000,
+      "ns_per_op": 2369.4306666666666,
+      "fixture": "small",
+      "lane": "cold_view_field",
+      "repeat": 1
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 4653.166666666667,
+      "fixture": "small",
+      "lane": "cold_legacy_field",
+      "repeat": 1
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 2883.389,
+      "fixture": "small",
+      "lane": "cold_view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 4314.986,
+      "fixture": "small",
+      "lane": "cold_legacy_native",
+      "repeat": 1
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 91.986,
+      "fixture": "small",
+      "lane": "warm_view_field",
+      "repeat": 1
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 27.722,
+      "fixture": "small",
+      "lane": "warm_native_field",
+      "repeat": 1
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 185.514,
+      "fixture": "small",
+      "lane": "view_array",
+      "repeat": 1
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 35.69433333333333,
+      "fixture": "small",
+      "lane": "native_array",
+      "repeat": 1
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 688.6526666666666,
+      "fixture": "small",
+      "lane": "view_copy",
+      "repeat": 1
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 1064.0833333333333,
+      "fixture": "small",
+      "lane": "native_copy",
+      "repeat": 1
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 501.05566666666664,
+      "fixture": "small",
+      "lane": "view_json",
+      "repeat": 1
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 1062.4863333333333,
+      "fixture": "small",
+      "lane": "native_json",
+      "repeat": 1
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 35.916666666666664,
+      "fixture": "small",
+      "lane": "view_presence",
+      "repeat": 1
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 20.111,
+      "fixture": "small",
+      "lane": "native_presence",
+      "repeat": 1
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 20.528,
+      "fixture": "small",
+      "lane": "native_presence",
+      "repeat": 2
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 36.333333333333336,
+      "fixture": "small",
+      "lane": "view_presence",
+      "repeat": 2
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 1084.0833333333333,
+      "fixture": "small",
+      "lane": "native_json",
+      "repeat": 2
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 512.486,
+      "fixture": "small",
+      "lane": "view_json",
+      "repeat": 2
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 1101.486,
+      "fixture": "small",
+      "lane": "native_copy",
+      "repeat": 2
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 724.9166666666666,
+      "fixture": "small",
+      "lane": "view_copy",
+      "repeat": 2
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 37.65266666666667,
+      "fixture": "small",
+      "lane": "native_array",
+      "repeat": 2
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 205.13866666666667,
+      "fixture": "small",
+      "lane": "view_array",
+      "repeat": 2
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 29.638666666666666,
+      "fixture": "small",
+      "lane": "warm_native_field",
+      "repeat": 2
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 98.736,
+      "fixture": "small",
+      "lane": "warm_view_field",
+      "repeat": 2
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 4398.152666666667,
+      "fixture": "small",
+      "lane": "cold_legacy_native",
+      "repeat": 2
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 2863.097333333333,
+      "fixture": "small",
+      "lane": "cold_view_native",
+      "repeat": 2
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 4317.833333333333,
+      "fixture": "small",
+      "lane": "cold_legacy_field",
+      "repeat": 2
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 2140.361,
+      "fixture": "small",
+      "lane": "cold_view_field",
+      "repeat": 2
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 2178.236,
+      "fixture": "small",
+      "lane": "cold_view_field",
+      "repeat": 3
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 4379.277666666667,
+      "fixture": "small",
+      "lane": "cold_legacy_field",
+      "repeat": 3
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 2821.472,
+      "fixture": "small",
+      "lane": "cold_view_native",
+      "repeat": 3
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 4272.5,
+      "fixture": "small",
+      "lane": "cold_legacy_native",
+      "repeat": 3
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 98.83333333333333,
+      "fixture": "small",
+      "lane": "warm_view_field",
+      "repeat": 3
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 26.902666666666665,
+      "fixture": "small",
+      "lane": "warm_native_field",
+      "repeat": 3
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 201.69466666666668,
+      "fixture": "small",
+      "lane": "view_array",
+      "repeat": 3
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 36.903,
+      "fixture": "small",
+      "lane": "native_array",
+      "repeat": 3
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 713.389,
+      "fixture": "small",
+      "lane": "view_copy",
+      "repeat": 3
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 1063.0973333333334,
+      "fixture": "small",
+      "lane": "native_copy",
+      "repeat": 3
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 498.4583333333333,
+      "fixture": "small",
+      "lane": "view_json",
+      "repeat": 3
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 1073.0556666666666,
+      "fixture": "small",
+      "lane": "native_json",
+      "repeat": 3
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 39.65266666666667,
+      "fixture": "small",
+      "lane": "view_presence",
+      "repeat": 3
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 19.708333333333332,
+      "fixture": "small",
+      "lane": "native_presence",
+      "repeat": 3
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 22.986,
+      "fixture": "small",
+      "lane": "native_presence",
+      "repeat": 4
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 35.625,
+      "fixture": "small",
+      "lane": "view_presence",
+      "repeat": 4
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 1055.3333333333333,
+      "fixture": "small",
+      "lane": "native_json",
+      "repeat": 4
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 492.4723333333333,
+      "fixture": "small",
+      "lane": "view_json",
+      "repeat": 4
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 1075.625,
+      "fixture": "small",
+      "lane": "native_copy",
+      "repeat": 4
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 733.2916666666666,
+      "fixture": "small",
+      "lane": "view_copy",
+      "repeat": 4
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 35.639,
+      "fixture": "small",
+      "lane": "native_array",
+      "repeat": 4
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 203.11133333333333,
+      "fixture": "small",
+      "lane": "view_array",
+      "repeat": 4
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 27.972333333333335,
+      "fixture": "small",
+      "lane": "warm_native_field",
+      "repeat": 4
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 98.68033333333334,
+      "fixture": "small",
+      "lane": "warm_view_field",
+      "repeat": 4
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 4287.639,
+      "fixture": "small",
+      "lane": "cold_legacy_native",
+      "repeat": 4
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 2805.3886666666667,
+      "fixture": "small",
+      "lane": "cold_view_native",
+      "repeat": 4
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 4446.444333333333,
+      "fixture": "small",
+      "lane": "cold_legacy_field",
+      "repeat": 4
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 2185.903,
+      "fixture": "small",
+      "lane": "cold_view_field",
+      "repeat": 4
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 2124.625,
+      "fixture": "small",
+      "lane": "cold_view_field",
+      "repeat": 5
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 4239.027666666667,
+      "fixture": "small",
+      "lane": "cold_legacy_field",
+      "repeat": 5
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 2748.5,
+      "fixture": "small",
+      "lane": "cold_view_native",
+      "repeat": 5
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 4226.764,
+      "fixture": "small",
+      "lane": "cold_legacy_native",
+      "repeat": 5
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 92.19433333333333,
+      "fixture": "small",
+      "lane": "warm_view_field",
+      "repeat": 5
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 34.708333333333336,
+      "fixture": "small",
+      "lane": "warm_native_field",
+      "repeat": 5
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 190.014,
+      "fixture": "small",
+      "lane": "view_array",
+      "repeat": 5
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 35.291666666666664,
+      "fixture": "small",
+      "lane": "native_array",
+      "repeat": 5
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 679.875,
+      "fixture": "small",
+      "lane": "view_copy",
+      "repeat": 5
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 1035.0693333333334,
+      "fixture": "small",
+      "lane": "native_copy",
+      "repeat": 5
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 498.9026666666667,
+      "fixture": "small",
+      "lane": "view_json",
+      "repeat": 5
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 1088.3196666666668,
+      "fixture": "small",
+      "lane": "native_json",
+      "repeat": 5
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 35.847,
+      "fixture": "small",
+      "lane": "view_presence",
+      "repeat": 5
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 19.222333333333335,
+      "fixture": "small",
+      "lane": "native_presence",
+      "repeat": 5
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 19.014,
+      "fixture": "small",
+      "lane": "native_presence",
+      "repeat": 6
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 35.458333333333336,
+      "fixture": "small",
+      "lane": "view_presence",
+      "repeat": 6
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 1064.8056666666666,
+      "fixture": "small",
+      "lane": "native_json",
+      "repeat": 6
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 505.73633333333333,
+      "fixture": "small",
+      "lane": "view_json",
+      "repeat": 6
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 1086.278,
+      "fixture": "small",
+      "lane": "native_copy",
+      "repeat": 6
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 704.889,
+      "fixture": "small",
+      "lane": "view_copy",
+      "repeat": 6
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 38.31933333333333,
+      "fixture": "small",
+      "lane": "native_array",
+      "repeat": 6
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 203.79166666666666,
+      "fixture": "small",
+      "lane": "view_array",
+      "repeat": 6
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 28.430666666666667,
+      "fixture": "small",
+      "lane": "warm_native_field",
+      "repeat": 6
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 97.764,
+      "fixture": "small",
+      "lane": "warm_view_field",
+      "repeat": 6
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 4324.361,
+      "fixture": "small",
+      "lane": "cold_legacy_native",
+      "repeat": 6
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 2857.3333333333335,
+      "fixture": "small",
+      "lane": "cold_view_native",
+      "repeat": 6
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 4257.555333333334,
+      "fixture": "small",
+      "lane": "cold_legacy_field",
+      "repeat": 6
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 2091.861,
+      "fixture": "small",
+      "lane": "cold_view_field",
+      "repeat": 6
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 2106.25,
+      "fixture": "small",
+      "lane": "cold_view_field",
+      "repeat": 7
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 4211.958333333333,
+      "fixture": "small",
+      "lane": "cold_legacy_field",
+      "repeat": 7
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 2799.722333333333,
+      "fixture": "small",
+      "lane": "cold_view_native",
+      "repeat": 7
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 4235.680333333334,
+      "fixture": "small",
+      "lane": "cold_legacy_native",
+      "repeat": 7
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 98.125,
+      "fixture": "small",
+      "lane": "warm_view_field",
+      "repeat": 7
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 28.180333333333333,
+      "fixture": "small",
+      "lane": "warm_native_field",
+      "repeat": 7
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 201.90266666666668,
+      "fixture": "small",
+      "lane": "view_array",
+      "repeat": 7
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 36.5,
+      "fixture": "small",
+      "lane": "native_array",
+      "repeat": 7
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 714.25,
+      "fixture": "small",
+      "lane": "view_copy",
+      "repeat": 7
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 1092.2083333333333,
+      "fixture": "small",
+      "lane": "native_copy",
+      "repeat": 7
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 520.6946666666666,
+      "fixture": "small",
+      "lane": "view_json",
+      "repeat": 7
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 1106.0276666666666,
+      "fixture": "small",
+      "lane": "native_json",
+      "repeat": 7
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 37.80566666666667,
+      "fixture": "small",
+      "lane": "view_presence",
+      "repeat": 7
+    },
+    {
+      "operations": 3000,
+      "ns_per_op": 20.736333333333334,
+      "fixture": "small",
+      "lane": "native_presence",
+      "repeat": 7
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 32929.582,
+      "fixture": "wide",
+      "lane": "cold_view_field",
+      "repeat": 1
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 69268.832,
+      "fixture": "wide",
+      "lane": "cold_legacy_field",
+      "repeat": 1
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 79937.0,
+      "fixture": "wide",
+      "lane": "cold_view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 66853.916,
+      "fixture": "wide",
+      "lane": "cold_legacy_native",
+      "repeat": 1
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 106.084,
+      "fixture": "wide",
+      "lane": "warm_view_field",
+      "repeat": 1
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 28.75,
+      "fixture": "wide",
+      "lane": "warm_native_field",
+      "repeat": 1
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 197.834,
+      "fixture": "wide",
+      "lane": "view_array",
+      "repeat": 1
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 35.75,
+      "fixture": "wide",
+      "lane": "native_array",
+      "repeat": 1
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 43690.416,
+      "fixture": "wide",
+      "lane": "view_copy",
+      "repeat": 1
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 86136.25,
+      "fixture": "wide",
+      "lane": "native_copy",
+      "repeat": 1
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 23035.832,
+      "fixture": "wide",
+      "lane": "view_json",
+      "repeat": 1
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 26623.084,
+      "fixture": "wide",
+      "lane": "native_json",
+      "repeat": 1
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 54.918,
+      "fixture": "wide",
+      "lane": "view_presence",
+      "repeat": 1
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 20.332,
+      "fixture": "wide",
+      "lane": "native_presence",
+      "repeat": 1
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 20.084,
+      "fixture": "wide",
+      "lane": "native_presence",
+      "repeat": 2
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 40.75,
+      "fixture": "wide",
+      "lane": "view_presence",
+      "repeat": 2
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 24414.416,
+      "fixture": "wide",
+      "lane": "native_json",
+      "repeat": 2
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 21401.916,
+      "fixture": "wide",
+      "lane": "view_json",
+      "repeat": 2
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 86312.5,
+      "fixture": "wide",
+      "lane": "native_copy",
+      "repeat": 2
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 43272.918,
+      "fixture": "wide",
+      "lane": "view_copy",
+      "repeat": 2
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 35.916,
+      "fixture": "wide",
+      "lane": "native_array",
+      "repeat": 2
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 258.918,
+      "fixture": "wide",
+      "lane": "view_array",
+      "repeat": 2
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 26.834,
+      "fixture": "wide",
+      "lane": "warm_native_field",
+      "repeat": 2
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 100.666,
+      "fixture": "wide",
+      "lane": "warm_view_field",
+      "repeat": 2
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 69770.0,
+      "fixture": "wide",
+      "lane": "cold_legacy_native",
+      "repeat": 2
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 77031.0,
+      "fixture": "wide",
+      "lane": "cold_view_native",
+      "repeat": 2
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 70681.834,
+      "fixture": "wide",
+      "lane": "cold_legacy_field",
+      "repeat": 2
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 31850.668,
+      "fixture": "wide",
+      "lane": "cold_view_field",
+      "repeat": 2
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 31906.668,
+      "fixture": "wide",
+      "lane": "cold_view_field",
+      "repeat": 3
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 67000.834,
+      "fixture": "wide",
+      "lane": "cold_legacy_field",
+      "repeat": 3
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 78134.334,
+      "fixture": "wide",
+      "lane": "cold_view_native",
+      "repeat": 3
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 70649.416,
+      "fixture": "wide",
+      "lane": "cold_legacy_native",
+      "repeat": 3
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 107.334,
+      "fixture": "wide",
+      "lane": "warm_view_field",
+      "repeat": 3
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 28.668,
+      "fixture": "wide",
+      "lane": "warm_native_field",
+      "repeat": 3
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 206.082,
+      "fixture": "wide",
+      "lane": "view_array",
+      "repeat": 3
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 38.25,
+      "fixture": "wide",
+      "lane": "native_array",
+      "repeat": 3
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 46016.916,
+      "fixture": "wide",
+      "lane": "view_copy",
+      "repeat": 3
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 88154.416,
+      "fixture": "wide",
+      "lane": "native_copy",
+      "repeat": 3
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 21219.832,
+      "fixture": "wide",
+      "lane": "view_json",
+      "repeat": 3
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 25143.082,
+      "fixture": "wide",
+      "lane": "native_json",
+      "repeat": 3
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 41.916,
+      "fixture": "wide",
+      "lane": "view_presence",
+      "repeat": 3
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 21.0,
+      "fixture": "wide",
+      "lane": "native_presence",
+      "repeat": 3
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 19.334,
+      "fixture": "wide",
+      "lane": "native_presence",
+      "repeat": 4
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 41.666,
+      "fixture": "wide",
+      "lane": "view_presence",
+      "repeat": 4
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 25150.166,
+      "fixture": "wide",
+      "lane": "native_json",
+      "repeat": 4
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 20283.582,
+      "fixture": "wide",
+      "lane": "view_json",
+      "repeat": 4
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 83047.416,
+      "fixture": "wide",
+      "lane": "native_copy",
+      "repeat": 4
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 43297.25,
+      "fixture": "wide",
+      "lane": "view_copy",
+      "repeat": 4
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 35.75,
+      "fixture": "wide",
+      "lane": "native_array",
+      "repeat": 4
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 193.5,
+      "fixture": "wide",
+      "lane": "view_array",
+      "repeat": 4
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 27.5,
+      "fixture": "wide",
+      "lane": "warm_native_field",
+      "repeat": 4
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 101.918,
+      "fixture": "wide",
+      "lane": "warm_view_field",
+      "repeat": 4
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 66947.584,
+      "fixture": "wide",
+      "lane": "cold_legacy_native",
+      "repeat": 4
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 74668.834,
+      "fixture": "wide",
+      "lane": "cold_view_native",
+      "repeat": 4
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 67444.25,
+      "fixture": "wide",
+      "lane": "cold_legacy_field",
+      "repeat": 4
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 31360.334,
+      "fixture": "wide",
+      "lane": "cold_view_field",
+      "repeat": 4
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 31141.918,
+      "fixture": "wide",
+      "lane": "cold_view_field",
+      "repeat": 5
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 66799.5,
+      "fixture": "wide",
+      "lane": "cold_legacy_field",
+      "repeat": 5
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 76823.5,
+      "fixture": "wide",
+      "lane": "cold_view_native",
+      "repeat": 5
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 67779.666,
+      "fixture": "wide",
+      "lane": "cold_legacy_native",
+      "repeat": 5
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 107.668,
+      "fixture": "wide",
+      "lane": "warm_view_field",
+      "repeat": 5
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 28.666,
+      "fixture": "wide",
+      "lane": "warm_native_field",
+      "repeat": 5
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 202.0,
+      "fixture": "wide",
+      "lane": "view_array",
+      "repeat": 5
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 37.416,
+      "fixture": "wide",
+      "lane": "native_array",
+      "repeat": 5
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 43942.0,
+      "fixture": "wide",
+      "lane": "view_copy",
+      "repeat": 5
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 85776.082,
+      "fixture": "wide",
+      "lane": "native_copy",
+      "repeat": 5
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 21124.0,
+      "fixture": "wide",
+      "lane": "view_json",
+      "repeat": 5
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 26077.832,
+      "fixture": "wide",
+      "lane": "native_json",
+      "repeat": 5
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 43.168,
+      "fixture": "wide",
+      "lane": "view_presence",
+      "repeat": 5
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 21.0,
+      "fixture": "wide",
+      "lane": "native_presence",
+      "repeat": 5
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 19.416,
+      "fixture": "wide",
+      "lane": "native_presence",
+      "repeat": 6
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 42.166,
+      "fixture": "wide",
+      "lane": "view_presence",
+      "repeat": 6
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 37854.918,
+      "fixture": "wide",
+      "lane": "native_json",
+      "repeat": 6
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 25194.584,
+      "fixture": "wide",
+      "lane": "view_json",
+      "repeat": 6
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 87420.334,
+      "fixture": "wide",
+      "lane": "native_copy",
+      "repeat": 6
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 44597.666,
+      "fixture": "wide",
+      "lane": "view_copy",
+      "repeat": 6
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 40.168,
+      "fixture": "wide",
+      "lane": "native_array",
+      "repeat": 6
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 231.0,
+      "fixture": "wide",
+      "lane": "view_array",
+      "repeat": 6
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 29.166,
+      "fixture": "wide",
+      "lane": "warm_native_field",
+      "repeat": 6
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 109.918,
+      "fixture": "wide",
+      "lane": "warm_view_field",
+      "repeat": 6
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 68402.582,
+      "fixture": "wide",
+      "lane": "cold_legacy_native",
+      "repeat": 6
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 76833.834,
+      "fixture": "wide",
+      "lane": "cold_view_native",
+      "repeat": 6
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 67090.666,
+      "fixture": "wide",
+      "lane": "cold_legacy_field",
+      "repeat": 6
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 31855.0,
+      "fixture": "wide",
+      "lane": "cold_view_field",
+      "repeat": 6
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 31590.916,
+      "fixture": "wide",
+      "lane": "cold_view_field",
+      "repeat": 7
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 69890.166,
+      "fixture": "wide",
+      "lane": "cold_legacy_field",
+      "repeat": 7
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 77373.084,
+      "fixture": "wide",
+      "lane": "cold_view_native",
+      "repeat": 7
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 67636.832,
+      "fixture": "wide",
+      "lane": "cold_legacy_native",
+      "repeat": 7
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 120.082,
+      "fixture": "wide",
+      "lane": "warm_view_field",
+      "repeat": 7
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 28.5,
+      "fixture": "wide",
+      "lane": "warm_native_field",
+      "repeat": 7
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 201.25,
+      "fixture": "wide",
+      "lane": "view_array",
+      "repeat": 7
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 37.084,
+      "fixture": "wide",
+      "lane": "native_array",
+      "repeat": 7
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 43928.918,
+      "fixture": "wide",
+      "lane": "view_copy",
+      "repeat": 7
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 83812.5,
+      "fixture": "wide",
+      "lane": "native_copy",
+      "repeat": 7
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 20608.168,
+      "fixture": "wide",
+      "lane": "view_json",
+      "repeat": 7
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 25469.25,
+      "fixture": "wide",
+      "lane": "native_json",
+      "repeat": 7
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 42.0,
+      "fixture": "wide",
+      "lane": "view_presence",
+      "repeat": 7
+    },
+    {
+      "operations": 500,
+      "ns_per_op": 20.75,
+      "fixture": "wide",
+      "lane": "native_presence",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 7475.833333333333,
+      "fixture": "long_string",
+      "lane": "cold_view_field",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 62076.25,
+      "fixture": "long_string",
+      "lane": "cold_legacy_field",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 10996.943333333333,
+      "fixture": "long_string",
+      "lane": "cold_view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 62510.276666666665,
+      "fixture": "long_string",
+      "lane": "cold_legacy_native",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 96.80666666666667,
+      "fixture": "long_string",
+      "lane": "warm_view_field",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 27.916666666666668,
+      "fixture": "long_string",
+      "lane": "warm_native_field",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 200.41666666666666,
+      "fixture": "long_string",
+      "lane": "view_array",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 38.193333333333335,
+      "fixture": "long_string",
+      "lane": "native_array",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 3675.8333333333335,
+      "fixture": "long_string",
+      "lane": "view_copy",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 1450.28,
+      "fixture": "long_string",
+      "lane": "native_copy",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 19723.47333333333,
+      "fixture": "long_string",
+      "lane": "view_json",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 31927.64,
+      "fixture": "long_string",
+      "lane": "native_json",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 39.723333333333336,
+      "fixture": "long_string",
+      "lane": "view_presence",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 21.946666666666665,
+      "fixture": "long_string",
+      "lane": "native_presence",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 19.86,
+      "fixture": "long_string",
+      "lane": "native_presence",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 36.803333333333335,
+      "fixture": "long_string",
+      "lane": "view_presence",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 30833.333333333332,
+      "fixture": "long_string",
+      "lane": "native_json",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 19472.916666666668,
+      "fixture": "long_string",
+      "lane": "view_json",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 1112.2233333333334,
+      "fixture": "long_string",
+      "lane": "native_copy",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 3340.28,
+      "fixture": "long_string",
+      "lane": "view_copy",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 35.973333333333336,
+      "fixture": "long_string",
+      "lane": "native_array",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 190.69666666666666,
+      "fixture": "long_string",
+      "lane": "view_array",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 27.776666666666667,
+      "fixture": "long_string",
+      "lane": "warm_native_field",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 94.16666666666667,
+      "fixture": "long_string",
+      "lane": "warm_view_field",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 61074.863333333335,
+      "fixture": "long_string",
+      "lane": "cold_legacy_native",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 10615.14,
+      "fixture": "long_string",
+      "lane": "cold_view_native",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 59519.583333333336,
+      "fixture": "long_string",
+      "lane": "cold_legacy_field",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 7228.75,
+      "fixture": "long_string",
+      "lane": "cold_view_field",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 7318.89,
+      "fixture": "long_string",
+      "lane": "cold_view_field",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 58957.78,
+      "fixture": "long_string",
+      "lane": "cold_legacy_field",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 10679.443333333333,
+      "fixture": "long_string",
+      "lane": "cold_view_native",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 60181.39,
+      "fixture": "long_string",
+      "lane": "cold_legacy_native",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 95.14,
+      "fixture": "long_string",
+      "lane": "warm_view_field",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 27.5,
+      "fixture": "long_string",
+      "lane": "warm_native_field",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 185.83333333333334,
+      "fixture": "long_string",
+      "lane": "view_array",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 35.696666666666665,
+      "fixture": "long_string",
+      "lane": "native_array",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 3281.806666666667,
+      "fixture": "long_string",
+      "lane": "view_copy",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 1097.2233333333334,
+      "fixture": "long_string",
+      "lane": "native_copy",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 19069.583333333332,
+      "fixture": "long_string",
+      "lane": "view_json",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 30759.72,
+      "fixture": "long_string",
+      "lane": "native_json",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 34.306666666666665,
+      "fixture": "long_string",
+      "lane": "view_presence",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 20.416666666666668,
+      "fixture": "long_string",
+      "lane": "native_presence",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 18.613333333333333,
+      "fixture": "long_string",
+      "lane": "native_presence",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 34.443333333333335,
+      "fixture": "long_string",
+      "lane": "view_presence",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 30636.943333333333,
+      "fixture": "long_string",
+      "lane": "native_json",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 19470.27666666667,
+      "fixture": "long_string",
+      "lane": "view_json",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 1129.8633333333332,
+      "fixture": "long_string",
+      "lane": "native_copy",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 3268.47,
+      "fixture": "long_string",
+      "lane": "view_copy",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 36.666666666666664,
+      "fixture": "long_string",
+      "lane": "native_array",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 187.5,
+      "fixture": "long_string",
+      "lane": "view_array",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 27.083333333333332,
+      "fixture": "long_string",
+      "lane": "warm_native_field",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 91.94666666666667,
+      "fixture": "long_string",
+      "lane": "warm_view_field",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 59408.75,
+      "fixture": "long_string",
+      "lane": "cold_legacy_native",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 10358.75,
+      "fixture": "long_string",
+      "lane": "cold_view_native",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 58921.666666666664,
+      "fixture": "long_string",
+      "lane": "cold_legacy_field",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 7104.446666666667,
+      "fixture": "long_string",
+      "lane": "cold_view_field",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 7123.473333333333,
+      "fixture": "long_string",
+      "lane": "cold_view_field",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 58873.61,
+      "fixture": "long_string",
+      "lane": "cold_legacy_field",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 10506.39,
+      "fixture": "long_string",
+      "lane": "cold_view_native",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 58801.80333333334,
+      "fixture": "long_string",
+      "lane": "cold_legacy_native",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 92.77666666666667,
+      "fixture": "long_string",
+      "lane": "warm_view_field",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 28.333333333333332,
+      "fixture": "long_string",
+      "lane": "warm_native_field",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 188.47333333333333,
+      "fixture": "long_string",
+      "lane": "view_array",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 36.806666666666665,
+      "fixture": "long_string",
+      "lane": "native_array",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 3311.6666666666665,
+      "fixture": "long_string",
+      "lane": "view_copy",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 1121.11,
+      "fixture": "long_string",
+      "lane": "native_copy",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 19085.27666666667,
+      "fixture": "long_string",
+      "lane": "view_json",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 30614.166666666668,
+      "fixture": "long_string",
+      "lane": "native_json",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 34.723333333333336,
+      "fixture": "long_string",
+      "lane": "view_presence",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 20.0,
+      "fixture": "long_string",
+      "lane": "native_presence",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 18.75,
+      "fixture": "long_string",
+      "lane": "native_presence",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 33.473333333333336,
+      "fixture": "long_string",
+      "lane": "view_presence",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 30591.666666666668,
+      "fixture": "long_string",
+      "lane": "native_json",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 19348.75,
+      "fixture": "long_string",
+      "lane": "view_json",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 1176.25,
+      "fixture": "long_string",
+      "lane": "native_copy",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 3369.306666666667,
+      "fixture": "long_string",
+      "lane": "view_copy",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 39.303333333333335,
+      "fixture": "long_string",
+      "lane": "native_array",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 203.33333333333334,
+      "fixture": "long_string",
+      "lane": "view_array",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 32.223333333333336,
+      "fixture": "long_string",
+      "lane": "warm_native_field",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 100.97333333333333,
+      "fixture": "long_string",
+      "lane": "warm_view_field",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 59463.89,
+      "fixture": "long_string",
+      "lane": "cold_legacy_native",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 10337.223333333333,
+      "fixture": "long_string",
+      "lane": "cold_view_native",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 59071.806666666664,
+      "fixture": "long_string",
+      "lane": "cold_legacy_field",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 7235.276666666667,
+      "fixture": "long_string",
+      "lane": "cold_view_field",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 7293.056666666666,
+      "fixture": "long_string",
+      "lane": "cold_view_field",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 58807.363333333335,
+      "fixture": "long_string",
+      "lane": "cold_legacy_field",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 10546.526666666667,
+      "fixture": "long_string",
+      "lane": "cold_view_native",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 59158.613333333335,
+      "fixture": "long_string",
+      "lane": "cold_legacy_native",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 94.44666666666667,
+      "fixture": "long_string",
+      "lane": "warm_view_field",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 27.916666666666668,
+      "fixture": "long_string",
+      "lane": "warm_native_field",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 187.5,
+      "fixture": "long_string",
+      "lane": "view_array",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 36.666666666666664,
+      "fixture": "long_string",
+      "lane": "native_array",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 3261.5266666666666,
+      "fixture": "long_string",
+      "lane": "view_copy",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 1094.1666666666667,
+      "fixture": "long_string",
+      "lane": "native_copy",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 19175.553333333333,
+      "fixture": "long_string",
+      "lane": "view_json",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 30659.583333333332,
+      "fixture": "long_string",
+      "lane": "native_json",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 34.443333333333335,
+      "fixture": "long_string",
+      "lane": "view_presence",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 20.973333333333333,
+      "fixture": "long_string",
+      "lane": "native_presence",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 13645.835,
+      "fixture": "array",
+      "lane": "cold_view_field",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 43696.455,
+      "fixture": "array",
+      "lane": "cold_legacy_field",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 35083.335,
+      "fixture": "array",
+      "lane": "cold_view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 48998.335,
+      "fixture": "array",
+      "lane": "cold_legacy_native",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 97.71,
+      "fixture": "array",
+      "lane": "warm_view_field",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 30.83,
+      "fixture": "array",
+      "lane": "warm_native_field",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 19242.71,
+      "fixture": "array",
+      "lane": "view_array",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 1271.25,
+      "fixture": "array",
+      "lane": "native_array",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 19760.625,
+      "fixture": "array",
+      "lane": "view_copy",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 30042.92,
+      "fixture": "array",
+      "lane": "native_copy",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9460.83,
+      "fixture": "array",
+      "lane": "view_json",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 17370.0,
+      "fixture": "array",
+      "lane": "native_json",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 36.25,
+      "fixture": "array",
+      "lane": "view_presence",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 21.455,
+      "fixture": "array",
+      "lane": "native_presence",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 18.335,
+      "fixture": "array",
+      "lane": "native_presence",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 36.665,
+      "fixture": "array",
+      "lane": "view_presence",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 17093.125,
+      "fixture": "array",
+      "lane": "native_json",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 10141.04,
+      "fixture": "array",
+      "lane": "view_json",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 30952.92,
+      "fixture": "array",
+      "lane": "native_copy",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 20515.625,
+      "fixture": "array",
+      "lane": "view_copy",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 1373.125,
+      "fixture": "array",
+      "lane": "native_array",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 20011.67,
+      "fixture": "array",
+      "lane": "view_array",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 30.83,
+      "fixture": "array",
+      "lane": "warm_native_field",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 96.04,
+      "fixture": "array",
+      "lane": "warm_view_field",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 44480.625,
+      "fixture": "array",
+      "lane": "cold_legacy_native",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 35367.29,
+      "fixture": "array",
+      "lane": "cold_view_native",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 44920.205,
+      "fixture": "array",
+      "lane": "cold_legacy_field",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 14426.875,
+      "fixture": "array",
+      "lane": "cold_view_field",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 14570.415,
+      "fixture": "array",
+      "lane": "cold_view_field",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 45382.085,
+      "fixture": "array",
+      "lane": "cold_legacy_field",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 35555.21,
+      "fixture": "array",
+      "lane": "cold_view_native",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 46555.625,
+      "fixture": "array",
+      "lane": "cold_legacy_native",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 106.04,
+      "fixture": "array",
+      "lane": "warm_view_field",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 31.25,
+      "fixture": "array",
+      "lane": "warm_native_field",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 20029.375,
+      "fixture": "array",
+      "lane": "view_array",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 1359.58,
+      "fixture": "array",
+      "lane": "native_array",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 20736.46,
+      "fixture": "array",
+      "lane": "view_copy",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 30066.455,
+      "fixture": "array",
+      "lane": "native_copy",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9741.46,
+      "fixture": "array",
+      "lane": "view_json",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 17340.625,
+      "fixture": "array",
+      "lane": "native_json",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 37.085,
+      "fixture": "array",
+      "lane": "view_presence",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 21.67,
+      "fixture": "array",
+      "lane": "native_presence",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 20.0,
+      "fixture": "array",
+      "lane": "native_presence",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 35.83,
+      "fixture": "array",
+      "lane": "view_presence",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 16864.585,
+      "fixture": "array",
+      "lane": "native_json",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9914.79,
+      "fixture": "array",
+      "lane": "view_json",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 30035.625,
+      "fixture": "array",
+      "lane": "native_copy",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 20512.705,
+      "fixture": "array",
+      "lane": "view_copy",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 1352.5,
+      "fixture": "array",
+      "lane": "native_array",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 19310.625,
+      "fixture": "array",
+      "lane": "view_array",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 29.375,
+      "fixture": "array",
+      "lane": "warm_native_field",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 96.67,
+      "fixture": "array",
+      "lane": "warm_view_field",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 42997.295,
+      "fixture": "array",
+      "lane": "cold_legacy_native",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 33937.915,
+      "fixture": "array",
+      "lane": "cold_view_native",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 43421.875,
+      "fixture": "array",
+      "lane": "cold_legacy_field",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 14178.125,
+      "fixture": "array",
+      "lane": "cold_view_field",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 13694.165,
+      "fixture": "array",
+      "lane": "cold_view_field",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 42591.045,
+      "fixture": "array",
+      "lane": "cold_legacy_field",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 34359.17,
+      "fixture": "array",
+      "lane": "cold_view_native",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 44040.21,
+      "fixture": "array",
+      "lane": "cold_legacy_native",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 102.5,
+      "fixture": "array",
+      "lane": "warm_view_field",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 30.835,
+      "fixture": "array",
+      "lane": "warm_native_field",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 19560.415,
+      "fixture": "array",
+      "lane": "view_array",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 1367.5,
+      "fixture": "array",
+      "lane": "native_array",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 20787.295,
+      "fixture": "array",
+      "lane": "view_copy",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 30165.625,
+      "fixture": "array",
+      "lane": "native_copy",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9395.835,
+      "fixture": "array",
+      "lane": "view_json",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 17540.415,
+      "fixture": "array",
+      "lane": "native_json",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 35.625,
+      "fixture": "array",
+      "lane": "view_presence",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 21.67,
+      "fixture": "array",
+      "lane": "native_presence",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 18.75,
+      "fixture": "array",
+      "lane": "native_presence",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 35.415,
+      "fixture": "array",
+      "lane": "view_presence",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 17072.08,
+      "fixture": "array",
+      "lane": "native_json",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 10037.29,
+      "fixture": "array",
+      "lane": "view_json",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 30636.04,
+      "fixture": "array",
+      "lane": "native_copy",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 20614.165,
+      "fixture": "array",
+      "lane": "view_copy",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 1367.5,
+      "fixture": "array",
+      "lane": "native_array",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 19658.96,
+      "fixture": "array",
+      "lane": "view_array",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 30.415,
+      "fixture": "array",
+      "lane": "warm_native_field",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 94.58,
+      "fixture": "array",
+      "lane": "warm_view_field",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 43806.25,
+      "fixture": "array",
+      "lane": "cold_legacy_native",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 33628.955,
+      "fixture": "array",
+      "lane": "cold_view_native",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 43216.46,
+      "fixture": "array",
+      "lane": "cold_legacy_field",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 14530.415,
+      "fixture": "array",
+      "lane": "cold_view_field",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 13893.955,
+      "fixture": "array",
+      "lane": "cold_view_field",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 44587.915,
+      "fixture": "array",
+      "lane": "cold_legacy_field",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 35125.835,
+      "fixture": "array",
+      "lane": "cold_view_native",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 44051.46,
+      "fixture": "array",
+      "lane": "cold_legacy_native",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 102.92,
+      "fixture": "array",
+      "lane": "warm_view_field",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 30.625,
+      "fixture": "array",
+      "lane": "warm_native_field",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 19544.79,
+      "fixture": "array",
+      "lane": "view_array",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 1360.415,
+      "fixture": "array",
+      "lane": "native_array",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 20686.46,
+      "fixture": "array",
+      "lane": "view_copy",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 31096.045,
+      "fixture": "array",
+      "lane": "native_copy",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9937.71,
+      "fixture": "array",
+      "lane": "view_json",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 17775.415,
+      "fixture": "array",
+      "lane": "native_json",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 37.085,
+      "fixture": "array",
+      "lane": "view_presence",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 22.915,
+      "fixture": "array",
+      "lane": "native_presence",
+      "repeat": 7
+    }
+  ],
+  "retention": [
+    {
+      "fixture": "small",
+      "encoded_bytes": 687,
+      "child_valid_after_pool_close": true,
+      "readonly_buffer": true,
+      "process_peak_rss_bytes": 33357824
+    },
+    {
+      "fixture": "wide",
+      "encoded_bytes": 35442,
+      "child_valid_after_pool_close": true,
+      "readonly_buffer": true,
+      "process_peak_rss_bytes": 33849344
+    },
+    {
+      "fixture": "long_string",
+      "encoded_bytes": 66235,
+      "child_valid_after_pool_close": true,
+      "readonly_buffer": true,
+      "process_peak_rss_bytes": 34291712
+    },
+    {
+      "fixture": "array",
+      "encoded_bytes": 41649,
+      "child_valid_after_pool_close": true,
+      "readonly_buffer": true,
+      "process_peak_rss_bytes": 34324480
+    }
+  ],
+  "backend_sha256": "30e33927fb86f9158206b292e4e4b0cd3d8c8a60675034954b345b56349e08ea",
+  "notes": [
+    "Storage pages are warm; cold means fresh message acquisition.",
+    "Tracemalloc excludes libplasmite/Rust/C allocations; diagnostic ns are null.",
+    "Native copying creates independent editable containers. Warm object lookup uses an already decoded object.",
+    "Fallback buffers keep extra immutable encoded copies. No native-tree fallback on arrival."
+  ]
+}

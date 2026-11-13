@@ -1,0 +1,554 @@
+{
+  "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "backend": "native",
+  "allocation_diagnostic": true,
+  "library_sha256": "e3f59f98c9f6055f0786b584add6dcfabde43395968993dd0a2bfcee134eeae0",
+  "runner_sha256": "17ba14fcb1238fcefdb77867363de9e0090fc97254b3e903a49c5d7f94dd1a25",
+  "binding_sha256": "ac6f7202061aa78e0cd0bec18ec63b42127c56c51e0247f26fdb7e5857d09053",
+  "facade_sha256": "81d3a833763703c33a2f935b7ee54b7a7bbec85f7d2e38a3968794eaf5a506bd",
+  "native_source_sha256": "7ccba6da048df383e371e7ca7fe54d30d3b8e3779de76dcfcf4718f602b13c17",
+  "runs": [
+    {
+      "operations": 30,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 764,
+      "python_traced_peak_bytes": 1176,
+      "fixture": "small",
+      "lane": "cold_view_field",
+      "repeat": 1
+    },
+    {
+      "operations": 30,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 1908,
+      "python_traced_peak_bytes": 4027,
+      "fixture": "small",
+      "lane": "cold_legacy_field",
+      "repeat": 1
+    },
+    {
+      "operations": 30,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 1569,
+      "python_traced_peak_bytes": 1957,
+      "fixture": "small",
+      "lane": "cold_view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 30,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 2601,
+      "python_traced_peak_bytes": 4720,
+      "fixture": "small",
+      "lane": "cold_legacy_native",
+      "repeat": 1
+    },
+    {
+      "operations": 30,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 380,
+      "python_traced_peak_bytes": 380,
+      "fixture": "small",
+      "lane": "warm_view_field",
+      "repeat": 1
+    },
+    {
+      "operations": 30,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 332,
+      "python_traced_peak_bytes": 332,
+      "fixture": "small",
+      "lane": "warm_native_field",
+      "repeat": 1
+    },
+    {
+      "operations": 30,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 332,
+      "python_traced_peak_bytes": 808,
+      "fixture": "small",
+      "lane": "view_array",
+      "repeat": 1
+    },
+    {
+      "operations": 30,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 380,
+      "python_traced_peak_bytes": 380,
+      "fixture": "small",
+      "lane": "native_array",
+      "repeat": 1
+    },
+    {
+      "operations": 30,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 1369,
+      "python_traced_peak_bytes": 1602,
+      "fixture": "small",
+      "lane": "view_copy",
+      "repeat": 1
+    },
+    {
+      "operations": 30,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 1404,
+      "python_traced_peak_bytes": 2184,
+      "fixture": "small",
+      "lane": "native_copy",
+      "repeat": 1
+    },
+    {
+      "operations": 30,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 1103,
+      "python_traced_peak_bytes": 2586,
+      "fixture": "small",
+      "lane": "view_json",
+      "repeat": 1
+    },
+    {
+      "operations": 30,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 1591,
+      "python_traced_peak_bytes": 3074,
+      "fixture": "small",
+      "lane": "native_json",
+      "repeat": 1
+    },
+    {
+      "operations": 30,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 332,
+      "python_traced_peak_bytes": 332,
+      "fixture": "small",
+      "lane": "view_presence",
+      "repeat": 1
+    },
+    {
+      "operations": 30,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 332,
+      "python_traced_peak_bytes": 332,
+      "fixture": "small",
+      "lane": "native_presence",
+      "repeat": 1
+    },
+    {
+      "operations": 5,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 764,
+      "python_traced_peak_bytes": 1032,
+      "fixture": "wide",
+      "lane": "cold_view_field",
+      "repeat": 1
+    },
+    {
+      "operations": 5,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 15680,
+      "python_traced_peak_bytes": 88174,
+      "fixture": "wide",
+      "lane": "cold_legacy_field",
+      "repeat": 1
+    },
+    {
+      "operations": 5,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 96603,
+      "python_traced_peak_bytes": 163262,
+      "fixture": "wide",
+      "lane": "cold_view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 5,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 78946,
+      "python_traced_peak_bytes": 151440,
+      "fixture": "wide",
+      "lane": "cold_legacy_native",
+      "repeat": 1
+    },
+    {
+      "operations": 5,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 380,
+      "python_traced_peak_bytes": 380,
+      "fixture": "wide",
+      "lane": "warm_view_field",
+      "repeat": 1
+    },
+    {
+      "operations": 5,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 332,
+      "python_traced_peak_bytes": 332,
+      "fixture": "wide",
+      "lane": "warm_native_field",
+      "repeat": 1
+    },
+    {
+      "operations": 5,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 332,
+      "python_traced_peak_bytes": 808,
+      "fixture": "wide",
+      "lane": "view_array",
+      "repeat": 1
+    },
+    {
+      "operations": 5,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 380,
+      "python_traced_peak_bytes": 380,
+      "fixture": "wide",
+      "lane": "native_array",
+      "repeat": 1
+    },
+    {
+      "operations": 5,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 96403,
+      "python_traced_peak_bytes": 162966,
+      "fixture": "wide",
+      "lane": "view_copy",
+      "repeat": 1
+    },
+    {
+      "operations": 5,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 58884,
+      "python_traced_peak_bytes": 105584,
+      "fixture": "wide",
+      "lane": "native_copy",
+      "repeat": 1
+    },
+    {
+      "operations": 5,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 23419,
+      "python_traced_peak_bytes": 78453,
+      "fixture": "wide",
+      "lane": "view_json",
+      "repeat": 1
+    },
+    {
+      "operations": 5,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 23907,
+      "python_traced_peak_bytes": 78941,
+      "fixture": "wide",
+      "lane": "native_json",
+      "repeat": 1
+    },
+    {
+      "operations": 5,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 332,
+      "python_traced_peak_bytes": 332,
+      "fixture": "wide",
+      "lane": "view_presence",
+      "repeat": 1
+    },
+    {
+      "operations": 5,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 332,
+      "python_traced_peak_bytes": 332,
+      "fixture": "wide",
+      "lane": "native_presence",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 764,
+      "python_traced_peak_bytes": 1032,
+      "fixture": "long_string",
+      "lane": "cold_view_field",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 1944,
+      "python_traced_peak_bytes": 200777,
+      "fixture": "long_string",
+      "lane": "cold_legacy_field",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 67191,
+      "python_traced_peak_bytes": 133142,
+      "fixture": "long_string",
+      "lane": "cold_view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 68259,
+      "python_traced_peak_bytes": 267092,
+      "fixture": "long_string",
+      "lane": "cold_legacy_native",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 380,
+      "python_traced_peak_bytes": 380,
+      "fixture": "long_string",
+      "lane": "warm_view_field",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 332,
+      "python_traced_peak_bytes": 332,
+      "fixture": "long_string",
+      "lane": "warm_native_field",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 332,
+      "python_traced_peak_bytes": 808,
+      "fixture": "long_string",
+      "lane": "view_array",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 380,
+      "python_traced_peak_bytes": 380,
+      "fixture": "long_string",
+      "lane": "native_array",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 66991,
+      "python_traced_peak_bytes": 132846,
+      "fixture": "long_string",
+      "lane": "view_copy",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 1404,
+      "python_traced_peak_bytes": 2184,
+      "fixture": "long_string",
+      "lane": "native_copy",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 66681,
+      "python_traced_peak_bytes": 133754,
+      "fixture": "long_string",
+      "lane": "view_json",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 67169,
+      "python_traced_peak_bytes": 149147,
+      "fixture": "long_string",
+      "lane": "native_json",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 332,
+      "python_traced_peak_bytes": 332,
+      "fixture": "long_string",
+      "lane": "view_presence",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 332,
+      "python_traced_peak_bytes": 332,
+      "fixture": "long_string",
+      "lane": "native_presence",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 764,
+      "python_traced_peak_bytes": 1008,
+      "fixture": "array",
+      "lane": "cold_view_field",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 1944,
+      "python_traced_peak_bytes": 20599,
+      "fixture": "array",
+      "lane": "cold_legacy_field",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 9545,
+      "python_traced_peak_bytes": 17850,
+      "fixture": "array",
+      "lane": "cold_view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 11405,
+      "python_traced_peak_bytes": 29884,
+      "fixture": "array",
+      "lane": "cold_legacy_native",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 380,
+      "python_traced_peak_bytes": 380,
+      "fixture": "array",
+      "lane": "warm_view_field",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 332,
+      "python_traced_peak_bytes": 332,
+      "fixture": "array",
+      "lane": "warm_native_field",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 368,
+      "python_traced_peak_bytes": 840,
+      "fixture": "array",
+      "lane": "view_array",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 416,
+      "python_traced_peak_bytes": 416,
+      "fixture": "array",
+      "lane": "native_array",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 9345,
+      "python_traced_peak_bytes": 17554,
+      "fixture": "array",
+      "lane": "view_copy",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 10172,
+      "python_traced_peak_bytes": 19432,
+      "fixture": "array",
+      "lane": "native_copy",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 5019,
+      "python_traced_peak_bytes": 15238,
+      "fixture": "array",
+      "lane": "view_json",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 5507,
+      "python_traced_peak_bytes": 15726,
+      "fixture": "array",
+      "lane": "native_json",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 332,
+      "python_traced_peak_bytes": 332,
+      "fixture": "array",
+      "lane": "view_presence",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "python_traced_current_bytes": 332,
+      "python_traced_peak_bytes": 332,
+      "fixture": "array",
+      "lane": "native_presence",
+      "repeat": 1
+    }
+  ],
+  "retention": [
+    {
+      "fixture": "small",
+      "encoded_bytes": 687,
+      "child_valid_after_pool_close": true,
+      "readonly_buffer": true,
+      "process_peak_rss_bytes": 33177600
+    },
+    {
+      "fixture": "wide",
+      "encoded_bytes": 35442,
+      "child_valid_after_pool_close": true,
+      "readonly_buffer": true,
+      "process_peak_rss_bytes": 34078720
+    },
+    {
+      "fixture": "long_string",
+      "encoded_bytes": 66235,
+      "child_valid_after_pool_close": true,
+      "readonly_buffer": true,
+      "process_peak_rss_bytes": 34553856
+    },
+    {
+      "fixture": "array",
+      "encoded_bytes": 41649,
+      "child_valid_after_pool_close": true,
+      "readonly_buffer": true,
+      "process_peak_rss_bytes": 34553856
+    }
+  ],
+  "backend_sha256": "30e33927fb86f9158206b292e4e4b0cd3d8c8a60675034954b345b56349e08ea",
+  "notes": [
+    "Storage pages are warm; cold means fresh message acquisition.",
+    "Tracemalloc excludes libplasmite/Rust/C allocations; diagnostic ns are null.",
+    "Native copying creates independent editable containers. Warm object lookup uses an already decoded object.",
+    "Fallback buffers keep extra immutable encoded copies. No native-tree fallback on arrival."
+  ]
+}

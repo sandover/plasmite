@@ -19,6 +19,7 @@ docs/
 ├── performance/consumer-latency.rs             — Read when reproducing the full-consumer latency measurements
 ├── performance/language-boundary-results/    — Read when reproducing per-binding ownership and conversion measurements
 │   ├── owned-views/README.md                 — Read when comparing owned views, append results, forwarding, and per-runtime baselines
+│   ├── owned-views/python/README.md          — Read when comparing native and fallback Python views or wheel coverage
 │   ├── node-views/README.md                  — Read when assessing JavaScript view access, conversion costs, and native ABI checks
 │   ├── c-json/README.md                      — Read when assessing direct JSON reads and stored-float correctness
 │   ├── wakeups/README.md                     — Read when assessing shared-address waits and independent-reader wakeups

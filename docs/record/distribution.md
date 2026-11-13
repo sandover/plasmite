@@ -35,7 +35,7 @@ require glibc 2.39 or newer; its Python source package requires a system SDK.
 The ARM preview retains its glibc 2.35 baseline and manual SDK installation.
 
 macOS native artifacts target macOS 10.12 on Intel and macOS 11 on Apple
-Silicon. Python wheel tags describe the bundled CLI and library architecture
+Silicon. Python wheel tags describe the extension, bundled CLI and library architecture
 and their minimum OS version; a thin native bundle does not claim `universal2`.
 These compiler deployment targets do not establish runtime testing on every
 older macOS version. Release smoke tests run on the declared CI hosts.
@@ -79,6 +79,20 @@ published release assets below for installation.
 Python 3.10 or newer for the Python package; Go 1.22 or newer, cgo, and
 pkg-config for Go. Rust source installs need the toolchain and C compiler
 described in the [build guide](../building.md#install-the-cli-from-source).
+
+Python container views use a native CPython extension over the shared C ABI.
+Builds provide `cp311-abi3` wheels for standard CPython 3.11+, `cp310-cp310`
+wheels for CPython 3.10, and platform-specific `py3-none` fallback wheels.
+The buffer protocol requires the separate 3.10 build. Source archives carry
+the extension source and SDK header; compiling native views needs a C compiler.
+PyPy and free-threaded CPython use the same lazy immutable view API through
+ctypes, with extra encoded copies and slower field access. Free-threaded
+Python skips the extension before import and keeps the GIL disabled. The
+[Python binding guide](../../bindings/python/README.md#runtime-and-wheel-support)
+explains runtime limits and copying. The wheel smoke builds all three variants
+from the source archive, verifies their native payloads and tags, and installs
+and exercises each variant. These checks run on the existing release hosts;
+they do not add supported operating systems.
 
 On platforms without a compatible wheel, Python's source package needs a separate system SDK. For a manually
 extracted SDK, point `PLASMITE_LIB_DIR` at its `lib` directory and add its

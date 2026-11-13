@@ -17,6 +17,8 @@ bindings/python/**/__pycache__/
 bindings/python/dist/
 bindings/python/*.egg-info/
 bindings/python/build/
+bindings/python/plasmite/_views_native*.so
+bindings/python/plasmite/_views_native*.pyd
 bindings/python/.venv/
 bindings/python/plasmite/_native/
 bindings/python/uv.lock

@@ -19,7 +19,7 @@ cleanup_workdir() {
   fi
 }
 trap cleanup_workdir EXIT
-UV_CACHE_DIR="${UV_CACHE_DIR:-$WORKDIR/uv-cache}"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-$WORKDIR/uv-cache}"
 HAS_RG=0
 if command -v rg >/dev/null 2>&1; then
   HAS_RG=1
@@ -89,59 +89,78 @@ wheel_has_member() {
   fi
 }
 
-uv venv "$build_env" --cache-dir "$UV_CACHE_DIR"
-activate_venv "$build_env"
-if ! uv pip install --cache-dir "$UV_CACHE_DIR" build; then
-  echo "error: failed to install python build backend ('build') with uv."
-  echo "hint: ensure network access to package indexes (or preinstall build deps) before running python wheel smoke."
-  exit 2
-fi
+# Build every wheel from the published source archive, outside the checkout.
+# CPython 3.11+ shares abi3; 3.10 needs its own buffer-protocol extension.
+# The explicit ctypes wheel also serves PyPy and free-threaded Python.
+mkdir -p "$WORKDIR/sdist" "$ROOT/bindings/python/dist"
+rm -f "$ROOT"/bindings/python/dist/*.whl "$ROOT"/bindings/python/dist/*.tar.gz
+PLASMITE_SDK_DIR="$SDK_DIR" uv build --sdist --python 3.11 \
+  --out-dir "$WORKDIR/sdist" "$ROOT/bindings/python"
+sdist_file="$(ls -1 "$WORKDIR"/sdist/*.tar.gz)"
+cp "$sdist_file" "$ROOT/bindings/python/dist/"
 
-(
-  cd "$ROOT/bindings/python"
-  rm -rf dist
-  PLASMITE_SDK_DIR="$SDK_DIR" python -m build
-)
-wheel_file="$(ls -1 "$ROOT"/bindings/python/dist/*.whl | tail -n 1)"
-if [[ -z "$wheel_file" ]]; then
-  echo "wheel build failed"
-  exit 1
-fi
-
-if [[ -n "${PLASMITE_MANYLINUX_PLATFORM:-}" ]]; then
-  uv pip install --cache-dir "$UV_CACHE_DIR" 'auditwheel==6.8.2' 'patchelf==0.19.1.0'
-  auditwheel repair --plat "$PLASMITE_MANYLINUX_PLATFORM" --only-plat \
-    --wheel-dir "$WORKDIR/repaired" "$wheel_file"
-  rm "$wheel_file"
-  cp "$WORKDIR"/repaired/*.whl "$ROOT/bindings/python/dist/"
-  wheel_file="$(ls -1 "$ROOT"/bindings/python/dist/*.whl)"
-fi
-
-wheel_has_member "$wheel_file" 'plasmite/_native/(plasmite\.dll|libplasmite\.(dylib|so))'
-wheel_has_member "$wheel_file" 'plasmite/_native/plasmite(\.exe)?'
-python "$ROOT/scripts/verify_python_wheel_platform.py" "$wheel_file" "$SDK_DIR"
-deactivate
-
-uv venv "$install_env" --cache-dir "$UV_CACHE_DIR"
-activate_venv "$install_env"
-uv pip install --cache-dir "$UV_CACHE_DIR" "$wheel_file"
-
-unset PLASMITE_LIB_DIR DYLD_LIBRARY_PATH LD_LIBRARY_PATH
-python - <<'PY'
+for variant in abi3 cp310 fallback; do
+  case "$variant" in
+    abi3) build_python=3.11; view_mode=1; expected_backend=native ;;
+    cp310) build_python=3.10; view_mode=1; expected_backend=native ;;
+    fallback) build_python=3.11; view_mode=0; expected_backend=python ;;
+  esac
+  wheel_dir="$WORKDIR/wheels-$variant"
+  PLASMITE_SDK_DIR="$SDK_DIR" PLASMITE_PYTHON_VIEWS="$view_mode" \
+    uv build --wheel --python "$build_python" --out-dir "$wheel_dir" "$sdist_file"
+  wheel_file="$(ls -1 "$wheel_dir"/*.whl)"
+  if [[ -n "${PLASMITE_MANYLINUX_PLATFORM:-}" ]]; then
+    uv venv "$build_env" --python 3.11 --cache-dir "$UV_CACHE_DIR" --allow-existing
+    activate_venv "$build_env"
+    uv pip install --cache-dir "$UV_CACHE_DIR" 'auditwheel==6.8.2' 'patchelf==0.19.1.0'
+    auditwheel repair --plat "$PLASMITE_MANYLINUX_PLATFORM" --only-plat \
+      --wheel-dir "$WORKDIR/repaired-$variant" "$wheel_file"
+    deactivate
+    wheel_file="$(ls -1 "$WORKDIR/repaired-$variant"/*.whl)"
+  fi
+  cp "$wheel_file" "$ROOT/bindings/python/dist/"
+  wheel_has_member "$wheel_file" 'plasmite/_native/(plasmite\.dll|libplasmite\.(dylib|so))'
+  wheel_has_member "$wheel_file" 'plasmite/_native/plasmite(\.exe)?'
+  uv run --no-project --python "$build_python" --with packaging \
+    python "$ROOT/scripts/verify_python_wheel_platform.py" "$wheel_file" "$SDK_DIR"
+  uv venv "$install_env-$variant" --python "$build_python" --cache-dir "$UV_CACHE_DIR"
+  activate_venv "$install_env-$variant"
+  uv pip install --cache-dir "$UV_CACHE_DIR" "$wheel_file"
+  unset PLASMITE_LIB_DIR DYLD_LIBRARY_PATH LD_LIBRARY_PATH PLASMITE_PYTHON_VIEWS
+  EXPECTED_VIEW_BACKEND="$expected_backend" python - <<'PY'
+import gc
+import json
+import os
+from collections.abc import Mapping, Sequence
 from tempfile import TemporaryDirectory
-from plasmite import Client
+from plasmite import Client, to_json, to_native, view_from_lite3
+from plasmite._views import VIEW_BACKEND
 
+assert VIEW_BACKEND == os.environ["EXPECTED_VIEW_BACKEND"], VIEW_BACKEND
 with TemporaryDirectory() as directory, Client(directory) as client:
     with client.pool("wheel-smoke", 1024 * 1024) as pool:
-        sent = pool.append({"wheel": True}, ["package"])
+        sent = pool.append({"wheel": True, "values": [1, 2, 3]}, ["package"])
         received = pool.get(sent.seq)
-        assert received.data == {"wheel": True} and received.tags == ["package"]
-print("python-wheel-native-roundtrip-ok")
+        assert received.data["wheel"] and received.tags == ["package"]
+        view = pool.get_view(sent.seq)
+        assert isinstance(view.data, Mapping) and isinstance(view.data["values"], Sequence)
+        assert to_native(view)["data"] == received.data
+        assert json.loads(to_json(view))["data"] == received.data
+        child, buffer = view.data["values"], memoryview(view)
+        assert buffer.readonly
+        assert view_from_lite3(bytes(buffer)).data == received.data
+        del view
+    gc.collect()
+    assert list(child) == [1, 2, 3] and len(buffer) > 0
+print("python-wheel-native-roundtrip-and-view-ok")
 PY
-plasmite --version >/dev/null
-pls --version >/dev/null
-BUNDLED_CLI="$(python -c 'from plasmite._cli import _bundled_cli_path; print(_bundled_cli_path())')"
-python "$ROOT/scripts/packaged_serve_smoke.py" --cli "$BUNDLED_CLI" --scratch "$WORKDIR"
-deactivate
+  plasmite --version >/dev/null
+  pls --version >/dev/null
+  if [[ "$variant" == abi3 ]]; then
+    BUNDLED_CLI="$(python -c 'from plasmite._cli import _bundled_cli_path; print(_bundled_cli_path())')"
+    python "$ROOT/scripts/packaged_serve_smoke.py" --cli "$BUNDLED_CLI" --scratch "$WORKDIR"
+  fi
+  deactivate
+done
 
-echo "[smoke] python wheel install + runtime ok"
+echo "[smoke] Python abi3, cp310 and fallback wheel install + runtime ok"

@@ -887,6 +887,14 @@ class Pool:
         return parse_message(self.get_json(seq))
 
     @_serialized_handle
+    def get_view(self, seq: int):
+        """Return an immutable Lite3 snapshot with native container access."""
+        _require_open(self._ptr, "pool")
+        from ._views import get_view
+
+        return get_view(self, seq)
+
+    @_serialized_handle
     def get_lite3(self, seq: int) -> Lite3Frame:
         _require_open(self._ptr, "pool")
         seq = _ensure_non_negative_int(seq, "seq")
@@ -1574,4 +1582,39 @@ __all__ = [
     "DEFAULT_POOL_SIZE_BYTES",
     "default_pool_dir",
     "parse_message",
+    "MessageView",
+    "ObjectView",
+    "ArrayView",
+    "to_native",
+    "to_json",
+    "view_from_lite3",
 ]
+
+
+# Keep extension loading lazy so legacy clients work with older system SDKs.
+def to_native(value):
+    from ._views import to_native as convert
+
+    return convert(value)
+
+
+def to_json(value):
+    from ._views import to_json as convert
+
+    return convert(value)
+
+
+def view_from_lite3(payload, seq=0, timestamp_ns=0):
+    from ._views import from_lite3
+
+    return from_lite3(payload, seq, timestamp_ns)
+
+
+def __getattr__(name):
+    if name in {"MessageView", "ObjectView", "ArrayView"}:
+        from . import _views
+
+        value = getattr(_views, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

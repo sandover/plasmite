@@ -1,3 +1,6 @@
 include LICENSE
 include THIRD_PARTY_NOTICES.md
 include wheel_platform.py
+
+include native/views.c
+recursive-include plasmite/_include *.h

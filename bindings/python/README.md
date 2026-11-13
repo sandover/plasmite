@@ -1,6 +1,8 @@
 # Plasmite Python Bindings (v0)
 
-These bindings wrap the `libplasmite` C ABI via `ctypes`.
+These bindings use the `libplasmite` C ABI. Native CPython container views
+provide lazy access to immutable Lite3 snapshots; the existing `Message` API
+keeps its editable native dictionaries.
 
 ## Installation
 
@@ -17,7 +19,7 @@ Current packaged-wheel targets:
 The Linux wheel bundles the CLI and library. Both `plasmite` and `pls` use the
 bundled binary. Version 1.2.1 on Linux uses the source package and needs a
 system SDK (Homebrew or a GitHub SDK archive). Wheels since 1.3.0 use the
-stable C ABI through ctypes and support Python 3.10 and newer.
+stable C ABI and support Python 3.10 and newer.
 
 ### Using uv (recommended)
 
@@ -69,7 +71,7 @@ PLASMITE_LIB_DIR="$(pwd)/../../target/debug" PLASMITE_BIN="$(pwd)/../../target/d
 Build a wheel with bundled native assets from a specific SDK directory:
 
 ```bash
-PLASMITE_SDK_DIR=/path/to/sdk python -m build
+PLASMITE_SDK_DIR=/path/to/sdk uv build
 ```
 
 ## Usage
@@ -99,6 +101,66 @@ with Client("./data") as client:
 Use `append_json(...)` / `get_json(...)` only when you explicitly need raw wire bytes.
 
 `Pool.tail(..., tags=[...])` uses exact tag matching and composes with other filters using AND semantics.
+
+## Immutable message views
+
+Use `get_view` when you need selected fields or want to retain encoded data:
+
+```python
+from plasmite import to_json, to_native
+
+view = pool.get_view(seq)
+power = view.data["metrics"]["power"]
+for sample in view.data["samples"]:
+    print(sample)
+last_two = view.data["samples"][-2:]  # lazy readonly slice
+editable = to_native(view.data)       # independent dict/list tree
+wire_json = to_json(view)             # direct formatting; no native data tree
+encoded = memoryview(view)            # readonly Lite3 payload, without identity
+```
+
+`ObjectView` implements `collections.abc.Mapping`; `ArrayView` implements
+`Sequence`, including negative indices and slices. Missing keys raise `KeyError`;
+JSON null becomes `None`. Field names cannot collide with conversion helpers,
+because `to_native` and `to_json` are module functions. Views reject assignment.
+Strings and numbers become Python scalars when you request them. Byte values
+expose readonly memoryviews; `to_native` makes owned `bytes`.
+
+A view owns one independent snapshot. Children, slices, iterators and buffers
+keep that snapshot alive after you close the pool or overwrite its ring slots.
+A small retained child retains the entire message. `memoryview(view)` includes
+stored meta/data bytes; `seq` and `timestamp_ns` remain separate identity fields.
+Use `view_from_lite3(payload, seq=0, timestamp_ns=0)` to validate and snapshot
+external encoded bytes. Mutable inputs trigger a defensive copy.
+
+`view.time_rfc3339` preserves nanoseconds. `view.time` creates a UTC `datetime`
+with Python's microsecond precision. `to_native(view)` and `to_json(view)` export
+the complete `seq`, `time`, `meta`, `data` envelope. `json.dumps` can consume a
+subtree with `default=to_native`; that route explicitly builds native containers.
+
+### Runtime and wheel support
+
+Standard CPython 3.11+ uses one `cp311-abi3` extension wheel per platform.
+CPython 3.10 uses a `cp310-cp310` wheel because its stable ABI does not expose
+the buffer protocol. Source archives carry the C source and public SDK header;
+native source builds require a C compiler. Build with
+`PLASMITE_PYTHON_VIEWS=1` to require native views or `=0` to choose the functional
+ctypes fallback. Keep the SDK library and header from the same build.
+
+PyPy and free-threaded CPython use the fallback. Free-threaded Python never
+imports this extension and keeps the GIL disabled. The fallback preserves lazy
+immutable containers and readonly buffers, while paying for extra encoded
+copies and per-field ctypes calls. Native view objects support one interpreter
+per process; additional interpreters use fallback where the Python runtime
+permits the underlying ctypes SDK. No cross-interpreter object sharing exists.
+The explicit fallback wheel carries the Python-independent `py3-none` tag and
+the same platform SDK binaries.
+
+The [measured native/fallback costs](../../docs/performance/language-boundary-results/owned-views/python/README.md)
+include regressions. Native views help selected cold reads; retained Python
+lists and dictionaries win repeated scans and lookup. Full wide-object native
+conversion can cost more than the existing JSON API. Choose the result your
+consumer needs and include conversion cost in comparisons.
 
 ## UDP sender and follower
 

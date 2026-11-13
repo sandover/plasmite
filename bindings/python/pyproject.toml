@@ -1,6 +1,6 @@
 # Purpose: Define build metadata for the Plasmite Python binding.
 # Key exports: Package metadata and dependencies.
-# Role: Enable editable installs and packaging for the ctypes wrapper.
+# Role: Package native container views with a functional ctypes fallback.
 # Invariants: Version aligns with core crate; no extra runtime deps.
 # Notes: Uses setuptools for lightweight packaging.
 
@@ -37,9 +37,12 @@ Documentation = "https://github.com/sandover/plasmite#readme"
 plasmite = "plasmite._cli:main"
 pls = "plasmite._cli:main"
 
+[tool.setuptools]
+include-package-data = false
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["plasmite"]
 
 [tool.setuptools.package-data]
-plasmite = ["_native/*"]
+plasmite = ["_native/*", "_include/*.h"]

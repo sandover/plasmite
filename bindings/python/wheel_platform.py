@@ -45,16 +45,18 @@ def macho_platform(data: bytes) -> tuple[str, tuple[int, int, int]]:
     return arch, (version >> 16, (version >> 8) & 255, version & 255)
 
 
-def macos_platform_tag(native_dir: Path, original_tag: str) -> str:
+def macos_platform_tag(native_dir: Path, original_tag: str, extension_dir: Path | None = None) -> str:
     match = re.fullmatch(r'macosx_(\d+)_(\d+)_.+', original_tag)
     if match is None:
         raise ValueError(f'Invalid macOS wheel platform: {original_tag}')
     minimum = (int(match[1]), int(match[2]), 0)
     binaries = [native_dir / name for name in ('libplasmite.dylib', 'plasmite')]
+    if extension_dir is not None:
+        binaries.extend(extension_dir.glob('_views_native*.so'))
     native = [macho_platform(p.read_bytes()) for p in binaries if p.is_file()]
     architectures = {arch for arch, _ in native}
     if len(architectures) > 1:
-        raise ValueError('Bundled macOS CLI and library have different architectures')
+        raise ValueError('Bundled macOS native files have different architectures')
     arch = next(iter(architectures), platform.machine())
     if arch not in {'x86_64', 'arm64'}:
         raise ValueError(f'Unsupported macOS wheel architecture: {arch}')
