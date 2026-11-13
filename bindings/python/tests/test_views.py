@@ -32,6 +32,48 @@ class Views(unittest.TestCase):
         self.client.close()
         self.directory.cleanup()
 
+    def test_sequence_callback_closes_before_view_handle_borrow(self):
+        from unittest.mock import patch
+        from plasmite import _views
+
+        pool = self.pool
+
+        class Sequence(int):
+            def __ge__(self, other):
+                pool.close()
+                return True
+
+        with patch.object(_views.backend, "get") as get:
+            with self.assertRaisesRegex(plasmite.PlasmiteError, "closed"):
+                pool.get_view(Sequence(1))
+            get.assert_not_called()
+
+    def test_index_callback_finishes_before_view_handle_borrow(self):
+        from unittest.mock import patch
+        from plasmite import _views
+
+        pool = self.pool
+
+        class Sequence:
+            @property
+            def __class__(self):
+                return int
+
+            def __ge__(self, other):
+                return True
+
+            def __lt__(self, other):
+                return True
+
+            def __index__(self):
+                pool.close()
+                return 1
+
+        with patch.object(_views.backend, "get") as get:
+            with self.assertRaisesRegex(plasmite.PlasmiteError, "closed"):
+                pool.get_view(Sequence())
+            get.assert_not_called()
+
     def test_protocols_and_missing(self):
         data = self.message.data
         self.assertIsInstance(data, Mapping)

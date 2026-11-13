@@ -299,6 +299,17 @@ The C interface adds bounded waits without changing legacy `*_next` calls:
   streams expose bounded waits and concurrent cancellation; high-level tails
   accept an optional `threading.Event` cancellation flag.
 
+- Explicit local view batches require positive count and encoded-payload byte
+  bounds. They wait for the first accepted message, then acquire available
+  companions without waiting to fill. Zero per-call timeout polls; wait expiry
+  returns an empty group, while completion/cancellation ends iteration. A first
+  requested record above the byte bound fails without consumption; callers can
+  retry with a larger bound. A later record failure returns the valid prefix
+  and leaves the failing record for the next call. Sequence/gap checks,
+  accepted-message limits and stream-wide deadlines remain per-record rules.
+  Each returned message owns an independent snapshot. Ordinary reads acquire
+  one record and keep no hidden prefetched queue.
+
 - Local and HTTP tails deliver messages strictly by `seq` within a pool.
   Standalone UDP follows use the separate
   [arrival-order receive policy](../../udp/v1/SPEC.md#receive-ordering-and-notices).

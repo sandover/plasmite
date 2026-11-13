@@ -145,9 +145,10 @@ subtree with `default=to_native`; that route explicitly builds native containers
 `pool.append_view(data, tags=None, durability=Durability.FAST)` walks exact
 builtin dictionaries, lists, tuples and scalars into Lite3 and retains that
 encoding as its result. It copies byte values from `bytes`, `bytearray` and
-C-contiguous memoryviews directly into the encoding. Later input mutations
-cannot change the result. The data root must be an exact dictionary; keys and
-tags must be exact strings. Integers must fit signed 64 bits, floats must be
+memoryviews directly into the encoding. Strided buffers copy their logical byte
+selection into a temporary contiguous buffer first. Later input mutations
+cannot change the result. The data root accepts an exact dictionary, `ObjectView`, or `MessageView`; keys
+and tags must be exact strings. Integers must fit signed 64 bits, floats must be
 finite, and keys cannot contain NUL. String values and tags can contain NUL.
 
 The method rejects custom values and builtin subclasses without invoking their
@@ -160,6 +161,37 @@ The fallback snapshots builtin input before its ctypes calls. It uses compact
 bulk JSON for ordinary JSON-compatible data; byte values and NUL tags use the
 checked builder through ctypes. These routes preserve view semantics and pay
 extra copying and runtime-call costs.
+
+### Streaming and forwarding
+
+```python
+with pool.tail_views(tags=["sensor"], since_seq=1) as stream:
+    message = next(stream)                    # acquires exactly one snapshot
+    batch = stream.next_batch(16, 256 * 1024)  # explicit count and encoded-byte bounds
+    for message in batch:
+        print(message.seq, message.data["power"])
+        destination.append_view(message)     # reuses the immutable encoding
+```
+
+`next_batch` waits for the first accepted message, then takes available records
+without waiting to fill the batch. `timeout_ms=0` polls and returns `[]` when no
+record is ready. A finite timeout also returns `[]` when its wait expires;
+completion or cancellation raises `StopIteration`. Stream-wide timeouts, gaps,
+sequence positions and accepted-message limits follow the existing tail rules.
+A first record larger than the byte bound raises an error without consuming it;
+retry with a larger bound. Returned children keep their individual owners alive
+when the stream, pool, batch list or other messages go away.
+
+Forwarding a `MessageView` with omitted tags preserves its encoding and tags.
+Explicit tags rebuild the message around its encoded data. Passing an
+`ObjectView` as the root, or nesting object/array views in builtin input, copies
+the checked subtrees directly into the destination encoding. Array and byte
+slices contribute their selected elements. These copies avoid native container
+construction and JSON conversion.
+
+Batching helps a busy reader amortize lock handoffs. It adds overhead to a
+reader that usually receives one record at a time; normal iteration never
+prefetches or batches behind the caller's back.
 
 ### Runtime and wheel support
 

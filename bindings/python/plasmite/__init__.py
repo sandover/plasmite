@@ -1017,6 +1017,20 @@ class Pool:
             raise _take_error(out_err)
         return Lite3Stream(out_stream)
 
+    @_serialized_handle
+    def tail_views(
+        self, *, since_seq=None, max_messages=None, tags=None, timeout_ms=None,
+        cancel=None, error_on_gap=False,
+    ):
+        """Return a stream of immutable message views with explicit bounded batches."""
+        _require_open(self._ptr, "pool")
+        from ._views import tail_views
+
+        return tail_views(
+            self, since_seq=since_seq, max_messages=max_messages, tags=tags,
+            timeout_ms=timeout_ms, cancel=cancel, error_on_gap=error_on_gap,
+        )
+
     def tail(
         self,
         since_seq: Optional[int] = None,

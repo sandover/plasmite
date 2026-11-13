@@ -1,0 +1,370 @@
+{
+  "backend": "native",
+  "backend_sha256": "d6903ec3ee07545cc6909dcee4cefb9ec1da8c68567be5cd7dba5514179435bb",
+  "facade_sha256": "4248a206c4927cf3a8342308610d2c6f32d43cc2b20b97d8a73dc2a6d2f0b4bf",
+  "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "library_sha256": "2e56f5570984e862fab3d5c97c7582ced7cad889c4ddab8b941eb733a6950594",
+  "runner_sha256": "72529dab2735f2d1e68c8e58fe430bfa39a02d441c498c464e247079874e8296",
+  "runs": [
+    {
+      "fixture": "small",
+      "lane": "forward",
+      "repeat": 1,
+      "operations": 1500,
+      "ns_per_op": 8518.528,
+      "cpu_ns_per_op": 4499.333333333333
+    },
+    {
+      "fixture": "small",
+      "lane": "native-copy-encode",
+      "repeat": 1,
+      "operations": 1500,
+      "ns_per_op": 6312.472,
+      "cpu_ns_per_op": 5471.333333333333
+    },
+    {
+      "fixture": "small",
+      "lane": "root-subtree-copy",
+      "repeat": 1,
+      "operations": 1500,
+      "ns_per_op": 5931.3606666666665,
+      "cpu_ns_per_op": 5010.0
+    },
+    {
+      "fixture": "small",
+      "lane": "root-subtree-copy",
+      "repeat": 2,
+      "operations": 1500,
+      "ns_per_op": 5713.472,
+      "cpu_ns_per_op": 4901.333333333333
+    },
+    {
+      "fixture": "small",
+      "lane": "native-copy-encode",
+      "repeat": 2,
+      "operations": 1500,
+      "ns_per_op": 6111.028,
+      "cpu_ns_per_op": 5236.666666666667
+    },
+    {
+      "fixture": "small",
+      "lane": "forward",
+      "repeat": 2,
+      "operations": 1500,
+      "ns_per_op": 5188.305333333334,
+      "cpu_ns_per_op": 4406.0
+    },
+    {
+      "fixture": "small",
+      "lane": "forward",
+      "repeat": 3,
+      "operations": 1500,
+      "ns_per_op": 5275.333333333333,
+      "cpu_ns_per_op": 4482.0
+    },
+    {
+      "fixture": "small",
+      "lane": "native-copy-encode",
+      "repeat": 3,
+      "operations": 1500,
+      "ns_per_op": 6006.75,
+      "cpu_ns_per_op": 5234.0
+    },
+    {
+      "fixture": "small",
+      "lane": "root-subtree-copy",
+      "repeat": 3,
+      "operations": 1500,
+      "ns_per_op": 5579.194666666666,
+      "cpu_ns_per_op": 4945.333333333333
+    },
+    {
+      "fixture": "small",
+      "lane": "root-subtree-copy",
+      "repeat": 4,
+      "operations": 1500,
+      "ns_per_op": 5112.1106666666665,
+      "cpu_ns_per_op": 5004.0
+    },
+    {
+      "fixture": "small",
+      "lane": "native-copy-encode",
+      "repeat": 4,
+      "operations": 1500,
+      "ns_per_op": 5586.416666666667,
+      "cpu_ns_per_op": 5451.333333333333
+    },
+    {
+      "fixture": "small",
+      "lane": "forward",
+      "repeat": 4,
+      "operations": 1500,
+      "ns_per_op": 4422.361333333333,
+      "cpu_ns_per_op": 4304.0
+    },
+    {
+      "fixture": "small",
+      "lane": "forward",
+      "repeat": 5,
+      "operations": 1500,
+      "ns_per_op": 4310.666666666667,
+      "cpu_ns_per_op": 4240.0
+    },
+    {
+      "fixture": "small",
+      "lane": "native-copy-encode",
+      "repeat": 5,
+      "operations": 1500,
+      "ns_per_op": 5373.611333333333,
+      "cpu_ns_per_op": 5294.666666666667
+    },
+    {
+      "fixture": "small",
+      "lane": "root-subtree-copy",
+      "repeat": 5,
+      "operations": 1500,
+      "ns_per_op": 5052.444,
+      "cpu_ns_per_op": 4934.666666666667
+    },
+    {
+      "fixture": "wide",
+      "lane": "forward",
+      "repeat": 1,
+      "operations": 150,
+      "ns_per_op": 19964.72,
+      "cpu_ns_per_op": 10480.0
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-copy-encode",
+      "repeat": 1,
+      "operations": 150,
+      "ns_per_op": 60034.44,
+      "cpu_ns_per_op": 59706.666666666664
+    },
+    {
+      "fixture": "wide",
+      "lane": "root-subtree-copy",
+      "repeat": 1,
+      "operations": 150,
+      "ns_per_op": 30620.833333333332,
+      "cpu_ns_per_op": 30600.0
+    },
+    {
+      "fixture": "wide",
+      "lane": "root-subtree-copy",
+      "repeat": 2,
+      "operations": 150,
+      "ns_per_op": 29130.0,
+      "cpu_ns_per_op": 28966.666666666668
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-copy-encode",
+      "repeat": 2,
+      "operations": 150,
+      "ns_per_op": 59688.05333333334,
+      "cpu_ns_per_op": 59153.333333333336
+    },
+    {
+      "fixture": "wide",
+      "lane": "forward",
+      "repeat": 2,
+      "operations": 150,
+      "ns_per_op": 7456.386666666666,
+      "cpu_ns_per_op": 6640.0
+    },
+    {
+      "fixture": "wide",
+      "lane": "forward",
+      "repeat": 3,
+      "operations": 150,
+      "ns_per_op": 4898.886666666666,
+      "cpu_ns_per_op": 4893.333333333333
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-copy-encode",
+      "repeat": 3,
+      "operations": 150,
+      "ns_per_op": 56230.55333333334,
+      "cpu_ns_per_op": 56240.0
+    },
+    {
+      "fixture": "wide",
+      "lane": "root-subtree-copy",
+      "repeat": 3,
+      "operations": 150,
+      "ns_per_op": 29073.886666666665,
+      "cpu_ns_per_op": 28806.666666666668
+    },
+    {
+      "fixture": "wide",
+      "lane": "root-subtree-copy",
+      "repeat": 4,
+      "operations": 150,
+      "ns_per_op": 27971.666666666668,
+      "cpu_ns_per_op": 27973.333333333332
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-copy-encode",
+      "repeat": 4,
+      "operations": 150,
+      "ns_per_op": 58448.05333333334,
+      "cpu_ns_per_op": 57306.666666666664
+    },
+    {
+      "fixture": "wide",
+      "lane": "forward",
+      "repeat": 4,
+      "operations": 150,
+      "ns_per_op": 4781.666666666667,
+      "cpu_ns_per_op": 4786.666666666667
+    },
+    {
+      "fixture": "wide",
+      "lane": "forward",
+      "repeat": 5,
+      "operations": 150,
+      "ns_per_op": 4809.446666666667,
+      "cpu_ns_per_op": 4813.333333333333
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-copy-encode",
+      "repeat": 5,
+      "operations": 150,
+      "ns_per_op": 59526.386666666665,
+      "cpu_ns_per_op": 58633.333333333336
+    },
+    {
+      "fixture": "wide",
+      "lane": "root-subtree-copy",
+      "repeat": 5,
+      "operations": 150,
+      "ns_per_op": 29003.893333333333,
+      "cpu_ns_per_op": 28906.666666666668
+    },
+    {
+      "fixture": "long_string",
+      "lane": "forward",
+      "repeat": 1,
+      "operations": 100,
+      "ns_per_op": 5481.25,
+      "cpu_ns_per_op": 5480.0
+    },
+    {
+      "fixture": "long_string",
+      "lane": "native-copy-encode",
+      "repeat": 1,
+      "operations": 100,
+      "ns_per_op": 16420.42,
+      "cpu_ns_per_op": 16420.0
+    },
+    {
+      "fixture": "long_string",
+      "lane": "root-subtree-copy",
+      "repeat": 1,
+      "operations": 100,
+      "ns_per_op": 12795.83,
+      "cpu_ns_per_op": 12790.0
+    },
+    {
+      "fixture": "long_string",
+      "lane": "root-subtree-copy",
+      "repeat": 2,
+      "operations": 100,
+      "ns_per_op": 12800.42,
+      "cpu_ns_per_op": 12800.0
+    },
+    {
+      "fixture": "long_string",
+      "lane": "native-copy-encode",
+      "repeat": 2,
+      "operations": 100,
+      "ns_per_op": 16575.83,
+      "cpu_ns_per_op": 16510.0
+    },
+    {
+      "fixture": "long_string",
+      "lane": "forward",
+      "repeat": 2,
+      "operations": 100,
+      "ns_per_op": 4977.91,
+      "cpu_ns_per_op": 4980.0
+    },
+    {
+      "fixture": "long_string",
+      "lane": "forward",
+      "repeat": 3,
+      "operations": 100,
+      "ns_per_op": 4733.33,
+      "cpu_ns_per_op": 4730.0
+    },
+    {
+      "fixture": "long_string",
+      "lane": "native-copy-encode",
+      "repeat": 3,
+      "operations": 100,
+      "ns_per_op": 16066.25,
+      "cpu_ns_per_op": 16070.0
+    },
+    {
+      "fixture": "long_string",
+      "lane": "root-subtree-copy",
+      "repeat": 3,
+      "operations": 100,
+      "ns_per_op": 12536.67,
+      "cpu_ns_per_op": 12540.0
+    },
+    {
+      "fixture": "long_string",
+      "lane": "root-subtree-copy",
+      "repeat": 4,
+      "operations": 100,
+      "ns_per_op": 13531.67,
+      "cpu_ns_per_op": 13390.0
+    },
+    {
+      "fixture": "long_string",
+      "lane": "native-copy-encode",
+      "repeat": 4,
+      "operations": 100,
+      "ns_per_op": 16402.5,
+      "cpu_ns_per_op": 16410.0
+    },
+    {
+      "fixture": "long_string",
+      "lane": "forward",
+      "repeat": 4,
+      "operations": 100,
+      "ns_per_op": 4927.08,
+      "cpu_ns_per_op": 4930.0
+    },
+    {
+      "fixture": "long_string",
+      "lane": "forward",
+      "repeat": 5,
+      "operations": 100,
+      "ns_per_op": 4825.0,
+      "cpu_ns_per_op": 4830.0
+    },
+    {
+      "fixture": "long_string",
+      "lane": "native-copy-encode",
+      "repeat": 5,
+      "operations": 100,
+      "ns_per_op": 16678.33,
+      "cpu_ns_per_op": 16670.0
+    },
+    {
+      "fixture": "long_string",
+      "lane": "root-subtree-copy",
+      "repeat": 5,
+      "operations": 100,
+      "ns_per_op": 12705.41,
+      "cpu_ns_per_op": 12710.0
+    }
+  ]
+}

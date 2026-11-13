@@ -1,0 +1,29 @@
+{
+  "backend": "native",
+  "backend_sha256": "d6903ec3ee07545cc6909dcee4cefb9ec1da8c68567be5cd7dba5514179435bb",
+  "facade_sha256": "4248a206c4927cf3a8342308610d2c6f32d43cc2b20b97d8a73dc2a6d2f0b4bf",
+  "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "library_sha256": "2e56f5570984e862fab3d5c97c7582ced7cad889c4ddab8b941eb733a6950594",
+  "runner_sha256": "72529dab2735f2d1e68c8e58fe430bfa39a02d441c498c464e247079874e8296",
+  "diagnostic": {
+    "ns_per_op": null,
+    "max_count": 16,
+    "max_bytes": 4096,
+    "returned_owner_lengths": [
+      680,
+      680,
+      680,
+      680,
+      680,
+      680
+    ],
+    "retained_child_owner_bytes": 680,
+    "python_peak_bytes": 10174,
+    "python_live_bytes_with_child": 4885,
+    "notes": [
+      "Tracemalloc excludes C/Rust payload storage and mapped pages.",
+      "Encoded lengths describe independent returned owners; no RSS claim.",
+      "A child remains readable after discarding the list and closing stream/pool/client."
+    ]
+  }
+}

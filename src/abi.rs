@@ -695,6 +695,14 @@ pub extern "C" fn plsm_lite3_stream_next(
     }
 }
 
+fn stream_frame_matches_tags(frame: &crate::api::FrameRef, tags: &[String]) -> Result<bool, Error> {
+    if tags.is_empty() {
+        return Ok(true);
+    }
+    let meta = crate::api::Meta::from_lite3(&frame.payload)?;
+    Ok(tags.iter().all(|tag| meta.tags.contains(tag)))
+}
+
 // Legacy and bounded waits use the same reader and retain the original open-time deadline.
 fn read_stream(
     stream: &plsm_stream,
@@ -704,7 +712,10 @@ fn read_stream(
         .state
         .lock()
         .map_err(|_| Error::new(ErrorKind::Internal).with_message("stream state is unavailable"))?;
-    state.next_wait(&stream.pool, wait, |frame, _| {
+    state.next_wait(&stream.pool, wait, |frame, tags| {
+        if !stream_frame_matches_tags(&frame, tags)? {
+            return Ok(None);
+        }
         crate::api::message_json_from_frame(&frame).map(Some)
     })
 }
@@ -2547,3 +2558,6 @@ mod tests {
         plsm_client_free(client);
     }
 }
+
+#[path = "abi_batches.rs"]
+mod batches;

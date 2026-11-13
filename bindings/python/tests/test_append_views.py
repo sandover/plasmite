@@ -53,8 +53,59 @@ class AppendViews(unittest.TestCase):
             {"a": b"immutable", "b": b"mutable", "c": b"mutable"},
         )
         self.assertTrue(message.data["b"].readonly)
-        with self.assertRaises(BufferError):
-            self.pool.append_view({"bad": memoryview(b"abcd")[::2]})
+        self.assertEqual(
+            bytes(
+                self.pool.append_view({"slice": memoryview(b"abcd")[::2]}).data["slice"]
+            ),
+            b"ac",
+        )
+
+    def test_forwarding_and_logical_slices(self):
+        original = self.pool.append_view(
+            {
+                "nested": {"integer": (1 << 63) - 1, "text": "é"},
+                "array": [0, {"x": 1}, 2, {"x": 3}],
+                "bytes": b"abcdef",
+            },
+            ["original", "nul\0tag"],
+        )
+        forwarded = self.pool.append_view(original)
+        self.assertEqual(list(forwarded.tags), ["original", "nul\0tag"])
+        self.assertEqual(bytes(memoryview(forwarded)), bytes(memoryview(original)))
+        retagged = self.pool.append_view(original, [])
+        self.assertEqual(list(retagged.tags), [])
+        self.assertEqual(
+            plasmite.to_native(retagged.data), plasmite.to_native(original.data)
+        )
+        subtree = self.pool.append_view(original.data["nested"], ["subtree"])
+        self.assertEqual(
+            plasmite.to_native(subtree.data), {"integer": (1 << 63) - 1, "text": "é"}
+        )
+        nested = self.pool.append_view(
+            {
+                "object": original.data["nested"],
+                "array": original.data["array"],
+                "reverse": original.data["array"][::-2],
+                "empty": original.data["array"][0:0],
+                "bytes": original.data["bytes"][::-2],
+            }
+        )
+        self.assertEqual(
+            plasmite.to_native(nested.data),
+            {
+                "object": {"integer": (1 << 63) - 1, "text": "é"},
+                "array": [0, {"x": 1}, 2, {"x": 3}],
+                "reverse": [{"x": 3}, {"x": 1}],
+                "empty": [],
+                "bytes": b"fdb",
+            },
+        )
+        child = nested.data["reverse"]
+        del original, forwarded, retagged, subtree, nested
+        self.pool.close()
+        self.client.close()
+        gc.collect()
+        self.assertEqual(plasmite.to_native(child), [{"x": 3}, {"x": 1}])
 
     def test_cycles_and_invalid_values_do_not_publish(self):
         first = self.pool.append_view({}).seq

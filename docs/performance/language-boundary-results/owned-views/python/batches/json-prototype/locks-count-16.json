@@ -1,0 +1,564 @@
+{
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "library": "/Users/brandonharvey/src/plasmite/tmp/python-batch-measurements/lib/libplasmite.dylib",
+  "library_sha256": "9fb9a136894b97a88d7deca702ad844247da8b0ef2d12d1e098ee2d1c5e3b3d4",
+  "bindings_sha256": "3d78678fb2e1230034a3a6e461a80749397c433747fbff53cf89eee1cbb6ee96",
+  "script_sha256": "e5f681266383800658ab585493360d1ff3c1323fe5345d673413c979cafece1e",
+  "messages": 5000,
+  "repeats": 3,
+  "reader_batch_count": 16,
+  "baseline_reader_batch_count": 0,
+  "reader_batch_bytes": 262144,
+  "batch_adapter_sha256": "c3db25d7e978b6c85868e9ed059b9fe77a47e7c469075cc5a9c56c9be307c69f",
+  "interval_ms": 0,
+  "producer_work_ns": 0,
+  "baseline_producer_work_ns": 0,
+  "format": "json-object",
+  "receipt": "native-view",
+  "baseline_receipt": "native-view",
+  "forward_owned_view": false,
+  "native_view_work": "CPython exact builtin input walk, retained encoded result, native identity access; consumer still decodes and verifies complete data",
+  "view_work": "benchmark-only ctypes producer: standard json.dumps, append view, read identity, release; consumer still verifies complete data",
+  "forward_view_work": "candidate forwards one prevalidated immutable owner; baseline validates arbitrary encoded input on each append",
+  "view_adapter_sha256": null,
+  "pipe_flush": false,
+  "compare_pipe_flush": false,
+  "native_operation_diagnostic": true,
+  "probe_sha256": "877beac470aeed534795cf88b57c66f3b254d8e46b1065c45c67608a512f614d",
+  "first_record_json_bytes": 450,
+  "runs": [
+    {
+      "lane": "baseline",
+      "elapsed_seconds": 0.057419166,
+      "messages_per_second": 87078.93806747385,
+      "cpu_seconds": 0.087008,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.039630000000000006,
+          "started_ns": 560386528880125,
+          "ended_ns": 560386570652916,
+          "messages": 5000,
+          "checksum": 0,
+          "latencies_ns": [],
+          "peak_rss_bytes": 42074112,
+          "native_operations": {
+            "shared_lock": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "exclusive_lock": {
+              "calls": 5000,
+              "inclusive_ns": 5399000,
+              "max_ns": 27000
+            },
+            "unlock": {
+              "calls": 5000,
+              "inclusive_ns": 2634000,
+              "max_ns": 36000
+            },
+            "address_wait": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "address_wake": {
+              "calls": 5000,
+              "inclusive_ns": 2675000,
+              "max_ns": 12000
+            }
+          }
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.047377999999999997,
+          "started_ns": 560386528881208,
+          "ended_ns": 560386586271041,
+          "messages": 5000,
+          "checksum": 37492500,
+          "latencies_ns": [],
+          "peak_rss_bytes": 41533440,
+          "native_operations": {
+            "shared_lock": {
+              "calls": 5003,
+              "inclusive_ns": 14762000,
+              "max_ns": 92000
+            },
+            "exclusive_lock": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "unlock": {
+              "calls": 5003,
+              "inclusive_ns": 1858000,
+              "max_ns": 2000
+            },
+            "address_wait": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "address_wake": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            }
+          }
+        }
+      ],
+      "verified_messages": 5000,
+      "profiled": false,
+      "repeat": 1
+    },
+    {
+      "lane": "plasmite",
+      "elapsed_seconds": 0.03714225,
+      "messages_per_second": 134617.58509514097,
+      "cpu_seconds": 0.071714,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.035996999999999994,
+          "started_ns": 560386699154916,
+          "ended_ns": 560386736179708,
+          "messages": 5000,
+          "checksum": 0,
+          "latencies_ns": [],
+          "peak_rss_bytes": 41746432,
+          "native_operations": {
+            "shared_lock": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "exclusive_lock": {
+              "calls": 5000,
+              "inclusive_ns": 3064000,
+              "max_ns": 20000
+            },
+            "unlock": {
+              "calls": 5000,
+              "inclusive_ns": 1438000,
+              "max_ns": 6000
+            },
+            "address_wait": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "address_wake": {
+              "calls": 5000,
+              "inclusive_ns": 2632000,
+              "max_ns": 6000
+            }
+          }
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.035717,
+          "started_ns": 560386699150625,
+          "ended_ns": 560386736269583,
+          "messages": 5000,
+          "checksum": 37492500,
+          "latencies_ns": [],
+          "peak_rss_bytes": 41353216,
+          "native_operations": {
+            "shared_lock": {
+              "calls": 708,
+              "inclusive_ns": 2159000,
+              "max_ns": 69000
+            },
+            "exclusive_lock": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "unlock": {
+              "calls": 708,
+              "inclusive_ns": 406000,
+              "max_ns": 8000
+            },
+            "address_wait": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "address_wake": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            }
+          }
+        }
+      ],
+      "verified_messages": 5000,
+      "profiled": false,
+      "repeat": 1
+    },
+    {
+      "lane": "plasmite",
+      "elapsed_seconds": 0.037679125,
+      "messages_per_second": 132699.47218784937,
+      "cpu_seconds": 0.07285499999999999,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.036486000000000005,
+          "started_ns": 560386840122625,
+          "ended_ns": 560386877722375,
+          "messages": 5000,
+          "checksum": 0,
+          "latencies_ns": [],
+          "peak_rss_bytes": 42139648,
+          "native_operations": {
+            "shared_lock": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "exclusive_lock": {
+              "calls": 5000,
+              "inclusive_ns": 3060000,
+              "max_ns": 16000
+            },
+            "unlock": {
+              "calls": 5000,
+              "inclusive_ns": 1450000,
+              "max_ns": 10000
+            },
+            "address_wait": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "address_wake": {
+              "calls": 5000,
+              "inclusive_ns": 2627000,
+              "max_ns": 14000
+            }
+          }
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.036368999999999985,
+          "started_ns": 560386840117916,
+          "ended_ns": 560386877776375,
+          "messages": 5000,
+          "checksum": 37492500,
+          "latencies_ns": [],
+          "peak_rss_bytes": 41320448,
+          "native_operations": {
+            "shared_lock": {
+              "calls": 695,
+              "inclusive_ns": 1886000,
+              "max_ns": 54000
+            },
+            "exclusive_lock": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "unlock": {
+              "calls": 695,
+              "inclusive_ns": 429000,
+              "max_ns": 6000
+            },
+            "address_wait": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "address_wake": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            }
+          }
+        }
+      ],
+      "verified_messages": 5000,
+      "profiled": false,
+      "repeat": 2
+    },
+    {
+      "lane": "baseline",
+      "elapsed_seconds": 0.058539125,
+      "messages_per_second": 85412.9609897654,
+      "cpu_seconds": 0.089201,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.04056,
+          "started_ns": 560386980335958,
+          "ended_ns": 560387023189958,
+          "messages": 5000,
+          "checksum": 0,
+          "latencies_ns": [],
+          "peak_rss_bytes": 41762816,
+          "native_operations": {
+            "shared_lock": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "exclusive_lock": {
+              "calls": 5000,
+              "inclusive_ns": 5622000,
+              "max_ns": 31000
+            },
+            "unlock": {
+              "calls": 5000,
+              "inclusive_ns": 2633000,
+              "max_ns": 9000
+            },
+            "address_wait": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "address_wake": {
+              "calls": 5000,
+              "inclusive_ns": 2715000,
+              "max_ns": 6000
+            }
+          }
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.048641,
+          "started_ns": 560386980310750,
+          "ended_ns": 560387038828333,
+          "messages": 5000,
+          "checksum": 37492500,
+          "latencies_ns": [],
+          "peak_rss_bytes": 41500672,
+          "native_operations": {
+            "shared_lock": {
+              "calls": 5002,
+              "inclusive_ns": 14551000,
+              "max_ns": 84000
+            },
+            "exclusive_lock": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "unlock": {
+              "calls": 5002,
+              "inclusive_ns": 1930000,
+              "max_ns": 10000
+            },
+            "address_wait": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "address_wake": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            }
+          }
+        }
+      ],
+      "verified_messages": 5000,
+      "profiled": false,
+      "repeat": 2
+    },
+    {
+      "lane": "baseline",
+      "elapsed_seconds": 0.058899125,
+      "messages_per_second": 84890.90457625645,
+      "cpu_seconds": 0.090199,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.04135200000000001,
+          "started_ns": 560387147548666,
+          "ended_ns": 560387191565375,
+          "messages": 5000,
+          "checksum": 0,
+          "latencies_ns": [],
+          "peak_rss_bytes": 42205184,
+          "native_operations": {
+            "shared_lock": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "exclusive_lock": {
+              "calls": 5000,
+              "inclusive_ns": 5909000,
+              "max_ns": 23000
+            },
+            "unlock": {
+              "calls": 5000,
+              "inclusive_ns": 2468000,
+              "max_ns": 7000
+            },
+            "address_wait": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "address_wake": {
+              "calls": 5000,
+              "inclusive_ns": 2923000,
+              "max_ns": 41000
+            }
+          }
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.048847,
+          "started_ns": 560387147547333,
+          "ended_ns": 560387206425791,
+          "messages": 5000,
+          "checksum": 37492500,
+          "latencies_ns": [],
+          "peak_rss_bytes": 41713664,
+          "native_operations": {
+            "shared_lock": {
+              "calls": 5003,
+              "inclusive_ns": 14287000,
+              "max_ns": 78000
+            },
+            "exclusive_lock": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "unlock": {
+              "calls": 5003,
+              "inclusive_ns": 2081000,
+              "max_ns": 73000
+            },
+            "address_wait": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "address_wake": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            }
+          }
+        }
+      ],
+      "verified_messages": 5000,
+      "profiled": false,
+      "repeat": 3
+    },
+    {
+      "lane": "plasmite",
+      "elapsed_seconds": 0.038965917,
+      "messages_per_second": 128317.26762647468,
+      "cpu_seconds": 0.07432599999999999,
+      "workers": [
+        {
+          "role": "writer",
+          "cpu_seconds": 0.037358,
+          "started_ns": 560387312218333,
+          "ended_ns": 560387351108458,
+          "messages": 5000,
+          "checksum": 0,
+          "latencies_ns": [],
+          "peak_rss_bytes": 42057728,
+          "native_operations": {
+            "shared_lock": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "exclusive_lock": {
+              "calls": 5000,
+              "inclusive_ns": 3290000,
+              "max_ns": 31000
+            },
+            "unlock": {
+              "calls": 5000,
+              "inclusive_ns": 1519000,
+              "max_ns": 8000
+            },
+            "address_wait": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "address_wake": {
+              "calls": 5000,
+              "inclusive_ns": 2625000,
+              "max_ns": 32000
+            }
+          }
+        },
+        {
+          "role": "reader",
+          "cpu_seconds": 0.03696799999999999,
+          "started_ns": 560387312216458,
+          "ended_ns": 560387351158333,
+          "messages": 5000,
+          "checksum": 37492500,
+          "latencies_ns": [],
+          "peak_rss_bytes": 41402368,
+          "native_operations": {
+            "shared_lock": {
+              "calls": 644,
+              "inclusive_ns": 2378000,
+              "max_ns": 46000
+            },
+            "exclusive_lock": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            },
+            "unlock": {
+              "calls": 644,
+              "inclusive_ns": 427000,
+              "max_ns": 20000
+            },
+            "address_wait": {
+              "calls": 1,
+              "inclusive_ns": 47000,
+              "max_ns": 47000
+            },
+            "address_wake": {
+              "calls": 0,
+              "inclusive_ns": 0,
+              "max_ns": 0
+            }
+          }
+        }
+      ],
+      "verified_messages": 5000,
+      "profiled": false,
+      "repeat": 3
+    }
+  ],
+  "native_probe_sha256": "877beac470aeed534795cf88b57c66f3b254d8e46b1065c45c67608a512f614d",
+  "baseline_library": "/Users/brandonharvey/src/plasmite/tmp/python-batch-measurements/lib/libplasmite.dylib",
+  "baseline_library_sha256": "9fb9a136894b97a88d7deca702ad844247da8b0ef2d12d1e098ee2d1c5e3b3d4",
+  "native_view_sources_sha256": {
+    "plasmite/_views.py": "95d4030c16b99d5f6c5cf1b28c21cb971b8c9e01190cc916baf36eef5f1314e4",
+    "plasmite/_views_fallback.py": "6709939cff53b4ded2547e931c61361d8dd3879f3674cfbf5d65f03e4dbb4c7c",
+    "native/views.c": "d661ca631291ef0189106d0f278c094acd33712258c2b80c9260da37f54e5fac",
+    "plasmite/_views_native.abi3.so": "90123c26e7f645742abd6d60a0d2b85783cf710cc062f43439785a1062b8083d"
+  },
+  "medians": {
+    "plasmite": {
+      "elapsed_seconds": 0.037679125,
+      "messages_per_second": 132699.47218784937,
+      "cpu_seconds": 0.07285499999999999
+    },
+    "baseline": {
+      "elapsed_seconds": 0.058539125,
+      "messages_per_second": 85412.9609897654,
+      "cpu_seconds": 0.089201
+    }
+  }
+}

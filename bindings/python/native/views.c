@@ -58,6 +58,13 @@ static int (*builder_put)(plsm_builder_t *, size_t, const uint8_t *, size_t,
 static int (*append_builder)(plsm_pool_t *, plsm_builder_t *, uint32_t,
                              const plsm_message_view_t **, plsm_error_t **);
 static void (*builder_free)(plsm_builder_t *);
+static int (*copy_value)(plsm_builder_t *, size_t, const uint8_t *, size_t, plsm_value_ref_t,
+                         plsm_error_t **);
+static int (*append_owner)(plsm_pool_t *, const plsm_message_view_t *, uint32_t,
+                           const plsm_message_view_t **, plsm_error_t **);
+
+static int (*stream_next)(plsm_stream_t *, uint64_t, size_t, size_t, const plsm_message_view_t **,
+                          size_t *, plsm_error_t **);
 
 static int fail(plsm_error_t *error) {
     PyObject *exc = PyObject_CallFunction(error_factory, "K", (unsigned long long)(uintptr_t)error);
@@ -506,6 +513,51 @@ static PyObject *snapshot_from_owner(const plsm_message_view_t *view) {
     result->view = view;
     return (PyObject *)result;
 }
+
+static PyObject *next_snapshots(PyObject *module, PyObject *args) {
+    (void)module;
+    unsigned long long address, timeout;
+    Py_ssize_t max_count, max_bytes;
+    if (!PyArg_ParseTuple(args, "KnnK", &address, &max_count, &max_bytes, &timeout))
+        return NULL;
+    if (max_count <= 0 || max_bytes <= 0 ||
+        (size_t)max_count > SIZE_MAX / sizeof(plsm_message_view_t *)) {
+        PyErr_SetString(PyExc_ValueError, "batch bounds must be positive and fit address space");
+        return NULL;
+    }
+    const plsm_message_view_t *local[16];
+    const plsm_message_view_t **owners =
+        max_count <= 16 ? local : PyMem_Malloc((size_t)max_count * sizeof(*owners));
+    if (!owners)
+        return PyErr_NoMemory();
+    size_t count = 0;
+    plsm_error_t *error = NULL;
+    int status;
+    Py_BEGIN_ALLOW_THREADS
+    status = stream_next((plsm_stream_t *)(uintptr_t)address, timeout, (size_t)max_count,
+                         (size_t)max_bytes, owners, &count, &error);
+    Py_END_ALLOW_THREADS
+    PyObject *items = status < 0 ? NULL : PyList_New((Py_ssize_t)count);
+    if (status < 0)
+        fail(error);
+    for (size_t i = 0; i < count; ++i) {
+        if (items) {
+            PyObject *snapshot = snapshot_from_owner(owners[i]);
+            if (!snapshot) {
+                Py_CLEAR(items);
+            } else
+                PyList_SetItem(items, (Py_ssize_t)i, snapshot);
+        } else
+            release_view(owners[i]);
+    }
+    if (owners != local)
+        PyMem_Free(owners);
+    if (!items)
+        return NULL;
+    PyObject *result = Py_BuildValue("iO", status, items);
+    Py_DECREF(items);
+    return result;
+}
 static PyObject *get_snapshot(PyObject *module, PyObject *args) {
     (void)module;
     if (!configured_handle) {
@@ -618,8 +670,30 @@ static int write_container(plsm_builder_t *builder, size_t node, PyObject *value
 }
 static int write_python(plsm_builder_t *builder, size_t parent, const uint8_t *key, size_t key_len,
                         PyObject *value, const Ancestor *parents) {
+    if (Py_IS_TYPE(value, object_type) || Py_IS_TYPE(value, array_type)) {
+        Value *source = (Value *)value;
+        plsm_error_t *error = NULL;
+        if (!source->sliced) {
+            int rc = copy_value(builder, parent, key, key_len, source->value, &error);
+            return rc ? fail(error) : 0;
+        }
+        plsm_view_value_t array = {0};
+        array.kind = PLSM_FIELD_ARRAY;
+        size_t node;
+        if (builder_put(builder, parent, key, key_len, &array, &node, &error))
+            return fail(error);
+        for (Py_ssize_t i = 0; i < source->length; ++i) {
+            plsm_value_ref_t child;
+            if (value_index(source->value, (uint32_t)(source->start + i * source->step), &child,
+                            &error) ||
+                copy_value(builder, node, NULL, 0, child, &error))
+                return fail(error);
+        }
+        return 0;
+    }
     plsm_view_value_t input = {0};
     Py_buffer buffer = {0};
+    PyObject *contiguous = NULL;
     int container = 0;
     if (value == Py_None)
         input.kind = PLSM_FIELD_NULL;
@@ -643,11 +717,23 @@ static int write_python(plsm_builder_t *builder, size_t parent, const uint8_t *k
         input.len = (size_t)length;
     } else if (PyBytes_CheckExact(value) || PyByteArray_CheckExact(value) ||
                PyMemoryView_Check(value)) {
-        if (PyObject_GetBuffer(value, &buffer, PyBUF_SIMPLE))
+        if (PyObject_GetBuffer(value, &buffer, PyBUF_FULL_RO))
             return -1;
         input.kind = PLSM_FIELD_BYTES;
         input.bytes = (const uint8_t *)buffer.buf;
         input.len = (size_t)buffer.len;
+        if (!PyBuffer_IsContiguous(&buffer, 'C')) {
+            contiguous = PyBytes_FromStringAndSize(NULL, buffer.len);
+            char *bytes;
+            Py_ssize_t length;
+            if (!contiguous || PyBytes_AsStringAndSize(contiguous, &bytes, &length) ||
+                PyBuffer_ToContiguous(bytes, &buffer, buffer.len, 'C')) {
+                Py_XDECREF(contiguous);
+                PyBuffer_Release(&buffer);
+                return -1;
+            }
+            input.bytes = (const uint8_t *)bytes;
+        }
     } else if (PyDict_CheckExact(value)) {
         input.kind = PLSM_FIELD_OBJECT;
         container = 1;
@@ -666,6 +752,7 @@ static int write_python(plsm_builder_t *builder, size_t parent, const uint8_t *k
     int rc = builder_put(builder, parent, key, key_len, &input, &node, &error);
     if (buffer.obj)
         PyBuffer_Release(&buffer);
+    Py_XDECREF(contiguous);
     if (rc)
         return fail(error);
     return container ? write_container(builder, node, value, parents) : 0;
@@ -683,15 +770,30 @@ static PyObject *append_python(PyObject *module, PyObject *args) {
     plsm_pool_t *pool = PyLong_AsVoidPtr(address);
     if (PyErr_Occurred())
         return NULL;
-    if (!PyDict_CheckExact(data)) {
-        PyErr_SetString(PyExc_TypeError, "append_view data must be an exact dict");
+    if (Py_IS_TYPE(data, snapshot_type) && tags == Py_None) {
+        const plsm_message_view_t *view = NULL;
+        plsm_error_t *error = NULL;
+        int rc;
+        Py_BEGIN_ALLOW_THREADS
+        rc = append_owner(pool, ((Snapshot *)data)->view, durability, &view, &error);
+        Py_END_ALLOW_THREADS
+        if (rc) {
+            fail(error);
+            return NULL;
+        }
+        return snapshot_from_owner(view);
+    }
+    if (!PyDict_CheckExact(data) && !Py_IS_TYPE(data, object_type) &&
+        !Py_IS_TYPE(data, snapshot_type)) {
+        PyErr_SetString(PyExc_TypeError,
+                        "append_view data must be an exact dict, ObjectView or MessageView");
         return NULL;
     }
-    if (!PyList_CheckExact(tags)) {
+    if (tags != Py_None && !PyList_CheckExact(tags)) {
         PyErr_SetString(PyExc_TypeError, "append_view tags must be a list of exact strings");
         return NULL;
     }
-    Py_ssize_t count = PyList_Size(tags);
+    Py_ssize_t count = tags == Py_None ? 0 : PyList_Size(tags);
     plsm_text_t *spans = count ? PyMem_Calloc((size_t)count, sizeof(plsm_text_t)) : NULL;
     if (count && !spans)
         return PyErr_NoMemory();
@@ -719,9 +821,20 @@ static PyObject *append_python(PyObject *module, PyObject *args) {
         fail(error);
         return NULL;
     }
-    if (write_container(builder, node, data, NULL)) {
-        builder_free(builder);
-        return NULL;
+    if (PyDict_CheckExact(data)) {
+        if (write_container(builder, node, data, NULL)) {
+            builder_free(builder);
+            return NULL;
+        }
+    } else {
+        plsm_value_ref_t source = Py_IS_TYPE(data, snapshot_type)
+                                      ? view_data(((Snapshot *)data)->view)
+                                      : ((Value *)data)->value;
+        if (copy_value(builder, SIZE_MAX, NULL, 0, source, &error)) {
+            builder_free(builder);
+            fail(error);
+            return NULL;
+        }
     }
     const plsm_message_view_t *view = NULL;
     /* Input access has finished; the builder now owns all bytes. */
@@ -795,6 +908,9 @@ static PyObject *configure(PyObject *module, PyObject *args) {
     LOAD(builder_put, "plsm_builder_put");
     LOAD(append_builder, "plsm_pool_append_builder");
     LOAD(builder_free, "plsm_builder_free");
+    LOAD(copy_value, "plsm_builder_copy_value");
+    LOAD(append_owner, "plsm_pool_append_view");
+    LOAD(stream_next, "plsm_view_stream_next");
     configured_interpreter = PyInterpreterState_Get();
     configured_handle = (uintptr_t)address;
     Py_INCREF(library);
@@ -809,6 +925,7 @@ static PyMethodDef module_methods[] = {{"_configure", configure, METH_VARARGS, N
                                        {"get", get_snapshot, METH_VARARGS, NULL},
                                        {"append", append_python, METH_VARARGS, NULL},
                                        {"from_bytes", bytes_snapshot, METH_VARARGS, NULL},
+                                       {"next_batch", next_snapshots, METH_VARARGS, NULL},
                                        {NULL}};
 static struct PyModuleDef definition = {PyModuleDef_HEAD_INIT, "_views_native", NULL, -1,
                                         module_methods};

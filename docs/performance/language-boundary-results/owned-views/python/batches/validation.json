@@ -1,0 +1,60 @@
+{
+  "library_sha256": "2a1dee2cbb01805551dae8960eb35b60fe576f53ba723e55237c117d975b6160",
+  "cli_sha256": "255f47859479add47b79d9a910a6576fe48a3a2bffbdb40e3b1741d37624d949",
+  "header_sha256": "4b67cbc239b7cc9af554233e660e30596fc3474e2d001bfab1ef038cd6c71b01",
+  "python_sources_sha256": {
+    "bindings/python/plasmite/_cli.py": "7569ed6398bdda719760ee9245509e627e0890dc9704e109d0cc3b20f68e1940",
+    "bindings/python/plasmite/__init__.py": "2684be88220ce4d7697829e565df637ae5b793697004f8e80c80c1b8ff35656e",
+    "bindings/python/plasmite/_views_native.abi3.so": "d6903ec3ee07545cc6909dcee4cefb9ec1da8c68567be5cd7dba5514179435bb",
+    "bindings/python/plasmite/_views.py": "1666aa60d2342c541ca3b77416b6c51cad7181d2e924bede8e4cdaa5e5215fd4",
+    "bindings/python/plasmite/_views_fallback.py": "f928ff1106b448788b93644cb34ee06cdd75747292e51ec025adc8d6c8475e4e",
+    "bindings/python/native/views.c": "f6247e03363ae45a30928c3b513e34a0d361a7429874f1967e13a895f4a0e892",
+    "bindings/python/benchmarks/stream_batches.py": "912e168b324203a0c2ba177c4a96781b9a71166e837bea3fc067e13a85ac720e",
+    "bindings/python/benchmarks/udp_message_allocations.py": "fe973f86cf74dd12be4195c15cad02ecdd0c5af1defa9b40177b76b66fed8f7d",
+    "bindings/python/benchmarks/producer.py": "5210f43ba3b6a824d2082ac775ae5a7780a11fa71e7406c77c9a722f14c6d539",
+    "bindings/python/benchmarks/input_guard.py": "2984ef581976add7c69c6c632e4d99ff478dbd2ab10871d14fb42abc0f6dbb69",
+    "bindings/python/benchmarks/prefilled_reader.py": "988778cfc27d8e47c64ad5932fd2aa1556ec6bd56987984f5807e6bcde164944",
+    "bindings/python/benchmarks/views.py": "ccea6f863ed5d6efa7fc7d38e11e93518a3468419b17f29beecadf4ac00d0d29",
+    "bindings/python/tests/test_append_views.py": "57d1daa18f44c8171ac294d203a9db4fede9c7f79793a607a6d46d04e8d8d7de",
+    "bindings/python/tests/test_wheel_platform.py": "eb9e582daeefeb17229c30e7ba379699890e2dae4fbc5b3a9836801c62c48a30",
+    "bindings/python/tests/test_views.py": "d05959ce1bcbbcec8e75983d8e3e2d121fe2605aa44c4d5c02cf4060a759fc99",
+    "bindings/python/tests/test_handle_callbacks.py": "f2fcbe5b7d3e785c0791a7f7cba97dc0a2d7ff01ae5e6045a5b3e69d714f67d4",
+    "bindings/python/tests/test_thread_safety.py": "b2905d3089a72a4e501c175cb5f50b482bf7f2a41c31d9c7ebe912b465928626",
+    "bindings/python/tests/test_view_streams.py": "95b0a6628bc5dfab2fa0e558c8997a4447ba5ab8de97a693781716d311dcc2f2",
+    "bindings/python/tests/test_cli.py": "10bad7ededf4c6a5516d09f4711b3863190645dc71c94a23a519983f18cb60fd",
+    "bindings/python/tests/test_bindings.py": "43fe348ecfc7b6920fb62446a20cd454d217135b361c1dc29ee7e74c7c1d3fb2",
+    "bindings/python/tests/fixtures/extra-meta.lite3": "9ae41e6eff18c9053218260742138228a6405265700db7e7d8bd269be52b01fa",
+    "scripts/bench_pipe_comparison.py": "815f27674fe8757c86db321eedf28592408bcad31aab8ae46f18dd2a7ffd27b6",
+    "scripts/bench_view_stream.py": "e0be04c5ec950438fb39026221b7392baaffce8e4f8944b710031cd278687b59",
+    "scripts/python_wheel_smoke.sh": "0583fed3aa730b5e76bac660b87468f0ddf8792e7c6f04ac81855a9a376eef35"
+  },
+  "wheels": {
+    "plasmite-1.3.0-cp310-cp310-macosx_11_0_arm64.whl": {
+      "sha256": "6a511b3222f025320cface28c27ecf85808e91d3d246474b1f34296c1a0cfebf",
+      "wheel_metadata": "Wheel-Version: 1.0\nGenerator: setuptools (84.2.1)\nRoot-Is-Purelib: false\nTag: cp310-cp310-macosx_11_0_arm64\n\n",
+      "bundled_library_sha256": "2a1dee2cbb01805551dae8960eb35b60fe576f53ba723e55237c117d975b6160"
+    },
+    "plasmite-1.3.0-cp311-abi3-macosx_11_0_arm64.whl": {
+      "sha256": "df873314a647f28f6c295a852ba970836ee044228d13fdbe58fb08944728d0ea",
+      "wheel_metadata": "Wheel-Version: 1.0\nGenerator: setuptools (84.2.1)\nRoot-Is-Purelib: false\nTag: cp311-abi3-macosx_11_0_arm64\n\n",
+      "bundled_library_sha256": "2a1dee2cbb01805551dae8960eb35b60fe576f53ba723e55237c117d975b6160"
+    },
+    "plasmite-1.3.0-py3-none-macosx_11_0_arm64.whl": {
+      "sha256": "5a2c9764dfdb843d5e5b85402d1d2fb3b4fbbcdbf6009b81b5b2bf1732d3f7ec",
+      "wheel_metadata": "Wheel-Version: 1.0\nGenerator: setuptools (84.2.1)\nRoot-Is-Purelib: false\nTag: py3-none-macosx_11_0_arm64\n\n",
+      "bundled_library_sha256": "2a1dee2cbb01805551dae8960eb35b60fe576f53ba723e55237c117d975b6160"
+    }
+  },
+  "checks": {
+    "python_full_suite": "95 tests pass; one expected skip",
+    "python_free_threaded": "43 tests pass under CPython3.14.10t; GIL disabled; native extension unloaded",
+    "native_and_fallback_stream_suite": "12 tests pass in each backend",
+    "rust_library": "273 of275 pass in sandbox;2 loopback-bind cases pass when rerun with socket permission",
+    "clippy": "cargo clippy --all-targets -- -D warnings passes",
+    "wheel_smoke": "cp311-abi3,cp310-cp310,py3-none built from sdist; tags/architecture/deployment floor/exact SDK verified; stream/forwarding/slices tested; bundled server restart smoke passes"
+  },
+  "notes": [
+    "Main timing matrix predates final zero-poll, mixed-reader tag and callback guard corrections. Final SDK and Python overlay identify the checked release checkpoint; central integration measurements will use that checkpoint.",
+    "No new C stream/owner signature changes after the fixed interface."
+  ]
+}

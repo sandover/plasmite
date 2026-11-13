@@ -1,0 +1,210 @@
+{
+  "backend": "native",
+  "backend_sha256": "d6903ec3ee07545cc6909dcee4cefb9ec1da8c68567be5cd7dba5514179435bb",
+  "facade_sha256": "4248a206c4927cf3a8342308610d2c6f32d43cc2b20b97d8a73dc2a6d2f0b4bf",
+  "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "library_sha256": "2e56f5570984e862fab3d5c97c7582ced7cad889c4ddab8b941eb733a6950594",
+  "runner_sha256": "72529dab2735f2d1e68c8e58fe430bfa39a02d441c498c464e247079874e8296",
+  "runs": [
+    {
+      "batch_count": 0,
+      "writer": {
+        "wall_ns": 27589833,
+        "cpu_ns": 21049000
+      },
+      "readers": [
+        {
+          "wall_ns": 32867958,
+          "cpu_ns": 19579000,
+          "records": 3000
+        },
+        {
+          "wall_ns": 32854458,
+          "cpu_ns": 19352000,
+          "records": 3000
+        }
+      ],
+      "repeat": 1
+    },
+    {
+      "batch_count": 16,
+      "writer": {
+        "wall_ns": 30278084,
+        "cpu_ns": 22073000
+      },
+      "readers": [
+        {
+          "wall_ns": 30208750,
+          "cpu_ns": 16763000,
+          "records": 3000
+        },
+        {
+          "wall_ns": 30233834,
+          "cpu_ns": 16678000,
+          "records": 3000
+        }
+      ],
+      "repeat": 1
+    },
+    {
+      "batch_count": 16,
+      "writer": {
+        "wall_ns": 27769292,
+        "cpu_ns": 20249000
+      },
+      "readers": [
+        {
+          "wall_ns": 27687833,
+          "cpu_ns": 16661000,
+          "records": 3000
+        },
+        {
+          "wall_ns": 27682833,
+          "cpu_ns": 16810000,
+          "records": 3000
+        }
+      ],
+      "repeat": 2
+    },
+    {
+      "batch_count": 0,
+      "writer": {
+        "wall_ns": 34769959,
+        "cpu_ns": 23892000
+      },
+      "readers": [
+        {
+          "wall_ns": 39406458,
+          "cpu_ns": 22256000,
+          "records": 3000
+        },
+        {
+          "wall_ns": 39565667,
+          "cpu_ns": 22161000,
+          "records": 3000
+        }
+      ],
+      "repeat": 2
+    },
+    {
+      "batch_count": 0,
+      "writer": {
+        "wall_ns": 28822083,
+        "cpu_ns": 20912000
+      },
+      "readers": [
+        {
+          "wall_ns": 35694500,
+          "cpu_ns": 18501000,
+          "records": 3000
+        },
+        {
+          "wall_ns": 35733000,
+          "cpu_ns": 18631000,
+          "records": 3000
+        }
+      ],
+      "repeat": 3
+    },
+    {
+      "batch_count": 16,
+      "writer": {
+        "wall_ns": 27690875,
+        "cpu_ns": 21321000
+      },
+      "readers": [
+        {
+          "wall_ns": 27593875,
+          "cpu_ns": 16972000,
+          "records": 3000
+        },
+        {
+          "wall_ns": 27609875,
+          "cpu_ns": 17177000,
+          "records": 3000
+        }
+      ],
+      "repeat": 3
+    },
+    {
+      "batch_count": 16,
+      "writer": {
+        "wall_ns": 25312375,
+        "cpu_ns": 18740000
+      },
+      "readers": [
+        {
+          "wall_ns": 25230750,
+          "cpu_ns": 13976000,
+          "records": 3000
+        },
+        {
+          "wall_ns": 25236375,
+          "cpu_ns": 13908000,
+          "records": 3000
+        }
+      ],
+      "repeat": 4
+    },
+    {
+      "batch_count": 0,
+      "writer": {
+        "wall_ns": 31824542,
+        "cpu_ns": 22230000
+      },
+      "readers": [
+        {
+          "wall_ns": 35816667,
+          "cpu_ns": 20725000,
+          "records": 3000
+        },
+        {
+          "wall_ns": 36281708,
+          "cpu_ns": 20837000,
+          "records": 3000
+        }
+      ],
+      "repeat": 4
+    },
+    {
+      "batch_count": 0,
+      "writer": {
+        "wall_ns": 30476167,
+        "cpu_ns": 21203000
+      },
+      "readers": [
+        {
+          "wall_ns": 35242166,
+          "cpu_ns": 20047000,
+          "records": 3000
+        },
+        {
+          "wall_ns": 35279542,
+          "cpu_ns": 19862000,
+          "records": 3000
+        }
+      ],
+      "repeat": 5
+    },
+    {
+      "batch_count": 16,
+      "writer": {
+        "wall_ns": 26900000,
+        "cpu_ns": 19293000
+      },
+      "readers": [
+        {
+          "wall_ns": 26802334,
+          "cpu_ns": 15605000,
+          "records": 3000
+        },
+        {
+          "wall_ns": 26785041,
+          "cpu_ns": 15805000,
+          "records": 3000
+        }
+      ],
+      "repeat": 5
+    }
+  ]
+}

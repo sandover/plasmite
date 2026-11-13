@@ -152,6 +152,22 @@ with TemporaryDirectory() as directory, Client(directory) as client:
         produced = pool.append_view({"integer": (1 << 63) - 1, "bytes": b"copy"}, ["nul\0tag"])
         assert to_native(produced.data) == {"integer": (1 << 63) - 1, "bytes": b"copy"}
         assert list(produced.tags) == ["nul\0tag"]
+        forwarded = pool.append_view(produced)
+        assert to_native(forwarded.data) == to_native(produced.data)
+        assert list(forwarded.tags) == list(produced.tags)
+        sliced = pool.append_view({"array": child[::-1], "bytes": produced.data["bytes"][::2]})
+        assert to_native(sliced.data) == {"array": [3, 2, 1], "bytes": b"cp"}
+        with pool.tail_views(since_seq=sent.seq, max_messages=2) as stream:
+            first = next(stream)
+            batch = stream.next_batch(4, 1024 * 1024)
+            assert first.seq == sent.seq and [item.seq for item in batch] == [produced.seq]
+            try:
+                next(stream)
+            except StopIteration:
+                pass
+            else:
+                raise AssertionError("view stream exceeded its message limit")
+
         del view
     gc.collect()
     assert list(child) == [1, 2, 3] and len(buffer) > 0

@@ -46,7 +46,7 @@ impl FrameView<'_> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Cursor {
     next_off: usize,
     last_seq: u64,
@@ -82,15 +82,56 @@ impl Cursor {
 
     // The caller retains the shared pool lock through the payload copy.
     pub(crate) fn next_locked(&mut self, pool: &Pool) -> Result<CursorResult, Error> {
+        match self.next_view_locked(pool)? {
+            CursorViewResult::Message(frame) => Ok(CursorResult::Message(frame.into_owned())),
+            CursorViewResult::WouldBlock => Ok(CursorResult::WouldBlock),
+            CursorViewResult::FellBehind => Ok(CursorResult::FellBehind),
+        }
+    }
+
+    pub(crate) fn next_locked_bounded(
+        &mut self,
+        pool: &Pool,
+        bytes: usize,
+        minimum_seq: Option<u64>,
+    ) -> Result<CursorResult, Error> {
+        if bytes == usize::MAX && minimum_seq.is_none() {
+            return self.next_locked(pool);
+        }
+        loop {
+            let checkpoint = self.clone();
+            match self.next_view_locked(pool)? {
+                CursorViewResult::Message(frame) => {
+                    // Older records never cross this stream's requested boundary.
+                    // Check their frame headers, then skip without copying payloads.
+                    if minimum_seq.is_some_and(|minimum| frame.seq < minimum) {
+                        continue;
+                    }
+                    if frame.payload.len() > bytes {
+                        let required = frame.payload.len();
+                        *self = checkpoint;
+                        return Err(Error::new(ErrorKind::Usage).with_message(format!(
+                            "next frame needs {required} encoded bytes, above batch budget {bytes}"
+                        )));
+                    }
+                    return Ok(CursorResult::Message(frame.into_owned()));
+                }
+                CursorViewResult::WouldBlock => return Ok(CursorResult::WouldBlock),
+                CursorViewResult::FellBehind => return Ok(CursorResult::FellBehind),
+            }
+        }
+    }
+
+    fn next_view_locked<'p>(&mut self, pool: &'p Pool) -> Result<CursorViewResult<'p>, Error> {
         let header = pool.header_locked()?;
         let position_may_be_stale = self.observed_header != Some(header);
         self.observed_header = Some(header);
         if header.oldest_seq == 0 {
-            return Ok(CursorResult::WouldBlock);
+            return Ok(CursorViewResult::WouldBlock);
         }
 
         if self.last_seq != 0 && self.last_seq >= header.newest_seq {
-            return Ok(CursorResult::WouldBlock);
+            return Ok(CursorViewResult::WouldBlock);
         }
 
         let ring_size = header.ring_size as usize;
@@ -106,7 +147,7 @@ impl Cursor {
         }
         let is_full = head == tail && header.oldest_seq != 0;
         if !is_full && self.next_off == head {
-            return Ok(CursorResult::WouldBlock);
+            return Ok(CursorViewResult::WouldBlock);
         }
 
         if self.next_off >= ring_size
@@ -114,7 +155,7 @@ impl Cursor {
         {
             self.next_off = tail;
             self.last_seq = 0;
-            return Ok(CursorResult::FellBehind);
+            return Ok(CursorViewResult::FellBehind);
         }
 
         loop {
@@ -138,7 +179,7 @@ impl Cursor {
                     }
                     self.next_off = tail;
                     self.last_seq = 0;
-                    return Ok(CursorResult::FellBehind);
+                    return Ok(CursorViewResult::FellBehind);
                 }
                 ReadResult::Message { frame, next_off } => {
                     if frame.seq < header.oldest_seq
@@ -148,17 +189,23 @@ impl Cursor {
                         if frame.seq < header.oldest_seq && self.next_off != tail {
                             self.next_off = tail;
                             self.last_seq = 0;
-                            return Ok(CursorResult::FellBehind);
+                            return Ok(CursorViewResult::FellBehind);
                         }
                         return Err(pool.malformed_frame_error(self.next_off));
                     }
                     self.next_off = next_off;
                     self.last_seq = frame.seq;
-                    return Ok(CursorResult::Message(frame.into_owned()));
+                    return Ok(CursorViewResult::Message(frame));
                 }
             }
         }
     }
+}
+
+enum CursorViewResult<'a> {
+    Message(FrameView<'a>),
+    WouldBlock,
+    FellBehind,
 }
 
 impl Default for Cursor {

@@ -211,5 +211,9 @@ byte values and NUL tags in every installed wheel, plus the packaged server.
 [Callback ordering checks](callback-guards/README.md) cover reentrant closure during
 argument conversion and report the cost of the additional open-handle check.
 
+[Explicit view batches and forwarding](batches/README.md) reduce busy-reader lock
+handoffs and reuse immutable encoded input, with matched complete-delivery, paced,
+contention and retention measurements.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

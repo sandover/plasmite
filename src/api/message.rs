@@ -195,6 +195,18 @@ impl TailState {
         wait: Option<Duration>,
         select: impl Fn(FrameRef, &[String]) -> Result<Option<T>, Error>,
     ) -> Result<TailOutcome<T>, Error> {
+        self.next_wait_using(wait, |cursor| cursor.next(pool), select)
+    }
+
+    fn next_wait_using<T>(
+        &mut self,
+        wait: Option<Duration>,
+        mut acquire: impl FnMut(&mut Cursor) -> Result<CursorResult, Error>,
+        select: impl Fn(FrameRef, &[String]) -> Result<Option<T>, Error>,
+    ) -> Result<TailOutcome<T>, Error> {
+        // A poll scans available records but never sleeps. Filters and a
+        // requested starting sequence must not conceal an already-ready item.
+        let poll_only = wait == Some(Duration::ZERO);
         let wait_deadline = wait
             .map(|duration| {
                 Instant::now().checked_add(duration).ok_or_else(|| {
@@ -227,12 +239,15 @@ impl TailState {
                 return Ok(TailOutcome::Finished);
             }
 
-            if polled && wait_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            if polled
+                && !poll_only
+                && wait_deadline.is_some_and(|deadline| Instant::now() >= deadline)
+            {
                 return Ok(TailOutcome::WaitExpired);
             }
             polled = true;
 
-            match self.cursor.next(pool)? {
+            match acquire(&mut self.cursor)? {
                 CursorResult::Message(frame) => {
                     let should_process = match observe_sequence(
                         &mut self.expected_seq,
@@ -292,6 +307,141 @@ impl TailState {
                 }
             }
         }
+    }
+
+    pub(crate) fn next_wait_bounded<T>(
+        &mut self,
+        pool: &Pool,
+        wait: Option<Duration>,
+        max_bytes: usize,
+        select: impl Fn(FrameRef, &[String]) -> Result<Option<T>, Error>,
+    ) -> Result<TailOutcome<T>, Error> {
+        if max_bytes == 0 {
+            return Err(Error::new(ErrorKind::Usage).with_message("byte bound must be positive"));
+        }
+        let minimum_seq = self.expected_seq;
+        self.next_wait_using(
+            wait,
+            |cursor| {
+                let _lock = pool.read_lock()?;
+                cursor.next_locked_bounded(pool, max_bytes, minimum_seq)
+            },
+            select,
+        )
+    }
+
+    /// Explicitly acquire a bounded group; regular next calls never prefetch.
+    pub(crate) fn next_batch_wait<T>(
+        &mut self,
+        pool: &Pool,
+        wait: Option<Duration>,
+        max_count: usize,
+        max_bytes: usize,
+        select: impl Fn(FrameRef, &[String]) -> Result<Option<T>, Error>,
+    ) -> Result<TailOutcome<Vec<T>>, Error> {
+        if max_count == 0 || max_bytes == 0 {
+            return Err(Error::new(ErrorKind::Usage).with_message("batch bounds must be positive"));
+        }
+        let copy_count = self.options.max_messages.map_or(max_count, |max| {
+            max_count.min(max.saturating_sub(self.seen))
+        });
+        let cancel = self.options.cancel.clone();
+        let deadline = self.deadline;
+        let expected_at_start = self.expected_seq;
+        let mut frames = std::collections::VecDeque::new();
+        let first = self.next_wait_using(
+            wait,
+            |cursor| {
+                // Filtering may reject the first record. Reuse only companions
+                // acquired by this explicit call, committing one checkpoint at a time.
+                if let Some((frame, checkpoint)) = frames.pop_front() {
+                    *cursor = checkpoint;
+                    return Ok(CursorResult::Message(frame));
+                }
+                // One lock covers the first snapshot and all available companions.
+                // Conversion never runs inside this lock.
+                let _lock = pool.read_lock()?;
+                let first = cursor.next_locked_bounded(pool, max_bytes, expected_at_start)?;
+                if let CursorResult::Message(frame) = &first {
+                    if expected_at_start.is_some_and(|expected| frame.seq < expected) {
+                        return Ok(first);
+                    }
+                    let mut used = frame.payload.len();
+                    let mut ahead = cursor.clone();
+                    while frames.len() + 1 < copy_count && used < max_bytes {
+                        if cancel
+                            .as_ref()
+                            .is_some_and(|flag| flag.load(Ordering::Acquire))
+                            || deadline.is_some_and(|limit| Instant::now() >= limit)
+                        {
+                            break;
+                        }
+                        match ahead.next_locked_bounded(pool, max_bytes - used, None) {
+                            Ok(CursorResult::Message(frame)) => {
+                                used += frame.payload.len();
+                                frames.push_back((frame, ahead.clone()));
+                            }
+                            Ok(CursorResult::FellBehind) => continue,
+                            // Return a valid prefix; the next explicit call sees
+                            // this error or retries with a fresh byte budget.
+                            Ok(CursorResult::WouldBlock) | Err(_) => break,
+                        }
+                    }
+                }
+                Ok(first)
+            },
+            &select,
+        )?;
+        let first = match first {
+            TailOutcome::Item(first) => first,
+            TailOutcome::WaitExpired => return Ok(TailOutcome::WaitExpired),
+            TailOutcome::Finished => return Ok(TailOutcome::Finished),
+            TailOutcome::Cancelled => return Ok(TailOutcome::Cancelled),
+        };
+        let mut items = vec![first];
+        for (frame, checkpoint) in frames {
+            if self.batch_stopped() {
+                break;
+            }
+            let mut expected = self.expected_seq;
+            let process = match observe_sequence(&mut expected, frame.seq, self.options.gap_policy)
+            {
+                Ok(process) => process,
+                Err(_) => break,
+            };
+            let terminal = frame.seq == u64::MAX;
+            let item = if process {
+                match select(frame, &self.options.tags) {
+                    Ok(item) => item,
+                    Err(_) => break,
+                }
+            } else {
+                None
+            };
+            self.cursor = checkpoint;
+            self.expected_seq = expected;
+            if process {
+                self.terminated = terminal;
+            }
+            if let Some(item) = item {
+                items.push(item);
+                self.seen += 1;
+            }
+            if self.terminated {
+                break;
+            }
+        }
+        Ok(TailOutcome::Item(items))
+    }
+
+    fn batch_stopped(&self) -> bool {
+        self.options
+            .cancel
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Acquire))
+            || self
+                .deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
     }
 }
 
@@ -722,7 +872,10 @@ pub(crate) fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GapPolicy, PoolApiExt, TailOptions, decode_payload, message_from_frame};
+    use super::{
+        GapPolicy, PoolApiExt, TailOptions, TailOutcome, TailState, decode_payload,
+        message_from_frame,
+    };
     use crate::core::error::ErrorKind;
     use crate::core::lite3::{encode_message, json_counter_snapshot, reset_json_counters};
     use crate::core::pool::{AppendOptions, Durability, Pool, PoolOptions};
@@ -731,6 +884,166 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
     use tempfile::tempdir;
+
+    fn batch_pool(path: &std::path::Path) -> Pool {
+        let mut pool = Pool::create(path, PoolOptions::new(1024 * 1024)).unwrap();
+        for value in 1..=4 {
+            pool.append_json_now(&json!({"value": value}), &[], Durability::Fast)
+                .unwrap();
+        }
+        pool
+    }
+
+    #[test]
+    fn batch_wait_respects_bytes_and_checkpoints() {
+        let directory = tempdir().unwrap();
+        let pool = batch_pool(&directory.path().join("batch.plasmite"));
+        let size = pool.get_lite3(1).unwrap().payload.len();
+        let mut state = TailState::new(
+            &pool,
+            TailOptions {
+                since_seq: Some(1),
+                max_messages: Some(4),
+                ..TailOptions::default()
+            },
+        );
+        let select = |frame: crate::api::FrameRef, _: &[String]| Ok(Some(frame.seq));
+        let error = state
+            .next_batch_wait(&pool, Some(Duration::ZERO), 16, size - 1, select)
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::Usage);
+        let TailOutcome::Item(first) = state
+            .next_batch_wait(&pool, Some(Duration::ZERO), 16, size * 2, select)
+            .unwrap()
+        else {
+            panic!("batch")
+        };
+        assert_eq!(first, vec![1, 2]);
+        assert!(matches!(
+            state
+                .next_wait(&pool, Some(Duration::ZERO), select)
+                .unwrap(),
+            TailOutcome::Item(3)
+        ));
+        let TailOutcome::Item(last) = state
+            .next_batch_wait(&pool, Some(Duration::ZERO), 16, usize::MAX, select)
+            .unwrap()
+        else {
+            panic!("batch")
+        };
+        assert_eq!(last, vec![4]);
+        assert!(matches!(
+            state
+                .next_wait(&pool, Some(Duration::ZERO), select)
+                .unwrap(),
+            TailOutcome::Finished
+        ));
+    }
+
+    #[test]
+    fn batch_prefix_leaves_error_record_for_next_call() {
+        let directory = tempdir().unwrap();
+        let pool = batch_pool(&directory.path().join("batch.plasmite"));
+        let mut state = TailState::new(
+            &pool,
+            TailOptions {
+                since_seq: Some(1),
+                ..TailOptions::default()
+            },
+        );
+        let select = |frame: crate::api::FrameRef, _: &[String]| {
+            if frame.seq == 2 {
+                Err(crate::core::error::Error::new(ErrorKind::Corrupt)
+                    .with_message("bad second frame"))
+            } else {
+                Ok(Some(frame.seq))
+            }
+        };
+        let TailOutcome::Item(prefix) = state
+            .next_batch_wait(&pool, Some(Duration::ZERO), 4, usize::MAX, select)
+            .unwrap()
+        else {
+            panic!("batch")
+        };
+        assert_eq!(prefix, vec![1]);
+        assert_eq!(
+            state
+                .next_wait(&pool, Some(Duration::ZERO), select)
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::Corrupt
+        );
+        assert!(matches!(
+            state
+                .next_wait(&pool, Some(Duration::ZERO), select)
+                .unwrap(),
+            TailOutcome::Item(3)
+        ));
+    }
+
+    #[test]
+    fn batch_selection_runs_outside_pool_lock() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("batch.plasmite");
+        let pool = batch_pool(&path);
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        let mut state = TailState::new(
+            &pool,
+            TailOptions {
+                since_seq: Some(1),
+                ..TailOptions::default()
+            },
+        );
+        let TailOutcome::Item(items) = state
+            .next_batch_wait(&pool, Some(Duration::ZERO), 4, usize::MAX, |frame, _| {
+                file.try_lock()
+                    .expect("formatting must release the shared pool lock");
+                file.unlock().unwrap();
+                Ok(Some(frame.seq))
+            })
+            .unwrap()
+        else {
+            panic!("batch")
+        };
+        assert_eq!(items, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn batch_cancellation_stops_available_tail() {
+        let directory = tempdir().unwrap();
+        let pool = batch_pool(&directory.path().join("batch.plasmite"));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut state = TailState::new(
+            &pool,
+            TailOptions {
+                since_seq: Some(1),
+                cancel: Some(cancel.clone()),
+                ..TailOptions::default()
+            },
+        );
+        let TailOutcome::Item(items) = state
+            .next_batch_wait(&pool, Some(Duration::ZERO), 4, usize::MAX, |frame, _| {
+                cancel.store(true, Ordering::Release);
+                Ok(Some(frame.seq))
+            })
+            .unwrap()
+        else {
+            panic!("batch")
+        };
+        assert_eq!(items, vec![1]);
+        assert!(matches!(
+            state
+                .next_wait(&pool, Some(Duration::ZERO), |frame, _| Ok(Some(frame.seq)))
+                .unwrap(),
+            TailOutcome::Cancelled
+        ));
+    }
 
     #[test]
     fn borrowed_wire_matches_complete_messages_and_corrupt_payload_errors() {

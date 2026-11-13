@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from threading import Lock
 
 from . import _LIB as lib
-from . import _take_error, plsm_buf_t, plsm_error_t, plsm_pool_t
+from . import _take_error, plsm_buf_t, plsm_error_t, plsm_pool_t, plsm_stream_t
 
 
 class Ref(c.Structure):
@@ -58,6 +58,26 @@ def _configure_unlocked():
         ),
         "plsm_view_from_lite3": (
             [c.c_char_p, c.c_size_t, c.c_uint64, c.c_uint64, owner, err],
+            c.c_int,
+        ),
+        "plsm_view_stream_next": (
+            [
+                c.POINTER(plsm_stream_t),
+                c.c_uint64,
+                c.c_size_t,
+                c.c_size_t,
+                c.POINTER(c.c_void_p),
+                c.POINTER(c.c_size_t),
+                err,
+            ],
+            c.c_int,
+        ),
+        "plsm_pool_append_view": (
+            [c.POINTER(plsm_pool_t), c.c_void_p, c.c_uint32, owner, err],
+            c.c_int,
+        ),
+        "plsm_builder_copy_value": (
+            [c.c_void_p, c.c_size_t, c.c_char_p, c.c_size_t, Ref, err],
             c.c_int,
         ),
         "plsm_view_release": ([c.c_void_p], None),
@@ -376,9 +396,10 @@ def _snapshot_input(value, parents, binary):
                 out[key] = _snapshot_input(child, parents, binary)
             return out
         return [_snapshot_input(child, parents, binary) for child in value]
+    if kind in (ObjectView, ArrayView):
+        binary[0] = True
+        return value
     if kind in (bytes, bytearray, memoryview):
-        if kind is memoryview and not value.c_contiguous:
-            raise BufferError("append_view byte buffers must be C-contiguous")
         binary[0] = True
         return bytes(value)
     if kind is int and not -(1 << 63) <= value < 1 << 63:
@@ -392,8 +413,19 @@ def _snapshot_input(value, parents, binary):
 
 def append(address, data, tags, durability):
     # ctypes releases the GIL. Freeze mutable inputs before its first crossing.
-    if type(data) is not dict:
-        raise TypeError("append_view data must be an exact dict")
+    _configure()
+    pool = c.cast(address, c.POINTER(plsm_pool_t))
+    out = c.c_void_p()
+    if type(data) is MessageView and tags is None:
+        _call(lib.plsm_pool_append_view, pool, data._ptr, durability, c.byref(out))
+        return MessageView(out)
+    if type(data) is MessageView:
+        data = data.data
+    if type(data) not in (dict, ObjectView):
+        raise TypeError(
+            "append_view data must be an exact dict, ObjectView or MessageView"
+        )
+    tags = [] if tags is None else tags
     if any(type(tag) is not str for tag in tags):
         raise TypeError("append_view tags must be exact str values")
     binary = [False]
@@ -427,7 +459,12 @@ def append(address, data, tags, durability):
     builder, root = c.c_void_p(), c.c_size_t()
     _call(lib.plsm_builder_new, spans, len(tags), c.byref(builder), c.byref(root))
     try:
-        _write_container(builder, root.value, data)
+        if type(data) is ObjectView:
+            _call(
+                lib.plsm_builder_copy_value, builder, c.c_size_t(-1), None, 0, data._ref
+            )
+        else:
+            _write_container(builder, root.value, data)
         _call(lib.plsm_pool_append_builder, pool, builder, durability, c.byref(out))
         return MessageView(out)
     finally:
@@ -437,6 +474,38 @@ def append(address, data, tags, durability):
 def _write_container(builder, node, value):
     items = value.items() if type(value) is dict else ((None, child) for child in value)
     for key, child in items:
+        key_bytes = key.encode("utf-8") if key is not None else None
+        if type(child) is ObjectView or (
+            type(child) is ArrayView and not child._sliced
+        ):
+            _call(
+                lib.plsm_builder_copy_value,
+                builder,
+                node,
+                key_bytes,
+                len(key_bytes) if key_bytes is not None else 0,
+                child._ref,
+            )
+            continue
+        if type(child) is ArrayView:
+            info, next_node = Info(), c.c_size_t()
+            info.kind = 8
+            _call(
+                lib.plsm_builder_put,
+                builder,
+                node,
+                key_bytes,
+                len(key_bytes) if key_bytes is not None else 0,
+                c.byref(info),
+                c.byref(next_node),
+            )
+            for index in child._indices:
+                ref = Ref()
+                _call(lib.plsm_value_index, child._ref, index, c.byref(ref))
+                _call(
+                    lib.plsm_builder_copy_value, builder, next_node.value, None, 0, ref
+                )
+            continue
         info = Info()
         encoded = None
         if child is None:
@@ -466,3 +535,32 @@ def _write_container(builder, node, value):
         )
         if info.kind in (7, 8):
             _write_container(builder, next_node.value, child)
+
+
+def next_batch(address, max_count, max_bytes, timeout_ms):
+    _configure()
+    owners = (c.c_void_p * max_count)()
+    count = c.c_size_t()
+    error = c.POINTER(plsm_error_t)()
+    status = lib.plsm_view_stream_next(
+        c.cast(address, c.POINTER(plsm_stream_t)),
+        timeout_ms,
+        max_count,
+        max_bytes,
+        owners,
+        c.byref(count),
+        c.byref(error),
+    )
+    items = []
+    try:
+        if status < 0:
+            raise _take_error(error)
+        for index in range(count.value):
+            ptr = owners[index]
+            owners[index] = None
+            items.append(MessageView(ptr))
+        return status, items
+    finally:
+        for index in range(count.value):
+            if owners[index]:
+                lib.plsm_view_release(owners[index])

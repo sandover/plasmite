@@ -491,6 +491,22 @@ int plsm_view_to_json(const plsm_message_view_t *view, plsm_buf_t *out, plsm_err
  * A flush error can follow publication, as for other appends. */
 typedef struct plsm_builder plsm_builder_t;
 typedef struct { const uint8_t *data; size_t len; } plsm_text_t;
+/* Independent immutable owners from the existing tail state machine. Tags use
+ * UTF-8 spans and count accepted messages toward max_messages. Cancel/free use
+ * plsm_stream_cancel/free. Serialized reads only; cancel may run concurrently.
+ * next waits for the first item, then acquires available companions only.
+ * max_count/max_bytes must be positive; bytes bound encoded payload snapshots.
+ * An oversized first record errors without consuming it. Each returned owner
+ * requires plsm_view_release, including any prefix returned before an error.
+ * UINT64_MAX timeout waits under the open-time deadline; zero polls.
+ * Status: 0=wait expired, 1=items, 2=finished, 3=cancelled, -1=error.
+ * out has max_count slots; count always reports initialized owners. */
+int plsm_view_stream_open(plsm_pool_t *pool, const plsm_stream_options_t *options,
+    const plsm_text_t *tags, size_t tag_count, plsm_stream_t **out, plsm_error_t **err);
+int plsm_view_stream_next(plsm_stream_t *stream, uint64_t timeout_ms,
+    size_t max_count, size_t max_bytes, const plsm_message_view_t **out,
+    size_t *count, plsm_error_t **err);
+
 int plsm_builder_new(const plsm_text_t *tags, size_t count,
     plsm_builder_t **out, size_t *data_node, plsm_error_t **err);
 int plsm_builder_put(plsm_builder_t *builder, size_t parent,

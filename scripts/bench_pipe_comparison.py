@@ -71,6 +71,10 @@ def worker(args):
         fixture = (Path(args.directory) / "fixture.lite3").read_bytes() if args.binary else None
         if args.role == "writer" and args.receipt == "native-view":
             import plasmite._views  # Exclude extension loading from delivery timing.
+        batch = None
+        if pool is not None and args.role == "reader" and args.reader_views:
+            import plasmite._views
+            import bench_view_stream as batch
         views = None
         source_view = None
         if pool is not None and args.role == "writer" and (args.receipt == "view" or args.forward_view):
@@ -135,6 +139,9 @@ def worker(args):
             ) if args.binary else (
                 (json.loads(line) for line in sys.stdin.buffer)
                 if pool is None else
+                batch.data(plasmite, pool, args.messages, args.reader_batch_count,
+                           args.reader_batch_bytes, args.reader_view_conversion)
+                if batch is not None else
                 (message.data for message in pool.tail(
                     since_seq=1, max_messages=args.messages,
                     timeout_ms=120_000, error_on_gap=True,
@@ -184,7 +191,12 @@ def trial(args, lane, directory, profile=False):
                "--lane", lane, "--messages", str(args.messages),
                "--directory", directory, "--bindings", str(args.bindings),
                "--interval-ms", str(args.interval_ms), "--receipt", args.receipt,
-               "--producer-work-ns", str(args.producer_work_ns)]
+               "--producer-work-ns", str(args.producer_work_ns),
+               "--reader-batch-count", str(args.reader_batch_count),
+               "--reader-batch-bytes", str(args.reader_batch_bytes),
+               "--reader-view-conversion", args.reader_view_conversion]
+    if args.reader_views:
+        command.append("--reader-views")
     if args.binary:
         command.append("--binary")
     if args.forward_view:
@@ -286,6 +298,11 @@ def main():
     parser.add_argument("--producer-work-ns", type=int, default=0,
                         help="diagnostic busy work before each candidate append; same payload/result")
     parser.add_argument("--baseline-producer-work-ns", type=int, default=0)
+    parser.add_argument("--reader-views", action="store_true")
+    parser.add_argument("--reader-view-conversion", choices=["message-json", "native"], default="message-json")
+    parser.add_argument("--reader-batch-count", type=int, default=0, help="explicit view batch; zero keeps ordinary view iteration")
+    parser.add_argument("--baseline-reader-batch-count", type=int, default=0)
+    parser.add_argument("--reader-batch-bytes", type=int, default=262144)
     parser.add_argument("--no-pipe", action="store_true", help="compare only the two Plasmite configurations")
     parser.add_argument("--compare-pipe-flush", action="store_true",
                         help="include both buffered and per-record-flushed pipes")
@@ -308,6 +325,12 @@ def main():
     parser.add_argument("--lane", choices=["pipe", "plasmite"], help=argparse.SUPPRESS)
     parser.add_argument("--directory", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if (args.reader_batch_count or args.baseline_reader_batch_count) and not args.reader_views:
+        parser.error("read batch counts require --reader-views")
+    if args.reader_batch_count < 0 or args.baseline_reader_batch_count < 0 or args.reader_batch_bytes <= 0:
+        parser.error("batch counts must be nonnegative; byte bound must be positive")
+    if args.reader_views and args.binary:
+        parser.error("reader views request message conversion, not repeated raw Lite3 frames")
     if args.forward_view and not args.binary:
         parser.error("forward-view needs --binary")
     if args.compare_pipe_flush and (args.binary or args.pipe_flush):
@@ -340,6 +363,10 @@ def main():
               "bindings_sha256": hashlib.sha256((args.bindings / "plasmite" / "__init__.py").read_bytes()).hexdigest(),
               "script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
               "messages": args.messages, "repeats": args.repeats,
+              "reader_batch_count": args.reader_batch_count, "baseline_reader_batch_count": args.baseline_reader_batch_count,
+              "reader_batch_bytes": args.reader_batch_bytes,
+              "reader_views": args.reader_views, "reader_view_conversion": args.reader_view_conversion,
+              "batch_adapter_sha256": hashlib.sha256((Path(__file__).parent / "bench_view_stream.py").read_bytes()).hexdigest() if args.reader_views else None,
               "interval_ms": args.interval_ms,
               "producer_work_ns": args.producer_work_ns, "baseline_producer_work_ns": args.baseline_producer_work_ns,
               "format": "lite3-repeat" if args.binary else "json-object",
@@ -354,6 +381,13 @@ def main():
               "probe_sha256": hashlib.sha256(args.native_counts.read_bytes()).hexdigest() if args.native_counts else None,
               "first_record_json_bytes": len(json.dumps(record()).encode()),
               "runs": []}
+    if args.reader_views:
+        os.environ["PLASMITE_LIB_DIR"] = str(args.library)
+        sys.path.insert(0, str(args.bindings))
+        import plasmite._views as view_facade
+        result["view_backend"] = view_facade.VIEW_BACKEND
+        result["view_backend_sha256"] = hashlib.sha256(Path(view_facade.backend.__file__).read_bytes()).hexdigest()
+        result["view_facade_sha256"] = hashlib.sha256(Path(view_facade.__file__).read_bytes()).hexdigest()
     if args.native_counts:
         result["native_probe_sha256"] = hashlib.sha256(args.native_counts.read_bytes()).hexdigest()
     libraries = {"plasmite": args.library}
@@ -393,6 +427,7 @@ def main():
             if label == "baseline":
                 trial_args.receipt = args.baseline_receipt
                 trial_args.producer_work_ns = args.baseline_producer_work_ns
+                trial_args.reader_batch_count = args.baseline_reader_batch_count
             if label == "baseline" and args.baseline_bindings:
                 trial_args.bindings = args.baseline_bindings
             with tempfile.TemporaryDirectory(prefix="plasmite-pipe-") as directory:
