@@ -4,6 +4,12 @@ use plasmite::api::{Message, lite3::Lite3Buf};
 use plasmite::view::MessageView;
 use std::hint::black_box;
 use std::time::Instant;
+#[derive(serde::Deserialize, Debug, PartialEq)]
+struct Reading<'a> {
+    power: i64,
+    samples: Vec<i64>,
+    note: Option<&'a str>,
+}
 fn run<F: FnMut()>(fixture: &str, lane: &str, n: usize, mut f: F) {
     for _ in 0..10 {
         f();
@@ -61,7 +67,16 @@ pub fn main() {
         let v = MessageView::from_bytes(bytes, 17, 1).unwrap();
         let samples = v.data().get("samples").unwrap().unwrap();
         let native = Message::from_lite3(17, 1, bytes).unwrap();
+        let expected_typed: Reading<'_> = serde::Deserialize::deserialize(&native.data).unwrap();
+        assert_eq!(v.data().decode::<Reading<'_>>().unwrap(), expected_typed);
         let mut lanes = [
+            "warm_view_typed",
+            "warm_json_typed",
+            "warm_native_typed",
+            "cold_view_typed",
+            "cold_legacy_typed",
+            "warm_view_full_native",
+            "warm_json_full_native",
             "whole_root_validation",
             "snapshot_copy",
             "cold_view_selected",
@@ -78,6 +93,48 @@ pub fn main() {
         }
         for lane in lanes {
             match lane {
+                "warm_view_typed" => run(name, lane, n, || {
+                    let reading: Reading<'_> = black_box(v.data()).decode().unwrap();
+                    assert_eq!(reading, expected_typed);
+                    black_box(reading);
+                }),
+                "warm_json_typed" => run(name, lane, n, || {
+                    let json = black_box(v.data()).to_json().unwrap();
+                    let reading: Reading<'_> = serde_json::from_slice(&json).unwrap();
+                    assert_eq!(reading, expected_typed);
+                    black_box(reading);
+                }),
+                "warm_native_typed" => run(name, lane, n, || {
+                    let reading: Reading<'_> =
+                        serde::Deserialize::deserialize(black_box(&native.data)).unwrap();
+                    assert_eq!(reading, expected_typed);
+                    black_box(reading);
+                }),
+                "cold_view_typed" => run(name, lane, n, || {
+                    let owner = MessageView::from_bytes(bytes, 17, 1).unwrap();
+                    let reading: Reading<'_> = owner.data().decode().unwrap();
+                    assert_eq!(reading, expected_typed);
+                    black_box(reading);
+                }),
+                "cold_legacy_typed" => run(name, lane, n, || {
+                    let snapshot = bytes.to_vec();
+                    let message = Message::from_lite3(17, 1, &snapshot).unwrap();
+                    let reading: Reading<'_> =
+                        serde::Deserialize::deserialize(&message.data).unwrap();
+                    assert_eq!(reading, expected_typed);
+                    black_box(reading);
+                }),
+                "warm_view_full_native" => run(name, lane, n, || {
+                    let decoded: serde_json::Value = black_box(v.data()).decode().unwrap();
+                    assert_eq!(decoded, native.data);
+                    black_box(decoded);
+                }),
+                "warm_json_full_native" => run(name, lane, n, || {
+                    let json = black_box(v.data()).to_json().unwrap();
+                    let decoded: serde_json::Value = serde_json::from_slice(&json).unwrap();
+                    assert_eq!(decoded, native.data);
+                    black_box(decoded);
+                }),
                 "whole_root_validation" => run(name, lane, n, || {
                     assert!(
                         unsafe {

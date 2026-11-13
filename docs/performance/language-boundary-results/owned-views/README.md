@@ -362,5 +362,51 @@ cc -O3 -Iinclude scripts/bench_builder_c.c -Ltarget/release -lplasmite -Wl,-rpat
 python3 scripts/bench_builder.py --repeats 7 --output native-builder.raw.json
 ```
 
+## Follow-up: decode Rust types directly
+
+`ValueRef::decode` builds the requested Serde type directly from Lite3. Text and
+byte fields borrow the snapshot when their target type permits it. Array size
+hints let the decoder allocate a requested vector once. Unknown fields skip
+already validated values without traversing their descendants. Struct decoding
+still scans keys; it does not perform an indexed projection.
+
+[Seven alternating release processes](rust-decode.raw.json) compare equal typed
+outputs, including every array element and long-string content. Cold routes
+both copy a snapshot; the old route creates a generic native message first.
+The JSON control formats the same warm immutable data and parses it into the
+same struct. Fixture setup stays outside timing. Builds/tests stopped during
+timing, and allocation probes ran separately. See the source archive (outside Git)
+and recorded source/example fingerprints for the measured implementation.
+
+| Fixture | Cold direct typed | Cold old typed | Warm direct typed | Warm JSON typed | Warm native-tree typed |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Small | 425 ns | 616 ns | 184 ns | 209 ns | 28 ns |
+| Wide | 18.74 µs | 52.79 µs | 3.53 µs | 29.65 µs | 405 ns |
+| Long string | 6.32 µs | 19.73 µs | 1.42 µs | 21.83 µs | 1.15 µs |
+| 1,000-element array | 21.60 µs | 24.70 µs | 13.89 µs | 14.80 µs | 693 ns |
+
+Cold direct decoding takes 31%/65%/68%/13% less time. Retained native-tree
+controls remain faster, especially for array scans. The common full-output
+checks enter all timings; comparing the long string itself costs time even
+when decoding borrows it. Do not interpret these as isolated field-access costs.
+
+Warm direct typed decoding requests one Rust allocation for the output vector:
+24 bytes in the first three fixtures, 8,000 bytes in the array case. Cold direct
+decoding requests three allocations versus 15/1,044/17/23 for the old route.
+Counters exclude C malloc and mapped storage. Full generic native conversion
+also has matched lanes in the raw file; it remains more expensive than a sparse
+typed result because it must create every requested object and string.
+
+Reproduce:
+
+```sh
+cargo build --release --example bench_owned_views --example bench_owned_view_allocations
+python3 scripts/bench_rust_decode.py --output rust-decode.raw.json
+```
+
+Tests cover borrowed string/byte pointers, options, enum shapes, integer range
+errors, and float/integer type errors. A compile-fail example prevents borrowed
+text from escaping its owner.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.
