@@ -17,6 +17,8 @@ docs/
 ├── performance/1.0-release.md                  — Read when assessing 1.0 read costs, writer contention, or benchmark results
 ├── performance/windows-access-1.0.md          — Read when comparing local, HTTP, and MCP access costs on Windows
 ├── performance/consumer-latency.rs             — Read when reproducing the full-consumer latency measurements
+├── performance/language-boundary-results/    — Read when reproducing per-binding ownership and conversion measurements
+│   └── node-owned/README.md                   — Read when evaluating raw buffer transfer and JSON compaction
 ├── performance/pipe-comparison.md              — Read when comparing a Python pipe with ordinary Plasmite calls
 ├── performance/pipe-comparison-results/         — Read when checking the raw pipe runs and append timing evidence
 │

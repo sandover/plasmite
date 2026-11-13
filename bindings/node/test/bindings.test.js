@@ -76,6 +76,33 @@ function fillPast(pool, seq) {
   assert.fail(`sequence ${seq} remained retained after filling the pool`);
 }
 
+test("native output buffers and slices survive handle close and garbage collection", () => {
+  const script = `
+    const assert = require('node:assert/strict');
+    const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+    const { Client } = require(${JSON.stringify(path.resolve(__dirname, "../index.js"))});
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plasmite-owned-'));
+    try {
+      const client = new Client(dir), pool = client.createPool('owned', 1048576n);
+      const message = pool.append({text:'x'.repeat(4096)});
+      let frame = pool.getLite3(message.seq);
+      const expected = Buffer.from(frame.payload);
+      const slice = frame.payload.subarray(1);
+      const json = pool.getJson(message.seq);
+      const other = pool.getLite3(message.seq).payload;
+      other.fill(0);
+      assert.deepEqual(frame.payload, expected);
+      frame = null;
+      pool.close(); client.close();
+      for (let i=0;i<8;i++) global.gc();
+      assert.deepEqual(slice, expected.subarray(1));
+      assert.equal(JSON.parse(json).data.text.length, 4096);
+    } finally { fs.rmSync(dir,{recursive:true,force:true}); }
+  `;
+  const result = childProcess.spawnSync(process.execPath, ["--expose-gc", "-e", script], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+});
+
 async function withPoolAsync(poolName, run, sizeBytes = TEST_POOL_SIZE_BYTES) {
   const temp = makeTempDir();
   const poolDir = path.join(temp, "pools");

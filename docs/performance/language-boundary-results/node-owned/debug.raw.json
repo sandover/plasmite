@@ -1,0 +1,364 @@
+{
+  "rows": [
+    {
+      "addon": "/private/tmp/plasmite-node-baseline/index.node",
+      "mode": "raw",
+      "verified": 20000,
+      "ms": 102.621292,
+      "cpu": {
+        "user": 92575,
+        "system": 20744
+      },
+      "memory": {
+        "rss": 67325000,
+        "heapTotal": 9846784,
+        "heapUsed": 4637568,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/Users/brandonharvey/src/plasmite/bindings/node/native/darwin-arm64/index.node",
+      "mode": "raw",
+      "verified": 20000,
+      "ms": 79.786708,
+      "cpu": {
+        "user": 72200,
+        "system": 17600
+      },
+      "memory": {
+        "rss": 67325096,
+        "heapTotal": 9846784,
+        "heapUsed": 4608216,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/Users/brandonharvey/src/plasmite/bindings/node/native/darwin-arm64/index.node",
+      "mode": "raw",
+      "verified": 20000,
+      "ms": 96.390208,
+      "cpu": {
+        "user": 81731,
+        "system": 21533
+      },
+      "memory": {
+        "rss": 65817648,
+        "heapTotal": 9584640,
+        "heapUsed": 4608216,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-baseline/index.node",
+      "mode": "raw",
+      "verified": 20000,
+      "ms": 85.00275,
+      "cpu": {
+        "user": 76836,
+        "system": 17285
+      },
+      "memory": {
+        "rss": 74402888,
+        "heapTotal": 9846784,
+        "heapUsed": 4637568,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-baseline/index.node",
+      "mode": "raw",
+      "verified": 20000,
+      "ms": 87.036709,
+      "cpu": {
+        "user": 78974,
+        "system": 17800
+      },
+      "memory": {
+        "rss": 66243656,
+        "heapTotal": 9846784,
+        "heapUsed": 4637496,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/Users/brandonharvey/src/plasmite/bindings/node/native/darwin-arm64/index.node",
+      "mode": "raw",
+      "verified": 20000,
+      "ms": 78.474416,
+      "cpu": {
+        "user": 70549,
+        "system": 17185
+      },
+      "memory": {
+        "rss": 65915928,
+        "heapTotal": 9846784,
+        "heapUsed": 4608216,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/Users/brandonharvey/src/plasmite/bindings/node/native/darwin-arm64/index.node",
+      "mode": "raw",
+      "verified": 20000,
+      "ms": 78.37675,
+      "cpu": {
+        "user": 70224,
+        "system": 17255
+      },
+      "memory": {
+        "rss": 66063552,
+        "heapTotal": 9846784,
+        "heapUsed": 4608216,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-baseline/index.node",
+      "mode": "raw",
+      "verified": 20000,
+      "ms": 88.502167,
+      "cpu": {
+        "user": 78949,
+        "system": 18434
+      },
+      "memory": {
+        "rss": 73632912,
+        "heapTotal": 9846784,
+        "heapUsed": 4637496,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-baseline/index.node",
+      "mode": "raw",
+      "verified": 20000,
+      "ms": 89.655917,
+      "cpu": {
+        "user": 83967,
+        "system": 18414
+      },
+      "memory": {
+        "rss": 66866032,
+        "heapTotal": 10108928,
+        "heapUsed": 4637568,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/Users/brandonharvey/src/plasmite/bindings/node/native/darwin-arm64/index.node",
+      "mode": "raw",
+      "verified": 20000,
+      "ms": 78.464666,
+      "cpu": {
+        "user": 70262,
+        "system": 17215
+      },
+      "memory": {
+        "rss": 67095624,
+        "heapTotal": 9846784,
+        "heapUsed": 4608216,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-baseline/index.node",
+      "mode": "object",
+      "verified": 20000,
+      "ms": 2154.449417,
+      "cpu": {
+        "user": 2146419,
+        "system": 25083
+      },
+      "memory": {
+        "rss": 33901304,
+        "heapTotal": 9846784,
+        "heapUsed": 4708976,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/Users/brandonharvey/src/plasmite/bindings/node/native/darwin-arm64/index.node",
+      "mode": "object",
+      "verified": 20000,
+      "ms": 2162.29575,
+      "cpu": {
+        "user": 2149535,
+        "system": 27162
+      },
+      "memory": {
+        "rss": 60033856,
+        "heapTotal": 10108928,
+        "heapUsed": 4679624,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/Users/brandonharvey/src/plasmite/bindings/node/native/darwin-arm64/index.node",
+      "mode": "object",
+      "verified": 20000,
+      "ms": 2174.910083,
+      "cpu": {
+        "user": 2163130,
+        "system": 27768
+      },
+      "memory": {
+        "rss": 59984584,
+        "heapTotal": 10108928,
+        "heapUsed": 4679624,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-baseline/index.node",
+      "mode": "object",
+      "verified": 20000,
+      "ms": 2156.342375,
+      "cpu": {
+        "user": 2147545,
+        "system": 25264
+      },
+      "memory": {
+        "rss": 33934144,
+        "heapTotal": 10108928,
+        "heapUsed": 4708952,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-baseline/index.node",
+      "mode": "object",
+      "verified": 20000,
+      "ms": 2165.833708,
+      "cpu": {
+        "user": 2154901,
+        "system": 25955
+      },
+      "memory": {
+        "rss": 34130728,
+        "heapTotal": 10108928,
+        "heapUsed": 4708976,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/Users/brandonharvey/src/plasmite/bindings/node/native/darwin-arm64/index.node",
+      "mode": "object",
+      "verified": 20000,
+      "ms": 2159.638542,
+      "cpu": {
+        "user": 2147929,
+        "system": 27528
+      },
+      "memory": {
+        "rss": 59902784,
+        "heapTotal": 10108928,
+        "heapUsed": 4679600,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/Users/brandonharvey/src/plasmite/bindings/node/native/darwin-arm64/index.node",
+      "mode": "object",
+      "verified": 20000,
+      "ms": 2167.415583,
+      "cpu": {
+        "user": 2154059,
+        "system": 27684
+      },
+      "memory": {
+        "rss": 59984704,
+        "heapTotal": 10108928,
+        "heapUsed": 4678592,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-baseline/index.node",
+      "mode": "object",
+      "verified": 20000,
+      "ms": 2171.930875,
+      "cpu": {
+        "user": 2161047,
+        "system": 27216
+      },
+      "memory": {
+        "rss": 34147088,
+        "heapTotal": 9846784,
+        "heapUsed": 4708976,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-baseline/index.node",
+      "mode": "object",
+      "verified": 20000,
+      "ms": 2176.510084,
+      "cpu": {
+        "user": 2164187,
+        "system": 26169
+      },
+      "memory": {
+        "rss": 34032376,
+        "heapTotal": 10108928,
+        "heapUsed": 4708976,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/Users/brandonharvey/src/plasmite/bindings/node/native/darwin-arm64/index.node",
+      "mode": "object",
+      "verified": 20000,
+      "ms": 2177.562875,
+      "cpu": {
+        "user": 2165750,
+        "system": 27484
+      },
+      "memory": {
+        "rss": 59984656,
+        "heapTotal": 10108928,
+        "heapUsed": 4679624,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    }
+  ]
+}

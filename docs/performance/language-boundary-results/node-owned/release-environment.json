@@ -1,0 +1,17 @@
+{
+  "profile": "release",
+  "baseline_commit": "53a6bcd4b6d53513d9c27d159de981056996f522",
+  "node": "v26.13.0",
+  "rust": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "sha256": {
+    "source": "fd9a925a736ede339fb8971d0645a583b6c56c841a20b6505aa72f1248d43a6c",
+    "lock": "cff618043b2fae92717e93ff00a55daa389ae3a4a826118e626f6669b5006162",
+    "baseline_addon": "0b03c22edf78d3a8edeb5e3bf70a2464e54efd977af4bd53c883542cef4d365f",
+    "candidate_addon": "2ee77a115d5231936fcbdfdf23b29f577511a4309a98793507c6ebe18500025f",
+    "common_library": "02f6c041ccf7136f8f0b4c83801eba258038f3cb4e97677f602b90154ede2fa0"
+  },
+  "common_library_verified_by_dyld": true,
+  "timing": "five alternating repeats; warmed; complete point-read plus full output checks, close and forced GC; setup excluded",
+  "source_note": "implementation.patch captures measured source; subsequent formatting does not change the algorithm"
+}

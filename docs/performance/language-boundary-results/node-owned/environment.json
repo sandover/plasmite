@@ -1,0 +1,13 @@
+{
+  "profile": "debug",
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "commit": "53a6bcd4b6d53513d9c27d159de981056996f522",
+  "rust": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "files": {
+    "bindings/node/native/src/lib.rs": "faa25d8471d7e53f0ca84af317dd15df956b82f59614de03e623d47b39ba3ec9",
+    "bindings/node/native/Cargo.lock": "cff618043b2fae92717e93ff00a55daa389ae3a4a826118e626f6669b5006162",
+    "bindings/node/native/darwin-arm64/index.node": "430a3a5252d9b443560cca0f181153d8879fcdf7473ce95dc3b345f8d131011c",
+    "/private/tmp/plasmite-node-baseline/index.node": "c985daca647bbc9f12c01ff041886fa65df14f6b71e6de0360872f22bbde7a04",
+    "target/debug/libplasmite.dylib": "78ed6f9329881cb8a0b8faa45047416a46bf6e861110b6fbbc16933ae63908af"
+  }
+}

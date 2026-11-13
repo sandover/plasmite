@@ -9,7 +9,7 @@ Notes: The addon links against libplasmite and does not re-implement internals.
 
 use libc::{c_char, c_int};
 use napi::bindgen_prelude::{AsyncTask, BigInt, Buffer, Either, Status};
-use napi::{Env, Error, Result, Task};
+use napi::{Env, Error, JsBuffer, NapiValue, Result, Task};
 use napi_derive::napi;
 use std::ffi::{CStr, CString};
 use std::ptr;
@@ -211,15 +211,24 @@ unsafe extern "C" {
         out_err: *mut *mut plsm_error_t,
     ) -> c_int;
 
-    fn plsm_stream_next_wait(stream: *mut plsm_stream_t, timeout_ms: u64, out: *mut plsm_buf_t, err: *mut *mut plsm_error_t) -> c_int;
-    fn plsm_lite3_stream_next_wait(stream: *mut plsm_lite3_stream_t, timeout_ms: u64, out: *mut plsm_lite3_frame_t, err: *mut *mut plsm_error_t) -> c_int;
+    fn plsm_stream_next_wait(
+        stream: *mut plsm_stream_t,
+        timeout_ms: u64,
+        out: *mut plsm_buf_t,
+        err: *mut *mut plsm_error_t,
+    ) -> c_int;
+    fn plsm_lite3_stream_next_wait(
+        stream: *mut plsm_lite3_stream_t,
+        timeout_ms: u64,
+        out: *mut plsm_lite3_frame_t,
+        err: *mut *mut plsm_error_t,
+    ) -> c_int;
     fn plsm_stream_cancel(stream: *mut plsm_stream_t);
     fn plsm_lite3_stream_cancel(stream: *mut plsm_lite3_stream_t);
     fn plsm_stream_free(stream: *mut plsm_stream_t);
     fn plsm_lite3_stream_free(stream: *mut plsm_lite3_stream_t);
 
     fn plsm_buf_free(buf: *mut plsm_buf_t);
-    fn plsm_lite3_frame_free(frame: *mut plsm_lite3_frame_t);
     fn plsm_error_free(err: *mut plsm_error_t);
 
     fn plsm_udp_client_new(
@@ -303,7 +312,8 @@ pub struct Client {
 impl Client {
     #[napi(constructor)]
     pub fn new(env: Env, pool_dir: String) -> Result<Self> {
-        let pool_dir = CString::new(pool_dir).map_err(|_| Error::new(Status::InvalidArg, "pool_dir contains NUL"))?;
+        let pool_dir = CString::new(pool_dir)
+            .map_err(|_| Error::new(Status::InvalidArg, "pool_dir contains NUL"))?;
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
         let rc = unsafe { plsm_client_new(pool_dir.as_ptr(), &mut out, &mut err) };
@@ -314,12 +324,20 @@ impl Client {
     }
 
     #[napi]
-    pub fn create_pool(&self, env: Env, pool_ref: String, size_bytes: Either<u32, BigInt>) -> Result<Pool> {
-        let pool_ref = CString::new(pool_ref).map_err(|_| Error::new(Status::InvalidArg, "pool_ref contains NUL"))?;
+    pub fn create_pool(
+        &self,
+        env: Env,
+        pool_ref: String,
+        size_bytes: Either<u32, BigInt>,
+    ) -> Result<Pool> {
+        let pool_ref = CString::new(pool_ref)
+            .map_err(|_| Error::new(Status::InvalidArg, "pool_ref contains NUL"))?;
         let size_bytes = to_u64(size_bytes, "size_bytes")?;
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
-        let rc = unsafe { plsm_pool_create(self.ptr, pool_ref.as_ptr(), size_bytes, &mut out, &mut err) };
+        let rc = unsafe {
+            plsm_pool_create(self.ptr, pool_ref.as_ptr(), size_bytes, &mut out, &mut err)
+        };
         if rc != 0 {
             return Err(take_error(env, err)?);
         }
@@ -328,7 +346,8 @@ impl Client {
 
     #[napi]
     pub fn open_pool(&self, env: Env, pool_ref: String) -> Result<Pool> {
-        let pool_ref = CString::new(pool_ref).map_err(|_| Error::new(Status::InvalidArg, "pool_ref contains NUL"))?;
+        let pool_ref = CString::new(pool_ref)
+            .map_err(|_| Error::new(Status::InvalidArg, "pool_ref contains NUL"))?;
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
         let rc = unsafe { plsm_pool_open(self.ptr, pool_ref.as_ptr(), &mut out, &mut err) };
@@ -364,15 +383,24 @@ pub struct Lite3Frame {
     #[napi(js_name = "timestampNs")]
     pub timestamp_ns: BigInt,
     pub flags: u32,
-    pub payload: Buffer,
+    pub payload: JsBuffer,
 }
 
 #[napi]
 impl Pool {
     #[napi]
-    pub fn append_json(&self, env: Env, payload: Buffer, tags: Vec<String>, durability: Durability) -> Result<Buffer> {
+    pub fn append_json(
+        &self,
+        env: Env,
+        payload: Buffer,
+        tags: Vec<String>,
+        durability: Durability,
+    ) -> Result<Buffer> {
         let c_tags = CStringArray::new(&tags)?;
-        let mut out = plsm_buf_t { data: ptr::null_mut(), len: 0 };
+        let mut out = plsm_buf_t {
+            data: ptr::null_mut(),
+            len: 0,
+        };
         let mut err = ptr::null_mut();
         let rc = unsafe {
             plsm_pool_append_json(
@@ -389,11 +417,16 @@ impl Pool {
         if rc != 0 {
             return Err(take_error(env, err)?);
         }
-        Ok(copy_and_free_buf(out))
+        Ok(copy_json_buf(out))
     }
 
     #[napi]
-    pub fn append_lite3(&self, env: Env, payload: Buffer, durability: Durability) -> Result<BigInt> {
+    pub fn append_lite3(
+        &self,
+        env: Env,
+        payload: Buffer,
+        durability: Durability,
+    ) -> Result<BigInt> {
         let mut seq = 0u64;
         let mut err = ptr::null_mut();
         let rc = unsafe {
@@ -415,13 +448,16 @@ impl Pool {
     #[napi]
     pub fn get_json(&self, env: Env, seq: Either<u32, BigInt>) -> Result<Buffer> {
         let seq = to_u64(seq, "seq")?;
-        let mut out = plsm_buf_t { data: ptr::null_mut(), len: 0 };
+        let mut out = plsm_buf_t {
+            data: ptr::null_mut(),
+            len: 0,
+        };
         let mut err = ptr::null_mut();
         let rc = unsafe { plsm_pool_get_json(self.ptr, seq, &mut out, &mut err) };
         if rc != 0 {
             return Err(take_error(env, err)?);
         }
-        Ok(copy_and_free_buf(out))
+        Ok(copy_json_buf(out))
     }
 
     #[napi]
@@ -431,14 +467,17 @@ impl Pool {
             seq: 0,
             timestamp_ns: 0,
             flags: 0,
-            payload: plsm_buf_t { data: ptr::null_mut(), len: 0 },
+            payload: plsm_buf_t {
+                data: ptr::null_mut(),
+                len: 0,
+            },
         };
         let mut err = ptr::null_mut();
         let rc = unsafe { plsm_pool_get_lite3(self.ptr, seq, &mut out, &mut err) };
         if rc != 0 {
             return Err(take_error(env, err)?);
         }
-        Ok(copy_and_free_lite3_frame(out))
+        take_frame(env, out)
     }
 
     #[napi]
@@ -450,9 +489,15 @@ impl Pool {
         timeout_ms: Option<Either<u32, BigInt>>,
         error_on_gap: bool,
     ) -> Result<Stream> {
-        let since_seq = since_seq.map(|value| to_u64(value, "since_seq")).transpose()?;
-        let max_messages = max_messages.map(|value| to_u64(value, "max_messages")).transpose()?;
-        let timeout_ms = timeout_ms.map(|value| to_u64(value, "timeout_ms")).transpose()?;
+        let since_seq = since_seq
+            .map(|value| to_u64(value, "since_seq"))
+            .transpose()?;
+        let max_messages = max_messages
+            .map(|value| to_u64(value, "max_messages"))
+            .transpose()?;
+        let timeout_ms = timeout_ms
+            .map(|value| to_u64(value, "timeout_ms"))
+            .transpose()?;
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
         let rc = if error_on_gap {
@@ -493,9 +538,15 @@ impl Pool {
         timeout_ms: Option<Either<u32, BigInt>>,
         error_on_gap: bool,
     ) -> Result<Lite3Stream> {
-        let since_seq = since_seq.map(|value| to_u64(value, "since_seq")).transpose()?;
-        let max_messages = max_messages.map(|value| to_u64(value, "max_messages")).transpose()?;
-        let timeout_ms = timeout_ms.map(|value| to_u64(value, "timeout_ms")).transpose()?;
+        let since_seq = since_seq
+            .map(|value| to_u64(value, "since_seq"))
+            .transpose()?;
+        let max_messages = max_messages
+            .map(|value| to_u64(value, "max_messages"))
+            .transpose()?;
+        let timeout_ms = timeout_ms
+            .map(|value| to_u64(value, "timeout_ms"))
+            .transpose()?;
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
         let rc = if error_on_gap {
@@ -541,7 +592,6 @@ impl Drop for Pool {
         self.close();
     }
 }
-
 
 // C serializes reader state and accepts concurrent cancellation. Each task owns
 // an Arc, so closing a JS wrapper cancels work without freeing an active handle.
@@ -642,7 +692,7 @@ impl Stream {
         };
         let mut err = ptr::null_mut();
         match unsafe { plsm_stream_next(ptr, &mut out, &mut err) } {
-            1 => Ok(Some(copy_and_free_buf(out))),
+            1 => Ok(Some(copy_json_buf(out))),
             0 => Ok(None),
             _ => Err(take_error(env, err)?),
         }
@@ -696,7 +746,7 @@ impl Lite3Stream {
         let mut out = empty_lite3_frame();
         let mut err = ptr::null_mut();
         match unsafe { plsm_lite3_stream_next(ptr, &mut out, &mut err) } {
-            1 => Ok(Some(copy_and_free_lite3_frame(out))),
+            1 => take_frame(env, out).map(Some),
             0 => Ok(None),
             _ => Err(take_error(env, err)?),
         }
@@ -755,9 +805,14 @@ pub struct StreamReadTask {
     timeout_ms: u64,
 }
 
+enum StreamPayload {
+    Json(Vec<u8>),
+    Lite3(NativeBuf),
+}
+
 pub struct StreamReadOutput {
     status: i32,
-    bytes: Vec<u8>,
+    bytes: Option<StreamPayload>,
     seq: u64,
     timestamp_ns: u64,
     flags: u32,
@@ -789,9 +844,15 @@ impl Task for StreamReadTask {
             }
         };
         let bytes = if status == 1 {
-            unsafe { std::slice::from_raw_parts(frame.payload.data, frame.payload.len) }.to_vec()
+            Some(match self.read.handle.pointer {
+                StreamPointer::Json(_) => {
+                    StreamPayload::Json(NativeBuf(frame.payload).copy_bytes())
+                }
+                StreamPointer::Lite3(_) => StreamPayload::Lite3(NativeBuf(frame.payload)),
+            })
         } else {
-            Vec::new()
+            unsafe { plsm_buf_free(&mut frame.payload) };
+            None
         };
         let output = StreamReadOutput {
             status,
@@ -801,7 +862,6 @@ impl Task for StreamReadTask {
             flags: frame.flags,
             error: err as usize,
         };
-        unsafe { plsm_buf_free(&mut frame.payload) };
         Ok(output)
     }
 
@@ -818,16 +878,15 @@ impl Task for StreamReadTask {
             frame: None,
         };
         if output.status == 1 {
-            let payload = Buffer::from(std::mem::take(&mut output.bytes));
-            match self.read.handle.pointer {
-                StreamPointer::Json(_) => result.message = Some(payload),
-                StreamPointer::Lite3(_) => {
+            match output.bytes.take().expect("item owns payload") {
+                StreamPayload::Json(bytes) => result.message = Some(Buffer::from(bytes)),
+                StreamPayload::Lite3(bytes) => {
                     result.frame = Some(Lite3Frame {
                         seq: BigInt::from(output.seq),
                         timestamp_ns: BigInt::from(output.timestamp_ns),
                         flags: output.flags,
-                        payload,
-                    })
+                        payload: bytes.into_node(env)?,
+                    });
                 }
             }
         }
@@ -861,7 +920,8 @@ impl UdpClient {
             .map_err(|_| Error::new(Status::InvalidArg, "pool_name contains NUL"))?;
         let mut out = ptr::null_mut();
         let mut err = ptr::null_mut();
-        let rc = unsafe { plsm_udp_client_open_pool(self.ptr, pool_name.as_ptr(), &mut out, &mut err) };
+        let rc =
+            unsafe { plsm_udp_client_open_pool(self.ptr, pool_name.as_ptr(), &mut out, &mut err) };
         if rc != 0 {
             return Err(take_error(env, err)?);
         }
@@ -945,9 +1005,8 @@ impl UdpPool {
     pub fn send_lite3(&self, env: Env, payload: Buffer) -> Result<()> {
         let pool = self.pool_ptr()?;
         let mut err = ptr::null_mut();
-        let rc = unsafe {
-            plsm_udp_pool_send_lite3(pool, payload.as_ptr(), payload.len(), &mut err)
-        };
+        let rc =
+            unsafe { plsm_udp_pool_send_lite3(pool, payload.as_ptr(), payload.len(), &mut err) };
         if rc != 0 {
             return Err(take_error(env, err)?);
         }
@@ -1089,7 +1148,10 @@ impl UdpFollow {
     #[napi(js_name = "nextEvent")]
     pub fn next_event(&mut self, env: Env, timeout_ms: Either<u32, BigInt>) -> Result<UdpWait> {
         if self.ptr.is_null() || self.finished {
-            return Ok(UdpWait { status: 2, event: None });
+            return Ok(UdpWait {
+                status: 2,
+                event: None,
+            });
         }
         let timeout_ms = to_u64(timeout_ms, "timeout_ms")?;
         let mut event = plsm_udp_event_t {
@@ -1106,12 +1168,18 @@ impl UdpFollow {
             terminal: 0,
             retention_gap: 0,
             reserved: 0,
-            payload: plsm_buf_t { data: ptr::null_mut(), len: 0 },
+            payload: plsm_buf_t {
+                data: ptr::null_mut(),
+                len: 0,
+            },
         };
         let mut err = ptr::null_mut();
         let rc = unsafe { plsm_udp_follow_next(self.ptr, timeout_ms, &mut event, &mut err) };
         match rc {
-            0 => Ok(UdpWait { status: 0, event: None }),
+            0 => Ok(UdpWait {
+                status: 0,
+                event: None,
+            }),
             1 => {
                 let parsed = udp_event_from_native(env, &mut event);
                 unsafe { plsm_udp_event_free(&mut event) };
@@ -1122,11 +1190,17 @@ impl UdpFollow {
             }
             2 => {
                 self.finished = true;
-                Ok(UdpWait { status: 2, event: None })
+                Ok(UdpWait {
+                    status: 2,
+                    event: None,
+                })
             }
             3 => {
                 self.finished = true;
-                Ok(UdpWait { status: 3, event: None })
+                Ok(UdpWait {
+                    status: 3,
+                    event: None,
+                })
             }
             _ => Err(take_error(env, err)?),
         }
@@ -1182,24 +1256,30 @@ fn udp_event_from_native(env: Env, event: &mut plsm_udp_event_t) -> Result<UdpEv
             parsed.seq = Some(BigInt::from(event.seq));
             parsed.timestamp_ns = Some(BigInt::from(event.timestamp_ns));
             parsed.payload = Some(Buffer::from(copy_buf_bytes(&event.payload)));
-            let mut message = plsm_buf_t { data: ptr::null_mut(), len: 0 };
+            let mut message = plsm_buf_t {
+                data: ptr::null_mut(),
+                len: 0,
+            };
             let mut err = ptr::null_mut();
             let rc = unsafe { plsm_udp_event_message(event, &mut message, &mut err) };
             if rc != 0 {
                 return Err(take_error(env, err)?);
             }
-            parsed.message = Some(copy_and_free_buf(message));
+            parsed.message = Some(copy_json_buf(message));
         }
         2 => {
             parsed.kind = "gap".to_string();
             parsed.first = Some(BigInt::from(event.first));
             parsed.last = Some(BigInt::from(event.last));
-            parsed.reason = Some(match event.reason {
-                1 => "oversized",
-                2 => "retention",
-                3 => "pressure",
-                _ => "unknown",
-            }.to_string());
+            parsed.reason = Some(
+                match event.reason {
+                    1 => "oversized",
+                    2 => "retention",
+                    3 => "pressure",
+                    _ => "unknown",
+                }
+                .to_string(),
+            );
         }
         3 => {
             parsed.kind = "progress".to_string();
@@ -1250,37 +1330,91 @@ impl CStringArray {
     }
 }
 
-fn copy_and_free_buf(mut buf: plsm_buf_t) -> Buffer {
-    let data = if buf.data.is_null() || buf.len == 0 {
-        Vec::new()
-    } else {
-        unsafe { std::slice::from_raw_parts(buf.data, buf.len) }.to_vec()
-    };
-    unsafe { plsm_buf_free(&mut buf) };
-    Buffer::from(data)
+// The native library owns this allocation. Moving the guard transfers its sole
+// ownership; dropping it always calls that library's allocator-matched free.
+struct NativeBuf(plsm_buf_t);
+
+// SAFETY: This is an exclusively owned byte allocation, with no JS references.
+// A worker may move it to the environment thread; only the final owner frees it.
+unsafe impl Send for NativeBuf {}
+
+impl Drop for NativeBuf {
+    fn drop(&mut self) {
+        unsafe { plsm_buf_free(&mut self.0) };
+    }
 }
 
-fn copy_and_free_lite3_frame(mut frame: plsm_lite3_frame_t) -> Lite3Frame {
-    let seq = frame.seq;
-    let timestamp_ns = frame.timestamp_ns;
-    let flags = frame.flags;
-    let payload = if frame.payload.data.is_null() || frame.payload.len == 0 {
-        Vec::new()
-    } else {
-        unsafe { std::slice::from_raw_parts(frame.payload.data, frame.payload.len) }.to_vec()
-    };
-    unsafe { plsm_lite3_frame_free(&mut frame) };
-    Lite3Frame {
-        seq: BigInt::from(seq),
-        timestamp_ns: BigInt::from(timestamp_ns),
-        flags,
-        payload: Buffer::from(payload),
+unsafe extern "C" fn finalize_native_buf(
+    _env: napi::sys::napi_env,
+    _data: *mut libc::c_void,
+    hint: *mut libc::c_void,
+) {
+    drop(unsafe { Box::from_raw(hint.cast::<NativeBuf>()) });
+}
+
+impl NativeBuf {
+    fn copy_bytes(self) -> Vec<u8> {
+        if self.0.len == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(self.0.data, self.0.len) }.to_vec()
+        }
     }
+
+    fn into_node(self, env: Env) -> Result<JsBuffer> {
+        if self.0.len == 0 {
+            return Ok(env.create_buffer(0)?.into_raw());
+        }
+        let owner = Box::into_raw(Box::new(self));
+        let mut value = ptr::null_mut();
+        let status = unsafe {
+            napi::sys::napi_create_external_buffer(
+                env.raw(),
+                (*owner).0.len,
+                (*owner).0.data.cast(),
+                Some(finalize_native_buf),
+                owner.cast(),
+                &mut value,
+            )
+        };
+        if status == napi::sys::Status::napi_ok {
+            // Return the existing JS handle without creating a temporary napi_ref.
+            return Ok(unsafe { JsBuffer::from_raw_unchecked(env.raw(), value) });
+        }
+        let owner = unsafe { Box::from_raw(owner) };
+        if status == napi::sys::Status::napi_no_external_buffers_allowed {
+            let bytes = unsafe { std::slice::from_raw_parts(owner.0.data, owner.0.len) };
+            return Ok(env.create_buffer_copy(bytes)?.into_raw());
+        }
+        Err(Error::new(
+            Status::from(status),
+            "failed to transfer native buffer",
+        ))
+    }
+}
+
+// Compact serialized JSON before JS retains it. Release measurements show no
+// speed gain from transferring these buffers and higher retained memory for
+// small JSON. Raw Lite3 frames already own a compact snapshot.
+fn copy_json_buf(buf: plsm_buf_t) -> Buffer {
+    Buffer::from(NativeBuf(buf).copy_bytes())
+}
+
+fn take_frame(env: Env, frame: plsm_lite3_frame_t) -> Result<Lite3Frame> {
+    Ok(Lite3Frame {
+        seq: BigInt::from(frame.seq),
+        timestamp_ns: BigInt::from(frame.timestamp_ns),
+        flags: frame.flags,
+        payload: NativeBuf(frame.payload).into_node(env)?,
+    })
 }
 
 fn take_error(env: Env, err: *mut plsm_error_t) -> Result<Error> {
     if err.is_null() {
-        return Ok(Error::new(Status::GenericFailure, "plasmite: unknown error"));
+        return Ok(Error::new(
+            Status::GenericFailure,
+            "plasmite: unknown error",
+        ));
     }
     let owned = unsafe { &*err };
     let mut message = unsafe { cstring_to_string(owned.message) };
@@ -1294,16 +1428,29 @@ fn take_error(env: Env, err: *mut plsm_error_t) -> Result<Error> {
     }
     // Human formatting does not define the machine error fields.
     let mut details = vec![format!("kind={kind}"), format!("message={message}")];
-    if !path.is_empty() { details.push(format!("path={path}")); }
-    if let Some(seq) = seq { details.push(format!("seq={seq}")); }
-    if let Some(offset) = offset { details.push(format!("offset={offset}")); }
+    if !path.is_empty() {
+        details.push(format!("path={path}"));
+    }
+    if let Some(seq) = seq {
+        details.push(format!("seq={seq}"));
+    }
+    if let Some(offset) = offset {
+        details.push(format!("offset={offset}"));
+    }
     let mut object = env.create_error(Error::new(
-        Status::GenericFailure, format!("plasmite error: {}", details.join("; ")),
+        Status::GenericFailure,
+        format!("plasmite error: {}", details.join("; ")),
     ))?;
     object.set_named_property("kind", kind)?;
-    if !path.is_empty() { object.set_named_property("path", path)?; }
-    if let Some(seq) = seq { object.set_named_property("seq", BigInt::from(seq))?; }
-    if let Some(offset) = offset { object.set_named_property("offset", BigInt::from(offset))?; }
+    if !path.is_empty() {
+        object.set_named_property("path", path)?;
+    }
+    if let Some(seq) = seq {
+        object.set_named_property("seq", BigInt::from(seq))?;
+    }
+    if let Some(offset) = offset {
+        object.set_named_property("offset", BigInt::from(offset))?;
+    }
     Ok(Error::from(object.into_unknown()))
 }
 

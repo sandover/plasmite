@@ -34,6 +34,8 @@ Start with the task you want to do:
   local libraries, command-line tools, HTTP, and MCP in Plasmite 1.0.0.
 - [1.0 performance measurements](performance/1.0-release.md): measured writer
   improvements, small-read costs and consumer latency on one Mac.
+- [Node buffer ownership measurements](performance/language-boundary-results/node-owned/README.md):
+  read when choosing raw buffer transfer or JSON compaction.
 - [JSON pipe comparison](performance/pipe-comparison.md): compare a Python
   producer and reader with ordinary Plasmite calls and measure append savings.
 

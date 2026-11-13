@@ -1,0 +1,384 @@
+{
+  "rows": [
+    {
+      "addon": "/private/tmp/plasmite-node-release/baseline.node",
+      "mode": "raw",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 58.605667,
+      "cpu": {
+        "user": 50820,
+        "system": 17234
+      },
+      "memory": {
+        "rss": 74288248,
+        "heapTotal": 9846784,
+        "heapUsed": 4640592,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/current.node",
+      "mode": "raw",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 59.405667,
+      "cpu": {
+        "user": 50911,
+        "system": 18843
+      },
+      "memory": {
+        "rss": 65981512,
+        "heapTotal": 9846784,
+        "heapUsed": 4640584,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/current.node",
+      "mode": "raw",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 55.67075,
+      "cpu": {
+        "user": 48145,
+        "system": 16646
+      },
+      "memory": {
+        "rss": 65932384,
+        "heapTotal": 9846784,
+        "heapUsed": 4640584,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/baseline.node",
+      "mode": "raw",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 60.925625,
+      "cpu": {
+        "user": 53559,
+        "system": 17065
+      },
+      "memory": {
+        "rss": 73387128,
+        "heapTotal": 9846784,
+        "heapUsed": 4640592,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/baseline.node",
+      "mode": "raw",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 63.331958,
+      "cpu": {
+        "user": 59511,
+        "system": 17361
+      },
+      "memory": {
+        "rss": 66997176,
+        "heapTotal": 10108928,
+        "heapUsed": 4640520,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/current.node",
+      "mode": "raw",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 56.039042,
+      "cpu": {
+        "user": 48326,
+        "system": 17241
+      },
+      "memory": {
+        "rss": 65981584,
+        "heapTotal": 9846784,
+        "heapUsed": 4640584,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/current.node",
+      "mode": "raw",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 58.829917,
+      "cpu": {
+        "user": 50273,
+        "system": 18226
+      },
+      "memory": {
+        "rss": 67374224,
+        "heapTotal": 9846784,
+        "heapUsed": 4640584,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/baseline.node",
+      "mode": "raw",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 61.048916,
+      "cpu": {
+        "user": 53726,
+        "system": 17603
+      },
+      "memory": {
+        "rss": 73124984,
+        "heapTotal": 9846784,
+        "heapUsed": 4640592,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/baseline.node",
+      "mode": "raw",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 58.967583,
+      "cpu": {
+        "user": 51128,
+        "system": 17020
+      },
+      "memory": {
+        "rss": 72977456,
+        "heapTotal": 9846784,
+        "heapUsed": 4640592,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/current.node",
+      "mode": "raw",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 55.880417,
+      "cpu": {
+        "user": 47988,
+        "system": 17329
+      },
+      "memory": {
+        "rss": 66030664,
+        "heapTotal": 9846784,
+        "heapUsed": 4640584,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/baseline.node",
+      "mode": "object",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 417.542583,
+      "cpu": {
+        "user": 414210,
+        "system": 22276
+      },
+      "memory": {
+        "rss": 34048832,
+        "heapTotal": 9846784,
+        "heapUsed": 4711984,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/current.node",
+      "mode": "object",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 406.144542,
+      "cpu": {
+        "user": 403495,
+        "system": 22726
+      },
+      "memory": {
+        "rss": 33786616,
+        "heapTotal": 10108928,
+        "heapUsed": 4711976,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/current.node",
+      "mode": "object",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 410.266833,
+      "cpu": {
+        "user": 407489,
+        "system": 21781
+      },
+      "memory": {
+        "rss": 33983200,
+        "heapTotal": 10108928,
+        "heapUsed": 4711952,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/baseline.node",
+      "mode": "object",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 406.942625,
+      "cpu": {
+        "user": 405024,
+        "system": 21530
+      },
+      "memory": {
+        "rss": 33917736,
+        "heapTotal": 10108928,
+        "heapUsed": 4711912,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/baseline.node",
+      "mode": "object",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 404.503458,
+      "cpu": {
+        "user": 402211,
+        "system": 21269
+      },
+      "memory": {
+        "rss": 33966864,
+        "heapTotal": 10108928,
+        "heapUsed": 4712032,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/current.node",
+      "mode": "object",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 409.338792,
+      "cpu": {
+        "user": 407227,
+        "system": 21925
+      },
+      "memory": {
+        "rss": 33999704,
+        "heapTotal": 10108928,
+        "heapUsed": 4711976,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/current.node",
+      "mode": "object",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 409.095583,
+      "cpu": {
+        "user": 406480,
+        "system": 22223
+      },
+      "memory": {
+        "rss": 33917760,
+        "heapTotal": 10108928,
+        "heapUsed": 4711952,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/baseline.node",
+      "mode": "object",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 475.560083,
+      "cpu": {
+        "user": 451861,
+        "system": 29432
+      },
+      "memory": {
+        "rss": 34229056,
+        "heapTotal": 9584640,
+        "heapUsed": 4711960,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/baseline.node",
+      "mode": "object",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 404.922417,
+      "cpu": {
+        "user": 404881,
+        "system": 20937
+      },
+      "memory": {
+        "rss": 33884896,
+        "heapTotal": 10108928,
+        "heapUsed": 4711984,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    },
+    {
+      "addon": "/private/tmp/plasmite-node-release/current.node",
+      "mode": "object",
+      "verified": 20000,
+      "textBytes": 32,
+      "ms": 409.283709,
+      "cpu": {
+        "user": 407698,
+        "system": 21281
+      },
+      "memory": {
+        "rss": 34048784,
+        "heapTotal": 10108928,
+        "heapUsed": 4711976,
+        "external": 2283597,
+        "arrayBuffers": 137919
+      },
+      "node": "v26.13.0"
+    }
+  ]
+}
