@@ -856,3 +856,58 @@
 {"version":1,"task_id":"A2YASO","kind":"done","at":"2026-11-13T17:56:20.518579Z","agent":"codex","text":"Format stored values once, borrow keys/strings/tags, stream base64, and document the corrected numeric policy."}
 {"version":1,"task_id":"27CHGI","kind":"result","at":"2026-11-13T17:56:20.557011Z","text":"C JSON reads now format borrowed Lite3 directly; reuse that seam for requested UDP JSON instead of Value round trips.","file":{"path":"docs/performance/language-boundary-results/c-json/README.md","sha256":"a8b5574b3525cc78ab030d9ebde6ae5665a77568626f5e42a90014967c4143a1","mtime":"2026-11-13T17:55:14.761987851Z","git_commit":"4d3d94c891c050c148a8c0f210944a4b7386d88f"}}
 {"version":1,"task_id":"VXOTFT","kind":"result","at":"2026-11-13T17:56:20.613055Z","text":"A2YASO supplies checked borrowed value views and correct float policy; Rust object reads still need direct decoding.","file":{"path":"docs/performance/language-boundary-results/c-json/README.md","sha256":"a8b5574b3525cc78ab030d9ebde6ae5665a77568626f5e42a90014967c4143a1","mtime":"2026-11-13T17:55:14.761987851Z","git_commit":"4d3d94c891c050c148a8c0f210944a4b7386d88f"}}
+{"version":1,"task_id":"2UB4UH","kind":"claim","at":"2026-11-13T18:22:26.720677Z","agent":"codex"}
+{"version":1,"task_id":"WVJROC","kind":"claim","at":"2026-11-13T18:26:06.276807Z","agent":"codex-node"}
+{"version":1,"task_id":"6N22SX","kind":"claim","at":"2026-11-13T18:26:37.934243Z","agent":"codex"}
+{"version":1,"task_id":"55CLVD","kind":"created","at":"2026-11-13T19:38:24.479454Z"}
+{"version":1,"task_id":"CP2MVR","kind":"created","at":"2026-11-13T19:38:24.479475Z"}
+{"version":1,"task_id":"OHVOLK","kind":"created","at":"2026-11-13T19:38:24.479478Z"}
+{"version":1,"task_id":"DI65XY","kind":"created","at":"2026-11-13T19:38:24.479482Z"}
+{"version":1,"task_id":"SQON5U","kind":"created","at":"2026-11-13T19:38:24.479484Z"}
+{"version":1,"task_id":"KKD6ES","kind":"created","at":"2026-11-13T19:38:24.479487Z"}
+{"version":1,"task_id":"64UWVZ","kind":"created","at":"2026-11-13T19:38:24.479489Z"}
+{"version":1,"task_id":"I4CZVI","kind":"created","at":"2026-11-13T19:38:24.479491Z"}
+{"version":1,"task_id":"DBUIU5","kind":"created","at":"2026-11-13T19:38:24.479494Z"}
+{"version":1,"task_id":"QG7QZI","kind":"created","at":"2026-11-13T19:38:24.479496Z"}
+{"version":1,"task_id":"VHX4HU","kind":"created","at":"2026-11-13T19:38:24.479499Z"}
+{"version":1,"task_id":"ARVEL3","kind":"created","at":"2026-11-13T19:38:24.479501Z"}
+{"version":1,"task_id":"BM2M5X","kind":"created","at":"2026-11-13T19:38:24.479503Z"}
+{"version":1,"task_id":"H77SPZ","kind":"created","at":"2026-11-13T19:38:24.479505Z"}
+{"version":1,"task_id":"APRTTY","kind":"created","at":"2026-11-13T19:38:24.479507Z"}
+{"version":1,"task_id":"MNKXLX","kind":"created","at":"2026-11-13T19:38:24.479508Z"}
+{"version":1,"task_id":"ABPMDK","kind":"created","at":"2026-11-13T19:38:24.47951Z"}
+{"version":1,"task_id":"27CHGI","kind":"cancel","at":"2026-11-13T19:39:20.023204Z","text":"Superseded by 55CLVD; carried to OHVOLK and VHX4HU. Source and results retained."}
+{"version":1,"task_id":"F5MEFX","kind":"cancel","at":"2026-11-13T19:39:34.507173Z","text":"Superseded by 55CLVD; carried to KKD6ES and 64UWVZ. Source and results retained."}
+{"version":1,"task_id":"GSYEYP","kind":"cancel","at":"2026-11-13T19:39:45.415398Z","text":"Superseded by 55CLVD; carried to I4CZVI and DBUIU5. Source and results retained."}
+{"version":1,"task_id":"IXNZWI","kind":"cancel","at":"2026-11-13T19:39:45.454647Z","text":"Superseded by 55CLVD; carried to ARVEL3. Source and results retained."}
+{"version":1,"task_id":"UJHEZU","kind":"cancel","at":"2026-11-13T19:39:45.490296Z","text":"Superseded by 55CLVD; carried to MNKXLX. Source and results retained."}
+{"version":1,"task_id":"VXOTFT","kind":"cancel","at":"2026-11-13T19:39:45.527713Z","text":"Superseded by 55CLVD; carried to SQON5U. Source and results retained."}
+{"version":1,"task_id":"WBA6TN","kind":"cancel","at":"2026-11-13T19:39:45.564158Z","text":"Superseded by 55CLVD; carried to ARVEL3. Source and results retained."}
+{"version":1,"task_id":"2UB4UH","kind":"cancel","at":"2026-11-13T19:39:45.604385Z","agent":"codex","text":"Superseded by 55CLVD; carried to DI65XY. Source and results retained."}
+{"version":1,"task_id":"32VKBS","kind":"cancel","at":"2026-11-13T19:39:45.642992Z","agent":"codex","text":"Superseded by 55CLVD; carried to SQON5U and H77SPZ. Source and results retained."}
+{"version":1,"task_id":"6N22SX","kind":"cancel","at":"2026-11-13T19:39:45.68806Z","agent":"codex","text":"Superseded by 55CLVD; carried to OHVOLK and QG7QZI. Source and results retained."}
+{"version":1,"task_id":"7ECLTU","kind":"cancel","at":"2026-11-13T19:39:45.803006Z","agent":"codex","text":"Superseded by 55CLVD; carried to I4CZVI and DBUIU5 and ABPMDK. Source and results retained."}
+{"version":1,"task_id":"BTS4ZI","kind":"cancel","at":"2026-11-13T19:39:45.844862Z","agent":"codex","text":"Superseded by 55CLVD; carried to KKD6ES and 64UWVZ and VHX4HU and ABPMDK. Source and results retained."}
+{"version":1,"task_id":"ECNBVJ","kind":"cancel","at":"2026-11-13T19:39:45.882396Z","text":"Superseded by 55CLVD; carried to QG7QZI. Source and results retained."}
+{"version":1,"task_id":"NTY2GK","kind":"cancel","at":"2026-11-13T19:39:45.918388Z","agent":"codex","text":"Superseded by 55CLVD; carried to QG7QZI and ABPMDK. Source and results retained."}
+{"version":1,"task_id":"QXY2OM","kind":"cancel","at":"2026-11-13T19:39:45.955226Z","agent":"codex","text":"Superseded by 55CLVD; carried to APRTTY. Source and results retained."}
+{"version":1,"task_id":"WVJROC","kind":"cancel","at":"2026-11-13T19:39:45.993455Z","agent":"codex-node","text":"Superseded by 55CLVD; carried to BM2M5X and H77SPZ. Source and results retained."}
+{"version":1,"task_id":"CP2MVR","kind":"open","at":"2026-11-13T19:39:46.151426Z"}
+{"version":1,"task_id":"OHVOLK","kind":"open","at":"2026-11-13T19:39:46.188893Z"}
+{"version":1,"task_id":"DI65XY","kind":"open","at":"2026-11-13T19:39:46.226024Z"}
+{"version":1,"task_id":"SQON5U","kind":"open","at":"2026-11-13T19:39:46.263461Z"}
+{"version":1,"task_id":"KKD6ES","kind":"open","at":"2026-11-13T19:39:46.299857Z"}
+{"version":1,"task_id":"64UWVZ","kind":"open","at":"2026-11-13T19:39:46.335806Z"}
+{"version":1,"task_id":"I4CZVI","kind":"open","at":"2026-11-13T19:39:46.371828Z"}
+{"version":1,"task_id":"DBUIU5","kind":"open","at":"2026-11-13T19:39:46.407791Z"}
+{"version":1,"task_id":"QG7QZI","kind":"open","at":"2026-11-13T19:39:46.493747Z"}
+{"version":1,"task_id":"VHX4HU","kind":"open","at":"2026-11-13T19:39:46.530291Z"}
+{"version":1,"task_id":"ARVEL3","kind":"open","at":"2026-11-13T19:39:46.565842Z"}
+{"version":1,"task_id":"BM2M5X","kind":"open","at":"2026-11-13T19:39:46.605704Z"}
+{"version":1,"task_id":"H77SPZ","kind":"open","at":"2026-11-13T19:39:46.645964Z"}
+{"version":1,"task_id":"APRTTY","kind":"open","at":"2026-11-13T19:39:46.684792Z"}
+{"version":1,"task_id":"MNKXLX","kind":"open","at":"2026-11-13T19:39:46.721318Z"}
+{"version":1,"task_id":"ABPMDK","kind":"open","at":"2026-11-13T19:39:46.837812Z"}
+{"version":1,"task_id":"CP2MVR","kind":"claim","at":"2026-11-13T19:49:17.587392Z","agent":"codex-contract"}
+{"version":1,"task_id":"APRTTY","kind":"claim","at":"2026-11-13T19:49:21.865577Z","agent":"codex-measurements"}
+{"version":1,"task_id":"OHVOLK","kind":"claim","at":"2026-11-13T19:49:26.02976Z","agent":"codex-core-views"}
