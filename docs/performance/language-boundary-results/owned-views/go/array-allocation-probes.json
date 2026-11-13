@@ -1,0 +1,17 @@
+{
+  "note": "Short100-iteration allocation diagnostics under ordinary concurrent development. Ignore timing columns; central paired time measurements remain pending. All variants load the same packed-copy library.",
+  "variants": {
+    "initial": {
+      "raw": "goos: darwin\ngoarch: arm64\npkg: github.com/sandover/plasmite/bindings/go/local\ncpu: Apple M5 Pro\nBenchmarkNativeInput/array/append_native_view-15         \t     100\t    141906 ns/op\t         2.000 cgo/op\t  195508 B/op\t      18 allocs/op\nBenchmarkNativeInput/array/append_json_view-15           \t     100\t     48612 ns/op\t         2.000 cgo/op\t   53934 B/op\t      18 allocs/op\nBenchmarkNativeInput/array/pipeline_native-15            \t     100\t    108009 ns/op\t         6.000 cgo/op\t  245945 B/op\t      24 allocs/op\nBenchmarkNativeInput/array/pipeline_json-15              \t     100\t     68862 ns/op\t         6.000 cgo/op\t  104634 B/op\t      24 allocs/op\nPASS\n"
+    },
+    "reserve": {
+      "raw": "goos: darwin\ngoarch: arm64\npkg: github.com/sandover/plasmite/bindings/go/local\ncpu: Apple M5 Pro\nBenchmarkNativeInput/array/append_native_view-15         \t     100\t    128947 ns/op\t         2.000 cgo/op\t  213756 B/op\t      12 allocs/op\nBenchmarkNativeInput/array/append_json_view-15           \t     100\t     49455 ns/op\t         2.000 cgo/op\t   53805 B/op\t      18 allocs/op\nBenchmarkNativeInput/array/pipeline_native-15            \t     100\t     93920 ns/op\t         6.000 cgo/op\t  264248 B/op\t      18 allocs/op\nBenchmarkNativeInput/array/pipeline_json-15              \t     100\t     58000 ns/op\t         6.000 cgo/op\t  104635 B/op\t      24 allocs/op\nPASS\n"
+    },
+    "packed": {
+      "raw": "goos: darwin\ngoarch: arm64\npkg: github.com/sandover/plasmite/bindings/go/local\ncpu: Apple M5 Pro\nBenchmarkNativeInput/array/append_native_view-15         \t     100\t     59430 ns/op\t         2.000 cgo/op\t   58620 B/op\t      12 allocs/op\nBenchmarkNativeInput/array/append_json_view-15           \t     100\t     51630 ns/op\t         2.000 cgo/op\t   53934 B/op\t      18 allocs/op\nBenchmarkNativeInput/array/pipeline_native-15            \t     100\t     53577 ns/op\t         6.000 cgo/op\t  109114 B/op\t      18 allocs/op\nBenchmarkNativeInput/array/pipeline_json-15              \t     100\t     63597 ns/op\t         6.000 cgo/op\t  104634 B/op\t      24 allocs/op\nPASS\n"
+    },
+    "packed-copy": {
+      "raw": "goos: darwin\ngoarch: arm64\npkg: github.com/sandover/plasmite/bindings/go/local\ncpu: Apple M5 Pro\nBenchmarkNativeInput/array/append_native_view-15         \t     100\t     97149 ns/op\t         2.000 cgo/op\t   58677 B/op\t      12 allocs/op\nBenchmarkNativeInput/array/append_json_view-15           \t     100\t     65186 ns/op\t         2.000 cgo/op\t   53805 B/op\t      18 allocs/op\nBenchmarkNativeInput/array/pipeline_native-15            \t     100\t     60466 ns/op\t         6.000 cgo/op\t  109115 B/op\t      18 allocs/op\nBenchmarkNativeInput/array/pipeline_json-15              \t     100\t     70872 ns/op\t         6.000 cgo/op\t  104764 B/op\t      24 allocs/op\nPASS\n"
+    }
+  }
+}

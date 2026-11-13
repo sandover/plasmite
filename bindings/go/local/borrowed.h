@@ -67,7 +67,9 @@ static inline plsm_go_status_t plsm_go_decode_result(const uint8_t *data,size_t 
 }
 
 /* Pinned input data borrows Go strings/immutable buffers for one call only.
- * Mutable bytes and hook JSON are private snapshots. No pointer escapes. */
+ * Mutable bytes and hook JSON are private snapshots. No pointer escapes.
+ * Kinds 11/12/13 carry packed native-endian i64/f64/u8-bool array snapshots
+ * in text; these internal spans never become a second persisted encoding. */
 typedef struct { const uint8_t *data; size_t len; } plsm_go_input_span_t;
 typedef struct {
     size_t parent;

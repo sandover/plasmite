@@ -129,6 +129,52 @@ unsafe fn source_reader<'a>(value: &Span) -> Result<Reader<'a>, Error> {
         duplicates: &[],
     })
 }
+// Native-endian pinned spans live only through this synchronous Go call.
+// The collector snapshots mutable input before any later user hook can run.
+fn packed_scalars(
+    builder: &mut Builder,
+    parent: usize,
+    key: Option<&str>,
+    node: &Node,
+    depth: usize,
+) -> Result<(), Error> {
+    if depth >= 32 {
+        return Err(usage("container nesting exceeds limit"));
+    }
+    let bytes = unsafe { span(&node.text) }?;
+    let width = if node.kind == 13 { 1 } else { 8 };
+    if !bytes.len().is_multiple_of(width) {
+        return Err(usage("invalid packed scalar span"));
+    }
+    let array = builder.container(parent, key, true)?;
+    for scalar in bytes.chunks_exact(width) {
+        let mut value = sys::ValueView::default();
+        match node.kind {
+            11 => {
+                value.kind = sys::LITE3_TYPE_I64;
+                value.integer = i64::from_ne_bytes(scalar.try_into().unwrap());
+            }
+            12 => {
+                value.kind = sys::LITE3_TYPE_F64;
+                value.real = f64::from_ne_bytes(scalar.try_into().unwrap());
+                if !value.real.is_finite() {
+                    return Err(usage("number must be finite"));
+                }
+            }
+            13 => {
+                if scalar[0] > 1 {
+                    return Err(usage("invalid packed boolean"));
+                }
+                value.kind = sys::LITE3_TYPE_BOOL;
+                value.integer = scalar[0] as i64;
+            }
+            _ => unreachable!(),
+        }
+        builder.put(array, None, value)?;
+    }
+    Ok(())
+}
+
 unsafe fn build(nodes: &[Node], tag_spans: &[Span]) -> Result<MessageView, Error> {
     let root = nodes.first().ok_or_else(|| usage("data must be object"))?;
     if root.parent != usize::MAX || root.flags >> 8 != 1 {
@@ -188,6 +234,11 @@ unsafe fn build(nodes: &[Node], tag_spans: &[Span]) -> Result<MessageView, Error
                 let source =
                     usize::try_from(node.integer).map_err(|_| usage("invalid source node"))?;
                 copy_source(&mut builder, parent, key, &reader, source, depth)?;
+                offsets.push(usize::MAX);
+                continue;
+            }
+            if matches!(node.kind, 11..=13) {
+                packed_scalars(&mut builder, parent, key, node, depth)?;
                 offsets.push(usize::MAX);
                 continue;
             }
@@ -334,5 +385,50 @@ mod tests {
         assert!(unsafe { build(&nodes, &[]) }.is_ok());
         nodes[1].key = text_span("bad\0key");
         assert!(unsafe { build(&nodes, &[]) }.is_err());
+    }
+    #[test]
+    fn packed_arrays_keep_exact_scalars_and_reject_invalid_spans() {
+        let integers = [i64::MIN.to_ne_bytes(), i64::MAX.to_ne_bytes()].concat();
+        let mut nodes = [
+            root(),
+            Node {
+                parent: 0,
+                kind: 11,
+                flags: (2 << 8) | 1,
+                integer: 0,
+                real: 0.0,
+                key: text_span("values"),
+                text: Span {
+                    data: integers.as_ptr(),
+                    len: integers.len(),
+                },
+            },
+        ];
+        let view = unsafe { build(&nodes, &[]) }.unwrap();
+        let values = view.data().get("values").unwrap().unwrap();
+        assert_eq!(values.index(0).unwrap().unwrap().integer(), Some(i64::MIN));
+        assert_eq!(values.index(1).unwrap().unwrap().integer(), Some(i64::MAX));
+        nodes[1].text.len -= 1;
+        assert!(unsafe { build(&nodes, &[]) }.is_err());
+        nodes[1].kind = 12;
+        let invalid = f64::INFINITY.to_ne_bytes();
+        nodes[1].text = Span {
+            data: invalid.as_ptr(),
+            len: 8,
+        };
+        assert!(unsafe { build(&nodes, &[]) }.is_err());
+        nodes[1].kind = 13;
+        let invalid_boolean = [2u8];
+        nodes[1].text = Span {
+            data: invalid_boolean.as_ptr(),
+            len: 1,
+        };
+        assert!(unsafe { build(&nodes, &[]) }.is_err());
+        nodes[1].text = empty_span();
+        let view = unsafe { build(&nodes, &[]) }.unwrap();
+        assert_eq!(
+            view.data().get("values").unwrap().unwrap().len().unwrap(),
+            0
+        );
     }
 }

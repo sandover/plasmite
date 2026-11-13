@@ -71,6 +71,7 @@ func (in *nativeInput) tagValues(tags []string) error {
 	}
 	return nil
 }
+
 func (in *nativeInput) add(parent uintptr, key string, hasKey bool, depth int, kind uint32) int {
 	flags := uint32(depth) << 8
 	if hasKey {
@@ -185,6 +186,9 @@ func (in *nativeInput) collect(value reflect.Value, parent uintptr, key string, 
 	case reflect.Array:
 		if depth >= 32 {
 			return &Error{Kind: ErrorUsage, Message: "container nesting exceeds limit"}
+		}
+		if packed, err := in.collectScalars(value, parent, key, hasKey, depth); packed {
+			return err
 		}
 		index := in.add(parent, key, hasKey, depth, 8)
 		length := value.Len()

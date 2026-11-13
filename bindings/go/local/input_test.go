@@ -304,3 +304,73 @@ func TestNativeAppendOptionsCannotMutatePriorSnapshots(t *testing.T) {
 		t.Fatalf("option tags %#v %v", meta, err)
 	}
 }
+
+func TestNativeAppendPackedScalarsPreserveTypesSnapshotsAndHooks(t *testing.T) {
+	pool := newTestPool(t, newTestClient(t), "packed-input").(*Pool)
+	integers := []int{1, 2, 3}
+	reals := []float64{math.Copysign(0, -1), 1e20}
+	flags := []bool{true, false}
+	hook := inputJSONHook{run: func() ([]byte, error) {
+		integers[0] = 99
+		reals[0] = 99
+		flags[0] = false
+		return []byte(`0`), nil
+	}}
+	view, err := pool.AppendView(struct {
+		Integers []int         `json:"integers"`
+		Reals    []float64     `json:"reals"`
+		Flags    []bool        `json:"flags"`
+		Hook     inputJSONHook `json:"hook"`
+		Later    []int         `json:"later"`
+		Empty    []int         `json:"empty"`
+		Nil      []int         `json:"nil"`
+		Array    [2]uint16     `json:"array"`
+	}{integers, reals, flags, hook, integers, []int{}, nil, [2]uint16{7, 8}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Integers []int
+		Reals    []float64
+		Flags    []bool
+		Later    []int
+		Empty    []int
+		Nil      []int
+		Array    []uint16
+	}
+	if err = view.Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(out.Integers, []int{1, 2, 3}) || !reflect.DeepEqual(out.Later, []int{99, 2, 3}) || !reflect.DeepEqual(out.Flags, []bool{true, false}) || !math.Signbit(out.Reals[0]) || out.Reals[1] != 1e20 || out.Empty == nil || out.Nil != nil || !reflect.DeepEqual(out.Array, []uint16{7, 8}) {
+		t.Fatalf("wrong packed values: %+v", out)
+	}
+	// Pointer methods on slice elements keep their normal addressability.
+	custom := []inputPointerHook{1, 2}
+	expected, err := json.Marshal(struct {
+		Values []inputPointerHook `json:"values"`
+	}{custom})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hooked, err := pool.AppendView(struct {
+		Values []inputPointerHook `json:"values"`
+	}{custom}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, err := hooked.DataJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want, got any
+	json.Unmarshal(expected, &want)
+	json.Unmarshal(actual, &got)
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("hook mismatch got %s want %s", actual, expected)
+	}
+	for _, bad := range []any{[]float64{math.Inf(1)}, []float32{float32(math.NaN())}, []uint64{math.MaxUint64}} {
+		if _, err = pool.AppendView(map[string]any{"bad": bad}, nil); err == nil {
+			t.Fatalf("accepted %v", bad)
+		}
+	}
+}

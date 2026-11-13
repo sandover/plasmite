@@ -231,5 +231,53 @@ follow-up should remove it before attributing the remaining time to reflection,
 pinning or the native writer. The consumer and native-byte functionality pass;
 the array producer performance gap remains open.
 
+
+## Compact scalar-array input checkpoint
+
+The collector now snapshots homogeneous integer/float/bool arrays into one
+compact span, represented by one container descriptor. Integers and floats use
+eight bytes per element; booleans use one. Native 64-bit signed slices copy
+their existing bits directly. Other integer widths widen to i64, unsigned values
+check range and floats check finiteness. The existing Rust writer consumes the
+span into ordinary Lite3 values. This introduces no second stored format.
+
+A private snapshot still precedes later user hooks, which can mutate the original
+slice. Element JSON/text methods keep the ordinary ordered visitor. Nil versus
+empty slices, native byte slices, exact integers and negative zero retain their
+semantics. Rust rejects malformed spans/nonfinite values before publication.
+Race, strict cgo-pointer and Go1.22 tests pass, along with four borrowed-input Rust
+tests and all-target Clippy.
+
+[Allocation diagnostics](array-allocation-probes.json) compare the same array
+append and append/read/decode paths. The original producer allocates about
+195.5 thousand Go bytes per append, versus 58.7 thousand after packing: 70% fewer Go
+bytes and 18 → 12 allocations. The complete pipeline falls from about 245.9 to
+109.1 thousand Go bytes and 24 → 18 allocations. These counts exclude native
+allocations. The short runs occurred during ordinary development; their timing
+columns do not support speed claims. Central repeated timing remains pending.
+
+The exact-reservation control (outside Git) reduces
+allocation count but increases bytes to about 213.8 thousand. Reserving just the
+array's children leaves no room for the following object field, so the next
+append grows and copies the large descriptor slice again. Removing growth does
+not remove the oversized intermediate representation. That reservation change
+is absent from production source.
+
+[The final manifest](array-packing-checkpoint.json) and
+complete source overlay (outside Git) identify the final fixed
+binary and library in `tmp/go-array-checkpoint/packed-copy`. Controls remain in
+`tmp/go-input-checkpoint` (original), `tmp/go-array-checkpoint/reserve` (exact
+reservation) and `tmp/go-array-checkpoint/packed` (packing with per-element Go
+copy). Use the final shared library for every executable to isolate the Go
+collector; each process should log/verify that loaded library path before timing.
+The original and intermediate artifacts remain unchanged.
+
+For central runs, use `DYLD_LIBRARY_PATH="$PWD/tmp/go-array-checkpoint/packed-copy/lib"`
+with each fixed executable and
+`-test.run=^$ -test.bench='^BenchmarkNativeInput/(array|small_map|small_struct)'
+-test.benchtime=2000x -test.count=1`. Alternate variant order and
+`PLASMITE_GO_REVERSE=0/1`; retain append, forwarding, pipeline and JSON controls.
+The existing harness verifies the final value in every lane.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.
