@@ -1,0 +1,593 @@
+{
+  "coreChange": "d929bc2",
+  "runs": [
+    {
+      "variant": "before",
+      "round": 0,
+      "result": {
+        "node": "v26.13.0",
+        "root": "/Users/brandonharvey/src/plasmite/tmp/node-json-safety-before",
+        "sink": 1648920,
+        "measurements": [
+          {
+            "fixture": "small",
+            "parseCalls": 0,
+            "encodedBytes": 752,
+            "reportedBackingBytes": 752,
+            "rows": [
+              {
+                "repeat": 0,
+                "operations": 5000,
+                "elapsedMs": 4.698416999999999
+              },
+              {
+                "repeat": 1,
+                "operations": 5000,
+                "elapsedMs": 4.529541999999999
+              },
+              {
+                "repeat": 2,
+                "operations": 5000,
+                "elapsedMs": 4.4600830000000045
+              },
+              {
+                "repeat": 3,
+                "operations": 5000,
+                "elapsedMs": 4.461416999999997
+              },
+              {
+                "repeat": 4,
+                "operations": 5000,
+                "elapsedMs": 4.669959000000006
+              },
+              {
+                "repeat": 5,
+                "operations": 5000,
+                "elapsedMs": 4.5013330000000025
+              },
+              {
+                "repeat": 6,
+                "operations": 5000,
+                "elapsedMs": 4.400917000000007
+              }
+            ]
+          },
+          {
+            "fixture": "wide",
+            "parseCalls": 0,
+            "encodedBytes": 46892,
+            "reportedBackingBytes": 46892,
+            "rows": [
+              {
+                "repeat": 0,
+                "operations": 500,
+                "elapsedMs": 33.186417000000006
+              },
+              {
+                "repeat": 1,
+                "operations": 500,
+                "elapsedMs": 33.06529099999999
+              },
+              {
+                "repeat": 2,
+                "operations": 500,
+                "elapsedMs": 35.148833999999994
+              },
+              {
+                "repeat": 3,
+                "operations": 500,
+                "elapsedMs": 33.09141700000001
+              },
+              {
+                "repeat": 4,
+                "operations": 500,
+                "elapsedMs": 32.614834
+              },
+              {
+                "repeat": 5,
+                "operations": 500,
+                "elapsedMs": 32.68237499999998
+              },
+              {
+                "repeat": 6,
+                "operations": 500,
+                "elapsedMs": 33.65420799999998
+              }
+            ]
+          },
+          {
+            "fixture": "array",
+            "parseCalls": 0,
+            "encodedBytes": 589952,
+            "reportedBackingBytes": 589952,
+            "rows": [
+              {
+                "repeat": 0,
+                "operations": 100,
+                "elapsedMs": 92.06629199999998
+              },
+              {
+                "repeat": 1,
+                "operations": 100,
+                "elapsedMs": 94.07054200000005
+              },
+              {
+                "repeat": 2,
+                "operations": 100,
+                "elapsedMs": 90.90358300000003
+              },
+              {
+                "repeat": 3,
+                "operations": 100,
+                "elapsedMs": 93.87137500000006
+              },
+              {
+                "repeat": 4,
+                "operations": 100,
+                "elapsedMs": 93.96924999999999
+              },
+              {
+                "repeat": 5,
+                "operations": 100,
+                "elapsedMs": 92.30966699999999
+              },
+              {
+                "repeat": 6,
+                "operations": 100,
+                "elapsedMs": 91.277375
+              }
+            ]
+          }
+        ],
+        "exactParseCalls": 0,
+        "hashes": {
+          "index.js": "bdf565a8223028281d9e5293509db807f69f6c656078adf15d157f762d606c11",
+          "views.js": "fbd3a745d4cdba1dabcb6ea88b35fdc275b8186a18ad2944d3cce3509bda6f34",
+          "native/darwin-arm64/index.node": "5f19b703a63a5db29922b0b5585773629139395aab6f3934fd05ed229a87dd33",
+          "native/darwin-arm64/libplasmite.dylib": "84e0bd45df11e3eaa639f615e7a89058b91b980e72829c654c2a11dcb306f018"
+        }
+      }
+    },
+    {
+      "variant": "after",
+      "round": 0,
+      "result": {
+        "node": "v26.13.0",
+        "root": "/Users/brandonharvey/src/plasmite/bindings/node",
+        "sink": 1648920,
+        "measurements": [
+          {
+            "fixture": "small",
+            "parseCalls": 1,
+            "encodedBytes": 752,
+            "reportedBackingBytes": 1024,
+            "rows": [
+              {
+                "repeat": 0,
+                "operations": 5000,
+                "elapsedMs": 3.579792000000001
+              },
+              {
+                "repeat": 1,
+                "operations": 5000,
+                "elapsedMs": 3.0396249999999974
+              },
+              {
+                "repeat": 2,
+                "operations": 5000,
+                "elapsedMs": 3.0497079999999954
+              },
+              {
+                "repeat": 3,
+                "operations": 5000,
+                "elapsedMs": 2.9991249999999994
+              },
+              {
+                "repeat": 4,
+                "operations": 5000,
+                "elapsedMs": 2.897874999999999
+              },
+              {
+                "repeat": 5,
+                "operations": 5000,
+                "elapsedMs": 2.8625410000000002
+              },
+              {
+                "repeat": 6,
+                "operations": 5000,
+                "elapsedMs": 2.8179170000000013
+              }
+            ]
+          },
+          {
+            "fixture": "wide",
+            "parseCalls": 1,
+            "encodedBytes": 46892,
+            "reportedBackingBytes": 65536,
+            "rows": [
+              {
+                "repeat": 0,
+                "operations": 500,
+                "elapsedMs": 23.686000000000007
+              },
+              {
+                "repeat": 1,
+                "operations": 500,
+                "elapsedMs": 23.670665999999997
+              },
+              {
+                "repeat": 2,
+                "operations": 500,
+                "elapsedMs": 23.044750000000008
+              },
+              {
+                "repeat": 3,
+                "operations": 500,
+                "elapsedMs": 23.85245900000001
+              },
+              {
+                "repeat": 4,
+                "operations": 500,
+                "elapsedMs": 23.83291700000001
+              },
+              {
+                "repeat": 5,
+                "operations": 500,
+                "elapsedMs": 25.249583
+              },
+              {
+                "repeat": 6,
+                "operations": 500,
+                "elapsedMs": 23.48675
+              }
+            ]
+          },
+          {
+            "fixture": "array",
+            "parseCalls": 1,
+            "encodedBytes": 589952,
+            "reportedBackingBytes": 1048576,
+            "rows": [
+              {
+                "repeat": 0,
+                "operations": 100,
+                "elapsedMs": 36.062666999999976
+              },
+              {
+                "repeat": 1,
+                "operations": 100,
+                "elapsedMs": 35.84595800000005
+              },
+              {
+                "repeat": 2,
+                "operations": 100,
+                "elapsedMs": 37.76187500000003
+              },
+              {
+                "repeat": 3,
+                "operations": 100,
+                "elapsedMs": 36.639999999999986
+              },
+              {
+                "repeat": 4,
+                "operations": 100,
+                "elapsedMs": 36.89225000000005
+              },
+              {
+                "repeat": 5,
+                "operations": 100,
+                "elapsedMs": 37.63491699999997
+              },
+              {
+                "repeat": 6,
+                "operations": 100,
+                "elapsedMs": 36.689250000000015
+              }
+            ]
+          }
+        ],
+        "exactParseCalls": 0,
+        "hashes": {
+          "index.js": "bdf565a8223028281d9e5293509db807f69f6c656078adf15d157f762d606c11",
+          "views.js": "fbd3a745d4cdba1dabcb6ea88b35fdc275b8186a18ad2944d3cce3509bda6f34",
+          "native/darwin-arm64/index.node": "5f19b703a63a5db29922b0b5585773629139395aab6f3934fd05ed229a87dd33",
+          "native/darwin-arm64/libplasmite.dylib": "40692aa657a709f8636eebb01c167298944a5725f40bc46be3edbb7d22512c16"
+        }
+      }
+    },
+    {
+      "variant": "after",
+      "round": 1,
+      "result": {
+        "node": "v26.13.0",
+        "root": "/Users/brandonharvey/src/plasmite/bindings/node",
+        "sink": 1648920,
+        "measurements": [
+          {
+            "fixture": "small",
+            "parseCalls": 1,
+            "encodedBytes": 752,
+            "reportedBackingBytes": 1024,
+            "rows": [
+              {
+                "repeat": 0,
+                "operations": 5000,
+                "elapsedMs": 3.1518750000000004
+              },
+              {
+                "repeat": 1,
+                "operations": 5000,
+                "elapsedMs": 3.0014999999999965
+              },
+              {
+                "repeat": 2,
+                "operations": 5000,
+                "elapsedMs": 2.918042
+              },
+              {
+                "repeat": 3,
+                "operations": 5000,
+                "elapsedMs": 2.9529169999999993
+              },
+              {
+                "repeat": 4,
+                "operations": 5000,
+                "elapsedMs": 2.823999999999998
+              },
+              {
+                "repeat": 5,
+                "operations": 5000,
+                "elapsedMs": 2.855125000000001
+              },
+              {
+                "repeat": 6,
+                "operations": 5000,
+                "elapsedMs": 2.806750000000001
+              }
+            ]
+          },
+          {
+            "fixture": "wide",
+            "parseCalls": 1,
+            "encodedBytes": 46892,
+            "reportedBackingBytes": 65536,
+            "rows": [
+              {
+                "repeat": 0,
+                "operations": 500,
+                "elapsedMs": 23.744750000000003
+              },
+              {
+                "repeat": 1,
+                "operations": 500,
+                "elapsedMs": 23.54033299999999
+              },
+              {
+                "repeat": 2,
+                "operations": 500,
+                "elapsedMs": 23.061000000000007
+              },
+              {
+                "repeat": 3,
+                "operations": 500,
+                "elapsedMs": 23.067709000000008
+              },
+              {
+                "repeat": 4,
+                "operations": 500,
+                "elapsedMs": 23.41062500000001
+              },
+              {
+                "repeat": 5,
+                "operations": 500,
+                "elapsedMs": 23.23041599999999
+              },
+              {
+                "repeat": 6,
+                "operations": 500,
+                "elapsedMs": 23.119916999999987
+              }
+            ]
+          },
+          {
+            "fixture": "array",
+            "parseCalls": 1,
+            "encodedBytes": 589952,
+            "reportedBackingBytes": 1048576,
+            "rows": [
+              {
+                "repeat": 0,
+                "operations": 100,
+                "elapsedMs": 36.36458299999998
+              },
+              {
+                "repeat": 1,
+                "operations": 100,
+                "elapsedMs": 36.37549999999999
+              },
+              {
+                "repeat": 2,
+                "operations": 100,
+                "elapsedMs": 36.424959
+              },
+              {
+                "repeat": 3,
+                "operations": 100,
+                "elapsedMs": 37.62045900000004
+              },
+              {
+                "repeat": 4,
+                "operations": 100,
+                "elapsedMs": 36.318291999999985
+              },
+              {
+                "repeat": 5,
+                "operations": 100,
+                "elapsedMs": 37.231042
+              },
+              {
+                "repeat": 6,
+                "operations": 100,
+                "elapsedMs": 36.23599999999999
+              }
+            ]
+          }
+        ],
+        "exactParseCalls": 0,
+        "hashes": {
+          "index.js": "bdf565a8223028281d9e5293509db807f69f6c656078adf15d157f762d606c11",
+          "views.js": "fbd3a745d4cdba1dabcb6ea88b35fdc275b8186a18ad2944d3cce3509bda6f34",
+          "native/darwin-arm64/index.node": "5f19b703a63a5db29922b0b5585773629139395aab6f3934fd05ed229a87dd33",
+          "native/darwin-arm64/libplasmite.dylib": "40692aa657a709f8636eebb01c167298944a5725f40bc46be3edbb7d22512c16"
+        }
+      }
+    },
+    {
+      "variant": "before",
+      "round": 1,
+      "result": {
+        "node": "v26.13.0",
+        "root": "/Users/brandonharvey/src/plasmite/tmp/node-json-safety-before",
+        "sink": 1648920,
+        "measurements": [
+          {
+            "fixture": "small",
+            "parseCalls": 0,
+            "encodedBytes": 752,
+            "reportedBackingBytes": 752,
+            "rows": [
+              {
+                "repeat": 0,
+                "operations": 5000,
+                "elapsedMs": 4.823458000000002
+              },
+              {
+                "repeat": 1,
+                "operations": 5000,
+                "elapsedMs": 4.465415999999998
+              },
+              {
+                "repeat": 2,
+                "operations": 5000,
+                "elapsedMs": 4.329915999999997
+              },
+              {
+                "repeat": 3,
+                "operations": 5000,
+                "elapsedMs": 4.397666000000001
+              },
+              {
+                "repeat": 4,
+                "operations": 5000,
+                "elapsedMs": 4.419958000000001
+              },
+              {
+                "repeat": 5,
+                "operations": 5000,
+                "elapsedMs": 4.358457999999999
+              },
+              {
+                "repeat": 6,
+                "operations": 5000,
+                "elapsedMs": 4.643708000000004
+              }
+            ]
+          },
+          {
+            "fixture": "wide",
+            "parseCalls": 0,
+            "encodedBytes": 46892,
+            "reportedBackingBytes": 46892,
+            "rows": [
+              {
+                "repeat": 0,
+                "operations": 500,
+                "elapsedMs": 32.993415999999996
+              },
+              {
+                "repeat": 1,
+                "operations": 500,
+                "elapsedMs": 32.77554099999999
+              },
+              {
+                "repeat": 2,
+                "operations": 500,
+                "elapsedMs": 33.478582999999986
+              },
+              {
+                "repeat": 3,
+                "operations": 500,
+                "elapsedMs": 32.73037500000001
+              },
+              {
+                "repeat": 4,
+                "operations": 500,
+                "elapsedMs": 33.071584
+              },
+              {
+                "repeat": 5,
+                "operations": 500,
+                "elapsedMs": 32.96083300000001
+              },
+              {
+                "repeat": 6,
+                "operations": 500,
+                "elapsedMs": 34.57166599999999
+              }
+            ]
+          },
+          {
+            "fixture": "array",
+            "parseCalls": 0,
+            "encodedBytes": 589952,
+            "reportedBackingBytes": 589952,
+            "rows": [
+              {
+                "repeat": 0,
+                "operations": 100,
+                "elapsedMs": 92.432792
+              },
+              {
+                "repeat": 1,
+                "operations": 100,
+                "elapsedMs": 92.30595900000003
+              },
+              {
+                "repeat": 2,
+                "operations": 100,
+                "elapsedMs": 95.29033300000003
+              },
+              {
+                "repeat": 3,
+                "operations": 100,
+                "elapsedMs": 91.446417
+              },
+              {
+                "repeat": 4,
+                "operations": 100,
+                "elapsedMs": 91.50545899999997
+              },
+              {
+                "repeat": 5,
+                "operations": 100,
+                "elapsedMs": 93.05991600000004
+              },
+              {
+                "repeat": 6,
+                "operations": 100,
+                "elapsedMs": 91.03895799999998
+              }
+            ]
+          }
+        ],
+        "exactParseCalls": 0,
+        "hashes": {
+          "index.js": "bdf565a8223028281d9e5293509db807f69f6c656078adf15d157f762d606c11",
+          "views.js": "fbd3a745d4cdba1dabcb6ea88b35fdc275b8186a18ad2944d3cce3509bda6f34",
+          "native/darwin-arm64/index.node": "5f19b703a63a5db29922b0b5585773629139395aab6f3934fd05ed229a87dd33",
+          "native/darwin-arm64/libplasmite.dylib": "84e0bd45df11e3eaa639f615e7a89058b91b980e72829c654c2a11dcb306f018"
+        }
+      }
+    }
+  ]
+}

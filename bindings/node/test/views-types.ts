@@ -3,6 +3,12 @@ declare const pool: Pool;
 interface Reading { metrics: { power: number }; samples: { value: number }[]; bytes: Uint8Array }
 async function usage() {
   const m = await pool.getView<Reading>(17n);
+  const written = await pool.appendView<Reading>({ metrics: { power: 42 } });
+  const writtenPower: number = written.data.metrics.power;
+  await pool.appendView(m, m.meta.tags);
+  await pool.appendView({}, ['sensor'] as const);
+  // @ts-expect-error committed results remain immutable
+  written.data.metrics.power = 2;
   const power: number = m.data.metrics.power;
   const editable: Reading = toNative(m.data);
   const child: { power: number } = toNative(m.data.metrics);
@@ -15,6 +21,6 @@ async function usage() {
   m.data.samples.push({ value: 1 });
   const bytes: Uint8Array = toNative(m.data.bytes);
   bytes.fill(0);
-  return [power, envelope, toJson(m)];
+  return [power, writtenPower, envelope, toJson(m)];
 }
 void usage;

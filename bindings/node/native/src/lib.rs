@@ -14,6 +14,7 @@ use napi_derive::napi;
 use std::ffi::{CStr, CString};
 use std::ptr;
 use std::sync::Arc;
+mod input;
 mod views;
 
 #[repr(C)]
@@ -478,6 +479,27 @@ pub struct Lite3Frame {
 
 #[napi]
 impl Pool {
+    #[napi]
+    pub fn prepare_append(
+        &self,
+        env: Env,
+        durability: Durability,
+    ) -> Result<input::NativeAppendTarget> {
+        if !views::available() {
+            return Err(pool_error(
+                env,
+                "Usage",
+                "loaded libplasmite lacks owned-view support",
+            ));
+        }
+        let handle = self
+            .handle
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| pool_error(env, "Usage", "pool is closed"))?;
+        Ok(input::NativeAppendTarget::new(handle, durability as u32))
+    }
+
     #[napi]
     pub fn append_json(
         &self,
@@ -1752,24 +1774,28 @@ impl Task for GetViewTask {
             unsafe { views::plsm_pool_get_view(self.handle.ptr, self.seq, &mut owner, &mut error) };
         Ok(GetViewOutput {
             owner: if rc == 0 {
-                Some(views::Owned(owner))
+                Some(views::Owned::new(owner))
             } else {
                 None
             },
             error: error as usize,
         })
     }
-    fn resolve(&mut self, env: Env, mut output: Self::Output) -> Result<Self::JsValue> {
-        if output.error != 0 {
-            let err = std::mem::replace(&mut output.error, 0);
-            return Err(take_error(env, err as *mut plsm_error_t)?);
-        }
-        views::NativeView::new(
-            env,
-            output
-                .owner
-                .take()
-                .ok_or_else(|| Error::from_reason("get_view returned no owner"))?,
-        )
+    fn resolve(&mut self, env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        resolve_owned_view(env, output)
     }
+}
+
+fn resolve_owned_view(env: Env, mut output: GetViewOutput) -> Result<views::NativeView> {
+    if output.error != 0 {
+        let err = std::mem::replace(&mut output.error, 0);
+        return Err(take_error(env, err as *mut plsm_error_t)?);
+    }
+    views::NativeView::new(
+        env,
+        output
+            .owner
+            .take()
+            .ok_or_else(|| Error::from_reason("native operation returned no owner"))?,
+    )
 }

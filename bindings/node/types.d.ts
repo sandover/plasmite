@@ -111,6 +111,8 @@ export function toJson(value: unknown): string
 export class Pool {
   /** Acquire an independent immutable snapshot without blocking JavaScript. */
   getView<T = unknown>(seq: number | bigint): Promise<MessageView<T>>
+  /** Encode native input once; T asserts the resulting data shape without validation. */
+  appendView<T = unknown>(payload: unknown, tags?: readonly string[], durability?: Durability): Promise<MessageView<T>>
   appendIdentity(payload: unknown, tags?: string[], durability?: Durability): AppendReceipt
   appendLite3Identity(payload: Buffer, durability?: Durability): AppendReceipt
   append(payload: unknown, tags?: string[], durability?: Durability): Message

@@ -1,0 +1,28 @@
+{
+  "node": "v26.13.0",
+  "counter": "diagnostic-only ValueScope creation count; one C++ HandleScopeWrapper allocation per successful napi_open_handle_scope",
+  "before": {
+    "small": 11,
+    "wide": 515,
+    "text64k": 6,
+    "array": 8195
+  },
+  "after": {
+    "small": 2,
+    "wide": 25,
+    "text64k": 1,
+    "array": 257
+  },
+  "diagnosticHashes": {
+    "before": {
+      "native/src/input.rs": "467de9de5764b9dbfbf4e63a71eb890f75aef454005ba6d4b1ba7f40f4c4efce",
+      "native/darwin-arm64/index.node": "7c584cf2c76ff29f1f1dafd983e62d79f6b9892dfdd8949195fd634211f3f0de",
+      "native/darwin-arm64/libplasmite.dylib": "40692aa657a709f8636eebb01c167298944a5725f40bc46be3edbb7d22512c16"
+    },
+    "after": {
+      "native/src/input.rs": "e1b6b53aa232073c4194777474dcd29bccd0534365c77e54908dcede0a02f587",
+      "native/darwin-arm64/index.node": "529f3fa332bb5b50b4212098b1a081e1faf17c9578f9723fc0251670e4f7f1fd",
+      "native/darwin-arm64/libplasmite.dylib": "40692aa657a709f8636eebb01c167298944a5725f40bc46be3edbb7d22512c16"
+    }
+  }
+}

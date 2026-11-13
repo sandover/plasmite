@@ -1,0 +1,79 @@
+--- a/bindings/node/native/src/input.rs
++++ b/bindings/node/native/src/input.rs
+@@ -412,26 +412,20 @@
+             let length = number(self.env, numeric)?
+                 .clamp(0.0, 9007199254740991.0)
+                 .floor() as u64;
+-            for start in (0..length).step_by(16) {
+-                let _scope = if length > 1 {
+-                    Some(ValueScope::new(self.env)?)
++            for index in 0..length {
++                let _scope = ValueScope::new(self.env)?;
++                let mut child = ptr::null_mut();
++                if let Ok(index) = u32::try_from(index) {
++                    napi::check_status!(unsafe {
++                        sys::napi_get_element(self.env.raw(), value, index, &mut child)
++                    })?;
+                 } else {
+-                    None
+-                };
+-                for index in start..(start + 16).min(length) {
+-                    let mut child = ptr::null_mut();
+-                    if let Ok(index) = u32::try_from(index) {
+-                        napi::check_status!(unsafe {
+-                            sys::napi_get_element(self.env.raw(), value, index, &mut child)
+-                        })?;
+-                    } else {
+-                        let key = HookKey::Index(index).raw(self.env)?;
+-                        napi::check_status!(unsafe {
+-                            sys::napi_get_property(self.env.raw(), value, key, &mut child)
+-                        })?;
+-                    }
+-                    self.value(parent, None, HookKey::Index(index), child, true)?;
+-                }
++                    let key = HookKey::Index(index).raw(self.env)?;
++                    napi::check_status!(unsafe {
++                        sys::napi_get_property(self.env.raw(), value, key, &mut child)
++                    })?;
++                }
++                self.value(parent, None, HookKey::Index(index), child, true)?;
+             }
+         } else {
+             let mut keys = ptr::null_mut();
+@@ -449,24 +443,18 @@
+             napi::check_status!(unsafe {
+                 sys::napi_get_array_length(self.env.raw(), keys, &mut count)
+             })?;
+-            for start in (0..count).step_by(16) {
+-                let _scope = if count > 1 {
+-                    Some(ValueScope::new(self.env)?)
+-                } else {
+-                    None
+-                };
+-                for index in start..(start + 16).min(count) {
+-                    let mut key = ptr::null_mut();
+-                    let mut child = ptr::null_mut();
+-                    napi::check_status!(unsafe {
+-                        sys::napi_get_element(self.env.raw(), keys, index, &mut key)
+-                    })?;
+-                    napi::check_status!(unsafe {
+-                        sys::napi_get_property(self.env.raw(), value, key, &mut child)
+-                    })?;
+-                    let name = text(self.env, key)?;
+-                    self.value(parent, Some(&name), HookKey::Name(key), child, false)?;
+-                }
++            for index in 0..count {
++                let _scope = ValueScope::new(self.env)?;
++                let mut key = ptr::null_mut();
++                let mut child = ptr::null_mut();
++                napi::check_status!(unsafe {
++                    sys::napi_get_element(self.env.raw(), keys, index, &mut key)
++                })?;
++                napi::check_status!(unsafe {
++                    sys::napi_get_property(self.env.raw(), value, key, &mut child)
++                })?;
++                let name = text(self.env, key)?;
++                self.value(parent, Some(&name), HookKey::Name(key), child, false)?;
+             }
+         }
+         self.stack.pop();

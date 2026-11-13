@@ -93,6 +93,43 @@ small-record latency and slower warm access/full native conversion. See the
 Run `node --expose-gc scripts/bench_views.js 100 5 result.json` from this directory
 after staging matching optimized native assets to repeat the focused comparison.
 
+### Native input and committed views (additive source API)
+
+```js
+const sent = await pool.appendView({
+  metrics: { power: 42 }, bytes: Buffer.from([1, 2]), counter: 9223372036854775807n,
+}, ["sensor"]);
+const forwarded = await destination.appendView(sent); // Reuse its encoding and tags.
+const retagged = await destination.appendView(sent, ["processed"]);
+const copied = await destination.appendView(sent.data); // New data object, no tags.
+```
+
+`appendView` evaluates input once on the calling thread, queues storage work,
+and returns an immutable view of the committed encoding. Mutating the input
+later cannot change the receipt. Closing a pool during a getter or serializer,
+or after queuing the append, keeps the in-flight target alive. Concurrent calls
+serialize storage work off-thread.
+
+Ordinary objects follow JSON's getter, Proxy, `toJSON`, own-key and array-hole
+rules. Object properties with undefined/functions/symbols disappear; array
+positions become null. Exact built-in Buffer/Uint8Array values encode native
+bytes instead of Buffer's default JSON object. Custom serializers and subclass
+serializers still run once. Ordinary byte buffers snapshot synchronously;
+shared-backed buffers require a caller-created ordinary copy, such as
+`Uint8Array.from(sharedBytes)`. Native input accepts signed-i64 BigInt and finite
+numbers; safe integral numbers use i64 except negative zero. A small BigInt can
+read back as number. Cycles, out-of-range BigInt, nonfinite numbers and isolated
+UTF16 surrogates fail before publication. Getter/serializer exceptions retain
+their original thrown value.
+
+Data must encode as an object. String input does not mean JSON source. A genuine
+message view forwards its data and existing tags when tags are omitted; explicit
+tags rebuild its payload. A payload subtree copies directly through the native
+writer, including exact integers and bytes. TypeScript's optional
+`appendView<Reading>(input)` type argument asserts the output shape without
+runtime validation. Existing `append`, `appendJson` and parseMessage behavior
+stay compatible.
+
 ### UDP sender and follower
 
 UDP uses one explicit endpoint. The server must enable `--udp-follow`, which

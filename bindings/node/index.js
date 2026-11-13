@@ -10,9 +10,9 @@ const { RemoteClient, RemoteError, RemotePool } = require("./remote");
 const { Message, parseMessage, parseNativeMessage } = require("./message");
 const { ERROR_KIND_VALUES, mapErrorKind } = require("./mappings");
 
-const { createMessageView, toNative, toJson } = require("./views");
+const { createNativeMessage: ownedMessage, toNative, toJson, messageReference, valueReference } = require("./views");
+const { inputHelpers, snapshotTags } = require("./input");
 
-const parseJson = JSON.parse;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const path = require("node:path");
 const os = require("node:os");
@@ -286,28 +286,36 @@ class Pool {
     }
   }
 
-  /**
-   * Get parsed Message by sequence.
-   * @param {number|bigint} seq
-   * @returns {Message}
-   */
+  /** Encode native input once and return its immutable committed view. */
+  async appendView(data, tags, durability) {
+    let target;
+    try { target = this._inner.prepareAppend(durability ?? Durability.Fast); }
+    catch (error) { throw wrapNativeError(error); }
+    // Keep this target separate from Pool before invoking any input hooks.
+    let pending;
+    try {
+      const tagSnapshot = snapshotTags(tags);
+      const message = messageReference(data);
+      if (message && tags === undefined) pending = target.forward(message.backend.owner);
+      else {
+        const payload = message ? data.data : data;
+        const ref = valueReference(payload);
+        pending = ref?.backend.owner
+          ? target.copy(ref.backend.owner, ref.node, tagSnapshot)
+          : target.encode(payload, tagSnapshot, inputHelpers);
+      }
+    } catch (error) { target.discard(); throw error; }
+    let owner;
+    try { owner = await pending; }
+    catch (error) { throw wrapNativeError(error); }
+    return ownedMessage(owner);
+  }
+
+  /** Acquire an immutable snapshot by sequence. */
   async getView(seq) {
     try {
       const owner = await this._inner.getView(normalizeUint64(seq, "seq"));
-      const backend = {
-        root: () => owner.root(),
-        lookup: (node, key) => owner.lookup(node, key),
-        at: (node, index) => owner.at(node, index),
-        has: (node, key) => owner.has(node, key),
-        keys: node => owner.keys(node),
-        materialize: node => owner.materialize(node, parseJson),
-        json: node => owner.json(node),
-        *iterate(node) {
-          const cursor = owner.cursor(node);
-          for (let value = cursor.nextValue(); value !== undefined; value = cursor.nextValue()) yield value;
-        },
-      };
-      return createMessageView(backend, owner.seq, owner.timestampNs);
+      return ownedMessage(owner);
     } catch (err) { throw wrapNativeError(err); }
   }
 

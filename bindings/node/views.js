@@ -109,4 +109,25 @@ function toJson(value) {
   throw new TypeError("expected a Plasmite view or scalar");
 }
 
-module.exports = { createMessageView, toNative, toJson };
+const parseJson = JSON.parse;
+function createNativeMessage(owner) {
+  const backend = {
+    owner,
+    root: () => owner.root(),
+    lookup: (node, key) => owner.lookup(node, key),
+    at: (node, index) => owner.at(node, index),
+    has: (node, key) => owner.has(node, key),
+    keys: node => owner.keys(node),
+    materialize: node => owner.materialize(node, parseJson),
+    json: node => owner.json(node),
+    *iterate(node) {
+      const cursor = owner.cursor(node);
+      for (let value = cursor.nextValue(); value !== undefined; value = cursor.nextValue()) yield value;
+    },
+  };
+  return createMessageView(backend, owner.seq, owner.timestampNs);
+}
+
+const valueReference = value => refs.get(value);
+const messageReference = value => messages.get(value);
+module.exports = { createMessageView, createNativeMessage, toNative, toJson, valueReference, messageReference };

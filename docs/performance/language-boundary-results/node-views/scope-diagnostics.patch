@@ -1,0 +1,21 @@
+--- a/bindings/node/native/src/input.rs
++++ b/bindings/node/native/src/input.rs
+@@ -4,6 +4,10 @@
+ use napi::{JsObject, JsUnknown, NapiRaw};
+ 
+ type Raw = sys::napi_value;
++thread_local! { static SCOPE_COUNT: std::cell::Cell<u32> = const { std::cell::Cell::new(0) }; }
++#[napi]
++pub fn input_scope_count() -> u32 { SCOPE_COUNT.with(std::cell::Cell::get) }
++
+ struct ValueScope {
+     env: sys::napi_env,
+     scope: sys::napi_handle_scope,
+@@ -12,6 +16,7 @@
+     fn new(env: Env) -> Result<Self> {
+         let mut scope = ptr::null_mut();
+         napi::check_status!(unsafe { sys::napi_open_handle_scope(env.raw(), &mut scope) })?;
++        SCOPE_COUNT.with(|count| count.set(count.get() + 1));
+         Ok(Self {
+             env: env.raw(),
+             scope,

@@ -1,5 +1,5 @@
 use super::*;
-use napi::{JsFunction, JsObject, JsUnknown, NapiRaw};
+use napi::{JsFunction, JsObject, JsString, JsUnknown, NapiRaw};
 
 #[repr(C)]
 pub struct Owner {
@@ -7,7 +7,7 @@ pub struct Owner {
 }
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct ValueRef {
+pub(super) struct ValueRef {
     owner: *const Owner,
     offset: usize,
 }
@@ -88,7 +88,12 @@ unsafe extern "C" {
     ) -> i32;
 }
 
-pub struct Owned(pub *const Owner);
+pub struct Owned(pub *const Owner, Option<Arc<Owned>>);
+impl Owned {
+    pub(super) fn new(pointer: *const Owner) -> Self {
+        Self(pointer, None)
+    }
+}
 // The view ABI allows immutable reads on independently retained owners.
 unsafe impl Send for Owned {}
 unsafe impl Sync for Owned {}
@@ -104,18 +109,32 @@ pub struct NativeView {
 }
 impl NativeView {
     pub fn new(mut env: Env, owner: Owned) -> Result<Self> {
-        let mut len = 0;
-        unsafe { plsm_view_bytes(owner.0, &mut len) };
-        env.adjust_external_memory(len as i64)?;
+        if owner.1.is_none() {
+            env.adjust_external_memory(backing_bytes(owner.0) as i64)?;
+        }
         Ok(Self {
             owner: Arc::new(owner),
         })
     }
-    fn reference(&self, node: u32) -> ValueRef {
+    pub(super) fn reference(&self, node: u32) -> ValueRef {
         ValueRef {
             owner: self.owner.0,
             offset: node as usize,
         }
+    }
+    pub(super) fn retained(&self) -> Self {
+        Self {
+            owner: self.owner.clone(),
+        }
+    }
+    pub(super) fn pointer(&self) -> *const Owner {
+        self.owner.0
+    }
+    pub(super) fn forwarded(&self, pointer: *const Owner) -> Owned {
+        // Every forwarded owner points straight to the original charge, so
+        // forwarding a forwarded message never retains a wrapper chain.
+        let allocation = self.owner.1.as_ref().unwrap_or(&self.owner).clone();
+        Owned(pointer, Some(allocation))
     }
     fn read(&self, env: Env, node: u32) -> Result<Value> {
         let mut value = Value::default();
@@ -355,7 +374,7 @@ impl NativeView {
         self.native_value(env, node)
     }
     #[napi]
-    pub fn json(&self, env: Env, node: u32) -> Result<String> {
+    pub fn json(&self, env: Env, node: u32) -> Result<JsString> {
         let mut out = plsm_buf_t {
             data: ptr::null_mut(),
             len: 0,
@@ -364,14 +383,18 @@ impl NativeView {
         if unsafe { plsm_value_to_json(self.reference(node), &mut out, &mut err) } != 0 {
             return Err(take_error(env, err)?);
         }
-        let bytes = NativeBuf(out).copy_bytes();
-        String::from_utf8(bytes).map_err(|e| Error::from_reason(e.to_string()))
+        let buffer = NativeBuf(out);
+        unsafe { env.create_string_from_c_char(buffer.0.data.cast(), buffer.0.len) }
     }
     #[napi]
     pub fn byte_length(&self) -> u32 {
         let mut len = 0;
         unsafe { plsm_view_bytes(self.owner.0, &mut len) };
         len as u32
+    }
+    #[napi]
+    pub fn retained_bytes(&self) -> u32 {
+        backing_bytes(self.owner.0) as u32
     }
 }
 
@@ -457,14 +480,15 @@ impl NativeView {
     }
 }
 
-// Published owner references live only in environment-thread view/cursor
-// wrappers. Charge once on publication and balance when their last Arc finalizes.
+// Wrappers and the forwarding task's environment-thread finally hook balance
+// the one shared allocation charge. Worker-thread drops never adjust the VM.
 impl napi::bindgen_prelude::ObjectFinalize for NativeView {
     fn finalize(self, mut env: Env) -> Result<()> {
         if Arc::strong_count(&self.owner) == 1 {
-            let mut len = 0;
-            unsafe { plsm_view_bytes(self.owner.0, &mut len) };
-            env.adjust_external_memory(-(len as i64))?;
+            let allocation = self.owner.1.as_ref().unwrap_or(&self.owner);
+            if self.owner.1.is_none() || Arc::strong_count(allocation) == 1 {
+                env.adjust_external_memory(-(backing_bytes(allocation.0) as i64))?;
+            }
         }
         Ok(())
     }
@@ -509,6 +533,25 @@ pub fn available() -> bool {
 }
 
 type NativeJsonSafe = unsafe extern "C" fn(*const Owner) -> bool;
+type RetainedBytes = unsafe extern "C" fn(*const Owner) -> usize;
+fn backing_bytes(owner: *const Owner) -> usize {
+    static GETTER: std::sync::OnceLock<Option<RetainedBytes>> = std::sync::OnceLock::new();
+    let getter = GETTER.get_or_init(|| {
+        let symbol = optional_symbol(c"plsm_view_retained_bytes");
+        if symbol.is_null() {
+            None
+        } else {
+            Some(unsafe { std::mem::transmute::<*mut libc::c_void, RetainedBytes>(symbol) })
+        }
+    });
+    if let Some(getter) = getter {
+        unsafe { getter(owner) }
+    } else {
+        let mut len = 0;
+        unsafe { plsm_view_bytes(owner, &mut len) };
+        len
+    }
+}
 type NativeJsonFormatter =
     unsafe extern "C" fn(ValueRef, *mut plsm_buf_t, *mut *mut plsm_error_t) -> i32;
 struct NativeJsonApi {
@@ -535,11 +578,11 @@ fn native_json_api() -> Option<&'static NativeJsonApi> {
 }
 
 #[cfg(unix)]
-fn optional_symbol(name: &std::ffi::CStr) -> *mut libc::c_void {
+pub(super) fn optional_symbol(name: &std::ffi::CStr) -> *mut libc::c_void {
     unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) }
 }
 #[cfg(windows)]
-fn optional_symbol(name: &std::ffi::CStr) -> *mut libc::c_void {
+pub(super) fn optional_symbol(name: &std::ffi::CStr) -> *mut libc::c_void {
     #[link(name = "kernel32")]
     unsafe extern "system" {
         fn GetModuleHandleA(name: *const u8) -> *mut libc::c_void;
@@ -555,7 +598,7 @@ fn optional_symbol(name: &std::ffi::CStr) -> *mut libc::c_void {
     }
 }
 #[cfg(not(any(unix, windows)))]
-fn optional_symbol(_name: &std::ffi::CStr) -> *mut libc::c_void {
+pub(super) fn optional_symbol(_name: &std::ffi::CStr) -> *mut libc::c_void {
     ptr::null_mut()
 }
 

@@ -239,3 +239,118 @@ raw-only experimental variant; the baseline is 611065c. The evidence records
 script, frontend, addon and shared-library hashes, first-use times, exact-value
 fallback timings and copy-retention memory samples. The production choice keeps
 the parser for safe owners and raw descriptors for every fallback.
+
+
+## Native input and committed receipts
+
+`appendView` evaluates JavaScript input once, builds Lite3 and queues its owned
+encoding for storage. A private retained target separates input callbacks from
+the original Pool: getters, tag iterators and serializers may close that Pool
+without invalidating the append. Failed preparation discards the target. Native
+bytes snapshot synchronously; shared backing requires an ordinary caller copy.
+VM exceptions stay pending across native unwinding, preserving primitive thrown
+values and avoiding napi's exception-to-string coercion.
+
+An unchanged message view forwards its encoded snapshot. A root-view copy or
+retag captures source ownership and tags, then performs the checked native copy
+on the worker. Mixed JavaScript objects evaluate on the environment thread and
+copy checked nested views through the shared writer. Destination builder handles
+remain opaque; source ValueRef offsets identify checked native values.
+
+Forwarded owners share one backing allocation charge. Each keeps a flattened
+reference to the original accounting owner, and asynchronous jobs retain that
+reference through their environment-thread finally hook. The optional
+`plsm_view_retained_bytes` getter reports allocated payload capacity; older
+libraries fall back to encoded length. This excludes owner/index metadata and
+keeps the growing allocation rather than shrinking through another payload copy.
+For example, the 64-KiB text fixture encodes 66,300 bytes but retains 131,072;
+the 4,096-object fixture encodes 589,952 and retains 1,048,576.
+
+The [complete producer run](native-input.raw.json) and
+[matched scope experiment](input-scope-batching-ab.raw.json) compare native input
+with optimized stringify + shared C parsing, both returning the same owned-view
+interface. The latter uses the same core SHA256
+`40692aa657a709f8636eebb01c167298944a5725f40bc46be3edbb7d22512c16`.
+Its final variant records these median microseconds:
+
+| Append and request one field | Native input | Stringify + C parse |
+| --- | ---: | ---: |
+| Small | 22.14 | 21.21 |
+| Wide | 144.28 | 74.91 |
+| 64-KiB text | 41.80 | 74.81 |
+| 4,096 objects | 1,474.34 | 444.34 |
+
+Native input saves 44% on long text. Many small objects remain slower through
+the Node-API traversal; this checkpoint does not claim a universal encoding win.
+Separate-handle append/consumer field reads show the same split: text 57.90
+versus 97.34 microseconds; arrays 1,676.77 versus 618.45. These consumers run in
+the same process and do not measure cross-process wakeups.
+
+| Existing view and request one field | Native reuse/copy | Explicit JSON conversion |
+| --- | ---: | ---: |
+| Forward wide | 24.66 | 81.78 |
+| Forward 64-KiB text | 16.93 | 74.92 |
+| Forward 4,096 objects | 31.05 | 585.33 |
+| Retag 64-KiB text | 30.36 | 79.97 |
+| Retag 4,096 objects | 550.04 | 559.48 |
+
+The forwarding gain comes from reusing the immutable payload rather than
+formatting, parsing and rebuilding it. Retagging currently uses a full checked
+native copy. The scripts also record checked subtree copies, full native
+materialization, exact i64 input, native bytes, process CPU, GC, event-loop delay
+and retained forwarding samples. Byte input has no equivalent JSON-native byte
+type, so that lane makes no cross-contract speed claim. Event-loop sampling has
+1-ms resolution; heap/RSS samples do not establish exact allocation or peak
+memory bounds.
+
+### Scope allocations inside the runtime
+
+[Node's handle-scope implementation](https://github.com/nodejs/node/blob/v26.13.0/src/js_native_api_v8.cc#L2685)
+allocates a C++ wrapper on open and deletes it on close. Per-value scopes
+therefore added a heap allocation for every visited property. The encoder now
+opens one scope across 16 siblings and skips a scope for single-child containers;
+branching containers bound temporary handles, and linear chains have the depth
+bound. Ancestor handles stay in outer scopes.
+
+A [diagnostic-only counter](input-scope-allocations.raw.json) measures those
+specific scope allocation requests, not total VM/Rust allocations:
+
+| Fixture | Per value | Batched |
+| --- | ---: | ---: |
+| Small | 11 | 2 |
+| Wide | 515 | 25 |
+| 64-KiB text | 6 | 1 |
+| 4,096 objects | 8,195 | 257 |
+
+The matched uninstrumented runs improve array append/field 1,622.62→1,474.34
+microseconds (9.1%), wide 155.38→144.28 (7.1%), and small 24.63→22.14 (10.1%).
+The allocation reduction is much larger than the time reduction, which points
+the remaining investigation toward key extraction, helper calls and VM access.
+[The per-value patch](per-value-scopes.patch) reconstructs the baseline;
+[the counter patch](scope-diagnostics.patch) adds the optional diagnostic export
+used by `count_input_scopes.js`. Production code contains no counter.
+
+### Improve the JSON control too
+
+The shared parsed-JSON copier now computes the native-safe property during its
+existing walk. The [same-addon, different-library experiment](json-safety-result-copy-ab.raw.json)
+verifies parser callback counts 0→1 for safe values and zero for exact large i64.
+Warm native materialization falls 66.14→47.03 microseconds on wide data and
+923.08→365.33 on 4,096 objects. This prevents an unknown safety flag from
+penalizing JSON-produced receipts in the producer comparison. Shared changes
+come from d929bc2 (safety/capacity) and 511ce29 (short keys); the raw files retain
+the precise library hashes.
+
+The [existing-read comparison](producer-read-regression-ab.raw.json) uses adapter
+289fe99 and the same frozen library. Small direct JSON export improves
+0.808→0.543 microseconds by copying formatter bytes straight into the VM string.
+Other read lanes show mixed changes: selected large-array reads rise about 7%
+and warm array-field reads about 12%, while selected wide reads fall about 7%.
+The short cold-identity samples vary more. These remain explicit follow-up
+measurements rather than a blanket read-performance claim.
+
+Reproduce with `bench_input_views.js`, `bench_json_result_copy.js` and
+`bench_views.js`. Run isolated library variants in separate processes: a process
+can reuse an already-loaded libplasmite dependency. The producer script records
+actual native, optimized JSON and legacy Message controls; legacy Message also
+decodes its complete result synchronously and has a different interface cost.
