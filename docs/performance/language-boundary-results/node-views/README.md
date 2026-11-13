@@ -354,3 +354,49 @@ Reproduce with `bench_input_views.js`, `bench_json_result_copy.js` and
 can reuse an already-loaded libplasmite dependency. The producer script records
 actual native, optimized JSON and legacy Message controls; legacy Message also
 decodes its complete result synchronously and has a different interface cost.
+
+### Reuse known VM types and fixed property keys
+
+The input walker now carries the type it already read through normalization.
+It reads a new type only when a serializer or boxed primitive changes the value.
+It also captures the VM strings `toJSON` and `length` once per encoding and passes
+those handles to property reads. This removes repeated boundary work without
+caching payload values or changing input semantics.
+
+Seven alternating baseline/candidate process pairs use the same frozen core
+library (`40692aa657a709f8636eebb01c167298944a5725f40bc46be3edbb7d22512c16`).
+Each process runs three repeats. The table takes the median within each process,
+then the median across its seven process medians. Times are microseconds.
+
+| Native append and one field | Before | After |
+| --- | ---: | ---: |
+| Small | 20.11 | 20.02 |
+| Wide | 131.58 | 132.30 |
+| 64-KiB text | 36.52 | 35.83 |
+| 4,096 objects | 1,428.74 | 1,354.84 |
+
+The array improves in all seven pairs (2.3–9.2%; median aggregate 5.2%). Its
+process CPU falls 4.7%. The unchanged stringify/parse control rises 0.5%, so this
+result supports removing repeated Node-API work. The array append/consumer lane
+falls 1,593.10→1,526.70 microseconds (4.2%; six of seven pairs improve), with CPU
+down 4.5%. Full array materialization improves 2.5%. Native array encoding still
+costs about 3.2 times the optimized JSON control; this step does not close that gap.
+
+Small and text pair deltas change sign. Wide append stays within 1% overall.
+Unchanged forwarding also varies, including wide 14.21→15.58 microseconds;
+these short lanes do not support broad improvement or regression claims.
+The changes ship for the consistent large-array result and simpler reuse of
+known runtime facts. The 22 producer cases and native clippy pass.
+
+[Summary](input-typekeys-summary.json) retains CPU and every paired time delta.
+Evidence archive (outside Git) contains all 14 raw process
+results, source overlay, exact addon/library manifest and an optional diagnostic
+patch. The diagnostic samples boundary stages and counts addon Rust allocator
+requests; it excludes V8/C++ and separately linked core allocations. Its clock
+and counter overhead prevents treating the stages as an exact additive budget.
+Use `profile_input_boundary.js` with that diagnostic-only addon. Production code
+contains no counters. Run `bench_input_views.js` with `PLASMITE_BENCH_BINDING`
+pointing to each isolated package for the uninstrumented comparison.
+
+Historical source snapshots and full build logs stay outside Git. This report
+keeps the scripts, summaries and readable results.

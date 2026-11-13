@@ -1,0 +1,941 @@
+{
+  "method": "median of per-process repeat medians; seven alternating baseline/candidate pairs",
+  "rows": [
+    {
+      "fixture": "small",
+      "lane": "append-field/native",
+      "baselineUs": 20.105624999999918,
+      "candidateUs": 20.018545000000003,
+      "deltaPercent": -0.4331126239543126,
+      "pairedDeltaPercent": [
+        -29.003577484764808,
+        7.036864439434654,
+        -1.2327012987013775,
+        -0.4331126239543126,
+        0.005104711623959979,
+        4.952133467130082,
+        8.075896425828644
+      ],
+      "baselineCpuUs": 21.095,
+      "candidateCpuUs": 21.09
+    },
+    {
+      "fixture": "small",
+      "lane": "append-field/stringify-json",
+      "baselineUs": 16.400414999999953,
+      "candidateUs": 15.326665000000048,
+      "deltaPercent": -6.547090424235657,
+      "pairedDeltaPercent": [
+        -19.31151770424392,
+        2.796941814707621,
+        0.5411906785319998,
+        13.866545770524485,
+        -13.049730753764221,
+        -5.239915526392458,
+        4.245328216423361
+      ],
+      "baselineCpuUs": 17.475,
+      "candidateCpuUs": 16.13
+    },
+    {
+      "fixture": "small",
+      "lane": "append-field/legacy-message",
+      "baselineUs": 8.665834999999902,
+      "candidateUs": 8.467499999999859,
+      "deltaPercent": -2.2887003964424113,
+      "pairedDeltaPercent": [
+        -4.32976164443456,
+        3.934605067137986,
+        -0.29555269555270325,
+        4.386487557890129,
+        5.359365276914119,
+        -1.240407546643263,
+        -9.2220920247296
+      ],
+      "baselineCpuUs": 10.07,
+      "candidateCpuUs": 10.005
+    },
+    {
+      "fixture": "small",
+      "lane": "append-native-copy/native",
+      "baselineUs": 20.144169999999946,
+      "candidateUs": 19.09958500000002,
+      "deltaPercent": -5.185544998875258,
+      "pairedDeltaPercent": [
+        -24.08927447364476,
+        0.96172983077778,
+        -4.824268644570284,
+        -5.045584769178024,
+        10.196024229604639,
+        1.6344801245706586,
+        -15.207054944432786
+      ],
+      "baselineCpuUs": 20.73,
+      "candidateCpuUs": 19.745
+    },
+    {
+      "fixture": "small",
+      "lane": "append-native-copy/stringify-json",
+      "baselineUs": 15.447710000000116,
+      "candidateUs": 15.09083000000004,
+      "deltaPercent": -2.3102453373352705,
+      "pairedDeltaPercent": [
+        -4.9458807108066605,
+        -1.0979482742017765,
+        3.257260127402617,
+        -2.5813211149100956,
+        4.134619499864645,
+        0.5200889312365398,
+        5.692117389298845
+      ],
+      "baselineCpuUs": 15.855,
+      "candidateCpuUs": 15.49
+    },
+    {
+      "fixture": "small",
+      "lane": "append-consumer-field/native",
+      "baselineUs": 35.446250000000106,
+      "candidateUs": 34.26354500000002,
+      "deltaPercent": -3.336615297810286,
+      "pairedDeltaPercent": [
+        -24.468881252386044,
+        0.090672413429016,
+        -2.486906743471784,
+        0.08132166805474572,
+        -0.3496405362500843,
+        -6.40613241369824,
+        -2.817068096061104
+      ],
+      "baselineCpuUs": 37.48,
+      "candidateCpuUs": 36.295
+    },
+    {
+      "fixture": "small",
+      "lane": "append-consumer-field/stringify-json",
+      "baselineUs": 30.08353999999997,
+      "candidateUs": 28.8660449999999,
+      "deltaPercent": -4.047046989815928,
+      "pairedDeltaPercent": [
+        -33.96857387858907,
+        2.9674289347871863,
+        8.179467645198057,
+        -0.06823680238235985,
+        -1.4051205410001377,
+        -8.62510516368955,
+        1.7402719343411865
+      ],
+      "baselineCpuUs": 30.585,
+      "candidateCpuUs": 29.19
+    },
+    {
+      "fixture": "small",
+      "lane": "forward-field/native",
+      "baselineUs": 13.365419999999945,
+      "candidateUs": 13.61791999999994,
+      "deltaPercent": 1.8892036314608562,
+      "pairedDeltaPercent": [
+        -29.13273415152965,
+        -0.6734042017244923,
+        4.352098464259324,
+        4.4538261578323635,
+        -2.8043653358279297,
+        5.2988974894109475,
+        6.925483823180656
+      ],
+      "baselineCpuUs": 13.49,
+      "candidateCpuUs": 13.665
+    },
+    {
+      "fixture": "small",
+      "lane": "forward-field/explicit-json",
+      "baselineUs": 15.829584999999895,
+      "candidateUs": 15.873749999999946,
+      "deltaPercent": 0.27900289236926223,
+      "pairedDeltaPercent": [
+        -16.823899371069086,
+        5.058461638994438,
+        3.1513315554313026,
+        3.081299384593872,
+        -0.9125316429704711,
+        8.463380630810956,
+        0.27900289236926223
+      ],
+      "baselineCpuUs": 15.89,
+      "candidateCpuUs": 15.97
+    },
+    {
+      "fixture": "small",
+      "lane": "retag-field/native",
+      "baselineUs": 16.78457999999999,
+      "candidateUs": 15.813539999999902,
+      "deltaPercent": -5.785310088188622,
+      "pairedDeltaPercent": [
+        -19.120005477201786,
+        4.371581194559848,
+        -2.0538655607675316,
+        -1.8775633066194342,
+        -1.5966753068050954,
+        -8.166475897790503,
+        2.051734389541049
+      ],
+      "baselineCpuUs": 17.565,
+      "candidateCpuUs": 16.315
+    },
+    {
+      "fixture": "small",
+      "lane": "retag-field/explicit-json",
+      "baselineUs": 16.3941650000001,
+      "candidateUs": 15.651459999999986,
+      "deltaPercent": -4.530300872292736,
+      "pairedDeltaPercent": [
+        -14.994070230079481,
+        3.114455583039466,
+        6.723110084679673,
+        9.557384752492194,
+        -2.5874564495095287,
+        -6.1699961085808,
+        -4.530300872292736
+      ],
+      "baselineCpuUs": 17.095,
+      "candidateCpuUs": 15.72
+    },
+    {
+      "fixture": "small",
+      "lane": "subtree-length/native",
+      "baselineUs": 17.21854499999992,
+      "candidateUs": 16.69957999999994,
+      "deltaPercent": -3.0139886964896445,
+      "pairedDeltaPercent": [
+        -6.868484939308194,
+        2.6045223951157936,
+        1.3125093649420938,
+        8.749026122707292,
+        -3.354241943983527,
+        -9.285636055637747,
+        1.083309653681508
+      ],
+      "baselineCpuUs": 17.33,
+      "candidateCpuUs": 16.76
+    },
+    {
+      "fixture": "small",
+      "lane": "subtree-length/explicit-json",
+      "baselineUs": 15.804165000000125,
+      "candidateUs": 15.426250000000008,
+      "deltaPercent": -2.3912367404422485,
+      "pairedDeltaPercent": [
+        -12.10118979136654,
+        3.0006855774638463,
+        13.3736663907853,
+        3.912481298441972,
+        -10.080512951291665,
+        5.638580141045768,
+        -6.454441479222184
+      ],
+      "baselineCpuUs": 16.315,
+      "candidateCpuUs": 15.935
+    },
+    {
+      "fixture": "wide",
+      "lane": "append-field/native",
+      "baselineUs": 131.57687499999952,
+      "candidateUs": 132.2958349999999,
+      "deltaPercent": 0.5464182060870293,
+      "pairedDeltaPercent": [
+        0.5464182060870293,
+        1.0992947858977864,
+        -2.1483275272824343,
+        0.46521184997865284,
+        -8.070287581517121,
+        3.1204942727158347,
+        -2.7756416418339147
+      ],
+      "baselineCpuUs": 135.215,
+      "candidateCpuUs": 136.82
+    },
+    {
+      "fixture": "wide",
+      "lane": "append-field/stringify-json",
+      "baselineUs": 70.86291500000016,
+      "candidateUs": 71.56041500000015,
+      "deltaPercent": 0.9842948176771893,
+      "pairedDeltaPercent": [
+        5.903797824145007,
+        5.305387435562259,
+        5.818079740190041,
+        5.204937135577992,
+        -2.303223062300075,
+        0.7269513129618099,
+        1.9124389675471587
+      ],
+      "baselineCpuUs": 73.455,
+      "candidateCpuUs": 74.27
+    },
+    {
+      "fixture": "wide",
+      "lane": "append-field/legacy-message",
+      "baselineUs": 90.1437500000003,
+      "candidateUs": 89.56395999999984,
+      "deltaPercent": -0.6431838036474624,
+      "pairedDeltaPercent": [
+        3.692431253369066,
+        4.048826095018598,
+        -3.150684626996769,
+        4.833118637435652,
+        -3.575040784276773,
+        -0.6278184892894445,
+        -3.056462594467446
+      ],
+      "baselineCpuUs": 90.585,
+      "candidateCpuUs": 90.185
+    },
+    {
+      "fixture": "wide",
+      "lane": "append-native-copy/native",
+      "baselineUs": 176.62832999999978,
+      "candidateUs": 176.25375000000076,
+      "deltaPercent": -0.21207243481213833,
+      "pairedDeltaPercent": [
+        -2.8328028487870527,
+        1.5702913540864838,
+        -2.6632657906697,
+        1.297683361213875,
+        -5.018429298929528,
+        0.16792989319767138,
+        -2.0730875958574813
+      ],
+      "baselineCpuUs": 181.77,
+      "candidateCpuUs": 181.73
+    },
+    {
+      "fixture": "wide",
+      "lane": "append-native-copy/stringify-json",
+      "baselineUs": 118.87937499999907,
+      "candidateUs": 117.52062499999965,
+      "deltaPercent": -1.1429652957036684,
+      "pairedDeltaPercent": [
+        -1.1921655171570178,
+        -5.669612579978511,
+        1.183122086172106,
+        3.126263954476838,
+        -3.0539533392715423,
+        -1.0554348225685795,
+        -0.1619545427854252
+      ],
+      "baselineCpuUs": 127.905,
+      "candidateCpuUs": 127.96
+    },
+    {
+      "fixture": "wide",
+      "lane": "append-consumer-field/native",
+      "baselineUs": 162.86354000000017,
+      "candidateUs": 158.31771000000003,
+      "deltaPercent": -2.7911894829254824,
+      "pairedDeltaPercent": [
+        -3.837654686323788,
+        -2.3177391705031414,
+        -2.552984214304188,
+        -1.2771548652228737,
+        -2.3343437942057177,
+        0.17220900389873783,
+        -3.380001441697722
+      ],
+      "baselineCpuUs": 169.65,
+      "candidateCpuUs": 165.18
+    },
+    {
+      "fixture": "wide",
+      "lane": "append-consumer-field/stringify-json",
+      "baselineUs": 96.70687499999985,
+      "candidateUs": 94.94062499999984,
+      "deltaPercent": -1.8263954863602216,
+      "pairedDeltaPercent": [
+        3.3531461486975056,
+        0.5116354715862803,
+        -0.6377519306989043,
+        -0.7798463139250367,
+        -3.9775035956835514,
+        -3.361966598516164,
+        0.8915166634255733
+      ],
+      "baselineCpuUs": 100.48,
+      "candidateCpuUs": 98.76
+    },
+    {
+      "fixture": "wide",
+      "lane": "forward-field/native",
+      "baselineUs": 14.212920000000508,
+      "candidateUs": 15.584794999999758,
+      "deltaPercent": 9.652309307300676,
+      "pairedDeltaPercent": [
+        32.90993864394842,
+        11.713955467943693,
+        43.988090096324406,
+        -6.978870038249008,
+        -27.639320306342686,
+        -40.82564000029315,
+        10.55522017995132
+      ],
+      "baselineCpuUs": 14.605,
+      "candidateCpuUs": 16.15
+    },
+    {
+      "fixture": "wide",
+      "lane": "forward-field/explicit-json",
+      "baselineUs": 71.3220849999999,
+      "candidateUs": 70.45729499999993,
+      "deltaPercent": -1.212513627440881,
+      "pairedDeltaPercent": [
+        -2.7907077814576797,
+        0.7014149372773559,
+        3.237327482844554,
+        2.3595987133588014,
+        -13.722688621320822,
+        4.296373222276451,
+        0.09462389299155216
+      ],
+      "baselineCpuUs": 75.42,
+      "candidateCpuUs": 72.405
+    },
+    {
+      "fixture": "wide",
+      "lane": "retag-field/native",
+      "baselineUs": 54.563125000000234,
+      "candidateUs": 53.41958499999919,
+      "deltaPercent": -2.095811044548934,
+      "pairedDeltaPercent": [
+        -4.873158832440105,
+        -3.0296322734006953,
+        7.571181307823127,
+        -3.082823793542744,
+        -3.763247366717992,
+        4.016423569243277,
+        3.056143849127313
+      ],
+      "baselineCpuUs": 57.37,
+      "candidateCpuUs": 55.645
+    },
+    {
+      "fixture": "wide",
+      "lane": "retag-field/explicit-json",
+      "baselineUs": 73.64937499999996,
+      "candidateUs": 72.86958499999969,
+      "deltaPercent": -1.0587869890277712,
+      "pairedDeltaPercent": [
+        -2.7741276563245543,
+        -0.9309876399503536,
+        5.727305900424051,
+        0.4078876600426051,
+        -1.4201824623113257,
+        -7.335528318250429,
+        1.7200635952026477
+      ],
+      "baselineCpuUs": 76.43,
+      "candidateCpuUs": 75.775
+    },
+    {
+      "fixture": "wide",
+      "lane": "subtree-length/native",
+      "baselineUs": 36.32833500000004,
+      "candidateUs": 38.0793749999998,
+      "deltaPercent": 4.820039233837048,
+      "pairedDeltaPercent": [
+        2.6040931298293657,
+        6.213847507143888,
+        17.2753904581461,
+        0.5591365527759073,
+        -4.0718227036332095,
+        1.2585418031431095,
+        13.435717733717723
+      ],
+      "baselineCpuUs": 36.705,
+      "candidateCpuUs": 38.485
+    },
+    {
+      "fixture": "wide",
+      "lane": "subtree-length/explicit-json",
+      "baselineUs": 36.889999999999645,
+      "candidateUs": 38.113124999999854,
+      "deltaPercent": 3.3156004337224765,
+      "pairedDeltaPercent": [
+        3.7155290025686183,
+        0.171532471097402,
+        7.8047846170879565,
+        5.413500791880366,
+        -1.6264570344252105,
+        -5.510017509335141,
+        1.313933335496098
+      ],
+      "baselineCpuUs": 39.355,
+      "candidateCpuUs": 41.125
+    },
+    {
+      "fixture": "text64k",
+      "lane": "append-field/native",
+      "baselineUs": 36.523955000000115,
+      "candidateUs": 35.83270999999968,
+      "deltaPercent": -1.8925798150841944,
+      "pairedDeltaPercent": [
+        2.794446844613252,
+        3.252482539840873,
+        -0.30286971933691786,
+        -12.605563155717835,
+        4.016923376874759,
+        5.301916376382798,
+        -12.954599257696842
+      ],
+      "baselineCpuUs": 36.585,
+      "candidateCpuUs": 36.12
+    },
+    {
+      "fixture": "text64k",
+      "lane": "append-field/stringify-json",
+      "baselineUs": 70.1529149999999,
+      "candidateUs": 71.41833499999962,
+      "deltaPercent": 1.8038024506889405,
+      "pairedDeltaPercent": [
+        11.472072512670263,
+        31.305807614820512,
+        -16.95506569020725,
+        -1.2802324432551915,
+        -0.5785531945353695,
+        -5.070625472491297,
+        -0.23193619252971365
+      ],
+      "baselineCpuUs": 74.055,
+      "candidateCpuUs": 75.075
+    },
+    {
+      "fixture": "text64k",
+      "lane": "append-field/legacy-message",
+      "baselineUs": 91.6108350000002,
+      "candidateUs": 93.92582999999944,
+      "deltaPercent": 2.526988210509429,
+      "pairedDeltaPercent": [
+        8.125345736988399,
+        18.891544472921584,
+        -8.058271792803263,
+        8.061127830667658,
+        -4.447710797526971,
+        -9.00288009322685,
+        -6.336911441178539
+      ],
+      "baselineCpuUs": 93.27,
+      "candidateCpuUs": 94.13
+    },
+    {
+      "fixture": "text64k",
+      "lane": "append-native-copy/native",
+      "baselineUs": 76.91812499999969,
+      "candidateUs": 76.43749999999955,
+      "deltaPercent": -0.6248527248943536,
+      "pairedDeltaPercent": [
+        1.0048541874883465,
+        0.20777129187581345,
+        0.9765756846147999,
+        1.5068481618985219,
+        -2.8013227100777693,
+        -0.14047813268535103,
+        -1.2998590662058218
+      ],
+      "baselineCpuUs": 79.445,
+      "candidateCpuUs": 78.83
+    },
+    {
+      "fixture": "text64k",
+      "lane": "append-native-copy/stringify-json",
+      "baselineUs": 111.2847899999997,
+      "candidateUs": 110.2714549999996,
+      "deltaPercent": -0.9105781661627788,
+      "pairedDeltaPercent": [
+        2.4842430404954596,
+        15.265450535870206,
+        -8.901544910937842,
+        -2.610384115701736,
+        1.9018755942088905,
+        2.4426833172805473,
+        -7.670943514317441
+      ],
+      "baselineCpuUs": 115.88,
+      "candidateCpuUs": 114.905
+    },
+    {
+      "fixture": "text64k",
+      "lane": "append-consumer-field/native",
+      "baselineUs": 51.63187500000049,
+      "candidateUs": 53.05770499999994,
+      "deltaPercent": 2.76153054677839,
+      "pairedDeltaPercent": [
+        18.89816651921492,
+        5.213759300954646,
+        -13.951968324762076,
+        8.265618860064272,
+        3.9558896514992004,
+        14.487147310937987,
+        -1.1519758163963223
+      ],
+      "baselineCpuUs": 52.23,
+      "candidateCpuUs": 53.635
+    },
+    {
+      "fixture": "text64k",
+      "lane": "append-consumer-field/stringify-json",
+      "baselineUs": 91.12020999999913,
+      "candidateUs": 90.46708500000022,
+      "deltaPercent": -0.7167729310532889,
+      "pairedDeltaPercent": [
+        5.524047532259457,
+        18.926206314167125,
+        -7.349890729575659,
+        6.7585272188465995,
+        -2.527112261921971,
+        0.6439750158230506,
+        -15.048797040337192
+      ],
+      "baselineCpuUs": 95.425,
+      "candidateCpuUs": 95.26
+    },
+    {
+      "fixture": "text64k",
+      "lane": "forward-field/native",
+      "baselineUs": 13.41354000000024,
+      "candidateUs": 14.011874999999918,
+      "deltaPercent": 4.460679283766011,
+      "pairedDeltaPercent": [
+        12.117212239783726,
+        8.034493504321393,
+        1.1719297875141033,
+        8.316571377323555,
+        -8.202831811563627,
+        17.177142304162118,
+        -4.547112250652607
+      ],
+      "baselineCpuUs": 13.545,
+      "candidateCpuUs": 14.13
+    },
+    {
+      "fixture": "text64k",
+      "lane": "forward-field/explicit-json",
+      "baselineUs": 71.09666999999945,
+      "candidateUs": 71.52603999999997,
+      "deltaPercent": 0.6039242062961803,
+      "pairedDeltaPercent": [
+        -2.0611654526147993,
+        2.782833682257224,
+        -1.719352362638693,
+        8.918953965851738,
+        -3.17867961797772,
+        1.2650550384040171,
+        1.9374125611084647
+      ],
+      "baselineCpuUs": 75.105,
+      "candidateCpuUs": 74.585
+    },
+    {
+      "fixture": "text64k",
+      "lane": "retag-field/native",
+      "baselineUs": 28.08375000000069,
+      "candidateUs": 27.741039999999657,
+      "deltaPercent": -1.2203142386647992,
+      "pairedDeltaPercent": [
+        4.455423510033696,
+        2.3881640260942083,
+        0.09729562390790036,
+        29.319050405636425,
+        -4.2875326671817815,
+        -2.0724456701588068,
+        -4.611143468397283
+      ],
+      "baselineCpuUs": 29.925,
+      "candidateCpuUs": 29.6
+    },
+    {
+      "fixture": "text64k",
+      "lane": "retag-field/explicit-json",
+      "baselineUs": 69.99833500000022,
+      "candidateUs": 69.90770999999995,
+      "deltaPercent": -0.12946736518842927,
+      "pairedDeltaPercent": [
+        2.983405148601359,
+        -0.15935786311759292,
+        -0.36241090050470604,
+        49.76802568273699,
+        1.7185211486393737,
+        -0.9818733545593261,
+        1.8217918195974514
+      ],
+      "baselineCpuUs": 73.575,
+      "candidateCpuUs": 73.495
+    },
+    {
+      "fixture": "text64k",
+      "lane": "subtree-length/native",
+      "baselineUs": 15.142499999999472,
+      "candidateUs": 15.118124999999054,
+      "deltaPercent": -0.16097077761544343,
+      "pairedDeltaPercent": [
+        -4.74728879194023,
+        13.998207242364114,
+        0.2132738979751414,
+        113.52600973556073,
+        -7.541157013794953,
+        -4.921164863591176,
+        1.052763504192633
+      ],
+      "baselineCpuUs": 15.115,
+      "candidateCpuUs": 15.16
+    },
+    {
+      "fixture": "text64k",
+      "lane": "subtree-length/explicit-json",
+      "baselineUs": 14.805209999999533,
+      "candidateUs": 14.550835000000006,
+      "deltaPercent": -1.718145166461904,
+      "pairedDeltaPercent": [
+        14.811779096686962,
+        11.363311250363562,
+        -0.8559625413797178,
+        164.50138176247714,
+        -4.613341606076626,
+        -9.45115357581222,
+        -9.771626080070694
+      ],
+      "baselineCpuUs": 14.85,
+      "candidateCpuUs": 14.655
+    },
+    {
+      "fixture": "array",
+      "lane": "append-field/native",
+      "baselineUs": 1428.7424999999985,
+      "candidateUs": 1354.8441600000024,
+      "deltaPercent": -5.1722644213352815,
+      "pairedDeltaPercent": [
+        -6.436479670688444,
+        -4.676881836746071,
+        -6.6933122678103025,
+        -4.686813754052932,
+        -5.641819561275674,
+        -2.2700656093719074,
+        -9.173835427494371
+      ],
+      "baselineCpuUs": 1445.14,
+      "candidateCpuUs": 1377.18
+    },
+    {
+      "fixture": "array",
+      "lane": "append-field/stringify-json",
+      "baselineUs": 419.2833400000018,
+      "candidateUs": 421.4916600000015,
+      "deltaPercent": 0.5266891835005172,
+      "pairedDeltaPercent": [
+        1.631194869412278,
+        2.303103242014859,
+        -2.18927058241688,
+        1.6093358943015224,
+        -1.3087576124428124,
+        -0.3174082709798465,
+        2.3561985335358804
+      ],
+      "baselineCpuUs": 421.72,
+      "candidateCpuUs": 423.52
+    },
+    {
+      "fixture": "array",
+      "lane": "append-field/legacy-message",
+      "baselineUs": 670.0208399999974,
+      "candidateUs": 676.1341799999992,
+      "deltaPercent": 0.9124104259207622,
+      "pairedDeltaPercent": [
+        0.7652454434650569,
+        1.0326695002015995,
+        0.09292643687428548,
+        2.2714848404779,
+        -0.5304285227904826,
+        0.9124104259207622,
+        -0.2686402869978677
+      ],
+      "baselineCpuUs": 667.36,
+      "candidateCpuUs": 673.26
+    },
+    {
+      "fixture": "array",
+      "lane": "append-native-copy/native",
+      "baselineUs": 1782.180840000001,
+      "candidateUs": 1738.407500000003,
+      "deltaPercent": -2.456167130603759,
+      "pairedDeltaPercent": [
+        -3.093841541182629,
+        0.8981768675602408,
+        -6.360195603381236,
+        -2.456167130603759,
+        -3.9457547861888043,
+        -0.07014995151496395,
+        -5.78835567310726
+      ],
+      "baselineCpuUs": 1800.76,
+      "candidateCpuUs": 1751.92
+    },
+    {
+      "fixture": "array",
+      "lane": "append-native-copy/stringify-json",
+      "baselineUs": 784.9041599999965,
+      "candidateUs": 779.6016599999986,
+      "deltaPercent": -0.6755601855897853,
+      "pairedDeltaPercent": [
+        1.2078641876867913,
+        -0.6755601855897853,
+        -10.278968026561241,
+        1.7022631469862937,
+        1.6949031687255145,
+        -1.90628111594765,
+        1.5525974933200182
+      ],
+      "baselineCpuUs": 792.72,
+      "candidateCpuUs": 787.24
+    },
+    {
+      "fixture": "array",
+      "lane": "append-consumer-field/native",
+      "baselineUs": 1593.1033200000002,
+      "candidateUs": 1526.7025000000012,
+      "deltaPercent": -4.168017175433347,
+      "pairedDeltaPercent": [
+        -4.420650669988602,
+        -0.8196535716317399,
+        -8.722680548482032,
+        -3.8561133493339117,
+        -4.596114057575329,
+        0.11810272198276017,
+        -5.317137874020883
+      ],
+      "baselineCpuUs": 1695.48,
+      "candidateCpuUs": 1619.08
+    },
+    {
+      "fixture": "array",
+      "lane": "append-consumer-field/stringify-json",
+      "baselineUs": 591.371680000002,
+      "candidateUs": 586.5391600000021,
+      "deltaPercent": -0.8171713599812391,
+      "pairedDeltaPercent": [
+        -2.501574415487573,
+        1.454668914818047,
+        -0.6865824980413993,
+        2.3792176212905414,
+        -0.39851406802131617,
+        -2.466910551536605,
+        2.109028473814867
+      ],
+      "baselineCpuUs": 672.14,
+      "candidateCpuUs": 657.6
+    },
+    {
+      "fixture": "array",
+      "lane": "forward-field/native",
+      "baselineUs": 28.085000000000946,
+      "candidateUs": 27.61500000000524,
+      "deltaPercent": -1.6734911874512814,
+      "pairedDeltaPercent": [
+        0.5233034007560367,
+        2.7311646511457344,
+        -10.386274542594375,
+        1.7041292861224688,
+        -1.6734911874836667,
+        -6.067662941587237,
+        -5.153122575724078
+      ],
+      "baselineCpuUs": 30.02,
+      "candidateCpuUs": 29.84
+    },
+    {
+      "fixture": "array",
+      "lane": "forward-field/explicit-json",
+      "baselineUs": 545.907500000003,
+      "candidateUs": 544.4425000000047,
+      "deltaPercent": -0.26836048231583254,
+      "pairedDeltaPercent": [
+        0.09206584201972845,
+        0.7493650481060987,
+        -3.4134129279026038,
+        1.9405480553021492,
+        -0.2511562445259963,
+        -1.5641086667424586,
+        0.3040005049028016
+      ],
+      "baselineCpuUs": 547.34,
+      "candidateCpuUs": 545.86
+    },
+    {
+      "fixture": "array",
+      "lane": "retag-field/native",
+      "baselineUs": 525.5975000000035,
+      "candidateUs": 520.3300000000036,
+      "deltaPercent": -1.0021927425453714,
+      "pairedDeltaPercent": [
+        0.9888276271586616,
+        0.39399730782521125,
+        -4.027172365144849,
+        0.21458899307116308,
+        -1.324061230152218,
+        -1.8437323447047071,
+        -2.3589626444590506
+      ],
+      "baselineCpuUs": 527.04,
+      "candidateCpuUs": 522.66
+    },
+    {
+      "fixture": "array",
+      "lane": "retag-field/explicit-json",
+      "baselineUs": 546.7458400000032,
+      "candidateUs": 541.4949999999953,
+      "deltaPercent": -0.9603804210029043,
+      "pairedDeltaPercent": [
+        1.533309673956773,
+        -0.8802078859909135,
+        -2.4569123975369256,
+        2.875765630417826,
+        0.7038922254988478,
+        -4.023508586219993,
+        1.6190309747917464
+      ],
+      "baselineCpuUs": 548.86,
+      "candidateCpuUs": 543.32
+    },
+    {
+      "fixture": "array",
+      "lane": "subtree-length/native",
+      "baselineUs": 530.116680000001,
+      "candidateUs": 536.2383399999999,
+      "deltaPercent": 1.1547759636612254,
+      "pairedDeltaPercent": [
+        0.26640144948739675,
+        1.947099816184994,
+        -0.9606267355846243,
+        2.3584252684851092,
+        -1.7560624577970585,
+        -2.949502305558338,
+        -0.7761992721197375
+      ],
+      "baselineCpuUs": 532.54,
+      "candidateCpuUs": 536.94
+    },
+    {
+      "fixture": "array",
+      "lane": "subtree-length/explicit-json",
+      "baselineUs": 552.8499999999985,
+      "candidateUs": 547.2941600000013,
+      "deltaPercent": -1.0049452835303008,
+      "pairedDeltaPercent": [
+        -0.1927510857708259,
+        0.20711381893414593,
+        -1.0049452835303008,
+        1.5629511920175032,
+        0.5985354400535492,
+        -3.6784130834339956,
+        1.4292471164516485
+      ],
+      "baselineCpuUs": 551.84,
+      "candidateCpuUs": 548.54
+    }
+  ]
+}

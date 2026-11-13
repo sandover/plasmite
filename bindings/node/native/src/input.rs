@@ -158,6 +158,12 @@ fn property(env: Env, object: Raw, name: &std::ffi::CStr) -> Result<Raw> {
     })?;
     Ok(result)
 }
+fn keyed_property(env: Env, object: Raw, key: Raw) -> Result<Raw> {
+    let mut result = ptr::null_mut();
+    napi::check_status!(unsafe { sys::napi_get_property(env.raw(), object, key, &mut result) })?;
+    Ok(result)
+}
+
 fn call(env: Env, function: Raw, receiver: Raw, args: &[Raw]) -> Result<Raw> {
     let mut result = ptr::null_mut();
     napi::check_status!(unsafe {
@@ -247,6 +253,8 @@ struct Encoder {
     unbox: Raw,
     binary_hook: Raw,
     bigint_hook: Raw,
+    to_json_key: Raw,
+    length_key: Raw,
     view: Raw,
     undefined: Raw,
     stack: Vec<Raw>,
@@ -285,6 +293,8 @@ impl Encoder {
             unbox: property(env, helpers, c"unbox")?,
             binary_hook: property(env, helpers, c"bufferToJSON")?,
             bigint_hook: property(env, helpers, c"bigintHook")?,
+            to_json_key: property(env, helpers, c"toJSONKey")?,
+            length_key: property(env, helpers, c"lengthKey")?,
             view: property(env, helpers, c"view")?,
             undefined: unsafe { env.get_undefined()?.raw() },
             stack: Vec::new(),
@@ -294,7 +304,7 @@ impl Encoder {
         let result = call(self.env, self.classify, self.undefined, &[value])?;
         Ok(number(self.env, result)? as u32)
     }
-    fn normalize(&self, mut value: Raw, key: HookKey) -> Result<(Raw, u32)> {
+    fn normalize(&self, mut value: Raw, key: HookKey) -> Result<(Raw, u32, sys::napi_valuetype)> {
         let mut ty = kind(self.env, value)?;
         let mut class = if ty == Type::napi_object {
             self.class(value)?
@@ -302,7 +312,7 @@ impl Encoder {
             0
         };
         if class == 13 {
-            return Ok((value, class));
+            return Ok((value, class, ty));
         }
         if matches!(
             ty,
@@ -311,7 +321,7 @@ impl Encoder {
             let hook = if ty == Type::napi_bigint {
                 call(self.env, self.bigint_hook, self.undefined, &[value])?
             } else {
-                property(self.env, value, c"toJSON")?
+                keyed_property(self.env, value, self.to_json_key)?
             };
             let mut default_binary = false;
             if class == 6 {
@@ -336,10 +346,11 @@ impl Encoder {
             if (9..=12).contains(&class) {
                 let code = unsafe { self.env.create_uint32(class)?.raw() };
                 value = call(self.env, self.unbox, self.undefined, &[value, code])?;
+                ty = kind(self.env, value)?;
                 class = 0;
             }
         }
-        Ok((value, class))
+        Ok((value, class, ty))
     }
     fn put(&self, parent: usize, key: Option<&str>, value: &Input) -> Result<usize> {
         let mut child = 0;
@@ -404,7 +415,7 @@ impl Encoder {
     fn members(&mut self, parent: usize, value: Raw, class: u32) -> Result<()> {
         self.enter(value)?;
         if class == 8 {
-            let length = property(self.env, value, c"length")?;
+            let length = keyed_property(self.env, value, self.length_key)?;
             let mut numeric = ptr::null_mut();
             napi::check_status!(unsafe {
                 sys::napi_coerce_to_number(self.env.raw(), length, &mut numeric)
@@ -480,12 +491,12 @@ impl Encoder {
         value: Raw,
         array: bool,
     ) -> Result<()> {
-        let (value, class) = self.normalize(value, hook_key)?;
+        let (value, class, ty) = self.normalize(value, hook_key)?;
         if class == 13 {
             return self.copy(parent, key, value);
         }
         let mut input = Input::default();
-        match kind(self.env, value)? {
+        match ty {
             Type::napi_undefined | Type::napi_function | Type::napi_symbol if !array => {
                 return Ok(());
             }
@@ -579,7 +590,7 @@ impl Encoder {
         Ok(())
     }
     fn encode(mut self, value: JsUnknown) -> Result<OwnedBuilder> {
-        let (value, class) = self.normalize(unsafe { value.raw() }, HookKey::Root)?;
+        let (value, class, _) = self.normalize(unsafe { value.raw() }, HookKey::Root)?;
         if class == 13 {
             self.copy(usize::MAX, None, value)?;
         } else if class == 7 {

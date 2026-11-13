@@ -12,6 +12,8 @@ const isRawJSON = JSON.isRawJSON;
 
 const inputHelpers = Object.freeze({
   bufferToJSON,
+  toJSONKey: 'toJSON',
+  lengthKey: 'length',
   bigintHook(value) { return value.toJSON; },
   classify(value) {
     if (isRawJSON(value)) throw new TypeError('JSON.rawJSON requires the explicit JSON input boundary');
