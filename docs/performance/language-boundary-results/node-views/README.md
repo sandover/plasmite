@@ -65,3 +65,38 @@ noise and cannot establish exact native-owner retention or prompt release.
 New view entry points leave legacy methods available. Direct native conversion
 still needs a measured implementation choice; fewer codec passes alone do not
 justify its slower complete result.
+
+## Returning scalars without descriptor objects
+
+The first bridge allocated a temporary JavaScript `{ value: scalar }` for every
+field, then immediately discarded it in the Proxy wrapper. The next bridge
+returns primitives directly, uses undefined only for absence, and reserves node
+descriptors for containers/bytes. Tests distinguish null, false, zero and empty
+strings from absence.
+
+Object presence now returns a boolean without extracting a scalar. Dense array
+presence follows the known index/count and never calls the backend. This avoids
+the extra lookup/decode that Array.map performs through HasProperty. A focused
+check counts zero indexed reads for presence and exactly one get per map item.
+
+A [matched alternating A/B](scalar-presence-ab.raw.json) rebuilds commit 86d4594
+in an isolated package and compares it with the primitive/presence bridge. Both
+variants load the same core library hash. Three pairs run AB/BA/AB, with 2,000
+small-array operations and 100 wide/large-array operations per repeat.
+
+| Warm operation | Small before/after µs | Wide before/after µs | 4,096 array before/after µs |
+| --- | ---: | ---: | ---: |
+| Field chain | 1.207 / 1.109 | 1.173 / 1.049 | 1.333 / 1.213 |
+| Array iteration | 4.250 / 3.820 | 90.271 / 75.970 | 2,831.753 / 2,375.276 |
+| Array.map | 5.762 / 3.766 | 149.274 / 86.783 | 4,737.057 / 2,829.438 |
+
+The combined boundary changes reduce field time 8–11%, iteration time 10–16%,
+and map time 35–42%. The isolated count check establishes why presence saves
+work; these timings measure the combined changes rather than allocate the gain
+between them. Cold-read latency has no established gain from this slice.
+
+The earlier [short exploratory run](scalar-values.raw.json) used only six
+small-array operations per repeat and showed a regression there. The longer
+matched A/B resolves that noise. To repeat warm-only comparisons, set
+PLASMITE_BENCH_WARM_ONLY=1; PLASMITE_BENCH_BINDING selects an isolated package
+root. The script records the chosen package's addon/library/JS hashes.

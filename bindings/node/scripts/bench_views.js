@@ -6,7 +6,9 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { performance } = require('node:perf_hooks');
-const { Client, toNative, toJson } = require('..');
+const bindingRoot = process.env.PLASMITE_BENCH_BINDING ? path.resolve(process.env.PLASMITE_BENCH_BINDING) : path.join(__dirname, '..');
+const { Client, toNative, toJson } = require(bindingRoot);
+const warmOnly = process.env.PLASMITE_BENCH_WARM_ONLY === '1';
 const assert = require('node:assert/strict');
 const iterations = Number(process.argv[2] || 100);
 const repeats = Number(process.argv[3] || 5);
@@ -49,6 +51,7 @@ async function main() {
       // Warm the JIT and native access separately from recorded repeats.
       for (let i = 0; i < 100; i++) sink += view.data.metrics.power + native.data.metrics.power;
       const rows = [];
+      const arrayIterations = fixture === 'small' ? 2000 : 100;
       for (let repeat = 0; repeat < repeats; repeat++) {
         // Alternate lane order to reduce systematic thermal/cache bias.
         const cold = [
@@ -60,15 +63,17 @@ async function main() {
         const warm = [
           ['warm-field/view', iterations * 100, () => view.data.metrics.power],
           ['warm-field/native-object', iterations * 100, () => native.data.metrics.power],
-          ['warm-array/view', Math.max(1, Math.floor(iterations / 5)), () => sum(view.data.samples)],
-          ['warm-array/native-object', Math.max(1, Math.floor(iterations / 5)), () => sum(native.data.samples)],
+          ['warm-array/view', arrayIterations, () => sum(view.data.samples)],
+          ['warm-array/native-object', arrayIterations, () => sum(native.data.samples)],
+          ['warm-map/view', arrayIterations, () => view.data.samples.map(x => x.value).length],
+          ['warm-map/native-object', arrayIterations, () => native.data.samples.map(x => x.value).length],
           ['warm-copy/view-toNative', iterations, () => toNative(view.data).metrics.power],
           ['warm-copy/native-structuredClone', iterations, () => structuredClone(native.data).metrics.power],
           ['warm-json/view-toJson', iterations, () => toJson(view.data).length],
           ['warm-json/native-stringify', iterations, () => JSON.stringify(native.data).length],
         ];
         if (repeat % 2) { cold.reverse(); warm.reverse(); }
-        for (const [name, fn] of cold) rows.push({ repeat, ...await asyncRun(name, iterations, fn) });
+        for (const [name, fn] of warmOnly ? [] : cold) rows.push({ repeat, ...await asyncRun(name, iterations, fn) });
         for (const [name, n, fn] of warm) rows.push({ repeat, ...sync(name, n, fn) });
       }
       global.gc?.();
@@ -84,14 +89,14 @@ async function main() {
       global.gc?.();
       await new Promise(resolve => setImmediate(resolve));
       const releasedChildren = process.memoryUsage();
-      measurements.push({ fixture, initialViewMs, jsonBytes: Buffer.byteLength(JSON.stringify(data)), rows,
+      measurements.push({ fixture, initialViewMs, arrayIterations, jsonBytes: Buffer.byteLength(JSON.stringify(data)), rows,
         memory: { before, retainedChildren, releasedChildren } });
     }
     const result = { node: process.version, platform: process.platform, arch: process.arch,
-      iterations, repeats, gcExposed: !!global.gc, sink, measurements,
+      iterations, repeats, warmOnly, gcExposed: !!global.gc, sink, measurements,
       hashes: Object.fromEntries(['scripts/bench_views.js', 'index.js', 'views.js', `native/${process.platform}-${process.arch}/index.node`,
         `native/${process.platform}-${process.arch}/${process.platform === 'darwin' ? 'libplasmite.dylib' : process.platform === 'win32' ? 'plasmite.dll' : 'libplasmite.so'}`]
-        .map(file => [file, hash(path.join(__dirname, '..', file))])),
+        .map(file => [file, hash(file === 'scripts/bench_views.js' ? __filename : path.join(bindingRoot, file))])),
       limits: ['Warm native-object controls already own decoded data; they isolate view access overhead.',
         'Cold controls perform the same requested result through the current full JSON API; initialViewMs separately captures startup including first ABI detection.',
         'Heap/RSS samples do not prove prompt GC or a bound on retention.'] };

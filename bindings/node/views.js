@@ -1,5 +1,5 @@
 // Immutable language views. Backends own checked Lite3 bytes and return node
-// descriptors: { kind: object|array|bytes, node, count } or { value: scalar }.
+// descriptors for containers/bytes; scalars cross directly and undefined means absent.
 const refs = new WeakMap();
 const messages = new WeakMap();
 const readonly = () => { throw new TypeError("Plasmite views are read-only"); };
@@ -14,7 +14,7 @@ function timestampText(ns) {
 function createMessageView(backend, seq, timestampNs) {
   const cache = new Map();
   function wrap(value) {
-    if (!value || !value.kind) return value?.value;
+    if (value === null || typeof value !== "object") return value;
     const prior = cache.get(value.node)?.deref();
     if (prior) return prior;
     const array = value.kind === "array";
@@ -27,7 +27,7 @@ function createMessageView(backend, seq, timestampNs) {
         const index = indexOf(key);
         return index >= 0 && index < value.count ? backend.at(value.node, index) : undefined;
       }
-      return backend.lookup(value.node, key) ?? undefined;
+      return backend.lookup(value.node, key);
     };
     const iterator = function* () {
       for (const item of backend.iterate(value.node)) yield wrap(item);
@@ -40,7 +40,14 @@ function createMessageView(backend, seq, timestampNs) {
         if (item !== undefined) return wrap(item);
         return array ? Reflect.get(target, key, receiver) : undefined;
       },
-      has(target, key) { return lookup(key) !== undefined || Reflect.has(target, key); },
+      has(target, key) {
+        if (array || bytes) {
+          const index = indexOf(key);
+          return (index >= 0 && index < value.count) || Reflect.has(target, key);
+        }
+        return (typeof key === "string" && !key.includes("\0") && key.isWellFormed()
+          && backend.has(value.node, key)) || Reflect.has(target, key);
+      },
       ownKeys() {
         if (array || bytes) return [...Array.from({ length: value.count }, (_, i) => String(i)), "length"];
         const keys = backend.keys(value.node);

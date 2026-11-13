@@ -1,5 +1,5 @@
 use super::*;
-use napi::{JsObject, JsUnknown, Property};
+use napi::{JsUnknown, Property};
 
 #[repr(C)]
 pub struct Owner {
@@ -104,10 +104,13 @@ impl NativeView {
         }
         Ok(value)
     }
-    fn descriptor(&self, env: Env, reference: ValueRef) -> Result<JsObject> {
+    fn descriptor(&self, env: Env, reference: ValueRef) -> Result<JsUnknown> {
         let value = self.read(env, reference.offset as u32)?;
+        if value.kind < 6 {
+            return self.scalar(env, value);
+        }
         let mut object = env.create_object()?;
-        if value.kind >= 6 {
+        {
             object.set_named_property(
                 "kind",
                 match value.kind {
@@ -118,10 +121,8 @@ impl NativeView {
             )?;
             object.set_named_property("node", reference.offset as u32)?;
             object.set_named_property("count", value.len as u32)?;
-        } else {
-            object.set_named_property("value", self.scalar(env, value)?)?;
         }
-        Ok(object)
+        Ok(object.into_unknown())
     }
     fn scalar(&self, env: Env, value: Value) -> Result<JsUnknown> {
         Ok(match value.kind {
@@ -204,7 +205,7 @@ impl NativeView {
 #[napi]
 impl NativeView {
     #[napi]
-    pub fn root(&self, env: Env) -> Result<JsObject> {
+    pub fn root(&self, env: Env) -> Result<JsUnknown> {
         self.descriptor(env, unsafe { plsm_view_root(self.owner.0) })
     }
     #[napi(getter)]
@@ -216,7 +217,7 @@ impl NativeView {
         BigInt::from(unsafe { plsm_view_timestamp_ns(self.owner.0) })
     }
     #[napi]
-    pub fn lookup(&self, env: Env, node: u32, key: String) -> Result<Option<JsObject>> {
+    pub fn lookup(&self, env: Env, node: u32, key: String) -> Result<JsUnknown> {
         let mut out = ValueRef {
             owner: ptr::null(),
             offset: 0,
@@ -235,21 +236,42 @@ impl NativeView {
             return Err(take_error(env, err)?);
         }
         if out.owner.is_null() {
-            Ok(None)
+            Ok(env.get_undefined()?.into_unknown())
         } else {
-            self.descriptor(env, out).map(Some)
+            self.descriptor(env, out)
         }
     }
     #[napi]
-    pub fn at(&self, env: Env, node: u32, index: u32) -> Result<JsObject> {
+    pub fn has(&self, env: Env, node: u32, key: String) -> Result<bool> {
+        let mut out = ValueRef {
+            owner: ptr::null(),
+            offset: 0,
+        };
+        let mut err = ptr::null_mut();
+        if unsafe {
+            plsm_value_get(
+                self.reference(node),
+                key.as_ptr(),
+                key.len(),
+                &mut out,
+                &mut err,
+            )
+        } != 0
+        {
+            return Err(take_error(env, err)?);
+        }
+        Ok(!out.owner.is_null())
+    }
+    #[napi]
+    pub fn at(&self, env: Env, node: u32, index: u32) -> Result<JsUnknown> {
         let value = self.read(env, node)?;
         if value.kind == 6 {
             if index as usize >= value.len {
                 return Err(Error::from_reason("byte index out of bounds"));
             }
-            let mut out = env.create_object()?;
-            out.set_named_property("value", unsafe { *value.bytes.add(index as usize) } as u32)?;
-            return Ok(out);
+            return Ok(env
+                .create_uint32(unsafe { *value.bytes.add(index as usize) } as u32)?
+                .into_unknown());
         }
         let mut out = ValueRef {
             owner: ptr::null(),
@@ -309,18 +331,17 @@ pub struct NativeCursor {
 #[napi]
 impl NativeCursor {
     #[napi]
-    pub fn next_value(&mut self, env: Env) -> Result<Option<JsObject>> {
+    pub fn next_value(&mut self, env: Env) -> Result<JsUnknown> {
         if self.index >= self.count {
-            return Ok(None);
+            return Ok(env.get_undefined()?.into_unknown());
         }
         let index = self.index;
         self.index += 1;
         if self.bytes {
-            self.backend.at(env, self.node, index).map(Some)
+            self.backend.at(env, self.node, index)
         } else {
             self.backend
                 .descriptor(env, self.entries[index as usize].value)
-                .map(Some)
         }
     }
 }

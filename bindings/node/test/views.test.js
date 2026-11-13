@@ -8,7 +8,7 @@ function owner(data) {
   const values = new Map();
   let next = 0;
   function describe(value) {
-    if (value === null || typeof value !== 'object') return { value };
+    if (value === null || typeof value !== 'object') return value;
     const node = next++;
     values.set(node, value);
     return { kind: Array.isArray(value) ? 'array' : 'object', node,
@@ -16,7 +16,7 @@ function owner(data) {
   }
   const descriptors = new WeakMap();
   function get(value) {
-    if (value === null || typeof value !== 'object') return { value };
+    if (value === null || typeof value !== 'object') return value;
     if (!descriptors.has(value)) descriptors.set(value, describe(value));
     return descriptors.get(value);
   }
@@ -27,6 +27,7 @@ function owner(data) {
     lookup: (node, key) => Object.hasOwn(values.get(node), key) ? get(values.get(node)[key]) : undefined,
     at: (node, index) => get(values.get(node)[index]),
     keys: node => Object.keys(values.get(node)),
+    has: (node, key) => Object.hasOwn(values.get(node), key),
     *iterate(node) { for (const item of values.get(node)) yield get(item); },
     materialize(node) { nativeCalls++; return structuredClone(values.get(node)); },
     json: node => JSON.stringify(values.get(node)),
@@ -88,4 +89,31 @@ test('mutation, freeze, seal and cloning fail explicitly', () => {
   assert.throws(() => structuredClone(m.data), { name: 'DataCloneError' });
   assert.equal(toJson(-0), '-0.0');
   assert.equal(toJson(9223372036854775807n), '9223372036854775807');
+});
+
+test('primitive null, false, zero and empty string remain present', () => {
+  const m = createMessageView(owner({ mixed: [null, false, 0, ''], value: null }), 1n, 0n);
+  assert.deepEqual([...m.data.mixed], [null, false, 0, '']);
+  assert.equal(Object.hasOwn(m.data, 'value'), true);
+  assert.equal(m.data.value, null);
+});
+
+test('presence and dense-array map avoid decoding values twice', () => {
+  const backend = owner({ value: 42, items: [1, 2] });
+  let lookups = 0, indices = 0;
+  const lookup = backend.lookup, at = backend.at;
+  backend.lookup = (...args) => { lookups++; return lookup(...args); };
+  backend.at = (...args) => { indices++; return at(...args); };
+  const m = createMessageView(backend, 1n, 0n);
+  const data = m.data, items = data.items;
+  lookups = 0;
+  assert.equal('value' in data, true);
+  assert.equal('missing' in data, false);
+  assert.equal(0 in items, true);
+  assert.equal(2 in items, false);
+  assert.equal('map' in items, true);
+  assert.equal(lookups, 0);
+  assert.equal(indices, 0);
+  assert.deepEqual(items.map(x => x * 2), [2, 4]);
+  assert.equal(indices, 2);
 });

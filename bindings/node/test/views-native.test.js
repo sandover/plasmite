@@ -10,9 +10,15 @@ test('native views retain exact values and independent snapshot lifetime', async
   const client = new Client(dir);
   const pool = client.createPool('views', 65536);
   t.after(() => { pool.close(); client.close(); fs.rmSync(dir, { recursive: true, force: true }); });
-  pool.appendJson(Buffer.from('{"metrics":{"power":42},"samples":[{"value":1},{"value":2}],"large":9223372036854775807,"negativeZero":-0.0,"__proto__":{"x":1},"then":null}'));
+  pool.appendJson(Buffer.from('{"metrics":{"power":42},"samples":[{"value":1},{"value":2}],"large":9223372036854775807,"negativeZero":-0.0,"__proto__":{"x":1},"then":null,"mixed":[null,false,0,""]}'));
   const [first, second] = await Promise.all([pool.getView(1n), pool.getView(1n)]);
   assert.equal(first.seq, 1n);
+  assert.equal('large' in first.data, true);
+  assert.equal('absent' in first.data, false);
+  assert.equal('bad\0key' in first.data, false);
+  assert.equal(0 in first.data.samples, true);
+  assert.equal(2 in first.data.samples, false);
+  assert.deepEqual([...first.data.mixed], [null, false, 0, '']);
   assert.equal(typeof first.timestampNs, 'bigint');
   assert.equal(first.data.large, 9223372036854775807n);
   assert.equal(Object.is(first.data.negativeZero, -0), true);

@@ -297,12 +297,13 @@ class Pool {
         root: () => owner.root(),
         lookup: (node, key) => owner.lookup(node, key),
         at: (node, index) => owner.at(node, index),
+        has: (node, key) => owner.has(node, key),
         keys: node => owner.keys(node),
         materialize: node => owner.materialize(node),
         json: node => owner.json(node),
         *iterate(node) {
           const cursor = owner.cursor(node);
-          for (let value = cursor.nextValue(); value != null; value = cursor.nextValue()) yield value;
+          for (let value = cursor.nextValue(); value !== undefined; value = cursor.nextValue()) yield value;
         },
       };
       return createMessageView(backend, owner.seq, owner.timestampNs);
