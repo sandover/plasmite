@@ -1,0 +1,125 @@
+{
+  "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "library_sha256": "ea3e5ab7c5bb262a86fcd88140c38a332074157d023fb084a28e0a004f798984",
+  "binding_sha256": "3d78678fb2e1230034a3a6e461a80749397c433747fbff53cf89eee1cbb6ee96",
+  "runner_sha256": "fe973f86cf74dd12be4195c15cad02ecdd0c5af1defa9b40177b76b66fed8f7d",
+  "notes": [
+    "Allocation diagnostics exclude C/Rust allocations; ns_per_op is null.",
+    "Each measurement starts a fresh tracemalloc session; result survives until after the peak is read."
+  ],
+  "runs": [
+    {
+      "fixture": "small",
+      "repeat": 1,
+      "ns_per_op": null,
+      "encoded_bytes": 424,
+      "python_current_bytes": 2457,
+      "python_peak_bytes": 4259
+    },
+    {
+      "fixture": "small",
+      "repeat": 2,
+      "ns_per_op": null,
+      "encoded_bytes": 424,
+      "python_current_bytes": 2441,
+      "python_peak_bytes": 4219
+    },
+    {
+      "fixture": "small",
+      "repeat": 3,
+      "ns_per_op": null,
+      "encoded_bytes": 424,
+      "python_current_bytes": 2425,
+      "python_peak_bytes": 4171
+    },
+    {
+      "fixture": "small",
+      "repeat": 4,
+      "ns_per_op": null,
+      "encoded_bytes": 424,
+      "python_current_bytes": 2409,
+      "python_peak_bytes": 4131
+    },
+    {
+      "fixture": "small",
+      "repeat": 5,
+      "ns_per_op": null,
+      "encoded_bytes": 424,
+      "python_current_bytes": 2377,
+      "python_peak_bytes": 4083
+    },
+    {
+      "fixture": "small",
+      "repeat": 6,
+      "ns_per_op": null,
+      "encoded_bytes": 424,
+      "python_current_bytes": 2361,
+      "python_peak_bytes": 4035
+    },
+    {
+      "fixture": "small",
+      "repeat": 7,
+      "ns_per_op": null,
+      "encoded_bytes": 424,
+      "python_current_bytes": 2345,
+      "python_peak_bytes": 3995
+    },
+    {
+      "fixture": "long_string",
+      "repeat": 1,
+      "ns_per_op": null,
+      "encoded_bytes": 65957,
+      "python_current_bytes": 133447,
+      "python_peak_bytes": 200586
+    },
+    {
+      "fixture": "long_string",
+      "repeat": 2,
+      "ns_per_op": null,
+      "encoded_bytes": 65957,
+      "python_current_bytes": 133431,
+      "python_peak_bytes": 200570
+    },
+    {
+      "fixture": "long_string",
+      "repeat": 3,
+      "ns_per_op": null,
+      "encoded_bytes": 65957,
+      "python_current_bytes": 133415,
+      "python_peak_bytes": 200554
+    },
+    {
+      "fixture": "long_string",
+      "repeat": 4,
+      "ns_per_op": null,
+      "encoded_bytes": 65957,
+      "python_current_bytes": 133383,
+      "python_peak_bytes": 200538
+    },
+    {
+      "fixture": "long_string",
+      "repeat": 5,
+      "ns_per_op": null,
+      "encoded_bytes": 65957,
+      "python_current_bytes": 133367,
+      "python_peak_bytes": 200522
+    },
+    {
+      "fixture": "long_string",
+      "repeat": 6,
+      "ns_per_op": null,
+      "encoded_bytes": 65957,
+      "python_current_bytes": 133351,
+      "python_peak_bytes": 200498
+    },
+    {
+      "fixture": "long_string",
+      "repeat": 7,
+      "ns_per_op": null,
+      "encoded_bytes": 65957,
+      "python_current_bytes": 133335,
+      "python_peak_bytes": 200474
+    }
+  ]
+}

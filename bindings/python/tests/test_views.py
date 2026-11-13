@@ -169,6 +169,30 @@ class Views(unittest.TestCase):
         gc.collect()
         self.assertEqual(blob.tobytes(), b"abc\0")
 
+    def test_canonical_message_export_preserves_payload_and_known_metadata(self):
+        from pathlib import Path
+
+        payload = (Path(__file__).parent / "fixtures" / "extra-meta.lite3").read_bytes()
+        message = plasmite.view_from_lite3(payload, 7, 123400000)
+        self.assertEqual(plasmite.to_native(message.meta), {"tags": [], "extra": 7})
+        expected = {
+            "seq": 7,
+            "time": "1970-01-01T00:00:00.1234Z",
+            "meta": {"tags": []},
+            "data": {"value": 1},
+        }
+        self.assertEqual(plasmite.to_native(message), expected)
+        self.assertEqual(json.loads(plasmite.to_json(message)), expected)
+
+    def test_canonical_timestamp_keeps_exact_nanoseconds(self):
+        payload = bytes(memoryview(self.message))
+        for timestamp in [0, 1, 100, 123400000, 123456789]:
+            message = plasmite.view_from_lite3(payload, 1, timestamp)
+            self.assertEqual(message.timestamp_ns, timestamp)
+            self.assertEqual(
+                json.loads(plasmite.to_json(message))["time"], message.time_rfc3339
+            )
+
     def test_validates_and_isolates_bytes(self):
         payload = bytearray(memoryview(self.message))
         view = plasmite.view_from_lite3(payload, 1, 2)

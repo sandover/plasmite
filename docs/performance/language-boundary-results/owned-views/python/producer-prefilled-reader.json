@@ -1,0 +1,133 @@
+{
+  "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "runner_sha256": "259323b8a2b23c5b790130fbe4f374017526dbfa998eaf43c2e5d37bc39bce2a",
+  "driver_sha256": "c504d0f14bd121662de692f38cb6751becc848ae826cc0b5ee0d90799bb6b6f0",
+  "library_sha256": "ea3e5ab7c5bb262a86fcd88140c38a332074157d023fb084a28e0a004f798984",
+  "messages": 5000,
+  "runs": [
+    {
+      "role": "reader",
+      "cpu_seconds": 0.038809,
+      "started_ns": 557234094842666,
+      "ended_ns": 557234133675916,
+      "messages": 5000,
+      "checksum": 37492500,
+      "latencies_ns": [],
+      "peak_rss_bytes": 41517056,
+      "variant": "native-view",
+      "repeat": 1
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.040637999999999994,
+      "started_ns": 557234236054958,
+      "ended_ns": 557234277021875,
+      "messages": 5000,
+      "checksum": 37492500,
+      "latencies_ns": [],
+      "peak_rss_bytes": 41009152,
+      "variant": "identity",
+      "repeat": 1
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.04410599999999999,
+      "started_ns": 557234407349875,
+      "ended_ns": 557234452782541,
+      "messages": 5000,
+      "checksum": 37492500,
+      "latencies_ns": [],
+      "peak_rss_bytes": 41762816,
+      "variant": "identity",
+      "repeat": 2
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.04046,
+      "started_ns": 557234544506375,
+      "ended_ns": 557234585191166,
+      "messages": 5000,
+      "checksum": 37492500,
+      "latencies_ns": [],
+      "peak_rss_bytes": 41533440,
+      "variant": "native-view",
+      "repeat": 2
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.049082999999999995,
+      "started_ns": 557234678381083,
+      "ended_ns": 557234729527458,
+      "messages": 5000,
+      "checksum": 37492500,
+      "latencies_ns": [],
+      "peak_rss_bytes": 41353216,
+      "variant": "native-view",
+      "repeat": 3
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.040787000000000004,
+      "started_ns": 557234852852000,
+      "ended_ns": 557234893731583,
+      "messages": 5000,
+      "checksum": 37492500,
+      "latencies_ns": [],
+      "peak_rss_bytes": 42237952,
+      "variant": "identity",
+      "repeat": 3
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.03954500000000001,
+      "started_ns": 557234995591333,
+      "ended_ns": 557235035170666,
+      "messages": 5000,
+      "checksum": 37492500,
+      "latencies_ns": [],
+      "peak_rss_bytes": 41500672,
+      "variant": "identity",
+      "repeat": 4
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.039348,
+      "started_ns": 557235122252750,
+      "ended_ns": 557235161620458,
+      "messages": 5000,
+      "checksum": 37492500,
+      "latencies_ns": [],
+      "peak_rss_bytes": 41418752,
+      "variant": "native-view",
+      "repeat": 4
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.04020399999999998,
+      "started_ns": 557235251101125,
+      "ended_ns": 557235291413125,
+      "messages": 5000,
+      "checksum": 37492500,
+      "latencies_ns": [],
+      "peak_rss_bytes": 41336832,
+      "variant": "native-view",
+      "repeat": 5
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.039711,
+      "started_ns": 557235394950625,
+      "ended_ns": 557235434721458,
+      "messages": 5000,
+      "checksum": 37492500,
+      "latencies_ns": [],
+      "peak_rss_bytes": 41385984,
+      "variant": "identity",
+      "repeat": 5
+    }
+  ],
+  "notes": [
+    "All append work finishes before reader process starts.",
+    "Reader reports its own elapsed/CPU after imports and start token; source pool pages are warm."
+  ]
+}

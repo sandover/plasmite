@@ -1,0 +1,451 @@
+{
+  "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "backend": "native",
+  "library_sha256": "ea3e5ab7c5bb262a86fcd88140c38a332074157d023fb084a28e0a004f798984",
+  "runner_sha256": "5210f43ba3b6a824d2082ac775ae5a7780a11fa71e7406c77c9a722f14c6d539",
+  "binding_sha256": "3d78678fb2e1230034a3a6e461a80749397c433747fbff53cf89eee1cbb6ee96",
+  "facade_sha256": "5855207c6664c8d0b024f6781af6a2861c35347566e51b4bdebe8a49b0fa3691",
+  "backend_sha256": "90123c26e7f645742abd6d60a0d2b85783cf710cc062f43439785a1062b8083d",
+  "native_source_sha256": "d661ca631291ef0189106d0f278c094acd33712258c2b80c9260da37f54e5fac",
+  "allocation_diagnostic": true,
+  "runs": [
+    {
+      "operations": 20,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1244,
+      "python_traced_peak_bytes": 2980,
+      "fixture": "small",
+      "lane": "view_retained",
+      "repeat": 1
+    },
+    {
+      "operations": 20,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1809,
+      "python_traced_peak_bytes": 2133,
+      "fixture": "small",
+      "lane": "view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 20,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1004,
+      "python_traced_peak_bytes": 1208,
+      "fixture": "small",
+      "lane": "view_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 20,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1544,
+      "python_traced_peak_bytes": 3267,
+      "fixture": "small",
+      "lane": "legacy_identity",
+      "repeat": 1
+    },
+    {
+      "operations": 20,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1520,
+      "python_traced_peak_bytes": 2475,
+      "fixture": "small",
+      "lane": "compact_identity",
+      "repeat": 1
+    },
+    {
+      "operations": 20,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 2364,
+      "python_traced_peak_bytes": 4423,
+      "fixture": "small",
+      "lane": "legacy_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 20,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 3057,
+      "python_traced_peak_bytes": 5116,
+      "fixture": "small",
+      "lane": "legacy_native",
+      "repeat": 1
+    },
+    {
+      "operations": 20,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 3057,
+      "python_traced_peak_bytes": 5116,
+      "fixture": "small",
+      "lane": "compact_native",
+      "repeat": 1
+    },
+    {
+      "operations": 20,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1830,
+      "python_traced_peak_bytes": 3605,
+      "fixture": "small",
+      "lane": "view_json",
+      "repeat": 1
+    },
+    {
+      "operations": 20,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 2182,
+      "python_traced_peak_bytes": 3957,
+      "fixture": "small",
+      "lane": "compact_json",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1244,
+      "python_traced_peak_bytes": 2980,
+      "fixture": "wide",
+      "lane": "view_retained",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 96843,
+      "python_traced_peak_bytes": 163438,
+      "fixture": "wide",
+      "lane": "view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1004,
+      "python_traced_peak_bytes": 1208,
+      "fixture": "wide",
+      "lane": "view_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1520,
+      "python_traced_peak_bytes": 19910,
+      "fixture": "wide",
+      "lane": "legacy_identity",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1520,
+      "python_traced_peak_bytes": 17894,
+      "fixture": "wide",
+      "lane": "compact_identity",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 16100,
+      "python_traced_peak_bytes": 88564,
+      "fixture": "wide",
+      "lane": "legacy_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 79366,
+      "python_traced_peak_bytes": 151830,
+      "fixture": "wide",
+      "lane": "legacy_native",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 79366,
+      "python_traced_peak_bytes": 151830,
+      "fixture": "wide",
+      "lane": "compact_native",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 23896,
+      "python_traced_peak_bytes": 79589,
+      "fixture": "wide",
+      "lane": "view_json",
+      "repeat": 1
+    },
+    {
+      "operations": 3,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 24249,
+      "python_traced_peak_bytes": 79943,
+      "fixture": "wide",
+      "lane": "compact_json",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1244,
+      "python_traced_peak_bytes": 67290,
+      "fixture": "long_string",
+      "lane": "view_retained",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 67431,
+      "python_traced_peak_bytes": 133318,
+      "fixture": "long_string",
+      "lane": "view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1004,
+      "python_traced_peak_bytes": 1184,
+      "fixture": "long_string",
+      "lane": "view_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1524,
+      "python_traced_peak_bytes": 132650,
+      "fixture": "long_string",
+      "lane": "legacy_identity",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1524,
+      "python_traced_peak_bytes": 132630,
+      "fixture": "long_string",
+      "lane": "compact_identity",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 2368,
+      "python_traced_peak_bytes": 201171,
+      "fixture": "long_string",
+      "lane": "legacy_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 68683,
+      "python_traced_peak_bytes": 267310,
+      "fixture": "long_string",
+      "lane": "legacy_native",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 68683,
+      "python_traced_peak_bytes": 267310,
+      "fixture": "long_string",
+      "lane": "compact_native",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 67407,
+      "python_traced_peak_bytes": 134772,
+      "fixture": "long_string",
+      "lane": "view_json",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 67763,
+      "python_traced_peak_bytes": 198847,
+      "fixture": "long_string",
+      "lane": "compact_json",
+      "repeat": 1
+    },
+    {
+      "operations": 1,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1244,
+      "python_traced_peak_bytes": 2980,
+      "fixture": "array",
+      "lane": "view_retained",
+      "repeat": 1
+    },
+    {
+      "operations": 1,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 9457,
+      "python_traced_peak_bytes": 9457,
+      "fixture": "array",
+      "lane": "view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 1,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 916,
+      "python_traced_peak_bytes": 1016,
+      "fixture": "array",
+      "lane": "view_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 1,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1520,
+      "python_traced_peak_bytes": 10748,
+      "fixture": "array",
+      "lane": "legacy_identity",
+      "repeat": 1
+    },
+    {
+      "operations": 1,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1520,
+      "python_traced_peak_bytes": 8850,
+      "fixture": "array",
+      "lane": "compact_identity",
+      "repeat": 1
+    },
+    {
+      "operations": 1,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 2276,
+      "python_traced_peak_bytes": 20597,
+      "fixture": "array",
+      "lane": "legacy_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 1,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 11313,
+      "python_traced_peak_bytes": 20597,
+      "fixture": "array",
+      "lane": "legacy_native",
+      "repeat": 1
+    },
+    {
+      "operations": 1,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 11313,
+      "python_traced_peak_bytes": 20597,
+      "fixture": "array",
+      "lane": "compact_native",
+      "repeat": 1
+    },
+    {
+      "operations": 1,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 5745,
+      "python_traced_peak_bytes": 16256,
+      "fixture": "array",
+      "lane": "view_json",
+      "repeat": 1
+    },
+    {
+      "operations": 1,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 6097,
+      "python_traced_peak_bytes": 16608,
+      "fixture": "array",
+      "lane": "compact_json",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1244,
+      "python_traced_peak_bytes": 2980,
+      "fixture": "bytes",
+      "lane": "view_retained",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 67423,
+      "python_traced_peak_bytes": 133302,
+      "fixture": "bytes",
+      "lane": "view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 2,
+      "ns_per_op": null,
+      "cpu_ns_per_op": null,
+      "python_traced_current_bytes": 1004,
+      "python_traced_peak_bytes": 1184,
+      "fixture": "bytes",
+      "lane": "view_selected",
+      "repeat": 1
+    }
+  ],
+  "notes": [
+    "Fresh append, Fast durability, warm mapped pool; fixture/import/setup excluded.",
+    "Identity control returns only identity; append_view also retains encoded data.",
+    "Selected/native/JSON lanes compare the same requested final value, while legacy API performs its required extra work.",
+    "Compact controls use compact UTF-8 JSON; legacy append uses existing json.dumps defaults.",
+    "Tracemalloc excludes native C/Rust allocations; diagnostic timings are null."
+  ]
+}

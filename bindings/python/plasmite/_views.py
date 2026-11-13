@@ -86,9 +86,11 @@ MessageView.tags = property(lambda self: self.meta["tags"])
 
 def _time_text(message):
     seconds, nanoseconds = divmod(message.timestamp_ns, 1_000_000_000)
+    fraction = f"{nanoseconds:09d}".rstrip("0")
     return (
         datetime.fromtimestamp(seconds, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-        + f".{nanoseconds:09d}Z"
+        + ("." + fraction if fraction else "")
+        + "Z"
     )
 
 
@@ -106,7 +108,7 @@ def to_native(value):
         return {
             "seq": value.seq,
             "time": value.time_rfc3339,
-            "meta": value.meta._native(),
+            "meta": {"tags": to_native(value.tags)},
             "data": to_native(value.data),
         }
     if isinstance(value, (ObjectView, ArrayView)):
@@ -121,17 +123,7 @@ def to_native(value):
 def to_json(value):
     """Format a requested view directly, without a native container tree."""
     if isinstance(value, MessageView):
-        return (
-            '{"seq":'
-            + str(value.seq)
-            + ',"time":'
-            + json.dumps(value.time_rfc3339)
-            + ',"meta":'
-            + value.meta._json()
-            + ',"data":'
-            + to_json(value.data)
-            + "}"
-        )
+        return value._json()
     if isinstance(value, (ObjectView, ArrayView)):
         try:
             return value._json()
@@ -159,3 +151,12 @@ def from_lite3(payload, seq=0, timestamp_ns=0):
     if not all(isinstance(n, int) and 0 <= n < 1 << 64 for n in [seq, timestamp_ns]):
         raise ValueError("identity must fit unsigned 64-bit integers")
     return backend.from_bytes(bytes(payload), seq, timestamp_ns)
+
+
+def append_view(pool, data, tags, durability):
+    return backend.append(
+        ctypes.cast(pool._ptr, ctypes.c_void_p).value,
+        data,
+        [] if tags is None else list(tags),
+        int(durability),
+    )

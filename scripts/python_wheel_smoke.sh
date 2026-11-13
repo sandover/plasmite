@@ -149,6 +149,9 @@ with TemporaryDirectory() as directory, Client(directory) as client:
         child, buffer = view.data["values"], memoryview(view)
         assert buffer.readonly
         assert view_from_lite3(bytes(buffer)).data == received.data
+        produced = pool.append_view({"integer": (1 << 63) - 1, "bytes": b"copy"}, ["nul\0tag"])
+        assert to_native(produced.data) == {"integer": (1 << 63) - 1, "bytes": b"copy"}
+        assert list(produced.tags) == ["nul\0tag"]
         del view
     gc.collect()
     assert list(child) == [1, 2, 3] and len(buffer) > 0

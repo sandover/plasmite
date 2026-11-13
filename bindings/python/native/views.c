@@ -49,7 +49,15 @@ static int (*cursor_next)(plsm_view_cursor_t *, plsm_view_entry_t *, size_t, siz
                           plsm_error_t **);
 static void (*cursor_free)(plsm_view_cursor_t *);
 static int (*value_json)(plsm_value_ref_t, plsm_buf_t *, plsm_error_t **);
+static int (*view_json)(const plsm_message_view_t *, plsm_buf_t *, plsm_error_t **);
 static void (*buf_free)(plsm_buf_t *);
+static int (*builder_new)(const plsm_text_t *, size_t, plsm_builder_t **, size_t *,
+                          plsm_error_t **);
+static int (*builder_put)(plsm_builder_t *, size_t, const uint8_t *, size_t,
+                          const plsm_view_value_t *, size_t *, plsm_error_t **);
+static int (*append_builder)(plsm_pool_t *, plsm_builder_t *, uint32_t,
+                             const plsm_message_view_t **, plsm_error_t **);
+static void (*builder_free)(plsm_builder_t *);
 
 static int fail(plsm_error_t *error) {
     PyObject *exc = PyObject_CallFunction(error_factory, "K", (unsigned long long)(uintptr_t)error);
@@ -417,6 +425,24 @@ static PyObject *value_repr(Value *self) {
         "<plasmite.%s len=%zd>",
         Py_TYPE((PyObject *)self) == object_type ? "ObjectView" : "ArrayView", self->length);
 }
+static PyObject *snapshot_json(Snapshot *self, PyObject *ignored) {
+    (void)ignored;
+    plsm_buf_t buf = {0};
+    plsm_error_t *error = NULL;
+    int rc;
+    Py_BEGIN_ALLOW_THREADS
+    rc = view_json(self->view, &buf, &error);
+    Py_END_ALLOW_THREADS
+    if (rc) {
+        fail(error);
+        return NULL;
+    }
+    PyObject *result = PyUnicode_DecodeUTF8((char *)buf.data, (Py_ssize_t)buf.len, "strict");
+    buf_free(&buf);
+    return result;
+}
+static PyMethodDef snapshot_methods[] = {{"_json", (PyCFunction)snapshot_json, METH_NOARGS, NULL},
+                                         {NULL}};
 static PyObject *snapshot_repr(Snapshot *self) {
     return PyUnicode_FromFormat("<plasmite.MessageView seq=%llu>",
                                 (unsigned long long)view_seq(self->view));
@@ -438,10 +464,13 @@ static PyObject *forbid_new(PyTypeObject *type, PyObject *args, PyObject *kw) {
     PyErr_SetString(PyExc_TypeError, "views come from a pool or encoded snapshot");
     return NULL;
 }
-static PyType_Slot snapshot_slots[] = {
-    {Py_tp_dealloc, snapshot_dealloc},  {Py_tp_new, forbid_new},
-    {Py_tp_getset, snapshot_getset},    {Py_tp_repr, snapshot_repr},
-    {Py_bf_getbuffer, snapshot_buffer}, {0, NULL}};
+static PyType_Slot snapshot_slots[] = {{Py_tp_dealloc, snapshot_dealloc},
+                                       {Py_tp_new, forbid_new},
+                                       {Py_tp_methods, snapshot_methods},
+                                       {Py_tp_getset, snapshot_getset},
+                                       {Py_tp_repr, snapshot_repr},
+                                       {Py_bf_getbuffer, snapshot_buffer},
+                                       {0, NULL}};
 static PyType_Slot object_slots[] = {{Py_tp_dealloc, value_dealloc},
                                      {Py_tp_new, forbid_new},
                                      {Py_mp_length, value_length},
@@ -468,6 +497,15 @@ static PyTypeObject *make_type(const char *name, int size, PyType_Slot *slots) {
     PyType_Spec spec = {name, size, 0, Py_TPFLAGS_DEFAULT, slots};
     return (PyTypeObject *)PyType_FromSpec(&spec);
 }
+static PyObject *snapshot_from_owner(const plsm_message_view_t *view) {
+    Snapshot *result = (Snapshot *)PyType_GenericAlloc(snapshot_type, 0);
+    if (!result) {
+        release_view(view);
+        return NULL;
+    }
+    result->view = view;
+    return (PyObject *)result;
+}
 static PyObject *get_snapshot(PyObject *module, PyObject *args) {
     (void)module;
     if (!configured_handle) {
@@ -493,13 +531,7 @@ static PyObject *get_snapshot(PyObject *module, PyObject *args) {
         fail(error);
         return NULL;
     }
-    Snapshot *result = (Snapshot *)PyType_GenericAlloc(snapshot_type, 0);
-    if (!result) {
-        release_view(view);
-        return NULL;
-    }
-    result->view = view;
-    return (PyObject *)result;
+    return snapshot_from_owner(view);
 }
 static PyObject *bytes_snapshot(PyObject *module, PyObject *args) {
     (void)module;
@@ -530,14 +562,180 @@ static PyObject *bytes_snapshot(PyObject *module, PyObject *args) {
         fail(error);
         return NULL;
     }
-    Snapshot *result = (Snapshot *)PyType_GenericAlloc(snapshot_type, 0);
-    if (!result) {
-        release_view(view);
+    return snapshot_from_owner(view);
+}
+/* Exact builtin input cannot invoke Python hooks while the encoder grows. */
+typedef struct Ancestor {
+    PyObject *value;
+    const struct Ancestor *parent;
+} Ancestor;
+
+static int write_python(plsm_builder_t *, size_t, const uint8_t *, size_t, PyObject *,
+                        const Ancestor *);
+static int write_container(plsm_builder_t *builder, size_t node, PyObject *value,
+                           const Ancestor *parents) {
+    for (const Ancestor *p = parents; p; p = p->parent) {
+        if (p->value == value) {
+            PyErr_SetString(PyExc_ValueError, "circular Python input");
+            return -1;
+        }
+    }
+    if (Py_EnterRecursiveCall(" while encoding Plasmite input"))
+        return -1;
+    Ancestor current = {value, parents};
+    int result = 0;
+    if (PyDict_CheckExact(value)) {
+        PyObject *key, *child;
+        Py_ssize_t position = 0;
+        while (PyDict_Next(value, &position, &key, &child)) {
+            if (!PyUnicode_CheckExact(key)) {
+                PyErr_SetString(PyExc_TypeError,
+                                "append_view object keys must be exact str values");
+                result = -1;
+                break;
+            }
+            Py_ssize_t length;
+            const char *text = PyUnicode_AsUTF8AndSize(key, &length);
+            if (!text || write_python(builder, node, (const uint8_t *)text, (size_t)length, child,
+                                      &current)) {
+                result = -1;
+                break;
+            }
+        }
+    } else {
+        int list = PyList_CheckExact(value);
+        Py_ssize_t count = list ? PyList_Size(value) : PyTuple_Size(value);
+        for (Py_ssize_t i = 0; i < count; ++i) {
+            PyObject *child = list ? PyList_GetItem(value, i) : PyTuple_GetItem(value, i);
+            if (!child || write_python(builder, node, NULL, 0, child, &current)) {
+                result = -1;
+                break;
+            }
+        }
+    }
+    Py_LeaveRecursiveCall();
+    return result;
+}
+static int write_python(plsm_builder_t *builder, size_t parent, const uint8_t *key, size_t key_len,
+                        PyObject *value, const Ancestor *parents) {
+    plsm_view_value_t input = {0};
+    Py_buffer buffer = {0};
+    int container = 0;
+    if (value == Py_None)
+        input.kind = PLSM_FIELD_NULL;
+    else if (PyBool_Check(value)) {
+        input.kind = PLSM_FIELD_BOOL;
+        input.integer = value == Py_True;
+    } else if (PyLong_CheckExact(value)) {
+        input.kind = PLSM_FIELD_I64;
+        input.integer = PyLong_AsLongLong(value);
+        if (PyErr_Occurred())
+            return -1;
+    } else if (PyFloat_CheckExact(value)) {
+        input.kind = PLSM_FIELD_F64;
+        input.real = PyFloat_AsDouble(value);
+    } else if (PyUnicode_CheckExact(value)) {
+        Py_ssize_t length;
+        input.kind = PLSM_FIELD_STRING;
+        input.bytes = (const uint8_t *)PyUnicode_AsUTF8AndSize(value, &length);
+        if (!input.bytes)
+            return -1;
+        input.len = (size_t)length;
+    } else if (PyBytes_CheckExact(value) || PyByteArray_CheckExact(value) ||
+               PyMemoryView_Check(value)) {
+        if (PyObject_GetBuffer(value, &buffer, PyBUF_SIMPLE))
+            return -1;
+        input.kind = PLSM_FIELD_BYTES;
+        input.bytes = (const uint8_t *)buffer.buf;
+        input.len = (size_t)buffer.len;
+    } else if (PyDict_CheckExact(value)) {
+        input.kind = PLSM_FIELD_OBJECT;
+        container = 1;
+    } else if (PyList_CheckExact(value) || PyTuple_CheckExact(value)) {
+        input.kind = PLSM_FIELD_ARRAY;
+        container = 1;
+    } else {
+        PyErr_SetString(
+            PyExc_TypeError,
+            "append_view supports exact builtin dict/list/tuple/scalars and byte buffers; "
+            "use append for JSON-compatible subclasses");
+        return -1;
+    }
+    size_t node = 0;
+    plsm_error_t *error = NULL;
+    int rc = builder_put(builder, parent, key, key_len, &input, &node, &error);
+    if (buffer.obj)
+        PyBuffer_Release(&buffer);
+    if (rc)
+        return fail(error);
+    return container ? write_container(builder, node, value, parents) : 0;
+}
+static PyObject *append_python(PyObject *module, PyObject *args) {
+    (void)module;
+    if (!configured_handle) {
+        PyErr_SetString(PyExc_RuntimeError, "view backend is not configured");
         return NULL;
     }
-    result->view = view;
-    return (PyObject *)result;
+    PyObject *address, *data, *tags;
+    unsigned int durability;
+    if (!PyArg_ParseTuple(args, "OOOI", &address, &data, &tags, &durability))
+        return NULL;
+    plsm_pool_t *pool = PyLong_AsVoidPtr(address);
+    if (PyErr_Occurred())
+        return NULL;
+    if (!PyDict_CheckExact(data)) {
+        PyErr_SetString(PyExc_TypeError, "append_view data must be an exact dict");
+        return NULL;
+    }
+    if (!PyList_CheckExact(tags)) {
+        PyErr_SetString(PyExc_TypeError, "append_view tags must be a list of exact strings");
+        return NULL;
+    }
+    Py_ssize_t count = PyList_Size(tags);
+    plsm_text_t *spans = count ? PyMem_Calloc((size_t)count, sizeof(plsm_text_t)) : NULL;
+    if (count && !spans)
+        return PyErr_NoMemory();
+    for (Py_ssize_t i = 0; i < count; ++i) {
+        PyObject *tag = PyList_GetItem(tags, i);
+        if (!PyUnicode_CheckExact(tag)) {
+            PyMem_Free(spans);
+            PyErr_SetString(PyExc_TypeError, "append_view tags must be exact str values");
+            return NULL;
+        }
+        Py_ssize_t length;
+        spans[i].data = (const uint8_t *)PyUnicode_AsUTF8AndSize(tag, &length);
+        if (!spans[i].data) {
+            PyMem_Free(spans);
+            return NULL;
+        }
+        spans[i].len = (size_t)length;
+    }
+    plsm_builder_t *builder = NULL;
+    size_t node = 0;
+    plsm_error_t *error = NULL;
+    int rc = builder_new(spans, (size_t)count, &builder, &node, &error);
+    PyMem_Free(spans);
+    if (rc) {
+        fail(error);
+        return NULL;
+    }
+    if (write_container(builder, node, data, NULL)) {
+        builder_free(builder);
+        return NULL;
+    }
+    const plsm_message_view_t *view = NULL;
+    /* Input access has finished; the builder now owns all bytes. */
+    Py_BEGIN_ALLOW_THREADS
+    rc = append_builder(pool, builder, durability, &view, &error);
+    builder_free(builder);
+    Py_END_ALLOW_THREADS
+    if (rc) {
+        fail(error);
+        return NULL;
+    }
+    return snapshot_from_owner(view);
 }
+
 static PyObject *configure(PyObject *module, PyObject *args) {
     (void)module;
     unsigned long long address;
@@ -591,7 +789,12 @@ static PyObject *configure(PyObject *module, PyObject *args) {
     LOAD(cursor_next, "plsm_cursor_next");
     LOAD(cursor_free, "plsm_cursor_free");
     LOAD(value_json, "plsm_value_to_json");
+    LOAD(view_json, "plsm_view_to_json");
     LOAD(buf_free, "plsm_buf_free");
+    LOAD(builder_new, "plsm_builder_new");
+    LOAD(builder_put, "plsm_builder_put");
+    LOAD(append_builder, "plsm_pool_append_builder");
+    LOAD(builder_free, "plsm_builder_free");
     configured_interpreter = PyInterpreterState_Get();
     configured_handle = (uintptr_t)address;
     Py_INCREF(library);
@@ -604,6 +807,7 @@ static PyObject *configure(PyObject *module, PyObject *args) {
 }
 static PyMethodDef module_methods[] = {{"_configure", configure, METH_VARARGS, NULL},
                                        {"get", get_snapshot, METH_VARARGS, NULL},
+                                       {"append", append_python, METH_VARARGS, NULL},
                                        {"from_bytes", bytes_snapshot, METH_VARARGS, NULL},
                                        {NULL}};
 static struct PyModuleDef definition = {PyModuleDef_HEAD_INIT, "_views_native", NULL, -1,

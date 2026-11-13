@@ -1,0 +1,160 @@
+{
+  "cadence_controls": {
+    "0": {
+      "baseline": {
+        "cpu_seconds": 0.093966,
+        "elapsed_seconds": 0.050046375,
+        "messages_per_second": 99907.33594591018
+      },
+      "plasmite": {
+        "cpu_seconds": 0.085346,
+        "elapsed_seconds": 0.053720125,
+        "messages_per_second": 93074.98819111087
+      }
+    },
+    "1500": {
+      "baseline": {
+        "cpu_seconds": 0.09592599999999998,
+        "elapsed_seconds": 0.051200125,
+        "messages_per_second": 97656.01158200298
+      },
+      "plasmite": {
+        "cpu_seconds": 0.08972499999999999,
+        "elapsed_seconds": 0.046712,
+        "messages_per_second": 107038.87651995206
+      }
+    },
+    "3000": {
+      "baseline": {
+        "cpu_seconds": 0.09423100000000001,
+        "elapsed_seconds": 0.050082625,
+        "messages_per_second": 99835.022625112
+      },
+      "plasmite": {
+        "cpu_seconds": 0.10181799999999998,
+        "elapsed_seconds": 0.055219125,
+        "messages_per_second": 90548.33809843962
+      }
+    }
+  },
+  "checks": {
+    "cp310_installed_native": {
+      "status": "pass",
+      "tests": 18
+    },
+    "cp314_freethreaded_fallback": {
+      "gil_enabled": false,
+      "native_imported": false,
+      "status": "pass",
+      "tests": 18
+    },
+    "full_python_suite": {
+      "skipped": 1,
+      "status": "pass",
+      "tests": 70
+    },
+    "packaged_secure_server": "pass",
+    "three_source_built_wheels": "pass"
+  },
+  "complete_pipelines": {
+    "large": {
+      "baseline": {
+        "cpu_seconds": 0.070248,
+        "elapsed_seconds": 0.035487708,
+        "messages_per_second": 14089.385541607815
+      },
+      "plasmite": {
+        "cpu_seconds": 0.046877000000000016,
+        "elapsed_seconds": 0.035159041,
+        "messages_per_second": 14221.093231752253
+      }
+    },
+    "small": {
+      "baseline": {
+        "cpu_seconds": 0.09489,
+        "elapsed_seconds": 0.050313,
+        "messages_per_second": 99377.89438117386
+      },
+      "plasmite": {
+        "cpu_seconds": 0.086652,
+        "elapsed_seconds": 0.054048959,
+        "messages_per_second": 92508.71973315897
+      }
+    },
+    "wide": {
+      "baseline": {
+        "cpu_seconds": 0.11970999999999998,
+        "elapsed_seconds": 0.071550333,
+        "messages_per_second": 27952.35068996814
+      },
+      "plasmite": {
+        "cpu_seconds": 0.12035599999999999,
+        "elapsed_seconds": 0.074206291,
+        "messages_per_second": 26951.892798415167
+      }
+    }
+  },
+  "core_source_archive": "../json-capability-source.tar.gz",
+  "library_sha256": "ea3e5ab7c5bb262a86fcd88140c38a332074157d023fb084a28e0a004f798984",
+  "native_goals_us": {
+    "array": {
+      "compact_identity": 72.85458,
+      "compact_json": 78.67166999999999,
+      "compact_native": 104.14125,
+      "legacy_identity": 74.84291999999999,
+      "legacy_native": 104.80208,
+      "legacy_selected": 105.88667,
+      "view_json": 53.84,
+      "view_native": 64.96375,
+      "view_retained": 44.38209,
+      "view_selected": 43.91583
+    },
+    "bytes": {
+      "view_native": 11.34875,
+      "view_retained": 9.164795,
+      "view_selected": 9.730625
+    },
+    "long_string": {
+      "compact_identity": 68.45229499999999,
+      "compact_json": 89.301045,
+      "compact_native": 122.2925,
+      "legacy_identity": 54.037085,
+      "legacy_native": 108.831875,
+      "legacy_selected": 108.918545,
+      "view_json": 34.015,
+      "view_native": 17.145625,
+      "view_retained": 13.674584999999999,
+      "view_selected": 14.142085
+    },
+    "small": {
+      "compact_identity": 6.1201455,
+      "compact_json": 7.156729,
+      "compact_native": 9.3727085,
+      "legacy_identity": 5.8815625,
+      "legacy_native": 9.185125,
+      "legacy_selected": 8.9005835,
+      "view_json": 5.699854,
+      "view_native": 5.6918125,
+      "view_retained": 4.651375,
+      "view_selected": 4.955479
+    },
+    "wide": {
+      "compact_identity": 49.23472,
+      "compact_json": 63.92458333333334,
+      "compact_native": 100.80916666666667,
+      "legacy_identity": 48.11291666666666,
+      "legacy_native": 100.15944333333333,
+      "legacy_selected": 100.90652666666668,
+      "view_json": 64.81916666666666,
+      "view_native": 88.98694333333333,
+      "view_retained": 43.83555333333334,
+      "view_selected": 43.631389999999996
+    }
+  },
+  "wheels_sha256": {
+    "plasmite-1.3.0-cp310-cp310-macosx_11_0_arm64.whl": "907683b2f64c889df6ebdba8ee823dcbbbc0d99645ea81ed40b91ea7643d27ed",
+    "plasmite-1.3.0-cp311-abi3-macosx_11_0_arm64.whl": "a97fae71f6dbbb0e935319e94cce6b2b9df221eafd8756089b24f34aae1fe8e8",
+    "plasmite-1.3.0-py3-none-macosx_11_0_arm64.whl": "34688fe84423c290c59762fb3480ba2b6357b34a1d7c1c52d1dec81e7e17686d",
+    "plasmite-1.3.0.tar.gz": "41e63e3ca6e15ffd3632771b71eed8c403d2fbadef570c96e216a8151e9204d8"
+  }
+}

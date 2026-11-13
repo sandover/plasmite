@@ -1,0 +1,2429 @@
+{
+  "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "backend": "native",
+  "library_sha256": "ea3e5ab7c5bb262a86fcd88140c38a332074157d023fb084a28e0a004f798984",
+  "runner_sha256": "5210f43ba3b6a824d2082ac775ae5a7780a11fa71e7406c77c9a722f14c6d539",
+  "binding_sha256": "3d78678fb2e1230034a3a6e461a80749397c433747fbff53cf89eee1cbb6ee96",
+  "facade_sha256": "5855207c6664c8d0b024f6781af6a2861c35347566e51b4bdebe8a49b0fa3691",
+  "backend_sha256": "90123c26e7f645742abd6d60a0d2b85783cf710cc062f43439785a1062b8083d",
+  "native_source_sha256": "d661ca631291ef0189106d0f278c094acd33712258c2b80c9260da37f54e5fac",
+  "allocation_diagnostic": false,
+  "runs": [
+    {
+      "operations": 2000,
+      "ns_per_op": 7918.396,
+      "cpu_ns_per_op": 5240.0,
+      "fixture": "small",
+      "lane": "view_retained",
+      "repeat": 1
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 7001.4585,
+      "cpu_ns_per_op": 6052.5,
+      "fixture": "small",
+      "lane": "view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 6492.1665,
+      "cpu_ns_per_op": 5518.5,
+      "fixture": "small",
+      "lane": "view_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 7453.0,
+      "cpu_ns_per_op": 6323.5,
+      "fixture": "small",
+      "lane": "legacy_identity",
+      "repeat": 1
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 7265.1875,
+      "cpu_ns_per_op": 6712.0,
+      "fixture": "small",
+      "lane": "compact_identity",
+      "repeat": 1
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 9321.854,
+      "cpu_ns_per_op": 9280.0,
+      "fixture": "small",
+      "lane": "legacy_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 9185.125,
+      "cpu_ns_per_op": 9160.5,
+      "fixture": "small",
+      "lane": "legacy_native",
+      "repeat": 1
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 9395.5835,
+      "cpu_ns_per_op": 9384.0,
+      "fixture": "small",
+      "lane": "compact_native",
+      "repeat": 1
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5699.854,
+      "cpu_ns_per_op": 5698.5,
+      "fixture": "small",
+      "lane": "view_json",
+      "repeat": 1
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 7195.521,
+      "cpu_ns_per_op": 7187.0,
+      "fixture": "small",
+      "lane": "compact_json",
+      "repeat": 1
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 7256.354,
+      "cpu_ns_per_op": 7253.0,
+      "fixture": "small",
+      "lane": "compact_json",
+      "repeat": 2
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5954.0,
+      "cpu_ns_per_op": 5946.0,
+      "fixture": "small",
+      "lane": "view_json",
+      "repeat": 2
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 9452.271,
+      "cpu_ns_per_op": 9444.0,
+      "fixture": "small",
+      "lane": "compact_native",
+      "repeat": 2
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 9679.1455,
+      "cpu_ns_per_op": 9573.0,
+      "fixture": "small",
+      "lane": "legacy_native",
+      "repeat": 2
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 9296.3125,
+      "cpu_ns_per_op": 9241.5,
+      "fixture": "small",
+      "lane": "legacy_selected",
+      "repeat": 2
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 6196.0,
+      "cpu_ns_per_op": 6178.5,
+      "fixture": "small",
+      "lane": "compact_identity",
+      "repeat": 2
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5896.646,
+      "cpu_ns_per_op": 5889.5,
+      "fixture": "small",
+      "lane": "legacy_identity",
+      "repeat": 2
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5017.9375,
+      "cpu_ns_per_op": 5014.5,
+      "fixture": "small",
+      "lane": "view_selected",
+      "repeat": 2
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5702.375,
+      "cpu_ns_per_op": 5703.0,
+      "fixture": "small",
+      "lane": "view_native",
+      "repeat": 2
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 4727.292,
+      "cpu_ns_per_op": 4724.0,
+      "fixture": "small",
+      "lane": "view_retained",
+      "repeat": 2
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 4724.9795,
+      "cpu_ns_per_op": 4721.0,
+      "fixture": "small",
+      "lane": "view_retained",
+      "repeat": 3
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5766.9375,
+      "cpu_ns_per_op": 5763.0,
+      "fixture": "small",
+      "lane": "view_native",
+      "repeat": 3
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5237.625,
+      "cpu_ns_per_op": 5237.0,
+      "fixture": "small",
+      "lane": "view_selected",
+      "repeat": 3
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 6178.104,
+      "cpu_ns_per_op": 6172.0,
+      "fixture": "small",
+      "lane": "legacy_identity",
+      "repeat": 3
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 6565.167,
+      "cpu_ns_per_op": 6562.5,
+      "fixture": "small",
+      "lane": "compact_identity",
+      "repeat": 3
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 9065.458,
+      "cpu_ns_per_op": 9062.0,
+      "fixture": "small",
+      "lane": "legacy_selected",
+      "repeat": 3
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 9221.5,
+      "cpu_ns_per_op": 9190.0,
+      "fixture": "small",
+      "lane": "legacy_native",
+      "repeat": 3
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 9372.7085,
+      "cpu_ns_per_op": 9372.0,
+      "fixture": "small",
+      "lane": "compact_native",
+      "repeat": 3
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5617.6045,
+      "cpu_ns_per_op": 5614.5,
+      "fixture": "small",
+      "lane": "view_json",
+      "repeat": 3
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 6948.625,
+      "cpu_ns_per_op": 6941.5,
+      "fixture": "small",
+      "lane": "compact_json",
+      "repeat": 3
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 6858.625,
+      "cpu_ns_per_op": 6854.5,
+      "fixture": "small",
+      "lane": "compact_json",
+      "repeat": 4
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5588.521,
+      "cpu_ns_per_op": 5584.5,
+      "fixture": "small",
+      "lane": "view_json",
+      "repeat": 4
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 8986.6875,
+      "cpu_ns_per_op": 8979.0,
+      "fixture": "small",
+      "lane": "compact_native",
+      "repeat": 4
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 8630.583,
+      "cpu_ns_per_op": 8622.5,
+      "fixture": "small",
+      "lane": "legacy_native",
+      "repeat": 4
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 8689.8335,
+      "cpu_ns_per_op": 8686.0,
+      "fixture": "small",
+      "lane": "legacy_selected",
+      "repeat": 4
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5978.8125,
+      "cpu_ns_per_op": 5971.5,
+      "fixture": "small",
+      "lane": "compact_identity",
+      "repeat": 4
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5638.0,
+      "cpu_ns_per_op": 5634.5,
+      "fixture": "small",
+      "lane": "legacy_identity",
+      "repeat": 4
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 4867.6045,
+      "cpu_ns_per_op": 4864.0,
+      "fixture": "small",
+      "lane": "view_selected",
+      "repeat": 4
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5588.146,
+      "cpu_ns_per_op": 5584.0,
+      "fixture": "small",
+      "lane": "view_native",
+      "repeat": 4
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 4604.104,
+      "cpu_ns_per_op": 4600.0,
+      "fixture": "small",
+      "lane": "view_retained",
+      "repeat": 4
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 4598.4375,
+      "cpu_ns_per_op": 4594.5,
+      "fixture": "small",
+      "lane": "view_retained",
+      "repeat": 5
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5547.604,
+      "cpu_ns_per_op": 5544.0,
+      "fixture": "small",
+      "lane": "view_native",
+      "repeat": 5
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 4860.75,
+      "cpu_ns_per_op": 4858.0,
+      "fixture": "small",
+      "lane": "view_selected",
+      "repeat": 5
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5691.3955,
+      "cpu_ns_per_op": 5686.5,
+      "fixture": "small",
+      "lane": "legacy_identity",
+      "repeat": 5
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5993.5,
+      "cpu_ns_per_op": 5990.0,
+      "fixture": "small",
+      "lane": "compact_identity",
+      "repeat": 5
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 8634.2085,
+      "cpu_ns_per_op": 8626.5,
+      "fixture": "small",
+      "lane": "legacy_selected",
+      "repeat": 5
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 8702.4375,
+      "cpu_ns_per_op": 8696.5,
+      "fixture": "small",
+      "lane": "legacy_native",
+      "repeat": 5
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 9100.9165,
+      "cpu_ns_per_op": 9101.5,
+      "fixture": "small",
+      "lane": "compact_native",
+      "repeat": 5
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5858.0,
+      "cpu_ns_per_op": 5851.5,
+      "fixture": "small",
+      "lane": "view_json",
+      "repeat": 5
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 7156.729,
+      "cpu_ns_per_op": 7154.0,
+      "fixture": "small",
+      "lane": "compact_json",
+      "repeat": 5
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 7257.979,
+      "cpu_ns_per_op": 7252.5,
+      "fixture": "small",
+      "lane": "compact_json",
+      "repeat": 6
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5818.854,
+      "cpu_ns_per_op": 5814.5,
+      "fixture": "small",
+      "lane": "view_json",
+      "repeat": 6
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 10229.104,
+      "cpu_ns_per_op": 10051.5,
+      "fixture": "small",
+      "lane": "compact_native",
+      "repeat": 6
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 8938.021,
+      "cpu_ns_per_op": 8929.5,
+      "fixture": "small",
+      "lane": "legacy_native",
+      "repeat": 6
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 8814.3955,
+      "cpu_ns_per_op": 8807.0,
+      "fixture": "small",
+      "lane": "legacy_selected",
+      "repeat": 6
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 6061.104,
+      "cpu_ns_per_op": 6058.5,
+      "fixture": "small",
+      "lane": "compact_identity",
+      "repeat": 6
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5758.0835,
+      "cpu_ns_per_op": 5755.0,
+      "fixture": "small",
+      "lane": "legacy_identity",
+      "repeat": 6
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 4945.6045,
+      "cpu_ns_per_op": 4942.0,
+      "fixture": "small",
+      "lane": "view_selected",
+      "repeat": 6
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5691.8125,
+      "cpu_ns_per_op": 5688.0,
+      "fixture": "small",
+      "lane": "view_native",
+      "repeat": 6
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 4651.375,
+      "cpu_ns_per_op": 4648.0,
+      "fixture": "small",
+      "lane": "view_retained",
+      "repeat": 6
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 4610.375,
+      "cpu_ns_per_op": 4607.0,
+      "fixture": "small",
+      "lane": "view_retained",
+      "repeat": 7
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5599.1665,
+      "cpu_ns_per_op": 5596.0,
+      "fixture": "small",
+      "lane": "view_native",
+      "repeat": 7
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 4955.479,
+      "cpu_ns_per_op": 4951.5,
+      "fixture": "small",
+      "lane": "view_selected",
+      "repeat": 7
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5881.5625,
+      "cpu_ns_per_op": 5877.5,
+      "fixture": "small",
+      "lane": "legacy_identity",
+      "repeat": 7
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 6120.1455,
+      "cpu_ns_per_op": 6116.5,
+      "fixture": "small",
+      "lane": "compact_identity",
+      "repeat": 7
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 8900.5835,
+      "cpu_ns_per_op": 8892.5,
+      "fixture": "small",
+      "lane": "legacy_selected",
+      "repeat": 7
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 9248.0625,
+      "cpu_ns_per_op": 9237.0,
+      "fixture": "small",
+      "lane": "legacy_native",
+      "repeat": 7
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 9048.5835,
+      "cpu_ns_per_op": 9040.5,
+      "fixture": "small",
+      "lane": "compact_native",
+      "repeat": 7
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 5613.5415,
+      "cpu_ns_per_op": 5611.5,
+      "fixture": "small",
+      "lane": "view_json",
+      "repeat": 7
+    },
+    {
+      "operations": 2000,
+      "ns_per_op": 6867.708,
+      "cpu_ns_per_op": 6864.0,
+      "fixture": "small",
+      "lane": "compact_json",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 75237.5,
+      "cpu_ns_per_op": 48713.333333333336,
+      "fixture": "wide",
+      "lane": "view_retained",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 91026.25,
+      "cpu_ns_per_op": 90810.0,
+      "fixture": "wide",
+      "lane": "view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 47013.193333333336,
+      "cpu_ns_per_op": 46823.333333333336,
+      "fixture": "wide",
+      "lane": "view_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 54372.636666666665,
+      "cpu_ns_per_op": 53230.0,
+      "fixture": "wide",
+      "lane": "legacy_identity",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 59015.276666666665,
+      "cpu_ns_per_op": 57400.0,
+      "fixture": "wide",
+      "lane": "compact_identity",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 111186.66666666667,
+      "cpu_ns_per_op": 109813.33333333333,
+      "fixture": "wide",
+      "lane": "legacy_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 112532.91666666667,
+      "cpu_ns_per_op": 110716.66666666667,
+      "fixture": "wide",
+      "lane": "legacy_native",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 104399.86333333333,
+      "cpu_ns_per_op": 104170.0,
+      "fixture": "wide",
+      "lane": "compact_native",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 69912.91666666667,
+      "cpu_ns_per_op": 69196.66666666667,
+      "fixture": "wide",
+      "lane": "view_json",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 67158.88666666667,
+      "cpu_ns_per_op": 67103.33333333333,
+      "fixture": "wide",
+      "lane": "compact_json",
+      "repeat": 1
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 71940.97333333333,
+      "cpu_ns_per_op": 70570.0,
+      "fixture": "wide",
+      "lane": "compact_json",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 68156.25,
+      "cpu_ns_per_op": 67946.66666666667,
+      "fixture": "wide",
+      "lane": "view_json",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 106468.61,
+      "cpu_ns_per_op": 106330.0,
+      "fixture": "wide",
+      "lane": "compact_native",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 109880.83333333333,
+      "cpu_ns_per_op": 109420.0,
+      "fixture": "wide",
+      "lane": "legacy_native",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 100906.52666666667,
+      "cpu_ns_per_op": 100853.33333333333,
+      "fixture": "wide",
+      "lane": "legacy_selected",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 49620.0,
+      "cpu_ns_per_op": 49570.0,
+      "fixture": "wide",
+      "lane": "compact_identity",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 47084.30333333334,
+      "cpu_ns_per_op": 47076.666666666664,
+      "fixture": "wide",
+      "lane": "legacy_identity",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 43631.39,
+      "cpu_ns_per_op": 43596.666666666664,
+      "fixture": "wide",
+      "lane": "view_selected",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 89018.05666666667,
+      "cpu_ns_per_op": 88763.33333333333,
+      "fixture": "wide",
+      "lane": "view_native",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 43835.55333333334,
+      "cpu_ns_per_op": 43813.333333333336,
+      "fixture": "wide",
+      "lane": "view_retained",
+      "repeat": 2
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 44524.443333333336,
+      "cpu_ns_per_op": 44460.0,
+      "fixture": "wide",
+      "lane": "view_retained",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 88255.97333333333,
+      "cpu_ns_per_op": 88206.66666666667,
+      "fixture": "wide",
+      "lane": "view_native",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 43453.333333333336,
+      "cpu_ns_per_op": 43433.333333333336,
+      "fixture": "wide",
+      "lane": "view_selected",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 46739.86,
+      "cpu_ns_per_op": 46716.666666666664,
+      "fixture": "wide",
+      "lane": "legacy_identity",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 49031.25,
+      "cpu_ns_per_op": 48976.666666666664,
+      "fixture": "wide",
+      "lane": "compact_identity",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 100071.94333333333,
+      "cpu_ns_per_op": 99993.33333333333,
+      "fixture": "wide",
+      "lane": "legacy_selected",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 99549.16666666667,
+      "cpu_ns_per_op": 99480.0,
+      "fixture": "wide",
+      "lane": "legacy_native",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 100745.97,
+      "cpu_ns_per_op": 100666.66666666667,
+      "fixture": "wide",
+      "lane": "compact_native",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 64573.19666666666,
+      "cpu_ns_per_op": 64516.666666666664,
+      "fixture": "wide",
+      "lane": "view_json",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 64026.25,
+      "cpu_ns_per_op": 63973.333333333336,
+      "fixture": "wide",
+      "lane": "compact_json",
+      "repeat": 3
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 63653.886666666665,
+      "cpu_ns_per_op": 63600.0,
+      "fixture": "wide",
+      "lane": "compact_json",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 66356.11,
+      "cpu_ns_per_op": 66340.0,
+      "fixture": "wide",
+      "lane": "view_json",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 108377.22,
+      "cpu_ns_per_op": 107333.33333333333,
+      "fixture": "wide",
+      "lane": "compact_native",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 111394.16666666667,
+      "cpu_ns_per_op": 109833.33333333333,
+      "fixture": "wide",
+      "lane": "legacy_native",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 101874.86,
+      "cpu_ns_per_op": 101683.33333333333,
+      "fixture": "wide",
+      "lane": "legacy_selected",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 49234.72,
+      "cpu_ns_per_op": 49196.666666666664,
+      "fixture": "wide",
+      "lane": "compact_identity",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 48112.916666666664,
+      "cpu_ns_per_op": 48090.0,
+      "fixture": "wide",
+      "lane": "legacy_identity",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 43516.943333333336,
+      "cpu_ns_per_op": 43466.666666666664,
+      "fixture": "wide",
+      "lane": "view_selected",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 87809.72333333333,
+      "cpu_ns_per_op": 87756.66666666667,
+      "fixture": "wide",
+      "lane": "view_native",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 42983.056666666664,
+      "cpu_ns_per_op": 42930.0,
+      "fixture": "wide",
+      "lane": "view_retained",
+      "repeat": 4
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 42727.363333333335,
+      "cpu_ns_per_op": 42703.333333333336,
+      "fixture": "wide",
+      "lane": "view_retained",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 89795.14,
+      "cpu_ns_per_op": 89686.66666666667,
+      "fixture": "wide",
+      "lane": "view_native",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 43428.47,
+      "cpu_ns_per_op": 43400.0,
+      "fixture": "wide",
+      "lane": "view_selected",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 48427.083333333336,
+      "cpu_ns_per_op": 48366.666666666664,
+      "fixture": "wide",
+      "lane": "legacy_identity",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 48157.916666666664,
+      "cpu_ns_per_op": 48126.666666666664,
+      "fixture": "wide",
+      "lane": "compact_identity",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 99503.33333333333,
+      "cpu_ns_per_op": 99413.33333333333,
+      "fixture": "wide",
+      "lane": "legacy_selected",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 99180.55333333333,
+      "cpu_ns_per_op": 99093.33333333333,
+      "fixture": "wide",
+      "lane": "legacy_native",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 100809.16666666667,
+      "cpu_ns_per_op": 100756.66666666667,
+      "fixture": "wide",
+      "lane": "compact_native",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 64819.166666666664,
+      "cpu_ns_per_op": 64773.333333333336,
+      "fixture": "wide",
+      "lane": "view_json",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 63265.556666666664,
+      "cpu_ns_per_op": 63220.0,
+      "fixture": "wide",
+      "lane": "compact_json",
+      "repeat": 5
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 63773.05333333334,
+      "cpu_ns_per_op": 63720.0,
+      "fixture": "wide",
+      "lane": "compact_json",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 64202.78,
+      "cpu_ns_per_op": 64150.0,
+      "fixture": "wide",
+      "lane": "view_json",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 100406.11,
+      "cpu_ns_per_op": 100330.0,
+      "fixture": "wide",
+      "lane": "compact_native",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 100159.44333333333,
+      "cpu_ns_per_op": 100080.0,
+      "fixture": "wide",
+      "lane": "legacy_native",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 103014.30666666667,
+      "cpu_ns_per_op": 102973.33333333333,
+      "fixture": "wide",
+      "lane": "legacy_selected",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 50442.776666666665,
+      "cpu_ns_per_op": 50443.333333333336,
+      "fixture": "wide",
+      "lane": "compact_identity",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 56150.416666666664,
+      "cpu_ns_per_op": 54466.666666666664,
+      "fixture": "wide",
+      "lane": "legacy_identity",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 46198.05333333334,
+      "cpu_ns_per_op": 46183.333333333336,
+      "fixture": "wide",
+      "lane": "view_selected",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 88986.94333333333,
+      "cpu_ns_per_op": 88913.33333333333,
+      "fixture": "wide",
+      "lane": "view_native",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 44314.443333333336,
+      "cpu_ns_per_op": 44316.666666666664,
+      "fixture": "wide",
+      "lane": "view_retained",
+      "repeat": 6
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 43419.723333333335,
+      "cpu_ns_per_op": 43370.0,
+      "fixture": "wide",
+      "lane": "view_retained",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 88157.77666666667,
+      "cpu_ns_per_op": 88110.0,
+      "fixture": "wide",
+      "lane": "view_native",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 44080.416666666664,
+      "cpu_ns_per_op": 44026.666666666664,
+      "fixture": "wide",
+      "lane": "view_selected",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 47471.11,
+      "cpu_ns_per_op": 47446.666666666664,
+      "fixture": "wide",
+      "lane": "legacy_identity",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 48338.19666666666,
+      "cpu_ns_per_op": 48286.666666666664,
+      "fixture": "wide",
+      "lane": "compact_identity",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 100182.77666666667,
+      "cpu_ns_per_op": 100103.33333333333,
+      "fixture": "wide",
+      "lane": "legacy_selected",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 99426.66666666667,
+      "cpu_ns_per_op": 99343.33333333333,
+      "fixture": "wide",
+      "lane": "legacy_native",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 100404.86,
+      "cpu_ns_per_op": 100330.0,
+      "fixture": "wide",
+      "lane": "compact_native",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 63934.166666666664,
+      "cpu_ns_per_op": 63886.666666666664,
+      "fixture": "wide",
+      "lane": "view_json",
+      "repeat": 7
+    },
+    {
+      "operations": 300,
+      "ns_per_op": 63924.583333333336,
+      "cpu_ns_per_op": 63873.333333333336,
+      "fixture": "wide",
+      "lane": "compact_json",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 25054.795,
+      "cpu_ns_per_op": 20045.0,
+      "fixture": "long_string",
+      "lane": "view_retained",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 17101.875,
+      "cpu_ns_per_op": 17110.0,
+      "fixture": "long_string",
+      "lane": "view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 14493.96,
+      "cpu_ns_per_op": 14495.0,
+      "fixture": "long_string",
+      "lane": "view_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 54037.085,
+      "cpu_ns_per_op": 54000.0,
+      "fixture": "long_string",
+      "lane": "legacy_identity",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 68794.17,
+      "cpu_ns_per_op": 68720.0,
+      "fixture": "long_string",
+      "lane": "compact_identity",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 108918.545,
+      "cpu_ns_per_op": 108850.0,
+      "fixture": "long_string",
+      "lane": "legacy_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 106853.125,
+      "cpu_ns_per_op": 106770.0,
+      "fixture": "long_string",
+      "lane": "legacy_native",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 122292.5,
+      "cpu_ns_per_op": 122170.0,
+      "fixture": "long_string",
+      "lane": "compact_native",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 33412.92,
+      "cpu_ns_per_op": 33420.0,
+      "fixture": "long_string",
+      "lane": "view_json",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 90477.295,
+      "cpu_ns_per_op": 90395.0,
+      "fixture": "long_string",
+      "lane": "compact_json",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 92603.54,
+      "cpu_ns_per_op": 92580.0,
+      "fixture": "long_string",
+      "lane": "compact_json",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 35177.71,
+      "cpu_ns_per_op": 35185.0,
+      "fixture": "long_string",
+      "lane": "view_json",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 129842.085,
+      "cpu_ns_per_op": 129765.0,
+      "fixture": "long_string",
+      "lane": "compact_native",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 114238.955,
+      "cpu_ns_per_op": 114200.0,
+      "fixture": "long_string",
+      "lane": "legacy_native",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 119746.875,
+      "cpu_ns_per_op": 118180.0,
+      "fixture": "long_string",
+      "lane": "legacy_selected",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 72071.04,
+      "cpu_ns_per_op": 72045.0,
+      "fixture": "long_string",
+      "lane": "compact_identity",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 55737.5,
+      "cpu_ns_per_op": 55650.0,
+      "fixture": "long_string",
+      "lane": "legacy_identity",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 14160.0,
+      "cpu_ns_per_op": 14160.0,
+      "fixture": "long_string",
+      "lane": "view_selected",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 17145.625,
+      "cpu_ns_per_op": 17150.0,
+      "fixture": "long_string",
+      "lane": "view_native",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 13508.96,
+      "cpu_ns_per_op": 13515.0,
+      "fixture": "long_string",
+      "lane": "view_retained",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 13910.625,
+      "cpu_ns_per_op": 13870.0,
+      "fixture": "long_string",
+      "lane": "view_retained",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 17137.92,
+      "cpu_ns_per_op": 17140.0,
+      "fixture": "long_string",
+      "lane": "view_native",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 13931.875,
+      "cpu_ns_per_op": 13940.0,
+      "fixture": "long_string",
+      "lane": "view_selected",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 54183.96,
+      "cpu_ns_per_op": 54105.0,
+      "fixture": "long_string",
+      "lane": "legacy_identity",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 68452.295,
+      "cpu_ns_per_op": 68410.0,
+      "fixture": "long_string",
+      "lane": "compact_identity",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 108855.21,
+      "cpu_ns_per_op": 108780.0,
+      "fixture": "long_string",
+      "lane": "legacy_selected",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 107783.125,
+      "cpu_ns_per_op": 107700.0,
+      "fixture": "long_string",
+      "lane": "legacy_native",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 121796.665,
+      "cpu_ns_per_op": 121670.0,
+      "fixture": "long_string",
+      "lane": "compact_native",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 34861.04,
+      "cpu_ns_per_op": 34700.0,
+      "fixture": "long_string",
+      "lane": "view_json",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 89914.375,
+      "cpu_ns_per_op": 89885.0,
+      "fixture": "long_string",
+      "lane": "compact_json",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 88338.54,
+      "cpu_ns_per_op": 88295.0,
+      "fixture": "long_string",
+      "lane": "compact_json",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 33618.335,
+      "cpu_ns_per_op": 33585.0,
+      "fixture": "long_string",
+      "lane": "view_json",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 122431.875,
+      "cpu_ns_per_op": 122350.0,
+      "fixture": "long_string",
+      "lane": "compact_native",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 108831.875,
+      "cpu_ns_per_op": 108765.0,
+      "fixture": "long_string",
+      "lane": "legacy_native",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 106968.54,
+      "cpu_ns_per_op": 106895.0,
+      "fixture": "long_string",
+      "lane": "legacy_selected",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 66915.21,
+      "cpu_ns_per_op": 66880.0,
+      "fixture": "long_string",
+      "lane": "compact_identity",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 52532.5,
+      "cpu_ns_per_op": 52495.0,
+      "fixture": "long_string",
+      "lane": "legacy_identity",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 14327.29,
+      "cpu_ns_per_op": 14285.0,
+      "fixture": "long_string",
+      "lane": "view_selected",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 17267.295,
+      "cpu_ns_per_op": 17270.0,
+      "fixture": "long_string",
+      "lane": "view_native",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 13491.455,
+      "cpu_ns_per_op": 13495.0,
+      "fixture": "long_string",
+      "lane": "view_retained",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 13639.17,
+      "cpu_ns_per_op": 13600.0,
+      "fixture": "long_string",
+      "lane": "view_retained",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 17000.625,
+      "cpu_ns_per_op": 17005.0,
+      "fixture": "long_string",
+      "lane": "view_native",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 13668.75,
+      "cpu_ns_per_op": 13670.0,
+      "fixture": "long_string",
+      "lane": "view_selected",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 52842.5,
+      "cpu_ns_per_op": 52800.0,
+      "fixture": "long_string",
+      "lane": "legacy_identity",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 67522.71,
+      "cpu_ns_per_op": 67435.0,
+      "fixture": "long_string",
+      "lane": "compact_identity",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 106586.665,
+      "cpu_ns_per_op": 106505.0,
+      "fixture": "long_string",
+      "lane": "legacy_selected",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 107286.875,
+      "cpu_ns_per_op": 107205.0,
+      "fixture": "long_string",
+      "lane": "legacy_native",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 121874.795,
+      "cpu_ns_per_op": 121760.0,
+      "fixture": "long_string",
+      "lane": "compact_native",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 33632.915,
+      "cpu_ns_per_op": 33635.0,
+      "fixture": "long_string",
+      "lane": "view_json",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 87925.21,
+      "cpu_ns_per_op": 87850.0,
+      "fixture": "long_string",
+      "lane": "compact_json",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 89301.045,
+      "cpu_ns_per_op": 89230.0,
+      "fixture": "long_string",
+      "lane": "compact_json",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 35334.585,
+      "cpu_ns_per_op": 35340.0,
+      "fixture": "long_string",
+      "lane": "view_json",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 129916.875,
+      "cpu_ns_per_op": 129870.0,
+      "fixture": "long_string",
+      "lane": "compact_native",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 114383.33,
+      "cpu_ns_per_op": 114295.0,
+      "fixture": "long_string",
+      "lane": "legacy_native",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 118209.375,
+      "cpu_ns_per_op": 117400.0,
+      "fixture": "long_string",
+      "lane": "legacy_selected",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 68949.79,
+      "cpu_ns_per_op": 68865.0,
+      "fixture": "long_string",
+      "lane": "compact_identity",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 54348.125,
+      "cpu_ns_per_op": 54330.0,
+      "fixture": "long_string",
+      "lane": "legacy_identity",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 13512.705,
+      "cpu_ns_per_op": 13515.0,
+      "fixture": "long_string",
+      "lane": "view_selected",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 17236.665,
+      "cpu_ns_per_op": 17240.0,
+      "fixture": "long_string",
+      "lane": "view_native",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 13946.46,
+      "cpu_ns_per_op": 13905.0,
+      "fixture": "long_string",
+      "lane": "view_retained",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 13674.585,
+      "cpu_ns_per_op": 13680.0,
+      "fixture": "long_string",
+      "lane": "view_retained",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 17207.705,
+      "cpu_ns_per_op": 17210.0,
+      "fixture": "long_string",
+      "lane": "view_native",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 14142.085,
+      "cpu_ns_per_op": 14100.0,
+      "fixture": "long_string",
+      "lane": "view_selected",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 53480.83,
+      "cpu_ns_per_op": 53435.0,
+      "fixture": "long_string",
+      "lane": "legacy_identity",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 67870.42,
+      "cpu_ns_per_op": 67830.0,
+      "fixture": "long_string",
+      "lane": "compact_identity",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 109441.875,
+      "cpu_ns_per_op": 109370.0,
+      "fixture": "long_string",
+      "lane": "legacy_selected",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 110737.5,
+      "cpu_ns_per_op": 110630.0,
+      "fixture": "long_string",
+      "lane": "legacy_native",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 122150.0,
+      "cpu_ns_per_op": 122060.0,
+      "fixture": "long_string",
+      "lane": "compact_native",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 34015.0,
+      "cpu_ns_per_op": 33980.0,
+      "fixture": "long_string",
+      "lane": "view_json",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 87664.375,
+      "cpu_ns_per_op": 87575.0,
+      "fixture": "long_string",
+      "lane": "compact_json",
+      "repeat": 7
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 111325.42,
+      "cpu_ns_per_op": 55330.0,
+      "fixture": "array",
+      "lane": "view_retained",
+      "repeat": 1
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 92950.0,
+      "cpu_ns_per_op": 70210.0,
+      "fixture": "array",
+      "lane": "view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 43775.0,
+      "cpu_ns_per_op": 43770.0,
+      "fixture": "array",
+      "lane": "view_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 73857.91,
+      "cpu_ns_per_op": 73800.0,
+      "fixture": "array",
+      "lane": "legacy_identity",
+      "repeat": 1
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 72012.92,
+      "cpu_ns_per_op": 71930.0,
+      "fixture": "array",
+      "lane": "compact_identity",
+      "repeat": 1
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 105886.67,
+      "cpu_ns_per_op": 105820.0,
+      "fixture": "array",
+      "lane": "legacy_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 104802.08,
+      "cpu_ns_per_op": 104730.0,
+      "fixture": "array",
+      "lane": "legacy_native",
+      "repeat": 1
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 104141.25,
+      "cpu_ns_per_op": 104060.0,
+      "fixture": "array",
+      "lane": "compact_native",
+      "repeat": 1
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 53543.34,
+      "cpu_ns_per_op": 53480.0,
+      "fixture": "array",
+      "lane": "view_json",
+      "repeat": 1
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 79321.25,
+      "cpu_ns_per_op": 79330.0,
+      "fixture": "array",
+      "lane": "compact_json",
+      "repeat": 1
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 78260.42,
+      "cpu_ns_per_op": 78190.0,
+      "fixture": "array",
+      "lane": "compact_json",
+      "repeat": 2
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 53770.42,
+      "cpu_ns_per_op": 53690.0,
+      "fixture": "array",
+      "lane": "view_json",
+      "repeat": 2
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 104319.59,
+      "cpu_ns_per_op": 104250.0,
+      "fixture": "array",
+      "lane": "compact_native",
+      "repeat": 2
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 103807.92,
+      "cpu_ns_per_op": 103730.0,
+      "fixture": "array",
+      "lane": "legacy_native",
+      "repeat": 2
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 104321.25,
+      "cpu_ns_per_op": 104250.0,
+      "fixture": "array",
+      "lane": "legacy_selected",
+      "repeat": 2
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 73665.0,
+      "cpu_ns_per_op": 73590.0,
+      "fixture": "array",
+      "lane": "compact_identity",
+      "repeat": 2
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 74397.09,
+      "cpu_ns_per_op": 74320.0,
+      "fixture": "array",
+      "lane": "legacy_identity",
+      "repeat": 2
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 42720.0,
+      "cpu_ns_per_op": 42720.0,
+      "fixture": "array",
+      "lane": "view_selected",
+      "repeat": 2
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 64098.33,
+      "cpu_ns_per_op": 64020.0,
+      "fixture": "array",
+      "lane": "view_native",
+      "repeat": 2
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 42659.17,
+      "cpu_ns_per_op": 42660.0,
+      "fixture": "array",
+      "lane": "view_retained",
+      "repeat": 2
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 43100.42,
+      "cpu_ns_per_op": 43030.0,
+      "fixture": "array",
+      "lane": "view_retained",
+      "repeat": 3
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 62383.75,
+      "cpu_ns_per_op": 62380.0,
+      "fixture": "array",
+      "lane": "view_native",
+      "repeat": 3
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 43787.92,
+      "cpu_ns_per_op": 43710.0,
+      "fixture": "array",
+      "lane": "view_selected",
+      "repeat": 3
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 75203.33,
+      "cpu_ns_per_op": 75130.0,
+      "fixture": "array",
+      "lane": "legacy_identity",
+      "repeat": 3
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 72316.66,
+      "cpu_ns_per_op": 72320.0,
+      "fixture": "array",
+      "lane": "compact_identity",
+      "repeat": 3
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 106390.83,
+      "cpu_ns_per_op": 106310.0,
+      "fixture": "array",
+      "lane": "legacy_selected",
+      "repeat": 3
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 104637.91,
+      "cpu_ns_per_op": 104570.0,
+      "fixture": "array",
+      "lane": "legacy_native",
+      "repeat": 3
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 103245.83,
+      "cpu_ns_per_op": 103150.0,
+      "fixture": "array",
+      "lane": "compact_native",
+      "repeat": 3
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 53840.0,
+      "cpu_ns_per_op": 53860.0,
+      "fixture": "array",
+      "lane": "view_json",
+      "repeat": 3
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 78671.67,
+      "cpu_ns_per_op": 78600.0,
+      "fixture": "array",
+      "lane": "compact_json",
+      "repeat": 3
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 79922.5,
+      "cpu_ns_per_op": 79830.0,
+      "fixture": "array",
+      "lane": "compact_json",
+      "repeat": 4
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 56360.0,
+      "cpu_ns_per_op": 56310.0,
+      "fixture": "array",
+      "lane": "view_json",
+      "repeat": 4
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 109052.5,
+      "cpu_ns_per_op": 108930.0,
+      "fixture": "array",
+      "lane": "compact_native",
+      "repeat": 4
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 109900.41,
+      "cpu_ns_per_op": 109830.0,
+      "fixture": "array",
+      "lane": "legacy_native",
+      "repeat": 4
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 111418.33,
+      "cpu_ns_per_op": 111310.0,
+      "fixture": "array",
+      "lane": "legacy_selected",
+      "repeat": 4
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 76546.66,
+      "cpu_ns_per_op": 76450.0,
+      "fixture": "array",
+      "lane": "compact_identity",
+      "repeat": 4
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 77848.75,
+      "cpu_ns_per_op": 77700.0,
+      "fixture": "array",
+      "lane": "legacy_identity",
+      "repeat": 4
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 46331.25,
+      "cpu_ns_per_op": 46340.0,
+      "fixture": "array",
+      "lane": "view_selected",
+      "repeat": 4
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 72166.25,
+      "cpu_ns_per_op": 70950.0,
+      "fixture": "array",
+      "lane": "view_native",
+      "repeat": 4
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 45035.83,
+      "cpu_ns_per_op": 45040.0,
+      "fixture": "array",
+      "lane": "view_retained",
+      "repeat": 4
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 45679.17,
+      "cpu_ns_per_op": 45620.0,
+      "fixture": "array",
+      "lane": "view_retained",
+      "repeat": 5
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 66390.41,
+      "cpu_ns_per_op": 66370.0,
+      "fixture": "array",
+      "lane": "view_native",
+      "repeat": 5
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 43915.83,
+      "cpu_ns_per_op": 43830.0,
+      "fixture": "array",
+      "lane": "view_selected",
+      "repeat": 5
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 74842.92,
+      "cpu_ns_per_op": 74780.0,
+      "fixture": "array",
+      "lane": "legacy_identity",
+      "repeat": 5
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 72854.58,
+      "cpu_ns_per_op": 72850.0,
+      "fixture": "array",
+      "lane": "compact_identity",
+      "repeat": 5
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 105124.16,
+      "cpu_ns_per_op": 105060.0,
+      "fixture": "array",
+      "lane": "legacy_selected",
+      "repeat": 5
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 106959.17,
+      "cpu_ns_per_op": 106890.0,
+      "fixture": "array",
+      "lane": "legacy_native",
+      "repeat": 5
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 103177.5,
+      "cpu_ns_per_op": 103080.0,
+      "fixture": "array",
+      "lane": "compact_native",
+      "repeat": 5
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 54167.08,
+      "cpu_ns_per_op": 54180.0,
+      "fixture": "array",
+      "lane": "view_json",
+      "repeat": 5
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 78310.0,
+      "cpu_ns_per_op": 78230.0,
+      "fixture": "array",
+      "lane": "compact_json",
+      "repeat": 5
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 79065.42,
+      "cpu_ns_per_op": 79000.0,
+      "fixture": "array",
+      "lane": "compact_json",
+      "repeat": 6
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 55357.92,
+      "cpu_ns_per_op": 55280.0,
+      "fixture": "array",
+      "lane": "view_json",
+      "repeat": 6
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 103435.41,
+      "cpu_ns_per_op": 103340.0,
+      "fixture": "array",
+      "lane": "compact_native",
+      "repeat": 6
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 104727.92,
+      "cpu_ns_per_op": 104660.0,
+      "fixture": "array",
+      "lane": "legacy_native",
+      "repeat": 6
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 110181.25,
+      "cpu_ns_per_op": 109930.0,
+      "fixture": "array",
+      "lane": "legacy_selected",
+      "repeat": 6
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 74153.75,
+      "cpu_ns_per_op": 74040.0,
+      "fixture": "array",
+      "lane": "compact_identity",
+      "repeat": 6
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 72791.25,
+      "cpu_ns_per_op": 72690.0,
+      "fixture": "array",
+      "lane": "legacy_identity",
+      "repeat": 6
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 44166.67,
+      "cpu_ns_per_op": 44160.0,
+      "fixture": "array",
+      "lane": "view_selected",
+      "repeat": 6
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 64963.75,
+      "cpu_ns_per_op": 64890.0,
+      "fixture": "array",
+      "lane": "view_native",
+      "repeat": 6
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 42864.17,
+      "cpu_ns_per_op": 42870.0,
+      "fixture": "array",
+      "lane": "view_retained",
+      "repeat": 6
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 44382.09,
+      "cpu_ns_per_op": 44310.0,
+      "fixture": "array",
+      "lane": "view_retained",
+      "repeat": 7
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 63917.91,
+      "cpu_ns_per_op": 63920.0,
+      "fixture": "array",
+      "lane": "view_native",
+      "repeat": 7
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 44355.83,
+      "cpu_ns_per_op": 44360.0,
+      "fixture": "array",
+      "lane": "view_selected",
+      "repeat": 7
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 74907.92,
+      "cpu_ns_per_op": 74820.0,
+      "fixture": "array",
+      "lane": "legacy_identity",
+      "repeat": 7
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 70540.42,
+      "cpu_ns_per_op": 70540.0,
+      "fixture": "array",
+      "lane": "compact_identity",
+      "repeat": 7
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 103798.33,
+      "cpu_ns_per_op": 103720.0,
+      "fixture": "array",
+      "lane": "legacy_selected",
+      "repeat": 7
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 106645.42,
+      "cpu_ns_per_op": 106570.0,
+      "fixture": "array",
+      "lane": "legacy_native",
+      "repeat": 7
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 108029.59,
+      "cpu_ns_per_op": 107960.0,
+      "fixture": "array",
+      "lane": "compact_native",
+      "repeat": 7
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 52080.83,
+      "cpu_ns_per_op": 52090.0,
+      "fixture": "array",
+      "lane": "view_json",
+      "repeat": 7
+    },
+    {
+      "operations": 100,
+      "ns_per_op": 78048.33,
+      "cpu_ns_per_op": 77980.0,
+      "fixture": "array",
+      "lane": "compact_json",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 55534.165,
+      "cpu_ns_per_op": 19335.0,
+      "fixture": "bytes",
+      "lane": "view_retained",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 11783.955,
+      "cpu_ns_per_op": 11790.0,
+      "fixture": "bytes",
+      "lane": "view_native",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9850.625,
+      "cpu_ns_per_op": 9855.0,
+      "fixture": "bytes",
+      "lane": "view_selected",
+      "repeat": 1
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9808.54,
+      "cpu_ns_per_op": 9805.0,
+      "fixture": "bytes",
+      "lane": "view_selected",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 11362.71,
+      "cpu_ns_per_op": 11365.0,
+      "fixture": "bytes",
+      "lane": "view_native",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9164.795,
+      "cpu_ns_per_op": 9165.0,
+      "fixture": "bytes",
+      "lane": "view_retained",
+      "repeat": 2
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9080.625,
+      "cpu_ns_per_op": 9080.0,
+      "fixture": "bytes",
+      "lane": "view_retained",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 11348.75,
+      "cpu_ns_per_op": 11350.0,
+      "fixture": "bytes",
+      "lane": "view_native",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9699.79,
+      "cpu_ns_per_op": 9700.0,
+      "fixture": "bytes",
+      "lane": "view_selected",
+      "repeat": 3
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9910.835,
+      "cpu_ns_per_op": 9875.0,
+      "fixture": "bytes",
+      "lane": "view_selected",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 11320.21,
+      "cpu_ns_per_op": 11320.0,
+      "fixture": "bytes",
+      "lane": "view_native",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9129.795,
+      "cpu_ns_per_op": 9130.0,
+      "fixture": "bytes",
+      "lane": "view_retained",
+      "repeat": 4
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9744.375,
+      "cpu_ns_per_op": 9750.0,
+      "fixture": "bytes",
+      "lane": "view_retained",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 11642.5,
+      "cpu_ns_per_op": 11605.0,
+      "fixture": "bytes",
+      "lane": "view_native",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9730.625,
+      "cpu_ns_per_op": 9735.0,
+      "fixture": "bytes",
+      "lane": "view_selected",
+      "repeat": 5
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9645.0,
+      "cpu_ns_per_op": 9650.0,
+      "fixture": "bytes",
+      "lane": "view_selected",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 11159.58,
+      "cpu_ns_per_op": 11160.0,
+      "fixture": "bytes",
+      "lane": "view_native",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9287.29,
+      "cpu_ns_per_op": 9250.0,
+      "fixture": "bytes",
+      "lane": "view_retained",
+      "repeat": 6
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9127.29,
+      "cpu_ns_per_op": 9130.0,
+      "fixture": "bytes",
+      "lane": "view_retained",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 11329.375,
+      "cpu_ns_per_op": 11330.0,
+      "fixture": "bytes",
+      "lane": "view_native",
+      "repeat": 7
+    },
+    {
+      "operations": 200,
+      "ns_per_op": 9722.915,
+      "cpu_ns_per_op": 9725.0,
+      "fixture": "bytes",
+      "lane": "view_selected",
+      "repeat": 7
+    }
+  ],
+  "notes": [
+    "Fresh append, Fast durability, warm mapped pool; fixture/import/setup excluded.",
+    "Identity control returns only identity; append_view also retains encoded data.",
+    "Selected/native/JSON lanes compare the same requested final value, while legacy API performs its required extra work.",
+    "Compact controls use compact UTF-8 JSON; legacy append uses existing json.dumps defaults.",
+    "Tracemalloc excludes native C/Rust allocations; diagnostic timings are null."
+  ]
+}

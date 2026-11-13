@@ -135,8 +135,31 @@ external encoded bytes. Mutable inputs trigger a defensive copy.
 
 `view.time_rfc3339` preserves nanoseconds. `view.time` creates a UTC `datetime`
 with Python's microsecond precision. `to_native(view)` and `to_json(view)` export
-the complete `seq`, `time`, `meta`, `data` envelope. `json.dumps` can consume a
+the canonical `seq`, `time`, `meta.tags`, `data` envelope. Whole-message
+exports omit unknown stored metadata fields; `view.meta` and subtree conversion
+preserve them. `json.dumps` can consume a
 subtree with `default=to_native`; that route explicitly builds native containers.
+
+### Direct native input
+
+`pool.append_view(data, tags=None, durability=Durability.FAST)` walks exact
+builtin dictionaries, lists, tuples and scalars into Lite3 and retains that
+encoding as its result. It copies byte values from `bytes`, `bytearray` and
+C-contiguous memoryviews directly into the encoding. Later input mutations
+cannot change the result. The data root must be an exact dictionary; keys and
+tags must be exact strings. Integers must fit signed 64 bits, floats must be
+finite, and keys cannot contain NUL. String values and tags can contain NUL.
+
+The method rejects custom values and builtin subclasses without invoking their
+hooks. Keep `append` for its existing JSON/dataclass behavior, or convert custom
+input explicitly. The tag iterable runs once. Native encoding holds Python's
+interpreter state while reading input, then releases it during storage work.
+Do not mutate input concurrently with encoding.
+
+The fallback snapshots builtin input before its ctypes calls. It uses compact
+bulk JSON for ordinary JSON-compatible data; byte values and NUL tags use the
+checked builder through ctypes. These routes preserve view semantics and pay
+extra copying and runtime-call costs.
 
 ### Runtime and wheel support
 

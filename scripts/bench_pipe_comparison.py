@@ -69,6 +69,8 @@ def worker(args):
             probe.plsm_bench_probe_end.restype = ctypes.c_char_p
         value = record()
         fixture = (Path(args.directory) / "fixture.lite3").read_bytes() if args.binary else None
+        if args.role == "writer" and args.receipt == "native-view":
+            import plasmite._views  # Exclude extension loading from delivery timing.
         views = None
         source_view = None
         if pool is not None and args.role == "writer" and (args.receipt == "view" or args.forward_view):
@@ -102,6 +104,10 @@ def worker(args):
                         time.sleep(delay)
                     value["sent_ns"] = time.monotonic_ns()
                     due += args.interval_ms / 1000
+                if args.producer_work_ns:
+                    work_until = time.perf_counter_ns() + args.producer_work_ns
+                    while time.perf_counter_ns() < work_until:
+                        pass
                 if pool is None:
                     # Match Pool.append's standard json.dumps settings.
                     sys.stdout.buffer.write(json.dumps(value).encode("utf-8") + b"\n")
@@ -113,12 +119,13 @@ def worker(args):
                     if seq != index + 1:
                         raise RuntimeError("binary append identity mismatch")
                 else:
-                    receipt = (views.append(pool, value) if args.receipt == "view" else
+                    receipt = (pool.append_view(value) if args.receipt == "native-view" else
+                               views.append(pool, value) if args.receipt == "view" else
                                pool.append_identity(value) if args.receipt == "identity"
                                else pool.append(value))
                     if (receipt.seq != index + 1
                             or (args.receipt == "full" and receipt.data != value)
-                            or (args.receipt in ("identity", "view") and receipt.timestamp_ns <= 0)):
+                            or (args.receipt in ("identity", "view", "native-view") and receipt.timestamp_ns <= 0)):
                         raise RuntimeError("append receipt mismatch")
             if pool is None:
                 sys.stdout.buffer.flush()
@@ -176,7 +183,8 @@ def trial(args, lane, directory, profile=False):
     command = [sys.executable, str(Path(__file__).resolve()), "--worker",
                "--lane", lane, "--messages", str(args.messages),
                "--directory", directory, "--bindings", str(args.bindings),
-               "--interval-ms", str(args.interval_ms), "--receipt", args.receipt]
+               "--interval-ms", str(args.interval_ms), "--receipt", args.receipt,
+               "--producer-work-ns", str(args.producer_work_ns)]
     if args.binary:
         command.append("--binary")
     if args.forward_view:
@@ -272,9 +280,13 @@ def main():
     parser.add_argument("--bindings", type=Path, default=ROOT / "bindings" / "python")
     parser.add_argument("--baseline-bindings", type=Path,
                         help="Python bindings to use with the saved baseline library")
-    parser.add_argument("--receipt", choices=["full", "identity", "view"], default="full",
+    parser.add_argument("--receipt", choices=["full", "identity", "view", "native-view"], default="full",
                         help="producer receipt work; the consumer still decodes and verifies complete data")
-    parser.add_argument("--baseline-receipt", choices=["full", "identity", "view"], default="full")
+    parser.add_argument("--baseline-receipt", choices=["full", "identity", "view", "native-view"], default="full")
+    parser.add_argument("--producer-work-ns", type=int, default=0,
+                        help="diagnostic busy work before each candidate append; same payload/result")
+    parser.add_argument("--baseline-producer-work-ns", type=int, default=0)
+    parser.add_argument("--no-pipe", action="store_true", help="compare only the two Plasmite configurations")
     parser.add_argument("--compare-pipe-flush", action="store_true",
                         help="include both buffered and per-record-flushed pipes")
     parser.add_argument("--pipe-flush", action="store_true",
@@ -329,14 +341,17 @@ def main():
               "script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
               "messages": args.messages, "repeats": args.repeats,
               "interval_ms": args.interval_ms,
+              "producer_work_ns": args.producer_work_ns, "baseline_producer_work_ns": args.baseline_producer_work_ns,
               "format": "lite3-repeat" if args.binary else "json-object",
               "receipt": args.receipt, "baseline_receipt": args.baseline_receipt,
               "forward_owned_view": args.forward_view,
+              "native_view_work": "CPython exact builtin input walk, retained encoded result, native identity access; consumer still decodes and verifies complete data",
               "view_work": "benchmark-only ctypes producer: standard json.dumps, append view, read identity, release; consumer still verifies complete data",
               "forward_view_work": "candidate forwards one prevalidated immutable owner; baseline validates arbitrary encoded input on each append",
               "view_adapter_sha256": hashlib.sha256((Path(__file__).parent / "bench_view_abi.py").read_bytes()).hexdigest() if args.forward_view or args.receipt == "view" or args.baseline_receipt == "view" else None,
               "pipe_flush": args.pipe_flush, "compare_pipe_flush": args.compare_pipe_flush,
               "native_operation_diagnostic": bool(args.native_counts),
+              "probe_sha256": hashlib.sha256(args.native_counts.read_bytes()).hexdigest() if args.native_counts else None,
               "first_record_json_bytes": len(json.dumps(record()).encode()),
               "runs": []}
     if args.native_counts:
@@ -350,7 +365,15 @@ def main():
         if args.baseline_bindings:
             args.baseline_bindings = args.baseline_bindings.resolve()
             result["baseline_bindings_sha256"] = hashlib.sha256((args.baseline_bindings / "plasmite" / "__init__.py").read_bytes()).hexdigest()
-    pipe_lanes = [] if args.binary else (["pipe", "pipe-flushed"] if args.compare_pipe_flush else ["pipe"])
+    if args.receipt == "native-view" or args.baseline_receipt == "native-view":
+        result["native_view_sources_sha256"] = {
+            str(path.relative_to(args.bindings)): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in [args.bindings / "plasmite" / "_views.py",
+                         args.bindings / "plasmite" / "_views_fallback.py",
+                         args.bindings / "native" / "views.c",
+                         *sorted((args.bindings / "plasmite").glob("_views_native*.so"))]
+        }
+    pipe_lanes = [] if args.binary or args.no_pipe else (["pipe", "pipe-flushed"] if args.compare_pipe_flush else ["pipe"])
     # Warm each complete path once; alternate order in the measured repeats.
     for repeat in range(args.repeats + 1):
         lanes = [*pipe_lanes, *libraries]
@@ -369,6 +392,7 @@ def main():
             trial_args.library = libraries.get(label, args.library)
             if label == "baseline":
                 trial_args.receipt = args.baseline_receipt
+                trial_args.producer_work_ns = args.baseline_producer_work_ns
             if label == "baseline" and args.baseline_bindings:
                 trial_args.bindings = args.baseline_bindings
             with tempfile.TemporaryDirectory(prefix="plasmite-pipe-") as directory:

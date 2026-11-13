@@ -27,6 +27,10 @@ class Info(c.Structure):
     ]
 
 
+class Text(c.Structure):
+    _fields_ = [("data", c.c_void_p), ("len", c.c_size_t)]
+
+
 class Entry(c.Structure):
     _fields_ = [("key", c.c_void_p), ("key_len", c.c_size_t), ("value", Ref)]
 
@@ -72,7 +76,46 @@ def _configure_unlocked():
         ),
         "plsm_cursor_free": ([c.c_void_p], None),
         "plsm_value_to_json": ([Ref, c.POINTER(plsm_buf_t), err], c.c_int),
+        "plsm_view_to_json": ([c.c_void_p, c.POINTER(plsm_buf_t), err], c.c_int),
     }
+    signatures.update(
+        {
+            "plsm_pool_append_view_json": (
+                [
+                    c.POINTER(plsm_pool_t),
+                    c.c_char_p,
+                    c.c_size_t,
+                    c.POINTER(c.c_char_p),
+                    c.c_size_t,
+                    c.c_uint32,
+                    owner,
+                    err,
+                ],
+                c.c_int,
+            ),
+            "plsm_builder_new": (
+                [c.POINTER(Text), c.c_size_t, owner, c.POINTER(c.c_size_t), err],
+                c.c_int,
+            ),
+            "plsm_builder_put": (
+                [
+                    c.c_void_p,
+                    c.c_size_t,
+                    c.c_char_p,
+                    c.c_size_t,
+                    c.POINTER(Info),
+                    c.POINTER(c.c_size_t),
+                    err,
+                ],
+                c.c_int,
+            ),
+            "plsm_pool_append_builder": (
+                [c.POINTER(plsm_pool_t), c.c_void_p, c.c_uint32, owner, err],
+                c.c_int,
+            ),
+            "plsm_builder_free": ([c.c_void_p], None),
+        }
+    )
     try:
         for name, (arguments, result) in signatures.items():
             function = getattr(lib, name)
@@ -175,6 +218,14 @@ class MessageView(bytes):
     @property
     def _root(self):
         return _wrap(self, lib.plsm_view_root(self._ptr))
+
+    def _json(self):
+        output = plsm_buf_t()
+        _call(lib.plsm_view_to_json, self._ptr, c.byref(output))
+        try:
+            return c.string_at(output.data, output.len).decode("utf-8")
+        finally:
+            lib.plsm_buf_free(c.byref(output))
 
     def __repr__(self):
         return f"<plasmite.MessageView seq={self.seq}>"
@@ -309,3 +360,109 @@ def from_bytes(payload, seq, timestamp_ns):
         lib.plsm_view_from_lite3, payload, len(payload), seq, timestamp_ns, c.byref(out)
     )
     return MessageView(out)
+
+
+def _snapshot_input(value, parents, binary):
+    kind = type(value)
+    if kind in (dict, list, tuple):
+        if any(value is parent for parent in parents):
+            raise ValueError("circular Python input")
+        parents = (*parents, value)
+        if kind is dict:
+            out = {}
+            for key, child in value.items():
+                if type(key) is not str:
+                    raise TypeError("append_view object keys must be exact str values")
+                out[key] = _snapshot_input(child, parents, binary)
+            return out
+        return [_snapshot_input(child, parents, binary) for child in value]
+    if kind in (bytes, bytearray, memoryview):
+        if kind is memoryview and not value.c_contiguous:
+            raise BufferError("append_view byte buffers must be C-contiguous")
+        binary[0] = True
+        return bytes(value)
+    if kind is int and not -(1 << 63) <= value < 1 << 63:
+        raise OverflowError("Python int too large to convert to C long long")
+    if value is None or kind in (bool, int, float, str):
+        return value
+    raise TypeError(
+        "append_view supports exact builtins and byte buffers; use append for subclasses"
+    )
+
+
+def append(address, data, tags, durability):
+    # ctypes releases the GIL. Freeze mutable inputs before its first crossing.
+    if type(data) is not dict:
+        raise TypeError("append_view data must be an exact dict")
+    if any(type(tag) is not str for tag in tags):
+        raise TypeError("append_view tags must be exact str values")
+    binary = [False]
+    data = _snapshot_input(data, (), binary)
+    encoded_tags = [tag.encode("utf-8") for tag in tags]
+    _configure()
+    pool = c.cast(address, c.POINTER(plsm_pool_t))
+    out = c.c_void_p()
+    if not binary[0] and all(b"\0" not in tag for tag in encoded_tags):
+        # Bulk JSON avoids one ctypes call per field on compatibility runtimes.
+        import json
+
+        payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
+        tag_array = (c.c_char_p * len(tags))(*encoded_tags)
+        _call(
+            lib.plsm_pool_append_view_json,
+            pool,
+            payload,
+            len(payload),
+            tag_array,
+            len(tags),
+            durability,
+            c.byref(out),
+        )
+        return MessageView(out)
+    spans = (Text * len(tags))(
+        *[Text(c.cast(c.c_char_p(tag), c.c_void_p), len(tag)) for tag in encoded_tags]
+    )
+    builder, root = c.c_void_p(), c.c_size_t()
+    _call(lib.plsm_builder_new, spans, len(tags), c.byref(builder), c.byref(root))
+    try:
+        _write_container(builder, root.value, data)
+        _call(lib.plsm_pool_append_builder, pool, builder, durability, c.byref(out))
+        return MessageView(out)
+    finally:
+        lib.plsm_builder_free(builder)
+
+
+def _write_container(builder, node, value):
+    items = value.items() if type(value) is dict else ((None, child) for child in value)
+    for key, child in items:
+        info = Info()
+        encoded = None
+        if child is None:
+            info.kind = 1
+        elif type(child) is bool:
+            info.kind, info.integer = 2, child
+        elif type(child) is int:
+            info.kind, info.integer = 3, child
+        elif type(child) is float:
+            info.kind, info.real = 4, child
+        elif type(child) in (str, bytes):
+            info.kind = 5 if type(child) is str else 6
+            encoded = child.encode("utf-8") if type(child) is str else child
+            info.bytes, info.len = c.cast(c.c_char_p(encoded), c.c_void_p), len(encoded)
+        else:
+            info.kind = 7 if type(child) is dict else 8
+        key_bytes = key.encode("utf-8") if key is not None else None
+        next_node = c.c_size_t()
+        _call(
+            lib.plsm_builder_put,
+            builder,
+            node,
+            key_bytes,
+            len(key_bytes) if key_bytes is not None else 0,
+            c.byref(info),
+            c.byref(next_node),
+        )
+        if info.kind in (7, 8):
+            _write_container(builder, next_node.value, child)

@@ -887,6 +887,14 @@ class Pool:
         return parse_message(self.get_json(seq))
 
     @_serialized_handle
+    def append_view(self, value, tags=None, durability=Durability.FAST):
+        """Encode builtin input once and retain the committed immutable snapshot."""
+        _require_open(self._ptr, "pool")
+        from ._views import append_view
+
+        return append_view(self, value, tags, durability)
+
+    @_serialized_handle
     def get_view(self, seq: int):
         """Return an immutable Lite3 snapshot with native container access."""
         _require_open(self._ptr, "pool")
@@ -1221,13 +1229,14 @@ class UdpFrame:
         )
 
     def message(self) -> Message:
-        payload_buf = (c_uint8 * len(self.payload)).from_buffer_copy(self.payload)
+        payload = _ensure_bytes(self.payload, "payload")
         event = plsm_udp_event_t()
         event.kind = 1
         event.seq = self.seq
         event.timestamp_ns = self.timestamp_ns
-        event.payload.data = cast(payload_buf, c_void_p) if self.payload else None
-        event.payload.len = len(self.payload)
+        # Keep the immutable snapshot alive through the GIL-releasing CDLL call.
+        event.payload.data = cast(c_char_p(payload), c_void_p) if payload else None
+        event.payload.len = len(payload)
         out_message = plsm_buf_t()
         out_err = POINTER(plsm_error_t)()
         rc = _LIB.plsm_udp_event_message(byref(event), byref(out_message), byref(out_err))
