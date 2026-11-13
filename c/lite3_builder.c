@@ -9,7 +9,7 @@ typedef int (*plasmite_grow_fn)(void *, unsigned char **, size_t *);
 
 int plasmite_json_copy_growing(uintptr_t root, size_t parent,
     unsigned char **buf, size_t *len, size_t *capacity,
-    void *state, plasmite_grow_fn grow, unsigned depth)
+    void *state, plasmite_grow_fn grow, unsigned depth, int *json_native_safe)
 {
     if (depth >= LITE3_JSON_NESTING_DEPTH_MAX) { errno = EINVAL; return -1; }
     yyjson_val *container = (yyjson_val *)root;
@@ -37,12 +37,15 @@ int plasmite_json_copy_growing(uintptr_t root, size_t parent,
             value.type = LITE3_TYPE_I64;
             value.integer = (int64_t)yyjson_get_uint(item);
         }
+        if (value.type == LITE3_TYPE_I64 &&
+                (value.integer < -9007199254740991LL || value.integer > 9007199254740991LL))
+            *json_native_safe = 0;
         size_t child = 0;
         while (plasmite_lite3_put(*buf, len, *capacity, parent, key, &value, &child) < 0) {
             if (errno != ENOBUFS || grow(state, buf, capacity) < 0) return -1;
         }
         if (yyjson_is_ctn(item) && plasmite_json_copy_growing((uintptr_t)item,
-                child, buf, len, capacity, state, grow, depth + 1) < 0) return -1;
+                child, buf, len, capacity, state, grow, depth + 1, json_native_safe) < 0) return -1;
     }
     return 0;
 }

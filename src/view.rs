@@ -160,6 +160,14 @@ impl MessageView {
             flags,
         }
     }
+    /// Reserved encoded-storage bytes, excluding owner and lookup metadata.
+    /// Shared children and forwarded messages retain the same backing storage.
+    pub fn retained_bytes(&self) -> usize {
+        match &self.snapshot.storage {
+            Storage::Bytes(bytes) => bytes.capacity(),
+            Storage::Aligned { words, .. } => words.capacity() * std::mem::size_of::<u32>(),
+        }
+    }
     /// Whether JSON conversion preserves every native scalar in binary64 runtimes.
     /// Private builders conservatively return false until they track this property.
     pub fn json_native_safe(&self) -> bool {

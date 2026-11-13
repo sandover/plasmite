@@ -529,6 +529,29 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn explicit_json_records_safe_conversion_during_encoding() {
+        for (number, safe) in [
+            ("9007199254740991", true),
+            ("9007199254740992", false),
+            ("-9007199254740992", false),
+            ("9223372036854775807", false),
+            ("1e20", true),
+            ("-0.0", true),
+        ] {
+            let json = format!("{{\"n\":{number}}}");
+            let view = MessageView::from_json(json.as_bytes(), &[]).unwrap();
+            assert_eq!(view.json_native_safe(), safe, "{number}");
+            assert!(view.retained_bytes() >= view.bytes().len());
+            let forwarded = view.with_identity(2, 3, 0);
+            assert_eq!(forwarded.retained_bytes(), view.retained_bytes());
+            assert_eq!(forwarded.bytes().as_ptr(), view.bytes().as_ptr());
+        }
+        assert_eq!(
+            unsafe { crate::abi_views::plsm_view_retained_bytes(std::ptr::null()) },
+            0
+        );
+    }
     struct Counted<'a> {
         calls: &'a Cell<usize>,
         text: &'a str,

@@ -444,6 +444,9 @@ int plsm_pool_get_into(plsm_pool_t *pool, uint64_t seq, uint8_t *destination,
     uint32_t *flags, plsm_error_t **err);
 uint64_t plsm_view_seq(const plsm_message_view_t *view);
 uint64_t plsm_view_timestamp_ns(const plsm_message_view_t *view);
+/* Reserved payload storage capacity, excluding owner/index metadata. Shared
+ * children/forwarded owners retain the same storage; NULL returns zero. */
+size_t plsm_view_retained_bytes(const plsm_message_view_t *view);
 int plsm_value_get(plsm_value_ref_t value, const uint8_t *key, size_t len,
     plsm_value_ref_t *out, plsm_error_t **err);
 int plsm_value_index(plsm_value_ref_t value, uint32_t index,

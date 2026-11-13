@@ -138,6 +138,11 @@ pub unsafe extern "C" fn plsm_view_seq(owner: *const plsm_message_view) -> u64 {
 pub unsafe extern "C" fn plsm_view_timestamp_ns(owner: *const plsm_message_view) -> u64 {
     unsafe { (*owner).view.timestamp_ns }
 }
+/// Backing payload capacity; no owner/index metadata or double-counted shares.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn plsm_view_retained_bytes(owner: *const plsm_message_view) -> usize {
+    unsafe { owner.as_ref() }.map_or(0, |owner| owner.view.retained_bytes())
+}
 #[unsafe(no_mangle)]
 pub extern "C" fn plsm_value_get(
     v: plsm_value_ref,

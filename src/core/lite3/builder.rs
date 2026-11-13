@@ -105,8 +105,6 @@ impl Builder {
         .map(|_| ())
     }
     pub fn copy_parsed(&mut self, root: usize) -> Result<(), Error> {
-        // The C bulk writer bypasses put; it does not yet return this property.
-        self.json_native_safe = false;
         unsafe extern "C" {
             fn plasmite_json_copy_growing(
                 root: usize,
@@ -117,6 +115,7 @@ impl Builder {
                 state: *mut std::ffi::c_void,
                 grow: unsafe extern "C" fn(*mut std::ffi::c_void, *mut *mut u8, *mut usize) -> i32,
                 depth: u32,
+                json_native_safe: *mut i32,
             ) -> i32;
         }
         unsafe extern "C" fn grow(
@@ -139,6 +138,7 @@ impl Builder {
         let mut capacity = self.words.len() * 4;
         // The parsed owner outlives this call. C retains no pointers; growth
         // mutates only the word allocation, with len stored separately.
+        let mut json_native_safe = i32::from(self.json_native_safe);
         let ret = unsafe {
             plasmite_json_copy_growing(
                 root,
@@ -149,11 +149,13 @@ impl Builder {
                 (&mut self.words as *mut Vec<u32>).cast(),
                 grow,
                 1,
+                &mut json_native_safe,
             )
         };
         if ret < 0 {
             return Err(Error::new(ErrorKind::Usage).with_message("failed to encode JSON view"));
         }
+        self.json_native_safe = json_native_safe != 0;
         Ok(())
     }
     pub(crate) fn data_is_empty(&self) -> Result<bool, Error> {
