@@ -479,6 +479,32 @@ pub extern "C" fn plsm_pool_append_view_json(
     )
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn plsm_value_to_json_stored(
+    v: plsm_value_ref,
+    out: *mut plsm_buf,
+    err: *mut *mut plsm_error,
+) -> i32 {
+    finish(
+        (|| write_json_buf(out, unsafe { value(v) }?.to_json_stored()?))(),
+        err,
+    )
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn plsm_view_to_json(
+    owner: *const plsm_message_view,
+    out: *mut plsm_buf,
+    err: *mut *mut plsm_error,
+) -> i32 {
+    finish(
+        (|| {
+            let owner = unsafe { owner.as_ref() }.ok_or_else(usage)?;
+            write_json_buf(out, owner.view.to_json()?)
+        })(),
+        err,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

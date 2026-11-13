@@ -472,6 +472,10 @@ int plsm_view_select(const plsm_message_view_t *view,
     const plsm_selector_t *selector, plsm_value_ref_t *slots,
     size_t capacity, plsm_error_t **err);
 int plsm_value_to_json(plsm_value_ref_t value, plsm_buf_t *out, plsm_error_t **err);
+/* Native-copy helper preserves view key order; normal JSON output stays canonical. */
+int plsm_value_to_json_stored(plsm_value_ref_t value, plsm_buf_t *out, plsm_error_t **err);
+/* Complete seq/time/meta/data envelope, with no intermediate native object tree. */
+int plsm_view_to_json(const plsm_message_view_t *view, plsm_buf_t *out, plsm_error_t **err);
 
 #ifdef __cplusplus
 } // extern "C"
