@@ -212,6 +212,20 @@ impl<'de> de::Deserializer<'de> for ValueRef<'de> {
             _ => Err(invalid("unsupported value kind")),
         }
     }
+    fn deserialize_f32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+        let node = self.owner.node(self.offset);
+        match node.kind {
+            sys::LITE3_TYPE_F64 => {
+                let value = node.real as f32;
+                if !value.is_finite() {
+                    return Err(invalid("number exceeds f32 range"));
+                }
+                visitor.visit_f32(value)
+            }
+            sys::LITE3_TYPE_I64 => visitor.visit_i64(node.integer),
+            _ => self.deserialize_any(visitor),
+        }
+    }
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
         if self.owner.node(self.offset).kind == sys::LITE3_TYPE_NULL {
             visitor.visit_none()
@@ -256,7 +270,7 @@ impl<'de> de::Deserializer<'de> for ValueRef<'de> {
         // Acquisition already checked the entire immutable subtree.
         visitor.visit_unit()
     }
-    serde::forward_to_deserialize_any! { bool i8 i16 i32 i64 u8 u16 u32 u64 i128 u128 f32 f64 char str string bytes byte_buf unit unit_struct seq tuple tuple_struct map struct identifier }
+    serde::forward_to_deserialize_any! { bool i8 i16 i32 i64 u8 u16 u32 u64 i128 u128 f64 char str string bytes byte_buf unit unit_struct seq tuple tuple_struct map struct identifier }
 }
 
 #[cfg(test)]
@@ -342,6 +356,30 @@ mod tests {
                 .unwrap()
                 .decode::<i64>()
                 .is_err()
+        );
+    }
+    #[test]
+    fn narrowing_float_overflow_is_a_range_error() {
+        let owner = MessageView::from_json(br#"{"large":1e100,"normal":0.1}"#, &[]).unwrap();
+        assert!(serde_json::from_str::<f32>("1e100").is_err());
+        assert!(
+            owner
+                .data()
+                .get("large")
+                .unwrap()
+                .unwrap()
+                .decode::<f32>()
+                .is_err()
+        );
+        assert_eq!(
+            owner
+                .data()
+                .get("normal")
+                .unwrap()
+                .unwrap()
+                .decode::<f32>()
+                .unwrap(),
+            0.1_f32
         );
     }
     #[test]

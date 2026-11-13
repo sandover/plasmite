@@ -61,12 +61,18 @@ struct Writer<'a> {
 }
 impl<'a> Writer<'a> {
     fn put(self, value: sys::ValueView) -> Result<(), CodecError> {
+        if self.parent == 0 && self.key == Some("data") {
+            return Err(invalid("data must be object"));
+        }
         self.builder
             .put(self.parent, self.key, value)
             .map(|_| ())
             .map_err(invalid)
     }
     fn container(self, array: bool) -> Result<Compound<'a>, CodecError> {
+        if array && self.parent == 0 && self.key == Some("data") {
+            return Err(invalid("data must be object"));
+        }
         if self.depth >= 32 {
             return Err(invalid("container nesting exceeds limit"));
         }
@@ -704,7 +710,10 @@ mod tests {
         assert!(MessageView::encode(&BTreeMap::from([("n", f64::INFINITY)]), &[]).is_err());
         assert!(MessageView::encode(&BTreeMap::from([("n", u64::MAX)]), &[]).is_err());
         assert!(MessageView::encode(&BTreeMap::from([("bad\0key", 1)]), &[]).is_err());
-        assert!(MessageView::encode(&vec![1, 2], &[]).is_err());
+        assert_eq!(
+            MessageView::encode(&vec![1, 2], &[]).err().unwrap().kind(),
+            ErrorKind::Usage
+        );
         let mut value = serde_json::json!(0);
         for _ in 0..32 {
             value = serde_json::json!({"x":value});
