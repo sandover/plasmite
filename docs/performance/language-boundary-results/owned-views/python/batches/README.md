@@ -33,7 +33,7 @@ CPython 3.15.2, macOS 27.2, Apple M5 Pro; five alternating repeats after one war
 These numbers measure the archived stream checkpoint. Final correctness fixes
 make zero-timeout polls scan available filtered records, keep mixed C JSON/view
 reads on the same filtered checkpoint, and finish Python callbacks before
-borrowing handles. The final integration matrix will use that final checkpoint.
+borrowing handles. The final central confirmation below retests that checkpoint.
 Other agents stopped builds/tests/timing. Every row uses the same frozen
 library, producer, data and requested consumer conversion. Small/wide/string
 rows format each view as a whole JSON message, encode UTF-8, and run the same
@@ -162,6 +162,30 @@ input, whole-owner forwarding, logical array/byte slices, bounded streams and
 child lifetime. The ABI3 wheel also passes the bundled server restart smoke.
 The logs preserve Python (outside Git), free-threaded (outside Git)
 and wheel (outside Git) results.
+
+## Final central confirmation
+
+The central measurement pass repeats the final implementation with the frozen
+SDK above, after the filtered-poll, mixed-reader and callback/cancellation fixes.
+Five alternating repeats compare ordinary view iteration with explicit count 16
+batches and a 256 KiB byte bound. Producer work and requested consumer conversion
+match within each pair; each record still undergoes exact-result checks.
+Other agents stopped CPU-heavy work during this pass.
+
+| Requested consumer result | Ordinary records/s | Batch records/s | Throughput change | Ordinary CPU ms | Batch CPU ms | CPU change |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| message-json | 70,945 | 120,865 | +70.4% | 87.407 | 71.957 | -17.7% |
+| native | 102,241 | 134,932 | +32.0% | 67.997 | 60.480 | -11.1% |
+
+[Whole-message JSON/dataclass raw runs](central-confirmation/message-json.json)
+and [native-data raw runs](central-confirmation/native.json) record source,
+backend and library hashes. They use library
+`2a1dee2cbb01805551dae8960eb35b60fe576f53ba723e55237c117d975b6160`.
+The reproduction command above selects `message-json`; change
+`--reader-view-conversion native` for the second row. Both use 5000 messages,
+five repeats, native-view producer receipts, no producer delay and no pipe.
+The final native-data gain differs from the earlier checkpoint's 11% result;
+use these final matched numbers when reporting the shipped implementation.
 
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

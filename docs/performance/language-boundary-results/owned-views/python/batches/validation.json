@@ -54,7 +54,7 @@
     "wheel_smoke": "cp311-abi3,cp310-cp310,py3-none built from sdist; tags/architecture/deployment floor/exact SDK verified; stream/forwarding/slices tested; bundled server restart smoke passes"
   },
   "notes": [
-    "Main timing matrix predates final zero-poll, mixed-reader tag and callback guard corrections. Final SDK and Python overlay identify the checked release checkpoint; central integration measurements will use that checkpoint.",
+    "Main exploratory timing matrix predates final correctness fixes; central-confirmation/message-json.json and native.json retest the final SDK/Python checkpoint. Both central runs match the archived final library and runtime source hashes.",
     "No new C stream/owner signature changes after the fixed interface."
   ]
 }
