@@ -122,6 +122,13 @@ pub struct Tail<'a>(TailReader<'a>);
 /// Retaining a message keeps only that message alive after this tail or pool closes.
 pub struct ViewTail<'a>(TailReader<'a>);
 
+impl Pool {
+    /// Tail validated owned views without constructing JSON or native data trees.
+    pub fn tail_views(&self, options: TailOptions) -> ViewTail<'_> {
+        ViewTail(TailReader::new(self, options))
+    }
+}
+
 pub struct Lite3Tail<'a>(TailReader<'a>);
 
 struct TailReader<'a> {
@@ -692,9 +699,6 @@ pub trait PoolApiExt {
 
     fn tail(&self, options: TailOptions) -> Tail<'_>;
 
-    /// Tail validated owned views without constructing JSON or native data trees.
-    fn tail_views(&self, options: TailOptions) -> ViewTail<'_>;
-
     /// Tail frames without JSON decoding.
     fn tail_lite3(&self, options: TailOptions) -> Lite3Tail<'_>;
 }
@@ -771,10 +775,6 @@ impl PoolApiExt for Pool {
 
     fn tail(&self, options: TailOptions) -> Tail<'_> {
         Tail(TailReader::new(self, options))
-    }
-
-    fn tail_views(&self, options: TailOptions) -> ViewTail<'_> {
-        ViewTail(TailReader::new(self, options))
     }
 
     fn tail_lite3(&self, options: TailOptions) -> Lite3Tail<'_> {
