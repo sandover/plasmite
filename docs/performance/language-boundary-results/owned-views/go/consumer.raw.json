@@ -1,0 +1,3518 @@
+{
+  "metadata": {
+    "commit": "0c74704337a610aa598676ae02630b300bdf96bf",
+    "host": "macOS-27.2-arm64-arm-64bit-Mach-O",
+    "go": "go version go1.27.3 darwin/arm64",
+    "source_sha256": {
+      "Cargo.lock": "8ff3448ec53e2abe93ec1670c50c3b4c3b3ce6a8207378e89c17f1bede75244e",
+      "Cargo.toml": "c80c305694472b67bb6cb7eabe089aaa41ffa11064a800755babecc54c4ba943",
+      "bindings/go/api/contracts.go": "8fabfe8f1a2aa354082e01825b067c197e1197d57c797432292da5cf4f4a70d7",
+      "bindings/go/api/contracts_test.go": "885072e508c2772e481032953a7a13de90cc9f5f4608977ca39ec5477af512ee",
+      "bindings/go/api/pool_ref_test.go": "cd5d4cdd6442f2bdf0e170fd4dc8d98e95c2fec6dac8008fbdbbb8c076fb2c5f",
+      "bindings/go/go.mod": "d14c2150a33e4e90f7ede7707fe1d723366a736cd24ef139cf39dd03fd9dbe50",
+      "bindings/go/local/borrowed.h": "166a33e81684d24d91e2ffa958d93f74b019acf10968b6b02e36698973183b69",
+      "bindings/go/local/concurrency_test.go": "c7963b880aaa451e9347fd04957c398c9d196ec2d9cdc8891849d9ec0bab295b",
+      "bindings/go/local/local.go": "c498f936d727a3b5d7aab97f53f8a7f9a0365645e3585ef9f842ee05ece04fa3",
+      "bindings/go/local/local_test.go": "5372e2121af60ce144f91cf93870e8fba356cbfbda19c89d6e968a09af47327b",
+      "bindings/go/local/views.go": "26ac3f202984c244474a9a9a12c30f9f6e4a38e5adf0cf72ac82f1719bfde1c2",
+      "bindings/go/local/views_bench_test.go": "5708878c93a7f63171685753f81a33d9bac8722ccf1f07de7a646900d091db48",
+      "bindings/go/local/views_decode.go": "0bf71632915adcade15c513b1e19383d23ccf4bacd95e7a36a4ebe2f2890ccd5",
+      "bindings/go/local/views_test.go": "b3f564221eb8ba0afcfff4dd8217578c8f9c6cdb5bad790d7f91e4fad4975c2e",
+      "build.rs": "bb4b02c2303b8c50eada7908a504ffc7e76fa0a9f8314902ece5d8405d8bdbe0",
+      "c/lite3_builder.c": "915322c97b6849c9987c216f801ac3109629ee0021a9cca0e209e364741fe07e",
+      "c/lite3_shim.c": "70010d2b8043f6481893e5a0e9eb9a058554d081019afbee784850d509298d18",
+      "c/lite3_shim.h": "a8013d9fe97d21971cdbc6cd8a2ca0b15b8e298e269028cb80f0c06c0f6ad3c5",
+      "c/notify_shim.c": "8394a34c2d604bef5c8d1cdd3075427f371076421be73549eefeb6e2ce228a99",
+      "include/plasmite.h": "b8edb6246938ae50bfe258640908afd042561417c7f91bc86452968ff5ae2cb0",
+      "src/abi.rs": "350098bb9439d6b0abc3f9c8ad159bfe525f3a1f02ef11b12cbab4ed8c5c9925",
+      "src/abi_borrowed.rs": "276c793f171ac9e3f6f4e737fd55ab3c68d5426e084505787d71bf3a639c3524",
+      "src/abi_builder.rs": "c03282cf9bf0af43a84766a75613f8baa742c0d2551ca3b8a246dbf3635c9bf5",
+      "src/abi_fields.rs": "b3269117de6ef1c541b388ad7dd2987db86b170608ee44a2126b0f106a45cba5",
+      "src/abi_views.rs": "1027f84b1b4d9296c26f3b60358f9dbbea7c4d64c96f9f4b26b2ea54c45e4f1b",
+      "src/access_store.rs": "24666d798658e7a98fcaac7beef32c7f40a949b2b76b9f57b3b9760a565e126f",
+      "src/activity.rs": "dfde0e2143fb1901d9d4aaa0494c6341fe98dacf1ce574a2074ad8790d57f6d6",
+      "src/api/access.rs": "f2de12f23e85293d657d3ceb54aa7944f87446ff4d3d0493e2ed975e3821fc0c",
+      "src/api/access_store.rs": "c8e1982fc2a78869cfbce6461aa70fc5ae60eb72c124be512200a64113d4cb7c",
+      "src/api/access_tls.rs": "91a809fca1740cb57d49442f5609af007693d569e0dac09822ac41b9b9fb44d0",
+      "src/api/browser_trust.rs": "2b1cbd9b76a2f8db0cb3c41b9c96f9ab6685d2351da5b440f5ca9fd7520d9ea9",
+      "src/api/client.rs": "0d8e9b0d4da98ab5893cffd29e9edf939ff2cc3cc48208e73619030712e43172",
+      "src/api/message.rs": "c21723b648cbf80fc93a0786061323bdbebab32368378c2972de1500bbb4378b",
+      "src/api/mod.rs": "cfbdfc4778f0029c6ccb518cbe8fc068dcffb4ea4b2ef7b4ecc3fd3bf13acdc9",
+      "src/api/notify.rs": "47e07534bb249420352b122ed46a2c1ebfdc35acad4b2c9e346d0258eb370f01",
+      "src/api/remote.rs": "86ede5636c5a161721c5769a71a5d53620cae178c0cea00174552392b8ced215",
+      "src/api/udp.rs": "f55e738f2f4467bd3b9e67ed70c3dcb3e48fc468f798b2544f4e69bb0daa4c71",
+      "src/api/validation.rs": "7a8140aa9925473d940685a558061d9e05b1865e03d73929bc24a295b342d242",
+      "src/bench.rs": "ffcbce6ef1476f1062971c296ed0f4d77cab7ffbb0148c2fb456d42acb0f3487",
+      "src/bin/pls.rs": "0e639fc80aadbb1ae490b76c6880ef19a0c156c87af557f147418dd4840d076a",
+      "src/browser_session.rs": "ffea50afec33348142da7cd19d6ebb9248185c415e2a9ae9b21a8feba00aabb5",
+      "src/cli/access.rs": "1163f1ea57811ce80ac3f604e2a88bf67b9b67781273f4169a126d9b16b75e8c",
+      "src/cli/args.rs": "b9e94ba5233aed50c25d0d5d9d800b5463feabdd9c548e8bcc920ad782f7851a",
+      "src/cli/context.rs": "c2307a9d9493dc98237670630fcc972424d87d6a3f8523c469a5a2ec4c5a517b",
+      "src/cli/doctor.rs": "900adb3c7924b6bd0b26ca44dafcc477dfa25745f1647f830635cf18b58fd54c",
+      "src/cli/doctor_support.rs": "e8b2157413c4e9fc57bca9f8358d63fa6404e5ba62c8deed00a3ce1d078053e6",
+      "src/cli/feed.rs": "9f48c3eecce84e0112037b35a94effabc1602f46ad3b176768aa29a36c18ce36",
+      "src/cli/feed_support.rs": "dc1eb540b334f31c2a46a7160a108def270907c11a03f6ce7cfc814f643f7162",
+      "src/cli/message_stream.rs": "5e5a871be18d4b15cd8ec947213be21b3bf461f7e031db3e23dd6f8a5da4c0de",
+      "src/cli/mod.rs": "6728d0867d84c28538c508e81e4331c2bc54e5f793bce422bde9accf110335f7",
+      "src/cli/output.rs": "4e31e82c1c3f3d1778e0941cff7053b6d01fe400a2443ee188ed9a05b26443a0",
+      "src/cli/output_support.rs": "456d6fba666993d02867c1a321c5d93759841af13707b9cf95faca4ae1943102",
+      "src/cli/pool.rs": "1d8ec55d99e2c9a578aae6443e9582cfc64fa47585b0778e6a3c50e036503677",
+      "src/cli/pool_support.rs": "a7def6fc920f487799f926c65bd569c6cc544217c583a67eef7976e6e0db0860",
+      "src/cli/result.rs": "5bc3cbeb2ba160bfd0a11bec5192f0edf0e91167fd81da197892f8e3551ad11c",
+      "src/cli/server.rs": "0b8af1ad10e71b2bd462d110a7a97451f8274fdf02564c6aa898001040990eea",
+      "src/cli/stream.rs": "f0d25381c77e9f7640c71ba70ebc91ff067bdbe98f524d4600f80a6bd1e3c5e2",
+      "src/cli/stream_support.rs": "c4acae6f62fbe3a74f53417b5baaa1a60f9149d940a9b112d62c2af664024ef2",
+      "src/cli/support.rs": "ec75b75c527921a36507d1e8cb1aee1f697d123666c1d37317755f6cf709ea4c",
+      "src/cli/tap.rs": "7b0e477671bdead60a15309dfc0f188345ee8c0587ea973b16833e25b5878e98",
+      "src/cli/utility.rs": "0077e83871a7e31b9e53c7baea1a495113b411fb188f09d37f87eadf258c11df",
+      "src/color_json.rs": "59f25d60beed7f87c45e3d8f09473f0594ad01acf02e4bc0b95ca8df2e67e8ef",
+      "src/core/cursor.rs": "9b881175e647f8b22efdfae7dd6881fdaaa761daa231bf28d2707931e250039e",
+      "src/core/error.rs": "7ef3f0758577e99dfd422ab9c62d5847f894f54748e9269df361fe288f9c74e1",
+      "src/core/format.rs": "0090d5f9706616f0fba0495380c1a363bba9b9b426aeddd5082cabfefb44ea5f",
+      "src/core/frame.rs": "28c83ab8ef05f445a6528dbe04caec5588edb915e6bf81124be2115f107b1388",
+      "src/core/lite3/builder.rs": "acb02fbfcae507e0e9f46b3a6dd2055dff1519edc26b4b27664b7c014e507d38",
+      "src/core/lite3/json.rs": "4d80b00b271f8dd05ae753b2a9c95b0e389610bcd7430e4d0c01622a226362aa",
+      "src/core/lite3/mod.rs": "5ba0e89a37f76814485e44cbe7c3287fa73199976343430363a007827d23793a",
+      "src/core/lite3/sys.rs": "0fa5563aa1daba183d96d03c80ab62aecd9a249a9366c2a457b4ee6ff327024c",
+      "src/core/mod.rs": "0a7d30ef15d8993508f33af574b3ac56e122808109037db25ab7912b5f9a4816",
+      "src/core/notify.rs": "59dee93e8f3306ea7d74f20c82dfb73e4d5403966f5be2e2166aeee30db6d6ba",
+      "src/core/plan.rs": "c614afb38c780ba947658525810829a398019214b5a78c76c6d925ae030e5bbe",
+      "src/core/pool.rs": "1e711fedaf2cb1415d7f6d5d035206fd1c709cbd869a23c20809152fd447d783",
+      "src/core/ring_layout.rs": "d5a14b4b111f108111ad26d9fb44fbd527f17db4c08a7d80508ea38f8074c8ba",
+      "src/core/validate.rs": "c8303c220072dec753e50b2731b30739ca51520bf82b5444ce0ba498e1113d6f",
+      "src/interface_wire.rs": "7fe532a4d83c5023e0ebd0868a09e9a4b1b376a42865998634c231bcabf22579",
+      "src/jq_filter.rs": "db1c104fc7d3865d4242bb7d2b24d7015e97270925d5b7adb09223272ff1bc15",
+      "src/lib.rs": "e2a86e4a49e50511501c7d76f0398547c7b13a711a7c9b4b3db3671ca88e885b",
+      "src/main.rs": "318949df0afa363c98397b09cc635eb4759122f5aa769c6aa6e09f4a1c957fb7",
+      "src/mcp.rs": "74dbc134804d5edf99297c182f9f84c4b68cc07ce734aaf729b3e028c69eaf9f",
+      "src/mcp_stdio.rs": "b8c16dc74553237a342c37830d73d2325d57e21f75e0142d35399070945c8f33",
+      "src/notice.rs": "6b0613d51b67caa232fcf7e81d5b18256a54d9a9a1ed5b6499cdb3ac07c6c224",
+      "src/oauth.rs": "ab5a49275ed48328f5eb074610a2db628095dc2ea503b09dd07f3190f470e10b",
+      "src/pool_info_json.rs": "b86d0b0c78d4abc56ec67ae944c2feefecebc47dc1006b939c9b3b868cadfe23",
+      "src/pool_paths.rs": "3d4c7a775aee3eedd9bd29880397ae681e4d7c6cec8b258f0cc9db175d685e01",
+      "src/secure_serve.rs": "b217a8be6deb73040557a94512a666e69d817b5e4fdcec6d34432c86a25c2760",
+      "src/serve.rs": "ba5e4c7bf0857ee6a626d9ba8ac883cb8b5652f0e512a3d320abb88bb264bd03",
+      "src/serve_registry.rs": "537fdd0027f985bff4988421b733802812f92f488ffc9c0587af5fe44e3c9af9",
+      "src/serve_service/unix.rs": "5b3f089b6a28722ff6d59b1e3ff9a1f7696cd961961cf69c82612635f5f02fca",
+      "src/serve_service/windows.rs": "cf7f2bfadd48c756b405441236384386ec09220bfbdad9e4ae13d0c2e4ab26d7",
+      "src/serve_service.rs": "7115b56326c50a3a9c038b418cb81c3c6925e7cb2e93e669f03d3412d027d76f",
+      "src/server_private.rs": "dfba79bdfa56b56442e282ad70b3ace4fc96e0ee5f61b48a63259141e0aa03fc",
+      "src/share_addresses.rs": "0335b825710543c2f0f23eef7bbc58a34c51b0d11698988c7d823971d7cdec07",
+      "src/since.rs": "a612e6683f6b2ff9404ab240dd1561b33aa21588d81fbf7d4487af594654032c",
+      "src/udp_input.rs": "e0184ae9bcab40ab973476e83c7862204ecaf305d010fa7de72c1a55267648c9",
+      "src/udp_wire.rs": "133592d8e60c194b1b1abb91c7f5079a7a86db6cade8858e99f2cc0d00ee29e5",
+      "src/view/de.rs": "af12ac8415dee34ee22234ec9911a86d83970e93974fee02748fe25c0a13dc21",
+      "src/view/json.rs": "8155d193c575f41a96e500be2e5f75c92696617d21f48055fb31f27f1f5e5ff6",
+      "src/view/ser.rs": "5857de4ad1c5e17dcb07d96e47d551aa9405d174d1a6ae3ddb60027248b20a19",
+      "src/view.rs": "3c6a41ce7a2dcb7f1be53e8f9d2af1724b6d1cfcdfa110f348be204c1a71775a",
+      "src/windows_private.rs": "f6e5af915d910e5368e6f58ae19e1d2595c55748da7b929f339c4213ac098078"
+    },
+    "artifact_sha256": {
+      "tmp/go-owned/owned-views.test": "07e0c1259bf3453d41d4f32258cae183085c4c671c412c68b34d86ae6ea77752",
+      "tmp/go-owned/lib/libplasmite.dylib": "84e0bd45df11e3eaa639f615e7a89058b91b980e72829c654c2a11dcb306f018",
+      "docs/performance/language-boundary-results/owned-views/go/consumer-source.tar.gz": "5f99b55e44792fde1eceacf72002c9a6195108f1623fc2f0835e75b6303daded"
+    },
+    "environment": {
+      "GOMAXPROCS": "1",
+      "GOGC": "100"
+    },
+    "note": "All lanes share one release core and Go binary. Seven processes alternate fixture/lane order. Go reports Go allocations only; native C snapshot control also allocates a Rust payload. Runtime cgo counters sampled outside timing. Default read-into initially reserves1KiB; exact probe starts empty. Typed direct plan accepts complete exact struct shapes; other shapes use JSON fallback."
+  },
+  "runs": [
+    {
+      "repeat": 0,
+      "reverse": 0,
+      "argv": [
+        "/Users/brandonharvey/src/plasmite/tmp/go-owned/owned-views.test",
+        "-test.run=^$",
+        "-test.bench=BenchmarkOwnedViews",
+        "-test.benchtime=2000x",
+        "-test.count=1"
+      ],
+      "elapsed_seconds": 2.038898541009985,
+      "cpu_seconds": 1.857532,
+      "rows": [
+        {
+          "fixture": "small",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 958.5,
+          "cgo/op": 2.0,
+          "B/op": 1104.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 1396.0,
+          "cgo/op": 3.0,
+          "B/op": 656.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 1073.0,
+          "cgo/op": 3.0,
+          "B/op": 760.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 1146.0,
+          "cgo/op": 3.0,
+          "B/op": 1381.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 1798.0,
+          "cgo/op": 2.0,
+          "B/op": 184.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 1027.0,
+          "cgo/op": 3.0,
+          "B/op": 1317.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 1977.0,
+          "cgo/op": 2.0,
+          "B/op": 184.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 222.8,
+          "cgo/op": 1.0,
+          "B/op": 277.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 252.2,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 206.4,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 19.46,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "small",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 1050.0,
+          "cgo/op": 2.0,
+          "B/op": 880.0,
+          "allocs/op": 17.0
+        },
+        {
+          "fixture": "small",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 615.3,
+          "cgo/op": 0.0,
+          "B/op": 816.0,
+          "allocs/op": 16.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 6979.0,
+          "cgo/op": 3.0,
+          "B/op": 10576.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 7162.0,
+          "cgo/op": 3.0,
+          "B/op": 9552.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 6561.0,
+          "cgo/op": 3.0,
+          "B/op": 9656.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 38235.0,
+          "cgo/op": 6.0,
+          "B/op": 13536.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 31852.0,
+          "cgo/op": 2.0,
+          "B/op": 3128.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 6295.0,
+          "cgo/op": 4.0,
+          "B/op": 10789.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 29642.0,
+          "cgo/op": 2.0,
+          "B/op": 3128.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 25556.0,
+          "cgo/op": 3.0,
+          "B/op": 2960.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 16196.0,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 150.2,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 17.27,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 44942.0,
+          "cgo/op": 2.0,
+          "B/op": 26921.0,
+          "allocs/op": 579.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 36453.0,
+          "cgo/op": 0.0,
+          "B/op": 24233.0,
+          "allocs/op": 578.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 9313.0,
+          "cgo/op": 3.0,
+          "B/op": 74832.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 9333.0,
+          "cgo/op": 3.0,
+          "B/op": 73808.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 10361.0,
+          "cgo/op": 3.0,
+          "B/op": 73912.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 13007.0,
+          "cgo/op": 4.0,
+          "B/op": 140640.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 66263.0,
+          "cgo/op": 2.0,
+          "B/op": 139327.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 14968.0,
+          "cgo/op": 4.0,
+          "B/op": 140576.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 72188.0,
+          "cgo/op": 2.0,
+          "B/op": 139327.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 3253.0,
+          "cgo/op": 1.0,
+          "B/op": 65808.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 40247.0,
+          "cgo/op": 0.0,
+          "B/op": 65571.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 4826.0,
+          "cgo/op": 1.0,
+          "B/op": 65744.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 803.5,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 60285.0,
+          "cgo/op": 2.0,
+          "B/op": 140087.0,
+          "allocs/op": 18.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 40436.0,
+          "cgo/op": 0.0,
+          "B/op": 66355.0,
+          "allocs/op": 17.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 11009.0,
+          "cgo/op": 3.0,
+          "B/op": 50256.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 10901.0,
+          "cgo/op": 3.0,
+          "B/op": 49232.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 11250.0,
+          "cgo/op": 3.0,
+          "B/op": 49336.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 33071.0,
+          "cgo/op": 6.0,
+          "B/op": 54626.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 28205.0,
+          "cgo/op": 2.0,
+          "B/op": 4152.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 11368.0,
+          "cgo/op": 4.0,
+          "B/op": 50469.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 28391.0,
+          "cgo/op": 2.0,
+          "B/op": 4152.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 20290.0,
+          "cgo/op": 3.0,
+          "B/op": 4368.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 9461.0,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 130.2,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 17.92,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "array",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 84443.0,
+          "cgo/op": 2.0,
+          "B/op": 56146.0,
+          "allocs/op": 2030.0
+        },
+        {
+          "fixture": "array",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 71112.0,
+          "cgo/op": 0.0,
+          "B/op": 52050.0,
+          "allocs/op": 2029.0
+        }
+      ],
+      "stdout": "goos: darwin\ngoarch: arm64\npkg: github.com/sandover/plasmite/bindings/go/local\ncpu: Apple M5 Pro\nBenchmarkOwnedViews/small/get_into         \t    2000\t       958.5 ns/op\t         2.000 cgo/op\t    1104 B/op\t       2 allocs/op\nBenchmarkOwnedViews/small/get_into_exact   \t    2000\t      1396 ns/op\t         3.000 cgo/op\t     656 B/op\t       2 allocs/op\nBenchmarkOwnedViews/small/get_c_copy       \t    2000\t      1073 ns/op\t         3.000 cgo/op\t     760 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/cold_view_typed  \t    2000\t      1146 ns/op\t         3.000 cgo/op\t    1381 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/cold_json_typed  \t    2000\t      1798 ns/op\t         2.000 cgo/op\t     184 B/op\t       4 allocs/op\nBenchmarkOwnedViews/small/cold_view_selected         \t    2000\t      1027 ns/op\t         3.000 cgo/op\t    1317 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/cold_json_selected         \t    2000\t      1977 ns/op\t         2.000 cgo/op\t     184 B/op\t       4 allocs/op\nBenchmarkOwnedViews/small/warm_view_typed            \t    2000\t       222.8 ns/op\t         1.000 cgo/op\t     277 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/warm_json_typed            \t    2000\t       252.2 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/small/warm_view_selected         \t    2000\t       206.4 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/warm_native_selected       \t    2000\t        19.46 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/small/full_view_native           \t    2000\t      1050 ns/op\t         2.000 cgo/op\t     880 B/op\t      17 allocs/op\nBenchmarkOwnedViews/small/full_json_native           \t    2000\t       615.3 ns/op\t         0 cgo/op\t     816 B/op\t      16 allocs/op\nBenchmarkOwnedViews/wide/get_into                    \t    2000\t      6979 ns/op\t         3.000 cgo/op\t   10576 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/get_into_exact              \t    2000\t      7162 ns/op\t         3.000 cgo/op\t    9552 B/op\t       2 allocs/op\nBenchmarkOwnedViews/wide/get_c_copy                  \t    2000\t      6561 ns/op\t         3.000 cgo/op\t    9656 B/op\t       5 allocs/op\nBenchmarkOwnedViews/wide/cold_view_typed             \t    2000\t     38235 ns/op\t         6.000 cgo/op\t   13536 B/op\t       6 allocs/op\nBenchmarkOwnedViews/wide/cold_json_typed             \t    2000\t     31852 ns/op\t         2.000 cgo/op\t    3128 B/op\t       4 allocs/op\nBenchmarkOwnedViews/wide/cold_view_selected          \t    2000\t      6295 ns/op\t         4.000 cgo/op\t   10789 B/op\t       6 allocs/op\nBenchmarkOwnedViews/wide/cold_json_selected          \t    2000\t     29642 ns/op\t         2.000 cgo/op\t    3128 B/op\t       4 allocs/op\nBenchmarkOwnedViews/wide/warm_view_typed             \t    2000\t     25556 ns/op\t         3.000 cgo/op\t    2960 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/warm_json_typed             \t    2000\t     16196 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/wide/warm_view_selected          \t    2000\t       150.2 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/warm_native_selected        \t    2000\t        17.27 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/wide/full_view_native            \t    2000\t     44942 ns/op\t         2.000 cgo/op\t   26921 B/op\t     579 allocs/op\nBenchmarkOwnedViews/wide/full_json_native            \t    2000\t     36453 ns/op\t         0 cgo/op\t   24233 B/op\t     578 allocs/op\nBenchmarkOwnedViews/long_string/get_into             \t    2000\t      9313 ns/op\t         3.000 cgo/op\t   74832 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/get_into_exact       \t    2000\t      9333 ns/op\t         3.000 cgo/op\t   73808 B/op\t       2 allocs/op\nBenchmarkOwnedViews/long_string/get_c_copy           \t    2000\t     10361 ns/op\t         3.000 cgo/op\t   73912 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/cold_view_typed      \t    2000\t     13007 ns/op\t         4.000 cgo/op\t  140640 B/op\t       6 allocs/op\nBenchmarkOwnedViews/long_string/cold_json_typed      \t    2000\t     66263 ns/op\t         2.000 cgo/op\t  139327 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/cold_view_selected   \t    2000\t     14968 ns/op\t         4.000 cgo/op\t  140576 B/op\t       6 allocs/op\nBenchmarkOwnedViews/long_string/cold_json_selected   \t    2000\t     72188 ns/op\t         2.000 cgo/op\t  139327 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/warm_view_typed      \t    2000\t      3253 ns/op\t         1.000 cgo/op\t   65808 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/warm_json_typed      \t    2000\t     40247 ns/op\t         0 cgo/op\t   65571 B/op\t       2 allocs/op\nBenchmarkOwnedViews/long_string/warm_view_selected   \t    2000\t      4826 ns/op\t         1.000 cgo/op\t   65744 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/warm_native_selected \t    2000\t       803.5 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/long_string/full_view_native     \t    2000\t     60285 ns/op\t         2.000 cgo/op\t  140087 B/op\t      18 allocs/op\nBenchmarkOwnedViews/long_string/full_json_native     \t    2000\t     40436 ns/op\t         0 cgo/op\t   66355 B/op\t      17 allocs/op\nBenchmarkOwnedViews/array/get_into                   \t    2000\t     11009 ns/op\t         3.000 cgo/op\t   50256 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/get_into_exact             \t    2000\t     10901 ns/op\t         3.000 cgo/op\t   49232 B/op\t       2 allocs/op\nBenchmarkOwnedViews/array/get_c_copy                 \t    2000\t     11250 ns/op\t         3.000 cgo/op\t   49336 B/op\t       5 allocs/op\nBenchmarkOwnedViews/array/cold_view_typed            \t    2000\t     33071 ns/op\t         6.000 cgo/op\t   54626 B/op\t       6 allocs/op\nBenchmarkOwnedViews/array/cold_json_typed            \t    2000\t     28205 ns/op\t         2.000 cgo/op\t    4152 B/op\t       4 allocs/op\nBenchmarkOwnedViews/array/cold_view_selected         \t    2000\t     11368 ns/op\t         4.000 cgo/op\t   50469 B/op\t       6 allocs/op\nBenchmarkOwnedViews/array/cold_json_selected         \t    2000\t     28391 ns/op\t         2.000 cgo/op\t    4152 B/op\t       4 allocs/op\nBenchmarkOwnedViews/array/warm_view_typed            \t    2000\t     20290 ns/op\t         3.000 cgo/op\t    4368 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/warm_json_typed            \t    2000\t      9461 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/array/warm_view_selected         \t    2000\t       130.2 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/warm_native_selected       \t    2000\t        17.92 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/array/full_view_native           \t    2000\t     84443 ns/op\t         2.000 cgo/op\t   56146 B/op\t    2030 allocs/op\nBenchmarkOwnedViews/array/full_json_native           \t    2000\t     71112 ns/op\t         0 cgo/op\t   52050 B/op\t    2029 allocs/op\nPASS\n",
+      "stderr": ""
+    },
+    {
+      "repeat": 1,
+      "reverse": 1,
+      "argv": [
+        "/Users/brandonharvey/src/plasmite/tmp/go-owned/owned-views.test",
+        "-test.run=^$",
+        "-test.bench=BenchmarkOwnedViews",
+        "-test.benchtime=2000x",
+        "-test.count=1"
+      ],
+      "elapsed_seconds": 1.8845315420767292,
+      "cpu_seconds": 1.8468259999999996,
+      "rows": [
+        {
+          "fixture": "array",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 68872.0,
+          "cgo/op": 0.0,
+          "B/op": 52050.0,
+          "allocs/op": 2029.0
+        },
+        {
+          "fixture": "array",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 82873.0,
+          "cgo/op": 2.0,
+          "B/op": 56146.0,
+          "allocs/op": 2030.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 18.33,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 139.1,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 9802.0,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 20782.0,
+          "cgo/op": 3.0,
+          "B/op": 4368.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 28639.0,
+          "cgo/op": 2.0,
+          "B/op": 4152.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 11606.0,
+          "cgo/op": 4.0,
+          "B/op": 50469.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 29044.0,
+          "cgo/op": 2.0,
+          "B/op": 4154.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 33044.0,
+          "cgo/op": 6.0,
+          "B/op": 54626.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 11974.0,
+          "cgo/op": 3.0,
+          "B/op": 49336.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 11184.0,
+          "cgo/op": 3.0,
+          "B/op": 49232.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 11093.0,
+          "cgo/op": 3.0,
+          "B/op": 50256.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 40518.0,
+          "cgo/op": 0.0,
+          "B/op": 66355.0,
+          "allocs/op": 17.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 61472.0,
+          "cgo/op": 2.0,
+          "B/op": 140087.0,
+          "allocs/op": 18.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 897.1,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 7668.0,
+          "cgo/op": 1.0,
+          "B/op": 65744.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 41962.0,
+          "cgo/op": 0.0,
+          "B/op": 65571.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 3143.0,
+          "cgo/op": 1.0,
+          "B/op": 65808.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 66369.0,
+          "cgo/op": 2.0,
+          "B/op": 139327.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 13884.0,
+          "cgo/op": 4.0,
+          "B/op": 140576.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 72252.0,
+          "cgo/op": 2.0,
+          "B/op": 139327.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 13120.0,
+          "cgo/op": 4.0,
+          "B/op": 140640.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 9977.0,
+          "cgo/op": 3.0,
+          "B/op": 73912.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 9499.0,
+          "cgo/op": 3.0,
+          "B/op": 73808.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 9684.0,
+          "cgo/op": 3.0,
+          "B/op": 74832.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 36854.0,
+          "cgo/op": 0.0,
+          "B/op": 24233.0,
+          "allocs/op": 578.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 44645.0,
+          "cgo/op": 2.0,
+          "B/op": 26921.0,
+          "allocs/op": 579.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 22.92,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 143.6,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 16999.0,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 25681.0,
+          "cgo/op": 3.0,
+          "B/op": 2960.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 29449.0,
+          "cgo/op": 2.0,
+          "B/op": 3128.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 6751.0,
+          "cgo/op": 4.0,
+          "B/op": 10789.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 32635.0,
+          "cgo/op": 2.0,
+          "B/op": 3128.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 34298.0,
+          "cgo/op": 6.0,
+          "B/op": 13536.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 5854.0,
+          "cgo/op": 3.0,
+          "B/op": 9656.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 6230.0,
+          "cgo/op": 3.0,
+          "B/op": 9552.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 6293.0,
+          "cgo/op": 3.0,
+          "B/op": 10576.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 611.4,
+          "cgo/op": 0.0,
+          "B/op": 816.0,
+          "allocs/op": 16.0
+        },
+        {
+          "fixture": "small",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 845.9,
+          "cgo/op": 2.0,
+          "B/op": 880.0,
+          "allocs/op": 17.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 18.4,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 136.8,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 250.2,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 216.0,
+          "cgo/op": 1.0,
+          "B/op": 277.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 1772.0,
+          "cgo/op": 2.0,
+          "B/op": 184.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 977.3,
+          "cgo/op": 3.0,
+          "B/op": 1317.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 1731.0,
+          "cgo/op": 2.0,
+          "B/op": 184.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 1072.0,
+          "cgo/op": 3.0,
+          "B/op": 1381.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 864.1,
+          "cgo/op": 3.0,
+          "B/op": 760.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 1314.0,
+          "cgo/op": 3.0,
+          "B/op": 656.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 805.7,
+          "cgo/op": 2.0,
+          "B/op": 1104.0,
+          "allocs/op": 2.0
+        }
+      ],
+      "stdout": "goos: darwin\ngoarch: arm64\npkg: github.com/sandover/plasmite/bindings/go/local\ncpu: Apple M5 Pro\nBenchmarkOwnedViews/array/full_json_native         \t    2000\t     68872 ns/op\t         0 cgo/op\t   52050 B/op\t    2029 allocs/op\nBenchmarkOwnedViews/array/full_view_native         \t    2000\t     82873 ns/op\t         2.000 cgo/op\t   56146 B/op\t    2030 allocs/op\nBenchmarkOwnedViews/array/warm_native_selected     \t    2000\t        18.33 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/array/warm_view_selected       \t    2000\t       139.1 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/warm_json_typed          \t    2000\t      9802 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/array/warm_view_typed          \t    2000\t     20782 ns/op\t         3.000 cgo/op\t    4368 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/cold_json_selected       \t    2000\t     28639 ns/op\t         2.000 cgo/op\t    4152 B/op\t       4 allocs/op\nBenchmarkOwnedViews/array/cold_view_selected       \t    2000\t     11606 ns/op\t         4.000 cgo/op\t   50469 B/op\t       6 allocs/op\nBenchmarkOwnedViews/array/cold_json_typed          \t    2000\t     29044 ns/op\t         2.000 cgo/op\t    4154 B/op\t       4 allocs/op\nBenchmarkOwnedViews/array/cold_view_typed          \t    2000\t     33044 ns/op\t         6.000 cgo/op\t   54626 B/op\t       6 allocs/op\nBenchmarkOwnedViews/array/get_c_copy               \t    2000\t     11974 ns/op\t         3.000 cgo/op\t   49336 B/op\t       5 allocs/op\nBenchmarkOwnedViews/array/get_into_exact           \t    2000\t     11184 ns/op\t         3.000 cgo/op\t   49232 B/op\t       2 allocs/op\nBenchmarkOwnedViews/array/get_into                 \t    2000\t     11093 ns/op\t         3.000 cgo/op\t   50256 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/full_json_native   \t    2000\t     40518 ns/op\t         0 cgo/op\t   66355 B/op\t      17 allocs/op\nBenchmarkOwnedViews/long_string/full_view_native   \t    2000\t     61472 ns/op\t         2.000 cgo/op\t  140087 B/op\t      18 allocs/op\nBenchmarkOwnedViews/long_string/warm_native_selected         \t    2000\t       897.1 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/long_string/warm_view_selected           \t    2000\t      7668 ns/op\t         1.000 cgo/op\t   65744 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/warm_json_typed              \t    2000\t     41962 ns/op\t         0 cgo/op\t   65571 B/op\t       2 allocs/op\nBenchmarkOwnedViews/long_string/warm_view_typed              \t    2000\t      3143 ns/op\t         1.000 cgo/op\t   65808 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/cold_json_selected           \t    2000\t     66369 ns/op\t         2.000 cgo/op\t  139327 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/cold_view_selected           \t    2000\t     13884 ns/op\t         4.000 cgo/op\t  140576 B/op\t       6 allocs/op\nBenchmarkOwnedViews/long_string/cold_json_typed              \t    2000\t     72252 ns/op\t         2.000 cgo/op\t  139327 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/cold_view_typed              \t    2000\t     13120 ns/op\t         4.000 cgo/op\t  140640 B/op\t       6 allocs/op\nBenchmarkOwnedViews/long_string/get_c_copy                   \t    2000\t      9977 ns/op\t         3.000 cgo/op\t   73912 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/get_into_exact               \t    2000\t      9499 ns/op\t         3.000 cgo/op\t   73808 B/op\t       2 allocs/op\nBenchmarkOwnedViews/long_string/get_into                     \t    2000\t      9684 ns/op\t         3.000 cgo/op\t   74832 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/full_json_native                    \t    2000\t     36854 ns/op\t         0 cgo/op\t   24233 B/op\t     578 allocs/op\nBenchmarkOwnedViews/wide/full_view_native                    \t    2000\t     44645 ns/op\t         2.000 cgo/op\t   26921 B/op\t     579 allocs/op\nBenchmarkOwnedViews/wide/warm_native_selected                \t    2000\t        22.92 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/wide/warm_view_selected                  \t    2000\t       143.6 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/warm_json_typed                     \t    2000\t     16999 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/wide/warm_view_typed                     \t    2000\t     25681 ns/op\t         3.000 cgo/op\t    2960 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/cold_json_selected                  \t    2000\t     29449 ns/op\t         2.000 cgo/op\t    3128 B/op\t       4 allocs/op\nBenchmarkOwnedViews/wide/cold_view_selected                  \t    2000\t      6751 ns/op\t         4.000 cgo/op\t   10789 B/op\t       6 allocs/op\nBenchmarkOwnedViews/wide/cold_json_typed                     \t    2000\t     32635 ns/op\t         2.000 cgo/op\t    3128 B/op\t       4 allocs/op\nBenchmarkOwnedViews/wide/cold_view_typed                     \t    2000\t     34298 ns/op\t         6.000 cgo/op\t   13536 B/op\t       6 allocs/op\nBenchmarkOwnedViews/wide/get_c_copy                          \t    2000\t      5854 ns/op\t         3.000 cgo/op\t    9656 B/op\t       5 allocs/op\nBenchmarkOwnedViews/wide/get_into_exact                      \t    2000\t      6230 ns/op\t         3.000 cgo/op\t    9552 B/op\t       2 allocs/op\nBenchmarkOwnedViews/wide/get_into                            \t    2000\t      6293 ns/op\t         3.000 cgo/op\t   10576 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/full_json_native                   \t    2000\t       611.4 ns/op\t         0 cgo/op\t     816 B/op\t      16 allocs/op\nBenchmarkOwnedViews/small/full_view_native                   \t    2000\t       845.9 ns/op\t         2.000 cgo/op\t     880 B/op\t      17 allocs/op\nBenchmarkOwnedViews/small/warm_native_selected               \t    2000\t        18.40 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/small/warm_view_selected                 \t    2000\t       136.8 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/warm_json_typed                    \t    2000\t       250.2 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/small/warm_view_typed                    \t    2000\t       216.0 ns/op\t         1.000 cgo/op\t     277 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/cold_json_selected                 \t    2000\t      1772 ns/op\t         2.000 cgo/op\t     184 B/op\t       4 allocs/op\nBenchmarkOwnedViews/small/cold_view_selected                 \t    2000\t       977.3 ns/op\t         3.000 cgo/op\t    1317 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/cold_json_typed                    \t    2000\t      1731 ns/op\t         2.000 cgo/op\t     184 B/op\t       4 allocs/op\nBenchmarkOwnedViews/small/cold_view_typed                    \t    2000\t      1072 ns/op\t         3.000 cgo/op\t    1381 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/get_c_copy                         \t    2000\t       864.1 ns/op\t         3.000 cgo/op\t     760 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/get_into_exact                     \t    2000\t      1314 ns/op\t         3.000 cgo/op\t     656 B/op\t       2 allocs/op\nBenchmarkOwnedViews/small/get_into                           \t    2000\t       805.7 ns/op\t         2.000 cgo/op\t    1104 B/op\t       2 allocs/op\nPASS\n",
+      "stderr": ""
+    },
+    {
+      "repeat": 2,
+      "reverse": 0,
+      "argv": [
+        "/Users/brandonharvey/src/plasmite/tmp/go-owned/owned-views.test",
+        "-test.run=^$",
+        "-test.bench=BenchmarkOwnedViews",
+        "-test.benchtime=2000x",
+        "-test.count=1"
+      ],
+      "elapsed_seconds": 1.8295325840590522,
+      "cpu_seconds": 1.7997410000000003,
+      "rows": [
+        {
+          "fixture": "small",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 843.9,
+          "cgo/op": 2.0,
+          "B/op": 1104.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 1398.0,
+          "cgo/op": 3.0,
+          "B/op": 656.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 948.8,
+          "cgo/op": 3.0,
+          "B/op": 760.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 1203.0,
+          "cgo/op": 3.0,
+          "B/op": 1381.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 1666.0,
+          "cgo/op": 2.0,
+          "B/op": 184.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 973.3,
+          "cgo/op": 3.0,
+          "B/op": 1317.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 1677.0,
+          "cgo/op": 2.0,
+          "B/op": 184.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 203.1,
+          "cgo/op": 1.0,
+          "B/op": 277.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 248.3,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 123.1,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 22.65,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "small",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 858.1,
+          "cgo/op": 2.0,
+          "B/op": 880.0,
+          "allocs/op": 17.0
+        },
+        {
+          "fixture": "small",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 581.8,
+          "cgo/op": 0.0,
+          "B/op": 816.0,
+          "allocs/op": 16.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 6188.0,
+          "cgo/op": 3.0,
+          "B/op": 10576.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 6027.0,
+          "cgo/op": 3.0,
+          "B/op": 9552.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 5686.0,
+          "cgo/op": 3.0,
+          "B/op": 9656.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 32099.0,
+          "cgo/op": 6.0,
+          "B/op": 13536.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 29419.0,
+          "cgo/op": 2.0,
+          "B/op": 3128.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 6300.0,
+          "cgo/op": 4.0,
+          "B/op": 10789.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 29407.0,
+          "cgo/op": 2.0,
+          "B/op": 3128.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 25709.0,
+          "cgo/op": 3.0,
+          "B/op": 2960.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 16405.0,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 137.5,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 17.23,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 44934.0,
+          "cgo/op": 2.0,
+          "B/op": 26921.0,
+          "allocs/op": 579.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 34692.0,
+          "cgo/op": 0.0,
+          "B/op": 24233.0,
+          "allocs/op": 578.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 8732.0,
+          "cgo/op": 3.0,
+          "B/op": 74832.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 8437.0,
+          "cgo/op": 3.0,
+          "B/op": 73808.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 8813.0,
+          "cgo/op": 3.0,
+          "B/op": 73912.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 12182.0,
+          "cgo/op": 4.0,
+          "B/op": 140640.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 64468.0,
+          "cgo/op": 2.0,
+          "B/op": 139327.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 13623.0,
+          "cgo/op": 4.0,
+          "B/op": 140576.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 64714.0,
+          "cgo/op": 2.0,
+          "B/op": 139327.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 3288.0,
+          "cgo/op": 1.0,
+          "B/op": 65808.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 43596.0,
+          "cgo/op": 0.0,
+          "B/op": 65571.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 6159.0,
+          "cgo/op": 1.0,
+          "B/op": 65744.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 763.8,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 60549.0,
+          "cgo/op": 2.0,
+          "B/op": 140087.0,
+          "allocs/op": 18.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 38944.0,
+          "cgo/op": 0.0,
+          "B/op": 66355.0,
+          "allocs/op": 17.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 10786.0,
+          "cgo/op": 3.0,
+          "B/op": 50256.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 11076.0,
+          "cgo/op": 3.0,
+          "B/op": 49232.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 11088.0,
+          "cgo/op": 3.0,
+          "B/op": 49336.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 33261.0,
+          "cgo/op": 6.0,
+          "B/op": 54626.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 28299.0,
+          "cgo/op": 2.0,
+          "B/op": 4152.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 11561.0,
+          "cgo/op": 4.0,
+          "B/op": 50469.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 29331.0,
+          "cgo/op": 2.0,
+          "B/op": 4152.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 20618.0,
+          "cgo/op": 3.0,
+          "B/op": 4368.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 9848.0,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 133.2,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 19.29,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "array",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 81051.0,
+          "cgo/op": 2.0,
+          "B/op": 56146.0,
+          "allocs/op": 2030.0
+        },
+        {
+          "fixture": "array",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 69474.0,
+          "cgo/op": 0.0,
+          "B/op": 52050.0,
+          "allocs/op": 2029.0
+        }
+      ],
+      "stdout": "goos: darwin\ngoarch: arm64\npkg: github.com/sandover/plasmite/bindings/go/local\ncpu: Apple M5 Pro\nBenchmarkOwnedViews/small/get_into         \t    2000\t       843.9 ns/op\t         2.000 cgo/op\t    1104 B/op\t       2 allocs/op\nBenchmarkOwnedViews/small/get_into_exact   \t    2000\t      1398 ns/op\t         3.000 cgo/op\t     656 B/op\t       2 allocs/op\nBenchmarkOwnedViews/small/get_c_copy       \t    2000\t       948.8 ns/op\t         3.000 cgo/op\t     760 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/cold_view_typed  \t    2000\t      1203 ns/op\t         3.000 cgo/op\t    1381 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/cold_json_typed  \t    2000\t      1666 ns/op\t         2.000 cgo/op\t     184 B/op\t       4 allocs/op\nBenchmarkOwnedViews/small/cold_view_selected         \t    2000\t       973.3 ns/op\t         3.000 cgo/op\t    1317 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/cold_json_selected         \t    2000\t      1677 ns/op\t         2.000 cgo/op\t     184 B/op\t       4 allocs/op\nBenchmarkOwnedViews/small/warm_view_typed            \t    2000\t       203.1 ns/op\t         1.000 cgo/op\t     277 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/warm_json_typed            \t    2000\t       248.3 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/small/warm_view_selected         \t    2000\t       123.1 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/warm_native_selected       \t    2000\t        22.65 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/small/full_view_native           \t    2000\t       858.1 ns/op\t         2.000 cgo/op\t     880 B/op\t      17 allocs/op\nBenchmarkOwnedViews/small/full_json_native           \t    2000\t       581.8 ns/op\t         0 cgo/op\t     816 B/op\t      16 allocs/op\nBenchmarkOwnedViews/wide/get_into                    \t    2000\t      6188 ns/op\t         3.000 cgo/op\t   10576 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/get_into_exact              \t    2000\t      6027 ns/op\t         3.000 cgo/op\t    9552 B/op\t       2 allocs/op\nBenchmarkOwnedViews/wide/get_c_copy                  \t    2000\t      5686 ns/op\t         3.000 cgo/op\t    9656 B/op\t       5 allocs/op\nBenchmarkOwnedViews/wide/cold_view_typed             \t    2000\t     32099 ns/op\t         6.000 cgo/op\t   13536 B/op\t       6 allocs/op\nBenchmarkOwnedViews/wide/cold_json_typed             \t    2000\t     29419 ns/op\t         2.000 cgo/op\t    3128 B/op\t       4 allocs/op\nBenchmarkOwnedViews/wide/cold_view_selected          \t    2000\t      6300 ns/op\t         4.000 cgo/op\t   10789 B/op\t       6 allocs/op\nBenchmarkOwnedViews/wide/cold_json_selected          \t    2000\t     29407 ns/op\t         2.000 cgo/op\t    3128 B/op\t       4 allocs/op\nBenchmarkOwnedViews/wide/warm_view_typed             \t    2000\t     25709 ns/op\t         3.000 cgo/op\t    2960 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/warm_json_typed             \t    2000\t     16405 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/wide/warm_view_selected          \t    2000\t       137.5 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/warm_native_selected        \t    2000\t        17.23 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/wide/full_view_native            \t    2000\t     44934 ns/op\t         2.000 cgo/op\t   26921 B/op\t     579 allocs/op\nBenchmarkOwnedViews/wide/full_json_native            \t    2000\t     34692 ns/op\t         0 cgo/op\t   24233 B/op\t     578 allocs/op\nBenchmarkOwnedViews/long_string/get_into             \t    2000\t      8732 ns/op\t         3.000 cgo/op\t   74832 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/get_into_exact       \t    2000\t      8437 ns/op\t         3.000 cgo/op\t   73808 B/op\t       2 allocs/op\nBenchmarkOwnedViews/long_string/get_c_copy           \t    2000\t      8813 ns/op\t         3.000 cgo/op\t   73912 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/cold_view_typed      \t    2000\t     12182 ns/op\t         4.000 cgo/op\t  140640 B/op\t       6 allocs/op\nBenchmarkOwnedViews/long_string/cold_json_typed      \t    2000\t     64468 ns/op\t         2.000 cgo/op\t  139327 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/cold_view_selected   \t    2000\t     13623 ns/op\t         4.000 cgo/op\t  140576 B/op\t       6 allocs/op\nBenchmarkOwnedViews/long_string/cold_json_selected   \t    2000\t     64714 ns/op\t         2.000 cgo/op\t  139327 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/warm_view_typed      \t    2000\t      3288 ns/op\t         1.000 cgo/op\t   65808 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/warm_json_typed      \t    2000\t     43596 ns/op\t         0 cgo/op\t   65571 B/op\t       2 allocs/op\nBenchmarkOwnedViews/long_string/warm_view_selected   \t    2000\t      6159 ns/op\t         1.000 cgo/op\t   65744 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/warm_native_selected \t    2000\t       763.8 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/long_string/full_view_native     \t    2000\t     60549 ns/op\t         2.000 cgo/op\t  140087 B/op\t      18 allocs/op\nBenchmarkOwnedViews/long_string/full_json_native     \t    2000\t     38944 ns/op\t         0 cgo/op\t   66355 B/op\t      17 allocs/op\nBenchmarkOwnedViews/array/get_into                   \t    2000\t     10786 ns/op\t         3.000 cgo/op\t   50256 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/get_into_exact             \t    2000\t     11076 ns/op\t         3.000 cgo/op\t   49232 B/op\t       2 allocs/op\nBenchmarkOwnedViews/array/get_c_copy                 \t    2000\t     11088 ns/op\t         3.000 cgo/op\t   49336 B/op\t       5 allocs/op\nBenchmarkOwnedViews/array/cold_view_typed            \t    2000\t     33261 ns/op\t         6.000 cgo/op\t   54626 B/op\t       6 allocs/op\nBenchmarkOwnedViews/array/cold_json_typed            \t    2000\t     28299 ns/op\t         2.000 cgo/op\t    4152 B/op\t       4 allocs/op\nBenchmarkOwnedViews/array/cold_view_selected         \t    2000\t     11561 ns/op\t         4.000 cgo/op\t   50469 B/op\t       6 allocs/op\nBenchmarkOwnedViews/array/cold_json_selected         \t    2000\t     29331 ns/op\t         2.000 cgo/op\t    4152 B/op\t       4 allocs/op\nBenchmarkOwnedViews/array/warm_view_typed            \t    2000\t     20618 ns/op\t         3.000 cgo/op\t    4368 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/warm_json_typed            \t    2000\t      9848 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/array/warm_view_selected         \t    2000\t       133.2 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/warm_native_selected       \t    2000\t        19.29 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/array/full_view_native           \t    2000\t     81051 ns/op\t         2.000 cgo/op\t   56146 B/op\t    2030 allocs/op\nBenchmarkOwnedViews/array/full_json_native           \t    2000\t     69474 ns/op\t         0 cgo/op\t   52050 B/op\t    2029 allocs/op\nPASS\n",
+      "stderr": ""
+    },
+    {
+      "repeat": 3,
+      "reverse": 1,
+      "argv": [
+        "/Users/brandonharvey/src/plasmite/tmp/go-owned/owned-views.test",
+        "-test.run=^$",
+        "-test.bench=BenchmarkOwnedViews",
+        "-test.benchtime=2000x",
+        "-test.count=1"
+      ],
+      "elapsed_seconds": 1.8535539159784093,
+      "cpu_seconds": 1.822787999999999,
+      "rows": [
+        {
+          "fixture": "array",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 71695.0,
+          "cgo/op": 0.0,
+          "B/op": 52050.0,
+          "allocs/op": 2029.0
+        },
+        {
+          "fixture": "array",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 81105.0,
+          "cgo/op": 2.0,
+          "B/op": 56146.0,
+          "allocs/op": 2030.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 21.15,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 120.8,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 9810.0,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 20388.0,
+          "cgo/op": 3.0,
+          "B/op": 4368.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 28437.0,
+          "cgo/op": 2.0,
+          "B/op": 4152.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 11216.0,
+          "cgo/op": 4.0,
+          "B/op": 50469.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 28513.0,
+          "cgo/op": 2.0,
+          "B/op": 4152.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 33445.0,
+          "cgo/op": 6.0,
+          "B/op": 54626.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 11709.0,
+          "cgo/op": 3.0,
+          "B/op": 49336.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 11294.0,
+          "cgo/op": 3.0,
+          "B/op": 49232.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 11565.0,
+          "cgo/op": 3.0,
+          "B/op": 50256.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 39470.0,
+          "cgo/op": 0.0,
+          "B/op": 66355.0,
+          "allocs/op": 17.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 59317.0,
+          "cgo/op": 2.0,
+          "B/op": 140087.0,
+          "allocs/op": 18.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 714.0,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 4425.0,
+          "cgo/op": 1.0,
+          "B/op": 65744.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 43839.0,
+          "cgo/op": 0.0,
+          "B/op": 65571.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 3328.0,
+          "cgo/op": 1.0,
+          "B/op": 65808.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 68566.0,
+          "cgo/op": 2.0,
+          "B/op": 139327.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 14140.0,
+          "cgo/op": 4.0,
+          "B/op": 140576.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 66610.0,
+          "cgo/op": 2.0,
+          "B/op": 139327.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 12578.0,
+          "cgo/op": 4.0,
+          "B/op": 140640.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 9304.0,
+          "cgo/op": 3.0,
+          "B/op": 73912.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 9190.0,
+          "cgo/op": 3.0,
+          "B/op": 73808.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 9071.0,
+          "cgo/op": 3.0,
+          "B/op": 74832.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 37265.0,
+          "cgo/op": 0.0,
+          "B/op": 24233.0,
+          "allocs/op": 578.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 44604.0,
+          "cgo/op": 2.0,
+          "B/op": 26921.0,
+          "allocs/op": 579.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 22.15,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 144.1,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 16541.0,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 25634.0,
+          "cgo/op": 3.0,
+          "B/op": 2960.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 30242.0,
+          "cgo/op": 2.0,
+          "B/op": 3128.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 6660.0,
+          "cgo/op": 4.0,
+          "B/op": 10789.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 29409.0,
+          "cgo/op": 2.0,
+          "B/op": 3128.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 32902.0,
+          "cgo/op": 6.0,
+          "B/op": 13536.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 5620.0,
+          "cgo/op": 3.0,
+          "B/op": 9656.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 6057.0,
+          "cgo/op": 3.0,
+          "B/op": 9552.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 6121.0,
+          "cgo/op": 3.0,
+          "B/op": 10576.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 579.4,
+          "cgo/op": 0.0,
+          "B/op": 816.0,
+          "allocs/op": 16.0
+        },
+        {
+          "fixture": "small",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 801.4,
+          "cgo/op": 2.0,
+          "B/op": 880.0,
+          "allocs/op": 17.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 16.33,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 125.1,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 229.9,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 194.3,
+          "cgo/op": 1.0,
+          "B/op": 277.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 1614.0,
+          "cgo/op": 2.0,
+          "B/op": 184.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 983.1,
+          "cgo/op": 3.0,
+          "B/op": 1317.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 1657.0,
+          "cgo/op": 2.0,
+          "B/op": 184.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 1064.0,
+          "cgo/op": 3.0,
+          "B/op": 1381.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 882.8,
+          "cgo/op": 3.0,
+          "B/op": 760.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 1288.0,
+          "cgo/op": 3.0,
+          "B/op": 656.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 807.7,
+          "cgo/op": 2.0,
+          "B/op": 1104.0,
+          "allocs/op": 2.0
+        }
+      ],
+      "stdout": "goos: darwin\ngoarch: arm64\npkg: github.com/sandover/plasmite/bindings/go/local\ncpu: Apple M5 Pro\nBenchmarkOwnedViews/array/full_json_native         \t    2000\t     71695 ns/op\t         0 cgo/op\t   52050 B/op\t    2029 allocs/op\nBenchmarkOwnedViews/array/full_view_native         \t    2000\t     81105 ns/op\t         2.000 cgo/op\t   56146 B/op\t    2030 allocs/op\nBenchmarkOwnedViews/array/warm_native_selected     \t    2000\t        21.15 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/array/warm_view_selected       \t    2000\t       120.8 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/warm_json_typed          \t    2000\t      9810 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/array/warm_view_typed          \t    2000\t     20388 ns/op\t         3.000 cgo/op\t    4368 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/cold_json_selected       \t    2000\t     28437 ns/op\t         2.000 cgo/op\t    4152 B/op\t       4 allocs/op\nBenchmarkOwnedViews/array/cold_view_selected       \t    2000\t     11216 ns/op\t         4.000 cgo/op\t   50469 B/op\t       6 allocs/op\nBenchmarkOwnedViews/array/cold_json_typed          \t    2000\t     28513 ns/op\t         2.000 cgo/op\t    4152 B/op\t       4 allocs/op\nBenchmarkOwnedViews/array/cold_view_typed          \t    2000\t     33445 ns/op\t         6.000 cgo/op\t   54626 B/op\t       6 allocs/op\nBenchmarkOwnedViews/array/get_c_copy               \t    2000\t     11709 ns/op\t         3.000 cgo/op\t   49336 B/op\t       5 allocs/op\nBenchmarkOwnedViews/array/get_into_exact           \t    2000\t     11294 ns/op\t         3.000 cgo/op\t   49232 B/op\t       2 allocs/op\nBenchmarkOwnedViews/array/get_into                 \t    2000\t     11565 ns/op\t         3.000 cgo/op\t   50256 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/full_json_native   \t    2000\t     39470 ns/op\t         0 cgo/op\t   66355 B/op\t      17 allocs/op\nBenchmarkOwnedViews/long_string/full_view_native   \t    2000\t     59317 ns/op\t         2.000 cgo/op\t  140087 B/op\t      18 allocs/op\nBenchmarkOwnedViews/long_string/warm_native_selected         \t    2000\t       714.0 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/long_string/warm_view_selected           \t    2000\t      4425 ns/op\t         1.000 cgo/op\t   65744 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/warm_json_typed              \t    2000\t     43839 ns/op\t         0 cgo/op\t   65571 B/op\t       2 allocs/op\nBenchmarkOwnedViews/long_string/warm_view_typed              \t    2000\t      3328 ns/op\t         1.000 cgo/op\t   65808 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/cold_json_selected           \t    2000\t     68566 ns/op\t         2.000 cgo/op\t  139327 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/cold_view_selected           \t    2000\t     14140 ns/op\t         4.000 cgo/op\t  140576 B/op\t       6 allocs/op\nBenchmarkOwnedViews/long_string/cold_json_typed              \t    2000\t     66610 ns/op\t         2.000 cgo/op\t  139327 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/cold_view_typed              \t    2000\t     12578 ns/op\t         4.000 cgo/op\t  140640 B/op\t       6 allocs/op\nBenchmarkOwnedViews/long_string/get_c_copy                   \t    2000\t      9304 ns/op\t         3.000 cgo/op\t   73912 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/get_into_exact               \t    2000\t      9190 ns/op\t         3.000 cgo/op\t   73808 B/op\t       2 allocs/op\nBenchmarkOwnedViews/long_string/get_into                     \t    2000\t      9071 ns/op\t         3.000 cgo/op\t   74832 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/full_json_native                    \t    2000\t     37265 ns/op\t         0 cgo/op\t   24233 B/op\t     578 allocs/op\nBenchmarkOwnedViews/wide/full_view_native                    \t    2000\t     44604 ns/op\t         2.000 cgo/op\t   26921 B/op\t     579 allocs/op\nBenchmarkOwnedViews/wide/warm_native_selected                \t    2000\t        22.15 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/wide/warm_view_selected                  \t    2000\t       144.1 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/warm_json_typed                     \t    2000\t     16541 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/wide/warm_view_typed                     \t    2000\t     25634 ns/op\t         3.000 cgo/op\t    2960 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/cold_json_selected                  \t    2000\t     30242 ns/op\t         2.000 cgo/op\t    3128 B/op\t       4 allocs/op\nBenchmarkOwnedViews/wide/cold_view_selected                  \t    2000\t      6660 ns/op\t         4.000 cgo/op\t   10789 B/op\t       6 allocs/op\nBenchmarkOwnedViews/wide/cold_json_typed                     \t    2000\t     29409 ns/op\t         2.000 cgo/op\t    3128 B/op\t       4 allocs/op\nBenchmarkOwnedViews/wide/cold_view_typed                     \t    2000\t     32902 ns/op\t         6.000 cgo/op\t   13536 B/op\t       6 allocs/op\nBenchmarkOwnedViews/wide/get_c_copy                          \t    2000\t      5620 ns/op\t         3.000 cgo/op\t    9656 B/op\t       5 allocs/op\nBenchmarkOwnedViews/wide/get_into_exact                      \t    2000\t      6057 ns/op\t         3.000 cgo/op\t    9552 B/op\t       2 allocs/op\nBenchmarkOwnedViews/wide/get_into                            \t    2000\t      6121 ns/op\t         3.000 cgo/op\t   10576 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/full_json_native                   \t    2000\t       579.4 ns/op\t         0 cgo/op\t     816 B/op\t      16 allocs/op\nBenchmarkOwnedViews/small/full_view_native                   \t    2000\t       801.4 ns/op\t         2.000 cgo/op\t     880 B/op\t      17 allocs/op\nBenchmarkOwnedViews/small/warm_native_selected               \t    2000\t        16.33 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/small/warm_view_selected                 \t    2000\t       125.1 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/warm_json_typed                    \t    2000\t       229.9 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/small/warm_view_typed                    \t    2000\t       194.3 ns/op\t         1.000 cgo/op\t     277 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/cold_json_selected                 \t    2000\t      1614 ns/op\t         2.000 cgo/op\t     184 B/op\t       4 allocs/op\nBenchmarkOwnedViews/small/cold_view_selected                 \t    2000\t       983.1 ns/op\t         3.000 cgo/op\t    1317 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/cold_json_typed                    \t    2000\t      1657 ns/op\t         2.000 cgo/op\t     184 B/op\t       4 allocs/op\nBenchmarkOwnedViews/small/cold_view_typed                    \t    2000\t      1064 ns/op\t         3.000 cgo/op\t    1381 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/get_c_copy                         \t    2000\t       882.8 ns/op\t         3.000 cgo/op\t     760 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/get_into_exact                     \t    2000\t      1288 ns/op\t         3.000 cgo/op\t     656 B/op\t       2 allocs/op\nBenchmarkOwnedViews/small/get_into                           \t    2000\t       807.7 ns/op\t         2.000 cgo/op\t    1104 B/op\t       2 allocs/op\nPASS\n",
+      "stderr": ""
+    },
+    {
+      "repeat": 4,
+      "reverse": 0,
+      "argv": [
+        "/Users/brandonharvey/src/plasmite/tmp/go-owned/owned-views.test",
+        "-test.run=^$",
+        "-test.bench=BenchmarkOwnedViews",
+        "-test.benchtime=2000x",
+        "-test.count=1"
+      ],
+      "elapsed_seconds": 1.8669310830300674,
+      "cpu_seconds": 1.8322990000000003,
+      "rows": [
+        {
+          "fixture": "small",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 852.5,
+          "cgo/op": 2.0,
+          "B/op": 1104.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 1286.0,
+          "cgo/op": 3.0,
+          "B/op": 656.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 846.1,
+          "cgo/op": 3.0,
+          "B/op": 760.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 1043.0,
+          "cgo/op": 3.0,
+          "B/op": 1381.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 1672.0,
+          "cgo/op": 2.0,
+          "B/op": 184.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 991.1,
+          "cgo/op": 3.0,
+          "B/op": 1317.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 1696.0,
+          "cgo/op": 2.0,
+          "B/op": 184.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 216.6,
+          "cgo/op": 1.0,
+          "B/op": 277.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 287.0,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 156.8,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 18.23,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "small",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 921.0,
+          "cgo/op": 2.0,
+          "B/op": 880.0,
+          "allocs/op": 17.0
+        },
+        {
+          "fixture": "small",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 579.6,
+          "cgo/op": 0.0,
+          "B/op": 816.0,
+          "allocs/op": 16.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 6379.0,
+          "cgo/op": 3.0,
+          "B/op": 10576.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 7082.0,
+          "cgo/op": 3.0,
+          "B/op": 9552.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 6297.0,
+          "cgo/op": 3.0,
+          "B/op": 9656.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 32191.0,
+          "cgo/op": 6.0,
+          "B/op": 13536.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 29176.0,
+          "cgo/op": 2.0,
+          "B/op": 3128.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 6572.0,
+          "cgo/op": 4.0,
+          "B/op": 10789.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 31361.0,
+          "cgo/op": 2.0,
+          "B/op": 3128.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 26589.0,
+          "cgo/op": 3.0,
+          "B/op": 2960.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 16550.0,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 154.4,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 21.75,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 46774.0,
+          "cgo/op": 2.0,
+          "B/op": 26921.0,
+          "allocs/op": 579.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 36199.0,
+          "cgo/op": 0.0,
+          "B/op": 24233.0,
+          "allocs/op": 578.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 8564.0,
+          "cgo/op": 3.0,
+          "B/op": 74832.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 8388.0,
+          "cgo/op": 3.0,
+          "B/op": 73808.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 8862.0,
+          "cgo/op": 3.0,
+          "B/op": 73912.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 11668.0,
+          "cgo/op": 4.0,
+          "B/op": 140640.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 63856.0,
+          "cgo/op": 2.0,
+          "B/op": 139327.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 13747.0,
+          "cgo/op": 4.0,
+          "B/op": 140576.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 66102.0,
+          "cgo/op": 2.0,
+          "B/op": 139327.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 3205.0,
+          "cgo/op": 1.0,
+          "B/op": 65808.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 41705.0,
+          "cgo/op": 0.0,
+          "B/op": 65571.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 4526.0,
+          "cgo/op": 1.0,
+          "B/op": 65744.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 846.0,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 61098.0,
+          "cgo/op": 2.0,
+          "B/op": 140087.0,
+          "allocs/op": 18.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 42307.0,
+          "cgo/op": 0.0,
+          "B/op": 66355.0,
+          "allocs/op": 17.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 12735.0,
+          "cgo/op": 3.0,
+          "B/op": 50256.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 12035.0,
+          "cgo/op": 3.0,
+          "B/op": 49232.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 12108.0,
+          "cgo/op": 3.0,
+          "B/op": 49336.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 34312.0,
+          "cgo/op": 6.0,
+          "B/op": 54626.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 28624.0,
+          "cgo/op": 2.0,
+          "B/op": 4152.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 11315.0,
+          "cgo/op": 4.0,
+          "B/op": 50469.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 28916.0,
+          "cgo/op": 2.0,
+          "B/op": 4152.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 20468.0,
+          "cgo/op": 3.0,
+          "B/op": 4368.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 9718.0,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 141.0,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 22.17,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "array",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 82826.0,
+          "cgo/op": 2.0,
+          "B/op": 56146.0,
+          "allocs/op": 2030.0
+        },
+        {
+          "fixture": "array",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 72994.0,
+          "cgo/op": 0.0,
+          "B/op": 52050.0,
+          "allocs/op": 2029.0
+        }
+      ],
+      "stdout": "goos: darwin\ngoarch: arm64\npkg: github.com/sandover/plasmite/bindings/go/local\ncpu: Apple M5 Pro\nBenchmarkOwnedViews/small/get_into         \t    2000\t       852.5 ns/op\t         2.000 cgo/op\t    1104 B/op\t       2 allocs/op\nBenchmarkOwnedViews/small/get_into_exact   \t    2000\t      1286 ns/op\t         3.000 cgo/op\t     656 B/op\t       2 allocs/op\nBenchmarkOwnedViews/small/get_c_copy       \t    2000\t       846.1 ns/op\t         3.000 cgo/op\t     760 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/cold_view_typed  \t    2000\t      1043 ns/op\t         3.000 cgo/op\t    1381 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/cold_json_typed  \t    2000\t      1672 ns/op\t         2.000 cgo/op\t     184 B/op\t       4 allocs/op\nBenchmarkOwnedViews/small/cold_view_selected         \t    2000\t       991.1 ns/op\t         3.000 cgo/op\t    1317 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/cold_json_selected         \t    2000\t      1696 ns/op\t         2.000 cgo/op\t     184 B/op\t       4 allocs/op\nBenchmarkOwnedViews/small/warm_view_typed            \t    2000\t       216.6 ns/op\t         1.000 cgo/op\t     277 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/warm_json_typed            \t    2000\t       287.0 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/small/warm_view_selected         \t    2000\t       156.8 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/warm_native_selected       \t    2000\t        18.23 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/small/full_view_native           \t    2000\t       921.0 ns/op\t         2.000 cgo/op\t     880 B/op\t      17 allocs/op\nBenchmarkOwnedViews/small/full_json_native           \t    2000\t       579.6 ns/op\t         0 cgo/op\t     816 B/op\t      16 allocs/op\nBenchmarkOwnedViews/wide/get_into                    \t    2000\t      6379 ns/op\t         3.000 cgo/op\t   10576 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/get_into_exact              \t    2000\t      7082 ns/op\t         3.000 cgo/op\t    9552 B/op\t       2 allocs/op\nBenchmarkOwnedViews/wide/get_c_copy                  \t    2000\t      6297 ns/op\t         3.000 cgo/op\t    9656 B/op\t       5 allocs/op\nBenchmarkOwnedViews/wide/cold_view_typed             \t    2000\t     32191 ns/op\t         6.000 cgo/op\t   13536 B/op\t       6 allocs/op\nBenchmarkOwnedViews/wide/cold_json_typed             \t    2000\t     29176 ns/op\t         2.000 cgo/op\t    3128 B/op\t       4 allocs/op\nBenchmarkOwnedViews/wide/cold_view_selected          \t    2000\t      6572 ns/op\t         4.000 cgo/op\t   10789 B/op\t       6 allocs/op\nBenchmarkOwnedViews/wide/cold_json_selected          \t    2000\t     31361 ns/op\t         2.000 cgo/op\t    3128 B/op\t       4 allocs/op\nBenchmarkOwnedViews/wide/warm_view_typed             \t    2000\t     26589 ns/op\t         3.000 cgo/op\t    2960 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/warm_json_typed             \t    2000\t     16550 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/wide/warm_view_selected          \t    2000\t       154.4 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/warm_native_selected        \t    2000\t        21.75 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/wide/full_view_native            \t    2000\t     46774 ns/op\t         2.000 cgo/op\t   26921 B/op\t     579 allocs/op\nBenchmarkOwnedViews/wide/full_json_native            \t    2000\t     36199 ns/op\t         0 cgo/op\t   24233 B/op\t     578 allocs/op\nBenchmarkOwnedViews/long_string/get_into             \t    2000\t      8564 ns/op\t         3.000 cgo/op\t   74832 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/get_into_exact       \t    2000\t      8388 ns/op\t         3.000 cgo/op\t   73808 B/op\t       2 allocs/op\nBenchmarkOwnedViews/long_string/get_c_copy           \t    2000\t      8862 ns/op\t         3.000 cgo/op\t   73912 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/cold_view_typed      \t    2000\t     11668 ns/op\t         4.000 cgo/op\t  140640 B/op\t       6 allocs/op\nBenchmarkOwnedViews/long_string/cold_json_typed      \t    2000\t     63856 ns/op\t         2.000 cgo/op\t  139327 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/cold_view_selected   \t    2000\t     13747 ns/op\t         4.000 cgo/op\t  140576 B/op\t       6 allocs/op\nBenchmarkOwnedViews/long_string/cold_json_selected   \t    2000\t     66102 ns/op\t         2.000 cgo/op\t  139327 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/warm_view_typed      \t    2000\t      3205 ns/op\t         1.000 cgo/op\t   65808 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/warm_json_typed      \t    2000\t     41705 ns/op\t         0 cgo/op\t   65571 B/op\t       2 allocs/op\nBenchmarkOwnedViews/long_string/warm_view_selected   \t    2000\t      4526 ns/op\t         1.000 cgo/op\t   65744 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/warm_native_selected \t    2000\t       846.0 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/long_string/full_view_native     \t    2000\t     61098 ns/op\t         2.000 cgo/op\t  140087 B/op\t      18 allocs/op\nBenchmarkOwnedViews/long_string/full_json_native     \t    2000\t     42307 ns/op\t         0 cgo/op\t   66355 B/op\t      17 allocs/op\nBenchmarkOwnedViews/array/get_into                   \t    2000\t     12735 ns/op\t         3.000 cgo/op\t   50256 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/get_into_exact             \t    2000\t     12035 ns/op\t         3.000 cgo/op\t   49232 B/op\t       2 allocs/op\nBenchmarkOwnedViews/array/get_c_copy                 \t    2000\t     12108 ns/op\t         3.000 cgo/op\t   49336 B/op\t       5 allocs/op\nBenchmarkOwnedViews/array/cold_view_typed            \t    2000\t     34312 ns/op\t         6.000 cgo/op\t   54626 B/op\t       6 allocs/op\nBenchmarkOwnedViews/array/cold_json_typed            \t    2000\t     28624 ns/op\t         2.000 cgo/op\t    4152 B/op\t       4 allocs/op\nBenchmarkOwnedViews/array/cold_view_selected         \t    2000\t     11315 ns/op\t         4.000 cgo/op\t   50469 B/op\t       6 allocs/op\nBenchmarkOwnedViews/array/cold_json_selected         \t    2000\t     28916 ns/op\t         2.000 cgo/op\t    4152 B/op\t       4 allocs/op\nBenchmarkOwnedViews/array/warm_view_typed            \t    2000\t     20468 ns/op\t         3.000 cgo/op\t    4368 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/warm_json_typed            \t    2000\t      9718 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/array/warm_view_selected         \t    2000\t       141.0 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/warm_native_selected       \t    2000\t        22.17 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/array/full_view_native           \t    2000\t     82826 ns/op\t         2.000 cgo/op\t   56146 B/op\t    2030 allocs/op\nBenchmarkOwnedViews/array/full_json_native           \t    2000\t     72994 ns/op\t         0 cgo/op\t   52050 B/op\t    2029 allocs/op\nPASS\n",
+      "stderr": ""
+    },
+    {
+      "repeat": 5,
+      "reverse": 1,
+      "argv": [
+        "/Users/brandonharvey/src/plasmite/tmp/go-owned/owned-views.test",
+        "-test.run=^$",
+        "-test.bench=BenchmarkOwnedViews",
+        "-test.benchtime=2000x",
+        "-test.count=1"
+      ],
+      "elapsed_seconds": 1.8509475000901148,
+      "cpu_seconds": 1.8210450000000005,
+      "rows": [
+        {
+          "fixture": "array",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 71164.0,
+          "cgo/op": 0.0,
+          "B/op": 52050.0,
+          "allocs/op": 2029.0
+        },
+        {
+          "fixture": "array",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 83091.0,
+          "cgo/op": 2.0,
+          "B/op": 56146.0,
+          "allocs/op": 2030.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 18.52,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 127.7,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 9938.0,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 20911.0,
+          "cgo/op": 3.0,
+          "B/op": 4368.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 30906.0,
+          "cgo/op": 2.0,
+          "B/op": 4152.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 11556.0,
+          "cgo/op": 4.0,
+          "B/op": 50469.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 29203.0,
+          "cgo/op": 2.0,
+          "B/op": 4152.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 32070.0,
+          "cgo/op": 6.0,
+          "B/op": 54626.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 11200.0,
+          "cgo/op": 3.0,
+          "B/op": 49336.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 10788.0,
+          "cgo/op": 3.0,
+          "B/op": 49232.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 10825.0,
+          "cgo/op": 3.0,
+          "B/op": 50256.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 39496.0,
+          "cgo/op": 0.0,
+          "B/op": 66355.0,
+          "allocs/op": 17.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 59081.0,
+          "cgo/op": 2.0,
+          "B/op": 140087.0,
+          "allocs/op": 18.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 723.4,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 4277.0,
+          "cgo/op": 1.0,
+          "B/op": 65744.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 40439.0,
+          "cgo/op": 0.0,
+          "B/op": 65571.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 3124.0,
+          "cgo/op": 1.0,
+          "B/op": 65808.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 67066.0,
+          "cgo/op": 2.0,
+          "B/op": 139327.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 13144.0,
+          "cgo/op": 4.0,
+          "B/op": 140576.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 66166.0,
+          "cgo/op": 2.0,
+          "B/op": 139327.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 12399.0,
+          "cgo/op": 4.0,
+          "B/op": 140640.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 9351.0,
+          "cgo/op": 3.0,
+          "B/op": 73912.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 8809.0,
+          "cgo/op": 3.0,
+          "B/op": 73808.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 8917.0,
+          "cgo/op": 3.0,
+          "B/op": 74832.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 35437.0,
+          "cgo/op": 0.0,
+          "B/op": 24233.0,
+          "allocs/op": 578.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 46674.0,
+          "cgo/op": 2.0,
+          "B/op": 26921.0,
+          "allocs/op": 579.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 20.46,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 170.4,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 19351.0,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 25861.0,
+          "cgo/op": 3.0,
+          "B/op": 2960.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 29134.0,
+          "cgo/op": 2.0,
+          "B/op": 3128.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 6518.0,
+          "cgo/op": 4.0,
+          "B/op": 10789.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 30428.0,
+          "cgo/op": 2.0,
+          "B/op": 3128.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 32752.0,
+          "cgo/op": 6.0,
+          "B/op": 13536.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 5764.0,
+          "cgo/op": 3.0,
+          "B/op": 9656.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 6178.0,
+          "cgo/op": 3.0,
+          "B/op": 9552.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 6284.0,
+          "cgo/op": 3.0,
+          "B/op": 10576.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 598.1,
+          "cgo/op": 0.0,
+          "B/op": 816.0,
+          "allocs/op": 16.0
+        },
+        {
+          "fixture": "small",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 835.7,
+          "cgo/op": 2.0,
+          "B/op": 880.0,
+          "allocs/op": 17.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 22.17,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 131.5,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 234.4,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 197.2,
+          "cgo/op": 1.0,
+          "B/op": 277.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 1626.0,
+          "cgo/op": 2.0,
+          "B/op": 184.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 986.0,
+          "cgo/op": 3.0,
+          "B/op": 1317.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 1662.0,
+          "cgo/op": 2.0,
+          "B/op": 184.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 1065.0,
+          "cgo/op": 3.0,
+          "B/op": 1381.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 869.2,
+          "cgo/op": 3.0,
+          "B/op": 760.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 1290.0,
+          "cgo/op": 3.0,
+          "B/op": 656.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 817.1,
+          "cgo/op": 2.0,
+          "B/op": 1104.0,
+          "allocs/op": 2.0
+        }
+      ],
+      "stdout": "goos: darwin\ngoarch: arm64\npkg: github.com/sandover/plasmite/bindings/go/local\ncpu: Apple M5 Pro\nBenchmarkOwnedViews/array/full_json_native         \t    2000\t     71164 ns/op\t         0 cgo/op\t   52050 B/op\t    2029 allocs/op\nBenchmarkOwnedViews/array/full_view_native         \t    2000\t     83091 ns/op\t         2.000 cgo/op\t   56146 B/op\t    2030 allocs/op\nBenchmarkOwnedViews/array/warm_native_selected     \t    2000\t        18.52 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/array/warm_view_selected       \t    2000\t       127.7 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/warm_json_typed          \t    2000\t      9938 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/array/warm_view_typed          \t    2000\t     20911 ns/op\t         3.000 cgo/op\t    4368 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/cold_json_selected       \t    2000\t     30906 ns/op\t         2.000 cgo/op\t    4152 B/op\t       4 allocs/op\nBenchmarkOwnedViews/array/cold_view_selected       \t    2000\t     11556 ns/op\t         4.000 cgo/op\t   50469 B/op\t       6 allocs/op\nBenchmarkOwnedViews/array/cold_json_typed          \t    2000\t     29203 ns/op\t         2.000 cgo/op\t    4152 B/op\t       4 allocs/op\nBenchmarkOwnedViews/array/cold_view_typed          \t    2000\t     32070 ns/op\t         6.000 cgo/op\t   54626 B/op\t       6 allocs/op\nBenchmarkOwnedViews/array/get_c_copy               \t    2000\t     11200 ns/op\t         3.000 cgo/op\t   49336 B/op\t       5 allocs/op\nBenchmarkOwnedViews/array/get_into_exact           \t    2000\t     10788 ns/op\t         3.000 cgo/op\t   49232 B/op\t       2 allocs/op\nBenchmarkOwnedViews/array/get_into                 \t    2000\t     10825 ns/op\t         3.000 cgo/op\t   50256 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/full_json_native   \t    2000\t     39496 ns/op\t         0 cgo/op\t   66355 B/op\t      17 allocs/op\nBenchmarkOwnedViews/long_string/full_view_native   \t    2000\t     59081 ns/op\t         2.000 cgo/op\t  140087 B/op\t      18 allocs/op\nBenchmarkOwnedViews/long_string/warm_native_selected         \t    2000\t       723.4 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/long_string/warm_view_selected           \t    2000\t      4277 ns/op\t         1.000 cgo/op\t   65744 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/warm_json_typed              \t    2000\t     40439 ns/op\t         0 cgo/op\t   65571 B/op\t       2 allocs/op\nBenchmarkOwnedViews/long_string/warm_view_typed              \t    2000\t      3124 ns/op\t         1.000 cgo/op\t   65808 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/cold_json_selected           \t    2000\t     67066 ns/op\t         2.000 cgo/op\t  139327 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/cold_view_selected           \t    2000\t     13144 ns/op\t         4.000 cgo/op\t  140576 B/op\t       6 allocs/op\nBenchmarkOwnedViews/long_string/cold_json_typed              \t    2000\t     66166 ns/op\t         2.000 cgo/op\t  139327 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/cold_view_typed              \t    2000\t     12399 ns/op\t         4.000 cgo/op\t  140640 B/op\t       6 allocs/op\nBenchmarkOwnedViews/long_string/get_c_copy                   \t    2000\t      9351 ns/op\t         3.000 cgo/op\t   73912 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/get_into_exact               \t    2000\t      8809 ns/op\t         3.000 cgo/op\t   73808 B/op\t       2 allocs/op\nBenchmarkOwnedViews/long_string/get_into                     \t    2000\t      8917 ns/op\t         3.000 cgo/op\t   74832 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/full_json_native                    \t    2000\t     35437 ns/op\t         0 cgo/op\t   24233 B/op\t     578 allocs/op\nBenchmarkOwnedViews/wide/full_view_native                    \t    2000\t     46674 ns/op\t         2.000 cgo/op\t   26921 B/op\t     579 allocs/op\nBenchmarkOwnedViews/wide/warm_native_selected                \t    2000\t        20.46 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/wide/warm_view_selected                  \t    2000\t       170.4 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/warm_json_typed                     \t    2000\t     19351 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/wide/warm_view_typed                     \t    2000\t     25861 ns/op\t         3.000 cgo/op\t    2960 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/cold_json_selected                  \t    2000\t     29134 ns/op\t         2.000 cgo/op\t    3128 B/op\t       4 allocs/op\nBenchmarkOwnedViews/wide/cold_view_selected                  \t    2000\t      6518 ns/op\t         4.000 cgo/op\t   10789 B/op\t       6 allocs/op\nBenchmarkOwnedViews/wide/cold_json_typed                     \t    2000\t     30428 ns/op\t         2.000 cgo/op\t    3128 B/op\t       4 allocs/op\nBenchmarkOwnedViews/wide/cold_view_typed                     \t    2000\t     32752 ns/op\t         6.000 cgo/op\t   13536 B/op\t       6 allocs/op\nBenchmarkOwnedViews/wide/get_c_copy                          \t    2000\t      5764 ns/op\t         3.000 cgo/op\t    9656 B/op\t       5 allocs/op\nBenchmarkOwnedViews/wide/get_into_exact                      \t    2000\t      6178 ns/op\t         3.000 cgo/op\t    9552 B/op\t       2 allocs/op\nBenchmarkOwnedViews/wide/get_into                            \t    2000\t      6284 ns/op\t         3.000 cgo/op\t   10576 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/full_json_native                   \t    2000\t       598.1 ns/op\t         0 cgo/op\t     816 B/op\t      16 allocs/op\nBenchmarkOwnedViews/small/full_view_native                   \t    2000\t       835.7 ns/op\t         2.000 cgo/op\t     880 B/op\t      17 allocs/op\nBenchmarkOwnedViews/small/warm_native_selected               \t    2000\t        22.17 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/small/warm_view_selected                 \t    2000\t       131.5 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/warm_json_typed                    \t    2000\t       234.4 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/small/warm_view_typed                    \t    2000\t       197.2 ns/op\t         1.000 cgo/op\t     277 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/cold_json_selected                 \t    2000\t      1626 ns/op\t         2.000 cgo/op\t     184 B/op\t       4 allocs/op\nBenchmarkOwnedViews/small/cold_view_selected                 \t    2000\t       986.0 ns/op\t         3.000 cgo/op\t    1317 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/cold_json_typed                    \t    2000\t      1662 ns/op\t         2.000 cgo/op\t     184 B/op\t       4 allocs/op\nBenchmarkOwnedViews/small/cold_view_typed                    \t    2000\t      1065 ns/op\t         3.000 cgo/op\t    1381 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/get_c_copy                         \t    2000\t       869.2 ns/op\t         3.000 cgo/op\t     760 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/get_into_exact                     \t    2000\t      1290 ns/op\t         3.000 cgo/op\t     656 B/op\t       2 allocs/op\nBenchmarkOwnedViews/small/get_into                           \t    2000\t       817.1 ns/op\t         2.000 cgo/op\t    1104 B/op\t       2 allocs/op\nPASS\n",
+      "stderr": ""
+    },
+    {
+      "repeat": 6,
+      "reverse": 0,
+      "argv": [
+        "/Users/brandonharvey/src/plasmite/tmp/go-owned/owned-views.test",
+        "-test.run=^$",
+        "-test.bench=BenchmarkOwnedViews",
+        "-test.benchtime=2000x",
+        "-test.count=1"
+      ],
+      "elapsed_seconds": 1.850627625011839,
+      "cpu_seconds": 1.8221509999999999,
+      "rows": [
+        {
+          "fixture": "small",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 851.3,
+          "cgo/op": 2.0,
+          "B/op": 1104.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 1292.0,
+          "cgo/op": 3.0,
+          "B/op": 656.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "small",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 861.3,
+          "cgo/op": 3.0,
+          "B/op": 760.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 1062.0,
+          "cgo/op": 3.0,
+          "B/op": 1381.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 1700.0,
+          "cgo/op": 2.0,
+          "B/op": 184.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 1001.0,
+          "cgo/op": 3.0,
+          "B/op": 1317.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "small",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 1668.0,
+          "cgo/op": 2.0,
+          "B/op": 184.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 215.1,
+          "cgo/op": 1.0,
+          "B/op": 277.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 242.9,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 121.9,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "small",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 16.88,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "small",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 837.9,
+          "cgo/op": 2.0,
+          "B/op": 880.0,
+          "allocs/op": 17.0
+        },
+        {
+          "fixture": "small",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 618.8,
+          "cgo/op": 0.0,
+          "B/op": 816.0,
+          "allocs/op": 16.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 6425.0,
+          "cgo/op": 3.0,
+          "B/op": 10576.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 6376.0,
+          "cgo/op": 3.0,
+          "B/op": 9552.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 6558.0,
+          "cgo/op": 3.0,
+          "B/op": 9656.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 33258.0,
+          "cgo/op": 6.0,
+          "B/op": 13536.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 29807.0,
+          "cgo/op": 2.0,
+          "B/op": 3128.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 6351.0,
+          "cgo/op": 4.0,
+          "B/op": 10789.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 29121.0,
+          "cgo/op": 2.0,
+          "B/op": 3128.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 25582.0,
+          "cgo/op": 3.0,
+          "B/op": 2960.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 16313.0,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 150.3,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 16.67,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 44598.0,
+          "cgo/op": 2.0,
+          "B/op": 26921.0,
+          "allocs/op": 579.0
+        },
+        {
+          "fixture": "wide",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 35427.0,
+          "cgo/op": 0.0,
+          "B/op": 24233.0,
+          "allocs/op": 578.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 8530.0,
+          "cgo/op": 3.0,
+          "B/op": 74832.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 11048.0,
+          "cgo/op": 3.0,
+          "B/op": 73808.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 10307.0,
+          "cgo/op": 3.0,
+          "B/op": 73912.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 13321.0,
+          "cgo/op": 4.0,
+          "B/op": 140640.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 67530.0,
+          "cgo/op": 2.0,
+          "B/op": 139329.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 13479.0,
+          "cgo/op": 4.0,
+          "B/op": 140576.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 66703.0,
+          "cgo/op": 2.0,
+          "B/op": 139327.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 3112.0,
+          "cgo/op": 1.0,
+          "B/op": 65808.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 39728.0,
+          "cgo/op": 0.0,
+          "B/op": 65571.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 4361.0,
+          "cgo/op": 1.0,
+          "B/op": 65744.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 725.7,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 60204.0,
+          "cgo/op": 2.0,
+          "B/op": 140087.0,
+          "allocs/op": 18.0
+        },
+        {
+          "fixture": "long_string",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 43486.0,
+          "cgo/op": 0.0,
+          "B/op": 66355.0,
+          "allocs/op": 17.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_into",
+          "iterations": 2000,
+          "ns/op": 10972.0,
+          "cgo/op": 3.0,
+          "B/op": 50256.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_into_exact",
+          "iterations": 2000,
+          "ns/op": 10739.0,
+          "cgo/op": 3.0,
+          "B/op": 49232.0,
+          "allocs/op": 2.0
+        },
+        {
+          "fixture": "array",
+          "lane": "get_c_copy",
+          "iterations": 2000,
+          "ns/op": 11017.0,
+          "cgo/op": 3.0,
+          "B/op": 49336.0,
+          "allocs/op": 5.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_view_typed",
+          "iterations": 2000,
+          "ns/op": 32108.0,
+          "cgo/op": 6.0,
+          "B/op": 54626.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_json_typed",
+          "iterations": 2000,
+          "ns/op": 27956.0,
+          "cgo/op": 2.0,
+          "B/op": 4152.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_view_selected",
+          "iterations": 2000,
+          "ns/op": 10933.0,
+          "cgo/op": 4.0,
+          "B/op": 50469.0,
+          "allocs/op": 6.0
+        },
+        {
+          "fixture": "array",
+          "lane": "cold_json_selected",
+          "iterations": 2000,
+          "ns/op": 27992.0,
+          "cgo/op": 2.0,
+          "B/op": 4152.0,
+          "allocs/op": 4.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_view_typed",
+          "iterations": 2000,
+          "ns/op": 20105.0,
+          "cgo/op": 3.0,
+          "B/op": 4368.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_json_typed",
+          "iterations": 2000,
+          "ns/op": 9810.0,
+          "cgo/op": 0.0,
+          "B/op": 32.0,
+          "allocs/op": 1.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_view_selected",
+          "iterations": 2000,
+          "ns/op": 132.0,
+          "cgo/op": 1.0,
+          "B/op": 213.0,
+          "allocs/op": 3.0
+        },
+        {
+          "fixture": "array",
+          "lane": "warm_native_selected",
+          "iterations": 2000,
+          "ns/op": 22.44,
+          "cgo/op": 0.0,
+          "B/op": 0.0,
+          "allocs/op": 0.0
+        },
+        {
+          "fixture": "array",
+          "lane": "full_view_native",
+          "iterations": 2000,
+          "ns/op": 84511.0,
+          "cgo/op": 2.0,
+          "B/op": 56146.0,
+          "allocs/op": 2030.0
+        },
+        {
+          "fixture": "array",
+          "lane": "full_json_native",
+          "iterations": 2000,
+          "ns/op": 70714.0,
+          "cgo/op": 0.0,
+          "B/op": 52050.0,
+          "allocs/op": 2029.0
+        }
+      ],
+      "stdout": "goos: darwin\ngoarch: arm64\npkg: github.com/sandover/plasmite/bindings/go/local\ncpu: Apple M5 Pro\nBenchmarkOwnedViews/small/get_into         \t    2000\t       851.3 ns/op\t         2.000 cgo/op\t    1104 B/op\t       2 allocs/op\nBenchmarkOwnedViews/small/get_into_exact   \t    2000\t      1292 ns/op\t         3.000 cgo/op\t     656 B/op\t       2 allocs/op\nBenchmarkOwnedViews/small/get_c_copy       \t    2000\t       861.3 ns/op\t         3.000 cgo/op\t     760 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/cold_view_typed  \t    2000\t      1062 ns/op\t         3.000 cgo/op\t    1381 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/cold_json_typed  \t    2000\t      1700 ns/op\t         2.000 cgo/op\t     184 B/op\t       4 allocs/op\nBenchmarkOwnedViews/small/cold_view_selected         \t    2000\t      1001 ns/op\t         3.000 cgo/op\t    1317 B/op\t       5 allocs/op\nBenchmarkOwnedViews/small/cold_json_selected         \t    2000\t      1668 ns/op\t         2.000 cgo/op\t     184 B/op\t       4 allocs/op\nBenchmarkOwnedViews/small/warm_view_typed            \t    2000\t       215.1 ns/op\t         1.000 cgo/op\t     277 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/warm_json_typed            \t    2000\t       242.9 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/small/warm_view_selected         \t    2000\t       121.9 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/small/warm_native_selected       \t    2000\t        16.88 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/small/full_view_native           \t    2000\t       837.9 ns/op\t         2.000 cgo/op\t     880 B/op\t      17 allocs/op\nBenchmarkOwnedViews/small/full_json_native           \t    2000\t       618.8 ns/op\t         0 cgo/op\t     816 B/op\t      16 allocs/op\nBenchmarkOwnedViews/wide/get_into                    \t    2000\t      6425 ns/op\t         3.000 cgo/op\t   10576 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/get_into_exact              \t    2000\t      6376 ns/op\t         3.000 cgo/op\t    9552 B/op\t       2 allocs/op\nBenchmarkOwnedViews/wide/get_c_copy                  \t    2000\t      6558 ns/op\t         3.000 cgo/op\t    9656 B/op\t       5 allocs/op\nBenchmarkOwnedViews/wide/cold_view_typed             \t    2000\t     33258 ns/op\t         6.000 cgo/op\t   13536 B/op\t       6 allocs/op\nBenchmarkOwnedViews/wide/cold_json_typed             \t    2000\t     29807 ns/op\t         2.000 cgo/op\t    3128 B/op\t       4 allocs/op\nBenchmarkOwnedViews/wide/cold_view_selected          \t    2000\t      6351 ns/op\t         4.000 cgo/op\t   10789 B/op\t       6 allocs/op\nBenchmarkOwnedViews/wide/cold_json_selected          \t    2000\t     29121 ns/op\t         2.000 cgo/op\t    3128 B/op\t       4 allocs/op\nBenchmarkOwnedViews/wide/warm_view_typed             \t    2000\t     25582 ns/op\t         3.000 cgo/op\t    2960 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/warm_json_typed             \t    2000\t     16313 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/wide/warm_view_selected          \t    2000\t       150.3 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/wide/warm_native_selected        \t    2000\t        16.67 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/wide/full_view_native            \t    2000\t     44598 ns/op\t         2.000 cgo/op\t   26921 B/op\t     579 allocs/op\nBenchmarkOwnedViews/wide/full_json_native            \t    2000\t     35427 ns/op\t         0 cgo/op\t   24233 B/op\t     578 allocs/op\nBenchmarkOwnedViews/long_string/get_into             \t    2000\t      8530 ns/op\t         3.000 cgo/op\t   74832 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/get_into_exact       \t    2000\t     11048 ns/op\t         3.000 cgo/op\t   73808 B/op\t       2 allocs/op\nBenchmarkOwnedViews/long_string/get_c_copy           \t    2000\t     10307 ns/op\t         3.000 cgo/op\t   73912 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/cold_view_typed      \t    2000\t     13321 ns/op\t         4.000 cgo/op\t  140640 B/op\t       6 allocs/op\nBenchmarkOwnedViews/long_string/cold_json_typed      \t    2000\t     67530 ns/op\t         2.000 cgo/op\t  139329 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/cold_view_selected   \t    2000\t     13479 ns/op\t         4.000 cgo/op\t  140576 B/op\t       6 allocs/op\nBenchmarkOwnedViews/long_string/cold_json_selected   \t    2000\t     66703 ns/op\t         2.000 cgo/op\t  139327 B/op\t       5 allocs/op\nBenchmarkOwnedViews/long_string/warm_view_typed      \t    2000\t      3112 ns/op\t         1.000 cgo/op\t   65808 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/warm_json_typed      \t    2000\t     39728 ns/op\t         0 cgo/op\t   65571 B/op\t       2 allocs/op\nBenchmarkOwnedViews/long_string/warm_view_selected   \t    2000\t      4361 ns/op\t         1.000 cgo/op\t   65744 B/op\t       3 allocs/op\nBenchmarkOwnedViews/long_string/warm_native_selected \t    2000\t       725.7 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/long_string/full_view_native     \t    2000\t     60204 ns/op\t         2.000 cgo/op\t  140087 B/op\t      18 allocs/op\nBenchmarkOwnedViews/long_string/full_json_native     \t    2000\t     43486 ns/op\t         0 cgo/op\t   66355 B/op\t      17 allocs/op\nBenchmarkOwnedViews/array/get_into                   \t    2000\t     10972 ns/op\t         3.000 cgo/op\t   50256 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/get_into_exact             \t    2000\t     10739 ns/op\t         3.000 cgo/op\t   49232 B/op\t       2 allocs/op\nBenchmarkOwnedViews/array/get_c_copy                 \t    2000\t     11017 ns/op\t         3.000 cgo/op\t   49336 B/op\t       5 allocs/op\nBenchmarkOwnedViews/array/cold_view_typed            \t    2000\t     32108 ns/op\t         6.000 cgo/op\t   54626 B/op\t       6 allocs/op\nBenchmarkOwnedViews/array/cold_json_typed            \t    2000\t     27956 ns/op\t         2.000 cgo/op\t    4152 B/op\t       4 allocs/op\nBenchmarkOwnedViews/array/cold_view_selected         \t    2000\t     10933 ns/op\t         4.000 cgo/op\t   50469 B/op\t       6 allocs/op\nBenchmarkOwnedViews/array/cold_json_selected         \t    2000\t     27992 ns/op\t         2.000 cgo/op\t    4152 B/op\t       4 allocs/op\nBenchmarkOwnedViews/array/warm_view_typed            \t    2000\t     20105 ns/op\t         3.000 cgo/op\t    4368 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/warm_json_typed            \t    2000\t      9810 ns/op\t         0 cgo/op\t      32 B/op\t       1 allocs/op\nBenchmarkOwnedViews/array/warm_view_selected         \t    2000\t       132.0 ns/op\t         1.000 cgo/op\t     213 B/op\t       3 allocs/op\nBenchmarkOwnedViews/array/warm_native_selected       \t    2000\t        22.44 ns/op\t         0 cgo/op\t       0 B/op\t       0 allocs/op\nBenchmarkOwnedViews/array/full_view_native           \t    2000\t     84511 ns/op\t         2.000 cgo/op\t   56146 B/op\t    2030 allocs/op\nBenchmarkOwnedViews/array/full_json_native           \t    2000\t     70714 ns/op\t         0 cgo/op\t   52050 B/op\t    2029 allocs/op\nPASS\n",
+      "stderr": ""
+    }
+  ]
+}

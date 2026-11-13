@@ -354,7 +354,7 @@ pub extern "C" fn plsm_pool_get_into(
 
 /// Paths parsed once for repeated coarse selection from immutable snapshots.
 pub struct PlsmSelector {
-    paths: Vec<Vec<String>>,
+    pub(crate) paths: Vec<Vec<String>>,
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn plsm_selector_new(

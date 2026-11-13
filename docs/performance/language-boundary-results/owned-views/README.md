@@ -408,6 +408,12 @@ Tests cover borrowed string/byte pointers, options, enum shapes, integer range
 errors, and float/integer type errors. A compile-fail example prevents borrowed
 text from escaping its owner.
 
+## Go-managed views
+
+The [Go consumer measurements](go/README.md) cover managed snapshot ownership,
+prepared sparse reads, typed decoding, copy controls, native-call counts and
+material JSON-fallback limits.
+
 ## Follow-up: native Rust encoding, append results, and retained children
 
 Rust can now encode a Serde input into one growing Lite3 allocation and retain

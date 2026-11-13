@@ -277,3 +277,43 @@ receipt data decoding. The local backend also provides these methods directly.
 They require the matching C SDK/library. The original `api.Pool` interface gains
 no required methods: unsupported backends return an error before they append.
 Existing append methods keep full Message results where they already did.
+
+## Managed owned views
+
+`client.Pool` returns the concrete local pool. Its additive `GetView` API retains
+one immutable Lite3 snapshot in Go memory, independently of pool close or record
+overwrite. Ordinary views and child values need no `Close`.
+
+```go
+message, err := pool.GetView(seq)
+if err != nil { return err }
+var reading struct {
+    Sensor string `json:"sensor"`
+    Metrics struct { Power int64 `json:"power"` } `json:"metrics"`
+}
+if err := message.Decode(&reading); err != nil { return err }
+
+selection, err := plasmite.Prepare("/sensor", "/metrics/power")
+if err != nil { return err }
+defer selection.Close() // reuse this small prepared plan across messages
+values, err := selection.Read(message)
+if err != nil { return err }
+sensor, sensorPresent := values[0].String()
+power, powerPresent := values[1].Int64()
+fmt.Println(sensor, sensorPresent, power, powerPresent)
+```
+
+Identity uses `message.Seq()` and `message.TimestampNs()`; `Time()` constructs UTC
+time when requested. `Data()` and `Meta()` return child references. `Decode`
+builds an independent ordinary value with `encoding/json` semantics. `DataJSON`
+and `JSON` format the data subtree and canonical complete envelope respectively;
+`Meta().JSON()` keeps all stored metadata fields. `Lite3()` returns a detached
+mutable copy. Strings and bytes extracted from selected values own their data.
+Closing a prepared selector waits for its active reads; message reads need no
+pool lock after acquisition.
+
+The [Go view measurements](../../docs/performance/language-boundary-results/owned-views/go/README.md)
+cover sparse reads, typed decoding, full conversion, cgo crossings, allocation
+counts and the initial-buffer memory tradeoff. Full conversion and partial
+structs with extra fields still use the standard JSON fallback in this first
+checkpoint; the measurements show those costs.
