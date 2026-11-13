@@ -281,7 +281,9 @@ func (v Value) Bytes() ([]byte, bool) {
 	if v.kind != 6 {
 		return nil, false
 	}
-	return append([]byte(nil), v.owner.bytes()[v.offset:v.offset+v.length]...), true
+	output := make([]byte, v.length)
+	copy(output, v.owner.bytes()[v.offset:v.offset+v.length])
+	return output, true
 }
 func (v Value) JSON() ([]byte, error) {
 	if v.owner == nil || v.kind == 0 {
@@ -295,6 +297,12 @@ func (v Value) JSON() ([]byte, error) {
 	return copyNativeJSON(result.buffer), nil
 }
 func (v Value) Decode(destination any) error {
+	if v.kind == KindBytes {
+		if target, ok := destination.(*[]byte); ok && target != nil {
+			*target, _ = v.Bytes()
+			return nil
+		}
+	}
 	if v.owner == nil || v.kind == 0 {
 		return invalidArgumentError("missing value")
 	}
@@ -352,3 +360,7 @@ func (d *structDecoder) read(view *MessageView, root C.size_t) ([]C.plsm_go_valu
 	}
 	return slots, true, nil
 }
+
+// MarshalJSON lets standard Go JSON operations format views directly.
+func (v Value) MarshalJSON() ([]byte, error)        { return v.JSON() }
+func (v *MessageView) MarshalJSON() ([]byte, error) { return v.JSON() }

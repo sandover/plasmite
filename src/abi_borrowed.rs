@@ -5,6 +5,7 @@
 //! allocation until the call returns. No function stores a caller pointer.
 #![allow(clippy::result_large_err)]
 mod decode;
+mod input;
 use crate::abi::{fail, plsm_buf, plsm_error, write_json_buf};
 use crate::abi_views::PlsmSelector;
 use crate::core::error::{Error, ErrorKind};

@@ -318,3 +318,44 @@ counts and the initial-buffer memory tradeoff. Complete exact structs use keyed 
 selected objects and skip unrequested subtrees; Unicode/ambiguous aliases and
 complex Go types keep the standard JSON fallback. The measurements include full
 conversion costs and the small-read buffer retention tradeoff.
+
+## Native producers
+
+`AppendView` walks ordinary Go values into Lite3 and returns their committed
+snapshot. `AppendJSONView` accepts explicit JSON source. Both return Go-managed
+views and preserve legacy `Append`/`AppendJSON` behavior.
+
+```go
+message, err := pool.AppendView(
+    map[string]any{"sensor": "north", "samples": []byte{0, 127, 255}},
+    []string{"sensor"},
+)
+if err != nil { return err }
+
+// Forward the encoded data directly, with new tags and identity.
+forwarded, err := pool.AppendView(message.Data(), []string{"forwarded"})
+if err != nil { return err }
+fmt.Println(forwarded.Seq())
+```
+
+Native signed/unsigned integers must fit i64. Finite floats stay binary64;
+float32 promotes its exact value. Native `[]byte` becomes Lite3 bytes: nil becomes
+null and a nonnil empty slice stays empty bytes. Explicit JSON and custom
+`MarshalJSON` output keep their JSON types, including base64 strings. Standard
+JSON exports format native bytes as base64; typed `Decode` and `Value.Bytes`
+produce independent mutable byte slices.
+
+The encoder follows Go's field promotion, tag dominance, `omitempty`, `string`,
+map-key `TextMarshaler` and addressable pointer-method rules. Go 1.24 and newer
+also honor `omitzero`; older supported compilers ignore it as their JSON library
+does. JSON/Text hooks run once in the usual visit order. Map values snapshot
+before sorted-key callbacks; mutable byte values snapshot at visit, so a later
+hook cannot rewrite an earlier value. Custom JSON subtrees parse once, while
+ordinary floats and other fields stay native.
+
+The binding pins immutable strings and private view buffers only during its
+synchronous native call. C retains no Go pointers. It releases the pool mutex
+before copying the checked producer snapshot into aligned Go memory, and reuses
+the construction proof. Closing a pool inside a serializer causes a closed-handle
+error before publication. `json.Marshal(message)` and `json.Marshal(message.Data())`
+use the normal Go marshaler interface for explicit JSON conversion.

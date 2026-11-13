@@ -142,5 +142,41 @@ initial buffer retains about 1,100 Go heap bytes per owner, versus 656 for exact
 sizing/native-copy controls. All retain two Go objects per owner; initial-buffer
 slack remains the deliberate small-read latency tradeoff.
 
+
+## Native producer checkpoint
+
+`AppendView` collects ordinary Go values into pinned native descriptors, writes
+Lite3 directly, and returns a Go-owned committed snapshot. Immutable strings and
+sealed views borrow their storage for one synchronous call. Mutable byte slices
+and custom JSON results take a snapshot when visited, so later hooks cannot
+change an earlier value. Custom hooks run outside the pool mutex. Embedded fields,
+map-key text methods, omission rules and quoted scalar tags follow Go's JSON
+field rules; native byte slices retain Lite3's byte type.
+
+[The checkpoint manifest](producer-checkpoint.json) records the release library,
+Go test executable and every compiled source hash. The complete source
+overlay (outside Git) includes registered Rust modules and the Go
+producer/consumer harnesses. Apply it over the recorded base commit, which
+supplies vendored dependencies. The fixed executable and library remain at
+`tmp/go-input-checkpoint/input.test` and `tmp/go-input-checkpoint/lib` for the
+central measurement run. A later Go-only omission-rule test adds coverage; it
+does not change the compiled runtime or benchmark source.
+
+Run the saved executable with the fixed library directory on the dynamic linker
+path and `-test.run=^$ -test.bench=BenchmarkNativeInput -test.benchtime=2000x
+-test.count=1`. Alternate `PLASMITE_GO_REVERSE=0/1`. The harness covers small maps
+and structs, wide objects, 64 KiB text/bytes and arrays. Each fixture compares
+owned native/JSON append results, forwarding and append/read/typed-decode
+pipelines, checks the final values and reports allocation/cgo-call counts. Byte
+lanes compare the same decoded byte output while storing native bytes versus
+JSON base64 strings. This checkpoint makes no producer performance claim; the
+full matrix belongs to the central run.
+
+Focused tests cover mutable-byte and reusable-hook buffers, map snapshots,
+reentrant close, exact integers, finite binary64 values, negative zero, native
+bytes, retained owners, embedded-field dominance, custom map keys, quoted tags,
+absolute depth through source/JSON subtrees and invalid text normalization.
+The full local/API race suite and strict cgo-pointer checks pass.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

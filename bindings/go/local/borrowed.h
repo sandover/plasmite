@@ -66,4 +66,38 @@ static inline plsm_go_status_t plsm_go_decode_result(const uint8_t *data,size_t 
     return result;
 }
 
+/* Pinned input data borrows Go strings/immutable buffers for one call only.
+ * Mutable bytes and hook JSON are private snapshots. No pointer escapes. */
+typedef struct { const uint8_t *data; size_t len; } plsm_go_input_span_t;
+typedef struct {
+    size_t parent;
+    uint32_t kind, flags;
+    int64_t integer;
+    double real;
+    plsm_go_input_span_t key, text;
+} plsm_go_input_node_t;
+
+int plsm_go_append_nodes(plsm_pool_t *,const plsm_go_input_node_t *,size_t,const plsm_go_input_span_t *,size_t,uint32_t,const plsm_message_view_t **,plsm_error_t **);
+typedef struct {
+    int status;
+    plsm_error_t *error;
+    const plsm_message_view_t *owner;
+    const uint8_t *bytes;
+    size_t len,data,meta;
+    uint64_t seq,timestamp;
+} plsm_go_input_result_t;
+static inline plsm_go_input_result_t plsm_go_append_input(plsm_pool_t *pool,const plsm_go_input_node_t *nodes,size_t count,const plsm_go_input_span_t *tags,size_t tag_count,uint32_t durability) {
+    plsm_go_input_result_t result={0};
+    result.status=plsm_go_append_nodes(pool,nodes,count,tags,tag_count,durability,&result.owner,&result.error);
+    if (result.status) return result;
+    result.bytes=plsm_view_bytes(result.owner,&result.len);
+    result.seq=plsm_view_seq(result.owner);result.timestamp=plsm_view_timestamp_ns(result.owner);
+    result.data=plsm_view_data(result.owner).offset;
+    plsm_value_ref_t meta={0};
+    result.status=plsm_value_get(plsm_view_root(result.owner),(const uint8_t *)"meta",4,&meta,&result.error);
+    if (result.status) { plsm_view_release(result.owner);result.owner=NULL;return result; }
+    result.meta=meta.offset;
+    return result;
+}
+
 #endif

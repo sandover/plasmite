@@ -54,7 +54,7 @@ func planFor(t reflect.Type) *decodePlan {
 				continue
 			}
 			options := strings.Split(f.Tag.Get("json"), ",")
-			if options[0] == "-" {
+			if f.Tag.Get("json") == "-" {
 				continue
 			}
 			for _, option := range options[1:] {
@@ -93,6 +93,13 @@ func planFor(t reflect.Type) *decodePlan {
 				continue
 			}
 			switch f.Type.Kind() {
+			case reflect.Slice:
+				if f.Type.Elem().Kind() != reflect.Uint8 {
+					return false
+				}
+				plan.fields = append(plan.fields, decodeField{index: childIndex, slot: len(paths), kind: reflect.Slice})
+				paths = append(paths, childPath)
+
 			case reflect.Bool, reflect.String, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr, reflect.Float64:
 				bits := 0
 				if f.Type.Kind() != reflect.Bool && f.Type.Kind() != reflect.String {
@@ -174,6 +181,10 @@ func (v Value) decodeStruct(destination any) (bool, error) {
 			continue
 		}
 		switch field.kind {
+		case reflect.Slice:
+			if slot.kind != 6 {
+				return false, nil
+			}
 		case reflect.String:
 			if slot.kind != 5 {
 				return false, nil
@@ -211,6 +222,10 @@ func (v Value) decodeStruct(destination any) (bool, error) {
 		}
 		target := root.FieldByIndex(field.index)
 		switch field.kind {
+		case reflect.Slice:
+			output := make([]byte, int(slot.len))
+			copy(output, v.owner.bytes()[int(slot.offset):int(slot.offset+slot.len)])
+			target.SetBytes(output)
 		case reflect.String:
 			target.SetString(string(v.owner.bytes()[int(slot.offset):int(slot.offset+slot.len)]))
 		case reflect.Bool:
