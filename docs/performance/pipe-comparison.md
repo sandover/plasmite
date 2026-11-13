@@ -261,5 +261,70 @@ The runner also completed a paced 3,000-record smoke trial whose reports exceed
 a pipe buffer, exercising its concurrent stderr draining. The follow-up evidence
 includes the measured harness version, saved source deltas, and diagnostic logs.
 
+## Count the work and isolate pipe batching
+
+A later seven-repeat comparison uses the same optimized structural-sizing
+library and numeric producer receipts for Plasmite. It rotates buffered pipe,
+record-flushed pipe and Plasmite through the trial order, with 100,000 verified
+records per run. The reader still decodes complete data in every lane.
+
+| Request pattern | Median records/s | Combined worker CPU s |
+| --- | ---: | ---: |
+| Buffered pipe | 301,251 | 0.646958 |
+| Pipe flushed after every record | 271,205 | 0.730642 |
+| Plasmite numeric receipt, full-message consumer | 78,970 | 2.389360 |
+
+Per-record flushing reduces pipe throughput 10.0% and increases worker CPU
+12.9%. Batching explains part of the difference; the remaining throughput ratio
+is about 3.4 times for this transient-data versus retained-message workload.
+It does not establish that retaining history intrinsically costs that much.
+See [pipe-batching.raw.json](pipe-comparison-results/pipe-batching.raw.json).
+
+A separate 10,000-record diagnostic injects a macOS native-call counter into
+the controlled worker processes. Its timing includes instrumentation and must
+not serve as a performance result. The ordinary seven-repeat table above runs
+without the counter. [native-operations.raw.json](pipe-comparison-results/native-operations.raw.json)
+records every worker's calls and verified counts. The buffered producer makes
+72 writes and the consumer makes 143 reads, moving about 9.3 MB. A write holds
+up to 130,982 bytes on this Python build. Flushing every record forces 10,000
+producer writes; reader buffering still permits some reads to contain multiple
+records. These are measured function-call counts for the wrapped native APIs,
+not a complete kernel or background-writeback profile.
+
+For Plasmite, the same diagnostic finds exactly 10,000 exclusive locks,
+10,000 unlocks, 10,000 pathname stat calls, 10,000 descriptor closes and 10,000
+semaphore posts in the writer. It opens its cached semaphore once. Source
+inspection identifies the corresponding descriptor duplication in
+`Pool::append_operation_lock`, which calls `File::try_clone`; this probe does
+not wrap variadic `fcntl`. The reader takes 10,002 shared locks and unlocks:
+10,000 frame snapshots plus setup. It makes one 4 KiB header read during stream
+open and uses mapped bytes for payload access. Neither worker calls `msync`.
+Neither waits on the semaphore in this saturated sample. The read side stays
+busy decoding available frames; the wake-up path does not explain this run's
+time. Paced and fan-out runs test that different workload.
+
+The pipe producer encodes JSON once and its consumer decodes JSON once.
+Plasmite's Python producer also encodes JSON, then the C boundary parses a Rust
+Value, serializes a Lite3 envelope and parses/builds the binary document.
+The full-message consumer takes a stable snapshot, exports the binary data as
+JSON, builds a Rust Value and serializes the complete envelope. Python then
+copies/decodes the returned bytes and constructs Message, metadata and timestamp
+objects. These codec-pass descriptions come from the owning source, separately
+from the native-call counts. Returning only confirmation removed the producer's
+full receipt work; it leaves this consumer conversion chain intact. The C JSON
+read and native object tickets target specific remaining steps.
+
+Reproduce counts by compiling
+[native-operation-probe.c](pipe-comparison-results/native-operation-probe.c)
+with `cc -dynamiclib -std=gnu11 -O2 -Wall -Wextra -o PROBE.dylib`, then run the
+benchmark with `--native-counts PROBE.dylib --compare-pipe-flush --receipt identity`.
+The probe uses dyld interposition only inside these benchmark processes and
+records its library hash. An independent pipe read/write/close smoke verified
+its hooks before the diagnostic. [operation-bench.py](pipe-comparison-results/operation-bench.py)
+preserves the exact measured script. Pass `--bindings` explicitly when running
+that saved copy; its default assumes the repository scripts directory. Omit
+`--native-counts` for timing. The script also now alternates two-lane runs
+instead of allowing rotation and reversal to cancel each other.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

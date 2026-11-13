@@ -59,6 +59,14 @@ def worker(args):
             import plasmite
             client = stack.enter_context(plasmite.Client(args.directory))
             pool = stack.enter_context(client.open_pool("events"))
+        probe = None
+        if args.native_counts:
+            import ctypes
+            probe = ctypes.CDLL(str(args.native_counts))
+            probe.plsm_bench_probe_begin.argtypes = []
+            probe.plsm_bench_probe_begin.restype = None
+            probe.plsm_bench_probe_end.argtypes = []
+            probe.plsm_bench_probe_end.restype = ctypes.c_char_p
         value = record()
         fixture = (Path(args.directory) / "fixture.lite3").read_bytes() if args.binary else None
         profile = cProfile.Profile() if args.profile else None
@@ -71,6 +79,8 @@ def worker(args):
         started = time.monotonic_ns()
         if profile:
             profile.enable()
+        if probe:
+            probe.plsm_bench_probe_begin()
         checksum = 0
         latencies = []
         if args.role == "writer":
@@ -87,7 +97,7 @@ def worker(args):
                 if pool is None:
                     # Match Pool.append's standard json.dumps settings.
                     sys.stdout.buffer.write(json.dumps(value).encode("utf-8") + b"\n")
-                    if args.interval_ms:
+                    if args.interval_ms or args.pipe_flush:
                         sys.stdout.buffer.flush()
                 elif args.binary:
                     if pool.append_lite3(fixture, plasmite.Durability.FAST) != index + 1:
@@ -142,6 +152,8 @@ def worker(args):
                   "latencies_ns": latencies,
                   "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
                       * (1 if sys.platform == "darwin" else 1024)}
+        if probe:
+            result["native_operations"] = json.loads(probe.plsm_bench_probe_end())
         if args.binary:
             result["fixture_sha256"] = hashlib.sha256(fixture).hexdigest()
         print(json.dumps(result), file=sys.stderr, flush=True)
@@ -156,6 +168,11 @@ def trial(args, lane, directory, profile=False):
                "--interval-ms", str(args.interval_ms), "--receipt", args.receipt]
     if args.binary:
         command.append("--binary")
+    if args.pipe_flush:
+        command.append("--pipe-flush")
+    if args.native_counts:
+        command.extend(["--native-counts", str(args.native_counts.resolve())])
+        environment["DYLD_INSERT_LIBRARIES"] = str(args.native_counts.resolve())
     processes = []
     try:
         if lane == "plasmite":
@@ -244,6 +261,12 @@ def main():
     parser.add_argument("--receipt", choices=["full", "identity"], default="full",
                         help="producer receipt work; the consumer still decodes and verifies complete data")
     parser.add_argument("--baseline-receipt", choices=["full", "identity"], default="full")
+    parser.add_argument("--compare-pipe-flush", action="store_true",
+                        help="include both buffered and per-record-flushed pipes")
+    parser.add_argument("--pipe-flush", action="store_true",
+                        help="flush each pipe record; do not add pacing")
+    parser.add_argument("--native-counts", type=Path,
+                        help="macOS probe dylib; diagnostic counts only, not performance timing")
     parser.add_argument("--binary", action="store_true",
                         help="compare verified repeated Lite3 forwarding; omit the JSON pipe")
     parser.add_argument("--messages", type=int, default=20_000)
@@ -257,6 +280,14 @@ def main():
     parser.add_argument("--lane", choices=["pipe", "plasmite"], help=argparse.SUPPRESS)
     parser.add_argument("--directory", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.compare_pipe_flush and (args.binary or args.pipe_flush):
+        parser.error("compare-pipe-flush needs JSON mode without pipe-flush")
+    if args.native_counts and args.profile:
+        parser.error("collect native counts and profiles in separate runs")
+    if args.native_counts and sys.platform != "darwin":
+        parser.error("native operation probe currently supports macOS only")
+    if args.binary and args.pipe_flush:
+        parser.error("binary forwarding omits the pipe")
     if args.messages < 1 or args.repeats < 1 or args.interval_ms < 0:
         parser.error("messages and repeats must be positive; interval must be nonnegative")
     if args.binary and (args.receipt != "full" or args.baseline_receipt != "full"):
@@ -282,8 +313,12 @@ def main():
               "interval_ms": args.interval_ms,
               "format": "lite3-repeat" if args.binary else "json-object",
               "receipt": args.receipt, "baseline_receipt": args.baseline_receipt,
+              "pipe_flush": args.pipe_flush, "compare_pipe_flush": args.compare_pipe_flush,
+              "native_operation_diagnostic": bool(args.native_counts),
               "first_record_json_bytes": len(json.dumps(record()).encode()),
               "runs": []}
+    if args.native_counts:
+        result["native_probe_sha256"] = hashlib.sha256(args.native_counts.read_bytes()).hexdigest()
     libraries = {"plasmite": args.library}
     if args.baseline_library:
         libraries["baseline"] = args.baseline_library.resolve()
@@ -293,17 +328,20 @@ def main():
         if args.baseline_bindings:
             args.baseline_bindings = args.baseline_bindings.resolve()
             result["baseline_bindings_sha256"] = hashlib.sha256((args.baseline_bindings / "plasmite" / "__init__.py").read_bytes()).hexdigest()
-    # Warm both complete paths once; alternate order in the measured repeats.
+    pipe_lanes = [] if args.binary else (["pipe", "pipe-flushed"] if args.compare_pipe_flush else ["pipe"])
+    # Warm each complete path once; alternate order in the measured repeats.
     for repeat in range(args.repeats + 1):
-        lanes = list(libraries) if args.binary else ["pipe", *libraries]
-        if not args.binary:
+        lanes = [*pipe_lanes, *libraries]
+        if len(lanes) > 2:
             offset = repeat % len(lanes)
             lanes = lanes[offset:] + lanes[:offset]
         if repeat % 2:
             lanes.reverse()
         for label in lanes:
-            lane = "pipe" if label == "pipe" else "plasmite"
+            lane = "pipe" if label in pipe_lanes else "plasmite"
             trial_args = argparse.Namespace(**vars(args))
+            if label == "pipe-flushed":
+                trial_args.pipe_flush = True
             trial_args.library = libraries.get(label, args.library)
             if label == "baseline":
                 trial_args.receipt = args.baseline_receipt
@@ -320,7 +358,7 @@ def main():
         lane: {key: statistics.median(run[key] for run in result["runs"] if run["lane"] == lane)
                for key in (["elapsed_seconds", "messages_per_second", "cpu_seconds"] +
                            (["p50_latency_ms", "p95_latency_ms"] if args.interval_ms else []))}
-        for lane in (list(libraries) if args.binary else ["pipe", *libraries])
+        for lane in [*pipe_lanes, *libraries]
     }
     if args.profile:
         with tempfile.TemporaryDirectory(prefix="plasmite-profile-") as directory:
