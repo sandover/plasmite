@@ -27,7 +27,28 @@ struct Entry {
     key_len: usize,
     value: ValueRef,
 }
+#[repr(C)]
+struct Cursor {
+    _private: [u8; 0],
+}
+struct OwnedCursor(*mut Cursor);
+impl Drop for OwnedCursor {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe { plsm_cursor_free(self.0) }
+        }
+    }
+}
 unsafe extern "C" {
+    fn plsm_value_iter(value: ValueRef, out: *mut *mut Cursor, err: *mut *mut plsm_error_t) -> i32;
+    fn plsm_cursor_next(
+        cursor: *mut Cursor,
+        slots: *mut Entry,
+        capacity: usize,
+        written: *mut usize,
+        err: *mut *mut plsm_error_t,
+    ) -> i32;
+    fn plsm_cursor_free(cursor: *mut Cursor);
     fn plsm_view_release(owner: *const Owner);
     fn plsm_view_root(owner: *const Owner) -> ValueRef;
     fn plsm_view_seq(owner: *const Owner) -> u64;
@@ -322,7 +343,10 @@ impl NativeView {
 #[napi(custom_finalize)]
 pub struct NativeCursor {
     backend: NativeView,
-    entries: Vec<Entry>,
+    cursor: OwnedCursor,
+    slots: [Entry; 16],
+    available: usize,
+    position: usize,
     node: u32,
     count: u32,
     index: u32,
@@ -332,17 +356,36 @@ pub struct NativeCursor {
 impl NativeCursor {
     #[napi]
     pub fn next_value(&mut self, env: Env) -> Result<JsUnknown> {
-        if self.index >= self.count {
-            return Ok(env.get_undefined()?.into_unknown());
-        }
-        let index = self.index;
-        self.index += 1;
         if self.bytes {
-            self.backend.at(env, self.node, index)
-        } else {
-            self.backend
-                .descriptor(env, self.entries[index as usize].value)
+            if self.index >= self.count {
+                return Ok(env.get_undefined()?.into_unknown());
+            }
+            let index = self.index;
+            self.index += 1;
+            return self.backend.at(env, self.node, index);
         }
+        if self.position == self.available {
+            let mut err = ptr::null_mut();
+            if unsafe {
+                plsm_cursor_next(
+                    self.cursor.0,
+                    self.slots.as_mut_ptr(),
+                    self.slots.len(),
+                    &mut self.available,
+                    &mut err,
+                )
+            } != 0
+            {
+                return Err(take_error(env, err)?);
+            }
+            self.position = 0;
+            if self.available == 0 {
+                return Ok(env.get_undefined()?.into_unknown());
+            }
+        }
+        let reference = self.slots[self.position].value;
+        self.position += 1;
+        self.backend.descriptor(env, reference)
     }
 }
 #[napi]
@@ -351,15 +394,26 @@ impl NativeView {
     pub fn cursor(&self, env: Env, node: u32) -> Result<NativeCursor> {
         let value = self.read(env, node)?;
         let bytes = value.kind == 6;
+        let mut cursor = ptr::null_mut();
+        if !bytes {
+            let mut err = ptr::null_mut();
+            if unsafe { plsm_value_iter(self.reference(node), &mut cursor, &mut err) } != 0 {
+                return Err(take_error(env, err)?);
+            }
+        }
+        let empty = Entry {
+            key: ptr::null(),
+            key_len: 0,
+            value: self.reference(0),
+        };
         Ok(NativeCursor {
             backend: NativeView {
                 owner: self.owner.clone(),
             },
-            entries: if bytes {
-                Vec::new()
-            } else {
-                self.entries(env, node)?
-            },
+            cursor: OwnedCursor(cursor),
+            slots: [empty; 16],
+            available: 0,
+            position: 0,
             node,
             count: value.len as u32,
             index: 0,
@@ -382,6 +436,7 @@ impl napi::bindgen_prelude::ObjectFinalize for NativeView {
 }
 impl napi::bindgen_prelude::ObjectFinalize for NativeCursor {
     fn finalize(self, env: Env) -> Result<()> {
+        drop(self.cursor);
         self.backend.finalize(env)
     }
 }
@@ -404,6 +459,9 @@ pub fn available() -> bool {
             c"plsm_value_read",
             c"plsm_value_entries",
             c"plsm_value_to_json",
+            c"plsm_value_iter",
+            c"plsm_cursor_next",
+            c"plsm_cursor_free",
         ]
         .iter()
         .all(|name| !unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) }.is_null())

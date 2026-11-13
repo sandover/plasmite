@@ -64,7 +64,7 @@ test('explicit native conversion builds only the requested subtree', () => {
 });
 
 test('reflection and dangerous names remain ordinary data', () => {
-  const data = JSON.parse('{"__proto__":{"x":1},"constructor":2,"toJSON":3,"then":4,"value":null}');
+  const data = JSON.parse('{"__proto__":{"x":1},"constructor":2,"toJSON":3,"then":4,"value":null,"�":5}');
   const m = createMessageView(owner(data), 1n, 0n);
   assert.equal(Object.getPrototypeOf(m.data), null);
   assert.equal(Object.hasOwn(m.data, '__proto__'), true);
@@ -74,6 +74,9 @@ test('reflection and dangerous names remain ordinary data', () => {
   assert.equal(m.data.value, null);
   assert.equal(m.data.missing, undefined);
   assert.equal(m.data['bad\0key'], undefined);
+  assert.equal(m.data['\ud800'], undefined);
+  assert.equal('\ud800' in m.data, false);
+  assert.equal(m.data['�'], 5);
   assert.equal('bad\0key' in m.data, false);
   assert.deepEqual(Object.keys(m.data), Object.keys(data));
   assert.equal(Object.hasOwn(toNative(m.data), '__proto__'), true);

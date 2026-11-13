@@ -46,10 +46,10 @@ and full native conversion also lose. Wide warm direct JSON formatting takes
 case loses. The raw files include every lane; no primary-API cutover follows
 from these measurements.
 
-Current iteration retains a vector of borrowed native entry references, though
-it creates no eager child proxies. Bounded native cursors and removal of scalar
-descriptor objects remain follow-ups. Memory samples include GC/other-allocation
-noise and cannot establish exact native-owner retention or prompt release.
+The initial bridge retained a vector of borrowed native entry references and
+created scalar descriptors. Later sections measure removal of those costs.
+Memory samples include GC/other-allocation noise and cannot establish exact
+native-owner retention or prompt release.
 
 ## Evidence and checks
 
@@ -100,3 +100,24 @@ small-array operations per repeat and showed a regression there. The longer
 matched A/B resolves that noise. To repeat warm-only comparisons, set
 PLASMITE_BENCH_WARM_ONLY=1; PLASMITE_BENCH_BINDING selects an isolated package
 root. The script records the chosen package's addon/library/JS hashes.
+
+## Bounded sequential iteration
+
+The next adapter fills sixteen inline C entry slots from the core's retained
+sequential cursor. It no longer allocates an entry vector proportional to the
+whole array before returning its first value. The inline slots occupy 512 bytes
+on this host; the core cursor also keeps bounded state and an owner reference.
+Explicit key enumeration/full conversion can still allocate their requested
+complete results.
+
+The [matched cursor A/B](bounded-cursor-ab.raw.json) rebuilds adapter commit
+036aed2 against the same core library as the new adapter and alternates three
+pairs. Taking only three elements from 128-element arrays falls from 5.45 to
+3.36 microseconds; from 4,096-element arrays it falls from 50.10 to 3.76
+microseconds (92.5% less time). Full scans show 7% less small-array time and
+2% less wide-array time, while the large scan rises 1.5%; no large full-scan
+speed improvement follows. Map uses indexed access and stays within roughly
+3% across variants. Warm native-object iteration remains much faster.
+
+The benefit is bounded scratch storage and early termination without scanning
+all entries. GC/RSS samples remain observational, not exact ownership counters.

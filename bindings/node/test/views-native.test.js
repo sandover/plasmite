@@ -10,11 +10,14 @@ test('native views retain exact values and independent snapshot lifetime', async
   const client = new Client(dir);
   const pool = client.createPool('views', 65536);
   t.after(() => { pool.close(); client.close(); fs.rmSync(dir, { recursive: true, force: true }); });
-  pool.appendJson(Buffer.from('{"metrics":{"power":42},"samples":[{"value":1},{"value":2}],"large":9223372036854775807,"negativeZero":-0.0,"__proto__":{"x":1},"then":null,"mixed":[null,false,0,""]}'));
+  pool.appendJson(Buffer.from('{"metrics":{"power":42},"samples":[{"value":1},{"value":2}],"large":9223372036854775807,"negativeZero":-0.0,"__proto__":{"x":1},"then":null,"mixed":[null,false,0,""],"�":5}'));
   const [first, second] = await Promise.all([pool.getView(1n), pool.getView(1n)]);
   assert.equal(first.seq, 1n);
   assert.equal('large' in first.data, true);
   assert.equal('absent' in first.data, false);
+  assert.equal(first.data['\ud800'], undefined);
+  assert.equal('\ud800' in first.data, false);
+  assert.equal(first.data['�'], 5);
   assert.equal('bad\0key' in first.data, false);
   assert.equal(0 in first.data.samples, true);
   assert.equal(2 in first.data.samples, false);
@@ -53,4 +56,21 @@ test('queued reads retain their pool after close', async t => {
   const views = await Promise.all(reads);
   assert.deepEqual(views.map(x => x.data.x), [1, 1]);
   await assert.rejects(pool.getView(1n), /closed/);
+});
+
+test('native cursor supports early return and mixed values across chunks', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plasmite-native-cursor-'));
+  const client = new Client(dir), pool = client.createPool('views', 1024 * 1024);
+  t.after(() => { pool.close(); client.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const values = Array.from({ length: 70 }, (_, i) => i % 3 === 0 ? null : i);
+  pool.append({ values });
+  const view = await pool.getView(1n);
+  const first = view.data.values[Symbol.iterator]();
+  assert.deepEqual(first.next(), { value: null, done: false });
+  first.return();
+  assert.deepEqual([...view.data.values], values);
+  const retained = view.data.values[Symbol.iterator]();
+  assert.equal(retained.next().value, null);
+  pool.close();
+  assert.deepEqual([...retained], values.slice(1));
 });

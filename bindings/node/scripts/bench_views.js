@@ -32,6 +32,7 @@ async function asyncRun(name, n, fn) {
   for (let i = 0; i < n; i++) sink += await fn();
   return { name, operations: n, elapsedMs: performance.now() - start };
 }
+const prefix = xs => { let value = 0, count = 0; for (const x of xs) { value += x.value; if (++count === 3) break; } return value; };
 const sum = xs => { let value = 0; for (const x of xs) value += x.value; return value; };
 async function main() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plasmite-view-bench-'));
@@ -65,6 +66,8 @@ async function main() {
           ['warm-field/native-object', iterations * 100, () => native.data.metrics.power],
           ['warm-array/view', arrayIterations, () => sum(view.data.samples)],
           ['warm-array/native-object', arrayIterations, () => sum(native.data.samples)],
+          ['warm-prefix/view', arrayIterations, () => prefix(view.data.samples)],
+          ['warm-prefix/native-object', arrayIterations, () => prefix(native.data.samples)],
           ['warm-map/view', arrayIterations, () => view.data.samples.map(x => x.value).length],
           ['warm-map/native-object', arrayIterations, () => native.data.samples.map(x => x.value).length],
           ['warm-copy/view-toNative', iterations, () => toNative(view.data).metrics.power],
