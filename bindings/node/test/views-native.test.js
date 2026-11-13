@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { Client, toNative, toJson } = require('..');
+const { Client, ErrorKind, toNative, toJson } = require('..');
 
 test('native views retain exact values and independent snapshot lifetime', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plasmite-native-view-'));
@@ -55,7 +55,8 @@ test('queued reads retain their pool after close', async t => {
   pool.close();
   const views = await Promise.all(reads);
   assert.deepEqual(views.map(x => x.data.x), [1, 1]);
-  await assert.rejects(pool.getView(1n), /closed/);
+  await assert.rejects(pool.getView(1n), error => error.kind === ErrorKind.Usage && /closed/.test(error.message));
+  assert.throws(() => pool.get(1n), error => error.kind === ErrorKind.Usage && /closed/.test(error.message));
 });
 
 test('native cursor supports early return and mixed values across chunks', async t => {

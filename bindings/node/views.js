@@ -8,7 +8,8 @@ const indexOf = key => typeof key === "string" && /^(0|[1-9][0-9]*)$/.test(key)
 
 function timestampText(ns) {
   const date = new Date(Number(ns / 1000000n));
-  return date.toISOString().slice(0, -5) + "." + (ns % 1000000000n).toString().padStart(9, "0") + "Z";
+  const fraction = (ns % 1000000000n).toString().padStart(9, "0").replace(/0+$/, "");
+  return date.toISOString().slice(0, -5) + (fraction ? "." + fraction : "") + "Z";
 }
 
 function createMessageView(backend, seq, timestampNs) {

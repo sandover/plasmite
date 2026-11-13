@@ -1,0 +1,489 @@
+{
+  "baselineCommit": "fb0b029",
+  "runs": [
+    {
+      "variant": "baseline",
+      "pair": 0,
+      "result": {
+        "node": "v26.13.0",
+        "root": "/Users/brandonharvey/src/plasmite/tmp/node-view-contract-baseline",
+        "hashes": {
+          "views.js": "9e807ef75938dda7f4226509f40ec9f4962e9eba4b3d2b3cab5061ee0d545363",
+          "native/darwin-arm64/index.node": "5365550cd9cfd652a758144352bbe3518668d903fba6a20901be5ccc2168a6a3",
+          "native/darwin-arm64/libplasmite.dylib": "9802e35ffb7834ca72d0d5467aedb72d885c7fadbd5b09f819b3f644abc7a720"
+        },
+        "timings": [
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 47.053124999999994
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 15.508624999999995
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 16.907167000000015
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 45.397249999999985
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 12.769749999999988
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 15.756791000000021
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 45.16179199999999
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 12.191666999999995
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 15.574250000000006
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 47.16216700000007
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 16.982666999999992
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 15.705832999999984
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 49.16000000000008
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 13.319665999999984
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 14.931916999999999
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 45.616084
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 13.185040999999956
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 15.196208999999953
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 45.439209000000005
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 13.61541699999998
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 15.033374999999978
+          }
+        ],
+        "sink": 23268000
+      }
+    },
+    {
+      "variant": "candidate",
+      "pair": 0,
+      "result": {
+        "node": "v26.13.0",
+        "root": "/Users/brandonharvey/src/plasmite/bindings/node",
+        "hashes": {
+          "views.js": "98704fab4fffdf3a7272eead2fc2a73cf4bf80b3d1bf51164a612f32a249e25f",
+          "native/darwin-arm64/index.node": "36acb85f090a810e888c8b59edf2ad4b060c8faa94b0450d9bfdb4f7caccf57d",
+          "native/darwin-arm64/libplasmite.dylib": "9802e35ffb7834ca72d0d5467aedb72d885c7fadbd5b09f819b3f644abc7a720"
+        },
+        "timings": [
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 50.580957999999995
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 30.088249999999988
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 28.302041000000003
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 49.842667000000006
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 28.011791999999986
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 33.896874999999994
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 53.88262500000002
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 25.508000000000038
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 27.56062499999996
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 48.884000000000015
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 28.36175000000003
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 27.19541700000002
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 49.93962499999998
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 28.012707999999975
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 26.433458000000087
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 47.515499999999975
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 27.628708000000074
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 29.477666999999997
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 50.72120799999993
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 29.215625000000045
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 28.252792
+          }
+        ],
+        "sink": 20675578
+      }
+    },
+    {
+      "variant": "candidate",
+      "pair": 1,
+      "result": {
+        "node": "v26.13.0",
+        "root": "/Users/brandonharvey/src/plasmite/bindings/node",
+        "hashes": {
+          "views.js": "98704fab4fffdf3a7272eead2fc2a73cf4bf80b3d1bf51164a612f32a249e25f",
+          "native/darwin-arm64/index.node": "36acb85f090a810e888c8b59edf2ad4b060c8faa94b0450d9bfdb4f7caccf57d",
+          "native/darwin-arm64/libplasmite.dylib": "9802e35ffb7834ca72d0d5467aedb72d885c7fadbd5b09f819b3f644abc7a720"
+        },
+        "timings": [
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 47.998667000000005
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 29.670833000000002
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 28.744625
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 49.16858300000001
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 29.139166999999986
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 37.36470800000001
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 48.67104200000003
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 25.620540999999946
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 27.80316700000003
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 49.561667
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 26.570459000000028
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 25.99083300000001
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 47.09687500000001
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 26.367250000000013
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 26.488458000000037
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 48.02291600000001
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 28.041124999999965
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 27.746458000000075
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 47.791665999999964
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 27.509374999999977
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 26.304250000000025
+          }
+        ],
+        "sink": 20675578
+      }
+    },
+    {
+      "variant": "baseline",
+      "pair": 1,
+      "result": {
+        "node": "v26.13.0",
+        "root": "/Users/brandonharvey/src/plasmite/tmp/node-view-contract-baseline",
+        "hashes": {
+          "views.js": "9e807ef75938dda7f4226509f40ec9f4962e9eba4b3d2b3cab5061ee0d545363",
+          "native/darwin-arm64/index.node": "5365550cd9cfd652a758144352bbe3518668d903fba6a20901be5ccc2168a6a3",
+          "native/darwin-arm64/libplasmite.dylib": "9802e35ffb7834ca72d0d5467aedb72d885c7fadbd5b09f819b3f644abc7a720"
+        },
+        "timings": [
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 48.16354199999999
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 16.606499999999997
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 17.169875000000005
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 45.71041700000001
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 12.209750000000014
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 15.77241699999999
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 45.785792000000015
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 12.226915999999989
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 15.677208000000007
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 45.460207999999966
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 13.281415999999979
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 14.724874999999997
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 46.02379199999996
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 13.324167000000045
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 14.914290999999992
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 46.713708
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 13.565665999999965
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 17.71070900000001
+          },
+          {
+            "name": "timestamp",
+            "operations": 100000,
+            "elapsedMs": 46.36437500000005
+          },
+          {
+            "name": "closed-sync",
+            "operations": 10000,
+            "elapsedMs": 13.787416000000007
+          },
+          {
+            "name": "closed-async",
+            "operations": 10000,
+            "elapsedMs": 15.02516700000001
+          }
+        ],
+        "sink": 23268000
+      }
+    }
+  ]
+}

@@ -425,21 +425,28 @@ impl Drop for PoolHandle {
         unsafe { plsm_pool_free(self.ptr) }
     }
 }
+fn pool_error(env: Env, kind: &str, message: &str) -> Error {
+    let result = (|| -> Result<Error> {
+        let mut error = env.create_error(Error::from_reason(message))?;
+        error.set_named_property("kind", kind)?;
+        Ok(Error::from(error.into_unknown()))
+    })();
+    result.unwrap_or_else(|error| error)
+}
+
 impl Pool {
     fn operation(&self, env: Env) -> Result<std::sync::MutexGuard<'_, ()>> {
         let handle = self
             .handle
             .as_ref()
-            .ok_or_else(|| Error::from_reason("pool is closed"))?;
+            .ok_or_else(|| pool_error(env, "Usage", "pool is closed"))?;
         match handle.operation.try_lock() {
             Ok(guard) => Ok(guard),
-            Err(_) => {
-                let mut error = env.create_error(Error::from_reason(
-                    "pool has an active asynchronous operation",
-                ))?;
-                error.set_named_property("kind", "Busy")?;
-                Err(Error::from(error.into_unknown()))
-            }
+            Err(_) => Err(pool_error(
+                env,
+                "Busy",
+                "pool has an active asynchronous operation",
+            )),
         }
     }
 }
@@ -752,9 +759,11 @@ impl Pool {
     }
 
     #[napi]
-    pub fn get_view(&self, seq: Either<u32, BigInt>) -> Result<AsyncTask<GetViewTask>> {
+    pub fn get_view(&self, env: Env, seq: Either<u32, BigInt>) -> Result<AsyncTask<GetViewTask>> {
         if !views::available() {
-            return Err(Error::from_reason(
+            return Err(pool_error(
+                env,
+                "Usage",
                 "loaded libplasmite lacks owned-view support; install matching native assets or rebuild libplasmite",
             ));
         }
@@ -763,7 +772,7 @@ impl Pool {
                 .handle
                 .as_ref()
                 .cloned()
-                .ok_or_else(|| Error::from_reason("pool is closed"))?,
+                .ok_or_else(|| pool_error(env, "Usage", "pool is closed"))?,
             seq: to_u64(seq, "seq")?,
         }))
     }

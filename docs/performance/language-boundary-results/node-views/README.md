@@ -165,3 +165,22 @@ large JSON stays unchanged. Cold field results remain within 1%; identity-only
 cold results vary across shapes, so they establish no broad latency improvement.
 A count-based check verifies zero root calls before data access and exactly one
 lookup each for repeated data/meta reads.
+
+
+## Compatibility costs
+
+Closed pools and a loaded library without the additive view ABI now preserve
+`Usage` error metadata. Full-message export uses the core RFC3339 convention:
+trim trailing fractional zeros and omit an empty fraction. Focused tests cover
+the full unsigned timestamp range and both synchronous and asynchronous closed
+pool calls.
+
+The [matched contract benchmark](contract-fixes-ab.raw.json) compares fb0b029
+with these fixes using identical core library hashes. Canonical timestamp text
+costs 0.459→0.490 microseconds per call. Adding `kind` to closed-pool errors
+requires a JavaScript Error object before the exception crosses the binding;
+that error-only path costs 1.332→2.801 microseconds synchronously and
+1.563→2.777 microseconds through getView. Successful reads take the same body.
+Reproduce with `node bindings/node/scripts/bench_view_contract.js BINDING_PATH`;
+the script reports seven repeats and asset hashes. The evidence alternates two
+baseline/candidate pairs.
