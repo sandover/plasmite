@@ -900,6 +900,39 @@ mod tests {
     }
 
     #[test]
+    fn tails_keep_independent_positions_with_shared_notifications() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("shared-wakeup.plasmite");
+        let mut writer = Pool::create(&path, PoolOptions::new(65536)).unwrap();
+        let first = Pool::open(&path).unwrap();
+        let second = Pool::open(&path).unwrap();
+        let options = TailOptions {
+            since_seq: Some(1),
+            timeout: Some(Duration::from_secs(1)),
+            ..TailOptions::new()
+        };
+        let mut first_tail = first.tail(options.clone());
+        let mut second_tail = second.tail(options);
+        let ready = std::sync::Barrier::new(3);
+        std::thread::scope(|scope| {
+            let one = scope.spawn(|| {
+                ready.wait();
+                first_tail.next_message().unwrap().unwrap()
+            });
+            let two = scope.spawn(|| {
+                ready.wait();
+                second_tail.next_message().unwrap().unwrap()
+            });
+            ready.wait();
+            let receipt = writer
+                .append_json_now(&json!({"n": 1}), &[], Durability::Fast)
+                .unwrap();
+            assert_eq!(one.join().unwrap(), receipt);
+            assert_eq!(two.join().unwrap(), receipt);
+        });
+    }
+
+    #[test]
     fn tails_read_new_messages_with_notifications_disabled() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("pool.plasmite");

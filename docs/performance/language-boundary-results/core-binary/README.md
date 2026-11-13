@@ -64,8 +64,31 @@ The [seven-repeat ordinary JSON comparison](writer-handles.raw.json) shows
 3.321993 seconds. The [paced control](writer-handles-paced.raw.json) shows the
 same p95 delivery latency, about 7.63 ms. Handle reuse removes one open and close
 per append after the first; it does not change the reader's timed polling.
-These measurements support a small throughput gain on this host. Resource
-pressure and idle CPU measurements remain pending for the writer-handle ticket.
+These measurements support a small throughput gain on this host.
+
+The [resource experiment](writer-resources.raw.json) runs three open/write/close
+cycles with 64 pools per library. Both start with four process descriptors and
+reach 68 after opening pools. The baseline remains at 68 after writing; handle
+reuse reaches 132. Every close returns to four, including after reopen and
+another write. On macOS, the cache therefore retains one additional descriptor
+per pool that has written successfully. Read-only pools retain none. Applications
+with many writable pools must include this descriptor in their resource budget;
+the experiment's soft limit was 1,048,575 descriptors. The cache has no global
+owner and closes each reference with its Pool.
+
+Across the three approximately one-second idle samples, baseline process CPU
+ranges from 36 to 44 microseconds and candidate CPU from 33 to 46 microseconds.
+These values sit at the measurement floor and show no new idle work. This tests
+idle writers with open handles, not reader wake-up behavior. Reader waiting code
+is unchanged. [writer-resources.py](writer-resources.py) records descriptor
+counts, the process limit, library hashes and idle CPU; pass its `--bindings`,
+`--baseline-library`, `--library` and `--output` arguments to repeat it. It removes
+only its own closed test semaphore names before deleting its temporary files.
+
+The native ownership test also closes/reopens the cached reference, moves its
+sole owner to another thread and confirms the independent receiver still gets
+all posted signals. Existing cross-process producer/consumer, pool identity,
+notification-failure fallback and multiple-reader tests retain their coverage.
 
 ## Correctness checks
 

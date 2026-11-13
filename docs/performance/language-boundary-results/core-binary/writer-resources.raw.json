@@ -1,0 +1,79 @@
+{
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "script_sha256": "afd34c1bfd353b398f10326058062c3e3d2a64c4371f3c057b8e1c0fa47f78c4",
+  "runs": [
+    {
+      "before_descriptors": 4,
+      "pools": 64,
+      "phases": [
+        {
+          "cycle": 0,
+          "opened_descriptors": 68,
+          "written_descriptors": 68,
+          "closed_descriptors": 4,
+          "idle_elapsed_s": 1.00598420802271,
+          "idle_cpu_s": 3.600000000000131e-05
+        },
+        {
+          "cycle": 1,
+          "opened_descriptors": 68,
+          "written_descriptors": 68,
+          "closed_descriptors": 4,
+          "idle_elapsed_s": 1.0095387499895878,
+          "idle_cpu_s": 4.399999999999543e-05
+        },
+        {
+          "cycle": 2,
+          "opened_descriptors": 68,
+          "written_descriptors": 68,
+          "closed_descriptors": 4,
+          "idle_elapsed_s": 1.0090804999927059,
+          "idle_cpu_s": 4.300000000000137e-05
+        }
+      ],
+      "file_limit": [
+        1048575,
+        9223372036854775807
+      ],
+      "label": "baseline",
+      "library_sha256": "02f6c041ccf7136f8f0b4c83801eba258038f3cb4e97677f602b90154ede2fa0"
+    },
+    {
+      "before_descriptors": 4,
+      "pools": 64,
+      "phases": [
+        {
+          "cycle": 0,
+          "opened_descriptors": 68,
+          "written_descriptors": 132,
+          "closed_descriptors": 4,
+          "idle_elapsed_s": 1.002903749991674,
+          "idle_cpu_s": 3.899999999999737e-05
+        },
+        {
+          "cycle": 1,
+          "opened_descriptors": 68,
+          "written_descriptors": 132,
+          "closed_descriptors": 4,
+          "idle_elapsed_s": 1.0079559580190107,
+          "idle_cpu_s": 4.599999999999049e-05
+        },
+        {
+          "cycle": 2,
+          "opened_descriptors": 68,
+          "written_descriptors": 132,
+          "closed_descriptors": 4,
+          "idle_elapsed_s": 1.005819459038321,
+          "idle_cpu_s": 3.300000000000525e-05
+        }
+      ],
+      "file_limit": [
+        1048575,
+        9223372036854775807
+      ],
+      "label": "cached",
+      "library_sha256": "51ef117db2dfe3b0a01b7710634689dace816c26722e088a19ab699c8bc791da"
+    }
+  ]
+}

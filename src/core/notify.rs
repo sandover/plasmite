@@ -364,6 +364,23 @@ mod tests {
             receiver.wait(Duration::ZERO).unwrap(),
             WaitOutcome::TimedOut
         );
+        // Closing one writer reference leaves the independent receiver valid.
+        drop(cached.take());
+        post_for_name(&name, &mut cached).unwrap();
+        // Moving the sole owner across threads also closes it exactly once.
+        std::thread::spawn(move || cached.unwrap().post().unwrap())
+            .join()
+            .unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                receiver.wait(Duration::ZERO).unwrap(),
+                WaitOutcome::Signaled
+            );
+        }
+        assert_eq!(
+            receiver.wait(Duration::ZERO).unwrap(),
+            WaitOutcome::TimedOut
+        );
     }
 
     #[test]
