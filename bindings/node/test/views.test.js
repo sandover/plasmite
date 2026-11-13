@@ -120,3 +120,20 @@ test('presence and dense-array map avoid decoding values twice', () => {
   assert.deepEqual(items.map(x => x * 2), [2, 4]);
   assert.equal(indices, 2);
 });
+
+test('fixed root descriptors stay lazy and never repeat immutable lookups', () => {
+  const backend = owner({ metrics: { power: 42 } });
+  const root = backend.root, lookup = backend.lookup;
+  let roots = 0;
+  const fields = [];
+  backend.root = () => { roots++; return root(); };
+  backend.lookup = (node, key) => { fields.push(key); return lookup(node, key); };
+  const m = createMessageView(backend, 17n, 123n);
+  assert.equal(m.seq, 17n);
+  assert.equal(roots, 0);
+  const data = m.data, meta = m.meta;
+  assert.equal(m.data, data);
+  assert.equal(m.meta, meta);
+  assert.equal(roots, 1);
+  assert.deepEqual(fields, ['data', 'meta']);
+});

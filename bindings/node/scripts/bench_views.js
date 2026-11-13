@@ -56,6 +56,8 @@ async function main() {
       for (let repeat = 0; repeat < repeats; repeat++) {
         // Alternate lane order to reduce systematic thermal/cache bias.
         const cold = [
+          ['cold-identity/view', async () => Number((await pool.getView(seq)).seq)],
+          ['cold-identity/current-json', async () => Number(pool.get(seq).seq)],
           ['cold-field/view', async () => (await pool.getView(seq)).data.metrics.power],
           ['cold-field/current-json', async () => pool.get(seq).data.metrics.power],
           ['cold-native/view', async () => toNative((await pool.getView(seq)).data).metrics.power],

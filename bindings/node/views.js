@@ -67,14 +67,18 @@ function createMessageView(backend, seq, timestampNs) {
     cache.set(value.node, new WeakRef(proxy));
     return proxy;
   }
-  const root = backend.root();
+  let root, dataNode, metaNode;
+  const lookupRoot = key => {
+    root ??= backend.root();
+    return backend.lookup(root.node, key);
+  };
   const message = Object.freeze({
     seq, timestampNs,
-    get data() { return wrap(backend.lookup(root.node, "data")); },
-    get meta() { return wrap(backend.lookup(root.node, "meta")); },
+    get data() { return wrap(dataNode ??= lookupRoot("data")); },
+    get meta() { return wrap(metaNode ??= lookupRoot("meta")); },
     get timeRfc3339() { return timestampText(timestampNs); },
   });
-  messages.set(message, { backend, root, wrap });
+  messages.set(message, { backend });
   return message;
 }
 

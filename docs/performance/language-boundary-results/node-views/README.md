@@ -148,3 +148,20 @@ The [stable napi_define_properties API](https://nodejs.org/api/n-api.html#napi_d
 works at the Node 24 floor. The newer
 [node_api_create_object_with_properties](https://nodejs.org/download/release/latest-v24.x/docs/api/n-api.html#node_api_create_object_with_properties)
 starts at 24.12 and remains experimental; this change does not require it.
+
+## Reusing fixed root descriptors lazily
+
+Repeated message.data/meta access previously looked up the same immutable root
+member and allocated its descriptor before finding the existing weak proxy.
+The factory now resolves the root and these two descriptors lazily, once per
+message. It retains descriptors, not child proxies; identity-only use does no
+root lookup. This is fixed message metadata rather than a general key cache.
+
+The [JS-only alternating A/B](root-descriptors-ab.raw.json) uses the same addon
+and core hashes for both variants, against frontend commit 6fe188f. Warm field
+chains fall 1.188→0.728 microseconds (small), 1.007→0.634 (wide), and 1.102→0.663
+(array), a 37–40% reduction. Small warm JSON falls 1.311→0.862 microseconds;
+large JSON stays unchanged. Cold field results remain within 1%; identity-only
+cold results vary across shapes, so they establish no broad latency improvement.
+A count-based check verifies zero root calls before data access and exactly one
+lookup each for repeated data/meta reads.
