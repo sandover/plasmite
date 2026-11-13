@@ -235,13 +235,29 @@ impl<'a> ValueRef<'a> {
                 offset,
             }));
         }
-        match self.owner.doc().key_offset_at(self.offset, key) {
-            Ok(offset) => Ok(Some(Self {
+        let mut offset = 0;
+        let result = unsafe {
+            sys::plasmite_lite3_lookup_span(
+                self.owner.bytes().as_ptr(),
+                self.owner.bytes().len(),
+                self.offset,
+                key.as_ptr().cast(),
+                key.len(),
+                &mut offset,
+            )
+        };
+        if result == 0 {
+            return Ok(Some(Self {
                 owner: self.owner,
                 offset,
-            })),
-            Err(_) => Ok(None),
+            }));
         }
+        if unsafe { sys::plasmite_lite3_last_errno() } == libc::ENOMEM {
+            return Err(
+                Error::new(ErrorKind::Internal).with_message("lookup key allocation failed")
+            );
+        }
+        Ok(None)
     }
     pub fn index(self, index: u32) -> Result<Option<Self>, Error> {
         if self.kind() != sys::LITE3_TYPE_ARRAY {
@@ -519,6 +535,9 @@ mod tests {
         )
         .unwrap();
         let view = MessageView::from_bytes(encoded.as_slice(), 1, 2).unwrap();
+        assert_eq!(view.data().get(&long).unwrap().unwrap().integer(), Some(3));
+        assert_eq!(view.data().get("é").unwrap().unwrap().integer(), Some(2));
+        assert_eq!(view.data().get("").unwrap().unwrap().integer(), Some(1));
         let mut keys = view
             .data()
             .iter()

@@ -140,6 +140,9 @@ int plasmite_lite3_cursor_init(const unsigned char *buf, size_t len, size_t ofs,
 int plasmite_lite3_cursor_next(const unsigned char *buf, size_t len, void *state,
                               plasmite_lite3_entry *out, uint32_t *hash);
 
+int plasmite_lite3_lookup_span(const unsigned char *buf, size_t len, size_t ofs,
+                              const char *key, size_t key_len, size_t *out);
+
 #ifdef __cplusplus
 }
 #endif

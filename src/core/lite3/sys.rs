@@ -41,6 +41,14 @@ pub(crate) struct ValueView {
 }
 
 unsafe extern "C" {
+    pub(crate) fn plasmite_lite3_lookup_span(
+        buf: *const u8,
+        len: usize,
+        ofs: usize,
+        key: *const c_char,
+        key_len: usize,
+        out: *mut usize,
+    ) -> c_int;
     pub(crate) fn plasmite_lite3_cursor_init(
         buf: *const u8,
         len: usize,

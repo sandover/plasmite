@@ -604,3 +604,21 @@ int plasmite_lite3_cursor_next(const unsigned char *buf, size_t len, void *state
         }
         return result;
 }
+
+/* Rust/host strings already have a length; terminate short keys on the stack
+ * instead of allocating another string at each language boundary. */
+int plasmite_lite3_lookup_span(const unsigned char *buf, size_t len, size_t ofs,
+                              const char *key, size_t key_len, size_t *out)
+{
+        char local[256];
+        if (key_len == SIZE_MAX) { errno = EINVAL; return -1; }
+        char *terminated = key_len < sizeof local ? local : malloc(key_len + 1);
+        if (!terminated) { errno = ENOMEM; return -1; }
+        memcpy(terminated, key, key_len);
+        terminated[key_len] = '\0';
+        int result = plasmite_lite3_get_val_ofs(buf, len, ofs, terminated, out);
+        int error = errno;
+        if (terminated != local) free(terminated);
+        errno = error;
+        return result;
+}

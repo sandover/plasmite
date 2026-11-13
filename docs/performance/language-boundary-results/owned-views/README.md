@@ -231,5 +231,35 @@ from the recorded base commit. Build with
 then run `target/release/examples/bench_owned_views 2000`, alternating `--reverse`.
 Use `target/release/examples/bench_owned_view_allocations 100` only for diagnostics.
 
+## Length-aware lookup
+
+Owned-view lookup now passes a borrowed UTF-8 span to the shim. Keys below 256
+bytes receive a temporary stack terminator; longer keys use a checked temporary
+allocation. NUL still means absent. The change removes the redundant Rust
+CString construction for `data` and the requested member, while retaining the
+same native lookup and local checks.
+
+Seven paired release runs alternate executable order and lane order. The
+preserved baseline executable matches the cursor checkpoint above; the candidate
+also includes unused native-builder entry points, so native-object and legacy
+JSON controls remain visible. Separate allocation diagnostics show two Rust
+allocations and eleven requested bytes per warm field read falling to zero.
+
+| Fixture | Baseline warm view ns/op | Span warm view ns/op |
+| --- | ---: | ---: |
+| Small | 64.5 | 34.8 |
+| Wide | 66.8 | 43.3 |
+| Long string | 63.1 | 34.9 |
+| Array | 62.8 | 36.6 |
+
+The small cold selected read falls from 609 to 551 ns; its native JSON control
+moves from 549 to 538 ns. Large cold reads change about 1% and do not establish
+a broad cold-path gain. Warm native-object controls remain faster; the exact
+controls and process CPU appear in [raw paired runs](span-lookup.raw.json).
+Candidate source (outside Git) and the preceding cursor source
+archive preserve the two measured states. The candidate archive includes the
+unused builder ABI additions. Long-key and empty/Unicode-key checks exercise
+both temporary-storage paths; the benchmark's short keys need no C allocation.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.
