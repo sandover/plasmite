@@ -1,5 +1,5 @@
 use super::*;
-use napi::{JsUnknown, Property};
+use napi::{JsFunction, JsObject, JsUnknown, NapiRaw};
 
 #[repr(C)]
 pub struct Owner {
@@ -190,12 +190,15 @@ impl NativeView {
         entries.truncate(count);
         Ok(entries)
     }
-    fn property(&self, env: Env, entry: &Entry) -> Result<Property> {
+    fn property(&self, env: Env, entry: &Entry) -> Result<DataProperty> {
         let child = self.native_value(env, entry.value.offset as u32)?;
         let key =
             std::str::from_utf8(unsafe { std::slice::from_raw_parts(entry.key, entry.key_len) })
                 .map_err(|error| Error::from_reason(error.to_string()))?;
-        Ok(Property::new(key)?.with_value(&child))
+        Ok(DataProperty {
+            key: CString::new(key)?,
+            value: child,
+        })
     }
     fn native_value(&self, env: Env, node: u32) -> Result<JsUnknown> {
         let value = self.read(env, node)?;
@@ -223,15 +226,15 @@ impl NativeView {
                 )?;
             }
         } else if entries.len() == 1 {
-            out.define_properties(&[self.property(env, &entries[0])?])?;
+            define_data_properties(env, &out, &[self.property(env, &entries[0])?])?;
         } else if !entries.is_empty() {
-            // Property owns its key; local JS handles remain rooted in this
-            // callback's handle scope until the single definition call finishes.
+            // Keys and JS handles live through the single definition call.
+            // Plain data properties need no native callback/finalizer metadata.
             let properties = entries
                 .iter()
                 .map(|entry| self.property(env, entry))
                 .collect::<Result<Vec<_>>>()?;
-            out.define_properties(&properties)?;
+            define_data_properties(env, &out, &properties)?;
         }
         Ok(out.into_unknown())
     }
@@ -329,7 +332,26 @@ impl NativeView {
             .collect()
     }
     #[napi]
-    pub fn materialize(&self, env: Env, node: u32) -> Result<JsUnknown> {
+    pub fn materialize(&self, env: Env, node: u32, parse: JsFunction) -> Result<JsUnknown> {
+        if let Some(api) = native_json_api()
+            && unsafe { (api.safe)(self.owner.0) }
+        {
+            let mut out = plsm_buf_t {
+                data: ptr::null_mut(),
+                len: 0,
+            };
+            let mut err = ptr::null_mut();
+            if unsafe { (api.json)(self.reference(node), &mut out, &mut err) } != 0 {
+                return Err(take_error(env, err)?);
+            }
+            let buffer = NativeBuf(out);
+            // The C formatter guarantees UTF8. Node copies directly from its
+            // allocation; the guard frees it after creating the JS string.
+            let text =
+                unsafe { env.create_string_from_c_char(buffer.0.data.cast(), buffer.0.len) }?;
+            drop(buffer);
+            return parse.call(None, &[text]);
+        }
         self.native_value(env, node)
     }
     #[napi]
@@ -484,4 +506,93 @@ pub fn available() -> bool {
 #[cfg(not(unix))]
 pub fn available() -> bool {
     true
+}
+
+type NativeJsonSafe = unsafe extern "C" fn(*const Owner) -> bool;
+type NativeJsonFormatter =
+    unsafe extern "C" fn(ValueRef, *mut plsm_buf_t, *mut *mut plsm_error_t) -> i32;
+struct NativeJsonApi {
+    safe: NativeJsonSafe,
+    json: NativeJsonFormatter,
+}
+
+// These additions stay optional so an older owned-view library can still use
+// the direct walker. Resolve once; never search the dynamic loader per copy.
+fn native_json_api() -> Option<&'static NativeJsonApi> {
+    static API: std::sync::OnceLock<Option<NativeJsonApi>> = std::sync::OnceLock::new();
+    API.get_or_init(|| {
+        let safe = optional_symbol(c"plsm_view_json_native_safe");
+        let json = optional_symbol(c"plsm_value_to_json_stored");
+        if safe.is_null() || json.is_null() {
+            return None;
+        }
+        Some(NativeJsonApi {
+            safe: unsafe { std::mem::transmute::<*mut libc::c_void, NativeJsonSafe>(safe) },
+            json: unsafe { std::mem::transmute::<*mut libc::c_void, NativeJsonFormatter>(json) },
+        })
+    })
+    .as_ref()
+}
+
+#[cfg(unix)]
+fn optional_symbol(name: &std::ffi::CStr) -> *mut libc::c_void {
+    unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) }
+}
+#[cfg(windows)]
+fn optional_symbol(name: &std::ffi::CStr) -> *mut libc::c_void {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetModuleHandleA(name: *const u8) -> *mut libc::c_void;
+        fn GetProcAddress(module: *mut libc::c_void, name: *const u8) -> *mut libc::c_void;
+    }
+    unsafe {
+        let module = GetModuleHandleA(c"plasmite.dll".as_ptr().cast());
+        if module.is_null() {
+            ptr::null_mut()
+        } else {
+            GetProcAddress(module, name.as_ptr().cast())
+        }
+    }
+}
+#[cfg(not(any(unix, windows)))]
+fn optional_symbol(_name: &std::ffi::CStr) -> *mut libc::c_void {
+    ptr::null_mut()
+}
+
+struct DataProperty {
+    key: CString,
+    value: JsUnknown,
+}
+impl DataProperty {
+    fn raw(&self) -> napi::sys::napi_property_descriptor {
+        napi::sys::napi_property_descriptor {
+            utf8name: self.key.as_ptr(),
+            name: ptr::null_mut(),
+            method: None,
+            getter: None,
+            setter: None,
+            value: unsafe { self.value.raw() },
+            attributes: napi::sys::PropertyAttributes::writable
+                | napi::sys::PropertyAttributes::enumerable
+                | napi::sys::PropertyAttributes::configurable,
+            data: ptr::null_mut(),
+        }
+    }
+}
+fn define_data_properties(env: Env, object: &JsObject, properties: &[DataProperty]) -> Result<()> {
+    if let [property] = properties {
+        napi::check_status!(unsafe {
+            napi::sys::napi_define_properties(env.raw(), object.raw(), 1, &property.raw())
+        })
+    } else {
+        let descriptors = properties.iter().map(DataProperty::raw).collect::<Vec<_>>();
+        napi::check_status!(unsafe {
+            napi::sys::napi_define_properties(
+                env.raw(),
+                object.raw(),
+                descriptors.len(),
+                descriptors.as_ptr(),
+            )
+        })
+    }
 }

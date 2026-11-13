@@ -184,3 +184,58 @@ that error-only path costs 1.332→2.801 microseconds synchronously and
 Reproduce with `node bindings/node/scripts/bench_view_contract.js BINDING_PATH`;
 the script reports seven repeats and asset hashes. The evidence alternates two
 baseline/candidate pairs.
+
+
+## Native copies: remove callback bookkeeping, then use the VM parser
+
+The napi 2.16.17 `JsObject::define_properties` helper creates closure metadata
+and an object finalizer even for plain data properties. Its descriptor iterator
+also calls `Property::raw` twice. The direct walker now passes raw data-only
+Node-API descriptors with null callback data. Keys and value handles stay live
+through that one call; properties remain writable, enumerable and configurable,
+including `__proto__`.
+
+The VM parser still constructs requested native results faster. For a snapshot
+whose existing validation pass proves safe integers, finite numbers and no
+bytes, materialization formats the requested subtree in stored key order and
+calls the captured `JSON.parse` builtin. Unsafe or unknown owners use the
+corrected direct walker. This adds no validation pass or public API choice.
+The C buffer goes directly into a copied VM UTF8 string and frees before parsing;
+no intermediate Rust Vec/String copy sits between those steps. Ordinary view
+reads keep Lite3 as their representation.
+
+The [three-way comparison](raw-vs-json-copy.raw.json) uses three rotating orders
+and identical core library SHA256
+`ea3e5ab7c5bb262a86fcd88140c38a332074157d023fb084a28e0a004f798984`.
+The baseline adapter comes from 611065c; core capability 4c686cb and formatter
+37eabc9 supply the shared implementation. Median microseconds per native copy:
+
+| Fixture | napi helper | Raw descriptors | Safe JSON parser |
+| --- | ---: | ---: | ---: |
+| Small | 2.664 | 2.135 | 1.331 |
+| Wide | 93.10 | 65.49 | 45.09 |
+| 4,096 objects | 1,296.8 | 884.8 | 343.3 |
+
+Raw descriptors remove 20–32% of direct-walker time. The parser then removes
+38%, 31% and 61% against that corrected walker. Exact-i64 fallback improves
+0.771→0.556 microseconds through the raw descriptor change. Tests verify stored
+key order, numeric keys, negative zero, escapes, dangerous names, safe integer
+boundaries, native bytes and exact i64 fallback. A private callback spy verifies
+which branch runs. Older view-capable libraries fall back through a separate,
+once-only optional symbol check; Unix and Windows resolve optional functions
+without hard imports.
+
+The first small copy costs about 150 microseconds versus 79 for the old adapter,
+including optional symbol discovery. Later copies use the cached function
+pointers. Observed retained-copy heap after GC stays near 258 KiB for both direct
+walkers versus 159 KiB for the parser on 4,096 objects. These samples suggest a
+VM construction/layout benefit; they do not measure exact allocations or peak
+native memory. The formatter temporarily creates encoded text for this explicit
+copy operation.
+
+Reproduce with `bench_views.js` and identical optimized libraries for each
+adapter. [This patch](raw-copy-variant.patch) turns the current adapter into the
+raw-only experimental variant; the baseline is 611065c. The evidence records
+script, frontend, addon and shared-library hashes, first-use times, exact-value
+fallback timings and copy-retention memory samples. The production choice keeps
+the parser for safe owners and raw descriptors for every fallback.

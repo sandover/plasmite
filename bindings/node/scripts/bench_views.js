@@ -45,7 +45,11 @@ async function main() {
       const view = await pool.getView(seq);
       const initialViewMs = performance.now() - initialStart;
       const native = pool.get(seq);
-      assert.deepEqual(toNative(view.data), data);
+      const initialNativeStart = performance.now();
+      let firstNative = toNative(view.data);
+      const initialNativeMs = performance.now() - initialNativeStart;
+      assert.deepEqual(firstNative, data);
+      firstNative = null;
       assert.deepEqual(JSON.parse(toJson(view.data)), data);
       const expectedSum = data.samples.length * (data.samples.length - 1) / 2;
       assert.equal(sum(view.data.samples), expectedSum);
@@ -96,11 +100,30 @@ async function main() {
       global.gc?.();
       await new Promise(resolve => setImmediate(resolve));
       const releasedChildren = process.memoryUsage();
-      measurements.push({ fixture, initialViewMs, arrayIterations, jsonBytes: Buffer.byteLength(JSON.stringify(data)), rows,
-        memory: { before, retainedChildren, releasedChildren } });
+      const beforeCopy = process.memoryUsage();
+      let retainedCopy = toNative(view.data);
+      const afterCopy = process.memoryUsage();
+      global.gc?.();
+      const retainedCopyAfterGc = process.memoryUsage();
+      assert.equal(retainedCopy.metrics.power, 42);
+      retainedCopy = null;
+      await new Promise(resolve => setImmediate(resolve));
+      global.gc?.();
+      const releasedCopy = process.memoryUsage();
+      measurements.push({ fixture, initialViewMs, initialNativeMs, arrayIterations, jsonBytes: Buffer.byteLength(JSON.stringify(data)), rows,
+        memory: { before, retainedChildren, releasedChildren, beforeCopy, afterCopy, retainedCopyAfterGc, releasedCopy } });
     }
+    // An unsafe integer keeps native materialization on the exact walker.
+    // Its JSON representation would round through JSON.parse, so it has no
+    // parse-based same-result control.
+    const exactSeq = pool.appendIdentity(Buffer.from('{"metrics":{"power":42},"large":9223372036854775807}')).seq;
+    const exactView = await pool.getView(exactSeq);
+    assert.equal(toNative(exactView.data).large, 9223372036854775807n);
+    const exactMaterialization = [];
+    for (let repeat = 0; repeat < repeats; repeat++) exactMaterialization.push({ repeat,
+      ...sync('warm-copy/exact-toNative', iterations * 100, () => toNative(exactView.data).metrics.power) });
     const result = { node: process.version, platform: process.platform, arch: process.arch,
-      iterations, repeats, warmOnly, gcExposed: !!global.gc, sink, measurements,
+      iterations, repeats, warmOnly, gcExposed: !!global.gc, sink, measurements, exactMaterialization,
       hashes: Object.fromEntries(['scripts/bench_views.js', 'index.js', 'views.js', `native/${process.platform}-${process.arch}/index.node`,
         `native/${process.platform}-${process.arch}/${process.platform === 'darwin' ? 'libplasmite.dylib' : process.platform === 'win32' ? 'plasmite.dll' : 'libplasmite.so'}`]
         .map(file => [file, hash(file === 'scripts/bench_views.js' ? __filename : path.join(bindingRoot, file))])),

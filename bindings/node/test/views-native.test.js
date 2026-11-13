@@ -105,3 +105,50 @@ test('native byte views preserve bytes and export independent mutable buffers', 
   assert.throws(() => { view.data.blob[0] = 0; }, TypeError);
   assert.equal(toJson(view.data.blob), JSON.stringify(expected.toString('base64')));
 });
+
+
+test('native conversion preserves stored key order and exact scalar semantics', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plasmite-native-conversion-'));
+  const client = new Client(dir), pool = client.createPool('views', 65536);
+  t.after(() => { pool.close(); client.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  pool.appendJson(Buffer.from('{"z":-0.0,"9":9,"2":2,"a":"\\u0000\\n雪","safe":9007199254740991,"low":-9007199254740991,"nested":{"y":1,"b":2},"__proto__":{"ok":true}}'));
+  const view = await pool.getView(1n);
+  const native = toNative(view.data);
+  assert.deepEqual(Object.keys(native), Object.keys(view.data));
+  assert.deepEqual(Object.keys(native.nested), Object.keys(view.data.nested));
+  assert.equal(Object.is(native.z, -0), true);
+  assert.equal(native.a, '\0\n雪');
+  assert.equal(native.safe, Number.MAX_SAFE_INTEGER);
+  assert.equal(native.low, Number.MIN_SAFE_INTEGER);
+  assert.equal(Object.hasOwn(native, '__proto__'), true);
+  assert.equal(Object.getPrototypeOf(native), Object.prototype);
+  pool.appendJson(Buffer.from('{"z":9223372036854775807,"a":-9223372036854775808}'));
+  const unsafe = toNative((await pool.getView(2n)).data);
+  assert.equal(unsafe.z, 9223372036854775807n);
+  assert.equal(unsafe.a, -9223372036854775808n);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(unsafe, 'z'), {
+    value: 9223372036854775807n, writable: true, enumerable: true, configurable: true,
+  });
+  unsafe.z = 1n;
+  assert.equal(unsafe.z, 1n);
+  assert.equal(delete unsafe.a, true);
+});
+
+
+test('native copies select the parser only for JSON-safe owners', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plasmite-native-json-safe-'));
+  const client = new Client(dir), pool = client.createPool('views', 65536);
+  t.after(() => { pool.close(); client.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  pool.append({ z: 1, a: 2 });
+  pool.appendJson(Buffer.from('{"z":9223372036854775807}'));
+  let parses = 0;
+  const parse = text => { parses++; return JSON.parse(text); };
+  const safe = await pool._inner.getView(1n);
+  const safeData = safe.lookup(safe.root().node, 'data');
+  assert.deepEqual(safe.materialize(safeData.node, parse), { z: 1, a: 2 });
+  assert.equal(parses, 1);
+  const unsafe = await pool._inner.getView(2n);
+  const unsafeData = unsafe.lookup(unsafe.root().node, 'data');
+  assert.equal(unsafe.materialize(unsafeData.node, parse).z, 9223372036854775807n);
+  assert.equal(parses, 1);
+});

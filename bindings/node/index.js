@@ -12,6 +12,7 @@ const { ERROR_KIND_VALUES, mapErrorKind } = require("./mappings");
 
 const { createMessageView, toNative, toJson } = require("./views");
 
+const parseJson = JSON.parse;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const path = require("node:path");
 const os = require("node:os");
@@ -299,7 +300,7 @@ class Pool {
         at: (node, index) => owner.at(node, index),
         has: (node, key) => owner.has(node, key),
         keys: node => owner.keys(node),
-        materialize: node => owner.materialize(node),
+        materialize: node => owner.materialize(node, parseJson),
         json: node => owner.json(node),
         *iterate(node) {
           const cursor = owner.cursor(node);
