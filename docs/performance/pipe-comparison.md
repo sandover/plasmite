@@ -9,6 +9,35 @@ and an optimized Rust 1.99.1 library. They establish a baseline for one local
 pipeline. They do not establish network performance, cross-platform results,
 or a general ranking of messaging systems.
 
+## What this comparison can explain
+
+The headline ratio combines three differences: the provided guarantees, the
+batching pattern and the implementation's extra work. It cannot isolate the
+minimum cost of retaining messages or rank feature-equivalent systems.
+
+The pipe carries data dictionaries and batches several small records into each
+system call. Ordinary Plasmite calls commit each record separately and return
+identified messages, tags, timestamps and a full producer receipt. Even a caller
+that reads only `.data` still pays for those complete-message objects. Fast
+mode publishes mapped records without forcing each append to disk; these runs
+do not measure power-loss durability. Worker CPU excludes unrelated kernel
+background writeback work.
+
+Use the pipe as a reference for transient JSON streaming, and explain its cost
+by counting actual encoding, copying, allocation and I/O operations. Compare
+buffered and record-flushed pipe writes separately, and compare numeric versus
+full Plasmite receipts as different requested work. Retained history, replay and
+independent-reader workloads need their own comparisons. A complete performance
+explanation must separate removable implementation costs from the work that
+provides those guarantees; the elapsed-time difference alone cannot do that.
+
+The [numeric receipt](language-boundary-results/append-receipts/README.md) and
+[encoding](language-boundary-results/encoding/README.md) follow-ups remove
+specific work and preserve matched before/after evidence. They do not turn the
+pipe into an equivalent retained-message service. The current storage hot path
+uses locks, frame bounds and commit markers; it writes zero to the checksum
+field rather than computing a payload checksum.
+
 ## Workload and results
 
 One producer sends 20,000 sensor records to one reader in separate processes.

@@ -100,5 +100,62 @@ sequence advance. Full metadata callers still receive owned tags. Full message
 callers retain JSON decoding. No entry point gains stronger validation merely
 to share this code.
 
+## Rust read-side selection
+
+Seven alternating optimized repeats compare commit `1e29a6a` with binary
+validation commit `5dcaa4d` against the same prepared pool bytes. Each pool keeps
+all records and indexes every sequence. The consumer warms the complete history,
+then times another complete pass. Every mode checks exact sequence, timestamp
+and payload or complete decoded data. Timings include snapshot locking/copying,
+selection, verification and tail creation/close. They exclude pool preparation,
+process startup, pool open and warmup. This isolates consumption; the concurrent
+producer/consumer results above establish the combined binary pipeline gain.
+
+| Consumer / fixture | Records | Baseline ms | Candidate ms |
+| --- | ---: | ---: | ---: |
+| Raw tail / sensor | 100,000 | 209.814 | 99.708 |
+| Raw tail / wide | 20,000 | 195.714 | 67.692 |
+| Raw tail / large text | 5,000 | 105.344 | 36.646 |
+| Tag-filtered raw / sensor | 100,000 | 209.755 | 106.637 |
+| Tag-filtered raw / wide | 20,000 | 195.577 | 69.322 |
+| Tag-filtered raw / large text | 5,000 | 104.158 | 37.718 |
+| Metadata point read / sensor | 100,000 | 212.213 | 108.665 |
+| Metadata point read / wide | 20,000 | 194.303 | 69.628 |
+| Metadata point read / large text | 5,000 | 103.768 | 36.145 |
+
+Raw tails take 52–65% less elapsed time. Tag-filtered tails and metadata reads
+show similar reductions. Separate allocation runs count Rust allocator requests,
+including snapshots: raw tails fall from 10 to 5 calls per record; filtered tails
+and metadata reads fall from 10 to 8. Large raw reads request 133,060 versus
+67,053 Rust allocation bytes per record. These counters exclude native C
+allocations and count requested bytes across an operation, not live heap size.
+
+The ordinary JSON control takes 348.770/350.619 ms for sensors,
+423.917/435.107 ms for wide and 116.878/116.286 ms for large text. The wide
+control is 2.6% slower; the others differ by about 0.5%. Snapshot-only point-read
+controls differ by at most 1.2%. JSON allocation counts remain identical. The
+binary gain does not imply faster full-object decoding. CPU medians, process
+peak resident memory, allocation diagnostics and every repeat live in
+[selection.raw.json](selection.raw.json).
+
+[selection-bench.rs](selection-bench.rs) implements the consumer;
+[selection-bench.py](selection-bench.py) prepares each history once, alternates
+binaries and runs allocation diagnostics separately. It removes its closed
+semaphore name and temporary pool after each fixture. Fixtures come from the
+encoding measurement folder, but this comparison uses the earlier encoding
+implementation in both builds. `get` controls exercise a complete index to
+avoid measuring history scans instead of the selection change.
+
+Build each archived commit with its own `CARGO_TARGET_DIR`; sharing a target
+between archived trees can reuse an earlier crate when archive timestamps
+precede the previous build. An initial shared-target candidate reused the old
+code; it supplied no timed samples. Final builds use isolated directories.
+Verify the candidate contains `plasmite_lite3_verify_json` and the baseline does
+not, then compile the same helper against each release rlib and its matching
+`libc`/`serde_json` dependencies. Use `rustc --edition=2024 -O`, pass the rlibs
+with `--extern`, and pass that target's release/deps with `-L dependency=...`.
+The raw record includes both executable hashes, helper/runner hashes, compiler,
+input/encoded-payload hashes and exact verified counts.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

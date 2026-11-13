@@ -1,0 +1,14 @@
+{
+  "baseline": {
+    "binary_sha256": "d22234a66105f56f36f85db58e3508d324f86e9332d6e7f385e8783e0b8ca194",
+    "has_binary_validator": false,
+    "target_directory": "/private/tmp/plasmite-selection-baseline-target",
+    "source_commit": "1e29a6a"
+  },
+  "candidate": {
+    "binary_sha256": "af32275d6cea7d34d627d2ece772848cad55ee5c31561f7ec2a7e572643c4063",
+    "has_binary_validator": true,
+    "target_directory": "/private/tmp/plasmite-selection-candidate-target",
+    "source_commit": "5dcaa4d"
+  }
+}
