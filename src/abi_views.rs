@@ -289,6 +289,11 @@ pub unsafe extern "C" fn plsm_view_root(owner: *const plsm_message_view) -> plsm
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn plsm_view_json_native_safe(owner: *const plsm_message_view) -> bool {
+    unsafe { owner.as_ref() }.is_some_and(|owner| owner.view.json_native_safe())
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn plsm_view_bytes(
     owner: *const plsm_message_view,
     len: *mut usize,
@@ -480,6 +485,7 @@ mod tests {
     use crate::core::lite3::Lite3Buf;
     #[test]
     fn retained_owner_and_prepared_selector_keep_borrowed_results() {
+        assert!(!unsafe { plsm_view_json_native_safe(std::ptr::null()) });
         let mut bytes = Lite3Buf::from_json_str(
             r#"{"meta":{"tags":[]},"data":{"nested":{"x":7},"s":"hello"}}"#,
         )
@@ -492,6 +498,7 @@ mod tests {
             plsm_view_from_lite3(bytes.as_ptr(), bytes.len(), 17, 99, &mut owner, &mut err),
             0
         );
+        assert!(unsafe { plsm_view_json_native_safe(owner) });
         bytes.fill(0);
         unsafe {
             plsm_view_retain(owner);

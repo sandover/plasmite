@@ -47,6 +47,7 @@ pub struct MessageView {
 
 struct Snapshot {
     storage: Storage,
+    json_native_safe: bool,
     // Only objects containing duplicate names need a lookup correction.
     duplicates: HashMap<usize, HashMap<String, usize>>,
 }
@@ -72,12 +73,14 @@ impl MessageView {
             snapshot: std::sync::Arc::new(Snapshot {
                 storage: Storage::new(bytes),
                 duplicates: HashMap::new(),
+                json_native_safe: false,
             }),
             seq,
             timestamp_ns,
             flags,
         };
         let mut duplicates = Vec::<usize>::new();
+        let mut json_native_safe = 0;
         unsafe extern "C" fn record_duplicate(
             context: *mut std::ffi::c_void,
             offset: usize,
@@ -93,11 +96,15 @@ impl MessageView {
                 owner.bytes().len(),
                 record_duplicate,
                 (&mut duplicates as *mut Vec<usize>).cast(),
+                &mut json_native_safe,
             )
         } < 0
         {
             return Err(corrupt());
         }
+        std::sync::Arc::get_mut(&mut owner.snapshot)
+            .unwrap()
+            .json_native_safe = json_native_safe != 0;
         for offset in duplicates {
             owner.collect_duplicates(offset)?;
         }
@@ -138,11 +145,17 @@ impl MessageView {
             snapshot: std::sync::Arc::new(Snapshot {
                 storage: Storage::Aligned { words, len },
                 duplicates: HashMap::new(),
+                json_native_safe: false,
             }),
             seq,
             timestamp_ns,
             flags,
         }
+    }
+    /// Whether JSON conversion preserves every native scalar in binary64 runtimes.
+    /// Private builders conservatively return false until they track this property.
+    pub fn json_native_safe(&self) -> bool {
+        self.snapshot.json_native_safe
     }
     /// Reuse immutable payload ownership with a new committed identity.
     pub(crate) fn with_identity(&self, seq: u64, timestamp_ns: u64, flags: u32) -> Self {
@@ -480,6 +493,58 @@ mod tests {
         .unwrap()
         .as_slice()
         .to_vec()
+    }
+    #[test]
+    fn json_native_capability_tracks_scalar_semantics_without_materializing() {
+        for (scalar, expected) in [
+            ("9007199254740991", true),
+            ("-9007199254740991", true),
+            ("9007199254740992", false),
+            ("-9007199254740992", false),
+            ("9223372036854775807", false),
+            ("-0.0", true),
+            ("1.25", true),
+        ] {
+            let encoded = Lite3Buf::from_json_str(&format!(
+                r#"{{"meta":{{"tags":[]}},"data":{{"value":{scalar}}}}}"#
+            ))
+            .unwrap();
+            let view = MessageView::from_bytes(encoded.as_slice(), 1, 2).unwrap();
+            assert_eq!(view.json_native_safe(), expected, "{scalar}");
+            assert_eq!(view.with_identity(2, 3, 0).json_native_safe(), expected);
+        }
+        let metadata = Lite3Buf::from_json_str(
+            r#"{"meta":{"tags":[],"large":9223372036854775807},"data":{}}"#,
+        )
+        .unwrap();
+        assert!(
+            !MessageView::from_bytes(metadata.as_slice(), 1, 2)
+                .unwrap()
+                .json_native_safe()
+        );
+        let encoded =
+            Lite3Buf::from_json_str(r#"{"meta":{"tags":[]},"data":{"value":"hello"}}"#).unwrap();
+        let view = MessageView::from_bytes(encoded.as_slice(), 1, 2).unwrap();
+        let offset = view.data().get("value").unwrap().unwrap().offset();
+        let mut bytes = view.bytes().to_vec();
+        bytes[offset] = sys::LITE3_TYPE_BYTES;
+        assert!(
+            !MessageView::from_owned(bytes, 1, 2, 0)
+                .unwrap()
+                .json_native_safe()
+        );
+        let mut words = vec![0u32; encoded.as_slice().len().div_ceil(4)];
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                encoded.as_slice().as_ptr(),
+                words.as_mut_ptr().cast(),
+                encoded.as_slice().len(),
+            );
+            assert!(
+                !MessageView::from_encoded_words(words, encoded.as_slice().len(), 1, 2, 0)
+                    .json_native_safe()
+            );
+        }
     }
     #[test]
     fn views_keep_owned_bytes_and_natural_field_semantics() {

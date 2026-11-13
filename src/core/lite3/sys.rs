@@ -46,6 +46,7 @@ unsafe extern "C" {
         len: usize,
         duplicate: unsafe extern "C" fn(*mut c_void, usize) -> c_int,
         context: *mut c_void,
+        native_json_safe: *mut c_int,
     ) -> c_int;
     pub(crate) fn plasmite_lite3_lookup_span(
         buf: *const u8,

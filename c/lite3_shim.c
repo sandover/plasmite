@@ -85,6 +85,7 @@ _Static_assert(LITE3_NODE_SIZE == 96 && LITE3_NODE_SIZE_KC_OFFSET == 32,
 typedef struct {
         int (*duplicate)(void *, size_t);
         void *context;
+        int native_json_safe;
 } view_check;
 static uint32_t view_word(const unsigned char *buf, size_t ofs)
 {
@@ -217,6 +218,11 @@ static int verify_tree(
                             val->type == LITE3_TYPE_ARRAY) &&
                            verify_tree(buf, buf_len, val_ofs, depth + 1, json_safe, check) < 0) {
                         return -1;
+                } else if (check && val->type == LITE3_TYPE_I64) {
+                        int64_t integer;
+                        memcpy(&integer, val->val, sizeof integer);
+                        if (integer < -INT64_C(9007199254740991) ||
+                            integer > INT64_C(9007199254740991)) check->native_json_safe = 0;
                 } else if (check && val->type == LITE3_TYPE_BOOL && val->val[0] > 1) {
                         return -1;
                 } else if (json_safe && val->type == LITE3_TYPE_F64) {
@@ -226,6 +232,7 @@ static int verify_tree(
                 } else if (json_safe && val->type == LITE3_TYPE_BYTES) {
                         /* Keep the existing base64 exporter as the oracle. */
                         *json_safe = 0;
+                        if (check) check->native_json_safe = 0;
                 } else if (json_safe && val->type > LITE3_TYPE_ARRAY) {
                         errno = EINVAL;
                         return -1;
@@ -243,11 +250,14 @@ static int verify_json_tree(const unsigned char *buf, size_t len, size_t ofs,
         return verify_tree(buf, len, ofs, depth, json_safe, NULL);
 }
 int plasmite_lite3_verify_view(const unsigned char *buf, size_t len,
-                              int (*duplicate)(void *, size_t), void *context)
+                              int (*duplicate)(void *, size_t), void *context,
+                              int *native_json_safe)
 {
         int json_safe = 1;
-        view_check check = {duplicate, context};
-        return verify_tree(buf, len, 0, 0, &json_safe, &check);
+        view_check check = {duplicate, context, 1};
+        int result = verify_tree(buf, len, 0, 0, &json_safe, &check);
+        if (result == 0) *native_json_safe = check.native_json_safe;
+        return result;
 }
 
 /* 0: JSON values; 1: native bytes require base64 formatting; -1: invalid. */

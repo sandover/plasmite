@@ -300,5 +300,27 @@ fingerprints, checksums and allocator diagnostics. Exact candidate source (outsi
 and the preceding span-lookup source archive preserve both measured states.
 Use the same release examples and alternating `--reverse` command above.
 
+## Cached JSON-native capability
+
+The same strict walk now records whether every integer fits the exact binary64
+integer range and the owner contains no native byte values. This conservative
+whole-owner bit lets a binding choose its optimized JSON parser for explicit
+native conversion. Private builder owners report false until their builders
+track the property. Acquisition still applies the same validation rules.
+
+Seven alternating paired runs compare against the exact strict-proof candidate.
+Fresh small reads stay at 280 ns; wide reads move from 16,048 to 15,608 ns,
+arrays from 7,601 to 7,487 ns, and long strings from 4,800 to 4,910 ns. The legacy
+long-string JSON control also rises 4.5%. These results establish no acquisition
+speed gain or broad regression. The cached field adds eight requested bytes per
+owner through structure padding, with the same two allocations and no extra
+walk. Warm lookup allocation counts remain zero.
+
+[Raw runs](json-capability.raw.json) include all controls, separate allocator
+probes and source hashes. Candidate source (outside Git)
+includes an unused stored-order formatter and ABI exports; these acquisition
+lanes never call them. The strict-proof source archive supplies the baseline.
+The Node conversion measurements cover the consumer gain separately.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

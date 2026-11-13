@@ -144,7 +144,8 @@ int plasmite_lite3_lookup_span(const unsigned char *buf, size_t len, size_t ofs,
                               const char *key, size_t key_len, size_t *out);
 
 int plasmite_lite3_verify_view(const unsigned char *buf, size_t len,
-                              int (*duplicate)(void *, size_t), void *context);
+                              int (*duplicate)(void *, size_t), void *context,
+                              int *native_json_safe);
 
 #ifdef __cplusplus
 }

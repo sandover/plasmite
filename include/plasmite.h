@@ -52,6 +52,7 @@ Notes: Remote pool refs are not supported by this ABI; use CLI or HTTP API inste
 #define PLASMITE_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -431,6 +432,9 @@ void plsm_view_release(const plsm_message_view_t *view);
 plsm_value_ref_t plsm_view_root(const plsm_message_view_t *view);
 plsm_value_ref_t plsm_view_data(const plsm_message_view_t *view);
 const uint8_t *plsm_view_bytes(const plsm_message_view_t *view, size_t *len);
+/* Conservative whole-owner property: finite numbers, exact binary64 integers,
+ * and no native bytes. False for NULL or an owner whose builder did not track it. */
+bool plsm_view_json_native_safe(const plsm_message_view_t *view);
 /* Four-aligned caller storage, borrowed only during this call. If capacity is
  * insufficient, success reports required size without writing any payload.
  * A retry may return NotFound after retention; no cursor advances here.
