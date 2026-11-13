@@ -32,7 +32,8 @@ def record():
         "sensor": "motor-7",
         "metrics": {"power": 0, **{f"channel_{i}": i * 0.25 for i in range(16)}},
         "context": {"site": "factory-a", "line": 3, "labels": ["motor", "temperature"]},
-        "note": "sensor observation " * 25,
+        "note": ("x" * int(os.environ["PLASMITE_BENCH_NOTE_BYTES"])
+                 if "PLASMITE_BENCH_NOTE_BYTES" in os.environ else "sensor observation " * 25),
     }
 
 
@@ -55,6 +56,7 @@ def worker(args):
             client = stack.enter_context(plasmite.Client(args.directory))
             pool = stack.enter_context(client.open_pool("events"))
         value = record()
+        fixture = (Path(args.directory) / "fixture.lite3").read_bytes() if args.binary else None
         profile = cProfile.Profile() if args.profile else None
         print("ready", file=sys.stderr, flush=True)
         # The pipe reader starts blocked on data. Other workers await a start token.
@@ -70,7 +72,8 @@ def worker(args):
         if args.role == "writer":
             due = time.monotonic()
             for index in range(args.messages):
-                update(value, index)
+                if not args.binary:
+                    update(value, index)
                 if args.interval_ms:
                     delay = due - time.monotonic()
                     if delay > 0:
@@ -82,6 +85,9 @@ def worker(args):
                     sys.stdout.buffer.write(json.dumps(value).encode("utf-8") + b"\n")
                     if args.interval_ms:
                         sys.stdout.buffer.flush()
+                elif args.binary:
+                    if pool.append_lite3(fixture, plasmite.Durability.FAST) != index + 1:
+                        raise RuntimeError("binary append identity mismatch")
                 else:
                     receipt = pool.append(value)
                     if receipt.seq != index + 1 or receipt.data != value:
@@ -89,7 +95,9 @@ def worker(args):
             if pool is None:
                 sys.stdout.buffer.flush()
         else:
-            incoming = (
+            incoming = pool.open_lite3_stream(
+                since_seq=1, max_messages=args.messages, timeout_ms=120_000, error_on_gap=True,
+            ) if args.binary else (
                 (json.loads(line) for line in sys.stdin.buffer)
                 if pool is None else
                 (message.data for message in pool.tail(
@@ -102,10 +110,15 @@ def worker(args):
                 if args.interval_ms:
                     received = time.monotonic_ns()
                     latencies.append(received - item.pop("sent_ns"))
-                update(value, count)
-                if item != value:
-                    raise RuntimeError(f"record mismatch at {count}")
-                checksum += item["metrics"]["power"]
+                if args.binary:
+                    if item.seq != count + 1 or item.payload != fixture or item.timestamp_ns <= 0:
+                        raise RuntimeError(f"binary frame mismatch at {count}")
+                    checksum += count * 3
+                else:
+                    update(value, count)
+                    if item != value:
+                        raise RuntimeError(f"record mismatch at {count}")
+                    checksum += item["metrics"]["power"]
                 count += 1
                 if count == args.messages:
                     break
@@ -120,6 +133,8 @@ def worker(args):
                   "started_ns": started, "ended_ns": ended,
                   "messages": args.messages, "checksum": checksum,
                   "latencies_ns": latencies}
+        if args.binary:
+            result["fixture_sha256"] = hashlib.sha256(fixture).hexdigest()
         print(json.dumps(result), file=sys.stderr, flush=True)
 
 
@@ -130,6 +145,8 @@ def trial(args, lane, directory, profile=False):
                "--lane", lane, "--messages", str(args.messages),
                "--directory", directory, "--bindings", str(args.bindings),
                "--interval-ms", str(args.interval_ms)]
+    if args.binary:
+        command.append("--binary")
     processes = []
     try:
         if lane == "plasmite":
@@ -140,6 +157,18 @@ def trial(args, lane, directory, profile=False):
                 f"p=c.create_pool('events', {max(16 * 1024 * 1024, args.messages * 8192)}); "
                 "p.close(); c.close()"
             )
+            if args.binary:
+                setup = (
+                    "import plasmite; from pathlib import Path; "
+                    f"c=plasmite.Client({directory!r}); "
+                    "seed=c.create_pool('fixture',1048576); "
+                    f"m=seed.append({record()!r}, ['sensor']); "
+                    "payload=seed.get_lite3(m.seq).payload; "
+                    f"Path({str(Path(directory) / 'fixture.lite3')!r}).write_bytes(payload); "
+                    "seed.close(); "
+                    f"p=c.create_pool('events', max(16777216, {args.messages} * (len(payload)+4096))); "
+                    "p.close(); c.close()"
+                )
             setup_env = dict(environment, PYTHONPATH=str(args.bindings))
             subprocess.run([sys.executable, "-c", setup], env=setup_env, check=True)
         writer_command = [*command, "--role", "writer"]
@@ -203,6 +232,8 @@ def main():
     parser.add_argument("--bindings", type=Path, default=ROOT / "bindings" / "python")
     parser.add_argument("--baseline-bindings", type=Path,
                         help="Python bindings to use with the saved baseline library")
+    parser.add_argument("--binary", action="store_true",
+                        help="compare verified repeated Lite3 forwarding; omit the JSON pipe")
     parser.add_argument("--messages", type=int, default=20_000)
     parser.add_argument("--interval-ms", type=float, default=0,
                         help="pace records and measure delivery latency (pipe flushes each record)")
@@ -216,6 +247,8 @@ def main():
     args = parser.parse_args()
     if args.messages < 1 or args.repeats < 1 or args.interval_ms < 0:
         parser.error("messages and repeats must be positive; interval must be nonnegative")
+    if args.binary and args.interval_ms:
+        parser.error("binary forwarding currently measures saturated traffic only")
     if args.worker:
         worker(args)
         return
@@ -233,6 +266,7 @@ def main():
               "script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
               "messages": args.messages, "repeats": args.repeats,
               "interval_ms": args.interval_ms,
+              "format": "lite3-repeat" if args.binary else "json-object",
               "first_record_json_bytes": len(json.dumps(record()).encode()),
               "runs": []}
     libraries = {"plasmite": args.library}
@@ -246,9 +280,10 @@ def main():
             result["baseline_bindings_sha256"] = hashlib.sha256((args.baseline_bindings / "plasmite" / "__init__.py").read_bytes()).hexdigest()
     # Warm both complete paths once; alternate order in the measured repeats.
     for repeat in range(args.repeats + 1):
-        lanes = ["pipe", *libraries]
-        offset = repeat % len(lanes)
-        lanes = lanes[offset:] + lanes[:offset]
+        lanes = list(libraries) if args.binary else ["pipe", *libraries]
+        if not args.binary:
+            offset = repeat % len(lanes)
+            lanes = lanes[offset:] + lanes[:offset]
         if repeat % 2:
             lanes.reverse()
         for label in lanes:
@@ -268,7 +303,7 @@ def main():
         lane: {key: statistics.median(run[key] for run in result["runs"] if run["lane"] == lane)
                for key in (["elapsed_seconds", "messages_per_second", "cpu_seconds"] +
                            (["p50_latency_ms", "p95_latency_ms"] if args.interval_ms else []))}
-        for lane in ["pipe", *libraries]
+        for lane in (list(libraries) if args.binary else ["pipe", *libraries])
     }
     if args.profile:
         with tempfile.TemporaryDirectory(prefix="plasmite-profile-") as directory:

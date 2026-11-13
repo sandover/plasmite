@@ -172,6 +172,10 @@ impl<'a> Lite3DocRef<'a> {
     }
 
     pub fn array_string_at(&self, ofs: usize, index: u32) -> Result<String, Error> {
+        self.array_str_at(ofs, index).map(str::to_owned)
+    }
+
+    pub(crate) fn array_str_at(&self, ofs: usize, index: u32) -> Result<&'a str, Error> {
         let mut out_ptr: *const std::os::raw::c_char = std::ptr::null();
         let mut out_len: usize = 0;
         let ret = unsafe {
@@ -195,7 +199,7 @@ impl<'a> Lite3DocRef<'a> {
                 .with_message("invalid utf-8")
                 .with_source(err)
         })?;
-        Ok(text.to_string())
+        Ok(text)
     }
 
     pub fn bool_at_key(&self, ofs: usize, key: &str) -> Result<bool, Error> {
@@ -247,6 +251,15 @@ impl<'a> Lite3DocRef<'a> {
         Ok(value)
     }
 
+    pub(crate) fn validate_readability_at(&self, ofs: usize) -> Result<(), Error> {
+        match unsafe { sys::plasmite_lite3_verify_json(self.bytes.as_ptr(), self.bytes.len(), ofs) }
+        {
+            0 => Ok(()),
+            1 => self.to_json_at(ofs, false).map(|_| ()),
+            _ => Err(Error::new(ErrorKind::Corrupt).with_message("failed to decode lite3")),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), Error> {
         let root_type =
             unsafe { sys::plasmite_lite3_get_root_type(self.bytes.as_ptr(), self.bytes.len()) };
@@ -255,24 +268,14 @@ impl<'a> Lite3DocRef<'a> {
         }
 
         let meta_type = unsafe {
-            sys::plasmite_lite3_get_type(
-                self.bytes.as_ptr(),
-                self.bytes.len(),
-                0,
-                c_key("meta")?.as_ptr(),
-            )
+            sys::plasmite_lite3_get_type(self.bytes.as_ptr(), self.bytes.len(), 0, c"meta".as_ptr())
         };
         if meta_type != sys::LITE3_TYPE_OBJECT {
             return Err(Error::new(ErrorKind::Corrupt).with_message("meta is not object"));
         }
 
         let data_type = unsafe {
-            sys::plasmite_lite3_get_type(
-                self.bytes.as_ptr(),
-                self.bytes.len(),
-                0,
-                c_key("data")?.as_ptr(),
-            )
+            sys::plasmite_lite3_get_type(self.bytes.as_ptr(), self.bytes.len(), 0, c"data".as_ptr())
         };
         if data_type != sys::LITE3_TYPE_OBJECT {
             return Err(Error::new(ErrorKind::Corrupt).with_message("data is not object"));
@@ -288,7 +291,7 @@ impl<'a> Lite3DocRef<'a> {
                 self.bytes.as_ptr(),
                 self.bytes.len(),
                 meta_ofs,
-                c_key("tags")?.as_ptr(),
+                c"tags".as_ptr(),
             )
         };
         if tags_type != sys::LITE3_TYPE_ARRAY {
@@ -300,14 +303,14 @@ impl<'a> Lite3DocRef<'a> {
 
         let count = array_count(self.bytes, tags_ofs)?;
         for index in 0..count {
-            self.array_string_at(tags_ofs, index)
+            self.array_str_at(tags_ofs, index)
                 .map_err(|err| err.with_message("meta.tags must be string array"))?;
         }
 
         // Outer fields can be valid while nested data cannot produce a readable
         // message. Check that data before any append can commit its bytes.
         let data_ofs = self.key_offset("data")?;
-        self.to_json_at(data_ofs, false)?;
+        self.validate_readability_at(data_ofs)?;
 
         Ok(())
     }
@@ -466,6 +469,103 @@ mod tests {
         assert_eq!(encoded.as_doc().to_json(false).unwrap(), r#"{"x":1}"#);
         let error = Lite3Buf::from_json_str("{\"x\":1}\0").unwrap_err();
         assert_eq!(error.message(), Some("json contains null"));
+    }
+
+    #[test]
+    fn binary_readability_matches_export_for_utf8_keys_and_values() {
+        let buf = encode_message(&[], &json!({"key_utf8_probe": "value_utf8_probe"})).unwrap();
+        let data = buf.as_doc().key_offset("data").unwrap();
+        for marker in [b"key_utf8_probe".as_slice(), b"value_utf8_probe".as_slice()] {
+            let start = buf
+                .as_slice()
+                .windows(marker.len())
+                .position(|s| s == marker)
+                .unwrap();
+            for pair in 0..=u16::MAX {
+                let mut bytes = buf.as_slice().to_vec();
+                bytes[start..start + 2].copy_from_slice(&pair.to_ne_bytes());
+                let doc = Lite3DocRef::new(&bytes);
+                let exported = doc
+                    .to_json_at(data, false)
+                    .map(|s| serde_json::from_str::<serde::de::IgnoredAny>(&s).is_ok())
+                    .unwrap_or(false);
+                assert_eq!(
+                    doc.validate_readability_at(data).is_ok(),
+                    exported,
+                    "{marker:?}: {pair:x}"
+                );
+            }
+            for prefix in [
+                &[0xe0, 0xa0, 0x80][..],
+                &[0xed, 0x9f, 0xbf],
+                &[0xed, 0xa0, 0x80],
+                &[0xf0, 0x90, 0x80, 0x80],
+                &[0xf0, 0x8f, 0xbf, 0xbf],
+                &[0xf4, 0x8f, 0xbf, 0xbf],
+                &[0xf4, 0x90, 0x80, 0x80],
+                &[0xe2, 0x82, 0xac],
+                &[0xf0, 0x9f, 0x98, 0x80],
+            ] {
+                let mut bytes = buf.as_slice().to_vec();
+                bytes[start..start + prefix.len()].copy_from_slice(prefix);
+                let doc = Lite3DocRef::new(&bytes);
+                let exported = doc.to_json_at(data, false).is_ok();
+                assert_eq!(
+                    doc.validate_readability_at(data).is_ok(),
+                    exported,
+                    "{prefix:x?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn native_bytes_keep_the_legacy_export_validation() {
+        let buf = encode_message(&[], &json!({"blob": "bytes including zero"})).unwrap();
+        let data = buf.as_doc().key_offset("data").unwrap();
+        let value = buf.as_doc().key_offset_at(data, "blob").unwrap();
+        let mut bytes = buf.as_slice().to_vec();
+        // String and byte values share their length-prefixed storage. Treat the
+        // terminator as one more byte, which the legacy exporter base64-encodes.
+        bytes[value] = super::sys::LITE3_TYPE_BYTES;
+        let doc = Lite3DocRef::new(&bytes);
+        assert_eq!(
+            unsafe { super::sys::plasmite_lite3_verify_json(bytes.as_ptr(), bytes.len(), data) },
+            1
+        );
+        assert!(doc.to_json_at(data, false).is_ok());
+        assert!(doc.validate_readability_at(data).is_ok());
+    }
+
+    #[test]
+    fn binary_readability_matches_export_for_float_extremes() {
+        let number = f64::from_bits(0x3ff1_2345_6789_abcd);
+        let buf = encode_message(&[], &json!({"number": number})).unwrap();
+        let data = buf.as_doc().key_offset("data").unwrap();
+        let start = buf
+            .as_slice()
+            .windows(8)
+            .position(|s| s == number.to_ne_bytes())
+            .unwrap();
+        for value in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::MAX,
+            f64::MIN,
+            f64::MIN_POSITIVE,
+            f64::from_bits(1),
+            -0.0,
+        ] {
+            let mut bytes = buf.as_slice().to_vec();
+            bytes[start..start + 8].copy_from_slice(&value.to_ne_bytes());
+            let doc = Lite3DocRef::new(&bytes);
+            assert_eq!(
+                doc.validate_readability_at(data).is_ok(),
+                doc.to_json_at(data, false).is_ok(),
+                "{value}"
+            );
+        }
     }
 
     #[test]

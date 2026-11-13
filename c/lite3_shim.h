@@ -16,6 +16,9 @@ Invariants: Returned heap pointers are freed by calling `plasmite_lite3_free`.
 extern "C" {
 #endif
 
+/* Check JSON readability without export; 1 requests the legacy bytes fallback. */
+int plasmite_lite3_verify_json(const unsigned char *buf, size_t len, size_t ofs);
+
 int plasmite_lite3_json_dec(
         const char *json_str,
         size_t json_len,

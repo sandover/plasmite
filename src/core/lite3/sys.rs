@@ -16,6 +16,7 @@ pub const LITE3_TYPE_ARRAY: u8 = 7;
 pub const LITE3_TYPE_INVALID: u8 = 8;
 
 unsafe extern "C" {
+    pub fn plasmite_lite3_verify_json(buf: *const c_uchar, len: usize, ofs: usize) -> c_int;
     pub fn plasmite_lite3_json_dec(
         json_str: *const c_char,
         json_len: usize,

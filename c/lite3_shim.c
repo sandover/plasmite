@@ -8,6 +8,7 @@ Invariants: Validate reader preconditions before forwarding to Lite3; keep busin
 #include "lite3_shim.h"
 
 #include <errno.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -39,9 +40,47 @@ static int verify_string(
         return 0;
 }
 
+/* Validate UTF-8 without constructing JSON. Skip ASCII in bounded words. */
+static int valid_utf8(const char *text, size_t len)
+{
+        const unsigned char *p = (const unsigned char *)text;
+        while (len) {
+                if (len >= sizeof(uint64_t)) {
+                        uint64_t word;
+                        memcpy(&word, p, sizeof(word));
+                        if ((word & UINT64_C(0x8080808080808080)) == 0) {
+                                p += sizeof(word);
+                                len -= sizeof(word);
+                                continue;
+                        }
+                }
+                unsigned c = *p++;
+                --len;
+                if (c < 0x80) continue;
+                unsigned count, lo = 0x80, hi = 0xbf;
+                if (c >= 0xc2 && c <= 0xdf) count = 1;
+                else if (c >= 0xe0 && c <= 0xef) {
+                        count = 2;
+                        if (c == 0xe0) lo = 0xa0;
+                        if (c == 0xed) hi = 0x9f;
+                } else if (c >= 0xf0 && c <= 0xf4) {
+                        count = 3;
+                        if (c == 0xf0) lo = 0x90;
+                        if (c == 0xf4) hi = 0x8f;
+                } else return 0;
+                if (len < count || p[0] < lo || p[0] > hi) return 0;
+                for (unsigned i = 1; i < count; ++i) {
+                        if (p[i] < 0x80 || p[i] > 0xbf) return 0;
+                }
+                p += count;
+                len -= count;
+        }
+        return 1;
+}
+
 /* The vendored JSON encoder expects terminated keys and string values. */
 static int verify_json_tree(
-        const unsigned char *buf, size_t buf_len, size_t ofs, unsigned depth)
+        const unsigned char *buf, size_t buf_len, size_t ofs, unsigned depth, int *json_safe)
 {
         if (depth >= LITE3_JSON_NESTING_DEPTH_MAX ||
             verify_node(buf, buf_len, ofs) < 0) {
@@ -74,6 +113,11 @@ static int verify_json_tree(
                                 return -1;
                         }
                 }
+                if (json_safe && type == LITE3_TYPE_OBJECT &&
+                    !valid_utf8(key.ptr, strlen(key.ptr))) {
+                        errno = EIO;
+                        return -1;
+                }
                 const lite3_val *val = (const lite3_val *)(buf + val_ofs);
                 if (val->type == LITE3_TYPE_STRING) {
                         uint32_t encoded_len;
@@ -85,13 +129,36 @@ static int verify_json_tree(
                                 errno = EINVAL;
                                 return -1;
                         }
+                        if (json_safe && !valid_utf8(
+                            (const char *)val->val + sizeof(encoded_len), encoded_len - 1)) {
+                                errno = EIO;
+                                return -1;
+                        }
                 } else if ((val->type == LITE3_TYPE_OBJECT ||
                             val->type == LITE3_TYPE_ARRAY) &&
-                           verify_json_tree(buf, buf_len, val_ofs, depth + 1) < 0) {
+                           verify_json_tree(buf, buf_len, val_ofs, depth + 1, json_safe) < 0) {
+                        return -1;
+                } else if (json_safe && val->type == LITE3_TYPE_F64) {
+                        double value;
+                        memcpy(&value, val->val, sizeof(value));
+                        if (!isfinite(value)) { errno = EIO; return -1; }
+                } else if (json_safe && val->type == LITE3_TYPE_BYTES) {
+                        /* Keep the existing base64 exporter as the oracle. */
+                        *json_safe = 0;
+                } else if (json_safe && val->type > LITE3_TYPE_ARRAY) {
+                        errno = EINVAL;
                         return -1;
                 }
         }
         return ret < 0 ? -1 : 0;
+}
+
+/* 0: readable; 1: use the legacy bytes/base64 exporter; -1: invalid. */
+int plasmite_lite3_verify_json(const unsigned char *buf, size_t len, size_t ofs)
+{
+        int json_safe = 1;
+        if (verify_json_tree(buf, len, ofs, 0, &json_safe) < 0) return -1;
+        return json_safe ? 0 : 1;
 }
 
 int plasmite_lite3_json_dec(
@@ -111,7 +178,7 @@ char *plasmite_lite3_json_enc(
         size_t ofs,
         size_t *out_len)
 {
-        if (verify_json_tree(buf, buf_len, ofs, 0) < 0) {
+        if (verify_json_tree(buf, buf_len, ofs, 0, NULL) < 0) {
                 return NULL;
         }
         return lite3_json_enc(buf, buf_len, ofs, out_len);
@@ -123,7 +190,7 @@ char *plasmite_lite3_json_enc_pretty(
         size_t ofs,
         size_t *out_len)
 {
-        if (verify_json_tree(buf, buf_len, ofs, 0) < 0) {
+        if (verify_json_tree(buf, buf_len, ofs, 0, NULL) < 0) {
                 return NULL;
         }
         return lite3_json_enc_pretty(buf, buf_len, ofs, out_len);

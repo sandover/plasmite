@@ -23,12 +23,12 @@ pub struct Meta {
 impl Meta {
     /// Decode metadata and validate the entire data payload without building its tree.
     ///
-    /// This exports data to JSON and scans it; it does not skip data validation.
+    /// JSON-compatible values use a checked binary walk. Native byte values
+    /// retain the legacy base64 export check; neither path skips validation.
     pub fn from_lite3(payload: &[u8]) -> Result<Self, Error> {
         let doc = Lite3DocRef::new(payload);
         let meta = decode_meta(doc)?;
-        let json = data_json(doc)?;
-        let _: serde::de::IgnoredAny = serde_json::from_str(&json).map_err(payload_json_error)?;
+        validate_data(doc)?;
         Ok(meta)
     }
 }
@@ -304,8 +304,18 @@ impl Tail<'_> {
 impl Lite3Tail<'_> {
     pub fn next_frame(&mut self) -> Result<Option<FrameRef>, Error> {
         self.0.next(|frame, tags| {
-            let meta = Meta::from_lite3(&frame.payload)?;
-            Ok(has_required_tags(&meta.tags, tags).then_some(frame))
+            if tags.is_empty() {
+                let doc = Lite3DocRef::new(&frame.payload);
+                let (ofs, count) = meta_tags(doc)?;
+                for index in 0..count {
+                    meta_tag(doc, ofs, index)?;
+                }
+                validate_data(doc)?;
+                Ok(Some(frame))
+            } else {
+                let meta = Meta::from_lite3(&frame.payload)?;
+                Ok(has_required_tags(&meta.tags, tags).then_some(frame))
+            }
         })
     }
 }
@@ -512,7 +522,7 @@ fn payload_json_error(err: serde_json::Error) -> Error {
         .with_source(err)
 }
 
-fn decode_meta(doc: Lite3DocRef<'_>) -> Result<Meta, Error> {
+fn meta_tags(doc: Lite3DocRef<'_>) -> Result<(usize, u32), Error> {
     let meta_type = doc
         .type_at_key(0, "meta")
         .map_err(|err| err.with_message("missing meta"))?;
@@ -529,23 +539,34 @@ fn decode_meta(doc: Lite3DocRef<'_>) -> Result<Meta, Error> {
     let tags_count = doc
         .count_at(tags_ofs)
         .map_err(|_| Error::new(ErrorKind::Corrupt).with_message("meta.tags must be array"))?;
-    let mut tags = Vec::with_capacity(tags_count as usize);
-    for index in 0..tags_count {
-        let item_type = doc.array_item_type(tags_ofs, index).map_err(|_| {
-            Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
-        })?;
-        if item_type != sys::LITE3_TYPE_STRING {
-            return Err(
-                Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
-            );
-        }
-        let tag = doc.array_string_at(tags_ofs, index).map_err(|_| {
-            Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
-        })?;
-        tags.push(tag);
-    }
+    Ok((tags_ofs, tags_count))
+}
 
+fn meta_tag<'a>(doc: Lite3DocRef<'a>, ofs: usize, index: u32) -> Result<&'a str, Error> {
+    let item_type = doc.array_item_type(ofs, index).map_err(|_| {
+        Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array")
+    })?;
+    if item_type != sys::LITE3_TYPE_STRING {
+        return Err(Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array"));
+    }
+    doc.array_str_at(ofs, index)
+        .map_err(|_| Error::new(ErrorKind::Corrupt).with_message("meta.tags must be string array"))
+}
+
+fn decode_meta(doc: Lite3DocRef<'_>) -> Result<Meta, Error> {
+    let (ofs, count) = meta_tags(doc)?;
+    let mut tags = Vec::with_capacity(count as usize);
+    for index in 0..count {
+        tags.push(meta_tag(doc, ofs, index)?.to_owned());
+    }
     Ok(Meta { tags })
+}
+
+fn validate_data(doc: Lite3DocRef<'_>) -> Result<(), Error> {
+    let ofs = doc
+        .key_offset("data")
+        .map_err(|err| err.with_message("missing data"))?;
+    doc.validate_readability_at(ofs)
 }
 
 fn data_json(doc: Lite3DocRef<'_>) -> Result<String, Error> {
