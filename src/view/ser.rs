@@ -100,7 +100,7 @@ struct Compound<'a> {
     builder: &'a mut Builder,
     parent: usize,
     depth: usize,
-    key: Option<String>,
+    key: Option<MapKey>,
 }
 impl Compound<'_> {
     fn child<T: Serialize + ?Sized>(
@@ -339,7 +339,7 @@ impl ser::SerializeMap for Compound<'_> {
         if self.key.is_some() {
             return Err(invalid("map key has no value"));
         }
-        self.key = Some(key.serialize(Key)?);
+        self.key = Some(key.serialize(KeySerializer)?);
         Ok(())
     }
     fn serialize_value<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<(), CodecError> {
@@ -347,15 +347,15 @@ impl ser::SerializeMap for Compound<'_> {
             .key
             .take()
             .ok_or_else(|| invalid("map value has no key"))?;
-        self.child(Some(&key), value)
+        self.child(Some(key.as_str()), value)
     }
     fn serialize_entry<K: Serialize + ?Sized, V: Serialize + ?Sized>(
         &mut self,
         key: &K,
         value: &V,
     ) -> Result<(), CodecError> {
-        let key = key.serialize(Key)?;
-        self.child(Some(&key), value)
+        let key = key.serialize(KeySerializer)?;
+        self.child(Some(key.as_str()), value)
     }
     fn end(self) -> Result<(), CodecError> {
         if self.key.is_some() {
@@ -394,19 +394,73 @@ impl ser::SerializeStructVariant for Compound<'_> {
     }
 }
 
-struct Key;
+// Keep short serialized map keys owned until their hook returns, without
+// allocating. This preserves key-hook/value-hook ordering for custom types.
+enum MapKey {
+    Inline { bytes: [u8; 64], len: u8 },
+    Heap(String),
+}
+impl MapKey {
+    fn text(value: &str) -> Self {
+        if value.len() < 64 {
+            let mut bytes = [0; 64];
+            bytes[..value.len()].copy_from_slice(value.as_bytes());
+            Self::Inline {
+                bytes,
+                len: value.len() as u8,
+            }
+        } else {
+            Self::Heap(value.to_owned())
+        }
+    }
+    fn as_str(&self) -> &str {
+        match self {
+            // Only complete UTF-8 strings enter the inline buffer.
+            Self::Inline { bytes, len } => unsafe {
+                std::str::from_utf8_unchecked(&bytes[..usize::from(*len)])
+            },
+            Self::Heap(value) => value,
+        }
+    }
+    fn formatted<T: std::fmt::Display + ?Sized>(value: &T) -> Result<Self, CodecError> {
+        use std::fmt::Write as _;
+        let mut key = Self::text("");
+        write!(&mut key, "{value}").map_err(invalid)?;
+        Ok(key)
+    }
+}
+impl std::fmt::Write for MapKey {
+    fn write_str(&mut self, value: &str) -> std::fmt::Result {
+        match self {
+            Self::Inline { bytes, len } if value.len() < 64 - usize::from(*len) => {
+                let start = usize::from(*len);
+                bytes[start..start + value.len()].copy_from_slice(value.as_bytes());
+                *len += value.len() as u8;
+            }
+            Self::Inline { .. } => {
+                let mut buffer = String::with_capacity(self.as_str().len() + value.len());
+                buffer.push_str(self.as_str());
+                buffer.push_str(value);
+                *self = Self::Heap(buffer);
+            }
+            Self::Heap(buffer) => buffer.push_str(value),
+        }
+        Ok(())
+    }
+}
+struct KeySerializer;
 macro_rules! key_number {
-    ($($name:ident: $kind:ty),* $(,)?) => { $(fn $name(self, value: $kind) -> Result<String, CodecError> { Ok(value.to_string()) })* };
+    ($($name:ident: $kind:ty),* $(,)?) => { $(fn $name(self, value: $kind) -> Result<MapKey, CodecError> { MapKey::formatted(&value) })* };
 }
 macro_rules! invalid_key {
     ($name:ident($($arg:ident: $ty:ty),* $(,)?) -> $out:ty) => {
         fn $name(self, $(_: $ty),*) -> Result<$out, CodecError> { Err(invalid("map key must be a string or scalar")) }
     };
 }
-impl ser::Serializer for Key {
-    type Ok = String;
+impl ser::Serializer for KeySerializer {
+    type Ok = MapKey;
     type Error = CodecError;
-    type SerializeSeq = ser::Impossible<String, CodecError>;
+    type SerializeSeq = ser::Impossible<MapKey, CodecError>;
     type SerializeTuple = Self::SerializeSeq;
     type SerializeTupleStruct = Self::SerializeSeq;
     type SerializeTupleVariant = Self::SerializeSeq;
@@ -414,39 +468,46 @@ impl ser::Serializer for Key {
     type SerializeStruct = Self::SerializeSeq;
     type SerializeStructVariant = Self::SerializeSeq;
     key_number!(serialize_bool: bool, serialize_i8: i8, serialize_i16: i16, serialize_i32: i32, serialize_i64: i64, serialize_i128: i128, serialize_u8: u8, serialize_u16: u16, serialize_u32: u32, serialize_u64: u64, serialize_u128: u128, serialize_char: char);
-    fn serialize_f32(self, value: f32) -> Result<String, CodecError> {
+    fn serialize_f32(self, value: f32) -> Result<MapKey, CodecError> {
         if value.is_finite() {
-            serde_json::to_string(&value).map_err(invalid)
+            serde_json::to_string(&value)
+                .map(MapKey::Heap)
+                .map_err(invalid)
         } else {
             Err(invalid("map key must be finite"))
         }
     }
-    fn serialize_f64(self, value: f64) -> Result<String, CodecError> {
+    fn serialize_f64(self, value: f64) -> Result<MapKey, CodecError> {
         if value.is_finite() {
-            serde_json::to_string(&value).map_err(invalid)
+            serde_json::to_string(&value)
+                .map(MapKey::Heap)
+                .map_err(invalid)
         } else {
             Err(invalid("map key must be finite"))
         }
     }
-    fn serialize_str(self, value: &str) -> Result<String, CodecError> {
-        Ok(value.to_owned())
+    fn collect_str<T: std::fmt::Display + ?Sized>(self, value: &T) -> Result<MapKey, CodecError> {
+        MapKey::formatted(value)
+    }
+    fn serialize_str(self, value: &str) -> Result<MapKey, CodecError> {
+        Ok(MapKey::text(value))
     }
     fn serialize_unit_variant(
         self,
         _: &'static str,
         _: u32,
         variant: &'static str,
-    ) -> Result<String, CodecError> {
-        Ok(variant.to_owned())
+    ) -> Result<MapKey, CodecError> {
+        Ok(MapKey::text(variant))
     }
     fn serialize_newtype_struct<T: Serialize + ?Sized>(
         self,
         _: &'static str,
         value: &T,
-    ) -> Result<String, CodecError> {
+    ) -> Result<MapKey, CodecError> {
         value.serialize(self)
     }
-    fn serialize_some<T: Serialize + ?Sized>(self, value: &T) -> Result<String, CodecError> {
+    fn serialize_some<T: Serialize + ?Sized>(self, value: &T) -> Result<MapKey, CodecError> {
         value.serialize(self)
     }
     fn serialize_newtype_variant<T: Serialize + ?Sized>(
@@ -455,13 +516,13 @@ impl ser::Serializer for Key {
         _: u32,
         _: &'static str,
         _: &T,
-    ) -> Result<String, CodecError> {
+    ) -> Result<MapKey, CodecError> {
         Err(invalid("enum map key is unsupported"))
     }
-    invalid_key!(serialize_bytes(value: &[u8]) -> String);
-    invalid_key!(serialize_none() -> String);
-    invalid_key!(serialize_unit() -> String);
-    invalid_key!(serialize_unit_struct(name: &'static str) -> String);
+    invalid_key!(serialize_bytes(value: &[u8]) -> MapKey);
+    invalid_key!(serialize_none() -> MapKey);
+    invalid_key!(serialize_unit() -> MapKey);
+    invalid_key!(serialize_unit_struct(name: &'static str) -> MapKey);
     invalid_key!(serialize_seq(len: Option<usize>) -> Self::SerializeSeq);
     invalid_key!(serialize_tuple(len: usize) -> Self::SerializeTuple);
     invalid_key!(
@@ -528,6 +589,55 @@ mod tests {
                 serde_json::to_value(&record).unwrap()
             );
         }
+    }
+    #[test]
+    fn short_and_long_keys_keep_the_same_values() {
+        let input = BTreeMap::from([
+            (String::new(), 0),
+            ("x".repeat(63), 1),
+            ("x".repeat(64), 2),
+            ("é".repeat(31), 3),
+            ("é".repeat(32), 4),
+            ("long".repeat(5000), 5),
+        ]);
+        let view = MessageView::encode(&input, &[]).unwrap();
+        assert_eq!(
+            view.data().decode::<BTreeMap<String, i64>>().unwrap(),
+            input
+        );
+    }
+    #[test]
+    fn key_hook_finishes_before_value_hook() {
+        use serde::ser::SerializeMap as _;
+        use std::cell::RefCell;
+        struct KeyHook<'a>(&'a RefCell<Vec<&'static str>>);
+        impl Serialize for KeyHook<'_> {
+            fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                self.0.borrow_mut().push("key-start");
+                let result = serializer.serialize_str("name");
+                self.0.borrow_mut().push("key-end");
+                result
+            }
+        }
+        struct ValueHook<'a>(&'a RefCell<Vec<&'static str>>);
+        impl Serialize for ValueHook<'_> {
+            fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                self.0.borrow_mut().push("value");
+                serializer.serialize_i64(7)
+            }
+        }
+        struct Input<'a>(&'a RefCell<Vec<&'static str>>);
+        impl Serialize for Input<'_> {
+            fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry(&KeyHook(self.0), &ValueHook(self.0))?;
+                map.end()
+            }
+        }
+        let events = RefCell::new(Vec::new());
+        let view = MessageView::encode(&Input(&events), &[]).unwrap();
+        assert_eq!(*events.borrow(), ["key-start", "key-end", "value"]);
+        assert_eq!(view.data().get("name").unwrap().unwrap().integer(), Some(7));
     }
     #[test]
     fn explicit_json_records_safe_conversion_during_encoding() {

@@ -1,5 +1,10 @@
 # Owned views: baseline and first measured costs
 
+This page records successive implementations. Start with the latest
+[Rust field-name results](#follow-up-remove-temporary-field-name-allocations),
+[Python](python/README.md), [Node](../node-views/README.md), or [Go](go/README.md)
+for current measurements. Earlier tables describe their recorded builds.
+
 The legacy parse-once candidate improves the complete Python JSON pipeline.
 The first strict append-view path still costs more than identity receipts on
 small and long-string records. Cold views help larger selected reads, while
@@ -470,6 +475,53 @@ Reproduce with the same command as the Rust decoder capture, using
 `--output rust-codec.raw.json`. Tests additionally cover native byte values,
 map-key types, custom serializer growth, native append/forward identity and
 lifetime, retagging, and pre-publication rejection.
+
+## Follow-up: remove temporary field-name allocations
+
+Short field names now stay in fixed stack storage through native insertion.
+Serde map keys keep a small owned buffer until the key hook returns; this
+preserves key-hook/value-hook order without creating a heap string per field.
+Long keys keep the existing dynamic storage path. The writer still supplies
+the trailing NUL required by the pinned native setter; an explicit length does
+not remove that native requirement.
+
+[Seven alternating build pairs](key-buffers.raw.json) compare saved `263282d`
+workers with the complete candidate source (outside Git). Each
+process runs 400 operations per lane, reverses lane order on alternate pairs,
+and verifies equal fixture outputs. Allocator probes run separately. The archive
+includes `compare-key-buffers.py` for exact repetition. Build fingerprints and
+source hashes identify both workers. Builds/tests stopped during timing.
+
+| Fixture | Native encode before | Native encode after | Allocations before → after |
+| --- | ---: | ---: | ---: |
+| Small | 550 ns | 458 ns | 14 → 7 |
+| Wide nested object | 41.92 µs | 29.31 µs | 1,220 → 13 |
+| 64 KiB string | 7.47 µs | 7.30 µs | 23 → 14 |
+| 1,000-element array | 32.84 µs | 33.07 µs | 20 → 13 |
+
+Wide encoding takes 30% less time. Its 602 stored keys previously caused two
+allocations each; metadata added three more. Removing those 1,207 allocations
+accounts for the measured 1,220 → 13 change. The remaining allocations cover
+the growing output, snapshot owner and existing validation helpers. No requested
+native object tree enters the direct writer.
+
+The candidate JSON control also benefits from cheaper metadata keys. Wide JSON
+encoding stays near 33.8 µs, so direct encoding now takes about 13% less time
+instead of regressing. Wide view retagging falls 59.95 → 47.44 µs, versus a
+49.62 µs candidate JSON control. Array encoding rises 0.7%, and array retagging
+rises 1.4%; neither supports an array speed claim for this change. Total CPU for
+the complete benchmark matrix falls about 3%; this is not a per-lane CPU budget.
+
+The candidate also includes parsed-JSON safety tracking and backing-capacity
+reporting. These Rust lanes do not invoke the gated JavaScript materializer.
+Node's producer/copy measurements cover that separate effect. The parsed writer
+records the safety property during its existing walk, and capacity reporting
+lets runtimes charge the actual reserved payload storage without shrinking and
+copying it.
+
+Tests cover empty keys, both sides of the short-key boundary, multi-byte UTF-8,
+long keys, NUL rejection and completion of a custom key hook before its value
+hook. All 23 view tests and all-target Clippy pass.
 
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

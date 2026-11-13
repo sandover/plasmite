@@ -42,10 +42,26 @@ impl Builder {
         self.json_native_safe &= value.kind != sys::LITE3_TYPE_BYTES
             && (value.kind != sys::LITE3_TYPE_I64
                 || (-9_007_199_254_740_991..=9_007_199_254_740_991).contains(&value.integer));
-        let key = key
-            .map(CString::new)
-            .transpose()
-            .map_err(|_| Error::new(ErrorKind::Usage).with_message("key contains NUL"))?;
+        // Most field names fit here. Keep the terminator required by the
+        // pinned native setter without allocating a temporary CString.
+        let mut key_stack;
+        let key_heap;
+        let key_pointer = match key {
+            Some(key) if key.len() < 64 => {
+                if key.as_bytes().contains(&0) {
+                    return Err(Error::new(ErrorKind::Usage).with_message("key contains NUL"));
+                }
+                key_stack = [0_u8; 64];
+                key_stack[..key.len()].copy_from_slice(key.as_bytes());
+                key_stack.as_ptr().cast()
+            }
+            Some(key) => {
+                key_heap = CString::new(key)
+                    .map_err(|_| Error::new(ErrorKind::Usage).with_message("key contains NUL"))?;
+                key_heap.as_ptr()
+            }
+            None => std::ptr::null(),
+        };
         loop {
             let mut child = 0;
             let result = unsafe {
@@ -54,7 +70,7 @@ impl Builder {
                     &mut self.len,
                     self.words.len() * 4,
                     parent,
-                    key.as_ref().map_or(std::ptr::null(), |k| k.as_ptr()),
+                    key_pointer,
                     &value,
                     &mut child,
                 )

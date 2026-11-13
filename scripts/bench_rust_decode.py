@@ -23,18 +23,28 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--repeats', type=int, default=7)
     parser.add_argument('--iterations', type=int, default=1000)
+    parser.add_argument('--timing-worker', type=Path, default=ROOT / 'target/release/examples/bench_owned_views')
+    parser.add_argument('--allocation-worker', type=Path, default=ROOT / 'target/release/examples/bench_owned_view_allocations')
+    parser.add_argument('--source-report', type=Path, help='Use archived source fingerprints for a saved worker build')
+    parser.add_argument('--reverse-start', action='store_true')
     args = parser.parse_args()
     assert args.repeats > 0 and args.iterations > 0
-    timing = ROOT / 'target/release/examples/bench_owned_views'
-    allocations = ROOT / 'target/release/examples/bench_owned_view_allocations'
+    timing = args.timing_worker.resolve()
+    allocations = args.allocation_worker.resolve()
     sources = sorted(set(
         [p for directory in ('src', 'c', 'include') for p in (ROOT / directory).rglob('*') if p.suffix in ('.rs', '.c', '.h')]
         + [ROOT / p for p in ('build.rs', 'Cargo.toml', 'Cargo.lock', 'examples/bench_owned_views.rs', 'examples/bench_owned_view_allocations.rs', 'examples/support/owned_view_workloads.rs', 'scripts/bench_rust_decode.py')]
     ))
     report = {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'platform': platform.platform(), 'sha256': {str(p.relative_to(ROOT)): fingerprint(p) for p in [timing, allocations, *sources]}, 'runs': [], 'allocations': [], 'summary': {}}
+    if args.source_report:
+        archived = json.loads(args.source_report.read_text())
+        report['sha256'] = {p: digest for p, digest in archived['sha256'].items() if not p.startswith('target/')}
+        report['sha256'].update({str(p.relative_to(ROOT)): fingerprint(p) for p in (timing, allocations)})
+        report['sha256'][str(Path(__file__).resolve().relative_to(ROOT))] = fingerprint(Path(__file__))
+        report['source_report'] = str(args.source_report)
     for repeat in range(args.repeats):
         before = resource.getrusage(resource.RUSAGE_CHILDREN)
-        lines = subprocess.check_output([str(timing), str(args.iterations), *(['--reverse'] if repeat % 2 else [])], text=True)
+        lines = subprocess.check_output([str(timing), str(args.iterations), *(['--reverse'] if (repeat + int(args.reverse_start)) % 2 else [])], text=True)
         after = resource.getrusage(resource.RUSAGE_CHILDREN)
         report['runs'].append({'repeat': repeat, 'process_cpu_seconds': (after.ru_utime + after.ru_stime) - (before.ru_utime + before.ru_stime), 'records': [json.loads(line) for line in lines.splitlines()]})
     # Allocator counters add work; their elapsed times intentionally stay null.
