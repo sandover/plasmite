@@ -25,7 +25,9 @@ impl MessageView {
             depth: 1,
         })
         .map_err(|e| Error::new(ErrorKind::Usage).with_message(e.to_string()))?;
-        builder.finish()
+        // Writer enforces the root shape and depth before insertion; Rust text
+        // is UTF-8, numbers are checked, and native setters keep unique keys.
+        unsafe { builder.finish_proven() }
     }
 }
 impl Serialize for ValueRef<'_> {
@@ -38,21 +40,23 @@ impl Serialize for ValueRef<'_> {
         .serialize(serializer)
     }
 }
-pub(crate) fn copy_value(
+pub(crate) fn copy_serialized<T: Serialize + ?Sized>(
     builder: &mut Builder,
     parent: usize,
     key: Option<&str>,
-    value: ValueRef<'_>,
+    value: &T,
+    depth: usize,
 ) -> Result<(), Error> {
     value
         .serialize(Writer {
             builder,
             parent,
             key,
-            depth: 1,
+            depth,
         })
         .map_err(|e| Error::new(ErrorKind::Usage).with_message(e.to_string()))
 }
+
 struct Writer<'a> {
     builder: &'a mut Builder,
     parent: usize,

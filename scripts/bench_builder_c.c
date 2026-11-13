@@ -28,13 +28,13 @@ int main(int argc,char **argv) {
     char keys[200][16];for(size_t j=0;j<200;j++) snprintf(keys[j],sizeof(keys[j]),"field%zu",j);
     plsm_client_t *client=NULL;plsm_pool_t *pool=NULL;check(plsm_client_new(argv[1],&client,&error));check(plsm_pool_create(client,"events",8*1024*1024,&pool,&error));
     const char *tags[]={"sensor"};plsm_text_t text={(const uint8_t *)"sensor",6};
-    uint64_t start=0,producer_ns=0; clock_t cpu_start=0;
+    uint64_t start=0,producer_ns=0; clock_t cpu_start=0; size_t initial_node=0;
     for(size_t i=0;i<n+100;i++) {
         if(i==100) { start=now(); cpu_start=clock(); }
         const plsm_message_view_t *view=NULL;
         uint64_t operation_start=now();
         if(native) {
-            plsm_builder_t *builder=NULL;size_t root=0;check(plsm_builder_new(&text,1,&builder,&root,&error));
+            plsm_builder_t *builder=NULL;size_t root=0;check(plsm_builder_new(&text,1,&builder,&root,&error));if(i==0)initial_node=root;
             put(builder,root,"count",(plsm_view_value_t){.kind=3,.integer=(int64_t)i});
             put(builder,root,"power",(plsm_view_value_t){.kind=4,.real=1.25});
             put(builder,root,"ok",(plsm_view_value_t){.kind=2,.integer=1});
@@ -67,6 +67,6 @@ int main(int argc,char **argv) {
         plsm_view_release(view);
     }
     uint64_t elapsed=now()-start; double cpu_ns=(double)(clock()-cpu_start)*1000000000.0/CLOCKS_PER_SEC;
-    printf("{\"mode\":\"%s\",\"shape\":\"%s\",\"iterations\":%zu,\"elapsed_ns\":%"PRIu64",\"producer_ns\":%"PRIu64",\"ns_per_op\":%.3f,\"complete_ns_per_op\":%.3f,\"complete_cpu_ns_per_op\":%.3f}\n",argv[2],argv[3],n,elapsed,producer_ns,(double)producer_ns/n,(double)elapsed/n,cpu_ns/n);
+    printf("{\"mode\":\"%s\",\"shape\":\"%s\",\"iterations\":%zu,\"elapsed_ns\":%"PRIu64",\"producer_ns\":%"PRIu64",\"ns_per_op\":%.3f,\"complete_ns_per_op\":%.3f,\"complete_cpu_ns_per_op\":%.3f,\"initial_opaque_node\":%zu}\n",argv[2],argv[3],n,elapsed,producer_ns,(double)producer_ns/n,(double)elapsed/n,cpu_ns/n,initial_node);
     plsm_pool_free(pool);plsm_client_free(client);free(json);free(note);return 0;
 }

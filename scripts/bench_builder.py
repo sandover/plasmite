@@ -20,19 +20,31 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--worker',type=Path,default=ROOT/'target/release/bench_builder_c')
     p.add_argument('--library',type=Path,default=ROOT/'target/release/libplasmite.dylib')
+    p.add_argument('--baseline-library',type=Path,help='Compare a saved library in alternating build order')
     p.add_argument('--repeats',type=int,default=7);p.add_argument('--output',type=Path,required=True)
     a=p.parse_args();assert a.repeats>0
     env=dict(os.environ);env['DYLD_LIBRARY_PATH']=str(a.library.resolve().parent);env['LD_LIBRARY_PATH']=str(a.library.resolve().parent)
     result={'platform':platform.platform(),'head':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),'worker_sha256':sha(a.worker),'library_sha256':sha(a.library),'runner_sha256':sha(__file__),'worker_source_sha256':sha(ROOT/'scripts/bench_builder_c.c'),'runs':[],'summary':{}}
+    libraries={'candidate':a.library}
+    if a.baseline_library:
+        libraries['baseline']=a.baseline_library
+        result['baseline_library_sha256']=sha(a.baseline_library)
     for shape,n in [('small',10000),('wide',2000),('large',1000)]:
         runs=[]
         for rep in range(a.repeats):
-            for mode in (['json','native'] if rep%2==0 else ['native','json']):
-                with pool_directory() as directory:
-                    item=json.loads(subprocess.check_output([str(a.worker),str(directory),mode,shape,str(n)],env=env,text=True))
-                item['repeat']=rep;runs.append(item)
+            builds=(['baseline','candidate'] if rep%2==0 else ['candidate','baseline']) if a.baseline_library else ['candidate']
+            for build in builds:
+                library=libraries[build].resolve()
+                run_env=dict(env);run_env['DYLD_LIBRARY_PATH']=str(library.parent);run_env['LD_LIBRARY_PATH']=str(library.parent)
+                for mode in (['json','native'] if rep%2==0 else ['native','json']):
+                    with pool_directory() as directory:
+                        item=json.loads(subprocess.check_output([str(a.worker),str(directory),mode,shape,str(n)],env=run_env,text=True))
+                    item['repeat']=rep;item['build']=build;runs.append(item)
         result['runs'].extend(runs)
-        med={m:statistics.median(r['ns_per_op'] for r in runs if r['mode']==m) for m in ['json','native']}
-        result['summary'][shape]={'ns_per_op':med,'native_time_change_pct':100*(med['native']/med['json']-1),'complete_ns_per_op':{m:statistics.median(r['complete_ns_per_op'] for r in runs if r['mode']==m) for m in ['json','native']}}
+        summaries={}
+        for build in libraries:
+            med={m:statistics.median(r['ns_per_op'] for r in runs if r['mode']==m and r['build']==build) for m in ['json','native']}
+            summaries[build]={'ns_per_op':med,'native_time_change_pct':100*(med['native']/med['json']-1),'complete_ns_per_op':{m:statistics.median(r['complete_ns_per_op'] for r in runs if r['mode']==m and r['build']==build) for m in ['json','native']},'complete_cpu_ns_per_op':{m:statistics.median(r['complete_cpu_ns_per_op'] for r in runs if r['mode']==m and r['build']==build) for m in ['json','native']}}
+        result['summary'][shape]=summaries if a.baseline_library else summaries['candidate']
     a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result['summary'],indent=2))
 if __name__=='__main__':main()

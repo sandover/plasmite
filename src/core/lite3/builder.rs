@@ -9,6 +9,7 @@ pub(crate) struct Builder {
     len: usize,
     pub data: usize,
     json_native_safe: bool,
+    failed: bool,
 }
 impl Builder {
     pub fn new(tags: &[&str]) -> Result<Self, Error> {
@@ -22,6 +23,7 @@ impl Builder {
             len: 0,
             data: 0,
             json_native_safe: true,
+            failed: false,
         };
         b.put(usize::MAX, None, sys::ValueView::default())?;
         let meta = b.container(0, Some("meta"), false)?;
@@ -37,6 +39,7 @@ impl Builder {
         key: Option<&str>,
         value: sys::ValueView,
     ) -> Result<usize, Error> {
+        self.check_failed()?;
         // Record this while writing, without scanning the completed encoding.
         // Replacing an unsafe value leaves a conservative false result.
         self.json_native_safe &= value.kind != sys::LITE3_TYPE_BYTES
@@ -80,6 +83,7 @@ impl Builder {
             }
             let errno = unsafe { sys::plasmite_lite3_last_errno() };
             if errno != libc::ENOBUFS || self.words.len() * 4 >= MAX_LITE3_BUF {
+                self.failed = true;
                 return Err(Error::new(ErrorKind::Usage)
                     .with_message("failed to build Lite3 value")
                     .with_source(std::io::Error::from_raw_os_error(errno)));
@@ -121,6 +125,7 @@ impl Builder {
         .map(|_| ())
     }
     pub fn copy_parsed(&mut self, root: usize) -> Result<(), Error> {
+        self.check_failed()?;
         unsafe extern "C" {
             fn plasmite_json_copy_growing(
                 root: usize,
@@ -169,22 +174,72 @@ impl Builder {
             )
         };
         if ret < 0 {
+            self.failed = true;
             return Err(Error::new(ErrorKind::Usage).with_message("failed to encode JSON view"));
         }
         self.json_native_safe = json_native_safe != 0;
         Ok(())
     }
+    fn check_failed(&self) -> Result<(), Error> {
+        if self.failed {
+            return Err(Error::new(ErrorKind::Usage)
+                .with_message("builder cannot continue after a failed write"));
+        }
+        Ok(())
+    }
     pub(crate) fn data_is_empty(&self) -> Result<bool, Error> {
+        self.check_failed()?;
         let bytes = unsafe { std::slice::from_raw_parts(self.words.as_ptr().cast(), self.len) };
         Ok(Lite3DocRef::new(bytes).count_at(self.data)? == 0)
     }
     pub fn finish(self) -> Result<MessageView, Error> {
+        self.check_failed()?;
         let bytes = unsafe { std::slice::from_raw_parts(self.words.as_ptr().cast(), self.len) };
         Lite3DocRef::new(bytes).validate_view()?;
-        // The setters overwrite duplicate keys. Full validation establishes depth,
-        // finite values, shape and text validity; the aligned allocation stays owned.
+        self.seal()
+    }
+    /// Seal bytes whose structure, shape, depth, text and numbers the writer proved.
+    ///
+    /// # Safety
+    /// Every write must use the checked native setters; callers must additionally
+    /// establish the full message shape, UTF-8, finite numbers and common depth
+    /// limit while writing. No mutable input pointer may survive publication.
+    pub(crate) unsafe fn finish_proven(self) -> Result<MessageView, Error> {
+        // Debug builds independently check the construction proof. Release
+        // writers retain it rather than walk the finished message again.
+        if cfg!(debug_assertions) {
+            self.finish()
+        } else {
+            self.seal()
+        }
+    }
+    fn seal(self) -> Result<MessageView, Error> {
+        self.check_failed()?;
         Ok(unsafe {
             MessageView::from_encoded_words(self.words, self.len, 0, 0, 0, self.json_native_safe)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn failed_copy_cannot_continue_or_seal_even_if_its_error_is_ignored() {
+        let mut data = serde_json::json!({});
+        for _ in 0..31 {
+            data = serde_json::json!({"next":data});
+        }
+        // This source fits depth zero, but not the enclosing message's depth.
+        let parsed =
+            crate::core::lite3::ParsedJson::parse_view(data.to_string().as_bytes()).unwrap();
+        let mut builder = Builder::new(&[]).unwrap();
+        assert!(
+            builder
+                .copy_parsed(unsafe { sys::plasmite_json_root(parsed.ptr.as_ptr()) })
+                .is_err()
+        );
+        assert!(builder.string(builder.data, Some("after"), "no").is_err());
+        assert!(unsafe { builder.finish_proven() }.is_err());
     }
 }

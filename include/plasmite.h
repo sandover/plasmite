@@ -484,7 +484,8 @@ int plsm_view_to_json(const plsm_message_view_t *view, plsm_buf_t *out, plsm_err
  * Text spans borrow input for the call only; embedded NUL is valid in values
  * and tags, but object keys reject it. NULL key means an array element; a
  * non-NULL empty span names the empty object key. Kinds match plsm_view_value_t.
- * Use only nodes returned by this builder. Container puts return a child node.
+ * Nodes are opaque handles, not byte offsets; pass them back unchanged and
+ * use only nodes returned by this builder. Container puts return a child node.
  * append_builder consumes the contents on both success and failure after input
  * guards; free the handle once afterward. No publication occurs on build errors.
  * A flush error can follow publication, as for other appends. */

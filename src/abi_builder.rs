@@ -25,6 +25,25 @@ pub struct Input {
 fn usage(message: &str) -> Error {
     Error::new(ErrorKind::Usage).with_message(message)
 }
+// Destination nodes are opaque handles. Four-aligned offsets below 256 MiB
+// use 26 bits after division by four; five depth bits still fit a 32-bit host.
+// Keeping depth here proves nesting during insertion, without a side table.
+const DEPTH_BITS: usize = 5;
+const DEPTH_MASK: usize = (1 << DEPTH_BITS) - 1;
+const _: () = assert!(crate::core::lite3::MAX_LITE3_BUF <= 1 << 28);
+fn encode_node(offset: usize, depth: usize) -> usize {
+    debug_assert!(offset.is_multiple_of(4) && offset < crate::core::lite3::MAX_LITE3_BUF);
+    debug_assert!((1..=DEPTH_MASK).contains(&depth));
+    ((offset / 4) << DEPTH_BITS) | depth
+}
+fn decode_node(node: usize) -> Result<(usize, usize), Error> {
+    let depth = node & DEPTH_MASK;
+    let offset = (node >> DEPTH_BITS) * 4;
+    if depth == 0 || offset >= crate::core::lite3::MAX_LITE3_BUF {
+        return Err(usage("invalid parent node"));
+    }
+    Ok((offset, depth))
+}
 unsafe fn span<'a>(data: *const u8, len: usize) -> Result<&'a [u8], Error> {
     if len == 0 {
         return Ok(&[]);
@@ -67,7 +86,7 @@ pub extern "C" fn plsm_builder_new(
                 .collect::<Result<Vec<_>, _>>()?;
             let builder = Builder::new(&tags)?;
             unsafe {
-                *data_node = builder.data;
+                *data_node = encode_node(builder.data, 1);
                 *out = Box::into_raw(Box::new(plsm_builder {
                     value: Some(builder),
                 }));
@@ -92,9 +111,7 @@ pub extern "C" fn plsm_builder_put(
             let builder = unsafe { builder.as_mut() }
                 .and_then(|b| b.value.as_mut())
                 .ok_or_else(|| usage("builder is finished or null"))?;
-            if parent == usize::MAX {
-                return Err(usage("invalid parent node"));
-            }
+            let (parent, depth) = decode_node(parent)?;
             let value = unsafe { value.as_ref() }.ok_or_else(|| usage("null input value"))?;
             let key = if key.is_null() {
                 if key_len != 0 {
@@ -115,6 +132,10 @@ pub extern "C" fn plsm_builder_put(
                 8 => sys::LITE3_TYPE_ARRAY,
                 _ => return Err(usage("unsupported input kind")),
             };
+            let container = matches!(kind, sys::LITE3_TYPE_OBJECT | sys::LITE3_TYPE_ARRAY);
+            if container && depth == DEPTH_MASK {
+                return Err(usage("container nesting exceeds limit"));
+            }
             if kind == sys::LITE3_TYPE_F64 && !value.real.is_finite() {
                 return Err(usage("number must be finite"));
             }
@@ -139,7 +160,11 @@ pub extern "C" fn plsm_builder_put(
             )?;
             if !child.is_null() {
                 unsafe {
-                    *child = offset;
+                    *child = if container {
+                        encode_node(offset, depth + 1)
+                    } else {
+                        0
+                    };
                 }
             }
             Ok(())
@@ -175,10 +200,11 @@ pub extern "C" fn plsm_builder_copy_value(
                 let parent = builder.data;
                 for entry in source.iter()? {
                     let (key, value) = entry?;
-                    crate::view::copy_value(builder, parent, key, value)?;
+                    crate::view::copy_serialized(builder, parent, key, &value, 2)?;
                 }
                 return Ok(());
             }
+            let (parent, depth) = decode_node(parent)?;
             let key = if key.is_null() {
                 if key_len != 0 {
                     return Err(usage("null key span"));
@@ -187,7 +213,7 @@ pub extern "C" fn plsm_builder_copy_value(
             } else {
                 Some(text(unsafe { span(key, key_len) }?)?)
             };
-            crate::view::copy_value(builder, parent, key, source)
+            crate::view::copy_serialized(builder, parent, key, &source, depth + 1)
         })(),
         err,
     )
@@ -218,7 +244,10 @@ pub extern "C" fn plsm_pool_append_builder(
                 .value
                 .take()
                 .ok_or_else(|| usage("builder already finished"))?;
-            let mut view = builder.finish()?;
+            // Constructor fixes envelope shape; put validates text/numbers and
+            // opaque handles prove depth. Subtree copies use checked owners and
+            // the real destination depth. A failed native write poisons sealing.
+            let mut view = unsafe { builder.finish_proven() }?;
             let time = crate::api::now_ns()?;
             view.seq = pool.pool.append_with_options(
                 view.bytes(),
@@ -322,6 +351,117 @@ mod tests {
             Some(42)
         );
         assert!(!encoded.json_native_safe());
+    }
+    #[test]
+    fn depth_handles_reject_a_container_at_32_but_allow_a_leaf() {
+        let mut builder = std::ptr::null_mut();
+        let mut parent = 0;
+        let mut err = std::ptr::null_mut();
+        assert_eq!(
+            plsm_builder_new(std::ptr::null(), 0, &mut builder, &mut parent, &mut err),
+            0
+        );
+        for _ in 2..=31 {
+            let mut child = 0;
+            assert_eq!(
+                plsm_builder_put(
+                    builder,
+                    parent,
+                    b"next".as_ptr(),
+                    4,
+                    &input(7),
+                    &mut child,
+                    &mut err
+                ),
+                0
+            );
+            parent = child;
+        }
+        assert_eq!(
+            plsm_builder_put(
+                builder,
+                parent,
+                b"bad".as_ptr(),
+                3,
+                &input(8),
+                std::ptr::null_mut(),
+                &mut err
+            ),
+            -1
+        );
+        crate::abi::plsm_error_free(err);
+        err = std::ptr::null_mut();
+        let number = Input {
+            integer: 7,
+            ..input(3)
+        };
+        assert_eq!(
+            plsm_builder_put(
+                builder,
+                parent,
+                b"leaf".as_ptr(),
+                4,
+                &number,
+                std::ptr::null_mut(),
+                &mut err
+            ),
+            0
+        );
+        let encoded = unsafe { (&mut *builder).value.take().unwrap().finish_proven() }.unwrap();
+        unsafe {
+            plsm_builder_free(builder);
+        }
+        crate::view::MessageView::from_bytes(encoded.bytes(), 0, 0).unwrap();
+    }
+    #[test]
+    fn subtree_copy_checks_absolute_destination_depth() {
+        let mut source = serde_json::json!({"leaf":7});
+        for _ in 0..30 {
+            source = serde_json::json!({"next":source});
+        }
+        let source = crate::view::MessageView::encode(&source, &[]).unwrap();
+        let mut owner = std::ptr::null();
+        publish(source, &mut owner).unwrap();
+        let source = unsafe { crate::abi_views::plsm_view_data(owner) };
+        let mut builder = std::ptr::null_mut();
+        let mut data = 0;
+        let mut err = std::ptr::null_mut();
+        assert_eq!(
+            plsm_builder_new(std::ptr::null(), 0, &mut builder, &mut data, &mut err),
+            0
+        );
+        assert_eq!(
+            plsm_builder_copy_value(builder, data, b"nested".as_ptr(), 6, source, &mut err),
+            -1
+        );
+        crate::abi::plsm_error_free(err);
+        unsafe {
+            plsm_builder_free(builder);
+        }
+        err = std::ptr::null_mut();
+        assert_eq!(
+            plsm_builder_new(std::ptr::null(), 0, &mut builder, &mut data, &mut err),
+            0
+        );
+        assert_eq!(
+            plsm_builder_copy_value(builder, usize::MAX, std::ptr::null(), 0, source, &mut err),
+            0
+        );
+        let copied = unsafe { (&mut *builder).value.take().unwrap().finish_proven() }.unwrap();
+        crate::view::MessageView::from_bytes(copied.bytes(), 0, 0).unwrap();
+        unsafe {
+            plsm_builder_free(builder);
+            plsm_view_release(owner);
+        }
+    }
+    #[test]
+    fn opaque_nodes_fit_32_bit_hosts_at_the_buffer_limit() {
+        let offset = crate::core::lite3::MAX_LITE3_BUF - 4;
+        let node = encode_node(offset, 31);
+        assert!(u32::try_from(node).is_ok());
+        assert_eq!(decode_node(node).unwrap(), (offset, 31));
+        assert!(decode_node(0).is_err());
+        assert!(decode_node(usize::MAX).is_err());
     }
     fn input(kind: u32) -> Input {
         Input {

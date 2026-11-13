@@ -1,7 +1,7 @@
 # Owned views: baseline and first measured costs
 
 This page records successive implementations. Start with the latest
-[Rust field-name results](#follow-up-remove-temporary-field-name-allocations),
+[Rust writer results](#follow-up-retain-the-writers-construction-proof),
 [Python](python/README.md), [Node](../node-views/README.md), or [Go](go/README.md)
 for current measurements. Earlier tables describe their recorded builds.
 
@@ -522,6 +522,52 @@ copying it.
 Tests cover empty keys, both sides of the short-key boundary, multi-byte UTF-8,
 long keys, NUL rejection and completion of a custom key hook before its value
 hook. All 23 view tests and all-target Clippy pass.
+
+## Follow-up: retain the writer's construction proof
+
+Trusted writers now check types, text, numbers, message shape and nesting while
+encoding, then seal that allocation without another whole-document walk. C
+builder destination handles carry their nesting depth as well as their aligned
+offset. Hosts pass these opaque handles back unchanged; no side table or public
+skip-validation flag enters the API. Subtree copies use absolute destination
+depth. Incoming arbitrary bytes still require the complete acquisition check.
+
+Failed native writes prevent further writing or sealing, even if a caller
+ignores the error. Debug builds independently validate the finished document;
+release tests also validate sealed results through the ordinary byte reader.
+Tests cover the depth31/32 boundary, scalar leaves, nested subtree copies,
+32-bit handle bounds and a failed partial copy. Both debug and optimized tests
+pass, as does all-target Clippy.
+
+[Seven alternating C producer pairs](proven-seal.raw.json) compare the exact
+checked-finish source (outside Git) with the
+construction-proof source (outside Git). Both return retained
+views and verify every value. The worker logs an opaque-handle witness as well
+as library hashes, confirming that it loaded distinct old/new implementations.
+Unrelated Go/stream work also appears in these archived builds; these producer
+routes never invoke it. The final run had no concurrent builds or tests.
+
+| Fixture | Native producer before → after | JSON producer before → after | Complete native CPU before → after |
+| --- | ---: | ---: | ---: |
+| Small | 5.40 → 5.07 µs | 5.69 → 5.24 µs | 4.73 → 4.40 µs |
+| 200 extra fields | 18.97 → 15.24 µs | 26.61 → 23.51 µs | 25.70 → 22.64 µs |
+| 64 KiB string | 14.96 → 10.72 µs | 29.09 → 26.13 µs | 16.26 → 11.89 µs |
+
+Native producer time falls 6%/20%/28%. Complete CPU includes shared verification
+and release; these are single-producer measurements, not delivery-throughput
+claims. JSON conversion retains its one parse and benefits from the same final
+scan removal.
+
+[Current Rust lanes](proven-seal-rust.raw.json) separately record typed encoding
+at 256 ns small, 2.92 µs long-string and 29.25 µs array, and complete native append at
+3.36/9.50/35.71 µs. These are current absolute results; they are not a paired
+Rust comparison against the earlier capture. The report retains all JSON,
+native-tree, sparse and allocation controls.
+
+Reproduce the C comparison with `scripts/bench_builder.py --baseline-library
+BEFORE/libplasmite.dylib --library AFTER/libplasmite.dylib --repeats 7 --output
+proven-seal.raw.json`. Build the unchanged C worker first, outside the timing
+window. Both archived source trees identify their exact core implementations.
 
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

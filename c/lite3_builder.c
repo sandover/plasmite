@@ -5,6 +5,9 @@
 #include <errno.h>
 #include <limits.h>
 
+_Static_assert(LITE3_NODE_ALIGNMENT == 4 && LITE3_JSON_NESTING_DEPTH_MAX == 32,
+               "writer proof targets the pinned alignment and depth limits");
+
 typedef int (*plasmite_grow_fn)(void *, unsigned char **, size_t *);
 
 int plasmite_json_copy_growing(uintptr_t root, size_t parent,

@@ -7,7 +7,7 @@ mod ser;
 use crate::core::error::{Error, ErrorKind};
 use crate::core::lite3::{JsonValue, Lite3DocRef, sys};
 pub use owned::OwnedValue;
-pub(crate) use ser::copy_value;
+pub(crate) use ser::copy_serialized;
 use std::collections::HashMap;
 
 fn corrupt() -> Error {

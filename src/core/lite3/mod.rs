@@ -143,7 +143,9 @@ impl ParsedJson {
         }
         let mut builder = builder::Builder::new(tags)?;
         builder.copy_parsed(unsafe { sys::plasmite_json_root(self.ptr.as_ptr()) })?;
-        builder.finish()
+        // Preparation and the copy walk checked text, finite/exact numbers,
+        // object shape and envelope-relative depth; setters keep unique keys.
+        unsafe { builder.finish_proven() }
     }
 
     fn build(&self, max_bytes: usize, tags: Option<&[sys::TextRef]>) -> Result<Lite3Buf, Error> {
