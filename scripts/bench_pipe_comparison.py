@@ -242,6 +242,7 @@ def trial(args, lane, directory, profile=False):
             latencies = sorted(reports[1]["latencies_ns"])
             result["p50_latency_ms"] = statistics.median(latencies) / 1e6
             result["p95_latency_ms"] = latencies[max(0, (len(latencies) * 95 + 99) // 100 - 1)] / 1e6
+            result["p99_latency_ms"] = latencies[max(0, (len(latencies) * 99 + 99) // 100 - 1)] / 1e6
         return result
     finally:
         for process in processes:
@@ -357,7 +358,7 @@ def main():
     result["medians"] = {
         lane: {key: statistics.median(run[key] for run in result["runs"] if run["lane"] == lane)
                for key in (["elapsed_seconds", "messages_per_second", "cpu_seconds"] +
-                           (["p50_latency_ms", "p95_latency_ms"] if args.interval_ms else []))}
+                           (["p50_latency_ms", "p95_latency_ms", "p99_latency_ms"] if args.interval_ms else []))}
         for lane in [*pipe_lanes, *libraries]
     }
     if args.profile:

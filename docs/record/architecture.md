@@ -142,14 +142,23 @@ Append (high level):
 5. Update index slot (when enabled).
 6. Publish header updates and notify waiters.
 
-Each pool derives its canonical notification name when it opens or creates the
-file. Appends reuse that name instead of resolving the path and hashing it for
-every message. Each append still opens, posts, and closes the notification
-semaphore after releasing the writer lock; polling remains the fallback.
+On macOS 14.4 and later, builds with the shared-address wait APIs publish the
+newest sequence with an aligned atomic store in its existing header location.
+After releasing the writer lock, the writer wakes all processes waiting on that
+word. Readers retain a header-only mapping and compare the generation from
+their empty-cursor check before sleeping. The kernel compares again when it
+registers the wait, so an intervening append cannot hide behind a new wait.
+
+Other Unix hosts retain named semaphore hints with 5 ms polling inside waits.
+Each pool derives its canonical semaphore name once and lazily retains its
+writer handle until the pool closes. Unsupported hosts use bounded polling.
+Old and new libraries share the same file format; when their notification
+mechanisms differ, readers discover commits through the bounded fallback.
 
 Invariants:
 
-- The writer lock must be held for the full duration of steps 3–6. Releasing it between planning and committing is a violation.
+- The writer holds the lock from placement planning through header publication,
+  then releases it before sending the optional notification.
 - A frame in `Writing` state that is never committed must not be returned to readers.
 - `plan.rs` must remain pure and side-effect-free. It must not write to the pool file. Its output must be fully determined by its inputs.
 

@@ -5,6 +5,7 @@
 - Rust crate: `plasmite` (CLI, library, tests, bindings support)
 - Native C dependency: vendored Lite3 sources under `vendor/lite3/`
 - C shim: `c/lite3_shim.c` exports the narrow ABI used by Rust FFI
+- Darwin notification bridge: `c/notify_shim.c` guards public shared-address waits by SDK and operating-system availability
 - Web UI font: vendored Inconsolata under `ui/fonts/`, embedded in the server binary (source and checksum in `ui/fonts/README.md`)
 
 `Cargo.toml` declares `build = "build.rs"`, so Cargo always runs the build script when needed.
@@ -37,11 +38,20 @@ Plasmite pins Lite3 to an exact upstream commit in
 covers the curated files compiled into Plasmite and the local reader patch.
 Normal builds and integrity checks never access the network.
 
-`build.rs` does three things:
+`build.rs` performs these steps:
 
 1. Declares `cargo:rerun-if-changed` for shim and vendored Lite3 files.
 2. Compiles vendored Lite3 C units plus `c/lite3_shim.c` into one static archive (`liblite3.a`) via `cc`.
-3. Leaves native-link metadata to Cargo/rustc default integration from `cc`.
+3. On Darwin, compiles `c/notify_shim.c` into `libplasmite_notify.a`; other targets retain their notification backend.
+4. Leaves native-link metadata to Cargo/rustc default integration from `cc`.
+
+The Darwin bridge weak-links the shared-address APIs and calls them only on
+macOS 14.4 or later. SDKs that lack the header compile an unavailable stub.
+Its C deployment target follows `MACOSX_DEPLOYMENT_TARGET`, or defaults to
+macOS 10.12 on Intel and 11.0 on Apple Silicon. This keeps availability guards
+intact even when the installed SDK defaults to a newer operating system.
+Older hosts keep the semaphore/polling fallback. The file format stays the same:
+the writer publishes its existing newest-sequence word with an atomic store.
 
 Key inputs:
 

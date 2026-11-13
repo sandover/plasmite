@@ -36,6 +36,24 @@ fn main() {
         println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,libplasmite.so");
     }
 
+    if target.contains("apple-darwin") {
+        println!("cargo:rerun-if-changed=c/notify_shim.c");
+        // cc otherwise uses the SDK's minimum, which can compile away the
+        // availability checks even while Rust targets an older macOS host.
+        let deployment = env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| {
+            if target.starts_with("aarch64") {
+                "11.0".into()
+            } else {
+                "10.12".into()
+            }
+        });
+        cc::Build::new()
+            .file(manifest_dir.join("c").join("notify_shim.c"))
+            .flag(format!("-mmacosx-version-min={deployment}"))
+            .flag_if_supported("-std=gnu11")
+            .compile("plasmite_notify");
+    }
+
     let mut build = cc::Build::new();
     build
         .include(&include_dir)

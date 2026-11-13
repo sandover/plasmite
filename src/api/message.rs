@@ -5,10 +5,11 @@
 //! Invariants: Tail streams preserve ordering and avoid unbounded buffering.
 #![allow(clippy::result_large_err)]
 
+use crate::api::notify::{NotifyHandle, open_for_pool};
 use crate::core::cursor::{Cursor, CursorResult, FrameRef};
 use crate::core::error::{Error, ErrorKind};
 use crate::core::lite3::{Lite3DocRef, sys, validate_bytes};
-use crate::core::notify::{NotifyError, PoolSemaphore, WaitOutcome, open_for_path};
+use crate::core::notify::{NotifyError, WaitOutcome};
 use crate::core::pool::{AppendOptions, Durability, Pool};
 use serde_json::Value;
 use std::sync::Arc;
@@ -129,7 +130,7 @@ pub(crate) struct TailState {
     options: TailOptions,
     seen: usize,
     deadline: Option<Instant>,
-    notify: Option<PoolSemaphore>,
+    notify: Option<NotifyHandle>,
     expected_seq: Option<u64>,
     terminated: bool,
 }
@@ -162,7 +163,7 @@ impl TailState {
         let deadline = options.timeout.map(|duration| Instant::now() + duration);
         let expected_seq = options.since_seq;
         let notify = if options.notify {
-            open_for_path(pool.path()).ok()
+            open_for_pool(pool)
         } else {
             None
         };
@@ -269,7 +270,9 @@ impl TailState {
                     let wait_for =
                         wait_interval(wait_deadline, wait_interval(self.deadline, poll_interval));
                     if let Some(notify) = &mut self.notify {
-                        match notify.wait(wait_for) {
+                        match notify
+                            .wait_for_generation(self.cursor.observed_generation(), wait_for)
+                        {
                             Ok(WaitOutcome::Signaled) | Ok(WaitOutcome::TimedOut) => {}
                             Err(NotifyError::Unavailable) => {
                                 self.notify = None;

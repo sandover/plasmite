@@ -10,6 +10,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -26,6 +27,7 @@ use crate::core::validate;
 const MAGIC: [u8; 4] = *b"PLSM";
 const ENDIANNESS_LE: u8 = 1;
 const HEADER_SIZE: usize = 4096;
+const NEWEST_SEQ_OFFSET: usize = 96;
 const INDEX_SLOT_BYTES: u64 = 16;
 const MAX_AUTO_INDEX_CAPACITY: u64 = 65_536;
 const MIN_RING_SIZE_FOR_INDEX: u64 = 1024;
@@ -637,6 +639,23 @@ impl Pool {
             .with_hint("Run `plasmite doctor` to inspect the pool.")
     }
 
+    /// Own a header-only mapping so a notification handle can outlive this Pool.
+    pub(crate) fn progress_watch(&self) -> Result<ProgressWatch, Error> {
+        // SAFETY: Pool creation/open validates a full header in this held file.
+        // This read/write alias exposes only atomic accesses to the sequence word.
+        let mmap = unsafe {
+            memmap2::MmapOptions::new()
+                .len(HEADER_SIZE)
+                .map_mut(&self.file)
+        }
+        .map_err(|error| {
+            Error::new(map_io_error_kind(&error))
+                .with_path(&self.path)
+                .with_source(error)
+        })?;
+        Ok(ProgressWatch { mmap })
+    }
+
     pub(crate) fn read_lock(&self) -> Result<ReadLock<'_>, Error> {
         // flock belongs to the open file description. Serializing snapshots on
         // this handle prevents one thread from unlocking another thread's read.
@@ -918,7 +937,11 @@ impl Pool {
         )?;
         drop(lock);
         // Notification is optional wake-up work after committed storage publication.
-        let _ = notify::post_for_name(&self.notify_name, &mut self.notify_writer);
+        let _ = notify::post_for_pool(
+            progress_word(&self.mmap),
+            &self.notify_name,
+            &mut self.notify_writer,
+        );
         Ok(seq)
     }
 
@@ -1045,6 +1068,31 @@ where
     );
 
     Ok(plan.seq)
+}
+
+pub(crate) struct ProgressWatch {
+    mmap: MmapMut,
+}
+
+impl ProgressWatch {
+    pub(crate) fn generation(&self) -> u64 {
+        u64::from_le(progress_word(&self.mmap).load(Ordering::Acquire))
+    }
+
+    pub(crate) fn wait(
+        &self,
+        expected: u64,
+        timeout: std::time::Duration,
+    ) -> Result<notify::WaitOutcome, notify::NotifyError> {
+        notify::wait_for_sequence(progress_word(&self.mmap), expected, timeout)
+    }
+}
+
+fn progress_word(mmap: &MmapMut) -> &AtomicU64 {
+    // SAFETY: Mappings start at a page boundary and the validated header contains
+    // this eight-byte aligned word. All live stores use this atomic access;
+    // ordinary header reads hold the pool lock and cannot overlap those stores.
+    unsafe { AtomicU64::from_ptr(mmap.as_ptr().add(NEWEST_SEQ_OFFSET).cast_mut().cast()) }
 }
 
 pub struct AppendLock {
@@ -1274,7 +1322,7 @@ fn write_pool_header(mmap: &mut MmapMut, header: &PoolHeader) {
     write_u64(mmap, 72, header.tail_off);
     write_u64(mmap, 80, header.tail_next_off);
     write_u64(mmap, 88, header.oldest_seq);
-    write_u64(mmap, 96, header.newest_seq);
+    progress_word(mmap).store(header.newest_seq.to_le(), Ordering::Release);
 }
 
 fn flush_mmap_range(
@@ -2321,6 +2369,30 @@ mod tests {
     }
 
     #[test]
+    fn progress_mapping_survives_pool_drop_and_observes_prior_publication() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("progress.plasmite");
+        let pool = Pool::create(&path, PoolOptions::new(65536)).unwrap();
+        let watch = pool.progress_watch().unwrap();
+        let observed = watch.generation();
+        assert_eq!(observed, 0);
+        drop(pool);
+        let mut writer = Pool::open(&path).unwrap();
+        writer.append(b"published before wait").unwrap();
+        assert_eq!(watch.generation(), 1);
+        if crate::core::notify::shared_address_available() {
+            assert_eq!(
+                watch.wait(observed, Duration::from_secs(1)).unwrap(),
+                crate::core::notify::WaitOutcome::Signaled
+            );
+            assert_eq!(
+                watch.wait(1, Duration::from_millis(1)).unwrap(),
+                crate::core::notify::WaitOutcome::TimedOut
+            );
+        }
+    }
+
+    #[test]
     fn notify_reader_child() {
         use crate::api::{PoolApiExt, TailOptions};
         use std::sync::Arc;
@@ -2329,6 +2401,8 @@ mod tests {
             return;
         };
         let path = std::path::PathBuf::from(path);
+        let reader_id = std::env::var("PLASMITE_NOTIFY_READER_ID").unwrap_or_default();
+        let marker = |kind: &str| path.with_extension(format!("{reader_id}{kind}"));
         let reader = Pool::open(&path).expect("independent reader");
         let cancelled = Arc::new(AtomicBool::new(false));
         let mut options = TailOptions::new();
@@ -2337,14 +2411,14 @@ mod tests {
         options.cancel = Some(Arc::clone(&cancelled));
         let mut tail = reader.tail(options);
         // The separate process registers its waiter before any append.
-        fs::write(path.with_extension("ready"), b"ready").expect("ready");
+        fs::write(marker("ready"), b"ready").expect("ready");
         for expected in 1..=128 {
             let message = tail.next_message().expect("tail").expect("message");
             assert_eq!(message.seq, expected);
             assert_eq!(message.data["n"].as_u64(), Some(expected));
         }
-        fs::write(path.with_extension("received"), b"received").expect("received");
-        let cancel_path = path.with_extension("cancel");
+        fs::write(marker("received"), b"received").expect("received");
+        let cancel_path = marker("cancel");
         let cancel_flag = Arc::clone(&cancelled);
         let watcher = thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs(3);
@@ -2360,6 +2434,45 @@ mod tests {
         assert!(tail.next_message().expect("cancelled wait").is_none());
         watcher.join().expect("cancel watcher");
         assert!(cancelled.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn independent_process_readers_keep_positions_and_cancel() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fanout.plasmite");
+        let mut writer = Pool::create(&path, PoolOptions::new(1048576)).unwrap();
+        let mut children = (0..3)
+            .map(|id| {
+                Command::new(std::env::current_exe().unwrap())
+                    .args(["core::pool::tests::notify_reader_child", "--exact"])
+                    .env("PLASMITE_NOTIFY_READER_PATH", &path)
+                    .env("PLASMITE_NOTIFY_READER_ID", format!("{id}."))
+                    .spawn()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let wait_for = |kind: &str| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while Instant::now() < deadline {
+                if (0..3).all(|id| path.with_extension(format!("{id}.{kind}")).exists()) {
+                    return true;
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
+            false
+        };
+        assert!(wait_for("ready"));
+        for seq in 1..=128 {
+            let payload = lite3::encode_message(&[], &serde_json::json!({"n": seq})).unwrap();
+            assert_eq!(writer.append(payload.as_slice()).unwrap(), seq);
+        }
+        assert!(wait_for("received"));
+        for id in 0..3 {
+            fs::write(path.with_extension(format!("{id}.cancel")), b"cancel").unwrap();
+        }
+        for child in &mut children {
+            assert!(child.wait().unwrap().success());
+        }
     }
 
     #[test]

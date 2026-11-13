@@ -1,4 +1,4 @@
-//! Purpose: Provide best-effort per-pool notifications via named semaphores.
+//! Purpose: Provide best-effort per-pool notifications via shared-address or semaphore waits.
 //! Exports: `PoolSemaphore`, `NotifyError`, `WaitOutcome`, `pool_semaphore_name`, `post_for_name`.
 //! Role: Optimization for tail-style consumers; correctness must not depend on notify.
 //! Invariants: Name derivation is deterministic; failures never panic or block progress.
@@ -7,6 +7,7 @@
 use sha2::{Digest, Sha256};
 use std::io;
 use std::path::Path;
+use std::sync::atomic::AtomicU64;
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -30,7 +31,7 @@ pub(crate) enum WaitOutcome {
 #[derive(Debug)]
 pub(crate) enum NotifyError {
     Unavailable,
-    // Only the Unix semaphore backend reports operating-system errors.
+    // Native Unix notification operations can report operating-system errors.
     #[cfg_attr(not(unix), allow(dead_code))]
     Io(io::Error),
 }
@@ -84,7 +85,7 @@ impl SemaphoreBackend for OsSemaphoreBackend {
         let handle =
             unsafe { libc::sem_open(c_name.as_ptr(), libc::O_CREAT, mode as libc::c_uint, 0) };
         if handle == libc::SEM_FAILED {
-            return Err(map_sem_error());
+            return Err(map_notify_error());
         }
         Ok(handle)
     }
@@ -92,7 +93,7 @@ impl SemaphoreBackend for OsSemaphoreBackend {
     fn post(&self, handle: &Self::Handle) -> Result<(), NotifyError> {
         let rc = unsafe { libc::sem_post(*handle) };
         if rc != 0 {
-            return Err(map_sem_error());
+            return Err(map_notify_error());
         }
         Ok(())
     }
@@ -116,7 +117,7 @@ impl SemaphoreBackend for OsSemaphoreBackend {
                     std::thread::sleep(poll);
                 }
                 Some(code) if code == libc::EINTR => continue,
-                _ => return Err(map_sem_error_with(err)),
+                _ => return Err(map_notify_error_with(err)),
             }
         }
     }
@@ -156,6 +157,85 @@ pub(crate) type PoolSemaphore = Semaphore<OsSemaphoreBackend>;
 unsafe impl Send for PoolSemaphore {}
 #[cfg(unix)]
 unsafe impl Sync for PoolSemaphore {}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn plasmite_address_wait_available() -> libc::c_int;
+    fn plasmite_address_wait(address: *mut u64, expected: u64, timeout_ns: u64) -> libc::c_int;
+    fn plasmite_address_wake_all(address: *mut u64) -> libc::c_int;
+}
+
+pub(crate) fn shared_address_available() -> bool {
+    #[cfg(test)]
+    if FORCE_UNAVAILABLE.load(Ordering::SeqCst) {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *AVAILABLE.get_or_init(|| unsafe { plasmite_address_wait_available() != 0 })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
+pub(crate) fn wait_for_sequence(
+    _word: &AtomicU64,
+    _expected: u64,
+    _timeout: Duration,
+) -> Result<WaitOutcome, NotifyError> {
+    #[cfg(target_os = "macos")]
+    {
+        // Touch this mapping before entering the kernel. This also handles a
+        // publication that wins the race after the cursor's empty-state check.
+        if _word.load(std::sync::atomic::Ordering::Acquire) != _expected.to_le() {
+            return Ok(WaitOutcome::Signaled);
+        }
+        if _timeout.is_zero() {
+            return Ok(WaitOutcome::TimedOut);
+        }
+        let nanos = _timeout.as_nanos().min(u64::MAX as u128) as u64;
+        // The borrowed atomic keeps the aligned mapped word alive through this
+        // compare-and-wait; the C bridge reads it and guards OS availability.
+        let ret = unsafe { plasmite_address_wait(_word.as_ptr(), _expected.to_le(), nanos) };
+        if ret >= 0 {
+            return Ok(WaitOutcome::Signaled);
+        }
+        let error = io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::ETIMEDOUT) => Ok(WaitOutcome::TimedOut),
+            Some(libc::EINTR) => Ok(WaitOutcome::Signaled),
+            _ => Err(map_notify_error_with(error)),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err(NotifyError::Unavailable)
+    }
+}
+
+pub(crate) fn post_for_pool(
+    _word: &AtomicU64,
+    name: &str,
+    cached: &mut Option<PoolSemaphore>,
+) -> Result<(), NotifyError> {
+    #[cfg(target_os = "macos")]
+    if shared_address_available() {
+        let ret = unsafe { plasmite_address_wake_all(_word.as_ptr()) };
+        if ret >= 0 {
+            return Ok(());
+        }
+        let error = io::Error::last_os_error();
+        return if error.raw_os_error() == Some(libc::ENOENT) {
+            Ok(()) // No waiter currently needs a hint.
+        } else {
+            Err(map_notify_error_with(error))
+        };
+    }
+    post_for_name(name, cached)
+}
 
 pub(crate) fn pool_semaphore_name(path: &Path) -> String {
     let bytes = canonical_path_bytes(path);
@@ -223,12 +303,12 @@ fn canonical_path_bytes(path: &Path) -> Vec<u8> {
 }
 
 #[cfg(unix)]
-fn map_sem_error() -> NotifyError {
-    map_sem_error_with(io::Error::last_os_error())
+fn map_notify_error() -> NotifyError {
+    map_notify_error_with(io::Error::last_os_error())
 }
 
 #[cfg(unix)]
-fn map_sem_error_with(err: io::Error) -> NotifyError {
+fn map_notify_error_with(err: io::Error) -> NotifyError {
     match err.raw_os_error() {
         Some(code) if code == libc::ENOSYS || code == libc::ENOTSUP => NotifyError::Unavailable,
         _ => NotifyError::Io(err),

@@ -318,9 +318,7 @@ fn follow_pool(
         terminal: false,
         retention_gap: false,
     };
-    let path = crate::pool_paths::resolve_named_pool_path(&sub.selection.pool, client.pool_dir()?)
-        .map_err(|_| Error::new(ErrorKind::Usage).with_message("invalid UDP pool name"))?;
-    let mut notify = plasmite::api::notify::open_for_path(&path);
+    let mut notify = plasmite::api::notify::open_for_pool(&pool);
     pool.check_current_path()?;
     reply(socket, key, wire::PROGRESS, &progress);
     let mut batch = 0;

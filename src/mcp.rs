@@ -1001,7 +1001,7 @@ impl PlasmiteMcpHandler {
             },
         };
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-        let mut notify = crate::api::notify::open_for_path(opened.path());
+        let mut notify = crate::api::notify::open_for_pool(&opened);
         let mut fell_behind = false;
 
         loop {

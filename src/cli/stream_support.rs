@@ -614,7 +614,7 @@ pub(crate) fn follow_pool(
     let mut drops = DropReporter::new(&cfg, pool_ref, pool_path.display().to_string());
     let mut deadline = FollowDeadline::new(cfg.timeout);
     let mut notify_handle = if cfg.notify {
-        notify::open_for_path(pool_path)
+        notify::open_for_pool(pool)
     } else {
         None
     };

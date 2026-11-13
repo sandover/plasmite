@@ -71,6 +71,10 @@ impl Cursor {
         self.observed_header = None;
     }
 
+    pub(crate) fn observed_generation(&self) -> u64 {
+        self.observed_header.map_or(0, |header| header.newest_seq)
+    }
+
     pub fn next(&mut self, pool: &Pool) -> Result<CursorResult, Error> {
         let _lock = pool.read_lock()?;
         self.next_locked(pool)
