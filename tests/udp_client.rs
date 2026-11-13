@@ -436,3 +436,228 @@ fn unknown_skip_reason_is_reserved_in_both_receive_phases() {
         server.join().unwrap();
     }
 }
+
+#[test]
+fn view_follow_preserves_arrival_order_and_retained_snapshots() {
+    let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let endpoint = peer.local_addr().unwrap();
+    let timestamp = 1_700_000_000_000_000_000u64;
+    let payload = lite3::encode_message(
+        &["lab".into()],
+        &json!({"temperature":23,"exact":i64::MAX,"negative":-0.0,"blob":"native bytes"}),
+    )
+    .unwrap();
+    let data = payload.as_doc().key_offset("data").unwrap();
+    let blob = payload.as_doc().key_offset_at(data, "blob").unwrap();
+    let mut payload = payload.as_slice().to_vec();
+    payload[blob] = lite3::sys::LITE3_TYPE_BYTES;
+    let original = payload.clone();
+    let server = thread::spawn(move || {
+        let (id, address, subscribe) = accept_subscription(&peer);
+        assert_eq!(subscribe["selection"]["start"]["kind"], "since");
+        let send_data = |seq: u64, time: u64| {
+            let mut body = seq.to_be_bytes().to_vec();
+            body.extend_from_slice(&time.to_be_bytes());
+            body.extend_from_slice(&payload);
+            peer.send_to(&packet(DATA, &id, &body), address).unwrap();
+        };
+        let progress = |next| {
+            packet(
+                PROGRESS,
+                &id,
+                &serde_json::to_vec(&json!({
+                    "start_seq": 1, "next_seq": next, "end_seq": null,
+                    "lease_ms": 30_000, "terminal": false
+                }))
+                .unwrap(),
+            )
+        };
+        send_data(10, timestamp); // DATA can open the follow before PROGRESS.
+        peer.send_to(&progress(20), address).unwrap();
+        peer.send_to(
+            &packet(
+                SKIP,
+                &id,
+                &serde_json::to_vec(&json!({
+                    "first": 11, "last": 11, "reason": "pressure"
+                }))
+                .unwrap(),
+            ),
+            address,
+        )
+        .unwrap();
+        peer.send_to(&progress(11), address).unwrap(); // Stale progress is descriptive.
+        for seq in [12, 11, 12] {
+            send_data(seq, timestamp);
+        }
+        send_data(13, timestamp - 1); // The requested timestamp filter still applies.
+        peer.send_to(&progress(21), address).unwrap();
+    });
+    let pool = UdpClient::new(format!("udp://{endpoint}"))
+        .unwrap()
+        .open_pool(&PoolRef::name("sensors"))
+        .unwrap();
+    let mut follow = pool
+        .follow_views(UdpFollowOptions {
+            start: UdpStart::Since(timestamp),
+            live: true,
+        })
+        .unwrap();
+    let mut retained = Vec::new();
+    let mut sequences = Vec::new();
+    let mut progress = Vec::new();
+    let mut skips = Vec::new();
+    for _ in 0..8 {
+        match follow
+            .next_event_timeout(Duration::from_secs(1))
+            .unwrap()
+            .expect("event")
+        {
+            plasmite::api::UdpViewEvent::Frame(frame) => {
+                sequences.push(frame.seq);
+                assert_eq!(frame.timestamp_ns, timestamp);
+                assert_eq!(frame.bytes(), original);
+                assert_eq!(
+                    frame.data().get("temperature").unwrap().unwrap().integer(),
+                    Some(23)
+                );
+                assert_eq!(
+                    frame
+                        .root()
+                        .get("meta")
+                        .unwrap()
+                        .unwrap()
+                        .get("tags")
+                        .unwrap()
+                        .unwrap()
+                        .index(0)
+                        .unwrap()
+                        .unwrap()
+                        .text(),
+                    Some("lab")
+                );
+                assert_eq!(
+                    frame.data().get("exact").unwrap().unwrap().integer(),
+                    Some(i64::MAX)
+                );
+                assert!(
+                    frame
+                        .data()
+                        .get("negative")
+                        .unwrap()
+                        .unwrap()
+                        .real()
+                        .unwrap()
+                        .is_sign_negative()
+                );
+                let bytes = frame.data().get("blob").unwrap().unwrap();
+                assert_eq!(bytes.kind(), lite3::sys::LITE3_TYPE_BYTES);
+                assert_eq!(bytes.span(), Some(b"native bytes\0".as_slice()));
+                retained.push(frame);
+            }
+            plasmite::api::UdpViewEvent::Gap {
+                first,
+                last,
+                reason,
+            } => skips.push((first, last, reason)),
+            plasmite::api::UdpViewEvent::Progress { next_seq, .. } => progress.push(next_seq),
+        }
+    }
+    assert_eq!(sequences, [10, 12, 11, 12]);
+    assert_eq!(progress, [20, 11, 21]);
+    assert_eq!(skips, [(11, 11, UdpSkipReason::Pressure)]);
+    assert!(
+        follow
+            .next_event_timeout(Duration::from_millis(20))
+            .unwrap()
+            .is_none()
+    );
+    assert!(!follow.is_finished());
+    follow.close();
+    server.join().unwrap();
+    drop(follow);
+    drop(pool);
+    assert_eq!(retained.len(), 4);
+    assert_eq!(
+        retained[0]
+            .data()
+            .get("temperature")
+            .unwrap()
+            .unwrap()
+            .integer(),
+        Some(23)
+    );
+    assert_ne!(retained[0].bytes().as_ptr(), retained[1].bytes().as_ptr());
+}
+
+#[test]
+fn view_follow_ends_at_terminal_progress_without_waiting_for_late_data() {
+    let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let endpoint = peer.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (id, address, _) = accept_subscription(&peer);
+        let payload = lite3::encode_message(&[], &json!({"sample": 1})).unwrap();
+        let data = |seq: u64| {
+            let mut body = seq.to_be_bytes().to_vec();
+            body.extend_from_slice(&1u64.to_be_bytes());
+            body.extend_from_slice(payload.as_slice());
+            packet(DATA, &id, &body)
+        };
+        peer.send_to(&data(10), address).unwrap();
+        peer.send_to(
+            &packet(
+                PROGRESS,
+                &id,
+                &serde_json::to_vec(&json!({
+                    "start_seq": 10, "next_seq": 12, "end_seq": 11,
+                    "lease_ms": 30_000, "terminal": true
+                }))
+                .unwrap(),
+            ),
+            address,
+        )
+        .unwrap();
+        peer.send_to(&data(11), address).unwrap();
+    });
+    let pool = UdpClient::new(format!("udp://{endpoint}"))
+        .unwrap()
+        .open_pool(&PoolRef::name("sensors"))
+        .unwrap();
+    let mut follow = pool
+        .follow_views(UdpFollowOptions {
+            start: UdpStart::Last(2),
+            live: false,
+        })
+        .unwrap();
+    assert!(
+        matches!(follow.next_event().unwrap(), Some(plasmite::api::UdpViewEvent::Frame(frame)) if frame.seq == 10)
+    );
+    assert!(matches!(
+        follow.next_event().unwrap(),
+        Some(plasmite::api::UdpViewEvent::Progress { terminal: true, .. })
+    ));
+    assert!(follow.next_event().unwrap().is_none());
+    server.join().unwrap();
+}
+
+#[test]
+fn view_follow_rejects_malformed_data_before_exposure() {
+    let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let endpoint = peer.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (id, address, _) = accept_subscription(&peer);
+        let invalid = lite3::Lite3Buf::from_json_str(r#"{"meta":{"tags":[7]},"data":{}}"#).unwrap();
+        let mut body = 1u64.to_be_bytes().to_vec();
+        body.extend_from_slice(&2u64.to_be_bytes());
+        body.extend_from_slice(invalid.as_slice());
+        peer.send_to(&packet(DATA, &id, &body), address).unwrap();
+    });
+    let pool = UdpClient::new(format!("udp://{endpoint}"))
+        .unwrap()
+        .open_pool(&PoolRef::name("sensors"))
+        .unwrap();
+    assert!(
+        matches!(pool.follow_views(UdpFollowOptions::new()),Err(error) if error.kind()==ErrorKind::Corrupt)
+    );
+    server.join().unwrap();
+}

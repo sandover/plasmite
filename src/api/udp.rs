@@ -102,11 +102,66 @@ pub enum UdpEvent {
     },
 }
 
-pub struct UdpFollow {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UdpStreamEvent<F> {
+    Frame(F),
+    /// Compatibility name for an explicit server SKIP, never inferred network loss.
+    Gap {
+        first: u64,
+        last: u64,
+        reason: UdpSkipReason,
+    },
+    Progress {
+        start_seq: u64,
+        next_seq: u64,
+        end_seq: Option<u64>,
+        terminal: bool,
+        retention_gap: bool,
+    },
+}
+
+/// View DATA retains a validated immutable snapshot.
+pub type UdpViewEvent = UdpStreamEvent<crate::view::MessageView>;
+
+impl From<UdpStreamEvent<UdpFrame>> for UdpEvent {
+    fn from(event: UdpStreamEvent<UdpFrame>) -> Self {
+        match event {
+            UdpStreamEvent::Frame(frame) => Self::Frame(frame),
+            UdpStreamEvent::Gap {
+                first,
+                last,
+                reason,
+            } => Self::Gap {
+                first,
+                last,
+                reason,
+            },
+            UdpStreamEvent::Progress {
+                start_seq,
+                next_seq,
+                end_seq,
+                terminal,
+                retention_gap,
+            } => Self::Progress {
+                start_seq,
+                next_seq,
+                end_seq,
+                terminal,
+                retention_gap,
+            },
+        }
+    }
+}
+
+pub struct UdpFollow(FollowReader<UdpFrame>);
+pub struct UdpViewFollow(FollowReader<crate::view::MessageView>);
+
+struct FollowReader<F> {
     socket: Option<UdpSocket>,
     id: wire::Id,
     selection: wire::Selection,
-    pending: VecDeque<UdpEvent>,
+    pending: VecDeque<UdpStreamEvent<F>>,
+    admit: fn(u64, u64, &[u8]) -> Result<F, Error>,
     initial_bounds: Option<FollowBounds>,
     last_activity: Instant,
     next_renewal: Instant,
@@ -208,6 +263,23 @@ impl UdpPool {
 
     /// Subscribe to best-effort DATA in arrival order, including late messages and duplicates.
     pub fn follow(&self, options: UdpFollowOptions) -> Result<UdpFollow, Error> {
+        Ok(UdpFollow(self.follow_reader(options, admit_frame)?))
+    }
+
+    /// Follow the same arrival-order event stream, retaining DATA as owned views.
+    pub fn follow_views(&self, options: UdpFollowOptions) -> Result<UdpViewFollow, Error> {
+        Ok(UdpViewFollow(
+            self.follow_reader(options, |seq, time, bytes| {
+                crate::view::MessageView::from_bytes(bytes, seq, time)
+            })?,
+        ))
+    }
+
+    fn follow_reader<F>(
+        &self,
+        options: UdpFollowOptions,
+        admit: fn(u64, u64, &[u8]) -> Result<F, Error>,
+    ) -> Result<FollowReader<F>, Error> {
         let mut id = [0u8; 16];
         getrandom::fill(&mut id).map_err(|error| {
             Error::new(ErrorKind::Internal)
@@ -224,11 +296,12 @@ impl UdpPool {
             live: options.live,
         };
         let now = Instant::now();
-        let mut follow = UdpFollow {
+        let mut follow = FollowReader {
             socket: Some(socket),
             id,
             selection,
             pending: VecDeque::new(),
+            admit,
             initial_bounds: None,
             last_activity: now,
             next_renewal: now + Duration::from_millis(wire::RENEW_MS),
@@ -239,15 +312,18 @@ impl UdpPool {
     }
 }
 
-impl UdpFollow {
+impl<F> FollowReader<F> {
     /// Wait for one event. Return `None` when a finished or closed follow has no queued events.
-    pub fn next_event(&mut self) -> Result<Option<UdpEvent>, Error> {
+    pub fn next_event(&mut self) -> Result<Option<UdpStreamEvent<F>>, Error> {
         self.next_event_until(None, false)
     }
 
     /// Wait for one event up to `timeout`. `None` can also mean the wait expired;
     /// call `is_finished` to distinguish that case from the end of a finite follow.
-    pub fn next_event_timeout(&mut self, timeout: Duration) -> Result<Option<UdpEvent>, Error> {
+    pub fn next_event_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<UdpStreamEvent<F>>, Error> {
         let deadline = Instant::now().checked_add(timeout);
         self.next_event_until(deadline, timeout.is_zero())
     }
@@ -324,7 +400,7 @@ impl UdpFollow {
         &mut self,
         deadline: Option<Instant>,
         mut poll_once: bool,
-    ) -> Result<Option<UdpEvent>, Error> {
+    ) -> Result<Option<UdpStreamEvent<F>>, Error> {
         if let Some(event) = self.pending.pop_front() {
             return Ok(Some(event));
         }
@@ -488,7 +564,7 @@ impl UdpFollow {
                 end_seq: progress.end_seq,
             });
         }
-        self.pending.push_back(UdpEvent::Progress {
+        self.pending.push_back(UdpStreamEvent::Progress {
             start_seq: progress.start_seq,
             next_seq: progress.next_seq,
             end_seq: progress.end_seq,
@@ -508,8 +584,7 @@ impl UdpFollow {
         let seq = u64::from_be_bytes(body[..8].try_into().expect("fixed sequence field"));
         let timestamp_ns =
             u64::from_be_bytes(body[8..16].try_into().expect("fixed timestamp field"));
-        let payload = body[16..].to_vec();
-        validate_bytes(&payload).map_err(|error| {
+        let frame = (self.admit)(seq, timestamp_ns, &body[16..]).map_err(|error| {
             Error::new(ErrorKind::Corrupt)
                 .with_message("UDP data packet contains invalid Lite3")
                 .with_source(error)
@@ -520,11 +595,7 @@ impl UdpFollow {
             _ => None,
         };
         if since.is_none_or(|since| timestamp_ns >= since) {
-            self.pending.push_back(UdpEvent::Frame(UdpFrame {
-                seq,
-                timestamp_ns,
-                payload,
-            }));
+            self.pending.push_back(UdpStreamEvent::Frame(frame));
         }
         Ok(())
     }
@@ -533,7 +604,7 @@ impl UdpFollow {
         if skip.first > skip.last || matches!(skip.reason, UdpSkipReason::Unknown) {
             return Err(protocol_error("UDP skip range or reason is invalid"));
         }
-        self.pending.push_back(UdpEvent::Gap {
+        self.pending.push_back(UdpStreamEvent::Gap {
             first: skip.first,
             last: skip.last,
             reason: skip.reason,
@@ -559,11 +630,50 @@ impl UdpFollow {
     }
 }
 
-impl Drop for UdpFollow {
+impl<F> Drop for FollowReader<F> {
     fn drop(&mut self) {
         self.close();
     }
 }
+
+fn admit_frame(seq: u64, timestamp_ns: u64, bytes: &[u8]) -> Result<UdpFrame, Error> {
+    let payload = bytes.to_vec();
+    validate_bytes(&payload)?;
+    Ok(UdpFrame {
+        seq,
+        timestamp_ns,
+        payload,
+    })
+}
+
+macro_rules! follow_adapter {
+    ($follow:ident, $event:ty) => {
+        impl $follow {
+            /// Wait for an event; None means this finite or closed follow drained.
+            pub fn next_event(&mut self) -> Result<Option<$event>, Error> {
+                self.0.next_event().map(|event| event.map(Into::into))
+            }
+            /// None can also mean the timeout expired; inspect is_finished().
+            pub fn next_event_timeout(
+                &mut self,
+                timeout: Duration,
+            ) -> Result<Option<$event>, Error> {
+                self.0
+                    .next_event_timeout(timeout)
+                    .map(|event| event.map(Into::into))
+            }
+            pub fn is_finished(&self) -> bool {
+                self.0.is_finished()
+            }
+            /// Send best-effort CLOSE and retain any already queued events.
+            pub fn close(&mut self) {
+                self.0.close();
+            }
+        }
+    };
+}
+follow_adapter!(UdpFollow, UdpEvent);
+follow_adapter!(UdpViewFollow, UdpViewEvent);
 
 fn parse_endpoint(endpoint: &str) -> Result<(String, u16, SocketAddr), Error> {
     let url = parse_udp_url(endpoint, false)?;

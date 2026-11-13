@@ -437,3 +437,24 @@ verified frames. A failed validation leaves the count unknown. Later file change
 do not update these facts. `validate_pool` and the CLI machine report keep their
 existing shape; human doctor output uses the captured observation without reopening
 its path.
+
+
+### Rust owned-view streams
+
+`PoolApiExt::tail_views(TailOptions)` returns `ViewTail`, a pull-based iterator
+whose items are `Result<MessageView, Error>`. `next_view()` also exposes the
+existing explicit `Result<Option<MessageView>, Error>` form. It uses the same
+local tail cursor, required-tag filter, matching-message limit, timeout,
+notification, cancellation and retention-gap policy as the legacy local tails.
+Each accepted frame owns an independent immutable Lite3 snapshot. Retained values
+survive pool overwrite and tail/pool drop; reading a field borrows that snapshot.
+
+`UdpPool::follow_views(UdpFollowOptions)` returns `UdpViewFollow` with the same
+`next_event`, `next_event_timeout`, `is_finished` and `close` lifecycle as
+`UdpFollow`. Its `UdpViewEvent::Frame` contains `MessageView`; Gap and Progress
+retain their existing fields and meaning. The shared transport state keeps the
+same startup, renewal, finite completion and arrival-order behavior, including
+late/duplicate DATA. DATA admission copies the receive-buffer payload into its
+owner, checks the complete Lite3 message once, and builds no native data tree.
+Legacy `UdpFrame` remains a public mutable byte vector; its `message()` method
+continues to validate caller-modified bytes before materializing them.

@@ -117,6 +117,11 @@ impl Default for TailOptions {
 
 pub struct Tail<'a>(TailReader<'a>);
 
+/// A pull-based stream of independent immutable Lite3 snapshots.
+///
+/// Retaining a message keeps only that message alive after this tail or pool closes.
+pub struct ViewTail<'a>(TailReader<'a>);
+
 pub struct Lite3Tail<'a>(TailReader<'a>);
 
 struct TailReader<'a> {
@@ -454,6 +459,43 @@ impl Tail<'_> {
     }
 }
 
+impl ViewTail<'_> {
+    pub fn next_view(&mut self) -> Result<Option<crate::view::MessageView>, Error> {
+        self.0.next(|frame, required| {
+            let view = crate::view::MessageView::from_owned(
+                frame.payload,
+                frame.seq,
+                frame.timestamp_ns,
+                frame.flags,
+            )?;
+            if !required.is_empty() {
+                let tags = view.root().get("meta")?.unwrap().get("tags")?.unwrap();
+                for required in required {
+                    let mut found = false;
+                    for entry in tags.iter()? {
+                        if entry?.1.text() == Some(required.as_str()) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if !found {
+                        return Ok(None);
+                    }
+                }
+            }
+            Ok(Some(view))
+        })
+    }
+}
+
+impl Iterator for ViewTail<'_> {
+    type Item = Result<crate::view::MessageView, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_view().transpose()
+    }
+}
+
 impl Lite3Tail<'_> {
     pub fn next_frame(&mut self) -> Result<Option<FrameRef>, Error> {
         self.0.next(|frame, tags| {
@@ -650,6 +692,9 @@ pub trait PoolApiExt {
 
     fn tail(&self, options: TailOptions) -> Tail<'_>;
 
+    /// Tail validated owned views without constructing JSON or native data trees.
+    fn tail_views(&self, options: TailOptions) -> ViewTail<'_>;
+
     /// Tail frames without JSON decoding.
     fn tail_lite3(&self, options: TailOptions) -> Lite3Tail<'_>;
 }
@@ -726,6 +771,10 @@ impl PoolApiExt for Pool {
 
     fn tail(&self, options: TailOptions) -> Tail<'_> {
         Tail(TailReader::new(self, options))
+    }
+
+    fn tail_views(&self, options: TailOptions) -> ViewTail<'_> {
+        ViewTail(TailReader::new(self, options))
     }
 
     fn tail_lite3(&self, options: TailOptions) -> Lite3Tail<'_> {

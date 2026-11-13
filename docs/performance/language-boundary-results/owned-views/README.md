@@ -569,5 +569,54 @@ BEFORE/libplasmite.dylib --library AFTER/libplasmite.dylib --repeats 7 --output
 proven-seal.raw.json`. Build the unchanged C worker first, outside the timing
 window. Both archived source trees identify their exact core implementations.
 
+
+## Rust local and UDP stream checkpoint
+
+`Pool::tail_views` transfers each cursor snapshot allocation into its immutable
+owner and validates it once. It shares `TailState` with the legacy adapters, so
+view delivery adds no prefetch queue, gap tracker or cancellation policy.
+Required-tag comparisons borrow strings from the checked owner. Each delivered
+message has its own allocation; retaining a child cannot retain another frame.
+
+`UdpPool::follow_views` shares the legacy follow reader's socket, startup,
+renewal, skip/progress queue, timestamp filter and finite-completion policy.
+Its DATA adapter copies from the stack receive buffer directly into the view
+owner and validates that owner once. The ordinary allocator supplies aligned
+storage; the owner retains its existing alignment repair for other allocators.
+It creates no intermediate `UdpFrame` or JSON tree. Legacy UDP events and mutable
+`UdpFrame` payload semantics stay intact.
+
+The release example `bench_view_streams` supplies central-run lanes for local
+and UDP raw consumption, selected view access, full view decoding and legacy
+JSON/native consumption. Build it outside timing:
+
+```sh
+CARGO_TARGET_DIR=tmp/stream-target cargo build --release --example bench_view_streams
+# One lane per process; alternate lane order across repeated runs.
+tmp/stream-target/release/examples/bench_view_streams local view_selected wide 1000
+tmp/stream-target/release/examples/bench_view_streams udp view_full array 1000
+```
+
+Transport choices are `local` and `udp`; lanes are `raw`, `raw_forward`,
+`view_selected`, `view_full`, `view_forward` and `json`; fixtures are `small`, `wide`, `long` and `array`. Setup,
+encoding and prefilled local writes stay outside timing. Forwarding lanes append
+to a separate local pool and verify the final exact payload. Every lane verifies its
+message count and checksum. UDP uses one DATA packet in flight with a test-only
+channel acknowledgement to prevent uncontrolled loss; it checks every sequence.
+Those timings include loopback delivery and channel pacing, so they describe
+matched delivery work rather than a saturated UDP throughput ceiling. The mock
+peer sends a direct valid opening PROGRESS response, excluding cookie exchange
+from timing. Full performance matrices and claims await the central run.
+
+
+[The Rust stream checkpoint manifest](rust-stream-checkpoint.json) and
+complete compiled source (outside Git) identify the fixed binary
+at `tmp/stream-checkpoint/bench_view_streams`. The overlay applies to its recorded
+base commit, which supplies vendored dependencies. Twelve focused local/UDP
+tests and all-target Clippy pass. A three-message smoke run verifies all twelve
+transport/lane combinations, including exact forwarded payloads; it supplies no
+performance claim. The mock peer uses the same 128 KiB send-buffer budget as the
+existing client, so large valid datagrams work on macOS.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

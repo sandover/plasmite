@@ -4,8 +4,8 @@
 //! Invariants: Additive-only changes to `api`; internal modules remain private.
 //! Invariants: Core modules prefer explicit inputs/outputs over hidden state.
 mod abi;
-mod abi_builder;
 mod abi_borrowed;
+mod abi_builder;
 mod abi_fields;
 mod abi_views;
 pub mod api;
