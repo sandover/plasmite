@@ -16,6 +16,7 @@ use crate::api::{
 };
 use crate::core::error::{Error, ErrorKind};
 use crate::core::pool::Pool;
+#[cfg(test)]
 use serde_json::Value;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
@@ -32,7 +33,7 @@ pub struct plsm_client {
 
 #[repr(C)]
 pub struct plsm_pool {
-    pool: Pool,
+    pub(crate) pool: Pool,
 }
 
 #[repr(C)]
@@ -283,31 +284,28 @@ pub extern "C" fn plsm_pool_append_json(
         Ok(pool) => pool,
         Err(code) => return code,
     };
-    let data = match parse_json_bytes(json_bytes, json_len) {
-        Ok(value) => value,
+    let result = (|| {
+        let parsed =
+            crate::core::lite3::ParsedJson::parse(unsafe { json_input(json_bytes, json_len) }?)?;
+        let tags = unsafe { tag_refs(tags, tags_len) }?;
+        let (seq, timestamp_ns) = append_parsed(&mut pool.pool, &parsed, &tags, durability)?;
+        let wire = crate::interface_wire::MessageWire::new(
+            seq,
+            crate::api::format_ts(timestamp_ns)?,
+            &tags,
+            parsed.value(),
+        );
+        serde_json::to_vec(&wire).map_err(|err| {
+            Error::new(ErrorKind::Internal)
+                .with_message("failed to serialize message")
+                .with_source(err)
+        })
+    })();
+    match result.and_then(|bytes| write_json_buf(out_message, bytes)) {
+        Ok(()) => {}
         Err(err) => return fail(out_err, err),
-    };
-    let tags = match parse_tags(tags, tags_len) {
-        Ok(tags) => tags,
-        Err(err) => return fail(out_err, err),
-    };
-    let durability = match durability {
-        0 => crate::api::Durability::Fast,
-        1 => crate::api::Durability::Flush,
-        _ => {
-            return fail(
-                out_err,
-                Error::new(ErrorKind::Usage).with_message("invalid durability"),
-            );
-        }
-    };
-    let message = match pool.pool.append_json_now(&data, &tags, durability) {
-        Ok(message) => message,
-        Err(err) => return fail(out_err, err),
-    };
-    if let Err(err) = write_message_buf(out_message, message) {
-        return fail(out_err, err);
     }
+
     0
 }
 
@@ -378,28 +376,17 @@ pub extern "C" fn plsm_pool_append_json_identity(
         Ok(pool) => pool,
         Err(code) => return code,
     };
-    let data = match parse_json_bytes(json_bytes, json_len) {
-        Ok(value) => value,
-        Err(err) => return fail(out_err, err),
-    };
-    let tags = match parse_tags(tags, tags_len) {
-        Ok(tags) => tags,
-        Err(err) => return fail(out_err, err),
-    };
-    let durability = match durability {
-        0 => crate::api::Durability::Fast,
-        1 => crate::api::Durability::Flush,
-        _ => {
-            return fail(
-                out_err,
-                Error::new(ErrorKind::Usage).with_message("invalid durability"),
-            );
-        }
-    };
-    let (seq, timestamp_ns) = match pool.pool.append_json_identity_now(&data, &tags, durability) {
+    let result = (|| {
+        let parsed =
+            crate::core::lite3::ParsedJson::parse(unsafe { json_input(json_bytes, json_len) }?)?;
+        let tags = unsafe { tag_refs(tags, tags_len) }?;
+        append_parsed(&mut pool.pool, &parsed, &tags, durability)
+    })();
+    let (seq, timestamp_ns) = match result {
         Ok(identity) => identity,
         Err(err) => return fail(out_err, err),
     };
+
     unsafe {
         *out_identity = plsm_append_identity { seq, timestamp_ns };
     }
@@ -898,15 +885,14 @@ pub extern "C" fn plsm_udp_pool_send_json(
             Error::new(ErrorKind::Usage).with_message("pool is null"),
         );
     }
-    let data = match parse_json_bytes(json_bytes, json_len) {
-        Ok(value) => value,
-        Err(err) => return fail(out_err, err),
-    };
-    let tags = match parse_tags(tags, tags_len) {
-        Ok(tags) => tags,
-        Err(err) => return fail(out_err, err),
-    };
-    match unsafe { &*pool }.pool.send_json(&data, &tags) {
+    let result = (|| {
+        let parsed =
+            crate::core::lite3::ParsedJson::parse(unsafe { json_input(json_bytes, json_len) }?)?;
+        let tags = unsafe { tag_refs(tags, tags_len) }?;
+        let payload = parsed.encode_message(&tags)?;
+        unsafe { &*pool }.pool.send_lite3(payload.as_slice())
+    })();
+    match result {
         Ok(()) => 0,
         Err(err) => fail(out_err, err),
     }
@@ -1252,7 +1238,7 @@ fn borrow_client<'a>(
     unsafe { Ok(&mut *client) }
 }
 
-fn borrow_pool<'a>(
+pub(crate) fn borrow_pool<'a>(
     pool: *mut plsm_pool,
     out_err: *mut *mut plsm_error,
 ) -> Result<&'a mut plsm_pool, i32> {
@@ -1324,21 +1310,33 @@ fn parse_pool_ref(input: *const c_char, out_err: *mut *mut plsm_error) -> Result
     }
 }
 
-fn parse_json_bytes(bytes: *const u8, len: usize) -> Result<Value, Error> {
+// Callers retain these C input bytes through the ABI operation.
+unsafe fn json_input<'a>(bytes: *const u8, len: usize) -> Result<&'a [u8], Error> {
     if bytes.is_null() {
         return Err(Error::new(ErrorKind::Usage).with_message("json_bytes is null"));
     }
-    let slice = unsafe { std::slice::from_raw_parts(bytes, len) };
-    let text = std::str::from_utf8(slice).map_err(|err| {
-        Error::new(ErrorKind::Usage)
-            .with_message("invalid json utf-8")
-            .with_source(err)
-    })?;
-    serde_json::from_str(text).map_err(|err| {
-        Error::new(ErrorKind::Usage)
-            .with_message("invalid json")
-            .with_source(err)
-    })
+    Ok(unsafe { std::slice::from_raw_parts(bytes, len) })
+}
+
+fn append_parsed(
+    pool: &mut Pool,
+    parsed: &crate::core::lite3::ParsedJson,
+    tags: &[&str],
+    durability: u32,
+) -> Result<(u64, u64), Error> {
+    let durability = match durability {
+        0 => crate::api::Durability::Fast,
+        1 => crate::api::Durability::Flush,
+        _ => return Err(Error::new(ErrorKind::Usage).with_message("invalid durability")),
+    };
+    let payload = parsed.encode_message(tags)?;
+    let timestamp_ns = crate::api::now_ns()?;
+    // This private builder already validated and encoded the complete message.
+    let seq = pool.append_with_options(
+        payload.as_slice(),
+        crate::api::AppendOptions::new(timestamp_ns, durability),
+    )?;
+    Ok((seq, timestamp_ns))
 }
 
 fn parse_utf8_cstr(input: *const c_char, name: &str) -> Result<String, Error> {
@@ -1417,7 +1415,7 @@ fn write_udp_payload(payload: Vec<u8>) -> plsm_buf {
     out
 }
 
-fn parse_tags(tags: *const *const c_char, len: usize) -> Result<Vec<String>, Error> {
+unsafe fn tag_refs<'a>(tags: *const *const c_char, len: usize) -> Result<Vec<&'a str>, Error> {
     if tags.is_null() {
         return Ok(Vec::new());
     }
@@ -1427,11 +1425,11 @@ fn parse_tags(tags: *const *const c_char, len: usize) -> Result<Vec<String>, Err
         if item.is_null() {
             return Err(Error::new(ErrorKind::Usage).with_message("tags contains null"));
         }
-        let value = unsafe { CStr::from_ptr(*item) }
-            .to_str()
-            .map_err(|_| Error::new(ErrorKind::Usage).with_message("tags invalid UTF-8"))?
-            .to_string();
-        out.push(value);
+        out.push(unsafe { CStr::from_ptr(*item) }.to_str().map_err(|err| {
+            Error::new(ErrorKind::Usage)
+                .with_message("tags invalid UTF-8")
+                .with_source(err)
+        })?);
     }
     Ok(out)
 }
@@ -1457,7 +1455,7 @@ fn write_message_buf(
     write_json_buf(out_message, json_bytes)
 }
 
-fn write_json_buf(out_message: *mut plsm_buf, json_bytes: Vec<u8>) -> Result<(), Error> {
+pub(crate) fn write_json_buf(out_message: *mut plsm_buf, json_bytes: Vec<u8>) -> Result<(), Error> {
     if out_message.is_null() {
         return Err(Error::new(ErrorKind::Usage).with_message("out_message is null"));
     }
@@ -1491,7 +1489,7 @@ fn write_lite3_frame(
     Ok(())
 }
 
-fn fail(out_err: *mut *mut plsm_error, err: Error) -> i32 {
+pub(crate) fn fail(out_err: *mut *mut plsm_error, err: Error) -> i32 {
     if out_err.is_null() {
         return -1;
     }

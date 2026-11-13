@@ -205,13 +205,104 @@ extern int _lite3_json_dec_obj(unsigned char *, size_t *, size_t, size_t,
 extern int _lite3_json_dec_arr(unsigned char *, size_t *, size_t, size_t,
                              size_t, yyjson_doc *, yyjson_val *);
 
+/* Match JSON value semantics before the C-string-keyed storage builder runs.
+ * A signed integer zero comes only from the token -0; preserve its sign.
+ */
+static int prepare_json_values(yyjson_val *value, unsigned depth)
+{
+        if (depth > LITE3_JSON_NESTING_DEPTH_MAX) { errno = EINVAL; return -1; }
+        if (yyjson_is_sint(value) && yyjson_get_sint(value) == 0)
+                yyjson_set_real(value, -0.0);
+        if (yyjson_is_obj(value)) {
+                yyjson_obj_iter iter = yyjson_obj_iter_with(value);
+                yyjson_val *key;
+                while ((key = yyjson_obj_iter_next(&iter))) {
+                        if (strlen(yyjson_get_str(key)) != yyjson_get_len(key)) {
+                                errno = EINVAL; return -1;
+                        }
+                        if (prepare_json_values(yyjson_obj_iter_get_val(key), depth + 1) < 0) return -1;
+                }
+        } else if (yyjson_is_arr(value)) {
+                yyjson_arr_iter iter = yyjson_arr_iter_with(value);
+                yyjson_val *item;
+                while ((item = yyjson_arr_iter_next(&iter)))
+                        if (prepare_json_values(item, depth + 1) < 0) return -1;
+        }
+        return 0;
+}
+
 void *plasmite_lite3_json_parse(const char *json, size_t len, size_t *values)
 {
         errno = 0;
         yyjson_doc *doc = yyjson_read_opts((char *)json, len, YYJSON_READ_NOFLAG, NULL, NULL);
         if (!doc) errno = EINVAL;
-        else *values = yyjson_doc_get_val_count(doc);
+        else if (prepare_json_values(yyjson_doc_get_root(doc), 0) < 0) {
+                yyjson_doc_free(doc); doc = NULL;
+        } else *values = yyjson_doc_get_val_count(doc);
         return doc;
+}
+
+uintptr_t plasmite_json_root(void *doc) { return (uintptr_t)yyjson_doc_get_root(doc); }
+size_t plasmite_json_count(uintptr_t node) { return yyjson_get_len((yyjson_val *)node); }
+void plasmite_json_value_view(uintptr_t node, plasmite_lite3_value *out)
+{
+        yyjson_val *value = (yyjson_val *)node;
+        *out = (plasmite_lite3_value){0};
+        switch (yyjson_get_type(value)) {
+        case YYJSON_TYPE_NULL: out->type = LITE3_TYPE_NULL; break;
+        case YYJSON_TYPE_BOOL: out->type = LITE3_TYPE_BOOL; out->integer = yyjson_get_bool(value); break;
+        case YYJSON_TYPE_STR:
+                out->type = LITE3_TYPE_STRING; out->text = yyjson_get_str(value); out->text_len = yyjson_get_len(value); break;
+        case YYJSON_TYPE_OBJ: out->type = LITE3_TYPE_OBJECT; break;
+        case YYJSON_TYPE_ARR: out->type = LITE3_TYPE_ARRAY; break;
+        case YYJSON_TYPE_NUM:
+                if (yyjson_is_real(value)) { out->type = LITE3_TYPE_F64; out->real = yyjson_get_real(value); }
+                else if (yyjson_is_uint(value)) {
+                        out->type = 9; /* Parsed JSON uint64; Lite3 stores only signed integers. */
+                        uint64_t integer = yyjson_get_uint(value);
+                        memcpy(&out->integer, &integer, sizeof(integer));
+                } else { out->type = LITE3_TYPE_I64; out->integer = yyjson_get_sint(value); }
+                break;
+        default: out->type = LITE3_TYPE_INVALID; break;
+        }
+}
+int plasmite_json_entries(uintptr_t node, plasmite_lite3_entry *out, size_t count)
+{
+        yyjson_val *value = (yyjson_val *)node;
+        size_t i = 0;
+        if (yyjson_is_obj(value)) {
+                yyjson_obj_iter iter = yyjson_obj_iter_with(value);
+                yyjson_val *key;
+                while ((key = yyjson_obj_iter_next(&iter))) {
+                        if (i == count) return -1;
+                        out[i++] = (plasmite_lite3_entry){yyjson_get_str(key), yyjson_get_len(key),
+                                                        (uintptr_t)yyjson_obj_iter_get_val(key)};
+                }
+        } else {
+                yyjson_arr_iter iter = yyjson_arr_iter_with(value);
+                yyjson_val *item;
+                while ((item = yyjson_arr_iter_next(&iter))) {
+                        if (i == count) return -1;
+                        out[i++] = (plasmite_lite3_entry){NULL, 0, (uintptr_t)item};
+                }
+        }
+        return i == count ? 0 : -1;
+}
+
+int plasmite_json_message_build(void *parsed, const plasmite_text_ref *tags, size_t count,
+                               unsigned char *buf, size_t *out_len, size_t capacity)
+{
+        yyjson_doc *doc = parsed;
+        yyjson_val *root = yyjson_doc_get_root(doc);
+        if (!yyjson_is_obj(root)) { errno = EINVAL; return -1; }
+        size_t meta, array, data;
+        if (lite3_init_obj(buf, out_len, capacity) < 0 ||
+            lite3_set_obj(buf, out_len, 0, capacity, "meta", &meta) < 0 ||
+            lite3_set_arr(buf, out_len, meta, capacity, "tags", &array) < 0) return -1;
+        for (size_t i = 0; i < count; ++i)
+                if (lite3_arr_append_str_n(buf, out_len, array, capacity, tags[i].ptr, tags[i].len) < 0) return -1;
+        if (lite3_set_obj(buf, out_len, 0, capacity, "data", &data) < 0) return -1;
+        return _lite3_json_dec_obj(buf, out_len, data, capacity, 1, doc, root);
 }
 
 void plasmite_lite3_json_doc_free(void *doc)
@@ -357,6 +448,15 @@ int plasmite_lite3_count(
                 return -1;
         }
         return lite3_count((unsigned char *)buf, buf_len, ofs, out);
+}
+
+int plasmite_lite3_arr_get_val_ofs(const unsigned char *buf, size_t len, size_t ofs, uint32_t index, size_t *out)
+{
+        if (verify_node(buf, len, ofs) < 0) return -1;
+        lite3_val *value;
+        if (_lite3_get_by_index(buf, len, ofs, index, &value) < 0) return -1;
+        *out = (size_t)((const unsigned char *)value - buf);
+        return 0;
 }
 
 int plasmite_lite3_arr_get_type(

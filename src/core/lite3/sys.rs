@@ -14,6 +14,13 @@ pub const LITE3_TYPE_STRING: u8 = 5;
 pub const LITE3_TYPE_OBJECT: u8 = 6;
 pub const LITE3_TYPE_ARRAY: u8 = 7;
 pub const LITE3_TYPE_INVALID: u8 = 8;
+pub(crate) const JSON_TYPE_U64: u8 = 9;
+
+#[repr(C)]
+pub(crate) struct TextRef {
+    pub ptr: *const c_char,
+    pub len: usize,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -34,6 +41,18 @@ pub(crate) struct ValueView {
 }
 
 unsafe extern "C" {
+    pub(crate) fn plasmite_json_root(doc: *mut c_void) -> usize;
+    pub(crate) fn plasmite_json_value_view(value: usize, out: *mut ValueView);
+    pub(crate) fn plasmite_json_count(value: usize) -> usize;
+    pub(crate) fn plasmite_json_entries(value: usize, out: *mut Entry, count: usize) -> c_int;
+    pub(crate) fn plasmite_json_message_build(
+        doc: *mut c_void,
+        tags: *const TextRef,
+        count: usize,
+        buf: *mut u8,
+        out_len: *mut usize,
+        capacity: usize,
+    ) -> c_int;
     pub(crate) fn plasmite_lite3_entries(
         buf: *const u8,
         len: usize,
@@ -116,6 +135,14 @@ unsafe extern "C" {
         buf_len: usize,
         ofs: usize,
         out: *mut u32,
+    ) -> c_int;
+
+    pub(crate) fn plasmite_lite3_arr_get_val_ofs(
+        buf: *const u8,
+        len: usize,
+        ofs: usize,
+        index: u32,
+        out: *mut usize,
     ) -> c_int;
 
     pub fn plasmite_lite3_arr_get_type(

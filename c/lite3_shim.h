@@ -44,6 +44,13 @@ void plasmite_lite3_value_view(const unsigned char *buf, size_t ofs, plasmite_li
 void *plasmite_lite3_json_parse(const char *json, size_t len, size_t *values);
 void plasmite_lite3_json_doc_free(void *doc);
 int plasmite_lite3_json_build(void *doc, unsigned char *buf, size_t *out_len, size_t buf_sz);
+typedef struct { const char *ptr; size_t len; } plasmite_text_ref;
+uintptr_t plasmite_json_root(void *doc);
+void plasmite_json_value_view(uintptr_t value, plasmite_lite3_value *out);
+size_t plasmite_json_count(uintptr_t value);
+int plasmite_json_entries(uintptr_t value, plasmite_lite3_entry *out, size_t count);
+int plasmite_json_message_build(void *doc, const plasmite_text_ref *tags, size_t count,
+                               unsigned char *buf, size_t *out_len, size_t capacity);
 
 int plasmite_lite3_json_dec(
         const char *json_str,
@@ -100,6 +107,8 @@ int plasmite_lite3_count(
         size_t buf_len,
         size_t ofs,
         uint32_t *out);
+
+int plasmite_lite3_arr_get_val_ofs(const unsigned char *buf, size_t len, size_t ofs, uint32_t index, size_t *out);
 
 int plasmite_lite3_arr_get_type(
         const unsigned char *buf,

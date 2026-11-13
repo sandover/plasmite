@@ -650,7 +650,7 @@ fn data_json(doc: Lite3DocRef<'_>) -> Result<String, Error> {
     doc.to_json_at(data_ofs, false)
 }
 
-fn now_ns() -> Result<u64, Error> {
+pub(crate) fn now_ns() -> Result<u64, Error> {
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|err| {
@@ -661,7 +661,7 @@ fn now_ns() -> Result<u64, Error> {
     Ok(duration.as_nanos() as u64)
 }
 
-fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
+pub(crate) fn format_ts(timestamp_ns: u64) -> Result<String, Error> {
     use time::format_description::well_known::Rfc3339;
     let ts =
         time::OffsetDateTime::from_unix_timestamp_nanos(timestamp_ns as i128).map_err(|err| {

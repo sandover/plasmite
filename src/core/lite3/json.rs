@@ -1,10 +1,16 @@
 //! Serialize a validated immutable Lite3 view without building an owned data tree.
-use super::{Lite3DocRef, sys};
+use super::{Lite3DocRef, ParsedJson, sys};
 use crate::core::error::{Error, ErrorKind};
 use serde::ser::{Error as _, Serialize, SerializeMap, SerializeSeq, Serializer};
 
+#[derive(Clone, Copy)]
+enum Source<'a> {
+    Lite3(Lite3DocRef<'a>),
+    Parsed(&'a ParsedJson),
+}
+
 pub(crate) struct JsonValue<'a> {
-    doc: Lite3DocRef<'a>,
+    source: Source<'a>,
     offset: usize,
 }
 
@@ -14,23 +20,54 @@ impl<'a> JsonValue<'a> {
         match unsafe {
             sys::plasmite_lite3_verify_json(doc.bytes().as_ptr(), doc.bytes().len(), offset)
         } {
-            0 | 1 => Ok(Self { doc, offset }),
+            // The checked walk established readability of this immutable subtree.
+            0 | 1 => Ok(unsafe { Self::from_validated(doc, offset) }),
             _ => Err(Error::new(ErrorKind::Corrupt).with_message("failed to decode lite3")),
         }
+    }
+    /// Format a node whose immutable owner established whole-frame readability.
+    ///
+    /// # Safety
+    /// The node and descendants must be readable, and the bytes must retain that
+    /// validation proof and immutable lifetime.
+    pub(crate) unsafe fn from_validated(doc: Lite3DocRef<'a>, offset: usize) -> Self {
+        Self {
+            source: Source::Lite3(doc),
+            offset,
+        }
+    }
+    pub(super) fn from_parsed(doc: &'a ParsedJson) -> Self {
+        Self {
+            source: Source::Parsed(doc),
+            offset: unsafe { sys::plasmite_json_root(doc.ptr.as_ptr()) },
+        }
+    }
+    fn view(&self) -> sys::ValueView {
+        let mut value = sys::ValueView::default();
+        unsafe {
+            match self.source {
+                Source::Lite3(doc) => {
+                    sys::plasmite_lite3_value_view(doc.bytes().as_ptr(), self.offset, &mut value)
+                }
+                Source::Parsed(_) => sys::plasmite_json_value_view(self.offset, &mut value),
+            }
+        };
+        value
+    }
+    pub(super) fn kind(&self) -> u8 {
+        self.view().kind
     }
 }
 
 impl Serialize for JsonValue<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let bytes = self.doc.bytes();
-        let mut value = sys::ValueView::default();
-        // SAFETY: Construction verifies this immutable tree. Child offsets and
-        // borrowed strings come only from that tree's checked native iterator.
-        unsafe { sys::plasmite_lite3_value_view(bytes.as_ptr(), self.offset, &mut value) };
+        // Both sources own/borrow a validated immutable tree for this call.
+        let value = self.view();
         match value.kind {
             sys::LITE3_TYPE_NULL => serializer.serialize_unit(),
             sys::LITE3_TYPE_BOOL => serializer.serialize_bool(value.integer != 0),
             sys::LITE3_TYPE_I64 => serializer.serialize_i64(value.integer),
+            sys::JSON_TYPE_U64 => serializer.serialize_u64(value.integer as u64),
             sys::LITE3_TYPE_F64 => serializer.serialize_f64(value.real),
             sys::LITE3_TYPE_BYTES => {
                 let bytes =
@@ -47,25 +84,39 @@ impl Serialize for JsonValue<'_> {
                 serializer.serialize_str(unsafe { std::str::from_utf8_unchecked(text) })
             }
             sys::LITE3_TYPE_OBJECT | sys::LITE3_TYPE_ARRAY => {
-                let count = self.doc.count_at(self.offset).map_err(S::Error::custom)? as usize;
-                if count > bytes.len() {
+                let count = match self.source {
+                    Source::Lite3(doc) => {
+                        doc.count_at(self.offset).map_err(S::Error::custom)? as usize
+                    }
+                    Source::Parsed(_) => unsafe { sys::plasmite_json_count(self.offset) },
+                };
+                let bound = match self.source {
+                    Source::Lite3(doc) => doc.bytes().len(),
+                    Source::Parsed(doc) => doc.values,
+                };
+                if count > bound {
                     return Err(S::Error::custom("invalid collection count"));
                 }
                 let mut entries = vec![sys::Entry::default(); count];
                 let ret = unsafe {
-                    sys::plasmite_lite3_entries(
-                        bytes.as_ptr(),
-                        bytes.len(),
-                        self.offset,
-                        entries.as_mut_ptr(),
-                        count,
-                    )
+                    match self.source {
+                        Source::Lite3(doc) => sys::plasmite_lite3_entries(
+                            doc.bytes().as_ptr(),
+                            doc.bytes().len(),
+                            self.offset,
+                            entries.as_mut_ptr(),
+                            count,
+                        ),
+                        Source::Parsed(_) => {
+                            sys::plasmite_json_entries(self.offset, entries.as_mut_ptr(), count)
+                        }
+                    }
                 };
                 if ret < 0 {
                     return Err(S::Error::custom("invalid collection"));
                 }
                 let child = |offset| Self {
-                    doc: self.doc,
+                    source: self.source,
                     offset,
                 };
                 if value.kind == sys::LITE3_TYPE_ARRAY {
