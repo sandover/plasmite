@@ -16,8 +16,27 @@ Invariants: Free JSON text with `plasmite_lite3_free`; free parsed documents wit
 extern "C" {
 #endif
 
-/* Check JSON readability without export; 1 requests the legacy bytes fallback. */
+/* Check JSON readability without export; 1 reports native bytes needing base64. */
 int plasmite_lite3_verify_json(const unsigned char *buf, size_t len, size_t ofs);
+
+/* Private borrowed views. First verify the immutable tree with verify_json >= 0;
+ * offsets must come from that root or its entries. Pointers borrow buf.
+ */
+typedef struct {
+        const char *key;
+        size_t key_len;
+        size_t offset;
+} plasmite_lite3_entry;
+typedef struct {
+        uint8_t type;
+        int64_t integer;
+        double real;
+        const char *text;
+        size_t text_len;
+} plasmite_lite3_value;
+int plasmite_lite3_entries(const unsigned char *buf, size_t len, size_t ofs,
+                         plasmite_lite3_entry *out, size_t count);
+void plasmite_lite3_value_view(const unsigned char *buf, size_t ofs, plasmite_lite3_value *out);
 
 /* The parsed document owns its allocations and never mutates/retains input.
  * Build borrows it; free it once after all output-capacity attempts finish.

@@ -25,7 +25,9 @@ pub use crate::core::pool::{
 pub use crate::core::ring_layout::{FrameSpan, RingLayout};
 pub use client::{LocalClient, PoolRef};
 pub use message::{GapPolicy, Lite3Tail, Message, Meta, PoolApiExt, Tail, TailOptions};
-pub(crate) use message::{TailOutcome, TailState, message_from_frame, message_from_udp_payload};
+pub(crate) use message::{
+    TailOutcome, TailState, message_from_udp_payload, message_json_from_frame,
+};
 pub use remote::{RemoteClient, RemoteLite3Frame, RemoteLite3Tail, RemotePool, RemoteTail};
 pub use udp::{
     UdpClient, UdpEvent, UdpFollow, UdpFollowOptions, UdpFrame, UdpPool, UdpSkipReason, UdpStart,

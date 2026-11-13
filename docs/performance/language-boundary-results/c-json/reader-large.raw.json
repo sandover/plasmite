@@ -1,0 +1,156 @@
+{
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "messages": 10000,
+  "repeats": 5,
+  "script_sha256": "83d321ad5d96f985d3305cc7ca9c634ad0fb18aaf9b373e6360dc94a1c79aff8",
+  "harness_sha256": "dc244df8eab3ae3da6b70a91a2b465a65e3a01dd43fa095270fc1385eec58267",
+  "library_hashes": {
+    "baseline": "e0f447904d969f1d2daf12cdb85d9f6ab9624f163fd0e279036e74dfbd455fa4",
+    "candidate": "d270901f1a2f62514996a025ee496aa2b0094fb7fa25c84e0fcb9cdd2167f481"
+  },
+  "runs": [
+    {
+      "role": "reader",
+      "cpu_seconds": 0.25912799999999997,
+      "started_ns": 544363138298083,
+      "ended_ns": 544363401851041,
+      "messages": 10000,
+      "checksum": 149985000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 208584704,
+      "elapsed_s": 0.263552958,
+      "label": "candidate",
+      "repeat": 1
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.302573,
+      "started_ns": 544363452917250,
+      "ended_ns": 544363755798458,
+      "messages": 10000,
+      "checksum": 149985000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 208994304,
+      "elapsed_s": 0.302881208,
+      "label": "baseline",
+      "repeat": 1
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.30539400000000005,
+      "started_ns": 544363806406166,
+      "ended_ns": 544364112137041,
+      "messages": 10000,
+      "checksum": 149985000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 208748544,
+      "elapsed_s": 0.305730875,
+      "label": "baseline",
+      "repeat": 2
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.24956099999999998,
+      "started_ns": 544364161799125,
+      "ended_ns": 544364414427666,
+      "messages": 10000,
+      "checksum": 149985000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 208977920,
+      "elapsed_s": 0.252628541,
+      "label": "candidate",
+      "repeat": 2
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.24923299999999993,
+      "started_ns": 544364475328375,
+      "ended_ns": 544364724812750,
+      "messages": 10000,
+      "checksum": 149985000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 208601088,
+      "elapsed_s": 0.249484375,
+      "label": "candidate",
+      "repeat": 3
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.298505,
+      "started_ns": 544364774748875,
+      "ended_ns": 544365073599958,
+      "messages": 10000,
+      "checksum": 149985000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 208912384,
+      "elapsed_s": 0.298851083,
+      "label": "baseline",
+      "repeat": 3
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.302324,
+      "started_ns": 544365122491541,
+      "ended_ns": 544365425081916,
+      "messages": 10000,
+      "checksum": 149985000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 208633856,
+      "elapsed_s": 0.302590375,
+      "label": "baseline",
+      "repeat": 4
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.24631699999999995,
+      "started_ns": 544365476273375,
+      "ended_ns": 544365722792000,
+      "messages": 10000,
+      "checksum": 149985000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 208519168,
+      "elapsed_s": 0.246518625,
+      "label": "candidate",
+      "repeat": 4
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.254783,
+      "started_ns": 544365771978541,
+      "ended_ns": 544366027263125,
+      "messages": 10000,
+      "checksum": 149985000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 208912384,
+      "elapsed_s": 0.255284584,
+      "label": "candidate",
+      "repeat": 5
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.30048800000000003,
+      "started_ns": 544366078776916,
+      "ended_ns": 544366379606041,
+      "messages": 10000,
+      "checksum": 149985000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 208994304,
+      "elapsed_s": 0.300829125,
+      "label": "baseline",
+      "repeat": 5
+    }
+  ],
+  "medians": {
+    "baseline": {
+      "elapsed_s": 0.302590375,
+      "cpu_seconds": 0.302324,
+      "peak_rss_bytes": 208912384
+    },
+    "candidate": {
+      "elapsed_s": 0.252628541,
+      "cpu_seconds": 0.24956099999999998,
+      "peak_rss_bytes": 208601088
+    }
+  }
+}

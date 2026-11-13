@@ -1,0 +1,208 @@
+{
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "messages": 50000,
+  "repeats": 7,
+  "script_sha256": "83d321ad5d96f985d3305cc7ca9c634ad0fb18aaf9b373e6360dc94a1c79aff8",
+  "harness_sha256": "dc244df8eab3ae3da6b70a91a2b465a65e3a01dd43fa095270fc1385eec58267",
+  "library_hashes": {
+    "baseline": "e0f447904d969f1d2daf12cdb85d9f6ab9624f163fd0e279036e74dfbd455fa4",
+    "candidate": "d270901f1a2f62514996a025ee496aa2b0094fb7fa25c84e0fcb9cdd2167f481"
+  },
+  "runs": [
+    {
+      "role": "reader",
+      "cpu_seconds": 0.421813,
+      "started_ns": 544354844535625,
+      "ended_ns": 544355266687833,
+      "messages": 50000,
+      "checksum": 3749925000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 130105344,
+      "elapsed_s": 0.422152208,
+      "label": "candidate",
+      "repeat": 1
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.5054690000000001,
+      "started_ns": 544355319390708,
+      "ended_ns": 544355825257666,
+      "messages": 50000,
+      "checksum": 3749925000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 130564096,
+      "elapsed_s": 0.505866958,
+      "label": "baseline",
+      "repeat": 1
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.5016689999999999,
+      "started_ns": 544355875466625,
+      "ended_ns": 544356377580875,
+      "messages": 50000,
+      "checksum": 3749925000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 130564096,
+      "elapsed_s": 0.50211425,
+      "label": "baseline",
+      "repeat": 2
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.41803999999999997,
+      "started_ns": 544356426908166,
+      "ended_ns": 544356845560833,
+      "messages": 50000,
+      "checksum": 3749925000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 130072576,
+      "elapsed_s": 0.418652667,
+      "label": "candidate",
+      "repeat": 2
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.42281799999999997,
+      "started_ns": 544356894427500,
+      "ended_ns": 544357317711083,
+      "messages": 50000,
+      "checksum": 3749925000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 130433024,
+      "elapsed_s": 0.423283583,
+      "label": "candidate",
+      "repeat": 3
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.5033949999999999,
+      "started_ns": 544357367357583,
+      "ended_ns": 544357871104416,
+      "messages": 50000,
+      "checksum": 3749925000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 130744320,
+      "elapsed_s": 0.503746833,
+      "label": "baseline",
+      "repeat": 3
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.512389,
+      "started_ns": 544357920252833,
+      "ended_ns": 544358436483666,
+      "messages": 50000,
+      "checksum": 3749925000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 130646016,
+      "elapsed_s": 0.516230833,
+      "label": "baseline",
+      "repeat": 4
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.41723299999999997,
+      "started_ns": 544358487768250,
+      "ended_ns": 544358905365416,
+      "messages": 50000,
+      "checksum": 3749925000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 130400256,
+      "elapsed_s": 0.417597166,
+      "label": "candidate",
+      "repeat": 4
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.41850099999999996,
+      "started_ns": 544358954538708,
+      "ended_ns": 544359373403333,
+      "messages": 50000,
+      "checksum": 3749925000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 130564096,
+      "elapsed_s": 0.418864625,
+      "label": "candidate",
+      "repeat": 5
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.50429,
+      "started_ns": 544359422100000,
+      "ended_ns": 544359926944166,
+      "messages": 50000,
+      "checksum": 3749925000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 130744320,
+      "elapsed_s": 0.504844166,
+      "label": "baseline",
+      "repeat": 5
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.5067969999999998,
+      "started_ns": 544359977037750,
+      "ended_ns": 544360484342416,
+      "messages": 50000,
+      "checksum": 3749925000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 130596864,
+      "elapsed_s": 0.507304666,
+      "label": "baseline",
+      "repeat": 6
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.41803399999999996,
+      "started_ns": 544360532866833,
+      "ended_ns": 544360951355416,
+      "messages": 50000,
+      "checksum": 3749925000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 130629632,
+      "elapsed_s": 0.418488583,
+      "label": "candidate",
+      "repeat": 6
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.422774,
+      "started_ns": 544361000937750,
+      "ended_ns": 544361424410958,
+      "messages": 50000,
+      "checksum": 3749925000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 130187264,
+      "elapsed_s": 0.423473208,
+      "label": "candidate",
+      "repeat": 7
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.5034099999999999,
+      "started_ns": 544361473828833,
+      "ended_ns": 544361977891208,
+      "messages": 50000,
+      "checksum": 3749925000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 130629632,
+      "elapsed_s": 0.504062375,
+      "label": "baseline",
+      "repeat": 7
+    }
+  ],
+  "medians": {
+    "baseline": {
+      "elapsed_s": 0.504844166,
+      "cpu_seconds": 0.50429,
+      "peak_rss_bytes": 130629632
+    },
+    "candidate": {
+      "elapsed_s": 0.418864625,
+      "cpu_seconds": 0.41850099999999996,
+      "peak_rss_bytes": 130400256
+    }
+  }
+}

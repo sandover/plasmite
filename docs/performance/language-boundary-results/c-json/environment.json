@@ -1,0 +1,19 @@
+{
+  "base_commit": "4d3d94c",
+  "baseline": "a0735d8 plus serde_json float_roundtrip feature only",
+  "candidate": "base plus accompanying implementation.patch.gz",
+  "cargo_lock_sha256": "8ff3448ec53e2abe93ec1670c50c3b4c3b3ce6a8207378e89c17f1bede75244e",
+  "baseline_cargo_lock_sha256": "8ff3448ec53e2abe93ec1670c50c3b4c3b3ce6a8207378e89c17f1bede75244e",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "cc": "Apple clang version 21.0.0 (clang-2100.4.1.1)",
+  "scope": "macOS host; no Linux/Windows timing claim; isolated target directories per source tree",
+  "library_sha256": "d270901f1a2f62514996a025ee496aa2b0094fb7fa25c84e0fcb9cdd2167f481",
+  "baseline_library_sha256": "e0f447904d969f1d2daf12cdb85d9f6ab9624f163fd0e279036e74dfbd455fa4",
+  "checks": {
+    "just check": "passed",
+    "just bindings-test": "passed",
+    "python": "51 tests, one existing skip",
+    "node": "51 tests plus package start/restart, remote-only, TypeScript",
+    "go": "all packages passed"
+  }
+}

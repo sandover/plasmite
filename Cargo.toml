@@ -42,7 +42,7 @@ jaq-core = "2"
 jaq-std = { version = "2", default-features = false }
 memmap2 = "0.9"
 libc = "0.2"
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 yaml_serde = "0.10.7"
 serde-saphyr = { version = "=1.1.0", default-features = false, features = ["serialize", "deserialize"] }
 serde = { version = "1", features = ["derive"] }

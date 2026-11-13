@@ -13,7 +13,9 @@ use serde_json::Value;
 
 use crate::core::error::{Error, ErrorKind};
 
+mod json;
 pub mod sys;
+pub(crate) use json::JsonValue;
 
 /// Maximum buffer size for encoded messages and single-document CLI input.
 pub const MAX_LITE3_BUF: usize = 256 * 1024 * 1024;
@@ -640,6 +642,30 @@ mod tests {
                     "{prefix:x?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn json_round_trips_stored_float_bits() {
+        let mut bits = 541u64;
+        for _ in 0..10000 {
+            bits ^= bits << 13;
+            bits ^= bits >> 7;
+            bits ^= bits << 17;
+            let value = f64::from_bits(bits);
+            if !value.is_finite() {
+                continue;
+            }
+            let payload = encode_message(&[], &json!({"number":value})).unwrap();
+            let doc = payload.as_doc();
+            let data = doc.key_offset("data").unwrap();
+            let exported = doc.to_json_at(data, false).unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&exported).unwrap();
+            assert_eq!(
+                parsed["number"].as_f64().unwrap().to_bits(),
+                value.to_bits(),
+                "{exported}"
+            );
         }
     }
 

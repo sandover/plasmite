@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Direct JSON reads and floating-point accuracy
+
+- C JSON get/tail now formats owned Lite3 snapshots directly, borrowing strings,
+  keys and tags instead of building temporary yyjson and Rust data trees.
+  Native byte fields keep their base64 JSON representation.
+- Rust enables correctly rounded JSON float parsing. Reads preserve stored
+  binary64 values instead of adding another rounding step. Applications that
+  compare exact floats or serialized text should check the
+  [next-major migration note](docs/record/upgrading-next-major.md#json-reads-preserve-stored-floating-point-values).
+
 ### Binary follow filtering
 
 - Binary `follow --tag` over local pools and HTTP now checks tags and data

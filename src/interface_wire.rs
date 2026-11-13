@@ -35,20 +35,20 @@ impl Lite3FrameHeader {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub(crate) struct MessageWire {
+pub(crate) struct MessageWire<D = Value, T = Vec<String>> {
     pub(crate) seq: u64,
     pub(crate) time: String,
-    pub(crate) meta: MessageMetaWire,
-    pub(crate) data: Value,
+    pub(crate) meta: MessageMetaWire<T>,
+    pub(crate) data: D,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct MessageMetaWire {
-    pub(crate) tags: Vec<String>,
+pub(crate) struct MessageMetaWire<T = Vec<String>> {
+    pub(crate) tags: T,
 }
 
-impl MessageWire {
-    pub(crate) fn new(seq: u64, time: String, tags: Vec<String>, data: Value) -> Self {
+impl<D, T> MessageWire<D, T> {
+    pub(crate) fn new(seq: u64, time: String, tags: T, data: D) -> Self {
         Self {
             seq,
             time,
@@ -56,7 +56,9 @@ impl MessageWire {
             data,
         }
     }
+}
 
+impl MessageWire {
     /// Move the existing data tree into the JSON envelope.
     pub(crate) fn into_json(self) -> Value {
         Value::from_iter([

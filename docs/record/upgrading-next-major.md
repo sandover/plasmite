@@ -4,6 +4,19 @@ These changes exist in the source checkout and await a major release. Package
 versions still identify the last release; this guide does not announce a release.
 See the [changelog](../../CHANGELOG.md#unreleased) for the UDP delivery changes.
 
+## JSON reads preserve stored floating-point values
+
+Rust now enables correctly rounded JSON float parsing. The C JSON get/tail path
+formats stored values directly instead of exporting JSON, parsing a Rust object
+tree and serializing it again. Both routes preserve the stored binary64 bits.
+
+The earlier Rust parser could round a value again during a read. For example,
+it could turn stored `2.027716612057172e155` into `2.0277166120571721e155`.
+Applications that compare exact float values or saved JSON text can observe the
+correction. Regenerate expectations from the stored value when a fixture captured
+that extra rounding. The pool format and its signed-integer/binary64 payload
+range stay the same; sequence and timestamp identity keep their exact integers.
+
 ## Duplex sends and receives ordinary messages
 
 `duplex` uses the same input parser as `feed`, including at a terminal. Enter

@@ -1,0 +1,64 @@
+{
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "messages": 10000,
+  "repeats": 1,
+  "script_sha256": "83d321ad5d96f985d3305cc7ca9c634ad0fb18aaf9b373e6360dc94a1c79aff8",
+  "harness_sha256": "dc244df8eab3ae3da6b70a91a2b465a65e3a01dd43fa095270fc1385eec58267",
+  "library_hashes": {
+    "baseline": "e0f447904d969f1d2daf12cdb85d9f6ab9624f163fd0e279036e74dfbd455fa4",
+    "candidate": "d270901f1a2f62514996a025ee496aa2b0094fb7fa25c84e0fcb9cdd2167f481"
+  },
+  "runs": [
+    {
+      "role": "reader",
+      "cpu_seconds": 0.355206,
+      "started_ns": 544380465424916,
+      "ended_ns": 544380821530208,
+      "messages": 10000,
+      "checksum": 149985000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 149749760,
+      "native_operations": {
+        "allocation_calls": 370023,
+        "requested_bytes": 691363931,
+        "free_calls": 290008
+      },
+      "elapsed_s": 0.356105292,
+      "label": "candidate",
+      "repeat": 1
+    },
+    {
+      "role": "reader",
+      "cpu_seconds": 0.496524,
+      "started_ns": 544380872989291,
+      "ended_ns": 544381370327625,
+      "messages": 10000,
+      "checksum": 149985000,
+      "latencies_ns": [],
+      "peak_rss_bytes": 149782528,
+      "native_operations": {
+        "allocation_calls": 3060023,
+        "requested_bytes": 1081449115,
+        "free_calls": 2980008
+      },
+      "elapsed_s": 0.497338334,
+      "label": "baseline",
+      "repeat": 1
+    }
+  ],
+  "diagnostic_only": true,
+  "probe_sha256": "41a61edf15b3ef887f2be74beb215206b19e6711100f34926a8662163f40cb99",
+  "medians": {
+    "baseline": {
+      "elapsed_s": 0.497338334,
+      "cpu_seconds": 0.496524,
+      "peak_rss_bytes": 149782528
+    },
+    "candidate": {
+      "elapsed_s": 0.356105292,
+      "cpu_seconds": 0.355206,
+      "peak_rss_bytes": 149749760
+    }
+  }
+}

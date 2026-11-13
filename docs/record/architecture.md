@@ -133,6 +133,20 @@ Key invariants:
 
 ## Write/read paths
 
+The storage reader returns an owned Lite3 frame. Interface adapters choose the
+representation their caller requests. C JSON get/tail validates the immutable
+frame, borrows its tags, keys and string values, and formats the envelope
+directly through Serde. It uses temporary collection-entry lists to retain
+deterministic key order. Native byte fields stream base64 into that same writer.
+This path builds neither a yyjson document nor a Rust application-data tree.
+
+Rust's object API still requests an owned `serde_json::Value`. Its current
+decoder exports data JSON and parses that final tree with `float_roundtrip`
+enabled. Both JSON output and object reads preserve stored binary64 values;
+an extra parser's rounding does not define the value. Raw reads retain their
+encoded bytes. Every route keeps the existing snapshot copy under the storage
+lock, so pool overwrite or close cannot change a returned message.
+
 Append (high level):
 
 1. Validate input and prepare frame.

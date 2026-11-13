@@ -1,0 +1,23 @@
+{
+  "cases": 4998,
+  "different_serialized_outputs": 3176,
+  "different_decoded_floats": 1517,
+  "legacy_errors": 0,
+  "serde_json": "1.0.149",
+  "serde_features": [
+    "default",
+    "std"
+  ],
+  "float_roundtrip": false,
+  "python_seed": 541,
+  "random_f64_bit_patterns": 5000,
+  "corpus": "Five explicit records, then finite f64s from Python Random(541).getrandbits(64); little-endian unpack; json.dumps.",
+  "probe_sha256": "d3f09ceb32b10d462694866377eeae307b07f56cf8cde0c59ecec12f7fe0f085",
+  "source_sha256": "ffb016a2d6957f5b80a6811fd5c655337168e6924826543beb6954251dab6ca6",
+  "allocation_probe_calibration": {
+    "allocation_calls": 1,
+    "requested_bytes": 123,
+    "free_calls": 1
+  },
+  "scope": "Diagnostic over adversarial/exponent-spanning floats, not an estimate of ordinary application error frequency."
+}

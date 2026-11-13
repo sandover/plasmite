@@ -543,6 +543,27 @@ pub(crate) fn message_from_frame(frame: &FrameRef) -> Result<Message, Error> {
     Message::from_lite3(frame.seq, frame.timestamp_ns, &frame.payload)
 }
 
+/// Produce the existing wire envelope while borrowing data from this owned frame.
+pub(crate) fn message_json_from_frame(frame: &FrameRef) -> Result<Vec<u8>, Error> {
+    let doc = Lite3DocRef::new(&frame.payload);
+    let (tags_offset, count) = meta_tags(doc)?;
+    let mut tags = Vec::with_capacity(count as usize);
+    for index in 0..count {
+        tags.push(meta_tag(doc, tags_offset, index)?);
+    }
+    let offset = doc
+        .key_offset("data")
+        .map_err(|err| err.with_message("missing data"))?;
+    let data = crate::core::lite3::JsonValue::new(doc, offset)?;
+    let wire = crate::interface_wire::MessageWire::new(
+        frame.seq,
+        format_ts(frame.timestamp_ns)?,
+        tags,
+        data,
+    );
+    serde_json::to_vec(&wire).map_err(payload_json_error)
+}
+
 pub(crate) fn message_from_udp_payload(
     seq: u64,
     timestamp_ns: u64,
@@ -666,6 +687,68 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
     use tempfile::tempdir;
+
+    #[test]
+    fn borrowed_wire_matches_complete_messages_and_corrupt_payload_errors() {
+        let compare = |payload: Vec<u8>| {
+            let frame = crate::api::FrameRef {
+                seq: u64::MAX,
+                timestamp_ns: u64::MAX,
+                flags: 0,
+                payload,
+            };
+            let old = message_from_frame(&frame);
+            reset_json_counters();
+            super::DATA_TREE_DECODES.with(|count| count.set(0));
+            let new = super::message_json_from_frame(&frame);
+            match (old, new) {
+                (Ok(message), Ok(bytes)) => {
+                    let wire = crate::interface_wire::MessageWire::new(
+                        message.seq,
+                        message.time,
+                        message.meta.tags,
+                        message.data,
+                    );
+                    assert_eq!(bytes, serde_json::to_vec(&wire).unwrap());
+                }
+                (Err(old), Err(new)) => assert_eq!(old.kind(), new.kind()),
+                (old, new) => panic!("old/new mismatch: {old:?} / {new:?}"),
+            }
+        };
+        for text in [
+            r#"{"meta":{"tags":["α","a\u0000b"]},"data":{"z":2.027716612057172e155,"a":[null,{},true]}}"#,
+            r#"{"meta":{"tags":[]},"data":[]}"#,
+            r#"{"meta":{"tags":[]},"data":42}"#,
+            r#"{"meta":{"tags":[7]},"data":{}}"#,
+            r#"{"meta":{"tags":[]}}"#,
+            r#"{"data":{}}"#,
+        ] {
+            compare(
+                crate::core::lite3::Lite3Buf::from_json_str(text)
+                    .unwrap()
+                    .as_slice()
+                    .to_vec(),
+            );
+        }
+        let payload = encode_message(&[], &json!({"blob":"borrowed text"})).unwrap();
+        compare(payload.as_slice().to_vec());
+        assert_eq!(json_counter_snapshot(), (0, 0));
+        super::DATA_TREE_DECODES.with(|count| assert_eq!(count.get(), 0));
+        let data = payload.as_doc().key_offset("data").unwrap();
+        let value = payload.as_doc().key_offset_at(data, "blob").unwrap();
+        let mut bytes = payload.as_slice().to_vec();
+        bytes[value] = crate::core::lite3::sys::LITE3_TYPE_BYTES;
+        compare(bytes);
+        let marker = payload
+            .as_slice()
+            .windows(13)
+            .position(|b| b == b"borrowed text")
+            .unwrap();
+        let mut bytes = payload.as_slice().to_vec();
+        bytes[marker] = 0xff;
+        compare(bytes);
+        compare(payload.as_slice()[..payload.len() - 1].to_vec());
+    }
 
     #[test]
     fn stored_lite3_messages_preserve_nested_data_and_report_malformed_tags() {

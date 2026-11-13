@@ -18,6 +18,7 @@ docs/
 ├── performance/windows-access-1.0.md          — Read when comparing local, HTTP, and MCP access costs on Windows
 ├── performance/consumer-latency.rs             — Read when reproducing the full-consumer latency measurements
 ├── performance/language-boundary-results/    — Read when reproducing per-binding ownership and conversion measurements
+│   ├── c-json/README.md                      — Read when assessing direct JSON reads and stored-float correctness
 │   ├── wakeups/README.md                     — Read when assessing shared-address waits and independent-reader wakeups
 │   ├── append-descriptors/README.md           — Read when assessing borrowed append locking and removed descriptor calls
 │   ├── encoding/README.md                     — Read when comparing parse-once encoding and structural size estimates

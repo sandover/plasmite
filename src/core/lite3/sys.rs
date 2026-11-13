@@ -15,7 +15,33 @@ pub const LITE3_TYPE_OBJECT: u8 = 6;
 pub const LITE3_TYPE_ARRAY: u8 = 7;
 pub const LITE3_TYPE_INVALID: u8 = 8;
 
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Entry {
+    pub key: *const c_char,
+    pub key_len: usize,
+    pub offset: usize,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub(crate) struct ValueView {
+    pub kind: u8,
+    pub integer: i64,
+    pub real: f64,
+    pub text: *const c_char,
+    pub text_len: usize,
+}
+
 unsafe extern "C" {
+    pub(crate) fn plasmite_lite3_entries(
+        buf: *const u8,
+        len: usize,
+        ofs: usize,
+        out: *mut Entry,
+        count: usize,
+    ) -> c_int;
+    pub(crate) fn plasmite_lite3_value_view(buf: *const u8, ofs: usize, out: *mut ValueView);
     pub fn plasmite_lite3_verify_json(buf: *const c_uchar, len: usize, ofs: usize) -> c_int;
     pub fn plasmite_lite3_json_parse(
         json: *const c_char,

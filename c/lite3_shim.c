@@ -154,12 +154,46 @@ static int verify_json_tree(
         return ret < 0 ? -1 : 0;
 }
 
-/* 0: readable; 1: use the legacy bytes/base64 exporter; -1: invalid. */
+/* 0: JSON values; 1: native bytes require base64 formatting; -1: invalid. */
 int plasmite_lite3_verify_json(const unsigned char *buf, size_t len, size_t ofs)
 {
         int json_safe = 1;
         if (verify_json_tree(buf, len, ofs, 0, &json_safe) < 0) return -1;
         return json_safe ? 0 : 1;
+}
+
+int plasmite_lite3_entries(const unsigned char *buf, size_t len, size_t ofs,
+                          plasmite_lite3_entry *out, size_t count)
+{
+        lite3_iter iter;
+        if (verify_node(buf, len, ofs) < 0 || lite3_iter_create(buf, len, ofs, &iter) < 0)
+                return -1;
+        size_t i = 0, offset;
+        lite3_str key;
+        int object = buf[ofs] == LITE3_TYPE_OBJECT;
+        int ret;
+        while ((ret = lite3_iter_next(buf, len, &iter, object ? &key : NULL, &offset)) == LITE3_ITER_ITEM) {
+                if (i == count) { errno = EINVAL; return -1; }
+                out[i++] = (plasmite_lite3_entry){object ? key.ptr : NULL,
+                                                object ? strlen(key.ptr) : 0, offset};
+        }
+        if (ret < 0 || i != count) { errno = EINVAL; return -1; }
+        return 0;
+}
+
+void plasmite_lite3_value_view(const unsigned char *buf, size_t ofs, plasmite_lite3_value *out)
+{
+        lite3_val *value = (lite3_val *)(buf + ofs);
+        *out = (plasmite_lite3_value){.type = value->type};
+        switch (value->type) {
+        case LITE3_TYPE_BOOL: out->integer = lite3_val_bool(value); break;
+        case LITE3_TYPE_I64: out->integer = lite3_val_i64(value); break;
+        case LITE3_TYPE_F64: out->real = lite3_val_f64(value); break;
+        case LITE3_TYPE_STRING: out->text = lite3_val_str_n(value, &out->text_len); break;
+        case LITE3_TYPE_BYTES:
+                out->text = (const char *)lite3_val_bytes(value, &out->text_len); break;
+        default: break;
+        }
 }
 
 /* The pinned decoder's recursive builders borrow the document. Only its

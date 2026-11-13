@@ -463,11 +463,15 @@ pub extern "C" fn plsm_pool_get_json(
         Ok(pool) => pool,
         Err(code) => return code,
     };
-    let message = match pool.pool.get_message(seq) {
+    let message = match pool
+        .pool
+        .get_lite3(seq)
+        .and_then(|frame| crate::api::message_json_from_frame(&frame))
+    {
         Ok(message) => message,
         Err(err) => return fail(out_err, err),
     };
-    if let Err(err) = write_message_buf(out_message, message) {
+    if let Err(err) = write_json_buf(out_message, message) {
         return fail(out_err, err);
     }
     0
@@ -590,7 +594,7 @@ pub extern "C" fn plsm_stream_next(
         Err(code) => return code,
     };
     match read_stream(stream, None) {
-        Ok(TailOutcome::Item(message)) => match write_message_buf(out_message, message) {
+        Ok(TailOutcome::Item(message)) => match write_json_buf(out_message, message) {
             Ok(()) => 1,
             Err(err) => fail(out_err, err),
         },
@@ -708,13 +712,13 @@ pub extern "C" fn plsm_lite3_stream_next(
 fn read_stream(
     stream: &plsm_stream,
     wait: Option<Duration>,
-) -> Result<TailOutcome<crate::api::Message>, Error> {
+) -> Result<TailOutcome<Vec<u8>>, Error> {
     let mut state = stream
         .state
         .lock()
         .map_err(|_| Error::new(ErrorKind::Internal).with_message("stream state is unavailable"))?;
     state.next_wait(&stream.pool, wait, |frame, _| {
-        crate::api::message_from_frame(&frame).map(Some)
+        crate::api::message_json_from_frame(&frame).map(Some)
     })
 }
 
@@ -747,7 +751,7 @@ pub extern "C" fn plsm_stream_next_wait(
         Err(code) => return code,
     };
     match read_stream(stream, Some(Duration::from_millis(timeout_ms))) {
-        Ok(TailOutcome::Item(message)) => match write_message_buf(out_message, message) {
+        Ok(TailOutcome::Item(message)) => match write_json_buf(out_message, message) {
             Ok(()) => 1,
             Err(err) => fail(out_err, err),
         },
@@ -1450,6 +1454,13 @@ fn write_message_buf(
             .with_message("failed to serialize message")
             .with_source(err)
     })?;
+    write_json_buf(out_message, json_bytes)
+}
+
+fn write_json_buf(out_message: *mut plsm_buf, json_bytes: Vec<u8>) -> Result<(), Error> {
+    if out_message.is_null() {
+        return Err(Error::new(ErrorKind::Usage).with_message("out_message is null"));
+    }
     unsafe {
         let buf = &mut *out_message;
         let mut data = json_bytes.into_boxed_slice();

@@ -101,6 +101,19 @@ unsupported. Go's `PoolRefPath` adds a relative prefix to bare filenames.
 - `PoolInfo` includes canonical local `path` and capacity/bounds diagnostics.
 - `PoolInfo` fields are additive-only within 1.x.
 
+### Stored numbers and JSON reads
+
+Payload storage uses signed 64-bit integers and IEEE 754 binary64 floating-point
+values. A JSON read formats the stored floating-point value so a correctly
+rounded binary64 parser recovers the same bits, including negative zero. Rust
+object reads use a parser configuration that preserves that round trip. An
+intermediate decimal conversion must not introduce another rounding step.
+
+The existing Lite3 encoder converts unsigned payload integers above
+`i64::MAX` to binary64, which can lose integer precision. Exact unsigned 64-bit
+sequence and timestamp identity belongs to the envelope/frame fields and keeps
+its separate representation. This change preserves the storage format and range.
+
 ### Error Kind Contract
 
 Errors must carry a stable `kind` plus structured context when available (for example `path`, `seq`, `offset`).
