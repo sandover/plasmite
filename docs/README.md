@@ -34,6 +34,8 @@ Start with the task you want to do:
   local libraries, command-line tools, HTTP, and MCP in Plasmite 1.0.0.
 - [1.0 performance measurements](performance/1.0-release.md): measured writer
   improvements, small-read costs and consumer latency on one Mac.
+- [Borrowed append locking](performance/language-boundary-results/append-descriptors/README.md):
+  read when comparing descriptor operations with complete append costs.
 - [Parse-once encoding measurements](performance/language-boundary-results/encoding/README.md):
   read when assessing bounded growth, structural sizing and native allocation costs.
 - [Numeric append receipts](performance/language-boundary-results/append-receipts/README.md):

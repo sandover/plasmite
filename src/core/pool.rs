@@ -882,26 +882,6 @@ impl Pool {
         Ok(lock)
     }
 
-    // Ordinary append has exclusive Rust access to Pool, so its original file
-    // description cannot have a concurrent same-handle read. Public guards use
-    // independent descriptions and therefore still exclude this lock.
-    fn append_operation_lock(&self) -> Result<AppendLock, Error> {
-        let file = self.file.try_clone().map_err(|err| {
-            Error::new(ErrorKind::Io)
-                .with_path(&self.path)
-                .with_source(err)
-        })?;
-        let lock = lock_for_append(file, &self.path)?;
-        // A duplicated descriptor still refers to the held file object. Its
-        // identity cannot change while Pool owns it; the mutable path is checked
-        // freshly after every lock acquisition.
-        #[cfg(unix)]
-        require_path_identity(self.file_identity, &self.path)?;
-        #[cfg(windows)]
-        require_current_path(&lock.file, &self.path)?;
-        Ok(lock)
-    }
-
     pub fn append(&mut self, payload: &[u8]) -> Result<u64, Error> {
         self.append_with_options(payload, AppendOptions::default())
     }
@@ -919,98 +899,27 @@ impl Pool {
         payload: &[u8],
         options: AppendOptions,
     ) -> Result<u64, Error> {
-        let lock = self.append_operation_lock()?;
+        // Exclusive Rust access excludes same-handle snapshots. Borrowing the
+        // held file preserves its lock identity without duplicating a descriptor.
+        let lock = lock_for_append_borrowed(&self.file, &self.path)?;
+        #[cfg(unix)]
+        require_path_identity(self.file_identity, &self.path)?;
+        #[cfg(windows)]
+        require_current_path(&self.file, &self.path)?;
         // Refresh header after acquiring the lock to avoid stale state across processes.
         self.header = self.header_locked()?;
-        let seq = self.append_locked(payload, options)?;
+        let seq = append_locked_with_flush(
+            &mut self.mmap,
+            &mut self.header,
+            &self.path,
+            payload,
+            options,
+            flush_mmap_range,
+        )?;
         drop(lock);
         // Notification is optional wake-up work after committed storage publication.
         let _ = notify::post_for_name(&self.notify_name, &mut self.notify_writer);
         Ok(seq)
-    }
-
-    fn append_locked(&mut self, payload: &[u8], options: AppendOptions) -> Result<u64, Error> {
-        self.append_locked_with_flush(payload, options, flush_mmap_range)
-    }
-
-    fn append_locked_with_flush<F>(
-        &mut self,
-        payload: &[u8],
-        options: AppendOptions,
-        mut flush_range: F,
-    ) -> Result<u64, Error>
-    where
-        F: FnMut(&MmapMut, usize, usize, &Path, &'static str) -> Result<(), Error>,
-    {
-        let ring_offset = self.header.ring_offset as usize;
-        let ring_size = self.header.ring_size as usize;
-        let plan = plan::plan_append(self.header, &self.mmap, payload.len())?;
-
-        apply_append(
-            &mut self.mmap,
-            ring_offset,
-            &plan,
-            payload,
-            options.timestamp_ns,
-        )?;
-
-        self.header = plan.next_header;
-
-        if options.durability == Durability::Flush {
-            let frame_offset = ring_offset + plan.frame_offset;
-            flush_range(
-                &self.mmap,
-                frame_offset,
-                plan.frame_len,
-                &self.path,
-                "failed to flush frame",
-            )?;
-            if let Some(wrap_head) = plan.wrap_offset {
-                let wrap_start = ring_offset + wrap_head;
-                flush_range(
-                    &self.mmap,
-                    wrap_start,
-                    FRAME_HEADER_LEN,
-                    &self.path,
-                    "failed to flush wrap marker",
-                )?;
-            }
-            if plan.next_header.index_capacity > 0 {
-                let (index_start, index_len) = index_slot_range(
-                    plan.next_header.index_offset,
-                    plan.next_header.index_capacity,
-                    plan.seq,
-                )
-                .ok_or_else(|| {
-                    Error::new(ErrorKind::Corrupt).with_message("index slot calculation overflow")
-                })?;
-                flush_range(
-                    &self.mmap,
-                    index_start,
-                    index_len,
-                    &self.path,
-                    "failed to flush index slot",
-                )?;
-            }
-            flush_range(
-                &self.mmap,
-                0,
-                HEADER_SIZE,
-                &self.path,
-                "failed to flush header",
-            )?;
-        }
-
-        validate::debug_assert_tail_committed(
-            &self.mmap,
-            ring_offset,
-            ring_size,
-            self.header.tail_off as usize,
-            self.header.tail_next_off as usize,
-            self.header.oldest_seq,
-        );
-
-        Ok(plan.seq)
     }
 
     fn metrics_from_header(&self, header: PoolHeader, bounds: Bounds) -> PoolMetrics {
@@ -1068,8 +977,88 @@ impl Pool {
     }
 }
 
+fn append_locked_with_flush<F>(
+    mmap: &mut MmapMut,
+    header: &mut PoolHeader,
+    path: &Path,
+    payload: &[u8],
+    options: AppendOptions,
+    mut flush_range: F,
+) -> Result<u64, Error>
+where
+    F: FnMut(&MmapMut, usize, usize, &Path, &'static str) -> Result<(), Error>,
+{
+    let ring_offset = header.ring_offset as usize;
+    let ring_size = header.ring_size as usize;
+    let plan = plan::plan_append(*header, mmap, payload.len())?;
+
+    apply_append(mmap, ring_offset, &plan, payload, options.timestamp_ns)?;
+
+    *header = plan.next_header;
+
+    if options.durability == Durability::Flush {
+        let frame_offset = ring_offset + plan.frame_offset;
+        flush_range(
+            mmap,
+            frame_offset,
+            plan.frame_len,
+            path,
+            "failed to flush frame",
+        )?;
+        if let Some(wrap_head) = plan.wrap_offset {
+            let wrap_start = ring_offset + wrap_head;
+            flush_range(
+                mmap,
+                wrap_start,
+                FRAME_HEADER_LEN,
+                path,
+                "failed to flush wrap marker",
+            )?;
+        }
+        if plan.next_header.index_capacity > 0 {
+            let (index_start, index_len) = index_slot_range(
+                plan.next_header.index_offset,
+                plan.next_header.index_capacity,
+                plan.seq,
+            )
+            .ok_or_else(|| {
+                Error::new(ErrorKind::Corrupt).with_message("index slot calculation overflow")
+            })?;
+            flush_range(
+                mmap,
+                index_start,
+                index_len,
+                path,
+                "failed to flush index slot",
+            )?;
+        }
+        flush_range(mmap, 0, HEADER_SIZE, path, "failed to flush header")?;
+    }
+
+    validate::debug_assert_tail_committed(
+        mmap,
+        ring_offset,
+        ring_size,
+        header.tail_off as usize,
+        header.tail_next_off as usize,
+        header.oldest_seq,
+    );
+
+    Ok(plan.seq)
+}
+
 pub struct AppendLock {
     file: File,
+}
+
+struct AppendOperationLock<'a> {
+    file: &'a File,
+}
+
+impl Drop for AppendOperationLock<'_> {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
 }
 
 pub(crate) struct ReadLock<'a> {
@@ -1158,6 +1147,18 @@ fn require_identity_matches(same: bool, path: &Path) -> Result<(), Error> {
             .with_hint("Open the pool again before writing."));
     }
     Ok(())
+}
+
+fn lock_for_append_borrowed<'a>(
+    file: &'a File,
+    path: &Path,
+) -> Result<AppendOperationLock<'a>, Error> {
+    file.lock().map_err(|err| {
+        Error::new(lock_error_kind(&err))
+            .with_path(path)
+            .with_source(err)
+    })?;
+    Ok(AppendOperationLock { file })
 }
 
 fn lock_for_append(file: File, path: &Path) -> Result<AppendLock, Error> {
@@ -1464,7 +1465,7 @@ fn index_slot_range(index_offset: u64, index_capacity: u32, seq: u64) -> Option<
 mod tests {
     use super::{
         AppendOptions, Durability, HEADER_SIZE, Pool, PoolHeader, PoolOptions, SeqOffsetCache,
-        apply_append,
+        append_locked_with_flush, apply_append,
     };
     use crate::core::error::{Error, ErrorKind};
     use crate::core::frame::{self, FRAME_HEADER_LEN, FrameHeader, FrameState};
@@ -3128,18 +3129,20 @@ mod tests {
         let path = dir.path().join("pool.plasmite");
         let mut pool = Pool::create(&path, PoolOptions::new(1024 * 1024)).expect("create");
 
-        let err = pool
-            .append_locked_with_flush(
-                b"not-acknowledged",
-                AppendOptions::new(1, Durability::Flush),
-                |_mmap, _offset, _len, path, _message| {
-                    Err(Error::new(ErrorKind::Io)
-                        .with_message("injected flush failure")
-                        .with_source(std::io::Error::from(std::io::ErrorKind::Interrupted))
-                        .with_path(path))
-                },
-            )
-            .expect_err("flush failure must be returned");
+        let err = append_locked_with_flush(
+            &mut pool.mmap,
+            &mut pool.header,
+            &pool.path,
+            b"not-acknowledged",
+            AppendOptions::new(1, Durability::Flush),
+            |_mmap, _offset, _len, path, _message| {
+                Err(Error::new(ErrorKind::Io)
+                    .with_message("injected flush failure")
+                    .with_source(std::io::Error::from(std::io::ErrorKind::Interrupted))
+                    .with_path(path))
+            },
+        )
+        .expect_err("flush failure must be returned");
         assert_eq!(err.kind(), ErrorKind::Io);
         assert!(err.to_string().contains("injected flush failure"));
         // The failed flush does not roll back publication. Retrying the append
