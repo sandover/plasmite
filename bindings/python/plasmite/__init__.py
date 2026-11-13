@@ -575,7 +575,7 @@ def _frame_to_py(frame: plsm_lite3_frame_t) -> Lite3Frame:
 
 
 def _tag_array(values: Iterable[str]) -> tuple[POINTER(c_char_p), list[bytes]]:
-    encoded = [value.encode("utf-8") for value in values]
+    encoded = [_ensure_bytes(value.encode("utf-8"), "tag") for value in values]
     if not encoded:
         return POINTER(c_char_p)(), encoded
     arr = (c_char_p * len(encoded))()
@@ -605,9 +605,10 @@ def _serialized_handle(method):
 
 def _ensure_bytes(payload: bytes | bytearray | memoryview, name: str) -> bytes:
     if isinstance(payload, bytes):
-        return payload
+        return payload if type(payload) is bytes else bytes.__getitem__(payload, slice(None))
     if isinstance(payload, (bytearray, memoryview)):
-        return bytes(payload)
+        encoded = bytes(payload)
+        return encoded if type(encoded) is bytes else bytes.__getitem__(encoded, slice(None))
     raise TypeError(f"{name} must be bytes-like")
 
 
@@ -672,10 +673,13 @@ class Client:
         size_bytes = _ensure_non_negative_int(size_bytes, "size_bytes")
         out_pool = POINTER(plsm_pool_t)()
         out_err = POINTER(plsm_error_t)()
+        encoded_ref = _ensure_bytes(pool_ref.encode("utf-8"), "pool_ref")
+        native_size = c_uint64(size_bytes)
+        _require_open(self._ptr, "client")
         rc = _LIB.plsm_pool_create(
             self._ptr,
-            pool_ref.encode("utf-8"),
-            c_uint64(size_bytes),
+            encoded_ref,
+            native_size,
             byref(out_pool),
             byref(out_err),
         )
@@ -690,9 +694,11 @@ class Client:
             raise ValueError("pool_ref is required")
         out_pool = POINTER(plsm_pool_t)()
         out_err = POINTER(plsm_error_t)()
+        encoded_ref = _ensure_bytes(pool_ref.encode("utf-8"), "pool_ref")
+        _require_open(self._ptr, "client")
         rc = _LIB.plsm_pool_open(
             self._ptr,
-            pool_ref.encode("utf-8"),
+            encoded_ref,
             byref(out_pool),
             byref(out_err),
         )
@@ -764,6 +770,8 @@ class Pool:
         buf = plsm_buf_t()
         out_err = POINTER(plsm_error_t)()
         arr, _keep = _tag_array(tags)
+        durability_value = int(durability)
+        _require_open(self._ptr, "pool")
         # The native call borrows these immutable bytes only until it returns.
         rc = _LIB.plsm_pool_append_json(
             self._ptr,
@@ -771,7 +779,7 @@ class Pool:
             len(payload),
             arr,
             len(_keep),
-            int(durability),
+            durability_value,
             byref(buf),
             byref(out_err),
         )
@@ -800,11 +808,13 @@ class Pool:
             raise ValueError("payload is required")
         out_seq = c_uint64()
         out_err = POINTER(plsm_error_t)()
+        durability_value = int(durability)
+        _require_open(self._ptr, "pool")
         rc = _LIB.plsm_pool_append_lite3(
             self._ptr,
             payload,
             len(payload),
-            int(durability),
+            durability_value,
             byref(out_seq),
             byref(out_err),
         )
@@ -824,6 +834,8 @@ class Pool:
         receipt = plsm_append_identity_t()
         out_err = POINTER(plsm_error_t)()
         arr, _keep = _tag_array(tags)
+        durability_value = int(durability)
+        _require_open(self._ptr, "pool")
         # The native call borrows these immutable bytes only until it returns.
         rc = function(
             self._ptr,
@@ -831,7 +843,7 @@ class Pool:
             len(payload),
             arr,
             len(_keep),
-            int(durability),
+            durability_value,
             byref(receipt),
             byref(out_err),
         )
@@ -860,11 +872,13 @@ class Pool:
             raise NotImplementedError("append identity requires a newer libplasmite")
         receipt = plsm_append_identity_t()
         out_err = POINTER(plsm_error_t)()
+        durability_value = int(durability)
+        _require_open(self._ptr, "pool")
         rc = function(
             self._ptr,
             payload,
             len(payload),
-            int(durability),
+            durability_value,
             byref(receipt),
             byref(out_err),
         )
@@ -878,7 +892,9 @@ class Pool:
         seq = _ensure_non_negative_int(seq, "seq")
         buf = plsm_buf_t()
         out_err = POINTER(plsm_error_t)()
-        rc = _LIB.plsm_pool_get_json(self._ptr, c_uint64(seq), byref(buf), byref(out_err))
+        native_seq = c_uint64(seq)
+        _require_open(self._ptr, "pool")
+        rc = _LIB.plsm_pool_get_json(self._ptr, native_seq, byref(buf), byref(out_err))
         if rc != 0:
             raise _take_error(out_err)
         return _buf_to_bytes(buf)
@@ -908,7 +924,9 @@ class Pool:
         seq = _ensure_non_negative_int(seq, "seq")
         frame = plsm_lite3_frame_t()
         out_err = POINTER(plsm_error_t)()
-        rc = _LIB.plsm_pool_get_lite3(self._ptr, c_uint64(seq), byref(frame), byref(out_err))
+        native_seq = c_uint64(seq)
+        _require_open(self._ptr, "pool")
+        rc = _LIB.plsm_pool_get_lite3(self._ptr, native_seq, byref(frame), byref(out_err))
         if rc != 0:
             raise _take_error(out_err)
         return _frame_to_py(frame)
@@ -929,6 +947,7 @@ class Pool:
         out_err = POINTER(plsm_error_t)()
         if error_on_gap:
             options = _stream_options(since_seq, max_messages, timeout_ms, True)
+            _require_open(self._ptr, "pool")
             rc = _LIB.plsm_stream_open_ex(
                 self._ptr,
                 byref(options),
@@ -936,13 +955,17 @@ class Pool:
                 byref(out_err),
             )
         else:
+            native_since = c_uint64(since_seq or 0)
+            native_max = c_uint64(max_messages or 0)
+            native_timeout = c_uint64(timeout_ms or 0)
+            _require_open(self._ptr, "pool")
             rc = _LIB.plsm_stream_open(
                 self._ptr,
-                c_uint64(since_seq or 0),
+                native_since,
                 c_uint32(1 if since_seq is not None else 0),
-                c_uint64(max_messages or 0),
+                native_max,
                 c_uint32(1 if max_messages is not None else 0),
-                c_uint64(timeout_ms or 0),
+                native_timeout,
                 c_uint32(1 if timeout_ms is not None else 0),
                 byref(out_stream),
                 byref(out_err),
@@ -967,6 +990,7 @@ class Pool:
         out_err = POINTER(plsm_error_t)()
         if error_on_gap:
             options = _stream_options(since_seq, max_messages, timeout_ms, True)
+            _require_open(self._ptr, "pool")
             rc = _LIB.plsm_lite3_stream_open_ex(
                 self._ptr,
                 byref(options),
@@ -974,13 +998,17 @@ class Pool:
                 byref(out_err),
             )
         else:
+            native_since = c_uint64(since_seq or 0)
+            native_max = c_uint64(max_messages or 0)
+            native_timeout = c_uint64(timeout_ms or 0)
+            _require_open(self._ptr, "pool")
             rc = _LIB.plsm_lite3_stream_open(
                 self._ptr,
-                c_uint64(since_seq or 0),
+                native_since,
                 c_uint32(1 if since_seq is not None else 0),
-                c_uint64(max_messages or 0),
+                native_max,
                 c_uint32(1 if max_messages is not None else 0),
-                c_uint64(timeout_ms or 0),
+                native_timeout,
                 c_uint32(1 if timeout_ms is not None else 0),
                 byref(out_stream),
                 byref(out_err),
@@ -1073,7 +1101,8 @@ class Stream:
     def next_wait(self, timeout_ms: int) -> tuple[int, bytes | None]:
         """Return (status, value): 0=wait expired, 1=value, 2=finished, 3=cancelled."""
         _require_open(self._ptr, "stream")
-        timeout_ms = _ensure_non_negative_int(timeout_ms, "timeout_ms")
+        timeout_ms = c_uint64(_ensure_non_negative_int(timeout_ms, "timeout_ms"))
+        _require_open(self._ptr, "stream")
         value = plsm_buf_t()
         out_err = POINTER(plsm_error_t)()
         status = _LIB.plsm_stream_next_wait(self._ptr, timeout_ms, byref(value), byref(out_err))
@@ -1140,10 +1169,11 @@ class Lite3Stream:
     def next_wait(self, timeout_ms: int) -> tuple[int, Lite3Frame | None]:
         """Return (status, value): 0=wait expired, 1=value, 2=finished, 3=cancelled."""
         _require_open(self._ptr, "stream")
-        timeout_ms = _ensure_non_negative_int(timeout_ms, "timeout_ms")
+        timeout_ms = c_uint64(_ensure_non_negative_int(timeout_ms, "timeout_ms"))
+        _require_open(self._ptr, "stream")
         value = plsm_lite3_frame_t()
         out_err = POINTER(plsm_error_t)()
-        status = _LIB.plsm_lite3_stream_next_wait(self._ptr, c_uint64(timeout_ms), byref(value), byref(out_err))
+        status = _LIB.plsm_lite3_stream_next_wait(self._ptr, timeout_ms, byref(value), byref(out_err))
         if status < 0:
             raise _take_error(out_err)
         return status, _frame_to_py(value) if status == 1 else None
@@ -1288,9 +1318,11 @@ class UdpClient:
             raise ValueError("pool_name is required")
         out_pool = POINTER(plsm_udp_pool_t)()
         out_err = POINTER(plsm_error_t)()
+        encoded_name = _ensure_bytes(pool_name.encode("utf-8"), "pool_name")
+        _require_open(self._ptr, "UDP client")
         rc = _LIB.plsm_udp_client_open_pool(
             self._ptr,
-            pool_name.encode("utf-8"),
+            encoded_name,
             byref(out_pool),
             byref(out_err),
         )
@@ -1329,6 +1361,7 @@ class UdpPool:
         payload = json.dumps(value, separators=(",", ":")).encode("utf-8")
         tag_arr, keepalive = _tag_array(tags)
         out_err = POINTER(plsm_error_t)()
+        _require_open(self._ptr, "UDP pool")
         rc = _LIB.plsm_udp_pool_send_json(
             self._ptr,
             payload,
@@ -1347,6 +1380,7 @@ class UdpPool:
         if not payload:
             raise ValueError("payload is required")
         out_err = POINTER(plsm_error_t)()
+        _require_open(self._ptr, "UDP pool")
         rc = _LIB.plsm_udp_pool_send_lite3(
             self._ptr,
             payload,
@@ -1363,16 +1397,23 @@ class UdpPool:
         if not isinstance(options, UdpFollowOptions):
             raise TypeError("options must be UdpFollowOptions")
         start = options.start
-        if not isinstance(start, UdpStart) or start.kind not in (0, 1, 2, 3):
+        if not isinstance(start, UdpStart):
+            raise ValueError("invalid UDP follow start")
+        start_kind = start.kind
+        if start_kind not in (0, 1, 2, 3):
             raise ValueError("invalid UDP follow start")
         start_value = _ensure_non_negative_int(start.value, "start.value")
         out_follow = POINTER(plsm_udp_follow_t)()
         out_err = POINTER(plsm_error_t)()
+        native_kind = c_uint32(start_kind)
+        native_value = c_uint64(start_value)
+        native_live = c_uint32(1 if options.live else 0)
+        _require_open(self._ptr, "UDP pool")
         rc = _LIB.plsm_udp_pool_follow(
             self._ptr,
-            c_uint32(start.kind),
-            c_uint64(start_value),
-            c_uint32(1 if options.live else 0),
+            native_kind,
+            native_value,
+            native_live,
             byref(out_follow),
             byref(out_err),
         )
@@ -1410,6 +1451,8 @@ class UdpFollow:
 
     def next_event(self, timeout_ms: int | None = None) -> UdpEvent | None:
         timeout_ms = _optional_non_negative_int(timeout_ms, "timeout_ms")
+        if timeout_ms is not None:
+            timeout_ms = c_uint64(timeout_ms).value
         with self._read_lock:
             with self._state_lock:
                 _require_open(self._ptr, "UDP follow")

@@ -208,5 +208,8 @@ growth, canonical timestamps/metadata and blocked-storage thread progress.
 The three-wheel log (outside Git) also verifies native input,
 byte values and NUL tags in every installed wheel, plus the packaged server.
 
+[Callback ordering checks](callback-guards/README.md) cover reentrant closure during
+argument conversion and report the cost of the additional open-handle check.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

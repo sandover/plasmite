@@ -1,0 +1,350 @@
+{
+  "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "backend": "native",
+  "library_sha256": "ea3e5ab7c5bb262a86fcd88140c38a332074157d023fb084a28e0a004f798984",
+  "runner_sha256": "23ef944bfab94811b8e31d5ff48982c369def93e3f5a4531e379db1b014b71b5",
+  "previous_source_sha256": "5855207c6664c8d0b024f6781af6a2861c35347566e51b4bdebe8a49b0fa3691",
+  "current_facade_sha256": "95d4030c16b99d5f6c5cf1b28c21cb971b8c9e01190cc916baf36eef5f1314e4",
+  "notes": [
+    "Old ordering runs only with literal builtins and no user callbacks.",
+    "Close-hook regression cases mock the final native boundary, avoiding unsafe old calls."
+  ],
+  "runs": [
+    {
+      "fixture": "small",
+      "variant": "before",
+      "repeat": 1,
+      "operations": 4000,
+      "ns_per_op": 7664.729,
+      "cpu_ns_per_op": 5928.5
+    },
+    {
+      "fixture": "small",
+      "variant": "after",
+      "repeat": 1,
+      "operations": 4000,
+      "ns_per_op": 6097.125,
+      "cpu_ns_per_op": 5201.75
+    },
+    {
+      "fixture": "small",
+      "variant": "after",
+      "repeat": 2,
+      "operations": 4000,
+      "ns_per_op": 5888.021,
+      "cpu_ns_per_op": 5124.5
+    },
+    {
+      "fixture": "small",
+      "variant": "before",
+      "repeat": 2,
+      "operations": 4000,
+      "ns_per_op": 5003.4375,
+      "cpu_ns_per_op": 4995.5
+    },
+    {
+      "fixture": "small",
+      "variant": "before",
+      "repeat": 3,
+      "operations": 4000,
+      "ns_per_op": 4957.5415,
+      "cpu_ns_per_op": 4939.75
+    },
+    {
+      "fixture": "small",
+      "variant": "after",
+      "repeat": 3,
+      "operations": 4000,
+      "ns_per_op": 4853.48975,
+      "cpu_ns_per_op": 4851.5
+    },
+    {
+      "fixture": "small",
+      "variant": "after",
+      "repeat": 4,
+      "operations": 4000,
+      "ns_per_op": 5101.7395,
+      "cpu_ns_per_op": 5081.25
+    },
+    {
+      "fixture": "small",
+      "variant": "before",
+      "repeat": 4,
+      "operations": 4000,
+      "ns_per_op": 4962.10425,
+      "cpu_ns_per_op": 4945.5
+    },
+    {
+      "fixture": "small",
+      "variant": "before",
+      "repeat": 5,
+      "operations": 4000,
+      "ns_per_op": 5026.2395,
+      "cpu_ns_per_op": 5007.0
+    },
+    {
+      "fixture": "small",
+      "variant": "after",
+      "repeat": 5,
+      "operations": 4000,
+      "ns_per_op": 5359.2085,
+      "cpu_ns_per_op": 5253.0
+    },
+    {
+      "fixture": "small",
+      "variant": "after",
+      "repeat": 6,
+      "operations": 4000,
+      "ns_per_op": 4984.229,
+      "cpu_ns_per_op": 4969.5
+    },
+    {
+      "fixture": "small",
+      "variant": "before",
+      "repeat": 6,
+      "operations": 4000,
+      "ns_per_op": 5216.52075,
+      "cpu_ns_per_op": 5176.75
+    },
+    {
+      "fixture": "small",
+      "variant": "before",
+      "repeat": 7,
+      "operations": 4000,
+      "ns_per_op": 5100.802,
+      "cpu_ns_per_op": 5095.75
+    },
+    {
+      "fixture": "small",
+      "variant": "after",
+      "repeat": 7,
+      "operations": 4000,
+      "ns_per_op": 4998.896,
+      "cpu_ns_per_op": 4988.75
+    },
+    {
+      "fixture": "wide",
+      "variant": "before",
+      "repeat": 1,
+      "operations": 300,
+      "ns_per_op": 31742.083333333332,
+      "cpu_ns_per_op": 22503.333333333332
+    },
+    {
+      "fixture": "wide",
+      "variant": "after",
+      "repeat": 1,
+      "operations": 300,
+      "ns_per_op": 31920.833333333332,
+      "cpu_ns_per_op": 23290.0
+    },
+    {
+      "fixture": "wide",
+      "variant": "after",
+      "repeat": 2,
+      "operations": 300,
+      "ns_per_op": 23245.97,
+      "cpu_ns_per_op": 21036.666666666668
+    },
+    {
+      "fixture": "wide",
+      "variant": "before",
+      "repeat": 2,
+      "operations": 300,
+      "ns_per_op": 19493.613333333335,
+      "cpu_ns_per_op": 19496.666666666668
+    },
+    {
+      "fixture": "wide",
+      "variant": "before",
+      "repeat": 3,
+      "operations": 300,
+      "ns_per_op": 19533.89,
+      "cpu_ns_per_op": 19526.666666666668
+    },
+    {
+      "fixture": "wide",
+      "variant": "after",
+      "repeat": 3,
+      "operations": 300,
+      "ns_per_op": 19836.11,
+      "cpu_ns_per_op": 19813.333333333332
+    },
+    {
+      "fixture": "wide",
+      "variant": "after",
+      "repeat": 4,
+      "operations": 300,
+      "ns_per_op": 20433.193333333333,
+      "cpu_ns_per_op": 20426.666666666668
+    },
+    {
+      "fixture": "wide",
+      "variant": "before",
+      "repeat": 4,
+      "operations": 300,
+      "ns_per_op": 19863.75,
+      "cpu_ns_per_op": 19866.666666666668
+    },
+    {
+      "fixture": "wide",
+      "variant": "before",
+      "repeat": 5,
+      "operations": 300,
+      "ns_per_op": 19660.136666666665,
+      "cpu_ns_per_op": 19650.0
+    },
+    {
+      "fixture": "wide",
+      "variant": "after",
+      "repeat": 5,
+      "operations": 300,
+      "ns_per_op": 19590.0,
+      "cpu_ns_per_op": 19593.333333333332
+    },
+    {
+      "fixture": "wide",
+      "variant": "after",
+      "repeat": 6,
+      "operations": 300,
+      "ns_per_op": 20398.053333333333,
+      "cpu_ns_per_op": 20293.333333333332
+    },
+    {
+      "fixture": "wide",
+      "variant": "before",
+      "repeat": 6,
+      "operations": 300,
+      "ns_per_op": 20692.083333333332,
+      "cpu_ns_per_op": 20606.666666666668
+    },
+    {
+      "fixture": "wide",
+      "variant": "before",
+      "repeat": 7,
+      "operations": 300,
+      "ns_per_op": 19805.27666666667,
+      "cpu_ns_per_op": 19806.666666666668
+    },
+    {
+      "fixture": "wide",
+      "variant": "after",
+      "repeat": 7,
+      "operations": 300,
+      "ns_per_op": 19899.72333333333,
+      "cpu_ns_per_op": 19893.333333333332
+    },
+    {
+      "fixture": "long_string",
+      "variant": "before",
+      "repeat": 1,
+      "operations": 200,
+      "ns_per_op": 26985.205,
+      "cpu_ns_per_op": 21495.0
+    },
+    {
+      "fixture": "long_string",
+      "variant": "after",
+      "repeat": 1,
+      "operations": 200,
+      "ns_per_op": 14043.955,
+      "cpu_ns_per_op": 14050.0
+    },
+    {
+      "fixture": "long_string",
+      "variant": "after",
+      "repeat": 2,
+      "operations": 200,
+      "ns_per_op": 14393.96,
+      "cpu_ns_per_op": 14400.0
+    },
+    {
+      "fixture": "long_string",
+      "variant": "before",
+      "repeat": 2,
+      "operations": 200,
+      "ns_per_op": 14568.96,
+      "cpu_ns_per_op": 14525.0
+    },
+    {
+      "fixture": "long_string",
+      "variant": "before",
+      "repeat": 3,
+      "operations": 200,
+      "ns_per_op": 15173.125,
+      "cpu_ns_per_op": 15100.0
+    },
+    {
+      "fixture": "long_string",
+      "variant": "after",
+      "repeat": 3,
+      "operations": 200,
+      "ns_per_op": 14246.04,
+      "cpu_ns_per_op": 14255.0
+    },
+    {
+      "fixture": "long_string",
+      "variant": "after",
+      "repeat": 4,
+      "operations": 200,
+      "ns_per_op": 14109.375,
+      "cpu_ns_per_op": 14110.0
+    },
+    {
+      "fixture": "long_string",
+      "variant": "before",
+      "repeat": 4,
+      "operations": 200,
+      "ns_per_op": 14631.455,
+      "cpu_ns_per_op": 14600.0
+    },
+    {
+      "fixture": "long_string",
+      "variant": "before",
+      "repeat": 5,
+      "operations": 200,
+      "ns_per_op": 14134.585,
+      "cpu_ns_per_op": 14145.0
+    },
+    {
+      "fixture": "long_string",
+      "variant": "after",
+      "repeat": 5,
+      "operations": 200,
+      "ns_per_op": 13825.42,
+      "cpu_ns_per_op": 13830.0
+    },
+    {
+      "fixture": "long_string",
+      "variant": "after",
+      "repeat": 6,
+      "operations": 200,
+      "ns_per_op": 14208.125,
+      "cpu_ns_per_op": 14180.0
+    },
+    {
+      "fixture": "long_string",
+      "variant": "before",
+      "repeat": 6,
+      "operations": 200,
+      "ns_per_op": 14195.21,
+      "cpu_ns_per_op": 14120.0
+    },
+    {
+      "fixture": "long_string",
+      "variant": "before",
+      "repeat": 7,
+      "operations": 200,
+      "ns_per_op": 14285.83,
+      "cpu_ns_per_op": 14240.0
+    },
+    {
+      "fixture": "long_string",
+      "variant": "after",
+      "repeat": 7,
+      "operations": 200,
+      "ns_per_op": 14371.04,
+      "cpu_ns_per_op": 14355.0
+    }
+  ]
+}

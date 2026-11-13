@@ -193,6 +193,27 @@ class Views(unittest.TestCase):
                 json.loads(plasmite.to_json(message))["time"], message.time_rfc3339
             )
 
+    def test_bytes_subclass_cannot_change_the_handed_off_buffer_length(self):
+        from unittest.mock import patch
+
+        from plasmite import _views
+
+        class Subclass(bytes):
+            def __bytes__(self):
+                return self
+
+            def __len__(self):
+                return bytes.__len__(self) + 1000
+
+        original = bytes(memoryview(self.message))
+        payload = Subclass(original)
+        with patch.object(_views.backend, "from_bytes") as construct:
+            plasmite.view_from_lite3(payload)
+            handed_off = construct.call_args.args[0]
+            self.assertIs(type(handed_off), bytes)
+            self.assertEqual(len(handed_off), len(original))
+        self.assertEqual(plasmite.view_from_lite3(payload).data, self.data)
+
     def test_validates_and_isolates_bytes(self):
         payload = bytearray(memoryview(self.message))
         view = plasmite.view_from_lite3(payload, 1, 2)

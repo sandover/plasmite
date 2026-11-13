@@ -103,6 +103,41 @@ class AppendViews(unittest.TestCase):
         # Existing JSON behavior stays available explicitly.
         self.assertEqual(self.pool.append({"custom": CustomInt(2)}).data["custom"], 2)
 
+    def test_tag_iterator_can_close_handle_before_native_use(self):
+        def tags():
+            self.pool.close()
+            yield "tag"
+
+        from unittest.mock import patch
+
+        from plasmite import _views
+
+        with patch.object(_views.backend, "append") as native_append:
+            with self.assertRaises(plasmite.PlasmiteError) as caught:
+                self.pool.append_view({"value": 1}, tags())
+            native_append.assert_not_called()
+        self.assertEqual(caught.exception.kind, plasmite.ErrorKind.USAGE)
+        self.assertIn("pool is closed", str(caught.exception))
+
+    def test_durability_conversion_can_close_handle_before_native_use(self):
+        pool = self.pool
+
+        class ClosePool:
+            def __int__(self):
+                pool.close()
+                return 0
+
+        from unittest.mock import patch
+
+        from plasmite import _views
+
+        with patch.object(_views.backend, "append") as native_append:
+            with self.assertRaises(plasmite.PlasmiteError) as caught:
+                self.pool.append_view({"value": 1}, durability=ClosePool())
+            native_append.assert_not_called()
+        self.assertEqual(caught.exception.kind, plasmite.ErrorKind.USAGE)
+        self.assertIn("pool is closed", str(caught.exception))
+
     def test_growth_runs_tag_iterable_once(self):
         calls = []
 

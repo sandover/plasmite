@@ -9,7 +9,7 @@ import sysconfig
 from collections.abc import ItemsView, Mapping, Sequence, ValuesView
 from datetime import datetime, timezone
 
-from . import _LIB, _take_error, plsm_error_t
+from . import _LIB, _require_open, _take_error, plsm_error_t
 
 
 def _native_error(address):
@@ -150,13 +150,17 @@ def from_lite3(payload, seq=0, timestamp_ns=0):
         raise TypeError("payload must be bytes-like")
     if not all(isinstance(n, int) and 0 <= n < 1 << 64 for n in [seq, timestamp_ns]):
         raise ValueError("identity must fit unsigned 64-bit integers")
-    return backend.from_bytes(bytes(payload), seq, timestamp_ns)
+    encoded = bytes(payload)
+    # __bytes__ may return a subtype; its __len__ is not the native buffer size.
+    if type(encoded) is not bytes:
+        encoded = bytes.__getitem__(encoded, slice(None))
+    return backend.from_bytes(encoded, seq, timestamp_ns)
 
 
 def append_view(pool, data, tags, durability):
-    return backend.append(
-        ctypes.cast(pool._ptr, ctypes.c_void_p).value,
-        data,
-        [] if tags is None else list(tags),
-        int(durability),
-    )
+    # Callbacks can close this handle reentrantly through its RLock.
+    normalized_tags = [] if tags is None else list(tags)
+    normalized_durability = int(durability)
+    _require_open(pool._ptr, "pool")
+    address = ctypes.cast(pool._ptr, ctypes.c_void_p).value
+    return backend.append(address, data, normalized_tags, normalized_durability)
