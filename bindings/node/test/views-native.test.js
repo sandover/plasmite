@@ -1,0 +1,50 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { Client, toNative, toJson } = require('..');
+
+test('native views retain exact values and independent snapshot lifetime', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plasmite-native-view-'));
+  const client = new Client(dir);
+  const pool = client.createPool('views', 65536);
+  t.after(() => { pool.close(); client.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  pool.appendJson(Buffer.from('{"metrics":{"power":42},"samples":[{"value":1},{"value":2}],"large":9223372036854775807,"negativeZero":-0.0,"__proto__":{"x":1},"then":null}'));
+  const [first, second] = await Promise.all([pool.getView(1n), pool.getView(1n)]);
+  assert.equal(first.seq, 1n);
+  assert.equal(typeof first.timestampNs, 'bigint');
+  assert.equal(first.data.large, 9223372036854775807n);
+  assert.equal(Object.is(first.data.negativeZero, -0), true);
+  assert.equal(first.data.metrics, first.data.metrics);
+  assert.deepEqual([...first.data.samples].map(x => x.value), [1, 2]);
+  const native = toNative(first.data);
+  assert.equal(Object.hasOwn(native, '__proto__'), true);
+  assert.equal(Object.getPrototypeOf(native), Object.prototype);
+  assert.equal(native.__proto__.x, 1);
+  assert.match(toJson(first), /9223372036854775807/);
+  assert.throws(() => JSON.stringify(first.data), TypeError);
+  const metrics = first.data.metrics;
+  const json = toJson(first.data);
+  for (let i = 0; i < 30; i++) pool.append({ text: 'x'.repeat(4096) });
+  await assert.rejects(pool.getView(1n), /not found|retention|sequence/i);
+  pool.close();
+  client.close();
+  assert.equal(metrics.power, 42);
+  assert.equal(second.data.samples.at(-1).value, 2);
+  assert.equal(toJson(first.data), json);
+  native.metrics.power = 1;
+  assert.equal(first.data.metrics.power, 42);
+});
+
+test('queued reads retain their pool after close', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plasmite-native-view-'));
+  const client = new Client(dir), pool = client.createPool('views', 65536);
+  t.after(() => { pool.close(); client.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  pool.append({ x: 1 });
+  const reads = [pool.getView(1n), pool.getView(1n)];
+  pool.close();
+  const views = await Promise.all(reads);
+  assert.deepEqual(views.map(x => x.data.x), [1, 1]);
+  await assert.rejects(pool.getView(1n), /closed/);
+});

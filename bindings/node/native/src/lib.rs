@@ -14,6 +14,7 @@ use napi_derive::napi;
 use std::ffi::{CStr, CString};
 use std::ptr;
 use std::sync::Arc;
+mod views;
 
 #[repr(C)]
 struct plsm_client_t {
@@ -367,7 +368,12 @@ impl Client {
         if rc != 0 {
             return Err(take_error(env, err)?);
         }
-        Ok(Pool { ptr: out })
+        Ok(Pool {
+            handle: Some(Arc::new(PoolHandle {
+                ptr: out,
+                operation: std::sync::Mutex::new(()),
+            })),
+        })
     }
 
     #[napi]
@@ -380,7 +386,12 @@ impl Client {
         if rc != 0 {
             return Err(take_error(env, err)?);
         }
-        Ok(Pool { ptr: out })
+        Ok(Pool {
+            handle: Some(Arc::new(PoolHandle {
+                ptr: out,
+                operation: std::sync::Mutex::new(()),
+            })),
+        })
     }
 
     #[napi]
@@ -400,7 +411,37 @@ impl Drop for Client {
 
 #[napi]
 pub struct Pool {
+    handle: Option<Arc<PoolHandle>>,
+}
+struct PoolHandle {
     ptr: *mut plsm_pool_t,
+    operation: std::sync::Mutex<()>,
+}
+// The mutex serializes every C pool call; the last Arc follows in-flight jobs.
+unsafe impl Send for PoolHandle {}
+unsafe impl Sync for PoolHandle {}
+impl Drop for PoolHandle {
+    fn drop(&mut self) {
+        unsafe { plsm_pool_free(self.ptr) }
+    }
+}
+impl Pool {
+    fn operation(&self, env: Env) -> Result<std::sync::MutexGuard<'_, ()>> {
+        let handle = self
+            .handle
+            .as_ref()
+            .ok_or_else(|| Error::from_reason("pool is closed"))?;
+        match handle.operation.try_lock() {
+            Ok(guard) => Ok(guard),
+            Err(_) => {
+                let mut error = env.create_error(Error::from_reason(
+                    "pool has an active asynchronous operation",
+                ))?;
+                error.set_named_property("kind", "Busy")?;
+                Err(Error::from(error.into_unknown()))
+            }
+        }
+    }
 }
 
 #[napi(object)]
@@ -438,6 +479,7 @@ impl Pool {
         tags: Vec<String>,
         durability: Durability,
     ) -> Result<Buffer> {
+        let _operation = self.operation(env)?;
         let c_tags = CStringArray::new(&tags)?;
         let mut out = plsm_buf_t {
             data: ptr::null_mut(),
@@ -446,7 +488,7 @@ impl Pool {
         let mut err = ptr::null_mut();
         let rc = unsafe {
             plsm_pool_append_json(
-                self.ptr,
+                self.handle.as_ref().expect("open pool").ptr,
                 payload.as_ptr(),
                 payload.len(),
                 c_tags.as_ptr(),
@@ -469,11 +511,12 @@ impl Pool {
         payload: Buffer,
         durability: Durability,
     ) -> Result<BigInt> {
+        let _operation = self.operation(env)?;
         let mut seq = 0u64;
         let mut err = ptr::null_mut();
         let rc = unsafe {
             plsm_pool_append_lite3(
-                self.ptr,
+                self.handle.as_ref().expect("open pool").ptr,
                 payload.as_ptr(),
                 payload.len(),
                 durability as u32,
@@ -495,12 +538,13 @@ impl Pool {
         tags: Vec<String>,
         durability: Durability,
     ) -> Result<AppendReceipt> {
+        let _operation = self.operation(env)?;
         let c_tags = CStringArray::new(&tags)?;
         let mut out = plsm_append_identity_t::default();
         let mut err = ptr::null_mut();
         let rc = unsafe {
             plsm_pool_append_json_identity(
-                self.ptr,
+                self.handle.as_ref().expect("open pool").ptr,
                 payload.as_ptr(),
                 payload.len(),
                 c_tags.as_ptr(),
@@ -523,11 +567,12 @@ impl Pool {
         payload: Buffer,
         durability: Durability,
     ) -> Result<AppendReceipt> {
+        let _operation = self.operation(env)?;
         let mut out = plsm_append_identity_t::default();
         let mut err = ptr::null_mut();
         let rc = unsafe {
             plsm_pool_append_lite3_identity(
-                self.ptr,
+                self.handle.as_ref().expect("open pool").ptr,
                 payload.as_ptr(),
                 payload.len(),
                 durability as u32,
@@ -543,13 +588,21 @@ impl Pool {
 
     #[napi]
     pub fn get_json(&self, env: Env, seq: Either<u32, BigInt>) -> Result<Buffer> {
+        let _operation = self.operation(env)?;
         let seq = to_u64(seq, "seq")?;
         let mut out = plsm_buf_t {
             data: ptr::null_mut(),
             len: 0,
         };
         let mut err = ptr::null_mut();
-        let rc = unsafe { plsm_pool_get_json(self.ptr, seq, &mut out, &mut err) };
+        let rc = unsafe {
+            plsm_pool_get_json(
+                self.handle.as_ref().expect("open pool").ptr,
+                seq,
+                &mut out,
+                &mut err,
+            )
+        };
         if rc != 0 {
             return Err(take_error(env, err)?);
         }
@@ -558,6 +611,7 @@ impl Pool {
 
     #[napi]
     pub fn get_lite3(&self, env: Env, seq: Either<u32, BigInt>) -> Result<Lite3Frame> {
+        let _operation = self.operation(env)?;
         let seq = to_u64(seq, "seq")?;
         let mut out = plsm_lite3_frame_t {
             seq: 0,
@@ -569,7 +623,14 @@ impl Pool {
             },
         };
         let mut err = ptr::null_mut();
-        let rc = unsafe { plsm_pool_get_lite3(self.ptr, seq, &mut out, &mut err) };
+        let rc = unsafe {
+            plsm_pool_get_lite3(
+                self.handle.as_ref().expect("open pool").ptr,
+                seq,
+                &mut out,
+                &mut err,
+            )
+        };
         if rc != 0 {
             return Err(take_error(env, err)?);
         }
@@ -585,6 +646,7 @@ impl Pool {
         timeout_ms: Option<Either<u32, BigInt>>,
         error_on_gap: bool,
     ) -> Result<Stream> {
+        let _operation = self.operation(env)?;
         let since_seq = since_seq
             .map(|value| to_u64(value, "since_seq"))
             .transpose()?;
@@ -598,11 +660,18 @@ impl Pool {
         let mut err = ptr::null_mut();
         let rc = if error_on_gap {
             let options = stream_options(since_seq, max_messages, timeout_ms, true);
-            unsafe { plsm_stream_open_ex(self.ptr, &options, &mut out, &mut err) }
+            unsafe {
+                plsm_stream_open_ex(
+                    self.handle.as_ref().expect("open pool").ptr,
+                    &options,
+                    &mut out,
+                    &mut err,
+                )
+            }
         } else {
             unsafe {
                 plsm_stream_open(
-                    self.ptr,
+                    self.handle.as_ref().expect("open pool").ptr,
                     since_seq.unwrap_or(0),
                     if since_seq.is_some() { 1 } else { 0 },
                     max_messages.unwrap_or(0),
@@ -634,6 +703,7 @@ impl Pool {
         timeout_ms: Option<Either<u32, BigInt>>,
         error_on_gap: bool,
     ) -> Result<Lite3Stream> {
+        let _operation = self.operation(env)?;
         let since_seq = since_seq
             .map(|value| to_u64(value, "since_seq"))
             .transpose()?;
@@ -647,11 +717,18 @@ impl Pool {
         let mut err = ptr::null_mut();
         let rc = if error_on_gap {
             let options = stream_options(since_seq, max_messages, timeout_ms, true);
-            unsafe { plsm_lite3_stream_open_ex(self.ptr, &options, &mut out, &mut err) }
+            unsafe {
+                plsm_lite3_stream_open_ex(
+                    self.handle.as_ref().expect("open pool").ptr,
+                    &options,
+                    &mut out,
+                    &mut err,
+                )
+            }
         } else {
             unsafe {
                 plsm_lite3_stream_open(
-                    self.ptr,
+                    self.handle.as_ref().expect("open pool").ptr,
                     since_seq.unwrap_or(0),
                     if since_seq.is_some() { 1 } else { 0 },
                     max_messages.unwrap_or(0),
@@ -675,11 +752,24 @@ impl Pool {
     }
 
     #[napi]
-    pub fn close(&mut self) {
-        if !self.ptr.is_null() {
-            unsafe { plsm_pool_free(self.ptr) };
-            self.ptr = ptr::null_mut();
+    pub fn get_view(&self, seq: Either<u32, BigInt>) -> Result<AsyncTask<GetViewTask>> {
+        if !views::available() {
+            return Err(Error::from_reason(
+                "loaded libplasmite lacks owned-view support; install matching native assets or rebuild libplasmite",
+            ));
         }
+        Ok(AsyncTask::new(GetViewTask {
+            handle: self
+                .handle
+                .as_ref()
+                .cloned()
+                .ok_or_else(|| Error::from_reason("pool is closed"))?,
+            seq: to_u64(seq, "seq")?,
+        }))
+    }
+    #[napi]
+    pub fn close(&mut self) {
+        self.handle.take();
     }
 }
 
@@ -1620,5 +1710,57 @@ fn to_u64(value: Either<u32, BigInt>, name: &str) -> Result<u64> {
                 ))
             }
         }
+    }
+}
+
+pub struct GetViewTask {
+    handle: Arc<PoolHandle>,
+    seq: u64,
+}
+pub struct GetViewOutput {
+    owner: Option<views::Owned>,
+    error: usize,
+}
+impl Drop for GetViewOutput {
+    fn drop(&mut self) {
+        if self.error != 0 {
+            unsafe { plsm_error_free(self.error as *mut plsm_error_t) }
+        }
+    }
+}
+impl Task for GetViewTask {
+    type Output = GetViewOutput;
+    type JsValue = views::NativeView;
+    fn compute(&mut self) -> Result<Self::Output> {
+        let _operation = self
+            .handle
+            .operation
+            .lock()
+            .map_err(|_| Error::from_reason("pool operation lock poisoned"))?;
+        let mut owner = ptr::null();
+        let mut error = ptr::null_mut();
+        let rc =
+            unsafe { views::plsm_pool_get_view(self.handle.ptr, self.seq, &mut owner, &mut error) };
+        Ok(GetViewOutput {
+            owner: if rc == 0 {
+                Some(views::Owned(owner))
+            } else {
+                None
+            },
+            error: error as usize,
+        })
+    }
+    fn resolve(&mut self, env: Env, mut output: Self::Output) -> Result<Self::JsValue> {
+        if output.error != 0 {
+            let err = std::mem::replace(&mut output.error, 0);
+            return Err(take_error(env, err as *mut plsm_error_t)?);
+        }
+        views::NativeView::new(
+            env,
+            output
+                .owner
+                .take()
+                .ok_or_else(|| Error::from_reason("get_view returned no owner"))?,
+        )
     }
 }

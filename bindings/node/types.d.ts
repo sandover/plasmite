@@ -81,7 +81,36 @@ export interface AppendReceipt {
   timestampNs: bigint
 }
 
+declare const byteViewType: unique symbol
+declare const messageViewType: unique symbol
+
+export interface BytesView extends Iterable<number> {
+  readonly [byteViewType]: true
+  readonly length: number
+  readonly [index: number]: number
+}
+export type View<T> = T extends Uint8Array ? BytesView
+  : T extends object ? { readonly [K in keyof T]: View<T[K]> } : T
+export interface MessageView<T = unknown> {
+  readonly [messageViewType]: true
+  readonly seq: bigint
+  readonly timestampNs: bigint
+  readonly timeRfc3339: string
+  readonly meta: View<{ tags: string[] }>
+  readonly data: View<T>
+}
+export type Native<T> = T extends MessageView<infer D>
+  ? { seq: bigint; time: string; meta: { tags: string[] }; data: Native<View<D>> }
+  : T extends BytesView ? Uint8Array
+  : T extends object ? { -readonly [K in keyof T]: Native<T[K]> } : T
+/** Build independent mutable containers from a view or supported scalar. */
+export function toNative<T>(value: T): Native<T>
+/** Format directly from a view, preserving exact stored integer digits. */
+export function toJson(value: unknown): string
+
 export class Pool {
+  /** Acquire an independent immutable snapshot without blocking JavaScript. */
+  getView<T = unknown>(seq: number | bigint): Promise<MessageView<T>>
   appendIdentity(payload: unknown, tags?: string[], durability?: Durability): AppendReceipt
   appendLite3Identity(payload: Buffer, durability?: Durability): AppendReceipt
   append(payload: unknown, tags?: string[], durability?: Durability): Message

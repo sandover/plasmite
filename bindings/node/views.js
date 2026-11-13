@@ -22,12 +22,12 @@ function createMessageView(backend, seq, timestampNs) {
     const target = array ? [] : Object.create(null);
     if (array || bytes) Object.defineProperty(target, "length", { value: value.count, writable: false });
     const lookup = key => {
-      if (typeof key !== "string" || key.includes("\0")) return undefined;
+      if (typeof key !== "string" || key.includes("\0") || !key.isWellFormed()) return undefined;
       if (array || bytes) {
         const index = indexOf(key);
         return index >= 0 && index < value.count ? backend.at(value.node, index) : undefined;
       }
-      return backend.lookup(value.node, key);
+      return backend.lookup(value.node, key) ?? undefined;
     };
     const iterator = function* () {
       for (const item of backend.iterate(value.node)) yield wrap(item);
@@ -91,6 +91,7 @@ function toJson(value) {
   const ref = refs.get(value);
   if (ref) return ref.backend.json(ref.node);
   if (typeof value === "bigint") return value.toString();
+  if (typeof value === "number" && !Number.isFinite(value)) throw new RangeError("JSON requires a finite number");
   if (typeof value === "number" && Object.is(value, -0)) return "-0.0";
   if (value === null || ["string", "number", "boolean"].includes(typeof value)) return JSON.stringify(value);
   throw new TypeError("expected a Plasmite view or scalar");

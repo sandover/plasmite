@@ -53,6 +53,46 @@ try {
 }
 ```
 
+### Owned views (additive source API)
+
+`await pool.getView(sequence)` returns an immutable Lite3 snapshot. Properties
+read the stored data; arrays support normal indexing, iteration and shallow
+methods. Children remain valid after pool close or ring overwrite.
+
+```js
+const { toNative, toJson } = require("plasmite");
+const message = await pool.getView(17n);
+const metrics = message.data.metrics;
+console.log(metrics.power);
+for (const sample of message.data.samples) console.log(sample.value);
+const editable = toNative(metrics); // Independent mutable subtree.
+editable.power = 42;
+const json = toJson(message);       // Direct formatting, exact integer digits.
+```
+
+Use `pool.getView<Reading>(17n)` in TypeScript to declare an expected data shape;
+this assertion performs no runtime validation. `toNative(message)` creates the
+canonical envelope with a string time; subtree conversion preserves its shape.
+Safe stored integers read as numbers and larger i64 values as bigints. Use
+`toJson` for exact JSON; ordinary JSON.stringify can reject bigint data.
+
+Object views have no Object prototype methods; use Object.hasOwn. Spread and
+slice make shallow containers whose children remain views. Mutation, freeze and
+seal throw TypeError; structuredClone cannot clone these proxies. Native copies
+preserve __proto__ as an own data property.
+
+Concurrent getView calls serialize off-thread. Closing a pool lets already
+queued reads finish. A legacy synchronous operation during an active async read
+returns Busy rather than waiting on the JavaScript thread. Await the read before
+mixing those operations. An older shared library lacking the additive view ABI
+produces an actionable error; install matching native assets.
+
+The view API currently trades lower wide-record selected-read cost for extra
+small-record latency and slower warm access/full native conversion. See the
+[measured comparisons](../../docs/performance/language-boundary-results/node-views/README.md).
+Run `node --expose-gc scripts/bench_views.js 100 5 result.json` from this directory
+after staging matching optimized native assets to repeat the focused comparison.
+
 ### UDP sender and follower
 
 UDP uses one explicit endpoint. The server must enable `--udp-follow`, which

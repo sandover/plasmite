@@ -10,6 +10,8 @@ const { RemoteClient, RemoteError, RemotePool } = require("./remote");
 const { Message, parseMessage, parseNativeMessage } = require("./message");
 const { ERROR_KIND_VALUES, mapErrorKind } = require("./mappings");
 
+const { createMessageView, toNative, toJson } = require("./views");
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const path = require("node:path");
 const os = require("node:os");
@@ -288,6 +290,25 @@ class Pool {
    * @param {number|bigint} seq
    * @returns {Message}
    */
+  async getView(seq) {
+    try {
+      const owner = await this._inner.getView(normalizeUint64(seq, "seq"));
+      const backend = {
+        root: () => owner.root(),
+        lookup: (node, key) => owner.lookup(node, key),
+        at: (node, index) => owner.at(node, index),
+        keys: node => owner.keys(node),
+        materialize: node => owner.materialize(node),
+        json: node => owner.json(node),
+        *iterate(node) {
+          const cursor = owner.cursor(node);
+          for (let value = cursor.nextValue(); value != null; value = cursor.nextValue()) yield value;
+        },
+      };
+      return createMessageView(backend, owner.seq, owner.timestampNs);
+    } catch (err) { throw wrapNativeError(err); }
+  }
+
   get(seq) {
     return parseNativeMessage(this.getJson(seq));
   }
@@ -840,6 +861,7 @@ function normalizeUint64(value, name) {
 }
 
 module.exports = {
+  toNative, toJson,
   Client,
   Pool,
   Stream,
