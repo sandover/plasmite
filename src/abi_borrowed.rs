@@ -11,6 +11,101 @@ use crate::abi_views::PlsmSelector;
 use crate::core::error::{Error, ErrorKind};
 use crate::core::lite3::{JsonValue, Lite3DocRef, sys};
 
+// Private transfer of an immutable owner's checked offsets to Go-owned bytes.
+#[repr(C)]
+#[derive(Default)]
+pub struct OwnedInfo {
+    bytes: *const u8,
+    len: usize,
+    data_node: usize,
+    meta_node: usize,
+    duplicate_count: usize,
+    seq: u64,
+    timestamp_ns: u64,
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn plsm_go_view_info(
+    owner: *const crate::abi_views::plsm_message_view,
+) -> OwnedInfo {
+    let Some(view) = (unsafe { crate::abi_views::owner_view(owner) }) else {
+        return OwnedInfo::default();
+    };
+    OwnedInfo {
+        bytes: view.bytes().as_ptr(),
+        len: view.bytes().len(),
+        data_node: view.data().offset(),
+        meta_node: view
+            .root()
+            .get("meta")
+            .expect("validated lookup")
+            .expect("validated metadata")
+            .offset(),
+        duplicate_count: view.duplicate_offsets().len(),
+        seq: view.seq,
+        timestamp_ns: view.timestamp_ns,
+    }
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn plsm_go_view_duplicates(
+    owner: *const crate::abi_views::plsm_message_view,
+    out: *mut usize,
+    capacity: usize,
+) -> usize {
+    let Some(view) = (unsafe { crate::abi_views::owner_view(owner) }) else {
+        return 0;
+    };
+    let count = view.duplicate_offsets().len();
+    if capacity >= count && !out.is_null() {
+        for (index, offset) in view.duplicate_offsets().enumerate() {
+            unsafe {
+                out.add(index).write(offset);
+            }
+        }
+    }
+    count
+}
+
+// The Go binding alone can call this with its private immutable bytes/proof.
+// No pointer survives the synchronous append, and publication supplies identity.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn plsm_go_append_sealed(
+    pool: *mut crate::abi::plsm_pool,
+    data: *const u8,
+    len: usize,
+    durability: u32,
+    seq: *mut u64,
+    timestamp: *mut u64,
+    error: *mut *mut plsm_error,
+) -> i32 {
+    if seq.is_null() || timestamp.is_null() {
+        return fail(error, usage());
+    }
+    let pool = match crate::abi::borrow_pool(pool, error) {
+        Ok(pool) => pool,
+        Err(code) => return code,
+    };
+    finish(
+        (|| {
+            let durability = match durability {
+                0 => crate::api::Durability::Fast,
+                1 => crate::api::Durability::Flush,
+                _ => return Err(usage()),
+            };
+            let payload = unsafe { bytes(data, len) }?;
+            let time = crate::api::now_ns()?;
+            let committed = pool
+                .pool
+                .append_with_options(payload, crate::api::AppendOptions::new(time, durability))?;
+            unsafe {
+                seq.write(committed);
+                timestamp.write(time);
+            }
+            Ok(())
+        })(),
+        error,
+    )
+}
+
 fn corrupt() -> Error {
     Error::new(ErrorKind::Corrupt).with_message("invalid borrowed Lite3 view")
 }
@@ -508,6 +603,32 @@ mod tests {
         let second = encoded.as_doc().key_offset_at(data, "bA").unwrap();
         let mut changed = encoded.as_slice().to_vec();
         changed[second - 3..second - 1].copy_from_slice(b"ab");
+        let view = crate::view::MessageView::from_bytes(&changed, 9, 17).unwrap();
+        let mut owner = std::ptr::null();
+        crate::abi_views::publish(view, &mut owner).unwrap();
+        let info = unsafe { plsm_go_view_info(owner) };
+        assert_eq!(
+            (info.seq, info.timestamp_ns, info.duplicate_count),
+            (9, 17, 1)
+        );
+        let mut exported = [usize::MAX];
+        assert_eq!(
+            unsafe { plsm_go_view_duplicates(owner, exported.as_mut_ptr(), 0) },
+            1
+        );
+        assert_eq!(exported, [usize::MAX]);
+        assert_eq!(
+            unsafe { plsm_go_view_duplicates(owner, exported.as_mut_ptr(), 1) },
+            1
+        );
+        assert_eq!(exported, [data]);
+        assert_eq!(
+            unsafe { std::slice::from_raw_parts(info.bytes, info.len) },
+            changed
+        );
+        unsafe {
+            crate::abi_views::plsm_view_release(owner);
+        }
         let mut root = 0;
         let mut meta = 0;
         let mut proof = Buffer::default();

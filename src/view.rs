@@ -166,6 +166,10 @@ impl MessageView {
     }
     /// Reserved encoded-storage bytes, excluding owner and lookup metadata.
     /// Shared children and forwarded messages retain the same backing storage.
+    pub(crate) fn duplicate_offsets(&self) -> impl ExactSizeIterator<Item = usize> + '_ {
+        self.snapshot.duplicates.keys().copied()
+    }
+
     pub fn retained_bytes(&self) -> usize {
         match &self.snapshot.storage {
             Storage::Bytes(bytes) => bytes.capacity(),

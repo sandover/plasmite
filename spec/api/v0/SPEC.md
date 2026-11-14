@@ -474,3 +474,29 @@ iteration idiom. DATA yields `MessageView`; control events retain `UdpGap` and
 `UdpProgress`. Native Python adopts the checked C owner without another payload
 copy or validation pass. The portable Python fallback keeps its documented
 readonly buffer copy. Both paths preserve independent message lifetimes.
+
+
+### Go owned-view stream adapters
+
+`local.Pool.OpenViewStream(TailOptions)` returns a pull stream with `Next(ctx)`
+and `Close`; `TailViews(ctx, TailOptions)` returns view/error channels. Its
+message channel defaults to unbuffered; positive Buffer explicitly bounds queued
+messages, plus one message awaiting delivery. Native tail state supplies filtering, matching
+limits, ordering and gap policy. Idle polling waits last at most 50 ms; active native reads retain the existing
+blocking pool-lock semantics. Low-level streams retain an independent pool handle; high-level tails
+check source pool closure between waits. Every delivered message owns private
+immutable Go bytes/proof and needs no Close.
+
+`udp.Pool.FollowViews` shares the existing follow context/cancel/close loop.
+Its DATA event is `*udp.ViewFrame` (the cgo-free generic contract
+`api.UDPViewFrame[*local.MessageView]`); `View` is the same concrete message type
+as local reads. Gap and Progress retain their types and meanings. `FollowRaw`
+retains exact bytes and metadata without a decoded Message. Payload copying
+transfers the native owner's checked relative offsets, including duplicate-key
+proof, without another whole-message validation.
+
+Whole-message Go `AppendView(message, nil, options...)` retains the original
+payload/tags and returns fresh identity over shared immutable Go storage. A
+nonnil tag slice requests retagging; an empty slice clears tags. Subtree Value
+inputs retain their existing copy semantics. Caller callbacks run outside the
+pool mutex after the source snapshot, and publication rechecks the live handle.

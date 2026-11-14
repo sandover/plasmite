@@ -15,9 +15,21 @@ import (
 // AppendView encodes ordinary Go values directly and returns the committed
 // immutable snapshot. Integers fit i64, finite floats keep binary64, and []byte
 // becomes native bytes. Custom JSON/text hooks run once in Go's visit order.
+// A whole *MessageView with nil tags forwards its original payload; nonnil tags
+// replace its tags (an empty slice clears them). The result has fresh identity.
 func (p *Pool) AppendView(value any, tags []string, options ...AppendOption) (*MessageView, error) {
 	if p == nil {
 		return nil, closedError("pool")
+	}
+	if whole, ok := value.(*MessageView); ok {
+		if whole == nil || len(whole.encoded) == 0 {
+			return nil, invalidArgumentError("missing message view")
+		}
+		if tags == nil {
+			snapshot := *whole // options may reassign the caller's view variable
+			return p.forwardView(&snapshot, api.ApplyAppendOptions(options...).Durability)
+		}
+		value = whole.Data() // explicit tags replace the envelope's tag set
 	}
 	input := nativeInput{}
 	defer input.pin.Unpin()

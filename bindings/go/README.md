@@ -359,3 +359,52 @@ before copying the checked producer snapshot into aligned Go memory, and reuses
 the construction proof. Closing a pool inside a serializer causes a closed-handle
 error before publication. `json.Marshal(message)` and `json.Marshal(message.Data())`
 use the normal Go marshaler interface for explicit JSON conversion.
+
+
+## Owned local and UDP streams
+
+`OpenViewStream` provides pull-based reads through `Next(ctx)` and `Close()`.
+`TailViews(ctx, options)` provides the same views on a bounded channel. Both use
+`TailOptions` for sequence, matching-message limits, tags and retention gaps.
+Tags support embedded NUL. `Timeout` keeps the existing tail polling-wait meaning;
+use the context for cancellation or a deadline. The pull stream can outlive its
+source pool. The channel adapter checks `Pool.Close` between native waits and
+defaults to an unbuffered channel. Positive `Buffer` opts into a bounded queue;
+one additional message can await delivery. Cancel its context when stopping
+consumption.
+
+```go
+stream, err := pool.OpenViewStream(local.TailOptions{SinceSeq: &first})
+if err != nil { return err }
+defer stream.Close()
+message, err := stream.Next(ctx)
+if err != nil { return err }
+var reading struct { Value int64 }
+if err := message.Decode(&reading); err != nil { return err }
+forwarded, err := destination.AppendView(message, nil)
+```
+
+Whole-message `AppendView(message, nil)` retains the exact payload/tags, commits
+it with fresh destination identity and shares the immutable Go backing storage.
+A nonnil tag slice replaces the tags; an empty slice clears them. Passing
+`message.Data()` retains the explicit subtree-copy behavior. Independent mutable
+exports still copy. An append option can close the destination or reassign the
+caller's source variable without changing the source snapshot already visited.
+
+`udp.Pool.FollowViews` uses the existing `Follow.Next(ctx)`, `Cancel` and `Close`
+lifecycle. DATA arrives as `*udp.ViewFrame` with an ordinary
+`*local.MessageView` in `View`; Gap and Progress keep their existing types.
+`FollowRaw` returns exact owned payloads with `Message == nil`; `Follow` keeps its
+legacy complete-message conversion. All three retain arrival order, late and
+duplicate packets, server skip/progress records and finite completion. No
+receive adapter infers packet loss or adds retransmission.
+
+A native receiver validates each incoming owner once. Go copies its bytes and
+relative duplicate-key proof into aligned private Go allocations, then releases
+the native owner. It performs no second validation and builds no data tree.
+Both the C receiver snapshot and the final Go snapshot copy payload bytes; the
+binding retains Go-managed storage without a per-message Close. Children and
+forwarded messages remain valid after source pool/follow/stream close.
+
+[Go stream benchmark coverage and fixed builds](../../docs/performance/language-boundary-results/owned-views/go/streams/README.md)
+separate receive/copy costs, explicit conversion, forwarding and packet pacing.

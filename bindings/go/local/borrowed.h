@@ -102,4 +102,20 @@ static inline plsm_go_input_result_t plsm_go_append_input(plsm_pool_t *pool,cons
     return result;
 }
 
+
+/* Return-by-value adapters keep pointer-free output temporaries off Go's heap. */
+typedef struct { int status; plsm_error_t *error; const plsm_message_view_t *owner; size_t count; } plsm_go_view_next_t;
+static inline plsm_go_view_next_t plsm_go_next_view(plsm_stream_t *stream,uint64_t wait) {
+    plsm_go_view_next_t result={0};
+    result.status=plsm_view_stream_next(stream,wait,1,256*1024*1024,&result.owner,&result.count,&result.error);
+    return result;
+}
+int plsm_go_append_sealed(plsm_pool_t *,const uint8_t *,size_t,uint32_t,uint64_t *,uint64_t *,plsm_error_t **);
+typedef struct { int status; plsm_error_t *error; uint64_t seq,timestamp; } plsm_go_sealed_result_t;
+static inline plsm_go_sealed_result_t plsm_go_forward_view(plsm_pool_t *pool,const uint8_t *data,size_t len,uint32_t durability) {
+    plsm_go_sealed_result_t result={0};
+    result.status=plsm_go_append_sealed(pool,data,len,durability,&result.seq,&result.timestamp,&result.error);
+    return result;
+}
+
 #endif

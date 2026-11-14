@@ -313,6 +313,16 @@ type UDPFrame struct {
 
 func (*UDPFrame) udpEvent() {}
 
+// UDPViewFrame carries a backend's immutable view without tying these contracts
+// to cgo. Concrete bindings choose the view type; ordinary messages need no Close.
+type UDPViewFrame[V any] struct {
+	Seq         uint64
+	TimestampNs uint64
+	View        V
+}
+
+func (*UDPViewFrame[V]) udpEvent() {}
+
 // UDPGap is the compatibility name for an explicit server skip, never inferred loss.
 type UDPGap struct {
 	First  uint64
