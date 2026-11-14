@@ -52,9 +52,7 @@ fn main() {
     }
 
     let lib_dir = found.unwrap_or_else(|| {
-        panic!(
-            "libplasmite not found; set PLASMITE_LIB_DIR or build target/debug/libplasmite.*"
-        )
+        panic!("libplasmite not found; set PLASMITE_LIB_DIR or build target/debug/libplasmite.*")
     });
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
