@@ -57,7 +57,8 @@ Use the repository's pinned Rust toolchain and the official
 [WASI SDK 34](https://github.com/WebAssembly/wasi-sdk/releases/tag/wasi-sdk-34).
 Only its compiler, headers and standalone `memchr` object enter the build. C
 allocations use Rust's heap; a second libc allocator or WASI startup does not
-link into the module. The final import check enforces that boundary.
+link into the module. The final import check enforces that boundary. The package
+includes the upstream musl copyright notice for the standalone `memchr` code.
 
 ```sh
 rustup target add wasm32-unknown-unknown

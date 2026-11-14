@@ -19,6 +19,7 @@ test('packed remote-only package uses portable checked views without native arti
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const packed = JSON.parse(execFileSync(npm, ['pack', '--ignore-scripts', '--json'], { cwd: root, encoding: 'utf8', env: npmEnv }))[0];
   assert.ok(packed.files.some(file => file.path === 'portable/plasmite_core.wasm'));
+  assert.ok(packed.files.some(file => file.path === 'portable/COPYRIGHT.musl'));
   assert.equal(packed.files.some(file => file.path.endsWith('.node')), false);
   const consumer = path.join(directory, 'consumer'); fs.mkdirSync(consumer);
   execFileSync(npm, ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--prefix', consumer,

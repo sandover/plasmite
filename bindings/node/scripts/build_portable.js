@@ -44,6 +44,7 @@ if (!process.argv.includes('--verify')) {
   if (build.status !== 0) process.exit(build.status || 1);
   fs.mkdirSync(path.dirname(artifact), { recursive: true });
   fs.copyFileSync(path.join(target, 'wasm32-unknown-unknown/release/plasmite_portable_core.wasm'), artifact);
+  fs.chmodSync(artifact, 0o644);
   const bytes = fs.readFileSync(artifact);
   const manifest = { abi: 1, bytes: bytes.length, sha256: sha(bytes),
     rustc: execFileSync('rustc', ['--version'], { cwd: root, encoding: 'utf8' }).trim(),

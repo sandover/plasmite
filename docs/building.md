@@ -397,3 +397,12 @@ support.
 - **Emergency fallback artifact integrity**
   - PowerShell: `Get-FileHash .\\plasmite_<version>_windows_amd64_preview.zip -Algorithm SHA256`
   - Compare with the accompanying `.sha256` file.
+
+## Portable Node view backend
+
+The remote-only Node package includes a checked WebAssembly (Wasm) artifact built
+from the shared Rust/C reader and input builder. Consumers need no native addon
+or compiler. Maintainers use the pinned Rust toolchain and WASI SDK 34; see the
+[portable core build instructions](../bindings/node/portable-core/README.md).
+`npm run check:portable` verifies the artifact, its import-free interface and the
+shared-source manifest without building native code.

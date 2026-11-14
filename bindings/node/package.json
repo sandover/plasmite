@@ -27,7 +27,8 @@
     "native/win32-x64/**",
     "portable.js",
     "portable/plasmite_core.wasm",
-    "portable/manifest.json"
+    "portable/manifest.json",
+    "portable/COPYRIGHT.musl"
   ],
   "keywords": [
     "ipc",

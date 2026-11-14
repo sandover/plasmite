@@ -1,0 +1,89 @@
+{
+  "node": "v26.13.0",
+  "platform": "darwin",
+  "arch": "arm64",
+  "wasmSha256": "96de040ab05a975eb2168e4777562edbe25c229ca1574303e11b50f799d5f6eb",
+  "wasmBytes": 114270,
+  "wasmGzipBytes": 45132,
+  "sourceSha256": {
+    "portable.js": "3e0f1c9e82275f3f0df0d6e5e40a70d5876722324009ee792113731d41a1017f",
+    "views.js": "fbd3a745d4cdba1dabcb6ea88b35fdc275b8186a18ad2944d3cce3509bda6f34",
+    "input.js": "0671ec07723b69e71891eafcc8d61380dd5a819b799ed23b4cfe6ace860f057a",
+    "scripts/bench_portable_views.js": "b7221bba7e83e4eea5ab0a0ac5b4c40c99994638a62b5970e48921ef5300896b"
+  },
+  "coreManifest": {
+    "abi": 1,
+    "bytes": 114270,
+    "sha256": "96de040ab05a975eb2168e4777562edbe25c229ca1574303e11b50f799d5f6eb",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "clang": "clang version 23.1.0-wasi-sdk (https://github.com/llvm/llvm-project 895aa2c896ada719451be2e3673c83da8ddf1141)",
+    "libc_memchr_sha256": "bbe7854d4cc9dd7a30de7637b67c4cc2dc2fd437f594fb0cc8932437716100aa",
+    "sources": {
+      "bindings/node/portable-core/Cargo.toml": "de3d804280a55e5ae355d5d039ca22376313ab9507250429ece54d7314d49e5b",
+      "bindings/node/portable-core/Cargo.lock": "46834ea4e0daab0695e1843d105c140f4d0d732a6ee7e3c26f9877bffc13fa24",
+      "bindings/node/portable-core/build.rs": "c0664543a8d886c9fca8608519453e32014e5f8a0e77f878163affb205c7c325",
+      "bindings/node/portable-core/src/lib.rs": "0d2e4988f412721a2556cb87ebf1aeff54469abec8c3dc99bba66b9d2654122b",
+      "bindings/node/portable-core/src/core.rs": "0561a5e7d916ad6e5d1bc150d35737ba4d4a218daf0002202f5f5606e63dd8ae",
+      "src/core/error.rs": "7ef3f0758577e99dfd422ab9c62d5847f894f54748e9269df361fe288f9c74e1",
+      "src/abi_builder.rs": "cd367b25f5bcd8cd510d78ac98c9a010b4ae31bf107250019372f4f1e3b270f2",
+      "src/view.rs": "d1e5ad70fe63497c6f9a61e448bc8055fb39e400b53d1f3e9d5f9496fd87d8c3",
+      "src/interface_wire.rs": "7fe532a4d83c5023e0ebd0868a09e9a4b1b376a42865998634c231bcabf22579",
+      "c/lite3_shim.c": "70010d2b8043f6481893e5a0e9eb9a058554d081019afbee784850d509298d18",
+      "c/lite3_shim.h": "a8013d9fe97d21971cdbc6cd8a2ca0b15b8e298e269028cb80f0c06c0f6ad3c5",
+      "c/lite3_builder.c": "3f99c4113b1848373ac28db40245f1e4fad5c4c297ad9022128921efd9eff5e2",
+      "src/core/lite3/builder.rs": "35b8340f96fb8dfbed981881b6f6bfa953aef1f1fdcc821b03bbb44ca8633b2b",
+      "src/core/lite3/json.rs": "4d80b00b271f8dd05ae753b2a9c95b0e389610bcd7430e4d0c01622a226362aa",
+      "src/core/lite3/mod.rs": "4e79e41d7b0dbf5fd69443b2f65b60ddf6306c4aeb6d809fd6b738383e1c3e6a",
+      "src/core/lite3/sys.rs": "0fa5563aa1daba183d96d03c80ab62aecd9a249a9366c2a457b4ee6ff327024c",
+      "src/view/de.rs": "d135b85dc2af50afb97e8a5da9860faa53918ecad58bcae2e7ef179615e62526",
+      "src/view/json.rs": "88d88c7b67f3192d15c7e5c0328d00ec14ccbd4ebd45362fa0d797115eff71ac",
+      "src/view/owned.rs": "58a67d12c49a035c4da0f22541bc84900bc220f045ddef52acfc1ab7772a44fd",
+      "src/view/ser.rs": "fbffb1529c05de225146f8bc51dda5ed5e112bfe976843e22c82367aa36605e1",
+      "vendor/lite3/include/lite3.h": "c0380f8d8cde418854c644183e2e6ee117412436814e42e5a065efefde554a59",
+      "vendor/lite3/include/lite3_context_api.h": "41f032ccc5186afcd50431d49850356d888f0355197463560c5be78d5a3c6d46",
+      "vendor/lite3/src/lite3.c": "03346772c8a3ea69318fe0e688841b60f873556d4cfe43a8ac733b97963417eb",
+      "vendor/lite3/src/json_dec.c": "e18fe7d22104668a56ec2b298559136fcc5f3200fabfcebf06323ea9986eafe7",
+      "vendor/lite3/src/json_enc.c": "e20c5d80050f0920045c5a0195e950d1a061748fb9b97ca5844dbde37f9b346e",
+      "vendor/lite3/src/ctx_api.c": "06afbbc7d250c554687553b6a05feedcad4e16f7094685664b57a1637e01480c",
+      "vendor/lite3/src/debug.c": "4e1e3f97cb7722f4984b7c823289d24aef78bb0668c1ea566654ff9b8efbade5",
+      "vendor/lite3/lib/yyjson/yyjson.c": "c329032b706ea07f9390f32178097d42d0f4c2783d37b41f9db2cd4bb31515fb",
+      "vendor/lite3/lib/yyjson/yyjson.h": "ae5d284346ca19399ce02a66e2de3466ca29600a1c222921ab8263c16db4ad6f",
+      "vendor/lite3/lib/nibble_base64/base64.c": "6f08d2452e3b83a2acb7c6883cee3009ccc86f40ed79ef69fffd8fff4144c33b",
+      "vendor/lite3/lib/nibble_base64/base64.h": "3aa185bc20647ba83467864197afa1ba40d9b8d5233b9b0fcf58253363521f82"
+    }
+  },
+  "nsPerOperation": null,
+  "before": {
+    "initialized": true,
+    "linearBytes": 1507328,
+    "ownerCount": 0,
+    "backingBytes": 0,
+    "lookupWorkspaceBytes": 0
+  },
+  "retained": {
+    "initialized": true,
+    "linearBytes": 1507328,
+    "ownerCount": 1,
+    "backingBytes": 66076,
+    "lookupWorkspaceBytes": 256
+  },
+  "released": {
+    "initialized": true,
+    "linearBytes": 1507328,
+    "ownerCount": 0,
+    "backingBytes": 0,
+    "lookupWorkspaceBytes": 256
+  },
+  "reused": {
+    "initialized": true,
+    "linearBytes": 4521984,
+    "ownerCount": 0,
+    "backingBytes": 0,
+    "lookupWorkspaceBytes": 256
+  },
+  "notes": [
+    "GC/finalization diagnostic, not timing.",
+    "backingBytes counts owner payload capacities, not metadata/workspace/allocator overhead.",
+    "Linear memory stays at its high-water size and can reuse released storage."
+  ]
+}

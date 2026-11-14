@@ -24,6 +24,7 @@ docs/
 │   │   └── callback-guards/README.md        — Read when checking Python callback closure and physical byte-buffer lengths
 │   ├── owned-views/go/README.md              — Read when assessing Go snapshot ownership, typed decoding, sizing, or cgo costs
 │   ├── node-views/README.md                  — Read when assessing JavaScript view access, conversion costs, and native ABI checks
+│   ├── portable-views/README.md              — Read when measuring portable Node startup, sparse/full work, copies, or retained WebAssembly (Wasm) memory
 │   ├── c-json/README.md                      — Read when assessing direct JSON reads and stored-float correctness
 │   ├── wakeups/README.md                     — Read when assessing shared-address waits and independent-reader wakeups
 │   ├── append-descriptors/README.md           — Read when assessing borrowed append locking and removed descriptor calls

@@ -1,0 +1,22 @@
+{
+  "runtime_commit": "a6fdd6c",
+  "runtime_files_sha256": {
+    "portable.js": "3e0f1c9e82275f3f0df0d6e5e40a70d5876722324009ee792113731d41a1017f",
+    "views.js": "fbd3a745d4cdba1dabcb6ea88b35fdc275b8186a18ad2944d3cce3509bda6f34",
+    "input.js": "0671ec07723b69e71891eafcc8d61380dd5a819b799ed23b4cfe6ace860f057a",
+    "index.js": "452407229a4d7e219865125cd64352c71f0fe4a3c167ca4db2c8a4edb763859d",
+    "remote.js": "7ffa3952dbe24c853f673e0dcb38d3e4ee3f697ce3e30e9c6816433404637cfa",
+    "message.js": "aed76b2deb0c52603943fd3130923a7de7d153f822701dfd616bd7a8c7d84367",
+    "mappings.js": "c4c9a1f6d925f56ccfe45ff29f1f52bd924f97222ce57d55ebb804bf81a9d529",
+    "package.json": "fa3b4f6808540e5e8ede07218fccd7cecefa586ce03728afea5da2baac191eff",
+    "portable/manifest.json": "30255baf59ded5c8f6009651d3a9fa9fa6d6db3ccc495ad267ddfc669eb60e83",
+    "portable/plasmite_core.wasm": "96de040ab05a975eb2168e4777562edbe25c229ca1574303e11b50f799d5f6eb",
+    "portable/COPYRIGHT.musl": "b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b",
+    "scripts/bench_portable_views.js": "b7221bba7e83e4eea5ab0a0ac5b4c40c99994638a62b5970e48921ef5300896b"
+  },
+  "notes": [
+    "No timed portable matrix was run in the implementation turn; parent owns central timing.",
+    "Verify-only operation/startup runs have null timings; retention uses explicit GC diagnostics.",
+    "The source archive contains the exact runtime and benchmark overlay identified by these hashes."
+  ]
+}
