@@ -1,0 +1,5036 @@
+{
+  "node": "v26.13.0",
+  "platform": "darwin",
+  "arch": "arm64",
+  "wasmSha256": "96de040ab05a975eb2168e4777562edbe25c229ca1574303e11b50f799d5f6eb",
+  "wasmBytes": 114270,
+  "wasmGzipBytes": 45132,
+  "sourceSha256": {
+    "portable.js": "3e0f1c9e82275f3f0df0d6e5e40a70d5876722324009ee792113731d41a1017f",
+    "views.js": "fbd3a745d4cdba1dabcb6ea88b35fdc275b8186a18ad2944d3cce3509bda6f34",
+    "input.js": "0671ec07723b69e71891eafcc8d61380dd5a819b799ed23b4cfe6ace860f057a",
+    "scripts/bench_portable_views.js": "b7221bba7e83e4eea5ab0a0ac5b4c40c99994638a62b5970e48921ef5300896b"
+  },
+  "coreManifest": {
+    "abi": 1,
+    "bytes": 114270,
+    "sha256": "96de040ab05a975eb2168e4777562edbe25c229ca1574303e11b50f799d5f6eb",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "clang": "clang version 23.1.0-wasi-sdk (https://github.com/llvm/llvm-project 895aa2c896ada719451be2e3673c83da8ddf1141)",
+    "libc_memchr_sha256": "bbe7854d4cc9dd7a30de7637b67c4cc2dc2fd437f594fb0cc8932437716100aa",
+    "sources": {
+      "bindings/node/portable-core/Cargo.toml": "de3d804280a55e5ae355d5d039ca22376313ab9507250429ece54d7314d49e5b",
+      "bindings/node/portable-core/Cargo.lock": "46834ea4e0daab0695e1843d105c140f4d0d732a6ee7e3c26f9877bffc13fa24",
+      "bindings/node/portable-core/build.rs": "c0664543a8d886c9fca8608519453e32014e5f8a0e77f878163affb205c7c325",
+      "bindings/node/portable-core/src/lib.rs": "0d2e4988f412721a2556cb87ebf1aeff54469abec8c3dc99bba66b9d2654122b",
+      "bindings/node/portable-core/src/core.rs": "0561a5e7d916ad6e5d1bc150d35737ba4d4a218daf0002202f5f5606e63dd8ae",
+      "src/core/error.rs": "7ef3f0758577e99dfd422ab9c62d5847f894f54748e9269df361fe288f9c74e1",
+      "src/abi_builder.rs": "cd367b25f5bcd8cd510d78ac98c9a010b4ae31bf107250019372f4f1e3b270f2",
+      "src/view.rs": "d1e5ad70fe63497c6f9a61e448bc8055fb39e400b53d1f3e9d5f9496fd87d8c3",
+      "src/interface_wire.rs": "7fe532a4d83c5023e0ebd0868a09e9a4b1b376a42865998634c231bcabf22579",
+      "c/lite3_shim.c": "70010d2b8043f6481893e5a0e9eb9a058554d081019afbee784850d509298d18",
+      "c/lite3_shim.h": "a8013d9fe97d21971cdbc6cd8a2ca0b15b8e298e269028cb80f0c06c0f6ad3c5",
+      "c/lite3_builder.c": "3f99c4113b1848373ac28db40245f1e4fad5c4c297ad9022128921efd9eff5e2",
+      "src/core/lite3/builder.rs": "35b8340f96fb8dfbed981881b6f6bfa953aef1f1fdcc821b03bbb44ca8633b2b",
+      "src/core/lite3/json.rs": "4d80b00b271f8dd05ae753b2a9c95b0e389610bcd7430e4d0c01622a226362aa",
+      "src/core/lite3/mod.rs": "4e79e41d7b0dbf5fd69443b2f65b60ddf6306c4aeb6d809fd6b738383e1c3e6a",
+      "src/core/lite3/sys.rs": "0fa5563aa1daba183d96d03c80ab62aecd9a249a9366c2a457b4ee6ff327024c",
+      "src/view/de.rs": "d135b85dc2af50afb97e8a5da9860faa53918ecad58bcae2e7ef179615e62526",
+      "src/view/json.rs": "88d88c7b67f3192d15c7e5c0328d00ec14ccbd4ebd45362fa0d797115eff71ac",
+      "src/view/owned.rs": "58a67d12c49a035c4da0f22541bc84900bc220f045ddef52acfc1ab7772a44fd",
+      "src/view/ser.rs": "fbffb1529c05de225146f8bc51dda5ed5e112bfe976843e22c82367aa36605e1",
+      "vendor/lite3/include/lite3.h": "c0380f8d8cde418854c644183e2e6ee117412436814e42e5a065efefde554a59",
+      "vendor/lite3/include/lite3_context_api.h": "41f032ccc5186afcd50431d49850356d888f0355197463560c5be78d5a3c6d46",
+      "vendor/lite3/src/lite3.c": "03346772c8a3ea69318fe0e688841b60f873556d4cfe43a8ac733b97963417eb",
+      "vendor/lite3/src/json_dec.c": "e18fe7d22104668a56ec2b298559136fcc5f3200fabfcebf06323ea9986eafe7",
+      "vendor/lite3/src/json_enc.c": "e20c5d80050f0920045c5a0195e950d1a061748fb9b97ca5844dbde37f9b346e",
+      "vendor/lite3/src/ctx_api.c": "06afbbc7d250c554687553b6a05feedcad4e16f7094685664b57a1637e01480c",
+      "vendor/lite3/src/debug.c": "4e1e3f97cb7722f4984b7c823289d24aef78bb0668c1ea566654ff9b8efbade5",
+      "vendor/lite3/lib/yyjson/yyjson.c": "c329032b706ea07f9390f32178097d42d0f4c2783d37b41f9db2cd4bb31515fb",
+      "vendor/lite3/lib/yyjson/yyjson.h": "ae5d284346ca19399ce02a66e2de3466ca29600a1c222921ab8263c16db4ad6f",
+      "vendor/lite3/lib/nibble_base64/base64.c": "6f08d2452e3b83a2acb7c6883cee3009ccc86f40ed79ef69fffd8fff4144c33b",
+      "vendor/lite3/lib/nibble_base64/base64.h": "3aa185bc20647ba83467864197afa1ba40d9b8d5233b9b0fcf58253363521f82"
+    }
+  },
+  "native": {
+    "addonPath": "/Users/brandonharvey/src/plasmite/tmp/node-wasm-input-checkpoint/baseline-final/native/darwin-arm64/index.node",
+    "addonSha256": "c955926c5736d4b5cb6c1fc638c2fff42b685a034c73c30637a8b9dd90b674ad",
+    "libraryPath": "/Users/brandonharvey/src/plasmite/tmp/node-wasm-input-checkpoint/baseline-final/native/darwin-arm64/libplasmite.dylib",
+    "librarySha256": "6a08cb2f48220adfbc3894d5108c097cd7ed60eb8300636f4a4f163f8b9280cc",
+    "addonBytes": 827920,
+    "libraryBytes": 1630688,
+    "loadedLibraries": [
+      {
+        "path": "/Users/brandonharvey/src/plasmite/tmp/node-wasm-input-checkpoint/baseline-final/native/darwin-arm64/libplasmite.dylib",
+        "sha256": "6a08cb2f48220adfbc3894d5108c097cd7ed60eb8300636f4a4f163f8b9280cc"
+      }
+    ]
+  },
+  "nativeProducer": {
+    "supported": false,
+    "reason": "native addon exposes committed appends, not storage-free encoding; compare full producer delivery with the HTTP/DUTYKD harness"
+  },
+  "fixtures": [
+    {
+      "fixture": "small",
+      "encodedBytes": 721,
+      "jsonBytes": 152,
+      "encodedSha256": "9bd1eda9a70a63752b01431d5b6d9827ce246ca3ee01d75ab0ce1c67f4e730fd"
+    },
+    {
+      "fixture": "wide",
+      "encodedBytes": 35486,
+      "jsonBytes": 8343,
+      "encodedSha256": "cdba77781c484ef04fdcae681fde6fc62172e83e5f77604c3a8ad5eb0d79e206"
+    },
+    {
+      "fixture": "long-string",
+      "encodedBytes": 66251,
+      "jsonBytes": 65682,
+      "encodedSha256": "34e0dc3d8395e98047cb3e7f70f16711ca0105d82c07eb7fd9a324288c1e086a"
+    },
+    {
+      "fixture": "array",
+      "encodedBytes": 169439,
+      "jsonBytes": 19516,
+      "encodedSha256": "66a7ef16c176524f978eb6fe3c945a99a84332d18ae51259c7a36d22700de1a6"
+    }
+  ],
+  "verifyOnly": false,
+  "rows": [
+    {
+      "fixture": "small",
+      "lane": "native-array-sum",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 1406.25,
+      "cpuNsPerOperation": 1590
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-json",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 391.917,
+      "cpuNsPerOperation": 392
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-native-copy",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 706.458,
+      "cpuNsPerOperation": 708
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-text",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 251.292,
+      "cpuNsPerOperation": 252
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-sparse",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 690.917,
+      "cpuNsPerOperation": 692
+    },
+    {
+      "fixture": "small",
+      "lane": "native-cold-full",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 3136.583,
+      "cpuNsPerOperation": 3137
+    },
+    {
+      "fixture": "small",
+      "lane": "native-cold-sparse",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 3365.583,
+      "cpuNsPerOperation": 3360
+    },
+    {
+      "fixture": "small",
+      "lane": "json-producer-request",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 374.75,
+      "cpuNsPerOperation": 376
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-producer-encoded",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 2992.625,
+      "cpuNsPerOperation": 3946
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-array-sum",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 127.583,
+      "cpuNsPerOperation": 336
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-array-sum",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 2124.208,
+      "cpuNsPerOperation": 4436
+    },
+    {
+      "fixture": "small",
+      "lane": "native-data-json-stringify",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 178,
+      "cpuNsPerOperation": 178
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-json",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 669.166,
+      "cpuNsPerOperation": 669
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-native-copy",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 1122.125,
+      "cpuNsPerOperation": 1454
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-warm-text",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 87.625,
+      "cpuNsPerOperation": 89
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-text",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 437,
+      "cpuNsPerOperation": 439
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-warm-sparse",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 96.958,
+      "cpuNsPerOperation": 219
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-sparse",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 623.833,
+      "cpuNsPerOperation": 2026
+    },
+    {
+      "fixture": "small",
+      "lane": "json-cold-full",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 587.625,
+      "cpuNsPerOperation": 1351
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-cold-full",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 3328.375,
+      "cpuNsPerOperation": 3584
+    },
+    {
+      "fixture": "small",
+      "lane": "json-cold-sparse",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 546.084,
+      "cpuNsPerOperation": 546
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-cold-sparse",
+      "repeat": 1,
+      "operations": 1000,
+      "nsPerOperation": 3169.917,
+      "cpuNsPerOperation": 3562
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-cold-sparse",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 3124,
+      "cpuNsPerOperation": 5757
+    },
+    {
+      "fixture": "small",
+      "lane": "json-cold-sparse",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 548.625,
+      "cpuNsPerOperation": 2699
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-cold-full",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 2978.875,
+      "cpuNsPerOperation": 4958
+    },
+    {
+      "fixture": "small",
+      "lane": "json-cold-full",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 523.5,
+      "cpuNsPerOperation": 524
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-sparse",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 474.125,
+      "cpuNsPerOperation": 476
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-warm-sparse",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 89.291,
+      "cpuNsPerOperation": 89
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-text",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 380.25,
+      "cpuNsPerOperation": 987
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-warm-text",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 84.209,
+      "cpuNsPerOperation": 182
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-native-copy",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 985.875,
+      "cpuNsPerOperation": 1119
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-json",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 562.667,
+      "cpuNsPerOperation": 555
+    },
+    {
+      "fixture": "small",
+      "lane": "native-data-json-stringify",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 128.042,
+      "cpuNsPerOperation": 128
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-array-sum",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 961.166,
+      "cpuNsPerOperation": 962
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-array-sum",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 69.5,
+      "cpuNsPerOperation": 70
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-producer-encoded",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 3558.708,
+      "cpuNsPerOperation": 10999
+    },
+    {
+      "fixture": "small",
+      "lane": "json-producer-request",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 274.291,
+      "cpuNsPerOperation": 275
+    },
+    {
+      "fixture": "small",
+      "lane": "native-cold-sparse",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 3283.125,
+      "cpuNsPerOperation": 4677
+    },
+    {
+      "fixture": "small",
+      "lane": "native-cold-full",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 3310.083,
+      "cpuNsPerOperation": 3302
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-sparse",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 673.666,
+      "cpuNsPerOperation": 675
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-text",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 233.291,
+      "cpuNsPerOperation": 234
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-native-copy",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 700,
+      "cpuNsPerOperation": 700
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-json",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 369.208,
+      "cpuNsPerOperation": 369
+    },
+    {
+      "fixture": "small",
+      "lane": "native-array-sum",
+      "repeat": 2,
+      "operations": 1000,
+      "nsPerOperation": 1371.333,
+      "cpuNsPerOperation": 1373
+    },
+    {
+      "fixture": "small",
+      "lane": "native-array-sum",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 1314.125,
+      "cpuNsPerOperation": 1314
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-json",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 367.791,
+      "cpuNsPerOperation": 368
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-native-copy",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 724.167,
+      "cpuNsPerOperation": 724
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-text",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 241.5,
+      "cpuNsPerOperation": 242
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-sparse",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 653.5,
+      "cpuNsPerOperation": 655
+    },
+    {
+      "fixture": "small",
+      "lane": "native-cold-full",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 3660.166,
+      "cpuNsPerOperation": 3653
+    },
+    {
+      "fixture": "small",
+      "lane": "native-cold-sparse",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 3406,
+      "cpuNsPerOperation": 3407
+    },
+    {
+      "fixture": "small",
+      "lane": "json-producer-request",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 290.917,
+      "cpuNsPerOperation": 292
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-producer-encoded",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 2515.125,
+      "cpuNsPerOperation": 3177
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-array-sum",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 87.958,
+      "cpuNsPerOperation": 89
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-array-sum",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 1163.208,
+      "cpuNsPerOperation": 1339
+    },
+    {
+      "fixture": "small",
+      "lane": "native-data-json-stringify",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 140.458,
+      "cpuNsPerOperation": 140
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-json",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 604.792,
+      "cpuNsPerOperation": 597
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-native-copy",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 998.958,
+      "cpuNsPerOperation": 1252
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-warm-text",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 65,
+      "cpuNsPerOperation": 65
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-text",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 359.958,
+      "cpuNsPerOperation": 360
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-warm-sparse",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 72.209,
+      "cpuNsPerOperation": 73
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-sparse",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 451.958,
+      "cpuNsPerOperation": 522
+    },
+    {
+      "fixture": "small",
+      "lane": "json-cold-full",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 521.083,
+      "cpuNsPerOperation": 522
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-cold-full",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 6044,
+      "cpuNsPerOperation": 11201
+    },
+    {
+      "fixture": "small",
+      "lane": "json-cold-sparse",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 482.458,
+      "cpuNsPerOperation": 483
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-cold-sparse",
+      "repeat": 3,
+      "operations": 1000,
+      "nsPerOperation": 2210.625,
+      "cpuNsPerOperation": 2211
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-cold-sparse",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 2397.459,
+      "cpuNsPerOperation": 2482
+    },
+    {
+      "fixture": "small",
+      "lane": "json-cold-sparse",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 518.541,
+      "cpuNsPerOperation": 519
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-cold-full",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 3122.25,
+      "cpuNsPerOperation": 3571
+    },
+    {
+      "fixture": "small",
+      "lane": "json-cold-full",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 530.208,
+      "cpuNsPerOperation": 532
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-sparse",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 449.542,
+      "cpuNsPerOperation": 451
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-warm-sparse",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 62.958,
+      "cpuNsPerOperation": 64
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-text",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 348.75,
+      "cpuNsPerOperation": 350
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-warm-text",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 60.875,
+      "cpuNsPerOperation": 61
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-native-copy",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 984.791,
+      "cpuNsPerOperation": 984
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-json",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 560.208,
+      "cpuNsPerOperation": 687
+    },
+    {
+      "fixture": "small",
+      "lane": "native-data-json-stringify",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 147.333,
+      "cpuNsPerOperation": 148
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-array-sum",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 1121.708,
+      "cpuNsPerOperation": 1122
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-array-sum",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 73.917,
+      "cpuNsPerOperation": 75
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-producer-encoded",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 2448.667,
+      "cpuNsPerOperation": 3773
+    },
+    {
+      "fixture": "small",
+      "lane": "json-producer-request",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 292.625,
+      "cpuNsPerOperation": 358
+    },
+    {
+      "fixture": "small",
+      "lane": "native-cold-sparse",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 3556.334,
+      "cpuNsPerOperation": 4085
+    },
+    {
+      "fixture": "small",
+      "lane": "native-cold-full",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 7054.292,
+      "cpuNsPerOperation": 14016
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-sparse",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 652.041,
+      "cpuNsPerOperation": 652
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-text",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 239.209,
+      "cpuNsPerOperation": 239
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-native-copy",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 683.875,
+      "cpuNsPerOperation": 684
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-json",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 366.5,
+      "cpuNsPerOperation": 367
+    },
+    {
+      "fixture": "small",
+      "lane": "native-array-sum",
+      "repeat": 4,
+      "operations": 1000,
+      "nsPerOperation": 1309.875,
+      "cpuNsPerOperation": 1311
+    },
+    {
+      "fixture": "small",
+      "lane": "native-array-sum",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 1739.5,
+      "cpuNsPerOperation": 5855
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-json",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 433.791,
+      "cpuNsPerOperation": 435
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-native-copy",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 837.959,
+      "cpuNsPerOperation": 839
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-text",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 341.834,
+      "cpuNsPerOperation": 335
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-sparse",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 813.292,
+      "cpuNsPerOperation": 3360
+    },
+    {
+      "fixture": "small",
+      "lane": "native-cold-full",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 4026.125,
+      "cpuNsPerOperation": 4052
+    },
+    {
+      "fixture": "small",
+      "lane": "native-cold-sparse",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 4285.375,
+      "cpuNsPerOperation": 4299
+    },
+    {
+      "fixture": "small",
+      "lane": "json-producer-request",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 331.333,
+      "cpuNsPerOperation": 331
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-producer-encoded",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 2543.25,
+      "cpuNsPerOperation": 3446
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-array-sum",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 122.208,
+      "cpuNsPerOperation": 123
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-array-sum",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 1752.75,
+      "cpuNsPerOperation": 1884
+    },
+    {
+      "fixture": "small",
+      "lane": "native-data-json-stringify",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 176.583,
+      "cpuNsPerOperation": 177
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-json",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 598.5,
+      "cpuNsPerOperation": 600
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-native-copy",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 1115.208,
+      "cpuNsPerOperation": 1118
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-warm-text",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 108.292,
+      "cpuNsPerOperation": 109
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-text",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 419.458,
+      "cpuNsPerOperation": 421
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-warm-sparse",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 101.292,
+      "cpuNsPerOperation": 103
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-sparse",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 523.542,
+      "cpuNsPerOperation": 1721
+    },
+    {
+      "fixture": "small",
+      "lane": "json-cold-full",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 582.5,
+      "cpuNsPerOperation": 583
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-cold-full",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 4392,
+      "cpuNsPerOperation": 4830
+    },
+    {
+      "fixture": "small",
+      "lane": "json-cold-sparse",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 552.375,
+      "cpuNsPerOperation": 553
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-cold-sparse",
+      "repeat": 5,
+      "operations": 1000,
+      "nsPerOperation": 3658.083,
+      "cpuNsPerOperation": 3706
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-cold-sparse",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 3108.667,
+      "cpuNsPerOperation": 3588
+    },
+    {
+      "fixture": "small",
+      "lane": "json-cold-sparse",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 487.625,
+      "cpuNsPerOperation": 488
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-cold-full",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 2963.334,
+      "cpuNsPerOperation": 2963
+    },
+    {
+      "fixture": "small",
+      "lane": "json-cold-full",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 523.5,
+      "cpuNsPerOperation": 517
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-sparse",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 411.875,
+      "cpuNsPerOperation": 412
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-warm-sparse",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 61.167,
+      "cpuNsPerOperation": 61
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-text",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 319.375,
+      "cpuNsPerOperation": 319
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-warm-text",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 60.708,
+      "cpuNsPerOperation": 61
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-native-copy",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 922.584,
+      "cpuNsPerOperation": 924
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-json",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 508.458,
+      "cpuNsPerOperation": 742
+    },
+    {
+      "fixture": "small",
+      "lane": "native-data-json-stringify",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 129.5,
+      "cpuNsPerOperation": 131
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-array-sum",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 970.334,
+      "cpuNsPerOperation": 972
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-array-sum",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 69.5,
+      "cpuNsPerOperation": 70
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-producer-encoded",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 2059.458,
+      "cpuNsPerOperation": 4906
+    },
+    {
+      "fixture": "small",
+      "lane": "json-producer-request",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 255.083,
+      "cpuNsPerOperation": 255
+    },
+    {
+      "fixture": "small",
+      "lane": "native-cold-sparse",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 3153.041,
+      "cpuNsPerOperation": 3153
+    },
+    {
+      "fixture": "small",
+      "lane": "native-cold-full",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 3067.625,
+      "cpuNsPerOperation": 3059
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-sparse",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 637.792,
+      "cpuNsPerOperation": 638
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-text",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 232.958,
+      "cpuNsPerOperation": 233
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-native-copy",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 695.625,
+      "cpuNsPerOperation": 695
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-json",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 367.417,
+      "cpuNsPerOperation": 368
+    },
+    {
+      "fixture": "small",
+      "lane": "native-array-sum",
+      "repeat": 6,
+      "operations": 1000,
+      "nsPerOperation": 1278.084,
+      "cpuNsPerOperation": 1278
+    },
+    {
+      "fixture": "small",
+      "lane": "native-array-sum",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 1260.875,
+      "cpuNsPerOperation": 1266
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-json",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 358.458,
+      "cpuNsPerOperation": 358
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-native-copy",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 710.333,
+      "cpuNsPerOperation": 704
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-text",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 225.459,
+      "cpuNsPerOperation": 226
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-sparse",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 648.625,
+      "cpuNsPerOperation": 648
+    },
+    {
+      "fixture": "small",
+      "lane": "native-cold-full",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 3115.708,
+      "cpuNsPerOperation": 3115
+    },
+    {
+      "fixture": "small",
+      "lane": "native-cold-sparse",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 3150.333,
+      "cpuNsPerOperation": 3151
+    },
+    {
+      "fixture": "small",
+      "lane": "json-producer-request",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 271.333,
+      "cpuNsPerOperation": 272
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-producer-encoded",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 2056.25,
+      "cpuNsPerOperation": 2048
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-array-sum",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 69.792,
+      "cpuNsPerOperation": 70
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-array-sum",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 2605.625,
+      "cpuNsPerOperation": 7319
+    },
+    {
+      "fixture": "small",
+      "lane": "native-data-json-stringify",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 133,
+      "cpuNsPerOperation": 134
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-json",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 501.25,
+      "cpuNsPerOperation": 501
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-native-copy",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 945.792,
+      "cpuNsPerOperation": 946
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-warm-text",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 61.833,
+      "cpuNsPerOperation": 62
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-text",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 348.5,
+      "cpuNsPerOperation": 2493
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-warm-sparse",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 61.333,
+      "cpuNsPerOperation": 62
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-sparse",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 415,
+      "cpuNsPerOperation": 416
+    },
+    {
+      "fixture": "small",
+      "lane": "json-cold-full",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 493.25,
+      "cpuNsPerOperation": 494
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-cold-full",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 4573.916,
+      "cpuNsPerOperation": 4567
+    },
+    {
+      "fixture": "small",
+      "lane": "json-cold-sparse",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 483.583,
+      "cpuNsPerOperation": 483
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-cold-sparse",
+      "repeat": 7,
+      "operations": 1000,
+      "nsPerOperation": 2068.917,
+      "cpuNsPerOperation": 2069
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-array-sum",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 1582.5,
+      "cpuNsPerOperation": 2060
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-json",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 19077.91,
+      "cpuNsPerOperation": 18990
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-native-copy",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 43439.58,
+      "cpuNsPerOperation": 43470
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-text",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 308.33,
+      "cpuNsPerOperation": 310
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-sparse",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 727.5,
+      "cpuNsPerOperation": 730
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-cold-full",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 68899.58,
+      "cpuNsPerOperation": 83890
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-cold-sparse",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 18387.08,
+      "cpuNsPerOperation": 18400
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-producer-request",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 5884.17,
+      "cpuNsPerOperation": 5950
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-producer-encoded",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 109480.42,
+      "cpuNsPerOperation": 110980
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-array-sum",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 105.42,
+      "cpuNsPerOperation": 110
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-array-sum",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 1307.5,
+      "cpuNsPerOperation": 1970
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-data-json-stringify",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 4977.5,
+      "cpuNsPerOperation": 6110
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-json",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 29858.75,
+      "cpuNsPerOperation": 29800
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-native-copy",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 65217.08,
+      "cpuNsPerOperation": 65230
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-warm-text",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 94.17,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-text",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 400,
+      "cpuNsPerOperation": 400
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-warm-sparse",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 92.09,
+      "cpuNsPerOperation": 110
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-sparse",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 496.66,
+      "cpuNsPerOperation": 500
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-cold-full",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 26542.5,
+      "cpuNsPerOperation": 26490
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-cold-full",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 95520.41,
+      "cpuNsPerOperation": 95520
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-cold-sparse",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 26184.17,
+      "cpuNsPerOperation": 26140
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-cold-sparse",
+      "repeat": 1,
+      "operations": 100,
+      "nsPerOperation": 29566.66,
+      "cpuNsPerOperation": 29570
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-cold-sparse",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 30172.92,
+      "cpuNsPerOperation": 31360
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-cold-sparse",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 26257.91,
+      "cpuNsPerOperation": 26190
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-cold-full",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 97862.92,
+      "cpuNsPerOperation": 97800
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-cold-full",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 26087.91,
+      "cpuNsPerOperation": 26100
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-sparse",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 504.59,
+      "cpuNsPerOperation": 510
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-warm-sparse",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 90.41,
+      "cpuNsPerOperation": 90
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-text",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 367.5,
+      "cpuNsPerOperation": 370
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-warm-text",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 86.66,
+      "cpuNsPerOperation": 90
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-native-copy",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 67949.16,
+      "cpuNsPerOperation": 67900
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-json",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 30069.58,
+      "cpuNsPerOperation": 29890
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-data-json-stringify",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 5069.58,
+      "cpuNsPerOperation": 5080
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-array-sum",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 3662.5,
+      "cpuNsPerOperation": 2410
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-array-sum",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 106.25,
+      "cpuNsPerOperation": 110
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-producer-encoded",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 112831.25,
+      "cpuNsPerOperation": 114300
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-producer-request",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 5811.67,
+      "cpuNsPerOperation": 5810
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-cold-sparse",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 22194.17,
+      "cpuNsPerOperation": 22110
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-cold-full",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 66537.5,
+      "cpuNsPerOperation": 66550
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-sparse",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 758.34,
+      "cpuNsPerOperation": 760
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-text",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 275.84,
+      "cpuNsPerOperation": 280
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-native-copy",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 47393.34,
+      "cpuNsPerOperation": 52960
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-json",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 18810.41,
+      "cpuNsPerOperation": 18810
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-array-sum",
+      "repeat": 2,
+      "operations": 100,
+      "nsPerOperation": 1768.75,
+      "cpuNsPerOperation": 1790
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-array-sum",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 1424.16,
+      "cpuNsPerOperation": 1430
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-json",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 18325.41,
+      "cpuNsPerOperation": 18330
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-native-copy",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 44261.25,
+      "cpuNsPerOperation": 44270
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-text",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 271.25,
+      "cpuNsPerOperation": 280
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-sparse",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 696.67,
+      "cpuNsPerOperation": 710
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-cold-full",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 65257.5,
+      "cpuNsPerOperation": 76740
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-cold-sparse",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 20015.42,
+      "cpuNsPerOperation": 20030
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-producer-request",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 7710.42,
+      "cpuNsPerOperation": 7720
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-producer-encoded",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 111665.42,
+      "cpuNsPerOperation": 111590
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-array-sum",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 108.33,
+      "cpuNsPerOperation": 110
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-array-sum",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 1018.75,
+      "cpuNsPerOperation": 1020
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-data-json-stringify",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 4701.25,
+      "cpuNsPerOperation": 4730
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-json",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 28857.5,
+      "cpuNsPerOperation": 28880
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-native-copy",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 63955,
+      "cpuNsPerOperation": 65390
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-warm-text",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 91.25,
+      "cpuNsPerOperation": 90
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-text",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 395,
+      "cpuNsPerOperation": 400
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-warm-sparse",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 313.33,
+      "cpuNsPerOperation": 230
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-sparse",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 519.58,
+      "cpuNsPerOperation": 540
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-cold-full",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 25493.75,
+      "cpuNsPerOperation": 25500
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-cold-full",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 99611.25,
+      "cpuNsPerOperation": 121290
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-cold-sparse",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 24692.09,
+      "cpuNsPerOperation": 24700
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-cold-sparse",
+      "repeat": 3,
+      "operations": 100,
+      "nsPerOperation": 33330,
+      "cpuNsPerOperation": 33260
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-cold-sparse",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 32993.33,
+      "cpuNsPerOperation": 33010
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-cold-sparse",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 25004.59,
+      "cpuNsPerOperation": 25010
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-cold-full",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 98599.58,
+      "cpuNsPerOperation": 98530
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-cold-full",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 25940.42,
+      "cpuNsPerOperation": 25880
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-sparse",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 481.67,
+      "cpuNsPerOperation": 480
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-warm-sparse",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 89.59,
+      "cpuNsPerOperation": 90
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-text",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 363.75,
+      "cpuNsPerOperation": 360
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-warm-text",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 86.25,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-native-copy",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 63587.09,
+      "cpuNsPerOperation": 63660
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-json",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 29106.25,
+      "cpuNsPerOperation": 30490
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-data-json-stringify",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 5035.83,
+      "cpuNsPerOperation": 4950
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-array-sum",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 1066.67,
+      "cpuNsPerOperation": 1070
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-array-sum",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 97.91,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-producer-encoded",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 106940.42,
+      "cpuNsPerOperation": 106860
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-producer-request",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 5950.42,
+      "cpuNsPerOperation": 5960
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-cold-sparse",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 21019.16,
+      "cpuNsPerOperation": 21030
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-cold-full",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 66303.75,
+      "cpuNsPerOperation": 71970
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-sparse",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 709.16,
+      "cpuNsPerOperation": 710
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-text",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 271.25,
+      "cpuNsPerOperation": 280
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-native-copy",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 43389.17,
+      "cpuNsPerOperation": 43390
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-json",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 19059.58,
+      "cpuNsPerOperation": 18990
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-array-sum",
+      "repeat": 4,
+      "operations": 100,
+      "nsPerOperation": 1608.34,
+      "cpuNsPerOperation": 1610
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-array-sum",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 1382.5,
+      "cpuNsPerOperation": 1380
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-json",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 18257.91,
+      "cpuNsPerOperation": 18260
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-native-copy",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 43041.25,
+      "cpuNsPerOperation": 43050
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-text",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 283.34,
+      "cpuNsPerOperation": 280
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-sparse",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 703.34,
+      "cpuNsPerOperation": 700
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-cold-full",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 63908.75,
+      "cpuNsPerOperation": 63840
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-cold-sparse",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 20098.75,
+      "cpuNsPerOperation": 20110
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-producer-request",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 6487.91,
+      "cpuNsPerOperation": 8150
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-producer-encoded",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 109043.33,
+      "cpuNsPerOperation": 108970
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-array-sum",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 99.58,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-array-sum",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 1153.75,
+      "cpuNsPerOperation": 1190
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-data-json-stringify",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 4785,
+      "cpuNsPerOperation": 5980
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-json",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 29283.75,
+      "cpuNsPerOperation": 29210
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-native-copy",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 66422.08,
+      "cpuNsPerOperation": 74870
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-warm-text",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 95,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-text",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 387.92,
+      "cpuNsPerOperation": 390
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-warm-sparse",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 92.08,
+      "cpuNsPerOperation": 90
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-sparse",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 454.58,
+      "cpuNsPerOperation": 460
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-cold-full",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 25123.34,
+      "cpuNsPerOperation": 39440
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-cold-full",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 103891.25,
+      "cpuNsPerOperation": 103810
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-cold-sparse",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 24888.33,
+      "cpuNsPerOperation": 24890
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-cold-sparse",
+      "repeat": 5,
+      "operations": 100,
+      "nsPerOperation": 35546.66,
+      "cpuNsPerOperation": 35470
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-cold-sparse",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 36257.08,
+      "cpuNsPerOperation": 36270
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-cold-sparse",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 24692.92,
+      "cpuNsPerOperation": 24690
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-cold-full",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 102141.25,
+      "cpuNsPerOperation": 102070
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-cold-full",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 24852.5,
+      "cpuNsPerOperation": 24870
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-sparse",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 764.58,
+      "cpuNsPerOperation": 680
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-warm-sparse",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 120.83,
+      "cpuNsPerOperation": 120
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-text",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 380,
+      "cpuNsPerOperation": 380
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-warm-text",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 87.92,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-native-copy",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 63184.17,
+      "cpuNsPerOperation": 63190
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-json",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 28885.42,
+      "cpuNsPerOperation": 28880
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-data-json-stringify",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 4657.08,
+      "cpuNsPerOperation": 4660
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-array-sum",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 1094.59,
+      "cpuNsPerOperation": 1110
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-array-sum",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 98.75,
+      "cpuNsPerOperation": 110
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-producer-encoded",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 112397.09,
+      "cpuNsPerOperation": 117100
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-producer-request",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 6236.25,
+      "cpuNsPerOperation": 6240
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-cold-sparse",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 17660.83,
+      "cpuNsPerOperation": 17660
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-cold-full",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 63841.67,
+      "cpuNsPerOperation": 65730
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-sparse",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 712.92,
+      "cpuNsPerOperation": 720
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-text",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 273.33,
+      "cpuNsPerOperation": 280
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-native-copy",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 42960,
+      "cpuNsPerOperation": 42960
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-json",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 18141.25,
+      "cpuNsPerOperation": 18150
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-array-sum",
+      "repeat": 6,
+      "operations": 100,
+      "nsPerOperation": 1573.75,
+      "cpuNsPerOperation": 1580
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-array-sum",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 1884.16,
+      "cpuNsPerOperation": 2320
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-json",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 19565,
+      "cpuNsPerOperation": 58150
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-native-copy",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 49526.25,
+      "cpuNsPerOperation": 49530
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-text",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 375.83,
+      "cpuNsPerOperation": 380
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-sparse",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 798.33,
+      "cpuNsPerOperation": 810
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-cold-full",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 74180,
+      "cpuNsPerOperation": 74460
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-cold-sparse",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 25642.08,
+      "cpuNsPerOperation": 25590
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-producer-request",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 6440.42,
+      "cpuNsPerOperation": 6440
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-producer-encoded",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 115037.91,
+      "cpuNsPerOperation": 114970
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-array-sum",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 145.83,
+      "cpuNsPerOperation": 160
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-array-sum",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 1465.83,
+      "cpuNsPerOperation": 1470
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-data-json-stringify",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 4953.33,
+      "cpuNsPerOperation": 5050
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-json",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 29170.83,
+      "cpuNsPerOperation": 29390
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-native-copy",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 72652.91,
+      "cpuNsPerOperation": 72590
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-warm-text",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 143.75,
+      "cpuNsPerOperation": 160
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-text",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 487.91,
+      "cpuNsPerOperation": 490
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-warm-sparse",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 131.25,
+      "cpuNsPerOperation": 140
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-sparse",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 575,
+      "cpuNsPerOperation": 590
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-cold-full",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 33635,
+      "cpuNsPerOperation": 34720
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-cold-full",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 143187.5,
+      "cpuNsPerOperation": 194120
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-cold-sparse",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 24882.08,
+      "cpuNsPerOperation": 24890
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-cold-sparse",
+      "repeat": 7,
+      "operations": 100,
+      "nsPerOperation": 38755,
+      "cpuNsPerOperation": 38680
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-array-sum",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 1608.34,
+      "cpuNsPerOperation": 1600
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-json",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 19877.5,
+      "cpuNsPerOperation": 19880
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-native-copy",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 35599.16,
+      "cpuNsPerOperation": 35600
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-text",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 8140,
+      "cpuNsPerOperation": 11380
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-sparse",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 780.84,
+      "cpuNsPerOperation": 780
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-cold-full",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 42541.66,
+      "cpuNsPerOperation": 42540
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-cold-sparse",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 8745,
+      "cpuNsPerOperation": 8760
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-producer-request",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 33797.5,
+      "cpuNsPerOperation": 33800
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-producer-encoded",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 13250,
+      "cpuNsPerOperation": 13260
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-array-sum",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 105.82,
+      "cpuNsPerOperation": 120
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-array-sum",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 1192.5,
+      "cpuNsPerOperation": 1200
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-data-json-stringify",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 17658.34,
+      "cpuNsPerOperation": 17660
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-json",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 18690.82,
+      "cpuNsPerOperation": 18700
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-native-copy",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 36011.66,
+      "cpuNsPerOperation": 39640
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-warm-text",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 91.66,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-text",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 1796.66,
+      "cpuNsPerOperation": 1800
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-warm-sparse",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 90.82,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-sparse",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 473.32,
+      "cpuNsPerOperation": 500
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-cold-full",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 16022.5,
+      "cpuNsPerOperation": 16040
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-cold-full",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 41715,
+      "cpuNsPerOperation": 41740
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-cold-sparse",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 16635,
+      "cpuNsPerOperation": 16640
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-cold-sparse",
+      "repeat": 1,
+      "operations": 50,
+      "nsPerOperation": 7060,
+      "cpuNsPerOperation": 7080
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-cold-sparse",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 9457.5,
+      "cpuNsPerOperation": 9480
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-cold-sparse",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 17061.68,
+      "cpuNsPerOperation": 72040
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-cold-full",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 48970,
+      "cpuNsPerOperation": 51600
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-cold-full",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 20599.16,
+      "cpuNsPerOperation": 20780
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-sparse",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 665.84,
+      "cpuNsPerOperation": 680
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-warm-sparse",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 155,
+      "cpuNsPerOperation": 160
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-text",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 8227.5,
+      "cpuNsPerOperation": 8320
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-warm-text",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 159.16,
+      "cpuNsPerOperation": 160
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-native-copy",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 44673.32,
+      "cpuNsPerOperation": 45000
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-json",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 23368.34,
+      "cpuNsPerOperation": 23780
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-data-json-stringify",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 77740.84,
+      "cpuNsPerOperation": 101060
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-array-sum",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 2498.32,
+      "cpuNsPerOperation": 17160
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-array-sum",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 105.82,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-producer-encoded",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 12315,
+      "cpuNsPerOperation": 12360
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-producer-request",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 28417.5,
+      "cpuNsPerOperation": 28440
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-cold-sparse",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 11350,
+      "cpuNsPerOperation": 13420
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-cold-full",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 45180.82,
+      "cpuNsPerOperation": 48400
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-sparse",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 736.66,
+      "cpuNsPerOperation": 760
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-text",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 4260.84,
+      "cpuNsPerOperation": 4280
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-native-copy",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 34180,
+      "cpuNsPerOperation": 34180
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-json",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 19091.66,
+      "cpuNsPerOperation": 19100
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-array-sum",
+      "repeat": 2,
+      "operations": 50,
+      "nsPerOperation": 1695,
+      "cpuNsPerOperation": 1720
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-array-sum",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 1627.5,
+      "cpuNsPerOperation": 1680
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-json",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 23470,
+      "cpuNsPerOperation": 36180
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-native-copy",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 35538.32,
+      "cpuNsPerOperation": 35540
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-text",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 4364.16,
+      "cpuNsPerOperation": 4380
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-sparse",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 735.82,
+      "cpuNsPerOperation": 740
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-cold-full",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 43149.16,
+      "cpuNsPerOperation": 43140
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-cold-sparse",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 8176.68,
+      "cpuNsPerOperation": 8200
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-producer-request",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 20460,
+      "cpuNsPerOperation": 20540
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-producer-encoded",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 11018.34,
+      "cpuNsPerOperation": 11040
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-array-sum",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 103.32,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-array-sum",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 1069.16,
+      "cpuNsPerOperation": 1080
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-data-json-stringify",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 17351.66,
+      "cpuNsPerOperation": 17360
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-json",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 18078.34,
+      "cpuNsPerOperation": 18080
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-native-copy",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 33778.34,
+      "cpuNsPerOperation": 33820
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-warm-text",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 125,
+      "cpuNsPerOperation": 120
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-text",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 1952.5,
+      "cpuNsPerOperation": 1980
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-warm-sparse",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 288.32,
+      "cpuNsPerOperation": 340
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-sparse",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 525,
+      "cpuNsPerOperation": 980
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-cold-full",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 18591.68,
+      "cpuNsPerOperation": 35880
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-cold-full",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 48744.16,
+      "cpuNsPerOperation": 67820
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-cold-sparse",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 16064.16,
+      "cpuNsPerOperation": 16080
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-cold-sparse",
+      "repeat": 3,
+      "operations": 50,
+      "nsPerOperation": 8705.82,
+      "cpuNsPerOperation": 8720
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-cold-sparse",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 8583.34,
+      "cpuNsPerOperation": 8580
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-cold-sparse",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 15922.5,
+      "cpuNsPerOperation": 15920
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-cold-full",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 41900,
+      "cpuNsPerOperation": 41900
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-cold-full",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 15955,
+      "cpuNsPerOperation": 15960
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-sparse",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 464.18,
+      "cpuNsPerOperation": 460
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-warm-sparse",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 63.34,
+      "cpuNsPerOperation": 60
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-text",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 4990,
+      "cpuNsPerOperation": 10760
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-warm-text",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 69.16,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-native-copy",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 34239.16,
+      "cpuNsPerOperation": 34240
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-json",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 18736.66,
+      "cpuNsPerOperation": 18740
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-data-json-stringify",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 17584.16,
+      "cpuNsPerOperation": 17600
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-array-sum",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 1090,
+      "cpuNsPerOperation": 1100
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-array-sum",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 74.18,
+      "cpuNsPerOperation": 80
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-producer-encoded",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 9841.66,
+      "cpuNsPerOperation": 9880
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-producer-request",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 20529.18,
+      "cpuNsPerOperation": 20540
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-cold-sparse",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 9177.5,
+      "cpuNsPerOperation": 9180
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-cold-full",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 46407.5,
+      "cpuNsPerOperation": 51440
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-sparse",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 732.5,
+      "cpuNsPerOperation": 740
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-text",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 4230,
+      "cpuNsPerOperation": 4240
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-native-copy",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 34176.66,
+      "cpuNsPerOperation": 34200
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-json",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 19623.34,
+      "cpuNsPerOperation": 19620
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-array-sum",
+      "repeat": 4,
+      "operations": 50,
+      "nsPerOperation": 1649.16,
+      "cpuNsPerOperation": 1680
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-array-sum",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 1787.5,
+      "cpuNsPerOperation": 1820
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-json",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 19195,
+      "cpuNsPerOperation": 21660
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-native-copy",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 37616.68,
+      "cpuNsPerOperation": 41920
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-text",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 4230,
+      "cpuNsPerOperation": 4240
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-sparse",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 679.16,
+      "cpuNsPerOperation": 680
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-cold-full",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 42489.16,
+      "cpuNsPerOperation": 42480
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-cold-sparse",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 9515.84,
+      "cpuNsPerOperation": 9520
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-producer-request",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 22239.16,
+      "cpuNsPerOperation": 22160
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-producer-encoded",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 14115.84,
+      "cpuNsPerOperation": 17640
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-array-sum",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 81.66,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-array-sum",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 1194.16,
+      "cpuNsPerOperation": 1200
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-data-json-stringify",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 18172.5,
+      "cpuNsPerOperation": 18160
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-json",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 22531.68,
+      "cpuNsPerOperation": 27740
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-native-copy",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 34113.34,
+      "cpuNsPerOperation": 34120
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-warm-text",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 67.5,
+      "cpuNsPerOperation": 60
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-text",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 1825,
+      "cpuNsPerOperation": 1820
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-warm-sparse",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 66.66,
+      "cpuNsPerOperation": 80
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-sparse",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 440.82,
+      "cpuNsPerOperation": 460
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-cold-full",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 15935.84,
+      "cpuNsPerOperation": 15960
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-cold-full",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 45148.34,
+      "cpuNsPerOperation": 45160
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-cold-sparse",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 20064.18,
+      "cpuNsPerOperation": 25700
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-cold-sparse",
+      "repeat": 5,
+      "operations": 50,
+      "nsPerOperation": 8228.34,
+      "cpuNsPerOperation": 8220
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-cold-sparse",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 7363.32,
+      "cpuNsPerOperation": 7380
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-cold-sparse",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 16457.5,
+      "cpuNsPerOperation": 18120
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-cold-full",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 40725.84,
+      "cpuNsPerOperation": 40740
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-cold-full",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 16090,
+      "cpuNsPerOperation": 16080
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-sparse",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 445.84,
+      "cpuNsPerOperation": 440
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-warm-sparse",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 63.32,
+      "cpuNsPerOperation": 60
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-text",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 1756.68,
+      "cpuNsPerOperation": 1780
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-warm-text",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 65,
+      "cpuNsPerOperation": 60
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-native-copy",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 37213.34,
+      "cpuNsPerOperation": 43240
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-json",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 17866.68,
+      "cpuNsPerOperation": 17860
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-data-json-stringify",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 17708.32,
+      "cpuNsPerOperation": 17720
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-array-sum",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 1125.82,
+      "cpuNsPerOperation": 1140
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-array-sum",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 78.32,
+      "cpuNsPerOperation": 80
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-producer-encoded",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 11340.84,
+      "cpuNsPerOperation": 11340
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-producer-request",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 20993.34,
+      "cpuNsPerOperation": 21000
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-cold-sparse",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 10095.82,
+      "cpuNsPerOperation": 10120
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-cold-full",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 50568.34,
+      "cpuNsPerOperation": 54480
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-sparse",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 800,
+      "cpuNsPerOperation": 800
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-text",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 4166.68,
+      "cpuNsPerOperation": 4160
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-native-copy",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 34080.84,
+      "cpuNsPerOperation": 34100
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-json",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 18926.66,
+      "cpuNsPerOperation": 18920
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-array-sum",
+      "repeat": 6,
+      "operations": 50,
+      "nsPerOperation": 1581.66,
+      "cpuNsPerOperation": 1600
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-array-sum",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 1520,
+      "cpuNsPerOperation": 1540
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-json",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 18893.34,
+      "cpuNsPerOperation": 18900
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-native-copy",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 34023.34,
+      "cpuNsPerOperation": 34040
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-text",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 6970.84,
+      "cpuNsPerOperation": 10120
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-sparse",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 710.82,
+      "cpuNsPerOperation": 720
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-cold-full",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 44254.16,
+      "cpuNsPerOperation": 44260
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-cold-sparse",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 11416.68,
+      "cpuNsPerOperation": 11440
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-producer-request",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 23016.66,
+      "cpuNsPerOperation": 23020
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-producer-encoded",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 13589.18,
+      "cpuNsPerOperation": 13580
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-array-sum",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 74.16,
+      "cpuNsPerOperation": 80
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-array-sum",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 1101.68,
+      "cpuNsPerOperation": 1100
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-data-json-stringify",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 17892.5,
+      "cpuNsPerOperation": 17920
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-json",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 18504.18,
+      "cpuNsPerOperation": 18520
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-native-copy",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 38449.16,
+      "cpuNsPerOperation": 45140
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-warm-text",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 72.5,
+      "cpuNsPerOperation": 80
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-text",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 1822.5,
+      "cpuNsPerOperation": 1840
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-warm-sparse",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 68.34,
+      "cpuNsPerOperation": 60
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-sparse",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 457.5,
+      "cpuNsPerOperation": 460
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-cold-full",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 16225.84,
+      "cpuNsPerOperation": 16240
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-cold-full",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 44373.34,
+      "cpuNsPerOperation": 44380
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-cold-sparse",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 16235,
+      "cpuNsPerOperation": 16240
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-cold-sparse",
+      "repeat": 7,
+      "operations": 50,
+      "nsPerOperation": 8904.16,
+      "cpuNsPerOperation": 8940
+    },
+    {
+      "fixture": "array",
+      "lane": "native-array-sum",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 496363.86666666664,
+      "cpuNsPerOperation": 605366.6666666666
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-json",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 40218.066666666666,
+      "cpuNsPerOperation": 40233.333333333336
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-native-copy",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 68365.26666666666,
+      "cpuNsPerOperation": 69233.33333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-text",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 350,
+      "cpuNsPerOperation": 366.6666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-sparse",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 845.8333333333334,
+      "cpuNsPerOperation": 866.6666666666666
+    },
+    {
+      "fixture": "array",
+      "lane": "native-cold-full",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 110016.66666666667,
+      "cpuNsPerOperation": 115666.66666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "native-cold-sparse",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 39305.566666666666,
+      "cpuNsPerOperation": 39700
+    },
+    {
+      "fixture": "array",
+      "lane": "json-producer-request",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 15200,
+      "cpuNsPerOperation": 15233.333333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-producer-encoded",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 231702.76666666666,
+      "cpuNsPerOperation": 231433.33333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-array-sum",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 1266.6666666666667,
+      "cpuNsPerOperation": 1333.3333333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-array-sum",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 708727.7666666667,
+      "cpuNsPerOperation": 813600
+    },
+    {
+      "fixture": "array",
+      "lane": "native-data-json-stringify",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 11891.666666666666,
+      "cpuNsPerOperation": 29466.666666666668
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-json",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 70855.56666666667,
+      "cpuNsPerOperation": 70900
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-native-copy",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 125837.5,
+      "cpuNsPerOperation": 125833.33333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-warm-text",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 70.83333333333333,
+      "cpuNsPerOperation": 66.66666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-text",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 447.23333333333335,
+      "cpuNsPerOperation": 433.3333333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-warm-sparse",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 72.23333333333333,
+      "cpuNsPerOperation": 66.66666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-sparse",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 2422.233333333333,
+      "cpuNsPerOperation": 2433.3333333333335
+    },
+    {
+      "fixture": "array",
+      "lane": "json-cold-full",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 17895.833333333332,
+      "cpuNsPerOperation": 17900
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-cold-full",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 163448.6,
+      "cpuNsPerOperation": 163166.66666666666
+    },
+    {
+      "fixture": "array",
+      "lane": "json-cold-sparse",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 18355.566666666666,
+      "cpuNsPerOperation": 18366.666666666668
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-cold-sparse",
+      "repeat": 1,
+      "operations": 30,
+      "nsPerOperation": 35215.26666666667,
+      "cpuNsPerOperation": 35233.333333333336
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-cold-sparse",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 34287.5,
+      "cpuNsPerOperation": 34300
+    },
+    {
+      "fixture": "array",
+      "lane": "json-cold-sparse",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 18569.433333333334,
+      "cpuNsPerOperation": 18600
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-cold-full",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 161697.2,
+      "cpuNsPerOperation": 161466.66666666666
+    },
+    {
+      "fixture": "array",
+      "lane": "json-cold-full",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 17931.933333333334,
+      "cpuNsPerOperation": 17966.666666666668
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-sparse",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 484.73333333333335,
+      "cpuNsPerOperation": 466.6666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-warm-sparse",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 72.2,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-text",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 365.26666666666665,
+      "cpuNsPerOperation": 366.6666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-warm-text",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 66.66666666666667,
+      "cpuNsPerOperation": 66.66666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-native-copy",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 124936.13333333333,
+      "cpuNsPerOperation": 124966.66666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-json",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 70193.03333333334,
+      "cpuNsPerOperation": 70200
+    },
+    {
+      "fixture": "array",
+      "lane": "native-data-json-stringify",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 11551.4,
+      "cpuNsPerOperation": 11533.333333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-array-sum",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 477566.6666666667,
+      "cpuNsPerOperation": 612666.6666666666
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-array-sum",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 1216.6666666666667,
+      "cpuNsPerOperation": 1200
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-producer-encoded",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 224909.7,
+      "cpuNsPerOperation": 224900
+    },
+    {
+      "fixture": "array",
+      "lane": "json-producer-request",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 13622.233333333334,
+      "cpuNsPerOperation": 13633.333333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "native-cold-sparse",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 33725,
+      "cpuNsPerOperation": 33466.666666666664
+    },
+    {
+      "fixture": "array",
+      "lane": "native-cold-full",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 101384.7,
+      "cpuNsPerOperation": 101400
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-sparse",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 733.3333333333334,
+      "cpuNsPerOperation": 733.3333333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-text",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 268.06666666666666,
+      "cpuNsPerOperation": 300
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-native-copy",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 66701.4,
+      "cpuNsPerOperation": 66700
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-json",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 38716.666666666664,
+      "cpuNsPerOperation": 38733.333333333336
+    },
+    {
+      "fixture": "array",
+      "lane": "native-array-sum",
+      "repeat": 2,
+      "operations": 30,
+      "nsPerOperation": 329154.1666666667,
+      "cpuNsPerOperation": 328933.3333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "native-array-sum",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 322452.76666666666,
+      "cpuNsPerOperation": 322200
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-json",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 39084.73333333333,
+      "cpuNsPerOperation": 39100
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-native-copy",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 68009.73333333334,
+      "cpuNsPerOperation": 68033.33333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-text",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 276.3666666666667,
+      "cpuNsPerOperation": 333.3333333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-sparse",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 708.3333333333334,
+      "cpuNsPerOperation": 733.3333333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "native-cold-full",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 99851.4,
+      "cpuNsPerOperation": 99566.66666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "native-cold-sparse",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 31781.933333333334,
+      "cpuNsPerOperation": 31800
+    },
+    {
+      "fixture": "array",
+      "lane": "json-producer-request",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 13525,
+      "cpuNsPerOperation": 13533.333333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-producer-encoded",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 235483.33333333334,
+      "cpuNsPerOperation": 234733.33333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-array-sum",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 1430.5666666666666,
+      "cpuNsPerOperation": 1433.3333333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-array-sum",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 451401.4,
+      "cpuNsPerOperation": 461333.3333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "native-data-json-stringify",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 11327.8,
+      "cpuNsPerOperation": 11366.666666666666
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-json",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 71511.1,
+      "cpuNsPerOperation": 71500
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-native-copy",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 123731.96666666666,
+      "cpuNsPerOperation": 123766.66666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-warm-text",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 73.6,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-text",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 400,
+      "cpuNsPerOperation": 400
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-warm-sparse",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 75,
+      "cpuNsPerOperation": 66.66666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-sparse",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 502.76666666666665,
+      "cpuNsPerOperation": 500
+    },
+    {
+      "fixture": "array",
+      "lane": "json-cold-full",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 17829.166666666668,
+      "cpuNsPerOperation": 17833.333333333332
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-cold-full",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 165866.66666666666,
+      "cpuNsPerOperation": 165633.33333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "json-cold-sparse",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 18340.266666666666,
+      "cpuNsPerOperation": 18366.666666666668
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-cold-sparse",
+      "repeat": 3,
+      "operations": 30,
+      "nsPerOperation": 37684.73333333333,
+      "cpuNsPerOperation": 37666.666666666664
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-cold-sparse",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 39087.5,
+      "cpuNsPerOperation": 39133.333333333336
+    },
+    {
+      "fixture": "array",
+      "lane": "json-cold-sparse",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 18306.933333333334,
+      "cpuNsPerOperation": 18300
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-cold-full",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 166787.5,
+      "cpuNsPerOperation": 166800
+    },
+    {
+      "fixture": "array",
+      "lane": "json-cold-full",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 18844.466666666667,
+      "cpuNsPerOperation": 18866.666666666668
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-sparse",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 738.9,
+      "cpuNsPerOperation": 766.6666666666666
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-warm-sparse",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 90.26666666666667,
+      "cpuNsPerOperation": 66.66666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-text",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 391.6666666666667,
+      "cpuNsPerOperation": 433.3333333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-warm-text",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 68.06666666666666,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-native-copy",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 127772.2,
+      "cpuNsPerOperation": 127533.33333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-json",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 71202.76666666666,
+      "cpuNsPerOperation": 71200
+    },
+    {
+      "fixture": "array",
+      "lane": "native-data-json-stringify",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 11538.9,
+      "cpuNsPerOperation": 11533.333333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-array-sum",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 431076.4,
+      "cpuNsPerOperation": 430833.3333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-array-sum",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 1298.6333333333334,
+      "cpuNsPerOperation": 1366.6666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-producer-encoded",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 229244.43333333332,
+      "cpuNsPerOperation": 229100
+    },
+    {
+      "fixture": "array",
+      "lane": "json-producer-request",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 13427.766666666666,
+      "cpuNsPerOperation": 13433.333333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "native-cold-sparse",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 35330.566666666666,
+      "cpuNsPerOperation": 35333.333333333336
+    },
+    {
+      "fixture": "array",
+      "lane": "native-cold-full",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 99551.36666666667,
+      "cpuNsPerOperation": 99533.33333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-sparse",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 744.4666666666667,
+      "cpuNsPerOperation": 766.6666666666666
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-text",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 272.23333333333335,
+      "cpuNsPerOperation": 300
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-native-copy",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 73677.76666666666,
+      "cpuNsPerOperation": 81166.66666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-json",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 38576.4,
+      "cpuNsPerOperation": 38600
+    },
+    {
+      "fixture": "array",
+      "lane": "native-array-sum",
+      "repeat": 4,
+      "operations": 30,
+      "nsPerOperation": 324511.13333333336,
+      "cpuNsPerOperation": 324233.3333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "native-array-sum",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 468920.8333333333,
+      "cpuNsPerOperation": 543866.6666666666
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-json",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 40241.666666666664,
+      "cpuNsPerOperation": 46033.333333333336
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-native-copy",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 68622.23333333334,
+      "cpuNsPerOperation": 69233.33333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-text",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 376.4,
+      "cpuNsPerOperation": 366.6666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-sparse",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 979.1666666666666,
+      "cpuNsPerOperation": 1000
+    },
+    {
+      "fixture": "array",
+      "lane": "native-cold-full",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 106562.5,
+      "cpuNsPerOperation": 111533.33333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "native-cold-sparse",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 33229.166666666664,
+      "cpuNsPerOperation": 33466.666666666664
+    },
+    {
+      "fixture": "array",
+      "lane": "json-producer-request",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 14268.066666666668,
+      "cpuNsPerOperation": 14266.666666666666
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-producer-encoded",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 228166.66666666666,
+      "cpuNsPerOperation": 227933.33333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-array-sum",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 1365.2666666666667,
+      "cpuNsPerOperation": 1400
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-array-sum",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 620527.7666666667,
+      "cpuNsPerOperation": 622333.3333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "native-data-json-stringify",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 13612.5,
+      "cpuNsPerOperation": 13333.333333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-json",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 100154.16666666667,
+      "cpuNsPerOperation": 127800
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-native-copy",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 125566.66666666667,
+      "cpuNsPerOperation": 182533.33333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-warm-text",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 70.83333333333333,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-text",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 438.8666666666667,
+      "cpuNsPerOperation": 466.6666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-warm-sparse",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 72.23333333333333,
+      "cpuNsPerOperation": 100
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-sparse",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 1861.1,
+      "cpuNsPerOperation": 1900
+    },
+    {
+      "fixture": "array",
+      "lane": "json-cold-full",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 17897.2,
+      "cpuNsPerOperation": 17900
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-cold-full",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 161194.46666666667,
+      "cpuNsPerOperation": 161200
+    },
+    {
+      "fixture": "array",
+      "lane": "json-cold-sparse",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 19176.366666666665,
+      "cpuNsPerOperation": 18900
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-cold-sparse",
+      "repeat": 5,
+      "operations": 30,
+      "nsPerOperation": 37865.26666666667,
+      "cpuNsPerOperation": 37933.333333333336
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-cold-sparse",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 34959.73333333333,
+      "cpuNsPerOperation": 34966.666666666664
+    },
+    {
+      "fixture": "array",
+      "lane": "json-cold-sparse",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 18670.833333333332,
+      "cpuNsPerOperation": 18666.666666666668
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-cold-full",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 159391.66666666666,
+      "cpuNsPerOperation": 159400
+    },
+    {
+      "fixture": "array",
+      "lane": "json-cold-full",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 18600,
+      "cpuNsPerOperation": 18600
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-sparse",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 484.73333333333335,
+      "cpuNsPerOperation": 500
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-warm-sparse",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 69.46666666666667,
+      "cpuNsPerOperation": 66.66666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-text",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 362.5,
+      "cpuNsPerOperation": 366.6666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-warm-text",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 68.06666666666666,
+      "cpuNsPerOperation": 66.66666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-native-copy",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 125402.76666666666,
+      "cpuNsPerOperation": 125133.33333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-json",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 70036.1,
+      "cpuNsPerOperation": 70066.66666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "native-data-json-stringify",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 11980.566666666668,
+      "cpuNsPerOperation": 12000
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-array-sum",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 432656.9666666667,
+      "cpuNsPerOperation": 437300
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-array-sum",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 1216.6666666666667,
+      "cpuNsPerOperation": 1266.6666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-producer-encoded",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 223276.36666666667,
+      "cpuNsPerOperation": 223300
+    },
+    {
+      "fixture": "array",
+      "lane": "json-producer-request",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 13827.766666666666,
+      "cpuNsPerOperation": 13866.666666666666
+    },
+    {
+      "fixture": "array",
+      "lane": "native-cold-sparse",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 32161.1,
+      "cpuNsPerOperation": 32166.666666666668
+    },
+    {
+      "fixture": "array",
+      "lane": "native-cold-full",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 99668.06666666667,
+      "cpuNsPerOperation": 99700
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-sparse",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 734.7,
+      "cpuNsPerOperation": 733.3333333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-text",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 269.46666666666664,
+      "cpuNsPerOperation": 266.6666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-native-copy",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 68493.03333333334,
+      "cpuNsPerOperation": 68200
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-json",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 38583.333333333336,
+      "cpuNsPerOperation": 38633.333333333336
+    },
+    {
+      "fixture": "array",
+      "lane": "native-array-sum",
+      "repeat": 6,
+      "operations": 30,
+      "nsPerOperation": 320515.3,
+      "cpuNsPerOperation": 320200
+    },
+    {
+      "fixture": "array",
+      "lane": "native-array-sum",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 329293.06666666665,
+      "cpuNsPerOperation": 328966.6666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-json",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 38733.333333333336,
+      "cpuNsPerOperation": 38733.333333333336
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-native-copy",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 66590.26666666666,
+      "cpuNsPerOperation": 66600
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-text",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 290.26666666666665,
+      "cpuNsPerOperation": 300
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-sparse",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 698.6,
+      "cpuNsPerOperation": 700
+    },
+    {
+      "fixture": "array",
+      "lane": "native-cold-full",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 98129.16666666667,
+      "cpuNsPerOperation": 98133.33333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "native-cold-sparse",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 32250,
+      "cpuNsPerOperation": 32266.666666666668
+    },
+    {
+      "fixture": "array",
+      "lane": "json-producer-request",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 13843.066666666668,
+      "cpuNsPerOperation": 13866.666666666666
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-producer-encoded",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 226215.3,
+      "cpuNsPerOperation": 225933.33333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-array-sum",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 1205.5666666666666,
+      "cpuNsPerOperation": 1200
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-array-sum",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 434266.6666666667,
+      "cpuNsPerOperation": 441300
+    },
+    {
+      "fixture": "array",
+      "lane": "native-data-json-stringify",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 11429.166666666666,
+      "cpuNsPerOperation": 11433.333333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-json",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 69651.36666666667,
+      "cpuNsPerOperation": 69666.66666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-native-copy",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 125220.83333333333,
+      "cpuNsPerOperation": 131366.66666666666
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-warm-text",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 72.23333333333333,
+      "cpuNsPerOperation": 66.66666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-text",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 386.1333333333333,
+      "cpuNsPerOperation": 400
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-warm-sparse",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 70.83333333333333,
+      "cpuNsPerOperation": 66.66666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-sparse",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 461.1333333333333,
+      "cpuNsPerOperation": 466.6666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "json-cold-full",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 18590.3,
+      "cpuNsPerOperation": 18600
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-cold-full",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 169698.6,
+      "cpuNsPerOperation": 168866.66666666666
+    },
+    {
+      "fixture": "array",
+      "lane": "json-cold-sparse",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 18625,
+      "cpuNsPerOperation": 18633.333333333332
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-cold-sparse",
+      "repeat": 7,
+      "operations": 30,
+      "nsPerOperation": 34311.1,
+      "cpuNsPerOperation": 34300
+    }
+  ],
+  "notes": [
+    "JSON producer writes a different format; report its cost, not an interchangeable codec ratio.",
+    "Cold lanes receive already available bytes; they do not include HTTP or storage.",
+    "Already-native warm controls exclude construction cost.",
+    "All lanes await operation results equally; process startup and fixture preparation stay outside timing."
+  ]
+}

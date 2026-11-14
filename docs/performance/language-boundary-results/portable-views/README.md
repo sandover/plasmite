@@ -2,7 +2,7 @@
 
 The remote-only Node backend keeps Lite3 as its immutable record and uses the
 same Rust/C checker, traversal, JSON formatting and input builder as native
-bindings. Its packaged module has 114,270 bytes (about45 KiB gzip), no runtime
+bindings. Its packaged module has 114,270 bytes (about 44 KiB gzip), no runtime
 imports and no native addon requirement. The existing Proxy implementation
 supplies properties, arrays, reflection and readonly byte views.
 
@@ -35,6 +35,31 @@ The [startup preflight](native-startup-verified.json) uses a fresh Node process.
 Its null timing fields verify the cold path without supplying a performance
 claim. Portable timing comes from the central pass using the commands below;
 the preflights do not supply throughput or latency results.
+
+## Central results
+
+The [raw operation runs](central/operations.json), [fresh-process startup runs](central/startup.json) and [retention diagnostic](central/retention.json) come from the centralized fixed-artifact pass on macOS arm64, Node 26.13.0. The [summary](central/summary.json) reports medians from seven repeats, with ranges and CPU costs for every operation lane. Every result check passed; the native control verified its loaded library hash.
+
+Portable views provide the requested semantics without an addon. They do not offer a general speed gain over JSON. Sparse access avoids materializing a native tree, but acquisition still copies and checks the complete encoded buffer. Full copies and array scans cross the Wasm boundary repeatedly or format and parse the requested data.
+
+Median wall time, microseconds per operation:
+
+| Fixture | Portable cold sparse | Native cold sparse | JSON parse + sparse | Portable cold full | Native cold full | JSON parse + full |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Small | 3.11 | 3.37 | 0.52 | 3.33 | 3.31 | 0.52 |
+| 200-field | 33.33 | 20.10 | 24.89 | 99.61 | 66.30 | 25.94 |
+| 64 KiB string | 8.58 | 9.52 | 16.46 | 44.37 | 44.25 | 16.09 |
+| 4,096 integers | 35.22 | 33.23 | 18.57 | 163.45 | 99.85 | 17.93 |
+
+The long-string sparse case takes about 48% less time than JSON parsing because it reads selected fields without decoding the large unused string. The wide and array fixtures show the cost of checking larger Lite3 layouts: their encoded sizes are 35,486 and 169,439 bytes, versus 8,343 and 19,516 JSON bytes. Warm portable sparse reads cost 0.45–0.51 microseconds; already-native property access costs 0.07–0.09. Scanning all 4,096 integers costs 451 microseconds portable, 329 native-view and 1.27 on an already-built native array. Construction stays outside that last control.
+
+Portable encoded production costs 2.52 / 111.67 / 12.32 / 228.17 microseconds for small / wide / long-string / array fixtures. JSON request construction costs 0.29 / 6.24 / 22.24 / 13.83. These produce different physical formats; the numbers do not establish an interchangeable codec ratio. The native addon exposes no storage-free encoder control. Complete delivery measurements belong to the HTTP and native-input evidence.
+
+Fresh-process portable require, first decode and first sparse access cost 0.613, 0.980 and 0.183 milliseconds respectively (separate medians). Native require, first decode and first sparse cost 1.942, 0.114 and 0.023 milliseconds. Process startup stays outside those measurements. The module adds 114,270 bytes, or 45,132 gzip bytes; no download latency is inferred from size.
+
+The central retention run confirms one child retains 66,076 backing bytes and releases them after collection. Fifty more acquisitions return live owner count and backing bytes to zero. Linear memory grows from 1,507,328 to 4,521,984 bytes and retains that allocation for reuse.
+
+These runs identify historical Wasm SHA `96de040ab05a975eb2168e4777562edbe25c229ca1574303e11b50f799d5f6eb` and adapter SHA `3e0f1c9e82275f3f0df0d6e5e40a70d5876722324009ee792113731d41a1017f`; the existing source archive matches them. The native baseline library SHA is `6a08cb2f48220adfbc3894d5108c097cd7ed60eb8300636f4a4f163f8b9280cc`. Later package rebuilds may update shared-source manifests; these raw runs continue to describe this measured checkpoint.
 
 ## Retention
 

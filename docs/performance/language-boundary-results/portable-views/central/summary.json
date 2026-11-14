@@ -1,0 +1,817 @@
+{
+  "method": "Median of seven repeat wall and CPU costs; raw files retain all order/iteration counts and fingerprints.",
+  "node": "v26.13.0",
+  "platform": "darwin",
+  "arch": "arm64",
+  "wasmSha256": "96de040ab05a975eb2168e4777562edbe25c229ca1574303e11b50f799d5f6eb",
+  "rawSha256": {
+    "operations.json": "a46f74298a503bbabbbbea228088c6af2517e7da79dd70cf3f12d998b10cab67",
+    "startup.json": "a79887c19238bbced068d7721d7e25d7f2b213e2f9d1d1453cab2674374e0ddb",
+    "retention.json": "9143f32584682acb7b4a60109a27c75fe94c6660de1fbbc0cd548fdb5ea38e3d"
+  },
+  "startup": {
+    "requireNs": 613292,
+    "firstDecodeNs": 979500,
+    "firstSparseNs": 183125,
+    "jsonParseSparseNs": 9375,
+    "native": {
+      "requireNs": 1942125,
+      "firstDecodeNs": 113875,
+      "firstSparseNs": 22583
+    }
+  },
+  "rows": [
+    {
+      "fixture": "small",
+      "lane": "native-array-sum",
+      "repeats": 7,
+      "medianNs": 1314.125,
+      "minNs": 1260.875,
+      "maxNs": 1739.5,
+      "medianCpuNs": 1314
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-json",
+      "repeats": 7,
+      "medianNs": 367.791,
+      "minNs": 358.458,
+      "maxNs": 433.791,
+      "medianCpuNs": 368
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-native-copy",
+      "repeats": 7,
+      "medianNs": 706.458,
+      "minNs": 683.875,
+      "maxNs": 837.959,
+      "medianCpuNs": 704
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-text",
+      "repeats": 7,
+      "medianNs": 239.209,
+      "minNs": 225.459,
+      "maxNs": 341.834,
+      "medianCpuNs": 239
+    },
+    {
+      "fixture": "small",
+      "lane": "native-warm-sparse",
+      "repeats": 7,
+      "medianNs": 653.5,
+      "minNs": 637.792,
+      "maxNs": 813.292,
+      "medianCpuNs": 655
+    },
+    {
+      "fixture": "small",
+      "lane": "native-cold-full",
+      "repeats": 7,
+      "medianNs": 3310.083,
+      "minNs": 3067.625,
+      "maxNs": 7054.292,
+      "medianCpuNs": 3302
+    },
+    {
+      "fixture": "small",
+      "lane": "native-cold-sparse",
+      "repeats": 7,
+      "medianNs": 3365.583,
+      "minNs": 3150.333,
+      "maxNs": 4285.375,
+      "medianCpuNs": 3407
+    },
+    {
+      "fixture": "small",
+      "lane": "json-producer-request",
+      "repeats": 7,
+      "medianNs": 290.917,
+      "minNs": 255.083,
+      "maxNs": 374.75,
+      "medianCpuNs": 292
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-producer-encoded",
+      "repeats": 7,
+      "medianNs": 2515.125,
+      "minNs": 2056.25,
+      "maxNs": 3558.708,
+      "medianCpuNs": 3773
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-array-sum",
+      "repeats": 7,
+      "medianNs": 73.917,
+      "minNs": 69.5,
+      "maxNs": 127.583,
+      "medianCpuNs": 75
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-array-sum",
+      "repeats": 7,
+      "medianNs": 1163.208,
+      "minNs": 961.166,
+      "maxNs": 2605.625,
+      "medianCpuNs": 1339
+    },
+    {
+      "fixture": "small",
+      "lane": "native-data-json-stringify",
+      "repeats": 7,
+      "medianNs": 140.458,
+      "minNs": 128.042,
+      "maxNs": 178,
+      "medianCpuNs": 140
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-json",
+      "repeats": 7,
+      "medianNs": 562.667,
+      "minNs": 501.25,
+      "maxNs": 669.166,
+      "medianCpuNs": 600
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-native-copy",
+      "repeats": 7,
+      "medianNs": 985.875,
+      "minNs": 922.584,
+      "maxNs": 1122.125,
+      "medianCpuNs": 1118
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-warm-text",
+      "repeats": 7,
+      "medianNs": 65,
+      "minNs": 60.708,
+      "maxNs": 108.292,
+      "medianCpuNs": 65
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-text",
+      "repeats": 7,
+      "medianNs": 359.958,
+      "minNs": 319.375,
+      "maxNs": 437,
+      "medianCpuNs": 421
+    },
+    {
+      "fixture": "small",
+      "lane": "already-native-warm-sparse",
+      "repeats": 7,
+      "medianNs": 72.209,
+      "minNs": 61.167,
+      "maxNs": 101.292,
+      "medianCpuNs": 73
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-warm-sparse",
+      "repeats": 7,
+      "medianNs": 451.958,
+      "minNs": 411.875,
+      "maxNs": 623.833,
+      "medianCpuNs": 476
+    },
+    {
+      "fixture": "small",
+      "lane": "json-cold-full",
+      "repeats": 7,
+      "medianNs": 523.5,
+      "minNs": 493.25,
+      "maxNs": 587.625,
+      "medianCpuNs": 524
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-cold-full",
+      "repeats": 7,
+      "medianNs": 3328.375,
+      "minNs": 2963.334,
+      "maxNs": 6044,
+      "medianCpuNs": 4567
+    },
+    {
+      "fixture": "small",
+      "lane": "json-cold-sparse",
+      "repeats": 7,
+      "medianNs": 518.541,
+      "minNs": 482.458,
+      "maxNs": 552.375,
+      "medianCpuNs": 519
+    },
+    {
+      "fixture": "small",
+      "lane": "portable-cold-sparse",
+      "repeats": 7,
+      "medianNs": 3108.667,
+      "minNs": 2068.917,
+      "maxNs": 3658.083,
+      "medianCpuNs": 3562
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-array-sum",
+      "repeats": 7,
+      "medianNs": 1582.5,
+      "minNs": 1382.5,
+      "maxNs": 1884.16,
+      "medianCpuNs": 1610
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-json",
+      "repeats": 7,
+      "medianNs": 18810.41,
+      "minNs": 18141.25,
+      "maxNs": 19565,
+      "medianCpuNs": 18810
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-native-copy",
+      "repeats": 7,
+      "medianNs": 43439.58,
+      "minNs": 42960,
+      "maxNs": 49526.25,
+      "medianCpuNs": 43470
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-text",
+      "repeats": 7,
+      "medianNs": 275.84,
+      "minNs": 271.25,
+      "maxNs": 375.83,
+      "medianCpuNs": 280
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-warm-sparse",
+      "repeats": 7,
+      "medianNs": 712.92,
+      "minNs": 696.67,
+      "maxNs": 798.33,
+      "medianCpuNs": 720
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-cold-full",
+      "repeats": 7,
+      "medianNs": 66303.75,
+      "minNs": 63841.67,
+      "maxNs": 74180,
+      "medianCpuNs": 71970
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-cold-sparse",
+      "repeats": 7,
+      "medianNs": 20098.75,
+      "minNs": 17660.83,
+      "maxNs": 25642.08,
+      "medianCpuNs": 20110
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-producer-request",
+      "repeats": 7,
+      "medianNs": 6236.25,
+      "minNs": 5811.67,
+      "maxNs": 7710.42,
+      "medianCpuNs": 6240
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-producer-encoded",
+      "repeats": 7,
+      "medianNs": 111665.42,
+      "minNs": 106940.42,
+      "maxNs": 115037.91,
+      "medianCpuNs": 111590
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-array-sum",
+      "repeats": 7,
+      "medianNs": 105.42,
+      "minNs": 97.91,
+      "maxNs": 145.83,
+      "medianCpuNs": 110
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-array-sum",
+      "repeats": 7,
+      "medianNs": 1153.75,
+      "minNs": 1018.75,
+      "maxNs": 3662.5,
+      "medianCpuNs": 1190
+    },
+    {
+      "fixture": "wide",
+      "lane": "native-data-json-stringify",
+      "repeats": 7,
+      "medianNs": 4953.33,
+      "minNs": 4657.08,
+      "maxNs": 5069.58,
+      "medianCpuNs": 5050
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-json",
+      "repeats": 7,
+      "medianNs": 29170.83,
+      "minNs": 28857.5,
+      "maxNs": 30069.58,
+      "medianCpuNs": 29390
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-native-copy",
+      "repeats": 7,
+      "medianNs": 65217.08,
+      "minNs": 63184.17,
+      "maxNs": 72652.91,
+      "medianCpuNs": 65390
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-warm-text",
+      "repeats": 7,
+      "medianNs": 91.25,
+      "minNs": 86.25,
+      "maxNs": 143.75,
+      "medianCpuNs": 100
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-text",
+      "repeats": 7,
+      "medianNs": 387.92,
+      "minNs": 363.75,
+      "maxNs": 487.91,
+      "medianCpuNs": 390
+    },
+    {
+      "fixture": "wide",
+      "lane": "already-native-warm-sparse",
+      "repeats": 7,
+      "medianNs": 92.09,
+      "minNs": 89.59,
+      "maxNs": 313.33,
+      "medianCpuNs": 110
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-warm-sparse",
+      "repeats": 7,
+      "medianNs": 504.59,
+      "minNs": 454.58,
+      "maxNs": 764.58,
+      "medianCpuNs": 510
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-cold-full",
+      "repeats": 7,
+      "medianNs": 25940.42,
+      "minNs": 24852.5,
+      "maxNs": 33635,
+      "medianCpuNs": 26100
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-cold-full",
+      "repeats": 7,
+      "medianNs": 99611.25,
+      "minNs": 95520.41,
+      "maxNs": 143187.5,
+      "medianCpuNs": 102070
+    },
+    {
+      "fixture": "wide",
+      "lane": "json-cold-sparse",
+      "repeats": 7,
+      "medianNs": 24888.33,
+      "minNs": 24692.09,
+      "maxNs": 26257.91,
+      "medianCpuNs": 24890
+    },
+    {
+      "fixture": "wide",
+      "lane": "portable-cold-sparse",
+      "repeats": 7,
+      "medianNs": 33330,
+      "minNs": 29566.66,
+      "maxNs": 38755,
+      "medianCpuNs": 33260
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-array-sum",
+      "repeats": 7,
+      "medianNs": 1627.5,
+      "minNs": 1520,
+      "maxNs": 1787.5,
+      "medianCpuNs": 1680
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-json",
+      "repeats": 7,
+      "medianNs": 19195,
+      "minNs": 18893.34,
+      "maxNs": 23470,
+      "medianCpuNs": 19620
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-native-copy",
+      "repeats": 7,
+      "medianNs": 34180,
+      "minNs": 34023.34,
+      "maxNs": 37616.68,
+      "medianCpuNs": 34200
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-text",
+      "repeats": 7,
+      "medianNs": 4260.84,
+      "minNs": 4166.68,
+      "maxNs": 8140,
+      "medianCpuNs": 4280
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-warm-sparse",
+      "repeats": 7,
+      "medianNs": 735.82,
+      "minNs": 679.16,
+      "maxNs": 800,
+      "medianCpuNs": 740
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-cold-full",
+      "repeats": 7,
+      "medianNs": 44254.16,
+      "minNs": 42489.16,
+      "maxNs": 50568.34,
+      "medianCpuNs": 44260
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-cold-sparse",
+      "repeats": 7,
+      "medianNs": 9515.84,
+      "minNs": 8176.68,
+      "maxNs": 11416.68,
+      "medianCpuNs": 9520
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-producer-request",
+      "repeats": 7,
+      "medianNs": 22239.16,
+      "minNs": 20460,
+      "maxNs": 33797.5,
+      "medianCpuNs": 22160
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-producer-encoded",
+      "repeats": 7,
+      "medianNs": 12315,
+      "minNs": 9841.66,
+      "maxNs": 14115.84,
+      "medianCpuNs": 12360
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-array-sum",
+      "repeats": 7,
+      "medianNs": 81.66,
+      "minNs": 74.16,
+      "maxNs": 105.82,
+      "medianCpuNs": 100
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-array-sum",
+      "repeats": 7,
+      "medianNs": 1125.82,
+      "minNs": 1069.16,
+      "maxNs": 2498.32,
+      "medianCpuNs": 1140
+    },
+    {
+      "fixture": "long-string",
+      "lane": "native-data-json-stringify",
+      "repeats": 7,
+      "medianNs": 17708.32,
+      "minNs": 17351.66,
+      "maxNs": 77740.84,
+      "medianCpuNs": 17720
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-json",
+      "repeats": 7,
+      "medianNs": 18690.82,
+      "minNs": 17866.68,
+      "maxNs": 23368.34,
+      "medianCpuNs": 18700
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-native-copy",
+      "repeats": 7,
+      "medianNs": 36011.66,
+      "minNs": 33778.34,
+      "maxNs": 44673.32,
+      "medianCpuNs": 39640
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-warm-text",
+      "repeats": 7,
+      "medianNs": 72.5,
+      "minNs": 65,
+      "maxNs": 159.16,
+      "medianCpuNs": 100
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-text",
+      "repeats": 7,
+      "medianNs": 1825,
+      "minNs": 1756.68,
+      "maxNs": 8227.5,
+      "medianCpuNs": 1840
+    },
+    {
+      "fixture": "long-string",
+      "lane": "already-native-warm-sparse",
+      "repeats": 7,
+      "medianNs": 68.34,
+      "minNs": 63.32,
+      "maxNs": 288.32,
+      "medianCpuNs": 80
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-warm-sparse",
+      "repeats": 7,
+      "medianNs": 464.18,
+      "minNs": 440.82,
+      "maxNs": 665.84,
+      "medianCpuNs": 460
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-cold-full",
+      "repeats": 7,
+      "medianNs": 16090,
+      "minNs": 15935.84,
+      "maxNs": 20599.16,
+      "medianCpuNs": 16080
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-cold-full",
+      "repeats": 7,
+      "medianNs": 44373.34,
+      "minNs": 40725.84,
+      "maxNs": 48970,
+      "medianCpuNs": 44380
+    },
+    {
+      "fixture": "long-string",
+      "lane": "json-cold-sparse",
+      "repeats": 7,
+      "medianNs": 16457.5,
+      "minNs": 15922.5,
+      "maxNs": 20064.18,
+      "medianCpuNs": 16640
+    },
+    {
+      "fixture": "long-string",
+      "lane": "portable-cold-sparse",
+      "repeats": 7,
+      "medianNs": 8583.34,
+      "minNs": 7060,
+      "maxNs": 9457.5,
+      "medianCpuNs": 8580
+    },
+    {
+      "fixture": "array",
+      "lane": "native-array-sum",
+      "repeats": 7,
+      "medianNs": 329154.1666666667,
+      "minNs": 320515.3,
+      "maxNs": 496363.86666666664,
+      "medianCpuNs": 328933.3333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-json",
+      "repeats": 7,
+      "medianNs": 38733.333333333336,
+      "minNs": 38576.4,
+      "maxNs": 40241.666666666664,
+      "medianCpuNs": 38733.333333333336
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-native-copy",
+      "repeats": 7,
+      "medianNs": 68365.26666666666,
+      "minNs": 66590.26666666666,
+      "maxNs": 73677.76666666666,
+      "medianCpuNs": 68200
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-text",
+      "repeats": 7,
+      "medianNs": 276.3666666666667,
+      "minNs": 268.06666666666666,
+      "maxNs": 376.4,
+      "medianCpuNs": 300
+    },
+    {
+      "fixture": "array",
+      "lane": "native-warm-sparse",
+      "repeats": 7,
+      "medianNs": 734.7,
+      "minNs": 698.6,
+      "maxNs": 979.1666666666666,
+      "medianCpuNs": 733.3333333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "native-cold-full",
+      "repeats": 7,
+      "medianNs": 99851.4,
+      "minNs": 98129.16666666667,
+      "maxNs": 110016.66666666667,
+      "medianCpuNs": 99700
+    },
+    {
+      "fixture": "array",
+      "lane": "native-cold-sparse",
+      "repeats": 7,
+      "medianNs": 33229.166666666664,
+      "minNs": 31781.933333333334,
+      "maxNs": 39305.566666666666,
+      "medianCpuNs": 33466.666666666664
+    },
+    {
+      "fixture": "array",
+      "lane": "json-producer-request",
+      "repeats": 7,
+      "medianNs": 13827.766666666666,
+      "minNs": 13427.766666666666,
+      "maxNs": 15200,
+      "medianCpuNs": 13866.666666666666
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-producer-encoded",
+      "repeats": 7,
+      "medianNs": 228166.66666666666,
+      "minNs": 223276.36666666667,
+      "maxNs": 235483.33333333334,
+      "medianCpuNs": 227933.33333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-array-sum",
+      "repeats": 7,
+      "medianNs": 1266.6666666666667,
+      "minNs": 1205.5666666666666,
+      "maxNs": 1430.5666666666666,
+      "medianCpuNs": 1333.3333333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-array-sum",
+      "repeats": 7,
+      "medianNs": 451401.4,
+      "minNs": 431076.4,
+      "maxNs": 708727.7666666667,
+      "medianCpuNs": 461333.3333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "native-data-json-stringify",
+      "repeats": 7,
+      "medianNs": 11551.4,
+      "minNs": 11327.8,
+      "maxNs": 13612.5,
+      "medianCpuNs": 11533.333333333334
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-json",
+      "repeats": 7,
+      "medianNs": 70855.56666666667,
+      "minNs": 69651.36666666667,
+      "maxNs": 100154.16666666667,
+      "medianCpuNs": 70900
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-native-copy",
+      "repeats": 7,
+      "medianNs": 125402.76666666666,
+      "minNs": 123731.96666666666,
+      "maxNs": 127772.2,
+      "medianCpuNs": 125833.33333333333
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-warm-text",
+      "repeats": 7,
+      "medianNs": 70.83333333333333,
+      "minNs": 66.66666666666667,
+      "maxNs": 73.6,
+      "medianCpuNs": 66.66666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-text",
+      "repeats": 7,
+      "medianNs": 391.6666666666667,
+      "minNs": 362.5,
+      "maxNs": 447.23333333333335,
+      "medianCpuNs": 400
+    },
+    {
+      "fixture": "array",
+      "lane": "already-native-warm-sparse",
+      "repeats": 7,
+      "medianNs": 72.23333333333333,
+      "minNs": 69.46666666666667,
+      "maxNs": 90.26666666666667,
+      "medianCpuNs": 66.66666666666667
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-warm-sparse",
+      "repeats": 7,
+      "medianNs": 502.76666666666665,
+      "minNs": 461.1333333333333,
+      "maxNs": 2422.233333333333,
+      "medianCpuNs": 500
+    },
+    {
+      "fixture": "array",
+      "lane": "json-cold-full",
+      "repeats": 7,
+      "medianNs": 17931.933333333334,
+      "minNs": 17829.166666666668,
+      "maxNs": 18844.466666666667,
+      "medianCpuNs": 17966.666666666668
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-cold-full",
+      "repeats": 7,
+      "medianNs": 163448.6,
+      "minNs": 159391.66666666666,
+      "maxNs": 169698.6,
+      "medianCpuNs": 163166.66666666666
+    },
+    {
+      "fixture": "array",
+      "lane": "json-cold-sparse",
+      "repeats": 7,
+      "medianNs": 18569.433333333334,
+      "minNs": 18306.933333333334,
+      "maxNs": 19176.366666666665,
+      "medianCpuNs": 18600
+    },
+    {
+      "fixture": "array",
+      "lane": "portable-cold-sparse",
+      "repeats": 7,
+      "medianNs": 35215.26666666667,
+      "minNs": 34287.5,
+      "maxNs": 39087.5,
+      "medianCpuNs": 35233.333333333336
+    }
+  ]
+}
