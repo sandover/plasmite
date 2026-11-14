@@ -711,11 +711,12 @@ test("remote append rejects invalid durability before fetch", async () => {
   }
 });
 
-test("UDP SDK polls without blocking, cancels, and rejects imprecise sequence numbers", async () => {
+test("UDP SDK waits without blocking, cancels, and rejects imprecise sequence numbers", async () => {
   let cancelCalls = 0;
   const follow = new UdpFollow({
-    nextEvent(timeoutMs) {
-      assert.equal(timeoutMs, 0n);
+    async nextEventWait(timeoutMs) {
+      assert.equal(timeoutMs, 1000n);
+      await new Promise(resolve => setTimeout(resolve, 10));
       return { status: 0, event: null };
     },
     get isFinished() {
@@ -921,7 +922,26 @@ test("UDP SDK sends JSON and exact Lite3 through a server process", async (t) =>
     const pending = cancelFollow.nextEvent(5000n, { signal: controller.signal });
     setTimeout(() => controller.abort(), 10);
     await assert.rejects(pending, (err) => err.name === "AbortError");
+    // Aborting one wait leaves the follower reusable and releases its read lease.
+    assert.equal(await cancelFollow.nextEvent(0n), null);
     cancelFollow.close();
+
+    const ownedFollow = await udpPool.followViews({ start: UdpStart.sequence(original.seq), live: false });
+    let ownedFrame;
+    for await (const event of ownedFollow) { if (event.kind === "frame") { ownedFrame = event; break; } }
+    ownedFollow.close();
+    assert.equal(ownedFrame.message.data.origin, "lite3");
+    assert.equal(ownedFrame.message.seq, original.seq);
+    assert.equal(ownedFrame.payload, undefined);
+    assert.throws(() => { ownedFrame.message.data.value = 123; }, TypeError);
+
+    const returnFollow = await udpPool.follow();
+    await returnFollow.nextEvent(0n);
+    const events = returnFollow.events({ pollIntervalMs: 5000 });
+    const idleNext = events.next();
+    setTimeout(() => events.return(), 5);
+    assert.equal((await idleNext).done, true);
+    returnFollow.close();
 
     const closeFollow = await udpPool.follow();
     await closeFollow.nextEvent(0n);

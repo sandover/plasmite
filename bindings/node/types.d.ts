@@ -124,6 +124,7 @@ export class Pool {
   getJson(seq: number | bigint): Buffer
   getLite3(seq: number | bigint): Lite3Frame
   tail(options?: LocalTailOptions): AsyncGenerator<Message, void, unknown>
+  tailViews<T = unknown>(options?: LocalTailOptions): AsyncGenerator<MessageView<T>, void, unknown>
   openStream(
     sinceSeq?: number | bigint | null,
     maxMessages?: number | bigint | null,
@@ -219,6 +220,7 @@ export class UdpPool {
   sendJson(payload: unknown, tags?: string[]): void
   sendLite3(payload: Buffer): void
   follow(options?: UdpFollowOptions): Promise<UdpFollow>
+  followViews<T = unknown>(options?: UdpFollowOptions): Promise<UdpViewFollow<T>>
   close(): void
   [Symbol.dispose](): void
 }
@@ -231,6 +233,20 @@ export class UdpFollow {
   close(): void
   [Symbol.dispose](): void
   [Symbol.asyncIterator](): AsyncGenerator<UdpEvent, void, unknown>
+}
+
+export type UdpViewEvent<T = unknown> =
+  | { kind: "frame"; seq: bigint; timestampNs: bigint; message: MessageView<T> }
+  | Exclude<UdpEvent, { kind: "frame" }>
+
+export interface UdpViewFollow<T = unknown> {
+  readonly finished: boolean
+  nextEvent(timeoutMs?: number | bigint, options?: UdpWaitOptions): Promise<UdpViewEvent<T> | null>
+  events(options?: { pollIntervalMs?: number | bigint; signal?: AbortSignal }): AsyncGenerator<UdpViewEvent<T>, void, unknown>
+  cancel(): void
+  close(): void
+  [Symbol.dispose](): void
+  [Symbol.asyncIterator](): AsyncGenerator<UdpViewEvent<T>, void, unknown>
 }
 
 export function parseMessage(payload: Buffer | Message | MessageEnvelope): Message

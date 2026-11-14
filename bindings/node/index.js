@@ -13,7 +13,6 @@ const { ERROR_KIND_VALUES, mapErrorKind } = require("./mappings");
 const { createNativeMessage: ownedMessage, toNative, toJson, toLite3, messageReference, valueReference } = require("./views");
 const { inputHelpers, snapshotTags, configureNativeInput, nativeOwner } = require("./input");
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const path = require("node:path");
 const os = require("node:os");
 
@@ -414,6 +413,37 @@ class Pool {
     }
   }
 
+  /** Pull independent immutable snapshots; no next item starts until demand. */
+  tailViews(options = {}) {
+    const pool = this;
+    let stream;
+    let stopped = false;
+    async function* read() {
+      const { sinceSeq, maxMessages, timeoutMs, errorOnGap = false, signal } = options;
+      const limit = normalizeOptionalCount(maxMessages, "maxMessages");
+      const finiteWait = BigInt(Math.floor(normalizePollingTimeout(timeoutMs)));
+      // An unlimited tail keeps one native read pending across quiet periods.
+      const waitMs = limit === null ? 18446744073709551615n : finiteWait;
+      if (signal?.aborted || stopped || limit === 0) return;
+      const tags = snapshotTags(options.tags);
+      try { stream = pool._inner.openViewStream(sinceSeq ?? null, maxMessages ?? null, null, errorOnGap, tags); }
+      catch (error) { throw wrapNativeError(error); }
+      const abort = () => stream.cancel();
+      signal?.addEventListener("abort", abort, { once: true });
+      try {
+        while (!signal?.aborted && !stopped) {
+          let result;
+          try { result = await stream.nextJsonWait(waitMs); }
+          catch (error) { throw wrapNativeError(error); }
+          if (stopped || signal?.aborted || result.status === 2 || result.status === 3) return;
+          if (result.status === 0) { if (limit !== null) return; continue; }
+          if (result.status === 1) yield ownedMessage(result.view);
+        }
+      } finally { signal?.removeEventListener("abort", abort); stream.close(); }
+    }
+    return cancelOnReturn(read(), () => { stopped = true; stream?.cancel(); });
+  }
+
   /**
    * Close the pool handle.
    * @returns {void}
@@ -682,7 +712,11 @@ class UdpPool {
     }
   }
 
-  follow(options = {}) {
+  follow(options = {}) { return this._follow(options, false); }
+
+  followViews(options = {}) { return this._follow(options, true); }
+
+  _follow(options, views) {
     const start = options.start ?? UdpStart.new();
     const live = options.live ?? true;
     let startKind;
@@ -708,8 +742,8 @@ class UdpPool {
     }
     try {
       return this._inner
-        .follow(startKind, BigInt(startValue), Boolean(live))
-        .then((inner) => new UdpFollow(inner), (err) => {
+        .follow(startKind, BigInt(startValue), Boolean(live), views)
+        .then((inner) => new UdpFollow(inner, views), (err) => {
           throw wrapNativeError(err);
         });
     } catch (err) {
@@ -727,51 +761,33 @@ class UdpPool {
 }
 
 class UdpFollow {
-  constructor(inner) {
+  constructor(inner, views = false) {
     this._inner = inner;
+    this._views = views;
     this._closed = false;
     this._cancelled = false;
   }
 
   async nextEvent(timeoutMs = 1000, { signal } = {}) {
     const timeout = normalizeUint64(timeoutMs, "timeoutMs");
-    const deadline = process.hrtime.bigint() + timeout * 1_000_000n;
-    for (;;) {
-      if (signal?.aborted) {
-        throw abortError(signal);
+    if (signal?.aborted) throw abortError(signal);
+    if (this._closed || this.finished) return null;
+    const abort = () => this._inner.interruptRead();
+    signal?.addEventListener("abort", abort, { once: true });
+    try {
+      const result = await this._inner.nextEventWait(timeout);
+      if (signal?.aborted) throw abortError(signal);
+      if (result.status !== 1) return null;
+      if (this._views && result.view) {
+        const message = ownedMessage(result.view);
+        return { kind: "frame", seq: message.seq, timestampNs: message.timestampNs, message };
       }
-      if (this._closed || this.finished) {
-        return null;
-      }
-
-      const remainingNs = deadline - process.hrtime.bigint();
-      if (remainingNs <= 0n && timeout !== 0n) {
-        return null;
-      }
-      try {
-        // Keep native polling nonblocking so another follower, timer, or
-        // AbortSignal can run while this call waits for the next event.
-        const wait = this._inner.nextEvent(0n);
-        if (signal?.aborted) {
-          throw abortError(signal);
-        }
-        if (wait.status === 1) {
-          return decorateUdpEvent(wait.event);
-        }
-        if (wait.status === 2 || wait.status === 3 || timeout === 0n) {
-          return null;
-        }
-      } catch (err) {
-        if (err?.name === "AbortError") {
-          throw err;
-        }
-        throw wrapNativeError(err);
-      }
-      if (process.hrtime.bigint() >= deadline) {
-        return null;
-      }
-      const untilDeadlineMs = (deadline - process.hrtime.bigint() + 999_999n) / 1_000_000n;
-      await sleep(Number(untilDeadlineMs < 10n ? untilDeadlineMs : 10n));
+      return decorateUdpEvent(result.event);
+    } catch (err) {
+      if (err?.name === "AbortError") throw err;
+      throw wrapNativeError(err);
+    } finally {
+      signal?.removeEventListener("abort", abort);
     }
   }
 
@@ -779,19 +795,24 @@ class UdpFollow {
     return this._closed || this._cancelled || this._inner.isFinished;
   }
 
-  async *events({ pollIntervalMs = 50, signal } = {}) {
+  events({ pollIntervalMs = 50, signal } = {}) {
+    const follow = this;
     const timeoutMs = normalizeUint64(pollIntervalMs, "pollIntervalMs");
-    while (true) {
-      const event = await this.nextEvent(timeoutMs, { signal });
-      if (event) {
-        yield event;
-        continue;
+    let stopped = false;
+    let reading = false;
+    async function* read() {
+      while (!stopped) {
+        let event;
+        reading = true;
+        try { event = await follow.nextEvent(timeoutMs, { signal }); }
+        finally { reading = false; }
+        if (stopped) return;
+        if (event) { yield event; continue; }
+        if (follow.finished) return;
+        await new Promise((resolve) => setImmediate(resolve));
       }
-      if (this.finished) {
-        return;
-      }
-      await new Promise((resolve) => setImmediate(resolve));
     }
+    return cancelOnReturn(read(), () => { stopped = true; if (reading) follow._inner.interruptRead(); });
   }
 
   [Symbol.asyncIterator]() {
@@ -815,6 +836,15 @@ class UdpFollow {
   [Symbol.dispose]() {
     this.close();
   }
+}
+
+// Async generators queue return/throw behind a pending next(). Interrupt the
+// native read first so explicit iterator cleanup also works on an idle stream.
+function cancelOnReturn(iterator, cancel) {
+  const end = iterator.return.bind(iterator), fail = iterator.throw.bind(iterator);
+  iterator.return = value => { cancel(); return end(value); };
+  iterator.throw = error => { cancel(); return fail(error); };
+  return iterator;
 }
 
 function abortError(signal) {

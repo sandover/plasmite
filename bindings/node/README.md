@@ -152,6 +152,47 @@ writer, including exact integers and bytes. TypeScript's optional
 runtime validation. Existing `append`, `appendJson` and parseMessage behavior
 stay compatible.
 
+### Owned local and UDP streams (additive source API)
+
+```js
+for await (const message of pool.tailViews({ tags: ["sensor"], maxMessages: 10 })) {
+  console.log(message.data.metrics.power);
+}
+const follow = await udpPool.followViews();
+try {
+  for await (const event of follow) {
+    if (event.kind === "frame") console.log(event.message.data.metrics.power);
+  }
+} finally { follow.close(); }
+```
+
+`tailViews<Reading>()` and `followViews<Reading>()` carry immutable snapshots;
+retained children survive iterator cleanup, pool overwrite and handle close.
+UDP frame events contain `message`, sequence and nanosecond time. They omit the
+separate mutable payload Buffer. Gap and progress events keep their existing
+meaning and fields. Each iterator reads on demand and creates no default
+prefetch queue. A supplied type argument asserts the payload shape.
+
+For finite `tailViews`, `timeoutMs` bounds each read, as for `tail()`. A finite
+tail ends after a quiet wait. An unlimited tail keeps one native read pending
+until data or cancellation, without resolving empty JavaScript Promises. Required tags filter
+before the matching-message limit. `signal` cancels a pending local
+read. Calling `return()` on an idle owned iterator interrupts its read, so
+explicit cleanup completes without waiting for data. UDP `nextEvent` aborts
+only that wait; the follower can read again. `cancel()` permanently cancels the
+follower, and `close()` releases it after any active call finishes.
+
+Async reads first check for available data on four private workers, leaving
+Node's shared filesystem/DNS workers available. An empty read waits on a parked
+thread for that handle. The next consumer demand checks the shared workers
+again, so a backlog does not wake every stream's thread for every record.
+UDP reads use the parked socket waiter directly; an extra readiness probe adds
+socket-mode changes and another handoff before network arrival. Each handle
+reuses one completion channel and releases its waiter after close.
+This spends thread resources to wait on independent pool addresses; the
+scheduling measurements report the CPU, memory and latency costs. A wait cannot
+interrupt a file operation already blocked on an operating-system lock.
+
 ### UDP sender and follower
 
 UDP uses one explicit endpoint. The server must enable `--udp-follow`, which
@@ -269,6 +310,7 @@ const { RemoteClient } = require("plasmite");
 | | `.getJson(seq)` | Get message by sequence number; returns `Buffer` |
 | | `.getLite3(seq)` | Get lite3 frame by sequence number |
 | | `.tail(opts?)` | Async generator of typed `Message` values with optional tag filter |
+| | `.tailViews<T>(opts?)` | Pull independent immutable snapshots; filter tags before the limit |
 | | `.openStream(sinceSeq?, max?, timeoutMs?, errorOnGap?)` | Open a message stream |
 | | `.openLite3Stream(sinceSeq?, max?, timeoutMs?, errorOnGap?)` | Open a lite3 frame stream |
 | | `.close()` | Close the pool |
@@ -286,6 +328,7 @@ const { RemoteClient } = require("plasmite");
 | `UdpPool` | `.sendJson(data, tags?)` | Send a JSON-origin message without a storage receipt |
 | | `.sendLite3(buf)` | Send a complete Lite3 document |
 | | `.follow(opts?)` | Open a best-effort UDP event stream (`Promise<UdpFollow>`) |
+| | `.followViews<T>(opts?)` | Open the same event stream with owned message views |
 | `UdpFollow` | `.nextEvent(timeoutMs?)` | Read one frame, gap, or progress event; return `null` at timeout or end |
 | | `[Symbol.asyncIterator]()` | Iterate events asynchronously |
 | | `.close()` | Cancel a wait and close the subscription |

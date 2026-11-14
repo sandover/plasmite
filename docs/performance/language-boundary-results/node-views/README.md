@@ -398,5 +398,64 @@ Use `profile_input_boundary.js` with that diagnostic-only addon. Production code
 contains no counters. Run `bench_input_views.js` with `PLASMITE_BENCH_BINDING`
 pointing to each isolated package for the uninstrumented comparison.
 
+### Stream waits without starving filesystem work
+
+The selected adapter probes local reads on four private workers and parks an
+empty read on a thread for that handle. Backlogged reads return to the shared
+workers on each demand. UDP waits park directly: its extra zero-timeout probe
+changes socket mode twice and adds a handoff before network arrival. Each
+handle reuses one completion channel. This preserves pull-based backpressure
+and keeps idle reads out of Node's shared filesystem/DNS worker pool.
+
+Three alternating process repeats cover 1/4/32/128 independent streams, paced
+and saturated traffic, cancellation, process CPU, resident memory and OS thread
+counts. A separate test publishes only to the last queued pool. Rotating four
+blocked waiters hides that rare event for roughly 55–70 ms; parked waiters return
+it in under a millisecond in these measurements. Baseline local32/128 never
+starts the target read before the 250-ms censor budget expires.
+
+The final comparison at128 streams uses the same core, payload and wrapper
+code. Wall/CPU columns describe the complete saturated phase in milliseconds;
+rare delivery reports the median of each process's median over ten trials.
+
+| Source and bridge | Wall ms | Process CPU ms | Rare delivery ms |
+| --- | ---: | ---: | ---: |
+| Local, rotating workers | 146.70 | 295.18 | 54.21 |
+| Local, parked reads | 148.01 | 631.94 | 0.134 |
+| Local, probe then park (selected) | 129.37 | 282.43 | 0.135 |
+| UDP, rotating workers | 605.24 | 348.83 | 54.79 |
+| UDP, parked reads (selected) | 543.33 | 339.06 | 0.218 |
+| UDP, probe then park | 579.69 | 518.80 | 0.208 |
+
+Local probing avoids waking128 threads for every backlogged record. UDP data
+arrives through another process/socket; a local producer backlog does not mean
+the receive queue already contains its next packet. Its failed probe adds work.
+Creating a thread-safe completion function for every item also added native
+async-handle creation/destruction; one per handle removes that recurring work.
+
+The resource cost remains explicit. At128 local streams the hybrid has144
+process threads, versus16 for the rotating bridge. Its observed RSS increase
+while opening/waiting is about4 MiB, versus1.6 MiB. The 250-ms idle phase uses
+about7.5% of one CPU, versus6.7%; those samples include waiter/channel startup
+and filesystem/DNS probes, not a steady idle-only interval. Cancellation across
+128 parked waits takes about51 ms, consistent with the existing bounded native
+waits. OS file locks can still outlast a read budget. These costs buy prompt
+rare-event delivery; they do not establish a universal throughput win.
+
+At128 idle local reads, baseline filesystem probes wait roughly285 ms until
+the harness cancels those reads; private execution returns them in about0.8 ms.
+The baseline result depends on that release schedule, rather than measuring a
+fixed filesystem delay. Owned local/UDP adapters additionally avoid JSON/data
+tree conversion; their raw results retain that different interface cost.
+
+[Summary](stream-scheduling-summary.json) includes every fanout and resource
+sample. Evidence (outside Git) preserves240 raw process
+runs, exact component sources/hashes and the harness. The final source selects
+the measured local and UDP paths without a public strategy option. Its local
+`tailViews` uses the same per-read timeout behavior as `tail`; finite idle tails
+end, unlimited tails continue, and successful reads can extend beyond one wait
+interval. Focused tests cover retained owners, queued close/cancel, Node Worker
+termination, async-hook reentrancy, caller context and iterator cleanup.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

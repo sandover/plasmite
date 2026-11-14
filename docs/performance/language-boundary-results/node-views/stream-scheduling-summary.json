@@ -1,0 +1,1150 @@
+{
+  "selection": "Local zero-wait probe on four private workers, park only empty reads; UDP positive waits directly park; per-handle completion resource reuse",
+  "method": "Three alternating process repeats; scalar table entries are medians of per-process measurements, not pooled p99s",
+  "rows": [
+    {
+      "series": "full",
+      "mode": "local",
+      "streams": 1,
+      "variant": "baseline",
+      "fsUs": 681.25,
+      "idlePhaseCpuPercent": 2.0529734494492144,
+      "pendingThreadSamples": [
+        {
+          "count": 12
+        },
+        {
+          "count": 12
+        },
+        {
+          "count": 12
+        }
+      ],
+      "rssChangeMiB": 0.812591552734375,
+      "cancelAllUs": 2788.584,
+      "saturatedWallUs": 5542.209,
+      "saturatedCpuUs": 5349,
+      "pacedP95Us": 230.792,
+      "rareMedianUs": 119.625,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "local",
+      "streams": 1,
+      "variant": "candidate-reuse",
+      "fsUs": 835,
+      "idlePhaseCpuPercent": 2.089475035648766,
+      "pendingThreadSamples": [
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        }
+      ],
+      "rssChangeMiB": 0.8594894409179688,
+      "cancelAllUs": 50253.375,
+      "saturatedWallUs": 5387.958,
+      "saturatedCpuUs": 5960,
+      "pacedP95Us": 269.625,
+      "rareMedianUs": 120.875,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "local",
+      "streams": 1,
+      "variant": "candidate-parked",
+      "fsUs": 784.417,
+      "idlePhaseCpuPercent": 2.109958797303655,
+      "pendingThreadSamples": [
+        {
+          "count": 13
+        },
+        {
+          "count": 13
+        },
+        {
+          "count": 13
+        }
+      ],
+      "rssChangeMiB": 0.6876373291015625,
+      "cancelAllUs": 48983.917,
+      "saturatedWallUs": 4890.709,
+      "saturatedCpuUs": 5556,
+      "pacedP95Us": 264.166,
+      "rareMedianUs": 117.125,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "local",
+      "streams": 1,
+      "variant": "owned",
+      "fsUs": 774.208,
+      "idlePhaseCpuPercent": 2.5988511810242025,
+      "pendingThreadSamples": [
+        {
+          "count": 13
+        },
+        {
+          "count": 13
+        },
+        {
+          "count": 13
+        }
+      ],
+      "rssChangeMiB": 1.17205810546875,
+      "cancelAllUs": 47822.708,
+      "saturatedWallUs": 7139.292,
+      "saturatedCpuUs": 6073,
+      "pacedP95Us": 288.75,
+      "rareMedianUs": null,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "local",
+      "streams": 4,
+      "variant": "baseline",
+      "fsUs": 234149.167,
+      "idlePhaseCpuPercent": 2.0428750972637086,
+      "pendingThreadSamples": [
+        {
+          "count": 12
+        },
+        {
+          "count": 12
+        },
+        {
+          "count": 12
+        }
+      ],
+      "rssChangeMiB": 0.9689102172851562,
+      "cancelAllUs": 48349.542,
+      "saturatedWallUs": 13202.75,
+      "saturatedCpuUs": 21712,
+      "pacedP95Us": 269.708,
+      "rareMedianUs": 178.875,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "local",
+      "streams": 4,
+      "variant": "candidate-reuse",
+      "fsUs": 729.875,
+      "idlePhaseCpuPercent": 2.1314224118539538,
+      "pendingThreadSamples": [
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        }
+      ],
+      "rssChangeMiB": 1.3283767700195312,
+      "cancelAllUs": 50274.667,
+      "saturatedWallUs": 13341.166,
+      "saturatedCpuUs": 19800,
+      "pacedP95Us": 325.875,
+      "rareMedianUs": 197.708,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "local",
+      "streams": 4,
+      "variant": "candidate-parked",
+      "fsUs": 738.208,
+      "idlePhaseCpuPercent": 2.147711523202456,
+      "pendingThreadSamples": [
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        }
+      ],
+      "rssChangeMiB": 0.812591552734375,
+      "cancelAllUs": 49946.875,
+      "saturatedWallUs": 12305.208,
+      "saturatedCpuUs": 18683,
+      "pacedP95Us": 251.75,
+      "rareMedianUs": 199.542,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "local",
+      "streams": 4,
+      "variant": "owned",
+      "fsUs": 771.333,
+      "idlePhaseCpuPercent": 2.407240299053782,
+      "pendingThreadSamples": [
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        }
+      ],
+      "rssChangeMiB": 0.9844894409179688,
+      "cancelAllUs": 51107.125,
+      "saturatedWallUs": 14518.375,
+      "saturatedCpuUs": 19589,
+      "pacedP95Us": 340.25,
+      "rareMedianUs": null,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "local",
+      "streams": 32,
+      "variant": "baseline",
+      "fsUs": 283710.458,
+      "idlePhaseCpuPercent": 1.83757507309419,
+      "pendingThreadSamples": [
+        {
+          "count": 12
+        },
+        {
+          "count": 12
+        },
+        {
+          "count": 12
+        }
+      ],
+      "rssChangeMiB": 1.1563644409179688,
+      "cancelAllUs": 50231.5,
+      "saturatedWallUs": 53555.792,
+      "saturatedCpuUs": 100097,
+      "pacedP95Us": 911.375,
+      "rareMedianUs": null,
+      "rareCensored": 30
+    },
+    {
+      "series": "full",
+      "mode": "local",
+      "streams": 32,
+      "variant": "candidate-reuse",
+      "fsUs": 783.792,
+      "idlePhaseCpuPercent": 3.0329412662460413,
+      "pendingThreadSamples": [
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        }
+      ],
+      "rssChangeMiB": 1.48455810546875,
+      "cancelAllUs": 6739.791,
+      "saturatedWallUs": 46060.833,
+      "saturatedCpuUs": 79094,
+      "pacedP95Us": 1016.667,
+      "rareMedianUs": 69796.666,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "local",
+      "streams": 32,
+      "variant": "candidate-parked",
+      "fsUs": 769.875,
+      "idlePhaseCpuPercent": 3.464961810605683,
+      "pendingThreadSamples": [
+        {
+          "count": 44
+        },
+        {
+          "count": 44
+        },
+        {
+          "count": 44
+        }
+      ],
+      "rssChangeMiB": 1.8752517700195312,
+      "cancelAllUs": 49753.291,
+      "saturatedWallUs": 49999.792,
+      "saturatedCpuUs": 182944,
+      "pacedP95Us": 987.5,
+      "rareMedianUs": 202.625,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "local",
+      "streams": 32,
+      "variant": "owned",
+      "fsUs": 838.125,
+      "idlePhaseCpuPercent": 3.756434341166787,
+      "pendingThreadSamples": [
+        {
+          "count": 44
+        },
+        {
+          "count": 44
+        },
+        {
+          "count": 44
+        }
+      ],
+      "rssChangeMiB": 2.0158538818359375,
+      "cancelAllUs": 49570.709,
+      "saturatedWallUs": 53327.083,
+      "saturatedCpuUs": 77847,
+      "pacedP95Us": 1454.875,
+      "rareMedianUs": null,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "local",
+      "streams": 128,
+      "variant": "baseline",
+      "fsUs": 284849.667,
+      "idlePhaseCpuPercent": 2.0101971405477825,
+      "pendingThreadSamples": [
+        {
+          "count": 12
+        },
+        {
+          "count": 12
+        },
+        {
+          "count": 12
+        }
+      ],
+      "rssChangeMiB": 1.0782852172851562,
+      "cancelAllUs": 49914.209,
+      "saturatedWallUs": 155925.75,
+      "saturatedCpuUs": 341636,
+      "pacedP95Us": 2775.542,
+      "rareMedianUs": null,
+      "rareCensored": 30
+    },
+    {
+      "series": "full",
+      "mode": "local",
+      "streams": 128,
+      "variant": "candidate-reuse",
+      "fsUs": 782.458,
+      "idlePhaseCpuPercent": 6.5268449953846215,
+      "pendingThreadSamples": [
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        }
+      ],
+      "rssChangeMiB": 1.6721038818359375,
+      "cancelAllUs": 3257.125,
+      "saturatedWallUs": 142441.75,
+      "saturatedCpuUs": 291024,
+      "pacedP95Us": 2809.292,
+      "rareMedianUs": 56058.166,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "local",
+      "streams": 128,
+      "variant": "candidate-parked",
+      "fsUs": 721.959,
+      "idlePhaseCpuPercent": 7.173479459099255,
+      "pendingThreadSamples": [
+        {
+          "count": 140
+        },
+        {
+          "count": 140
+        },
+        {
+          "count": 140
+        }
+      ],
+      "rssChangeMiB": 3.7816390991210938,
+      "cancelAllUs": 50127.291,
+      "saturatedWallUs": 150820.166,
+      "saturatedCpuUs": 568945,
+      "pacedP95Us": 2842.291,
+      "rareMedianUs": 158.542,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "local",
+      "streams": 128,
+      "variant": "owned",
+      "fsUs": 780.75,
+      "idlePhaseCpuPercent": 8.224206813912934,
+      "pendingThreadSamples": [
+        {
+          "count": 140
+        },
+        {
+          "count": 140
+        },
+        {
+          "count": 140
+        }
+      ],
+      "rssChangeMiB": 3.9848785400390625,
+      "cancelAllUs": 51256.917,
+      "saturatedWallUs": 174039.666,
+      "saturatedCpuUs": 249931,
+      "pacedP95Us": 2834.708,
+      "rareMedianUs": null,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "udp",
+      "streams": 1,
+      "variant": "baseline",
+      "fsUs": 772.833,
+      "idlePhaseCpuPercent": 2.3977651244138127,
+      "pendingThreadSamples": [
+        {
+          "count": 12
+        },
+        {
+          "count": 12
+        },
+        {
+          "count": 12
+        }
+      ],
+      "rssChangeMiB": 1.046966552734375,
+      "cancelAllUs": 1534.5,
+      "saturatedWallUs": 13406.209,
+      "saturatedCpuUs": 5441,
+      "pacedP95Us": 12292.333,
+      "rareMedianUs": 10460.833,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "udp",
+      "streams": 1,
+      "variant": "candidate-reuse",
+      "fsUs": 710.667,
+      "idlePhaseCpuPercent": 2.0899006315513913,
+      "pendingThreadSamples": [
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        }
+      ],
+      "rssChangeMiB": 0.6875686645507812,
+      "cancelAllUs": 49110.833,
+      "saturatedWallUs": 7866.083,
+      "saturatedCpuUs": 6936,
+      "pacedP95Us": 366.167,
+      "rareMedianUs": 252.042,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "udp",
+      "streams": 1,
+      "variant": "candidate-parked",
+      "fsUs": 703.625,
+      "idlePhaseCpuPercent": 1.8493547267508108,
+      "pendingThreadSamples": [
+        {
+          "count": 13
+        },
+        {
+          "count": 13
+        },
+        {
+          "count": 13
+        }
+      ],
+      "rssChangeMiB": 0.5938186645507812,
+      "cancelAllUs": 50489.208,
+      "saturatedWallUs": 9199.75,
+      "saturatedCpuUs": 8176,
+      "pacedP95Us": 387.375,
+      "rareMedianUs": 273.75,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "udp",
+      "streams": 1,
+      "variant": "owned",
+      "fsUs": 733.583,
+      "idlePhaseCpuPercent": 2.0879391370760243,
+      "pendingThreadSamples": [
+        {
+          "count": 13
+        },
+        {
+          "count": 13
+        },
+        {
+          "count": 13
+        }
+      ],
+      "rssChangeMiB": 0.9844436645507812,
+      "cancelAllUs": 48752.5,
+      "saturatedWallUs": 8801,
+      "saturatedCpuUs": 7798,
+      "pacedP95Us": 418.375,
+      "rareMedianUs": null,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "udp",
+      "streams": 4,
+      "variant": "baseline",
+      "fsUs": 727.958,
+      "idlePhaseCpuPercent": 2.8118982704056372,
+      "pendingThreadSamples": [
+        {
+          "count": 12
+        },
+        {
+          "count": 12
+        },
+        {
+          "count": 12
+        }
+      ],
+      "rssChangeMiB": 1.1407394409179688,
+      "cancelAllUs": 438.875,
+      "saturatedWallUs": 16974.083,
+      "saturatedCpuUs": 15470,
+      "pacedP95Us": 12379.708,
+      "rareMedianUs": 10706,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "udp",
+      "streams": 4,
+      "variant": "candidate-reuse",
+      "fsUs": 691.334,
+      "idlePhaseCpuPercent": 2.2501465354147587,
+      "pendingThreadSamples": [
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        }
+      ],
+      "rssChangeMiB": 0.8751144409179688,
+      "cancelAllUs": 51605.625,
+      "saturatedWallUs": 17133.542,
+      "saturatedCpuUs": 22795,
+      "pacedP95Us": 429.584,
+      "rareMedianUs": 277.625,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "udp",
+      "streams": 4,
+      "variant": "candidate-parked",
+      "fsUs": 684.75,
+      "idlePhaseCpuPercent": 2.1519100978648242,
+      "pendingThreadSamples": [
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        }
+      ],
+      "rssChangeMiB": 0.546875,
+      "cancelAllUs": 51837.125,
+      "saturatedWallUs": 16018.084,
+      "saturatedCpuUs": 21861,
+      "pacedP95Us": 381.458,
+      "rareMedianUs": 319.125,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "udp",
+      "streams": 4,
+      "variant": "owned",
+      "fsUs": 737.875,
+      "idlePhaseCpuPercent": 2.2585415962936146,
+      "pendingThreadSamples": [
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        }
+      ],
+      "rssChangeMiB": 1.1720123291015625,
+      "cancelAllUs": 51007.083,
+      "saturatedWallUs": 15503.833,
+      "saturatedCpuUs": 22238,
+      "pacedP95Us": 418.375,
+      "rareMedianUs": null,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "udp",
+      "streams": 32,
+      "variant": "baseline",
+      "fsUs": 732.125,
+      "idlePhaseCpuPercent": 5.757158133075125,
+      "pendingThreadSamples": [
+        {
+          "count": 12
+        },
+        {
+          "count": 12
+        },
+        {
+          "count": 12
+        }
+      ],
+      "rssChangeMiB": 1.2970352172851562,
+      "cancelAllUs": 1207.167,
+      "saturatedWallUs": 127078.75,
+      "saturatedCpuUs": 68457,
+      "pacedP95Us": 11647.792,
+      "rareMedianUs": 10392.458,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "udp",
+      "streams": 32,
+      "variant": "candidate-reuse",
+      "fsUs": 729.666,
+      "idlePhaseCpuPercent": 2.5938562468272433,
+      "pendingThreadSamples": [
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        }
+      ],
+      "rssChangeMiB": 0.5625,
+      "cancelAllUs": 4702.083,
+      "saturatedWallUs": 98205.084,
+      "saturatedCpuUs": 117357,
+      "pacedP95Us": 1567.917,
+      "rareMedianUs": 65536.375,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "udp",
+      "streams": 32,
+      "variant": "candidate-parked",
+      "fsUs": 750.333,
+      "idlePhaseCpuPercent": 3.0764499245717976,
+      "pendingThreadSamples": [
+        {
+          "count": 44
+        },
+        {
+          "count": 44
+        },
+        {
+          "count": 44
+        }
+      ],
+      "rssChangeMiB": 0.40627288818359375,
+      "cancelAllUs": 50090.875,
+      "saturatedWallUs": 127761.333,
+      "saturatedCpuUs": 152827,
+      "pacedP95Us": 1754.083,
+      "rareMedianUs": 246.5,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "udp",
+      "streams": 32,
+      "variant": "owned",
+      "fsUs": 734.333,
+      "idlePhaseCpuPercent": 2.7608985792867746,
+      "pendingThreadSamples": [
+        {
+          "count": 44
+        },
+        {
+          "count": 44
+        },
+        {
+          "count": 44
+        }
+      ],
+      "rssChangeMiB": 0.5468978881835938,
+      "cancelAllUs": 49956.5,
+      "saturatedWallUs": 126667.292,
+      "saturatedCpuUs": 161022,
+      "pacedP95Us": 1761.083,
+      "rareMedianUs": null,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "udp",
+      "streams": 128,
+      "variant": "baseline",
+      "fsUs": 804.875,
+      "idlePhaseCpuPercent": 8.50723630568168,
+      "pendingThreadSamples": [
+        {
+          "count": 12
+        },
+        {
+          "count": 12
+        },
+        {
+          "count": 12
+        }
+      ],
+      "rssChangeMiB": 3.2504119873046875,
+      "cancelAllUs": 2220.667,
+      "saturatedWallUs": 576719.958,
+      "saturatedCpuUs": 256364,
+      "pacedP95Us": 9060,
+      "rareMedianUs": 9501.083,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "udp",
+      "streams": 128,
+      "variant": "candidate-reuse",
+      "fsUs": 759.958,
+      "idlePhaseCpuPercent": 5.742267774074834,
+      "pendingThreadSamples": [
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        }
+      ],
+      "rssChangeMiB": 0.6093978881835938,
+      "cancelAllUs": 4904.125,
+      "saturatedWallUs": 611060.708,
+      "saturatedCpuUs": 347285,
+      "pacedP95Us": 4831.667,
+      "rareMedianUs": 55074.333,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "udp",
+      "streams": 128,
+      "variant": "candidate-parked",
+      "fsUs": 791.25,
+      "idlePhaseCpuPercent": 5.582681833145577,
+      "pendingThreadSamples": [
+        {
+          "count": 140
+        },
+        {
+          "count": 140
+        },
+        {
+          "count": 140
+        }
+      ],
+      "rssChangeMiB": 0.6250686645507812,
+      "cancelAllUs": 52329.5,
+      "saturatedWallUs": 537233.792,
+      "saturatedCpuUs": 420613,
+      "pacedP95Us": 3872.875,
+      "rareMedianUs": 228.541,
+      "rareCensored": 0
+    },
+    {
+      "series": "full",
+      "mode": "udp",
+      "streams": 128,
+      "variant": "owned",
+      "fsUs": 854.166,
+      "idlePhaseCpuPercent": 7.310892083461584,
+      "pendingThreadSamples": [
+        {
+          "count": 140
+        },
+        {
+          "count": 140
+        },
+        {
+          "count": 140
+        }
+      ],
+      "rssChangeMiB": 0.34375,
+      "cancelAllUs": 51903.708,
+      "saturatedWallUs": 596125.75,
+      "saturatedCpuUs": 423477,
+      "pacedP95Us": 3910.708,
+      "rareMedianUs": null,
+      "rareCensored": 0
+    },
+    {
+      "series": "decisions",
+      "mode": "local",
+      "streams": 32,
+      "variant": "candidate-reuse",
+      "fsUs": 715.25,
+      "idlePhaseCpuPercent": 2.993719087300204,
+      "pendingThreadSamples": [
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        }
+      ],
+      "rssChangeMiB": 1.4377059936523438,
+      "cancelAllUs": 6460.541,
+      "saturatedWallUs": 50840.083,
+      "saturatedCpuUs": 84716,
+      "pacedP95Us": 1022.166,
+      "rareMedianUs": 69452.209,
+      "rareCensored": 0
+    },
+    {
+      "series": "decisions",
+      "mode": "local",
+      "streams": 32,
+      "variant": "candidate-parked",
+      "fsUs": 780.792,
+      "idlePhaseCpuPercent": 3.617254146355129,
+      "pendingThreadSamples": [
+        {
+          "count": 44
+        },
+        {
+          "count": 44
+        },
+        {
+          "count": 44
+        }
+      ],
+      "rssChangeMiB": 1.9846038818359375,
+      "cancelAllUs": 50051.25,
+      "saturatedWallUs": 50066.834,
+      "saturatedCpuUs": 77668,
+      "pacedP95Us": 1091.334,
+      "rareMedianUs": 189.416,
+      "rareCensored": 0
+    },
+    {
+      "series": "decisions",
+      "mode": "local",
+      "streams": 32,
+      "variant": "candidate-hybrid",
+      "fsUs": 870.625,
+      "idlePhaseCpuPercent": 4.192450325872314,
+      "pendingThreadSamples": [
+        {
+          "count": 48
+        },
+        {
+          "count": 48
+        },
+        {
+          "count": 48
+        }
+      ],
+      "rssChangeMiB": 2.0314788818359375,
+      "cancelAllUs": 51163.292,
+      "saturatedWallUs": 47137.25,
+      "saturatedCpuUs": 81111,
+      "pacedP95Us": 1035.417,
+      "rareMedianUs": 223.708,
+      "rareCensored": 0
+    },
+    {
+      "series": "decisions",
+      "mode": "local",
+      "streams": 128,
+      "variant": "candidate-reuse",
+      "fsUs": 814.541,
+      "idlePhaseCpuPercent": 6.684250226042633,
+      "pendingThreadSamples": [
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        }
+      ],
+      "rssChangeMiB": 1.5940017700195312,
+      "cancelAllUs": 3869.25,
+      "saturatedWallUs": 146695.792,
+      "saturatedCpuUs": 295177,
+      "pacedP95Us": 2783.834,
+      "rareMedianUs": 54211.375,
+      "rareCensored": 0
+    },
+    {
+      "series": "decisions",
+      "mode": "local",
+      "streams": 128,
+      "variant": "candidate-parked",
+      "fsUs": 752.375,
+      "idlePhaseCpuPercent": 8.026296654971226,
+      "pendingThreadSamples": [
+        {
+          "count": 140
+        },
+        {
+          "count": 140
+        },
+        {
+          "count": 140
+        }
+      ],
+      "rssChangeMiB": 3.8597640991210938,
+      "cancelAllUs": 51122.5,
+      "saturatedWallUs": 148007,
+      "saturatedCpuUs": 631937,
+      "pacedP95Us": 2696.542,
+      "rareMedianUs": 133.834,
+      "rareCensored": 0
+    },
+    {
+      "series": "decisions",
+      "mode": "local",
+      "streams": 128,
+      "variant": "candidate-hybrid",
+      "fsUs": 789.5,
+      "idlePhaseCpuPercent": 7.5119185415251355,
+      "pendingThreadSamples": [
+        {
+          "count": 144
+        },
+        {
+          "count": 144
+        },
+        {
+          "count": 144
+        }
+      ],
+      "rssChangeMiB": 3.9691390991210938,
+      "cancelAllUs": 51447.209,
+      "saturatedWallUs": 129370,
+      "saturatedCpuUs": 282433,
+      "pacedP95Us": 2748.167,
+      "rareMedianUs": 134.5,
+      "rareCensored": 0
+    },
+    {
+      "series": "decisions",
+      "mode": "udp",
+      "streams": 32,
+      "variant": "candidate-reuse",
+      "fsUs": 703.125,
+      "idlePhaseCpuPercent": 2.4024928986390073,
+      "pendingThreadSamples": [
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        }
+      ],
+      "rssChangeMiB": 0.46875,
+      "cancelAllUs": 6271.875,
+      "saturatedWallUs": 122643.75,
+      "saturatedCpuUs": 100719,
+      "pacedP95Us": 1542.917,
+      "rareMedianUs": 68844.209,
+      "rareCensored": 0
+    },
+    {
+      "series": "decisions",
+      "mode": "udp",
+      "streams": 32,
+      "variant": "candidate-parked",
+      "fsUs": 709.666,
+      "idlePhaseCpuPercent": 2.852103679485621,
+      "pendingThreadSamples": [
+        {
+          "count": 44
+        },
+        {
+          "count": 44
+        },
+        {
+          "count": 44
+        }
+      ],
+      "rssChangeMiB": 0.40627288818359375,
+      "cancelAllUs": 51076.375,
+      "saturatedWallUs": 125374.458,
+      "saturatedCpuUs": 156360,
+      "pacedP95Us": 1682.75,
+      "rareMedianUs": 309.959,
+      "rareCensored": 0
+    },
+    {
+      "series": "decisions",
+      "mode": "udp",
+      "streams": 32,
+      "variant": "candidate-hybrid",
+      "fsUs": 732.583,
+      "idlePhaseCpuPercent": 3.4910520774974003,
+      "pendingThreadSamples": [
+        {
+          "count": 48
+        },
+        {
+          "count": 48
+        },
+        {
+          "count": 48
+        }
+      ],
+      "rssChangeMiB": 3.1406707763671875,
+      "cancelAllUs": 51216.708,
+      "saturatedWallUs": 136180.292,
+      "saturatedCpuUs": 200919,
+      "pacedP95Us": 1741.208,
+      "rareMedianUs": 236.041,
+      "rareCensored": 0
+    },
+    {
+      "series": "decisions",
+      "mode": "udp",
+      "streams": 128,
+      "variant": "candidate-reuse",
+      "fsUs": 788.333,
+      "idlePhaseCpuPercent": 4.9704134895918015,
+      "pendingThreadSamples": [
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        },
+        {
+          "count": 16
+        }
+      ],
+      "rssChangeMiB": 0.5625228881835938,
+      "cancelAllUs": 4597.75,
+      "saturatedWallUs": 605241.333,
+      "saturatedCpuUs": 348830,
+      "pacedP95Us": 4504.583,
+      "rareMedianUs": 54793.834,
+      "rareCensored": 0
+    },
+    {
+      "series": "decisions",
+      "mode": "udp",
+      "streams": 128,
+      "variant": "candidate-parked",
+      "fsUs": 779.541,
+      "idlePhaseCpuPercent": 6.823814538763447,
+      "pendingThreadSamples": [
+        {
+          "count": 140
+        },
+        {
+          "count": 140
+        },
+        {
+          "count": 140
+        }
+      ],
+      "rssChangeMiB": 0.34377288818359375,
+      "cancelAllUs": 50775.541,
+      "saturatedWallUs": 543333.583,
+      "saturatedCpuUs": 339061,
+      "pacedP95Us": 3654.459,
+      "rareMedianUs": 217.666,
+      "rareCensored": 0
+    },
+    {
+      "series": "decisions",
+      "mode": "udp",
+      "streams": 128,
+      "variant": "candidate-hybrid",
+      "fsUs": 808.208,
+      "idlePhaseCpuPercent": 7.946475953359884,
+      "pendingThreadSamples": [
+        {
+          "count": 144
+        },
+        {
+          "count": 144
+        },
+        {
+          "count": 144
+        }
+      ],
+      "rssChangeMiB": 10.84393310546875,
+      "cancelAllUs": 49917.542,
+      "saturatedWallUs": 579693.084,
+      "saturatedCpuUs": 518797,
+      "pacedP95Us": 3782.416,
+      "rareMedianUs": 207.75,
+      "rareCensored": 0
+    }
+  ]
+}

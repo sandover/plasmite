@@ -1,0 +1,23 @@
+{
+  "root": "/Users/brandonharvey/src/plasmite/tmp/node-stream-checkpoint/final",
+  "baseCommit": "7f51b6d",
+  "selection": "Local probe-first on four private workers, positive UDP direct parked waits; explicit zero polls complete at the shared probe. One lease/deadline/completion channel per handle; finite tailViews per-read timeout, unlimited tailViews one native wait.",
+  "checks": [
+    "80 related Node26 cases plus3 real UDP cases pass",
+    "12 focused lifecycle/context/timeout cases also pass Node24",
+    "all-target native clippy, strict TypeScript and type surface pass"
+  ],
+  "hashes": {
+    "remote.js": "7ffa3952dbe24c853f673e0dcb38d3e4ee3f697ce3e30e9c6816433404637cfa",
+    "message.js": "aed76b2deb0c52603943fd3130923a7de7d153f822701dfd616bd7a8c7d84367",
+    "index.js": "49ed4eff757b63e02e99032f9b06412b9896a35d59bf8f6187740662c158f9c4",
+    "cookbook_smoke_fixture.js": "8f67b96e7b1927f56962417cec17578be335941682373a944158f9500610f8f3",
+    "package.json": "5f0b68e433d3e7e5cac48ab927b12efd5f1f039c5e034799f4663da7d1104849",
+    "mappings.js": "c4c9a1f6d925f56ccfe45ff29f1f52bd924f97222ce57d55ebb804bf81a9d529",
+    "views.js": "fbd3a745d4cdba1dabcb6ea88b35fdc275b8186a18ad2944d3cce3509bda6f34",
+    "tsconfig.json": "500e0c02f5793b30ecfae9e655c4b5833594b29904d2d429269fa95813e96c86",
+    "input.js": "60cca55c3784c610528839adc07fdad35398dddfa3b470ea5c04b6dcd589670e",
+    "native/darwin-arm64/libplasmite.dylib": "6a08cb2f48220adfbc3894d5108c097cd7ed60eb8300636f4a4f163f8b9280cc",
+    "native/darwin-arm64/index.node": "bd15544abab846714a108ef22064ef2120965c3208c02df5d0a513d6846b64db"
+  }
+}
