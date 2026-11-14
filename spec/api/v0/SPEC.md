@@ -126,6 +126,9 @@ lifetime, mutation, reflection and encoded-duplicate checks to their own suites.
 `MessageView`; `append_view` forwards an existing immutable encoding and assigns
 a fresh destination identity. `get_view` copies and validates one snapshot.
 Existing message/JSON methods keep their published behavior.
+`append_value_now` and `append_view_now` use the same paths with a timestamp
+from the system clock; callers who supply a timestamp use the explicit-options
+forms above.
 
 `MessageView::encode` constructs an uncommitted encoding; `from_json` accepts
 explicit JSON source with the strict integer rules above. Their sequence/time

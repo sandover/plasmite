@@ -107,6 +107,8 @@ export type Native<T> = T extends MessageView<infer D>
 export function toNative<T>(value: T): Native<T>
 /** Format directly from a view, preserving exact stored integer digits. */
 export function toJson(value: unknown): string
+/** Copy one complete message's encoded payload into an independent mutable Buffer. */
+export function toLite3(message: MessageView): Buffer
 
 export class Pool {
   /** Acquire an independent immutable snapshot without blocking JavaScript. */
@@ -256,6 +258,15 @@ export interface RemoteTailOptions {
   timeoutMs?: number
   tags?: string[]
   errorOnGap?: boolean
+  signal?: AbortSignal
+}
+
+/** One binary HTTP observation; requires current-server frame identity headers. */
+export interface RemoteLite3Frame {
+  seq: bigint
+  timestampNs: bigint
+  payload: Buffer
+  time: Date
 }
 
 export class RemoteError extends Error {
@@ -284,11 +295,17 @@ export class RemotePool {
   client: RemoteClient
   pool: string
   poolRef(): string
+  appendView<T = unknown>(data: unknown, tags?: readonly string[], durability?: Durability): Promise<MessageView<T>>
+  getView<T = unknown>(seq: number | bigint, options?: { signal?: AbortSignal }): Promise<MessageView<T>>
+  tailViews<T = unknown>(options?: RemoteTailOptions): AsyncGenerator<MessageView<T>, void, unknown>
   append(
     data: unknown,
     tags?: string[],
     durability?: Durability,
   ): Promise<Message>
   get(seq: number | bigint): Promise<Message>
+  appendLite3(payload: Buffer, durability?: Durability): Promise<bigint>
+  getLite3(seq: number | bigint, options?: { signal?: AbortSignal }): Promise<RemoteLite3Frame>
+  tailLite3(options?: RemoteTailOptions): AsyncGenerator<RemoteLite3Frame, void, unknown>
   tail(options?: RemoteTailOptions): AsyncGenerator<Message, void, unknown>
 }

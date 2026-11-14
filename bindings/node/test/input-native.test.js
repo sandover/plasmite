@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { Client, ErrorKind, toNative, toJson } = require('..');
+const { Client, ErrorKind, toNative, toJson, toLite3 } = require('..');
 const { valueReference, createNativeMessage, createMessageView, messageReference } = require('../views');
 
 function fixture(t) {
@@ -28,7 +28,7 @@ test('foreign checked backends import once and preserve exact subtrees', async t
   const mixed = await pool.appendView({ subset: foreign.data, nested: foreign.data.nested });
   assert.deepEqual(toNative(mixed.data), { subset: data, nested: { value: 17 } });
   assert.equal(copies, 1);
-  const exported = original.owner.encodedBytes();
+  const exported = toLite3(source);
   exported.fill(0);
   assert.equal(forwarded.data.exact, data.exact);
   assert.equal(foreign.data.nested.value, 17);

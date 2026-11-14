@@ -130,4 +130,10 @@ function createNativeMessage(owner) {
 
 const valueReference = value => refs.get(value);
 const messageReference = value => messages.get(value);
-module.exports = { createMessageView, createNativeMessage, toNative, toJson, valueReference, messageReference };
+function toLite3(message) {
+  const reference = messages.get(message);
+  if (!reference) throw new TypeError('expected a Plasmite message view');
+  const backend = reference.backend;
+  return backend.encodedBytes ? backend.encodedBytes() : backend.owner.encodedBytes();
+}
+module.exports = { createMessageView, createNativeMessage, toNative, toJson, toLite3, valueReference, messageReference };

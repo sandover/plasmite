@@ -11,6 +11,8 @@ const { Readable } = require("node:stream");
 const readline = require("node:readline");
 const { messageFromEnvelope, parseMessageJson, normalizeMessageSeq } = require("./message");
 const { ERROR_KIND_VALUES, mapDurability, mapErrorKind } = require("./mappings");
+const MAX_FRAME_BYTES = 256 * 1024 * 1024;
+const LITE3_TYPE = "application/x-plasmite-lite3";
 
 class RemoteError extends Error {
   /**
@@ -112,46 +114,32 @@ class RemoteClient {
   }
 
   async _requestJson(method, url, body) {
-    assertSafeTransport(url, this.token);
-    const headers = { Accept: "application/json" };
-    if (this.token) {
-      headers.Authorization = `Bearer ${this.token}`;
-    }
     let payload;
+    let contentType;
     if (method !== "GET" && method !== "DELETE") {
-      headers["Content-Type"] = "application/json";
+      contentType = "application/json";
       payload = JSON.stringify(body);
     }
-
-    const response = await fetch(url.toString(), {
-      method,
-      headers,
-      body: payload,
-      redirect: "manual",
-    });
-    rejectRedirect(response);
-
-    if (!response.ok) {
-      throw await parseRemoteError(response);
-    }
-
+    const response = await this._request(method, url, { body: payload, contentType });
     if (response.status === 204) {
       return null;
     }
     return parseMessageJson(await response.text(), "message");
   }
 
-  async _requestStream(url, controller) {
+  async _request(method, url, { body, contentType, accept = "application/json", signal } = {}) {
     assertSafeTransport(url, this.token);
-    const headers = { Accept: "application/json" };
+    const headers = { Accept: accept };
+    if (contentType) headers["Content-Type"] = contentType;
     if (this.token) {
       headers.Authorization = `Bearer ${this.token}`;
     }
 
     const response = await fetch(url.toString(), {
-      method: "GET",
+      method,
       headers,
-      signal: controller.signal,
+      body,
+      signal,
       redirect: "manual",
     });
     rejectRedirect(response);
@@ -161,6 +149,10 @@ class RemoteClient {
     }
 
     return response;
+  }
+
+  async _requestStream(url, controller, accept = "application/json") {
+    return this._request("GET", url, { accept, signal: controller.signal });
   }
 }
 
@@ -214,6 +206,102 @@ class RemotePool {
     return messageFromEnvelope(response.message);
   }
 
+  /** Encode once and retain the sent data with the server's committed identity. */
+  async appendView(data, tags, durability = "fast") {
+    const backend = require("./portable");
+    const payload = await backend.encodeMessage(data, tags);
+    const url = buildUrl(this.client.baseUrl, ["v0", "pools", this.pool, "append_lite3"]);
+    const policy = mapDurability(durability);
+    if (policy !== "fast") url.searchParams.set("durability", policy);
+    const response = await this.client._request("POST", url, {
+      body: payload, contentType: LITE3_TYPE, accept: "application/x-plasmite-identity",
+    });
+    let seq, timestampNs;
+    if (response.status === 204) {
+      seq = frameHeader(response.headers.get("plasmite-seq"), "plasmite-seq");
+      timestampNs = frameHeader(response.headers.get("plasmite-timestamp-ns"), "plasmite-timestamp-ns");
+    } else {
+      // Older v0 servers ignore the new Accept type and return the JSON receipt.
+      const receipt = parseMessageJson((await readBody(response)).toString("utf8"), "message").message;
+      seq = normalizeMessageSeq(receipt.seq);
+      timestampNs = receiptTimestamp(receipt.time);
+    }
+    return backend.decodeMessage(payload, seq, timestampNs);
+  }
+
+  async getView(seq, options = {}) {
+    const frame = await this.getLite3(seq, options);
+    return require("./portable").decodeMessage(frame.payload, frame.seq, frame.timestampNs);
+  }
+
+  async *tailViews(options = {}) {
+    const backend = require("./portable");
+    for await (const frame of this._tailLite3(options, false)) {
+      yield await backend.decodeMessage(frame.payload, frame.seq, frame.timestampNs);
+    }
+  }
+
+  /** Append encoded bytes; current servers return a complete JSON receipt. */
+  async appendLite3(payload, durability = "fast") {
+    if (!Buffer.isBuffer(payload)) throw new TypeError("Lite3 payload must be a Buffer");
+    if (payload.length > MAX_FRAME_BYTES) throw new RangeError("Lite3 payload exceeds maximum frame size");
+    const policy = mapDurability(durability);
+    const url = buildUrl(this.client.baseUrl, ["v0", "pools", this.pool, "append_lite3"]);
+    if (policy !== "fast") url.searchParams.set("durability", policy);
+    const response = await this.client._request("POST", url, {
+      body: payload, contentType: LITE3_TYPE,
+    });
+    const bytes = await readBody(response);
+    return normalizeMessageSeq(parseMessageJson(bytes.toString("utf8"), "message").message.seq);
+  }
+
+  /** Read bytes and their identity from one response on current servers. */
+  async getLite3(seq, { signal } = {}) {
+    const expected = normalizeMessageSeq(seq);
+    const url = buildUrl(this.client.baseUrl, ["v0", "pools", this.pool, "messages", String(expected), "lite3"]);
+    const response = await this.client._request("GET", url, { accept: LITE3_TYPE, signal });
+    try {
+      const actual = frameHeader(response.headers.get("plasmite-seq"), "plasmite-seq");
+      const timestampNs = frameHeader(response.headers.get("plasmite-timestamp-ns"), "plasmite-timestamp-ns");
+      if (actual !== expected) throw new Error("remote Lite3 frame sequence does not match request");
+      return binaryFrame(actual, timestampNs, await readBody(response));
+    } catch (error) {
+      await response.body?.cancel().catch(() => {});
+      throw error;
+    }
+  }
+
+  /** Stream complete owned frames without building message objects. */
+  async *tailLite3(options = {}) {
+    yield* this._tailLite3(options, true);
+  }
+
+  async *_tailLite3(options, owned) {
+    if (options.errorOnGap === true) throw new Error("binary HTTP tails cannot report terminal retention gaps");
+    const url = tailUrl(this.client.baseUrl, this.pool, "tail_lite3", options);
+    const request = requestController(options.signal);
+    let input;
+    try {
+      const response = await this.client._requestStream(url, request.controller, `${LITE3_TYPE}-stream`);
+      if (!response.body) throw new Error("remote Lite3 tail response has no body");
+      input = response.body.getReader();
+      const source = new FrameReader(input);
+      while (true) {
+        const header = await source.read(20, true);
+        if (header === null) return;
+        const length = header.readUInt32BE(16);
+        if (length > MAX_FRAME_BYTES) throw new Error("Lite3 frame exceeds maximum response size");
+        yield binaryFrame(header.readBigUInt64BE(0), header.readBigUInt64BE(8), await source.read(length, false, owned));
+      }
+    } finally {
+      request.dispose();
+      if (input) {
+        await input.cancel().catch(() => {});
+        input.releaseLock();
+      }
+    }
+  }
+
   /**
    * Tail remote messages as an async iterable.
    * @param {{sinceSeq?: number|bigint, maxMessages?: number|bigint, timeoutMs?: number, tags?: string[], errorOnGap?: boolean}} [options]
@@ -263,6 +351,116 @@ class RemotePool {
       controller.abort();
       reader.close();
     }
+  }
+}
+
+function tailUrl(baseUrl, pool, route, options) {
+  const url = buildUrl(baseUrl, ["v0", "pools", pool, route]);
+  if (options.sinceSeq !== undefined) url.searchParams.set("since_seq", String(normalizeMessageSeq(options.sinceSeq)));
+  if (options.maxMessages !== undefined) url.searchParams.set("max", String(normalizeMessageSeq(options.maxMessages)));
+  if (options.timeoutMs !== undefined) url.searchParams.set("timeout_ms", String(options.timeoutMs));
+  for (const tag of options.tags || []) url.searchParams.append("tag", String(tag));
+  return url;
+}
+
+function requestController(signal) {
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal.reason);
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
+  return { controller, dispose() { signal?.removeEventListener("abort", abort); controller.abort(); } };
+}
+
+function binaryFrame(seq, timestampNs, payload) {
+  return { seq, timestampNs, payload,
+    get time() { return new Date(Number(timestampNs / 1_000_000n)); } };
+}
+
+function frameHeader(value, name) {
+  if (value === null || !/^[0-9]{1,20}$/.test(value)) throw new Error(`missing or invalid ${name} header`);
+  return normalizeMessageSeq(BigInt(value));
+}
+
+function receiptTimestamp(value) {
+  const match = typeof value === "string" && /^(.*T\d\d:\d\d:\d\d)(?:\.(\d{1,9}))?Z$/.exec(value);
+  if (!match) throw new Error("invalid timestamp in legacy append receipt");
+  const ms = Date.parse(match[1] + "Z");
+  if (!Number.isFinite(ms)) throw new Error("invalid timestamp in legacy append receipt");
+  return normalizeMessageSeq(BigInt(ms) * 1000000n + BigInt((match[2] || "").padEnd(9, "0")));
+}
+
+// Hold one transport chunk and assemble only a fragmented requested frame.
+// Yielding a frame leaves the next read to the consumer, preserving backpressure.
+class FrameReader {
+  constructor(reader) { this.reader = reader; this.chunk = Buffer.alloc(0); this.offset = 0; }
+  async read(length, allowEof = false, owned = false) {
+    if (length === 0) return Buffer.alloc(0);
+    let output;
+    let copied = 0;
+    while (copied < length) {
+      if (this.offset === this.chunk.length) {
+        const { done, value } = await this.reader.read();
+        if (done) {
+          if (allowEof && copied === 0) return null;
+          throw new Error("truncated Lite3 frame");
+        }
+        this.chunk = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+        this.offset = 0;
+        if (this.chunk.length === 0) continue;
+      }
+      const available = this.chunk.length - this.offset;
+      if (copied === 0 && available >= length) {
+        const result = this.chunk.subarray(this.offset, this.offset + length);
+        this.offset += length;
+        return owned ? Buffer.from(result) : result;
+      }
+      output ||= Buffer.allocUnsafe(length);
+      const take = Math.min(available, length - copied);
+      this.chunk.copy(output, copied, this.offset, this.offset + take);
+      copied += take;
+      this.offset += take;
+    }
+    return output;
+  }
+}
+
+async function readBody(response) {
+  const declared = response.headers.get("content-length");
+  if (declared !== null && Number(declared) > MAX_FRAME_BYTES) {
+    await response.body?.cancel();
+    throw new Error("response exceeds maximum frame size");
+  }
+  if (!response.body) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  let output = Buffer.alloc(0);
+  let borrowed = true;
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value.byteLength === 0) continue;
+      const next = size + value.byteLength;
+      if (next > MAX_FRAME_BYTES) throw new Error("response exceeds maximum frame size");
+      const chunk = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+      if (size === 0) {
+        output = chunk;
+      } else {
+        if (borrowed || next > output.length) {
+          const capacity = Math.min(MAX_FRAME_BYTES, Math.max(next, Number(declared) || 0, size * 2));
+          const grown = Buffer.allocUnsafe(capacity);
+          output.copy(grown, 0, 0, size);
+          output = grown;
+          borrowed = false;
+        }
+        chunk.copy(output, size);
+      }
+      size = next;
+    }
+    return output.subarray(0, size);
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 }
 

@@ -571,6 +571,28 @@ fn wait_interval(deadline: Option<Instant>, poll_interval: Duration) -> Duration
 }
 
 pub trait PoolApiExt {
+    /// Encode native data and assign a timestamp from the system clock.
+    fn append_value_now<T: serde::Serialize + ?Sized>(
+        &mut self,
+        data: &T,
+        tags: &[&str],
+        durability: Durability,
+    ) -> Result<crate::view::MessageView, Error>
+    where
+        Self: Sized,
+    {
+        self.append_value(data, tags, AppendOptions::new(now_ns()?, durability))
+    }
+
+    /// Forward a checked snapshot with a fresh identity and system timestamp.
+    fn append_view_now(
+        &mut self,
+        view: &crate::view::MessageView,
+        durability: Durability,
+    ) -> Result<crate::view::MessageView, Error> {
+        self.append_view(view, AppendOptions::new(now_ns()?, durability))
+    }
+
     /// Encode native data once and retain the committed immutable encoding.
     fn append_value<T: serde::Serialize + ?Sized>(
         &mut self,

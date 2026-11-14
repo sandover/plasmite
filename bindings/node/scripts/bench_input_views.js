@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const assert = require('node:assert/strict');
 const { performance, PerformanceObserver, monitorEventLoopDelay } = require('node:perf_hooks');
 const root = path.resolve(process.env.PLASMITE_BENCH_BINDING || path.join(__dirname, '..'));
-const { Client, Durability, toNative, toJson } = require(root);
+const { Client, Durability, toNative, toJson, toLite3 } = require(root);
 const { createNativeMessage, createMessageView, messageReference, valueReference } = require(path.join(root, 'views'));
 const iterations = Number(process.argv[2] || 200), repeats = Number(process.argv[3] || 5);
 if (!Number.isSafeInteger(iterations) || iterations <= 0 || !Number.isSafeInteger(repeats) || repeats <= 0) throw new Error('positive counts required');
@@ -103,6 +103,7 @@ async function main() {
           ['foreign-forward/warm-import', async () => (await destination.appendView(retained)).data.metrics.power],
         );
       }
+      if (toLite3) lanes.push(['encoded-export/copy', async () => toLite3(source).length]);
       for (const [, fn] of lanes) for (let i = 0; i < 20; i++) sink += await fn();
       const rows = [];
       for (let repeat = 0; repeat < repeats; repeat++) {

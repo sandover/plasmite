@@ -10,7 +10,7 @@ const { RemoteClient, RemoteError, RemotePool } = require("./remote");
 const { Message, parseMessage, parseNativeMessage } = require("./message");
 const { ERROR_KIND_VALUES, mapErrorKind } = require("./mappings");
 
-const { createNativeMessage: ownedMessage, toNative, toJson, messageReference, valueReference } = require("./views");
+const { createNativeMessage: ownedMessage, toNative, toJson, toLite3, messageReference, valueReference } = require("./views");
 const { inputHelpers, snapshotTags, configureNativeInput, nativeOwner } = require("./input");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -872,7 +872,7 @@ function normalizeUint64(value, name) {
 }
 
 module.exports = {
-  toNative, toJson,
+  toNative, toJson, toLite3,
   Client,
   Pool,
   Stream,

@@ -96,9 +96,16 @@ It captures stable wire-level compatibility guarantees only.
 
 - `POST /v0/pools/{pool}/append` -> success body `{ "message": ... }`.
 - `POST /v0/pools/{pool}/append_lite3` (`application/x-plasmite-lite3`) -> `{ "message": ... }`.
+- A Lite3 sender may request `Accept: application/x-plasmite-identity` to receive
+  `204 No Content` with exact decimal unsigned `plasmite-seq` and
+  `plasmite-timestamp-ns` headers. This additive v0 response avoids a full-message
+  JSON export; the sender retains its original encoding. Older servers return
+  the existing JSON receipt instead. Clients must accept that receipt or report
+  the missing capability explicitly; they must not repeat the append.
 - Lite3 append validates the complete message before writing; unreadable nested
   data returns `Corrupt` without appending. Successful appends preserve the
-  document bytes and return the new destination message in the response.
+  document bytes and return the new destination identity or complete message,
+  according to the requested response type.
 - `GET /v0/pools/{pool}/messages/{seq}` -> success body `{ "message": ... }`.
 - `GET /v0/pools/{pool}/messages/{seq}/lite3` -> raw Lite3 bytes with `Content-Type: application/x-plasmite-lite3` and decimal unsigned `plasmite-seq` and `plasmite-timestamp-ns` headers. Both identify the same stored frame as the payload. Older servers may omit the timestamp header.
 

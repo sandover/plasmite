@@ -2112,6 +2112,40 @@ async fn append_lite3(
     }
     let pool_ref = pool_ref_from_request(&pool)?;
     let durability = durability_from_str(query.durability.as_deref());
+    // The sender already owns the encoding. Return only its new identity when
+    // requested, rather than decoding and exporting the entire message again.
+    if headers.get("accept").and_then(|value| value.to_str().ok())
+        == Some("application/x-plasmite-identity")
+    {
+        let client = state.client.clone();
+        let receipt = state
+            .storage_executor
+            .run_authorized(grant, move || {
+                // Acquire one aligned checked snapshot from the arbitrary HTTP
+                // body slice. Reuse its proof when appending, including duplicate
+                // key semantics and validation of the complete envelope.
+                let view = plasmite::view::MessageView::from_bytes(&payload, 0, 0)?;
+                client
+                    .open_pool(&pool_ref)
+                    .and_then(|mut pool| pool.append_view_now(&view, durability))
+            })
+            .await?;
+        let mut response = Response::new(Body::empty());
+        *response.status_mut() = StatusCode::NO_CONTENT;
+        response.headers_mut().insert(
+            "plasmite-seq",
+            HeaderValue::from_str(&receipt.seq.to_string()).expect("decimal u64 is a valid header"),
+        );
+        response.headers_mut().insert(
+            "plasmite-timestamp-ns",
+            HeaderValue::from_str(&receipt.timestamp_ns.to_string())
+                .expect("decimal u64 is a valid header"),
+        );
+        response
+            .headers_mut()
+            .insert("plasmite-version", HeaderValue::from_static("0"));
+        return Ok(response);
+    }
     let payload = payload.to_vec();
     let client = state.client.clone();
     let message = state
@@ -2711,6 +2745,134 @@ mod tests {
     use serde_json::json;
     use std::sync::{Arc, Mutex};
     use tokio::sync::Semaphore;
+
+    #[tokio::test]
+    async fn binary_append_identity_preserves_payload_and_legacy_receipts() {
+        let temp = tempfile::tempdir().unwrap();
+        let client = LocalClient::new().with_pool_dir(temp.path());
+        let pool_ref = plasmite::api::PoolRef::name("receipts");
+        client
+            .create_pool(&pool_ref, plasmite::api::PoolOptions::new(65536))
+            .unwrap();
+        let state = Arc::new(AppState {
+            client: client.clone(),
+            secure_access: None,
+            oauth: None,
+            browser_sessions: BrowserSessions::new(None).unwrap(),
+            local_admin: true,
+            max_tail_timeout_ms: 30_000,
+            tail_semaphore: Arc::new(Semaphore::new(1)),
+            mcp_semaphore: Arc::new(Semaphore::new(1)),
+            storage_executor: StorageExecutor::new(1),
+            ui_pool_watch: Mutex::new(None),
+            activity: Default::default(),
+        });
+        let view =
+            plasmite::view::MessageView::encode(&json!({"exact": i64::MAX}), &["kept"]).unwrap();
+        for (accept, expected_status) in [
+            (
+                "application/x-plasmite-identity",
+                axum::http::StatusCode::NO_CONTENT,
+            ),
+            ("application/json", axum::http::StatusCode::OK),
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert("accept", HeaderValue::from_static(accept));
+            let mut transmitted = vec![0];
+            transmitted.extend_from_slice(view.bytes());
+            let payload = bytes::Bytes::from(transmitted).slice(1..);
+            assert_ne!(
+                payload.as_ptr().align_offset(std::mem::align_of::<u32>()),
+                0
+            );
+            let response = super::append_lite3(
+                State(state.clone()),
+                headers,
+                axum::extract::Path("receipts".into()),
+                axum::extract::Query(super::AppendLite3Query { durability: None }),
+                payload,
+            )
+            .await
+            .map_err(|err| err.0)
+            .unwrap();
+            assert_eq!(response.status(), expected_status);
+            if expected_status == axum::http::StatusCode::NO_CONTENT {
+                let seq = response.headers()["plasmite-seq"]
+                    .to_str()
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                let timestamp: u64 = response.headers()["plasmite-timestamp-ns"]
+                    .to_str()
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                let frame = client.open_pool(&pool_ref).unwrap().get_lite3(seq).unwrap();
+                assert_eq!(frame.payload, view.bytes());
+                assert_eq!(frame.timestamp_ns, timestamp);
+                assert!(
+                    axum::body::to_bytes(response.into_body(), 65536)
+                        .await
+                        .unwrap()
+                        .is_empty()
+                );
+            } else {
+                let body = axum::body::to_bytes(response.into_body(), 65536)
+                    .await
+                    .unwrap();
+                let receipt: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(receipt["message"]["data"]["exact"], i64::MAX);
+                assert_eq!(receipt["message"]["meta"]["tags"][0], "kept");
+            }
+        }
+        // These names share their native hash. The last metadata object wins
+        // at the checked view boundary, even when an earlier duplicate is scalar.
+        let encoded = plasmite::api::lite3::Lite3Buf::from_json_str(
+            r#"{"data":{},"meta":7,"mfSa":{"tags":[]}}"#,
+        )
+        .unwrap();
+        let mut bytes = encoded.as_slice().to_vec();
+        let key = bytes
+            .windows(5)
+            .position(|value| value == b"mfSa\0")
+            .unwrap();
+        bytes[key..key + 4].copy_from_slice(b"meta");
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "accept",
+            HeaderValue::from_static("application/x-plasmite-identity"),
+        );
+        let response = super::append_lite3(
+            State(state),
+            headers,
+            axum::extract::Path("receipts".into()),
+            axum::extract::Query(super::AppendLite3Query { durability: None }),
+            bytes::Bytes::from(bytes),
+        )
+        .await
+        .map_err(|err| err.0)
+        .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::NO_CONTENT);
+        let seq = response.headers()["plasmite-seq"]
+            .to_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let retained = client.open_pool(&pool_ref).unwrap().get_view(seq).unwrap();
+        assert_eq!(
+            retained
+                .root()
+                .get("meta")
+                .unwrap()
+                .unwrap()
+                .get("tags")
+                .unwrap()
+                .unwrap()
+                .len()
+                .unwrap(),
+            0
+        );
+    }
 
     #[tokio::test]
     async fn listener_failure_waits_for_peer_shutdown_before_returning() {
