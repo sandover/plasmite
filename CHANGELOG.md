@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Immutable views and direct native input
+
+- Add owned Lite3 message views across Rust, C, Python, JavaScript and Go.
+  Selected reads traverse encoded data; explicit conversion creates ordinary
+  native containers. Retained views and children outlive pool or stream closure.
+- Add direct native writers, whole-message forwarding with fresh identity,
+  owned local/UDP streams and explicit bounded Python batches. Keep published
+  message APIs compatible. Node HTTP pools also support owned views through
+  the bundled WebAssembly backend.
+- New view writers reject integers outside signed 64 bits and preserve native
+  bytes. See the [migration guide](docs/record/upgrading-next-major.md#keep-encoded-data-with-owned-views)
+  for copy boundaries, exact numbers, cleanup and transport limits.
+
 ### Direct JSON reads and floating-point accuracy
 
 - C JSON get/tail now formats owned Lite3 snapshots directly, borrowing strings,

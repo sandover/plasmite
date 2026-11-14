@@ -251,6 +251,24 @@ creates a pool, Node opens a stream that reads a message from a separate
 CLI process, and Node, Python, and the CLI read each other's messages from
 the same file.
 
+### Owned-view contracts
+
+Use matching native assets when running the view suites. The shared fixtures in
+`tests/fixtures/owned_views.json` cover strict input rules; runtime tests also
+check actual acquisition, exact i64 values, native bytes, negative zero, retained
+children, ring overwrite and explicit conversion. Go checks that children survive
+reassignment of their message wrapper. Streams check cancellation, tag/gap
+policy, explicit batch bounds and retained results after close. UDP checks keep
+arrival order, duplicates and late packets rather than inferring loss.
+
+The binding suites include Python `test_views.py`, `test_append_views.py` and
+`test_view_streams.py`; Go local view/input/stream tests and UDP tests; and Node
+view, native-input, portable and HTTP tests. Node's `npm run test:portable`
+also verifies the bundled WebAssembly artifact and package contents. These tests
+check semantics; performance comparisons and fixed-build provenance live under
+[`language-boundary-results/owned-views`](../performance/language-boundary-results/owned-views/README.md).
+A fast selected read does not establish a full-conversion or transport win.
+
 ### C ABI boundary checks
 
 Run the happy-path link smoke and focused supported-misuse harness:

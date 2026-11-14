@@ -60,7 +60,7 @@ read the stored data; arrays support normal indexing, iteration and shallow
 methods. Children remain valid after pool close or ring overwrite.
 
 ```js
-const { toNative, toJson } = require("plasmite");
+const { toNative, toJson, toLite3 } = require("plasmite");
 const message = await pool.getView(17n);
 const metrics = message.data.metrics;
 console.log(metrics.power);
@@ -68,6 +68,7 @@ for (const sample of message.data.samples) console.log(sample.value);
 const editable = toNative(metrics); // Independent mutable subtree.
 editable.power = 42;
 const json = toJson(message);       // Direct formatting, exact integer digits.
+const encoded = toLite3(message);   // Detached mutable Buffer; identity stays separate.
 ```
 
 Use `pool.getView<Reading>(17n)` in TypeScript to declare an expected data shape;
@@ -87,11 +88,32 @@ returns Busy rather than waiting on the JavaScript thread. Await the read before
 mixing those operations. An older shared library lacking the additive view ABI
 produces an actionable error; install matching native assets.
 
-The view API currently trades lower wide-record selected-read cost for extra
-small-record latency and slower warm access/full native conversion. See the
+Views avoid full decoding for selected reads, but property access still crosses
+a language boundary. Native conversion and small-record latency have different
+costs from legacy methods. See the
 [measured comparisons](../../docs/performance/language-boundary-results/node-views/README.md).
 Run `node --expose-gc scripts/bench_views.js 100 5 result.json` from this directory
 after staging matching optimized native assets to repeat the focused comparison.
+
+### Owned local streams
+
+```js
+const controller = new AbortController();
+for await (const message of pool.tailViews({
+  tags: ["sensor"], sinceSeq: 1n, signal: controller.signal,
+})) {
+  console.log(message.data.metrics.power);
+  break; // Closes this reader; retained messages remain readable.
+}
+```
+
+`tailViews` pulls one snapshot at a time without hidden prefetch or batching.
+It shares local tag filtering, gap policy and per-wait timeout behavior with
+`tail`. Abort the signal
+when abandoning a pending read; breaking the iterator also cancels its wait.
+UDP `await udpPool.followViews(options)` uses the same follow lifecycle as
+`follow`; frame events carry the view in `event.message`. Gap and progress
+events keep their existing shape. Close the follow in `finally`.
 
 ### Native input and committed views (additive source API)
 
@@ -294,6 +316,35 @@ The tail throws `PlasmiteNativeError` with
 Persist the next sequence to read (`message.seq + 1n`) after handling each
 message, and restart from a suitable checkpoint after deciding how to recover.
 
+### Owned HTTP messages
+
+`RemotePool` offers the same immutable data interface without a native addon:
+
+```js
+const { RemoteClient, toLite3 } = require("plasmite");
+const remote = await new RemoteClient("http://127.0.0.1:9700").openPool("sensors");
+const sent = await remote.appendView({ counter: 9223372036854775807n }, ["sensor"]);
+const message = await remote.getView(sent.seq);
+console.log(message.data.counter); // bigint, with exact digits
+const detached = toLite3(message); // Mutable copy, without sequence/timestamp.
+for await (const item of remote.tailViews({ sinceSeq: sent.seq, maxMessages: 1 })) {
+  console.log(item.data.counter);
+}
+```
+
+The package bundles a checked WebAssembly core for HTTP encoding and validation.
+Its first use compiles that module; later calls reuse it. The input walk runs
+synchronously before network I/O, so getters run once and later mutations cannot
+change the submitted payload. HTTP transfers and owner acquisition still copy
+bytes. Native local calls and HTTP calls use different backends; neither exposes
+mutable storage through a view. Retaining a child retains the whole snapshot.
+
+Binary HTTP reads require current-server identity headers. `tailViews` rejects
+`errorOnGap: true`, like `tailLite3`: binary frames cannot carry terminal errors.
+EOF does not certify complete delivery after a failure once streaming starts.
+Use the JSON `tail` if you require its fail-closed retention-gap reporting.
+An `AbortSignal` cancels an HTTP read; breaking a tail closes its response.
+
 ### Remote client
 
 | Class | Method | Description |
@@ -307,6 +358,8 @@ message, and restart from a suitable checkpoint after deciding how to recover.
 | | `.deletePool(name)` | Delete a pool |
 | `RemotePool` | `.append(data, tags?, durability?)` | Append a message (data is any JSON-serializable value) |
 | | `.get(seq)` | Get a message by sequence number |
+| | `.getView(seq)` / `.appendView(data, tags?)` | Read or produce immutable encoded messages |
+| | `.tailViews(opts?)` | Pull immutable messages over binary HTTP |
 | | `.tail(opts?)` | Live-tail typed messages (`AsyncGenerator<Message>`) |
 
 ### Tail options
@@ -389,7 +442,9 @@ Pre-built binaries are included for:
 Linux ARM64 and ARMv7 have [preview SDK archives](https://github.com/sandover/plasmite/blob/main/docs/record/distribution.md#linux-arm-sdk-preview-install)
 for the native CLI/server, but no published npm addon or CLI. Installing an
 SDK archive does not supply a Node addon. The HTTP `RemoteClient` remains
-available without native binaries for the loopback workflow above.
+available without native binaries, including owned views through the bundled
+WebAssembly backend. This Node entry point uses Node file and Buffer APIs; it
+does not provide a browser package.
 
 For source development, build the addon and stage its native assets with
 `npm run build` and `npm run prepare-native` on a compatible host.

@@ -100,6 +100,42 @@ client.delete_pool(&PoolRef::name("logs"))?;
 Pool references resolve names to `~/.plasmite/pools/{name}.plasmite`, or
 you can use `PoolRef::path(...)` for an absolute path.
 
+### Immutable snapshots and typed values
+
+Use the additive owned-view API to keep Lite3 as the data of record. Existing
+JSON/message methods remain available.
+
+```rust
+use plasmite::api::{Durability, PoolApiExt, TailOptions};
+use serde_json::json;
+
+let sent = pool.append_value_now(&json!({"power": 42}), &["sensor"], Durability::Fast)?;
+let message = pool.get_view(sent.seq)?;
+let power = message.data().get("power")?.unwrap().decode::<i64>()?;
+let retained = message.data().into_owned(); // Share the snapshot, without copying.
+let forwarded = destination.append_view_now(&message, Durability::Fast)?;
+
+for message in pool.tail_views(TailOptions::new()) {
+    let message = message?;
+    println!("{}", String::from_utf8(message.data().to_json()?)?);
+    break;
+}
+```
+
+`ValueRef` borrows its owner; `OwnedValue::as_ref()` borrows a retained child.
+Typed `decode` borrows compatible strings/bytes or constructs the requested
+owned type. `MessageView::encode(&value, tags)` encodes Serde values without
+storage. Native integers must fit i64 and floats must be finite. The data root
+must encode as an object. `bytes()` borrows immutable Lite3 bytes; JSON output
+allocates text. A retained child keeps its entire snapshot alive.
+
+`UdpPool::follow_views` returns `UdpViewEvent::Frame(MessageView)` alongside
+existing gap/progress events, sharing arrival-order and cancellation rules with
+ordinary follows. Configure local cancellation through `TailOptions::cancel`;
+stop and drop a tail when finished. See the
+[migration guide](docs/record/upgrading-next-major.md#keep-encoded-data-with-owned-views)
+for ownership, forwarding and transport limits.
+
 ### Writing messages
 
 The `PoolApiExt` trait extends `Pool` with the message API:

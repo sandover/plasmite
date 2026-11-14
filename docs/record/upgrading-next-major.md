@@ -4,6 +4,99 @@ These changes exist in the source checkout and await a major release. Package
 versions still identify the last release; this guide does not announce a release.
 See the [changelog](../../CHANGELOG.md#unreleased) for the UDP delivery changes.
 
+## Keep encoded data with owned views
+
+The new view APIs keep one immutable Lite3 snapshot instead of decoding an
+entire message into language containers. Use them for selected reads, retained
+messages, typed decoding and forwarding. Existing message APIs keep their
+published return types and behavior; applications can migrate one call at a time.
+Install matching bindings and native libraries before using the new symbols.
+
+| Language | Produce / read | Local stream | Explicit native copy |
+|---|---|---|---|
+| [Rust](../../README-crate.md#immutable-snapshots-and-typed-values) | `append_value_now` / `get_view` | `tail_views` | `value.decode::<T>()` when `T` owns its fields |
+| [Python](../../bindings/python/README.md#immutable-message-views) | `append_view` / `get_view` | `tail_views` | `to_native(value)` |
+| [JavaScript](../../bindings/node/README.md#owned-views-additive-source-api) | `appendView` / `await getView` | `tailViews` | `toNative(value)` |
+| [Go](../../bindings/go/README.md#managed-owned-views) | `AppendView` / `GetView` | `OpenViewStream` or `TailViews` | `Decode(&target)` |
+| [C](../../include/plasmite.h) | native builder or `plsm_pool_append_view_json` / `plsm_pool_get_view` | `plsm_view_stream_open` | caller-selected scalar/span copies |
+
+Field access reads the snapshot. It may allocate language scalars or small
+wrappers, but does not build the rest of the native tree. Acquisition copies
+pool or transport data into independent storage and validates it once. Closing
+a pool or stream, or overwriting a ring slot, cannot invalidate a returned view.
+A small retained child keeps the complete message alive. Convert only that
+subtree when you want to release the larger snapshot.
+
+Rust borrows values from `MessageView`; `ValueRef::into_owned()` retains a child
+by sharing its snapshot. C callers retain/release the message owner and keep it
+alive while using borrowed value references. Python and JavaScript children
+retain their owners automatically. Go views and children retain immutable
+Go-managed buffers and need no per-message `Close`. Streams, follows and Go
+prepared selectors still own resources that callers must close.
+
+Readonly buffers do not grant mutable access to the stored snapshot. Go
+`Lite3()` and JavaScript `toLite3(message)` return independent mutable copies.
+Python `memoryview(message)` and Rust `message.bytes()` borrow readonly payload
+bytes. These payloads contain stored metadata and data; sequence and timestamp
+identity travel separately. Timestamp identity stays exact in nanoseconds;
+language time objects arise on request. Python datetime has microsecond
+precision, while its `time_rfc3339` preserves nanoseconds.
+Whole-message JSON/native exports use the canonical
+`seq`, `time`, `meta.tags`, `data` envelope; subtree exports preserve their stored
+fields, including additional metadata.
+
+Forward a whole view to preserve its encoding and tags while assigning a new
+destination identity. Rust uses `append_view_now`; Python and JavaScript use
+`append_view(message)` / `appendView(message)` with tags omitted; Go uses
+`AppendView(message, nil)`. Explicit tags rebuild the envelope around the data
+and replace the tags; an empty tag list clears them. Forwarding a data subtree
+copies it into a new encoding. Destination storage still writes the message.
+
+### Exact numbers and native bytes
+
+New view writers accept signed 64-bit integers and finite binary64 floats.
+They reject an out-of-range integer before publication. JSON integer tokens
+also must fit i64; a decimal point or exponent requests a float. Legacy writers
+retain their existing conversion rules. Native byte values stay bytes; JSON
+exports represent them as base64 strings.
+
+Python reads i64 as `int`. JavaScript reads safe i64 as `number` and larger i64
+as `bigint`; stored floats stay `number`, including negative zero. Use `bigint`
+to submit an exact large integer: converting it to `number` first already loses
+precision. JavaScript sequence and nanosecond timestamp fields always use
+`bigint`. Use `toJson` for exact JSON integer digits; `JSON.stringify` rejects
+bigints. Rust and Go typed decoding report incompatible target types or ranges.
+New object keys cannot contain NUL. Consult each binding guide for supported
+input types and serializer hooks; the Python native writer accepts exact
+builtins rather than invoking custom object serializers.
+
+### Streams and transport limits
+
+Owned local streams share existing tag, gap and sequence rules. They do not
+implicitly prefetch or batch. Python's `next_batch` requests explicit count and
+encoded-byte bounds; Go's channel adapter accepts an explicit buffer. Cancel a
+stream when abandoning a blocked read, and close its resource handle. Node
+async iterators close on `break`; Python context managers and Go `defer Close()`
+provide the corresponding cleanup. Cancellation interrupts message waits;
+it cannot interrupt a file lock already in progress. Node local tails use
+`timeoutMs` for each wait. Go tail polling waits use `TailOptions.Timeout`;
+use the context for a deadline.
+
+Owned UDP follows preserve arrival order, duplicates and late packets. Explicit
+server skips produce gaps; sequence jumps alone do not establish packet loss.
+A finite follow can end with DATA still in flight. Views do not add delivery
+acknowledgments or repair to UDP.
+
+Node's HTTP `RemotePool` provides `getView`, `tailViews` and `appendView` through
+the bundled WebAssembly backend, without a native addon. Binary HTTP reads need
+current-server identity headers. Binary tails reject `errorOnGap: true`: their
+frame protocol cannot report a terminal error after streaming begins. EOF does
+not certify complete delivery. Use the JSON tail when you require its
+fail-closed gap reporting. Other languages' local view APIs do not imply HTTP
+support. See the binding guides for examples and the
+[measurement index](../performance/language-boundary-results/owned-views/README.md)
+for workloads where views help or add cost.
+
 ## JSON reads preserve stored floating-point values
 
 Rust now enables correctly rounded JSON float parsing. The C JSON get/tail path

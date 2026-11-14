@@ -104,6 +104,12 @@ Use `append_json(...)` / `get_json(...)` only when you explicitly need raw wire 
 
 ## Immutable message views
 
+The view methods are additive. Existing `append`, `get` and `tail` retain their
+message behavior. Use views to keep encoded data across selected reads and
+forwarding; convert explicitly when you need editable containers. See the
+[next-major guide](../../docs/record/upgrading-next-major.md#keep-encoded-data-with-owned-views)
+for cross-language ownership and numeric rules.
+
 Use `get_view` when you need selected fields or want to retain encoded data:
 
 ```python

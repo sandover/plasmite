@@ -61,6 +61,30 @@ hints supplied by a command remain authoritative; shared policy supplies only
 the stable defaults. Permission failures may map to HTTP 401 or 403 according to
 request authorization context without changing their shared `Permission` kind.
 
+## Immutable message ownership
+
+Storage contains Lite3 payloads and separate sequence/timestamp identity. An
+owned `MessageView` keeps an independent immutable payload and its validation
+result. Pool reads copy under the existing storage lock, then release the lock;
+UDP admission validates the received payload before delivery. Private checked
+writers establish the same invariants as they encode and retain that result.
+Forwarding shares immutable payload ownership while assigning a fresh identity.
+
+A value reference identifies a node in that snapshot. Lookups and bounded
+sequential iterators read Lite3 directly. Language adapters create wrappers or
+requested scalars, not an eager native tree. Explicit native conversion builds
+ordinary containers; JSON formatting writes text directly from stored values.
+A retained child keeps its complete snapshot alive. C uses retained message
+owners and borrowed references; Rust uses borrows or an owned child; Python and
+Node wrappers retain owners; Go keeps private immutable bytes and proof in its
+own heap. Mutable byte exports copy.
+
+Legacy message APIs remain available. Owned local tails reuse `TailState` and
+`TailReader`; owned UDP delivery shares the existing receive/order/skip state.
+Adapters select a representation without duplicating those policies. Node's
+HTTP adapter runs the checked core in bundled WebAssembly and uses the same
+Proxy interface. It retains the binary transport's existing delivery limits.
+
 ## CLI ownership
 
 The `plasmite` binary uses ordinary Rust modules with one-way dependencies:

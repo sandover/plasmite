@@ -80,6 +80,13 @@ Python 3.10 or newer for the Python package; Go 1.22 or newer, cgo, and
 pkg-config for Go. Rust source installs need the toolchain and C compiler
 described in the [build guide](../building.md#install-the-cli-from-source).
 
+The additive owned-view APIs require matching binding/native assets. Updating
+only a binding while retaining an older `libplasmite` does not add its symbols.
+Node's HTTP `RemoteClient` needs no native addon for views: the npm package
+includes a checked WebAssembly core for encoding and validation. Local pools and
+UDP still need the native addon. The portable backend supports the Node entry
+point, not a browser distribution. Its first use pays module compilation.
+
 Python container views use a native CPython extension over the shared C ABI.
 Builds provide `cp311-abi3` wheels for standard CPython 3.11+, `cp310-cp310`
 wheels for CPython 3.10, and platform-specific `py3-none` fallback wheels.

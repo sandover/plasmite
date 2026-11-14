@@ -2,7 +2,10 @@
 
 These bindings wrap the `libplasmite` C ABI via cgo and expose typed Go contracts.
 `Append`, `Get`, and `Tail` return `*Message` values, while Lite3 APIs
-provide raw binary frames. These bindings operate on local pools; they do
+provide raw binary frames. Prefer the additive owned-view methods for selected
+reads, typed decoding and forwarding; existing message methods stay compatible.
+Owned views keep immutable encoded bytes in Go memory and need no per-message
+`Close`. These bindings operate on local pools and UDP endpoints; they do
 not expose the Rust/CLI secure native access-key client. Messages disappear
 when the bounded ring fills, independent of consumer progress.
 
@@ -334,8 +337,8 @@ message, err := pool.AppendView(
 )
 if err != nil { return err }
 
-// Forward the encoded data directly, with new tags and identity.
-forwarded, err := pool.AppendView(message.Data(), []string{"forwarded"})
+// Forward the whole encoding and tags, with a new identity.
+forwarded, err := pool.AppendView(message, nil)
 if err != nil { return err }
 fmt.Println(forwarded.Seq())
 ```
