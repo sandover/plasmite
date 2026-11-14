@@ -1,0 +1,324 @@
+{
+  "decision": "Reject as default; test narrower encoded import before any operation packet",
+  "method": "seven alternating paired processes; median of per-process repeat medians",
+  "rows": [
+    {
+      "fixture": "small",
+      "lane": "append-field/native",
+      "beforeUs": 19.266874999999857,
+      "afterUs": 25.55916999999994,
+      "deltaPercent": 32.658617445746295,
+      "pairedDeltasPercent": [
+        48.24167435260407,
+        34.25350504428053,
+        23.887065000071715,
+        43.750377600407674,
+        36.07216744021584,
+        22.453997687503467,
+        24.976971891005583
+      ],
+      "beforeCpuUs": 20.64,
+      "afterCpuUs": 25.73
+    },
+    {
+      "fixture": "small",
+      "lane": "append-field/stringify-json",
+      "beforeUs": 13.888125000000002,
+      "afterUs": 13.709585000000004,
+      "deltaPercent": -1.2855587057288065,
+      "pairedDeltasPercent": [
+        8.568338762216987,
+        3.3146913499092046,
+        -7.036055355586857,
+        -0.5576123239760533,
+        0.9030376670715157,
+        -4.1534080862480005,
+        -5.153034014016999
+      ],
+      "beforeCpuUs": 14.07,
+      "afterCpuUs": 14.295
+    },
+    {
+      "fixture": "small",
+      "lane": "append-consumer-field/native",
+      "beforeUs": 33.5593750000001,
+      "afterUs": 39.34437499999973,
+      "deltaPercent": 17.238104106526443,
+      "pairedDeltasPercent": [
+        13.985206566842766,
+        19.533228111674305,
+        16.61627351448136,
+        25.51870104435374,
+        17.609341651921984,
+        18.096590107522516,
+        14.130996309962374
+      ],
+      "beforeCpuUs": 35.445,
+      "afterCpuUs": 43.2
+    },
+    {
+      "fixture": "small",
+      "lane": "append-consumer-field/stringify-json",
+      "beforeUs": 29.625000000000053,
+      "afterUs": 29.14354000000003,
+      "deltaPercent": -1.6251814345992321,
+      "pairedDeltasPercent": [
+        -6.887339506375268,
+        -11.095645569620372,
+        10.7794635108871,
+        -2.507480209908597,
+        -1.1148988350707323,
+        -2.841245277112059,
+        -13.589081546854132
+      ],
+      "beforeCpuUs": 30.035,
+      "afterCpuUs": 29.525
+    },
+    {
+      "fixture": "wide",
+      "lane": "append-field/native",
+      "beforeUs": 109.81457999999975,
+      "afterUs": 136.17124999999987,
+      "deltaPercent": 24.001066160795936,
+      "pairedDeltasPercent": [
+        24.87204340261564,
+        25.67298336057351,
+        22.232060574087953,
+        21.50342107937209,
+        24.941743558430616,
+        21.55524658452126,
+        22.151283650031605
+      ],
+      "beforeCpuUs": 111.25,
+      "afterCpuUs": 165.665
+    },
+    {
+      "fixture": "wide",
+      "lane": "append-field/stringify-json",
+      "beforeUs": 57.03604000000041,
+      "afterUs": 57.75250000000028,
+      "deltaPercent": 1.2561531270401494,
+      "pairedDeltasPercent": [
+        0.4697032689884528,
+        1.1550743537558583,
+        2.6532448841347867,
+        1.1155227466683737,
+        5.384346983280919,
+        -2.532898187276511,
+        1.1135912151581273
+      ],
+      "beforeCpuUs": 59.38,
+      "afterCpuUs": 59.845
+    },
+    {
+      "fixture": "wide",
+      "lane": "append-consumer-field/native",
+      "beforeUs": 141.17792000000009,
+      "afterUs": 167.7347900000001,
+      "deltaPercent": 18.81092312452257,
+      "pairedDeltasPercent": [
+        17.555795568225975,
+        21.088466818982354,
+        20.937286097408236,
+        16.84458957010897,
+        13.471562866262232,
+        21.411956628911977,
+        16.879582886544476
+      ],
+      "beforeCpuUs": 145.25,
+      "afterCpuUs": 204.95
+    },
+    {
+      "fixture": "wide",
+      "lane": "append-consumer-field/stringify-json",
+      "beforeUs": 81.77333500000032,
+      "afterUs": 80.83500000000015,
+      "deltaPercent": -1.1474828561170436,
+      "pairedDeltasPercent": [
+        -4.556253903394092,
+        -6.443639883978525,
+        2.369230327825922,
+        1.93318518805643,
+        0.7425352878471791,
+        -1.8203349173335104,
+        -0.9014935706647798
+      ],
+      "beforeCpuUs": 85.745,
+      "afterCpuUs": 84.76
+    },
+    {
+      "fixture": "text64k",
+      "lane": "append-field/native",
+      "beforeUs": 25.626875000000382,
+      "afterUs": 33.22979499999974,
+      "deltaPercent": 29.667760895541285,
+      "pairedDeltasPercent": [
+        33.43270267868763,
+        28.22010528702126,
+        30.793661839599263,
+        32.48950564592352,
+        21.891356841704624,
+        33.23895348836954,
+        29.328426420361197
+      ],
+      "beforeCpuUs": 25.66,
+      "afterCpuUs": 34.785
+    },
+    {
+      "fixture": "text64k",
+      "lane": "append-field/stringify-json",
+      "beforeUs": 60.48104500000022,
+      "afterUs": 60.232710000000225,
+      "deltaPercent": -0.4105997176470644,
+      "pairedDeltasPercent": [
+        7.78299415253676,
+        7.032265025489237,
+        -2.726593196222782,
+        26.67225739899124,
+        -8.956565856668275,
+        3.5904263752407406,
+        -19.35607251338176
+      ],
+      "beforeCpuUs": 63.87,
+      "afterCpuUs": 63.125
+    },
+    {
+      "fixture": "text64k",
+      "lane": "append-consumer-field/native",
+      "beforeUs": 43.30812500000093,
+      "afterUs": 50.09167000000048,
+      "deltaPercent": 15.663446524178548,
+      "pairedDeltasPercent": [
+        11.01049127551834,
+        25.059996203328062,
+        26.949815998726876,
+        12.974925995883568,
+        22.025448681885784,
+        17.526422460578274,
+        14.73657164528821
+      ],
+      "beforeCpuUs": 43.715,
+      "afterCpuUs": 53.565
+    },
+    {
+      "fixture": "text64k",
+      "lane": "append-consumer-field/stringify-json",
+      "beforeUs": 86.67562500000031,
+      "afterUs": 84.8210449999999,
+      "deltaPercent": -2.139678831275116,
+      "pairedDeltasPercent": [
+        7.215624383507735,
+        1.4706388970215922,
+        -0.21356528160547672,
+        7.0458946288062485,
+        -2.0904988814755887,
+        -2.139678831275116,
+        -14.830210730511917
+      ],
+      "beforeCpuUs": 90.95,
+      "afterCpuUs": 89.86
+    },
+    {
+      "fixture": "array",
+      "lane": "append-field/native",
+      "beforeUs": 1196.181660000002,
+      "afterUs": 1001.2300000000049,
+      "deltaPercent": -16.29783054858045,
+      "pairedDeltasPercent": [
+        -14.30732632352749,
+        -18.115418232590276,
+        -16.338454789484025,
+        -13.922982233317537,
+        -17.33595423778255,
+        -15.91234304843484,
+        -17.429239158659627
+      ],
+      "beforeCpuUs": 1206.74,
+      "afterCpuUs": 1126.9
+    },
+    {
+      "fixture": "array",
+      "lane": "append-field/stringify-json",
+      "beforeUs": 311.4191800000026,
+      "afterUs": 315.98582000000533,
+      "deltaPercent": 1.4663965141783253,
+      "pairedDeltasPercent": [
+        1.9622697310948567,
+        -4.785367695871301,
+        2.1143726505078897,
+        5.046909708748015,
+        1.198295543516692,
+        0.9310927839862204,
+        -0.7602357696780082
+      ],
+      "beforeCpuUs": 313.48,
+      "afterCpuUs": 318.26
+    },
+    {
+      "fixture": "array",
+      "lane": "append-consumer-field/native",
+      "beforeUs": 1354.927499999994,
+      "afterUs": 1172.5516599999992,
+      "deltaPercent": -13.46019178147877,
+      "pairedDeltasPercent": [
+        -13.44523329538153,
+        -15.519539882300116,
+        -15.086791878124838,
+        -13.597679358347447,
+        -13.437092196177014,
+        -13.597488100628253,
+        -13.368673969640277
+      ],
+      "beforeCpuUs": 1423.82,
+      "afterCpuUs": 1297.6
+    },
+    {
+      "fixture": "array",
+      "lane": "append-consumer-field/stringify-json",
+      "beforeUs": 471.1316799999986,
+      "afterUs": 476.3408200000049,
+      "deltaPercent": 1.1056654054777848,
+      "pairedDeltasPercent": [
+        0.23815803344791053,
+        -0.32068316866140645,
+        0.13681599361135,
+        1.9653091024476321,
+        2.985142514186534,
+        -4.8901488672676185,
+        -0.37211144832348664
+      ],
+      "beforeCpuUs": 534.98,
+      "afterCpuUs": 543.22
+    }
+  ],
+  "cold": {
+    "baseline-final": {
+      "firstUs": 1173.834,
+      "requireUs": 3205.958,
+      "firstCpuUs": 1415,
+      "linearBytes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "candidate-final": {
+      "firstUs": 2634.334,
+      "requireUs": 3148.208,
+      "firstCpuUs": 3369,
+      "linearBytes": [
+        1179648,
+        1179648,
+        1179648,
+        1179648,
+        1179648,
+        1179648,
+        1179648
+      ]
+    }
+  }
+}

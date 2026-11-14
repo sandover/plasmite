@@ -457,5 +457,42 @@ end, unlimited tails continue, and successful reads can extend beyond one wait
 interval. Focused tests cover retained owners, queued close/cancel, Node Worker
 termination, async-hook reentrancy, caller context and iterator cleanup.
 
+### Rejected default: encode through the portable core
+
+We tested the existing JavaScript semantic traversal and shared Wasm writer,
+then copied its encoded output into a checked native owner and forwarded that
+owner into storage. This reused the existing codec. It removed most per-value
+Node-API calls, but added an encoded export, native import/validation and a
+temporary V8 owner wrapper.
+
+Seven alternating process pairs use identical native addons/core libraries and
+the same portable module within each pair. Values below are median microseconds
+for append plus one consumed field.
+
+| Fixture | Native traversal | Portable encoding/import | Change |
+| --- | ---: | ---: | ---: |
+| Small | 19.27 | 25.56 | +33% |
+| Wide | 109.81 | 136.17 | +24% |
+| 64-KiB text | 25.63 | 33.23 | +30% |
+| 4,096 objects | 1,196.18 | 1,001.23 | -16% |
+
+Every pair shows the same direction for these four fixtures. Small/wide/text
+consumer paths also regress, so this experiment does not earn a default change.
+The array saves only about 7% process CPU despite its larger elapsed-time gain;
+wide process CPU rises about 49%. A cold first append/field rises from 1.17 to
+2.63 ms, and the portable core keeps 1.125 MiB of linear memory after this small
+case. These figures include real conversion, startup and memory costs.
+
+The existing input-semantic cases pass. A separate test assumes spare builder
+capacity; checked imports instead own an exact-size snapshot. This allocation
+choice does not change payload values. The next narrower experiment removes
+the intermediate V8 wrapper while retaining the same portable encoding and
+checked import, before considering any private captured-operation protocol.
+
+[Summary](wasm-input-reuse-summary.json) retains all pair deltas, CPU controls
+and cold observations. Evidence (outside Git) contains the
+28 raw runs, exact package hashes and measured source overlay. This records a
+rejected default; it does not change the production input path.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.
