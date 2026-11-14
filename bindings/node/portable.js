@@ -398,6 +398,20 @@ async function encodeMessage(data, tags) {
   const owner = encodeOwner(data, tags);
   try { return owner.encodedBytes(); } finally { releaseOwner(owner); }
 }
+// A failed request discards only a newly built, unpublished owner. Forwarded
+// caller views stay alive; a successful request retains this same backend.
+function prepareAppend(data, tags) {
+  const reference = messageReference(data);
+  if (reference && tags === undefined) {
+    return { payload: encoded(reference), message: data, discard() {} };
+  }
+  const owner = encodeOwner(data, tags);
+  try {
+    return { payload: owner.encodedBytes(),
+      message: createMessageView(backend(owner), 0n, 0n),
+      discard() { releaseOwner(owner); } };
+  } catch (err) { releaseOwner(owner); throw err; }
+}
 function messageWithIdentity(message, seq, timestampNs) {
   const reference = messageReference(message);
   if (!reference) throw new TypeError('expected a Plasmite MessageView');
@@ -411,4 +425,4 @@ function diagnostics() {
     ownerCount: core().wasm.live_owners(), backingBytes: core().wasm.live_bytes(),
     lookupWorkspaceBytes: runtime.lookupPointer ? 256 : 0 };
 }
-module.exports = { decodeMessage, encodeMessage, messageWithIdentity, diagnostics };
+module.exports = { decodeMessage, encodeMessage, prepareAppend, messageWithIdentity, diagnostics };

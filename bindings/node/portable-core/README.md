@@ -80,3 +80,14 @@ the same step before committing. Its public C signatures stay unchanged. The
 portable crate imports shared reader/writer source files directly, including
 all validation and duplicate rules. Its 32-bit `DocRef` import keeps the native
 method signature and documents the target-specific Clippy convention exception.
+
+The private HTTP `prepareAppend(data, tags)` captures input synchronously and
+returns `{payload, message, discard}`. `payload` owns an independent Buffer;
+`message` retains the checked encoding that produced it. After receipt,
+`messageWithIdentity` supplies committed sequence and time without importing or
+validating the body again. On request failure, the caller invokes `discard()`
+to free a newly built unpublished owner. Forwarding a whole MessageView with
+omitted tags shares its caller-owned backend, so `discard()` does nothing.
+Explicit tags rebuild one owner. Successful requests leave release to the
+returned view's lifetime. The encoded-only helper still releases its temporary
+owner immediately.

@@ -211,3 +211,62 @@ test('memory growth preserves live children, independent snapshots and pending i
   assert.equal(other.data.nested.value, 9);
   assert.equal(child.value, 7);
 });
+
+test('append preparation retains one encoding, snapshots once and cleans failed requests', async () => {
+  let calls = 0;
+  const bytes = Buffer.from([1, 2]);
+  const input = { get value() { calls++; return { toJSON() { calls++; return 42; } }; }, bytes };
+  const before = portable.diagnostics().ownerCount;
+  const prepared = portable.prepareAppend(input, ['ready']);
+  assert.equal(calls, 2);
+  assert.equal(portable.diagnostics().ownerCount, before + 1);
+  bytes.fill(9);
+  assert.deepEqual([...prepared.message.data.bytes], [1, 2]);
+  const committed = portable.messageWithIdentity(prepared.message, 19n, 123n);
+  assert.equal(committed.seq, 19n);
+  assert.equal(committed.data.value, 42);
+  assert.equal(messageReference(committed).backend, messageReference(prepared.message).backend);
+  assert.equal(portable.diagnostics().ownerCount, before + 1);
+  // The HTTP body owns its bytes and cannot mutate the retained message.
+  prepared.payload.fill(0);
+  assert.equal(committed.data.value, 42);
+  const failed = portable.prepareAppend({ value: 5 });
+  assert.equal(portable.diagnostics().ownerCount, before + 2);
+  try { throw new Error('request failed'); } catch { failed.discard(); }
+  failed.discard();
+  assert.equal(portable.diagnostics().ownerCount, before + 1);
+  const failedRetag = portable.prepareAppend(committed, []);
+  failedRetag.discard();
+  assert.equal(committed.data.value, 42);
+  assert.equal(calls, 2);
+  assert.equal(portable.diagnostics().ownerCount, before + 1);
+  // Test cleanup only: this prepared message has no external consumer.
+  prepared.discard();
+  assert.equal(portable.diagnostics().ownerCount, before);
+});
+
+test('append preparation forwards caller owners and retags through one new owner', async () => {
+  const source = await round({ nested: { value: 3 }, exact: (1n << 63n) - 1n }, ['source']);
+  const sources = [source];
+  if (process.env.PLASMITE_PORTABLE_TEST_ADDON) {
+    const addon = require(process.env.PLASMITE_PORTABLE_TEST_ADDON);
+    const { createNativeMessage } = require('../views');
+    sources.push(createNativeMessage(addon.nativeViewFromBytes(await portable.encodeMessage(source))));
+  }
+  for (const original of sources) {
+    const before = portable.diagnostics().ownerCount;
+    const whole = portable.prepareAppend(original);
+    assert.equal(whole.message, original);
+    assert.equal(messageReference(whole.message).backend, messageReference(original).backend);
+    whole.discard(); whole.discard();
+    assert.equal(original.data.nested.value, 3);
+    assert.equal(portable.diagnostics().ownerCount, before);
+    const retagged = portable.prepareAppend(original, []);
+    assert.deepEqual([...retagged.message.meta.tags], []);
+    assert.deepEqual(toNative(retagged.message.data), toNative(original.data));
+    assert.equal(portable.diagnostics().ownerCount, before + 1);
+    retagged.discard();
+    assert.equal(portable.diagnostics().ownerCount, before);
+    assert.deepEqual([...original.meta.tags], ['source']);
+  }
+});
