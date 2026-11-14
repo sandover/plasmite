@@ -142,7 +142,9 @@ shared-backed buffers require a caller-created ordinary copy, such as
 numbers; safe integral numbers use i64 except negative zero. A small BigInt can
 read back as number. Cycles, out-of-range BigInt, nonfinite numbers and isolated
 UTF16 surrogates fail before publication. Getter/serializer exceptions retain
-their original thrown value.
+their original thrown value. Buffered primitive writes can report resource or
+encoded-size failures when a batch flushes or finishes; no message publishes
+on failure. Type, key and depth checks keep their traversal order.
 
 Data must encode as an object. String input does not mean JSON source. A genuine
 message view forwards its data and existing tags when tags are omitted; explicit

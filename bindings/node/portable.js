@@ -3,17 +3,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const types = require('node:util').types;
 const { createMessageView, messageReference, valueReference } = require('./views');
-const { inputHelpers, snapshotTags } = require('./input');
+const { inputHelpers, snapshotTags, InputWalker, bytesOf } = require('./input');
 
 const decodeText = new TextDecoder('utf-8', { fatal: true });
 const encodeText = new TextEncoder();
 const decodeBytes = decodeText.decode.bind(decodeText);
 const encodeInto = encodeText.encodeInto.bind(encodeText);
 const parseJson = JSON.parse;
-const typed = Object.getPrototypeOf(Uint8Array.prototype);
-const getBuffer = Object.getOwnPropertyDescriptor(typed, 'buffer').get;
-const getOffset = Object.getOwnPropertyDescriptor(typed, 'byteOffset').get;
-const getLength = Object.getOwnPropertyDescriptor(typed, 'byteLength').get;
 const MAX_BYTES = 256 * 1024 * 1024;
 let runtime;
 
@@ -46,10 +42,6 @@ function error() {
   const result = kind === 2 ? new TypeError(message) : new Error(message);
   result.kind = kind;
   return result;
-}
-function bytesOf(value) {
-  if (!types.isUint8Array(value)) throw new TypeError('encoded input must be a Uint8Array or Buffer');
-  return new Uint8Array(getBuffer.call(value), getOffset.call(value), getLength.call(value));
 }
 function allocate(size) {
   if (size < 1 || size > MAX_BYTES) throw new RangeError('portable input exceeds the 256 MiB core limit');
@@ -250,26 +242,11 @@ function encoded(reference) {
   if (owner?.encodedBytes) return owner.encodedBytes();
   return reference.backend.encodedBytes();
 }
-function normalize(value, key) {
-  let type = typeof value;
-  let kind = value !== null && type === 'object' ? inputHelpers.classify(value) : 0;
-  if (kind === 13) return [value, kind];
-  if (value !== null && ['object', 'function', 'bigint'].includes(type)) {
-    const hook = type === 'bigint' ? inputHelpers.bigintHook(value) : value.toJSON;
-    if (typeof hook === 'function' && !(kind === 6 && hook === inputHelpers.bufferToJSON)) {
-      value = Reflect.apply(hook, value, [typeof key === 'number' ? String(key) : key]);
-      type = typeof value;
-      kind = value !== null && type === 'object' ? inputHelpers.classify(value) : 0;
-    }
-    if (kind >= 9 && kind <= 12) { value = inputHelpers.unbox(value, kind); kind = 0; }
-  }
-  return [value, kind];
-}
-class Encoder {
+class Encoder extends InputWalker {
   scratch = new Scratch();
   imports = new Map();
-  stack = [];
   constructor(tags) {
+    super();
     const sizes = tags.map(stringLength);
     const total = tags.length * 8 + sizes.reduce((a, b) => a + b, 0);
     const pointer = total ? this.scratch.ensure(total) : 0;
@@ -306,7 +283,7 @@ class Encoder {
   }
   put(parent, key, kind, value) {
     const keySize = key === null ? 0 : Buffer.byteLength(key, 'utf8');
-    const size = kind === 5 ? stringLength(value) : kind === 6 ? value.byteLength : 0;
+    const size = kind === 5 ? Buffer.byteLength(value, 'utf8') : kind === 6 ? value.byteLength : 0;
     const pointer = (keySize + size) ? this.scratch.ensure(keySize + size) : 0;
     const keyPointer = key === null ? 0 : keySize ? pointer : 1;
     if (keySize) putText(key, pointer, keySize);
@@ -324,62 +301,8 @@ class Encoder {
     if (child === -1) throw error();
     return child;
   }
-  members(parent, value, kind) {
-    if (this.stack.includes(value)) throw new TypeError('cannot encode a cyclic input');
-    if (this.stack.length >= 31) throw new TypeError('input exceeds Lite3 nesting depth');
-    this.stack.push(value);
-    try {
-      if (kind === 8) {
-        const numeric = +value.length;
-        const length = Number.isNaN(numeric) || numeric < 0 ? 0 : Math.min(Math.floor(numeric), Number.MAX_SAFE_INTEGER);
-        for (let i = 0; i < length; i++) this.value(parent, null, i, value[i], true);
-      } else {
-        const keys = Object.keys(value);
-        for (const key of keys) this.value(parent, key, key, value[key], false);
-      }
-    } finally { this.stack.pop(); }
-  }
-  value(parent, key, hookKey, value, array) {
-    // Argument evaluation has already performed Get; reject malformed keys
-    // before the child can run toJSON, matching the native environment walker.
-    if (key !== null && !key.isWellFormed()) throw new TypeError('input key contains an isolated UTF16 surrogate');
-    let item = value, kind = 0;
-    if (value !== null && ['object', 'function', 'bigint'].includes(typeof value)) {
-      [item, kind] = normalize(value, hookKey);
-    }
-    if (kind === 13) return this.copy(parent, key, valueReference(item));
-    const type = typeof item;
-    if (['undefined', 'function', 'symbol'].includes(type)) {
-      if (array) this.put(parent, key, 1, null);
-    } else if (item === null) this.put(parent, key, 1, null);
-    else if (type === 'boolean') this.put(parent, key, 2, item);
-    else if (type === 'bigint') {
-      if (item < -(1n << 63n) || item >= 1n << 63n) throw new TypeError('bigint must fit signed i64');
-      this.put(parent, key, 3, item);
-    } else if (type === 'number') {
-      if (!Number.isFinite(item)) throw new TypeError('number must be finite');
-      this.put(parent, key, Number.isSafeInteger(item) && !Object.is(item, -0) ? 3 : 4, item);
-    } else if (type === 'string') this.put(parent, key, 5, item);
-    else if (kind === 6) {
-      const bytes = bytesOf(item);
-      if (types.isSharedArrayBuffer(bytes.buffer)) throw new TypeError('shared-backed bytes require an ordinary buffer copy');
-      this.put(parent, key, 6, bytes);
-    } else {
-      const child = this.put(parent, key, kind, null);
-      this.members(child, item, kind);
-    }
-  }
   finish(data) {
-    const ref = valueReference(data);
-    if (ref) this.copy(-1, null, ref);
-    else {
-      const [value, kind] = normalize(data, '');
-      if (kind === 13) this.copy(-1, null, valueReference(value));
-      else {
-        if (value === null || typeof value !== 'object' || kind !== 7) throw new TypeError('message data must be an object');
-        this.members(this.data, value, kind);
-      }
-    }
+    this.write(data);
     const pointer = core().wasm.builder_finish(this.pointer);
     if (!pointer) throw error();
     return new PortableOwner(pointer);

@@ -317,3 +317,92 @@ test('input exceptions preserve every thrown value without coercing it', async t
   assert.equal(coerced, 0);
   assert.equal((await pool.appendView({ good: true })).seq, 1n);
 });
+
+test('captured primitives and bytes keep their value at the visit', async t => {
+  const { pool } = fixture(t);
+  const earlier = { value: 1 }, bytes = Buffer.from([1, 2]);
+  const view = await pool.appendView({ earlier, bytes, get later() { earlier.value = 9; bytes[0] = 9; return true; } });
+  assert.equal(view.data.earlier.value, 1);
+  assert.deepEqual([...toNative(view.data.bytes)], [1, 2]);
+});
+
+test('capture batches preserve traversal and reentrant appends', async t => {
+  const { pool } = fixture(t);
+  let reads = 0, nested;
+  const rows = Array.from({ length: 700 }, (_, number) => ({ get value() {
+    reads++;
+    if (number === 170) nested = pool.appendView({ inner: true });
+    return number;
+  } }));
+  const result = await pool.appendView({ rows });
+  assert.equal(reads, 700);
+  assert.equal(result.data.rows.length, 700);
+  assert.equal(result.data.rows[0].value, 0);
+  assert.equal(result.data.rows[170].value, 170);
+  assert.equal(result.data.rows[699].value, 699);
+  assert.equal((await nested).data.inner, true);
+});
+
+test('key failures preserve Get and hook order before later fields', async t => {
+  const { pool } = fixture(t);
+  const unicode = [], nul = [];
+  const invalidKey = Object.defineProperty({}, '\ud800', { enumerable: true, get() {
+    unicode.push('get'); return { toJSON() { unicode.push('hook'); return 1; } };
+  } });
+  Object.defineProperty(invalidKey, 'later', { enumerable: true, get() { unicode.push('later'); return 2; } });
+  await assert.rejects(pool.appendView(invalidKey), /surrogate/);
+  assert.deepEqual(unicode, ['get']);
+  await assert.rejects(pool.appendView({ ['\0']: { toJSON() { nul.push('hook'); return 1; } }, get later() { nul.push('later'); return 2; } }), /NUL/);
+  assert.deepEqual(nul, ['hook']);
+  const ignored = await pool.appendView({ ['\0']: undefined, value: 3 });
+  assert.equal(ignored.data.value, 3);
+});
+
+test('checked subtree depth errors precede later getters', async t => {
+  const { pool } = fixture(t);
+  let deep = { leaf: 1 };
+  for (let i = 0; i < 30; i++) deep = { nested: deep };
+  const source = await pool.appendView(deep);
+  let later = 0;
+  await assert.rejects(pool.appendView({ copy: source.data, get later() { later++; return 2; } }), /nest|depth/i);
+  assert.equal(later, 0);
+  assert.equal((await pool.appendView({ good: true })).seq, source.seq + 1n);
+});
+
+test('mixed scalar commands remain exact across batches and buffer reuse', async t => {
+  const { pool } = fixture(t);
+  const values = Array.from({ length: 1200 }, (_, i) => [null, false, true, -0, 0, 1, 3.5, 9007199254740991, 9007199254740992, 17n, 9223372036854775807n, -9223372036854775808n][i % 12]);
+  const expected = values.map(value => value === 17n ? 17 : value);
+  for (let i = 0; i < 2; i++) {
+    const view = await pool.appendView({ values });
+    assert.deepEqual(toNative(view.data.values), expected);
+  }
+});
+
+test('real portable owners import once for native whole, root, mixed and retagged input', async t => {
+  const { pool } = fixture(t);
+  const portable = require('../portable');
+  const { configureNativeInput } = require('../input');
+  const addon = require('../native/' + process.platform + '-' + process.arch + '/index.node');
+  const data = { exact: 9223372036854775807n, bytes: Buffer.from([0, 255]), nested: { value: 17 } };
+  const bytes = await portable.encodeMessage(data, ['source']);
+  const source = await portable.decodeMessage(bytes, 77n, 0n);
+  let imports = 0;
+  configureNativeInput(encoded => { imports++; return addon.nativeViewFromBytes(encoded); }, addon.NativeView);
+  try {
+    const whole = await pool.appendView(source);
+    const root = await pool.appendView(source.data);
+    const retagged = await pool.appendView(source, ['retagged']);
+    const mixed = await pool.appendView({ subset: source.data.nested, payload: source.data });
+    assert.deepEqual(toNative(whole.data), data);
+    assert.deepEqual(toNative(whole.meta.tags), ['source']);
+    assert.deepEqual(toNative(root.data), data);
+    assert.deepEqual(toNative(root.meta.tags), []);
+    assert.deepEqual(toNative(retagged.data), data);
+    assert.deepEqual(toNative(retagged.meta.tags), ['retagged']);
+    assert.deepEqual(toNative(mixed.data), { subset: data.nested, payload: data });
+    assert.equal(imports, 1);
+    await pool.appendView(whole);
+    assert.equal(imports, 1, 'native owners bypass import');
+  } finally { configureNativeInput(addon.nativeViewFromBytes, addon.NativeView); }
+});

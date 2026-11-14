@@ -1,29 +1,9 @@
 //! Evaluate input once on the environment thread, then commit its owned encoding.
 use super::*;
 use napi::sys::{self, ValueType as Type};
-use napi::{JsObject, JsUnknown, NapiRaw};
+use napi::{JsUnknown, NapiRaw};
 
 type Raw = sys::napi_value;
-struct ValueScope {
-    env: sys::napi_env,
-    scope: sys::napi_handle_scope,
-}
-impl ValueScope {
-    fn new(env: Env) -> Result<Self> {
-        let mut scope = ptr::null_mut();
-        napi::check_status!(unsafe { sys::napi_open_handle_scope(env.raw(), &mut scope) })?;
-        Ok(Self {
-            env: env.raw(),
-            scope,
-        })
-    }
-}
-impl Drop for ValueScope {
-    fn drop(&mut self) {
-        // Nested Rust guards close in reverse order, including on hook errors.
-        unsafe { sys::napi_close_handle_scope(self.env, self.scope) };
-    }
-}
 #[repr(C)]
 struct Builder {
     _private: [u8; 0],
@@ -151,38 +131,46 @@ fn kind(env: Env, value: Raw) -> Result<sys::napi_valuetype> {
     napi::check_status!(unsafe { sys::napi_typeof(env.raw(), value, &mut result) })?;
     Ok(result)
 }
-fn property(env: Env, object: Raw, name: &std::ffi::CStr) -> Result<Raw> {
-    let mut result = ptr::null_mut();
+// Inspect the actual backing store before passing bytes to C. In particular,
+// do not construct a Rust slice over concurrently mutable shared memory.
+fn typed_span(
+    env: Env,
+    value: Raw,
+    expected: sys::napi_typedarray_type,
+) -> Result<(*const u8, usize)> {
+    let mut ty = expected;
+    let mut data = ptr::null_mut();
+    let mut buffer = ptr::null_mut();
+    let mut length = 0;
+    let mut offset = 0;
     napi::check_status!(unsafe {
-        sys::napi_get_named_property(env.raw(), object, name.as_ptr(), &mut result)
-    })?;
-    Ok(result)
-}
-fn keyed_property(env: Env, object: Raw, key: Raw) -> Result<Raw> {
-    let mut result = ptr::null_mut();
-    napi::check_status!(unsafe { sys::napi_get_property(env.raw(), object, key, &mut result) })?;
-    Ok(result)
-}
-
-fn call(env: Env, function: Raw, receiver: Raw, args: &[Raw]) -> Result<Raw> {
-    let mut result = ptr::null_mut();
-    napi::check_status!(unsafe {
-        sys::napi_call_function(
+        sys::napi_get_typedarray_info(
             env.raw(),
-            receiver,
-            function,
-            args.len(),
-            args.as_ptr(),
-            &mut result,
+            value,
+            &mut ty,
+            &mut length,
+            &mut data,
+            &mut buffer,
+            &mut offset,
         )
     })?;
-    Ok(result)
+    if ty != expected {
+        return Err(invalid(env, "unexpected captured typed array"));
+    }
+    let mut ordinary = false;
+    napi::check_status!(unsafe { sys::napi_is_arraybuffer(env.raw(), buffer, &mut ordinary) })?;
+    if !ordinary {
+        return Err(invalid(
+            env,
+            "shared-backed bytes require an ordinary buffer copy",
+        ));
+    }
+    Ok((data.cast(), length))
 }
-fn number(env: Env, value: Raw) -> Result<f64> {
-    let mut result = 0.0;
-    napi::check_status!(unsafe { sys::napi_get_value_double(env.raw(), value, &mut result) })?;
-    Ok(result)
+fn byte_span(env: Env, value: Raw) -> Result<(*const u8, usize)> {
+    typed_span(env, value, sys::TypedarrayType::uint8_array)
 }
+
 // Transfer the VM's UTF8 write buffer into String without napi's extra Vec copy.
 // Only U+FFFD output can conceal replacement of an isolated UTF16 surrogate.
 fn text(env: Env, value: Raw) -> Result<String> {
@@ -229,137 +217,27 @@ fn text(env: Env, value: Raw) -> Result<String> {
     Ok(text)
 }
 
-#[derive(Clone, Copy)]
-enum HookKey {
-    Root,
-    Name(Raw),
-    Index(u64),
+#[napi]
+pub struct NativeAppendTarget {
+    handle: Option<Arc<PoolHandle>>,
+    durability: u32,
+    capture: Option<Capture>,
 }
-impl HookKey {
-    fn raw(self, env: Env) -> Result<Raw> {
-        match self {
-            Self::Name(key) => Ok(key),
-            Self::Root => Ok(unsafe { env.create_string("")?.raw() }),
-            Self::Index(index) => Ok(unsafe { env.create_string(&index.to_string())?.raw() }),
-        }
-    }
-}
-
-struct Encoder {
-    env: Env,
+const CAPTURE_END: u32 = 9;
+const CAPTURE_NUMBER_I64: u32 = 10;
+struct Capture {
     builder: OwnedBuilder,
-    data: usize,
-    classify: Raw,
-    unbox: Raw,
-    binary_hook: Raw,
-    bigint_hook: Raw,
-    to_json_key: Raw,
-    length_key: Raw,
-    view: Raw,
-    undefined: Raw,
-    stack: Vec<Raw>,
+    parents: Vec<usize>,
 }
-impl Encoder {
-    fn new(env: Env, tags: &[String], helpers: JsObject, api: &'static Api) -> Result<Self> {
-        let tags = tags
-            .iter()
-            .map(|s| Text {
-                data: s.as_ptr(),
-                len: s.len(),
-            })
-            .collect::<Vec<_>>();
-        let mut pointer = ptr::null_mut();
-        let mut data = 0;
-        let mut error = ptr::null_mut();
-        if unsafe {
-            (api.new)(
-                tags.as_ptr(),
-                tags.len(),
-                &mut pointer,
-                &mut data,
-                &mut error,
-            )
-        } != 0
-        {
-            return Err(take_error(env, error)?);
-        }
-        let builder = OwnedBuilder { pointer, api };
-        let helpers = unsafe { helpers.raw() };
-        Ok(Self {
-            env,
-            builder,
-            data,
-            classify: property(env, helpers, c"classify")?,
-            unbox: property(env, helpers, c"unbox")?,
-            binary_hook: property(env, helpers, c"bufferToJSON")?,
-            bigint_hook: property(env, helpers, c"bigintHook")?,
-            to_json_key: property(env, helpers, c"toJSONKey")?,
-            length_key: property(env, helpers, c"lengthKey")?,
-            view: property(env, helpers, c"view")?,
-            undefined: unsafe { env.get_undefined()?.raw() },
-            stack: Vec::new(),
-        })
-    }
-    fn class(&self, value: Raw) -> Result<u32> {
-        let result = call(self.env, self.classify, self.undefined, &[value])?;
-        Ok(number(self.env, result)? as u32)
-    }
-    fn normalize(&self, mut value: Raw, key: HookKey) -> Result<(Raw, u32, sys::napi_valuetype)> {
-        let mut ty = kind(self.env, value)?;
-        let mut class = if ty == Type::napi_object {
-            self.class(value)?
-        } else {
-            0
-        };
-        if class == 13 {
-            return Ok((value, class, ty));
-        }
-        if matches!(
-            ty,
-            Type::napi_object | Type::napi_function | Type::napi_bigint
-        ) {
-            let hook = if ty == Type::napi_bigint {
-                call(self.env, self.bigint_hook, self.undefined, &[value])?
-            } else {
-                keyed_property(self.env, value, self.to_json_key)?
-            };
-            let mut default_binary = false;
-            if class == 6 {
-                napi::check_status!(unsafe {
-                    sys::napi_strict_equals(
-                        self.env.raw(),
-                        hook,
-                        self.binary_hook,
-                        &mut default_binary,
-                    )
-                })?;
-            }
-            if kind(self.env, hook)? == Type::napi_function && !default_binary {
-                value = call(self.env, hook, value, &[key.raw(self.env)?])?;
-                ty = kind(self.env, value)?;
-                class = if ty == Type::napi_object {
-                    self.class(value)?
-                } else {
-                    0
-                };
-            }
-            if (9..=12).contains(&class) {
-                let code = unsafe { self.env.create_uint32(class)?.raw() };
-                value = call(self.env, self.unbox, self.undefined, &[value, code])?;
-                ty = kind(self.env, value)?;
-                class = 0;
-            }
-        }
-        Ok((value, class, ty))
-    }
-    fn put(&self, parent: usize, key: Option<&str>, value: &Input) -> Result<usize> {
+impl Capture {
+    fn put(&mut self, env: Env, key: Option<&str>, value: &Input) -> Result<()> {
+        let (key, len) = key.map_or((ptr::null(), 0), |key| (key.as_ptr(), key.len()));
         let mut child = 0;
         let mut error = ptr::null_mut();
-        let (key, len) = key.map_or((ptr::null(), 0), |s| (s.as_ptr(), s.len()));
         if unsafe {
             (self.builder.api.put)(
                 self.builder.pointer,
-                parent,
+                *self.parents.last().expect("root parent"),
                 key,
                 len,
                 value,
@@ -368,250 +246,20 @@ impl Encoder {
             )
         } != 0
         {
-            return Err(take_error(self.env, error)?);
+            return Err(take_error(env, error)?);
         }
-        Ok(child)
-    }
-    fn copy(&self, parent: usize, key: Option<&str>, value: Raw) -> Result<()> {
-        use napi::bindgen_prelude::FromNapiValue;
-        let info = call(self.env, self.view, self.undefined, &[value])?;
-        let owner = property(self.env, info, c"owner")?;
-        let node = number(self.env, property(self.env, info, c"node")?)? as u32;
-        let owner = unsafe { <&views::NativeView>::from_napi_value(self.env.raw(), owner) }?;
-        let (key, len) = key.map_or((ptr::null(), 0), |s| (s.as_ptr(), s.len()));
-        let mut error = ptr::null_mut();
-        if unsafe {
-            (self.builder.api.copy)(
-                self.builder.pointer,
-                parent,
-                key,
-                len,
-                owner.reference(node),
-                &mut error,
-            )
-        } != 0
-        {
-            return Err(take_error(self.env, error)?);
+        if value.kind == 7 || value.kind == 8 {
+            self.parents.push(child);
         }
         Ok(())
     }
-    fn enter(&mut self, value: Raw) -> Result<()> {
-        for ancestor in &self.stack {
-            let mut equal = false;
-            napi::check_status!(unsafe {
-                sys::napi_strict_equals(self.env.raw(), *ancestor, value, &mut equal)
-            })?;
-            if equal {
-                return Err(invalid(self.env, "cannot encode a cyclic input"));
-            }
-        }
-        // Data sits one level below the enclosing Lite3 message object.
-        if self.stack.len() >= 31 {
-            return Err(invalid(self.env, "input exceeds Lite3 nesting depth"));
-        }
-        self.stack.push(value);
-        Ok(())
-    }
-    fn members(&mut self, parent: usize, value: Raw, class: u32) -> Result<()> {
-        self.enter(value)?;
-        if class == 8 {
-            let length = keyed_property(self.env, value, self.length_key)?;
-            let mut numeric = ptr::null_mut();
-            napi::check_status!(unsafe {
-                sys::napi_coerce_to_number(self.env.raw(), length, &mut numeric)
-            })?;
-            let length = number(self.env, numeric)?
-                .clamp(0.0, 9007199254740991.0)
-                .floor() as u64;
-            for start in (0..length).step_by(16) {
-                let _scope = if length > 1 {
-                    Some(ValueScope::new(self.env)?)
-                } else {
-                    None
-                };
-                for index in start..(start + 16).min(length) {
-                    let mut child = ptr::null_mut();
-                    if let Ok(index) = u32::try_from(index) {
-                        napi::check_status!(unsafe {
-                            sys::napi_get_element(self.env.raw(), value, index, &mut child)
-                        })?;
-                    } else {
-                        let key = HookKey::Index(index).raw(self.env)?;
-                        napi::check_status!(unsafe {
-                            sys::napi_get_property(self.env.raw(), value, key, &mut child)
-                        })?;
-                    }
-                    self.value(parent, None, HookKey::Index(index), child, true)?;
-                }
-            }
-        } else {
-            let mut keys = ptr::null_mut();
-            napi::check_status!(unsafe {
-                sys::napi_get_all_property_names(
-                    self.env.raw(),
-                    value,
-                    sys::KeyCollectionMode::own_only,
-                    sys::KeyFilter::enumerable | sys::KeyFilter::skip_symbols,
-                    sys::KeyConversion::numbers_to_strings,
-                    &mut keys,
-                )
-            })?;
-            let mut count = 0;
-            napi::check_status!(unsafe {
-                sys::napi_get_array_length(self.env.raw(), keys, &mut count)
-            })?;
-            for start in (0..count).step_by(16) {
-                let _scope = if count > 1 {
-                    Some(ValueScope::new(self.env)?)
-                } else {
-                    None
-                };
-                for index in start..(start + 16).min(count) {
-                    let mut key = ptr::null_mut();
-                    let mut child = ptr::null_mut();
-                    napi::check_status!(unsafe {
-                        sys::napi_get_element(self.env.raw(), keys, index, &mut key)
-                    })?;
-                    napi::check_status!(unsafe {
-                        sys::napi_get_property(self.env.raw(), value, key, &mut child)
-                    })?;
-                    let name = text(self.env, key)?;
-                    self.value(parent, Some(&name), HookKey::Name(key), child, false)?;
-                }
-            }
-        }
-        self.stack.pop();
-        Ok(())
-    }
-    fn value(
-        &mut self,
-        parent: usize,
-        key: Option<&str>,
-        hook_key: HookKey,
-        value: Raw,
-        array: bool,
-    ) -> Result<()> {
-        let (value, class, ty) = self.normalize(value, hook_key)?;
-        if class == 13 {
-            return self.copy(parent, key, value);
-        }
-        let mut input = Input::default();
-        match ty {
-            Type::napi_undefined | Type::napi_function | Type::napi_symbol if !array => {
-                return Ok(());
-            }
-            Type::napi_undefined | Type::napi_function | Type::napi_symbol | Type::napi_null => {
-                input.kind = 1
-            }
-            Type::napi_boolean => {
-                input.kind = 2;
-                let mut b = false;
-                napi::check_status!(unsafe {
-                    sys::napi_get_value_bool(self.env.raw(), value, &mut b)
-                })?;
-                input.integer = i64::from(b);
-            }
-            Type::napi_bigint => {
-                input.kind = 3;
-                let mut lossless = false;
-                napi::check_status!(unsafe {
-                    sys::napi_get_value_bigint_int64(
-                        self.env.raw(),
-                        value,
-                        &mut input.integer,
-                        &mut lossless,
-                    )
-                })?;
-                if !lossless {
-                    return Err(invalid(self.env, "bigint must fit signed i64"));
-                }
-            }
-            Type::napi_number => {
-                let number = number(self.env, value)?;
-                if !number.is_finite() {
-                    return Err(invalid(self.env, "number must be finite"));
-                }
-                if number.abs() <= 9007199254740991.0
-                    && number.fract() == 0.0
-                    && !(number == 0.0 && number.is_sign_negative())
-                {
-                    input.kind = 3;
-                    input.integer = number as i64;
-                } else {
-                    input.kind = 4;
-                    input.real = number;
-                }
-            }
-            Type::napi_string => {
-                let string = text(self.env, value)?;
-                input.kind = 5;
-                input.bytes = string.as_ptr();
-                input.len = string.len();
-                self.put(parent, key, &input)?;
-                return Ok(());
-            }
-            Type::napi_object if class == 6 => {
-                let mut ty = sys::TypedarrayType::uint8_array;
-                let mut data = ptr::null_mut();
-                let mut buffer = ptr::null_mut();
-                let mut offset = 0;
-                napi::check_status!(unsafe {
-                    sys::napi_get_typedarray_info(
-                        self.env.raw(),
-                        value,
-                        &mut ty,
-                        &mut input.len,
-                        &mut data,
-                        &mut buffer,
-                        &mut offset,
-                    )
-                })?;
-                let mut ordinary = false;
-                napi::check_status!(unsafe {
-                    sys::napi_is_arraybuffer(self.env.raw(), buffer, &mut ordinary)
-                })?;
-                if !ordinary {
-                    return Err(invalid(
-                        self.env,
-                        "shared-backed bytes require an ordinary buffer copy",
-                    ));
-                }
-                input.kind = 6;
-                input.bytes = data.cast();
-            }
-            Type::napi_object => {
-                input.kind = class;
-                let child = self.put(parent, key, &input)?;
-                return self.members(child, value, class);
-            }
-            _ => return Err(invalid(self.env, "unsupported native input")),
-        }
-        self.put(parent, key, &input)?;
-        Ok(())
-    }
-    fn encode(mut self, value: JsUnknown) -> Result<OwnedBuilder> {
-        let (value, class, _) = self.normalize(unsafe { value.raw() }, HookKey::Root)?;
-        if class == 13 {
-            self.copy(usize::MAX, None, value)?;
-        } else if class == 7 {
-            self.members(self.data, value, class)?;
-        } else {
-            return Err(invalid(self.env, "message data must encode as an object"));
-        }
-        Ok(self.builder)
-    }
-}
-
-#[napi]
-pub struct NativeAppendTarget {
-    handle: Option<Arc<PoolHandle>>,
-    durability: u32,
 }
 impl NativeAppendTarget {
     pub(super) fn new(handle: Arc<PoolHandle>, durability: u32) -> Self {
         Self {
             handle: Some(handle),
             durability,
+            capture: None,
         }
     }
     fn consume(&mut self, env: Env) -> Result<(Arc<PoolHandle>, &'static Api)> {
@@ -633,7 +281,208 @@ impl NativeAppendTarget {
 impl NativeAppendTarget {
     #[napi]
     pub fn discard(&mut self) {
+        self.capture.take();
         self.handle.take();
+    }
+    fn begin(&mut self, env: Env, tags: Vec<String>) -> Result<()> {
+        if self.handle.is_none() || self.capture.is_some() {
+            return Err(pool_error(
+                env,
+                "Usage",
+                "append target is not ready for capture",
+            ));
+        }
+        let api =
+            api().ok_or_else(|| pool_error(env, "Usage", "native input support is unavailable"))?;
+        let spans: Vec<_> = tags
+            .iter()
+            .map(|tag| Text {
+                data: tag.as_ptr(),
+                len: tag.len(),
+            })
+            .collect();
+        let mut pointer = ptr::null_mut();
+        let mut data = 0;
+        let mut error = ptr::null_mut();
+        if unsafe {
+            (api.new)(
+                spans.as_ptr(),
+                spans.len(),
+                &mut pointer,
+                &mut data,
+                &mut error,
+            )
+        } != 0
+        {
+            return Err(take_error(env, error)?);
+        }
+        let mut parents = Vec::with_capacity(4);
+        parents.push(data);
+        self.capture = Some(Capture {
+            builder: OwnedBuilder { pointer, api },
+            parents,
+        });
+        Ok(())
+    }
+    #[napi]
+    pub fn write(
+        &mut self,
+        env: Env,
+        ops: JsUnknown,
+        numbers: JsUnknown,
+        strings: Vec<String>,
+        count: u32,
+        tags: Option<Vec<String>>,
+    ) -> Result<()> {
+        let (ops, len) = typed_span(env, unsafe { ops.raw() }, sys::TypedarrayType::uint32_array)?;
+        let (numbers, numeric_len) = typed_span(
+            env,
+            unsafe { numbers.raw() },
+            sys::TypedarrayType::float64_array,
+        )?;
+        let count = count as usize;
+        if count > 512 || len < count * 3 || numeric_len < count {
+            return Err(invalid(env, "invalid captured input batch"));
+        }
+        if self.capture.is_none() {
+            self.begin(
+                env,
+                tags.ok_or_else(|| pool_error(env, "Usage", "captured input tags are missing"))?,
+            )?;
+        }
+        let capture = self.capture.as_mut().expect("initialized capture");
+        for row in 0..count {
+            let command = unsafe { std::slice::from_raw_parts(ops.cast::<u32>().add(row * 3), 3) };
+            if command[0] == CAPTURE_END {
+                if capture.parents.len() <= 1 {
+                    return Err(invalid(env, "captured parent stack is empty"));
+                }
+                capture.parents.pop();
+                continue;
+            }
+            let key = if command[1] == u32::MAX {
+                None
+            } else {
+                Some(
+                    strings
+                        .get(command[1] as usize)
+                        .ok_or_else(|| invalid(env, "captured key is missing"))?
+                        .as_str(),
+                )
+            };
+            let mut value = Input {
+                kind: command[0],
+                ..Input::default()
+            };
+            match value.kind {
+                1 | 7 | 8 => (),
+                2 => value.integer = i64::from(command[2] != 0),
+                3 => {
+                    value.integer =
+                        unsafe { numbers.cast::<u64>().add(row).read_unaligned() } as i64
+                }
+                4 => {
+                    value.real =
+                        f64::from_bits(unsafe { numbers.cast::<u64>().add(row).read_unaligned() })
+                }
+                5 => {
+                    let text = strings
+                        .get(command[2] as usize)
+                        .ok_or_else(|| invalid(env, "captured text is missing"))?;
+                    value.bytes = text.as_ptr();
+                    value.len = text.len();
+                }
+                CAPTURE_NUMBER_I64 => {
+                    value.kind = 3;
+                    value.integer =
+                        f64::from_bits(unsafe { numbers.cast::<u64>().add(row).read_unaligned() })
+                            as i64;
+                }
+                _ => return Err(invalid(env, "invalid captured value kind")),
+            }
+            capture.put(env, key, &value)?;
+        }
+        Ok(())
+    }
+    #[napi]
+    pub fn write_bytes(&mut self, env: Env, key: Option<String>, bytes: JsUnknown) -> Result<()> {
+        let (data, len) = byte_span(env, unsafe { bytes.raw() })?;
+        let capture = self
+            .capture
+            .as_mut()
+            .ok_or_else(|| pool_error(env, "Usage", "append target has no capture"))?;
+        capture.put(
+            env,
+            key.as_deref(),
+            &Input {
+                kind: 6,
+                bytes: data,
+                len,
+                ..Input::default()
+            },
+        )
+    }
+    #[napi]
+    pub fn write_copy(
+        &mut self,
+        env: Env,
+        source: &views::NativeView,
+        node: u32,
+        key: Option<String>,
+        root: bool,
+    ) -> Result<()> {
+        let capture = self
+            .capture
+            .as_mut()
+            .ok_or_else(|| pool_error(env, "Usage", "append target has no capture"))?;
+        let parent = if root {
+            usize::MAX
+        } else {
+            *capture.parents.last().expect("root parent")
+        };
+        let (key, len) = key
+            .as_deref()
+            .map_or((ptr::null(), 0), |key| (key.as_ptr(), key.len()));
+        let mut error = ptr::null_mut();
+        if unsafe {
+            (capture.builder.api.copy)(
+                capture.builder.pointer,
+                parent,
+                key,
+                len,
+                source.reference(node),
+                &mut error,
+            )
+        } != 0
+        {
+            return Err(take_error(env, error)?);
+        }
+        Ok(())
+    }
+    #[napi]
+    pub fn finish(
+        &mut self,
+        env: Env,
+        ops: JsUnknown,
+        numbers: JsUnknown,
+        strings: Vec<String>,
+        count: u32,
+        tags: Option<Vec<String>>,
+    ) -> Result<AsyncTask<AppendTask>> {
+        self.write(env, ops, numbers, strings, count, tags)?;
+        let capture = self
+            .capture
+            .take()
+            .ok_or_else(|| pool_error(env, "Usage", "append target has no capture"))?;
+        if capture.parents.len() != 1 {
+            return Err(invalid(env, "captured input has unclosed parents"));
+        }
+        let (handle, _) = self.consume(env)?;
+        Ok(AsyncTask::new(AppendTask {
+            handle,
+            input: AppendInput::Encoded(capture.builder),
+            durability: self.durability,
+        }))
     }
     #[napi]
     pub fn copy(
@@ -682,22 +531,6 @@ impl NativeAppendTarget {
         Ok(AsyncTask::new(AppendTask {
             handle,
             input: AppendInput::Forwarded(Some(source.retained())),
-            durability: self.durability,
-        }))
-    }
-    #[napi]
-    pub fn encode(
-        &mut self,
-        env: Env,
-        value: JsUnknown,
-        tags: Vec<String>,
-        helpers: JsObject,
-    ) -> Result<AsyncTask<AppendTask>> {
-        let (handle, api) = self.consume(env)?;
-        let builder = Encoder::new(env, &tags, helpers, api)?.encode(value)?;
-        Ok(AsyncTask::new(AppendTask {
-            handle,
-            input: AppendInput::Encoded(builder),
             durability: self.durability,
         }))
     }
