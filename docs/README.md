@@ -34,6 +34,8 @@ Start with the task you want to do:
   local libraries, command-line tools, HTTP, and MCP in Plasmite 1.0.0.
 - [1.0 performance measurements](performance/1.0-release.md): measured writer
   improvements, small-read costs and consumer latency on one Mac.
+- [Language interfaces and performance](performance/language-interfaces.md):
+  read when choosing owned views, native copies or explicit batches and checking their measured tradeoffs.
 - [Native wake-up investigation](performance/language-boundary-results/wakeups/README.md):
   read when checking cross-process shared-address waits and the remaining integration work.
 - [Borrowed append locking](performance/language-boundary-results/append-descriptors/README.md):

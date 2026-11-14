@@ -17,6 +17,7 @@ docs/
 ├── performance/1.0-release.md                  — Read when assessing 1.0 read costs, writer contention, or benchmark results
 ├── performance/windows-access-1.0.md          — Read when comparing local, HTTP, and MCP access costs on Windows
 ├── performance/consumer-latency.rs             — Read when reproducing the full-consumer latency measurements
+├── performance/language-interfaces.md          — Read when choosing owned views, native copies or explicit batches from measured complete paths
 ├── performance/language-boundary-results/    — Read when reproducing per-binding ownership and conversion measurements
 │   ├── owned-views/README.md                 — Read when comparing owned views, local/UDP streams, forwarding, and runtime costs
 │   ├── owned-views/python/README.md          — Read when comparing Python views, native input, owned UDP streams, or wheel coverage
