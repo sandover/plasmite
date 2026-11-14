@@ -24,7 +24,10 @@
     "native/linux-arm64/**",
     "native/darwin-x64/**",
     "native/darwin-arm64/**",
-    "native/win32-x64/**"
+    "native/win32-x64/**",
+    "portable.js",
+    "portable/plasmite_core.wasm",
+    "portable/manifest.json"
   ],
   "keywords": [
     "ipc",
@@ -46,8 +49,11 @@
     "check:type-surface": "node scripts/check_type_surface.js",
     "test": "npm run build && npm run prepare-native && npm run check:type-surface && node --test test/*.test.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "prepack": "npm run build && npm run prepare-native",
-    "prepublishOnly": "npm run typecheck"
+    "prepack": "npm run check:portable && npm run build && npm run prepare-native",
+    "prepublishOnly": "npm run typecheck",
+    "build:portable": "node scripts/build_portable.js",
+    "check:portable": "node scripts/build_portable.js --verify",
+    "test:portable": "npm run check:portable && node --test test/portable-views.test.js test/portable-package.test.js"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0",

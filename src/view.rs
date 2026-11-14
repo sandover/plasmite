@@ -1,8 +1,12 @@
 //! Immutable, aligned Lite3 snapshots and borrowed node references.
 #![allow(clippy::result_large_err)]
+#[path = "view/de.rs"]
 mod de;
+#[path = "view/json.rs"]
 mod json;
+#[path = "view/owned.rs"]
 mod owned;
+#[path = "view/ser.rs"]
 mod ser;
 use crate::core::error::{Error, ErrorKind};
 use crate::core::lite3::{JsonValue, Lite3DocRef, sys};

@@ -1,6 +1,9 @@
 //! Native runtime walkers construct one checked encoding through narrow C calls.
 #![allow(clippy::result_large_err)] // Keep the shared structured Error ABI.
-use crate::abi::{borrow_pool, fail, plsm_error, plsm_pool};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::abi::{borrow_pool, plsm_pool};
+use crate::abi::{fail, plsm_error};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::abi_views::{plsm_message_view, publish};
 use crate::core::error::{Error, ErrorKind};
 use crate::core::lite3::{builder::Builder, sys};
@@ -9,18 +12,28 @@ use crate::core::lite3::{builder::Builder, sys};
 pub struct plsm_builder {
     value: Option<Builder>,
 }
+impl plsm_builder {
+    pub(crate) fn take_view(&mut self) -> Result<crate::view::MessageView, Error> {
+        let builder = self
+            .value
+            .take()
+            .ok_or_else(|| usage("builder already finished"))?;
+        // Only checked puts and checked subtree copies can mutate this builder.
+        unsafe { builder.finish_proven() }
+    }
+}
 #[repr(C)]
 pub struct Text {
-    data: *const u8,
-    len: usize,
+    pub(crate) data: *const u8,
+    pub(crate) len: usize,
 }
 #[repr(C)]
 pub struct Input {
-    kind: u32,
-    integer: i64,
-    real: f64,
-    bytes: *const u8,
-    len: usize,
+    pub(crate) kind: u32,
+    pub(crate) integer: i64,
+    pub(crate) real: f64,
+    pub(crate) bytes: *const u8,
+    pub(crate) len: usize,
 }
 fn usage(message: &str) -> Error {
     Error::new(ErrorKind::Usage).with_message(message)
@@ -218,6 +231,7 @@ pub extern "C" fn plsm_builder_copy_value(
         err,
     )
 }
+#[cfg(not(target_arch = "wasm32"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn plsm_pool_append_builder(
     pool: *mut plsm_pool,
@@ -240,14 +254,7 @@ pub extern "C" fn plsm_pool_append_builder(
                 1 => crate::api::Durability::Flush,
                 _ => return Err(usage("invalid durability")),
             };
-            let builder = unsafe { &mut *builder }
-                .value
-                .take()
-                .ok_or_else(|| usage("builder already finished"))?;
-            // Constructor fixes envelope shape; put validates text/numbers and
-            // opaque handles prove depth. Subtree copies use checked owners and
-            // the real destination depth. A failed native write poisons sealing.
-            let mut view = unsafe { builder.finish_proven() }?;
+            let mut view = unsafe { &mut *builder }.take_view()?;
             let time = crate::api::now_ns()?;
             view.seq = pool.pool.append_with_options(
                 view.bytes(),
