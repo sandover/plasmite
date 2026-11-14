@@ -1,0 +1,359 @@
+{
+  "profile": "release",
+  "coreSha256": "6a08cb2f48220adfbc3894d5108c097cd7ed60eb8300636f4a4f163f8b9280cc",
+  "method": "48 processes: three alternating JSON/owned orders per mode and count, 100 records per handle. Table medians use complete per-process lanes. No builds or competing tests during timing.",
+  "rows": [
+    {
+      "mode": "local",
+      "streams": 1,
+      "result": "json",
+      "processes": 3,
+      "saturatedWallUs": 5093.75,
+      "saturatedCpuUs": 6073,
+      "pacedP95Us": 245.083,
+      "fsProbeUs": 907.291,
+      "pendingThreads": [
+        {
+          "count": 17
+        },
+        {
+          "count": 17
+        },
+        {
+          "count": 17
+        }
+      ],
+      "pendingRssBytes": 18287160
+    },
+    {
+      "mode": "local",
+      "streams": 1,
+      "result": "owned",
+      "processes": 3,
+      "saturatedWallUs": 8097.083,
+      "saturatedCpuUs": 7238,
+      "pacedP95Us": 280.166,
+      "fsProbeUs": 711.958,
+      "pendingThreads": [
+        {
+          "count": 17
+        },
+        {
+          "count": 17
+        },
+        {
+          "count": 17
+        }
+      ],
+      "pendingRssBytes": 18336288
+    },
+    {
+      "mode": "local",
+      "streams": 4,
+      "result": "json",
+      "processes": 3,
+      "saturatedWallUs": 13055.416,
+      "saturatedCpuUs": 21122,
+      "pacedP95Us": 287.125,
+      "fsProbeUs": 816.75,
+      "pendingThreads": [
+        {
+          "count": 20
+        },
+        {
+          "count": 20
+        },
+        {
+          "count": 20
+        }
+      ],
+      "pendingRssBytes": 18582048
+    },
+    {
+      "mode": "local",
+      "streams": 4,
+      "result": "owned",
+      "processes": 3,
+      "saturatedWallUs": 11266.291,
+      "saturatedCpuUs": 17217,
+      "pacedP95Us": 334.25,
+      "fsProbeUs": 782.667,
+      "pendingThreads": [
+        {
+          "count": 20
+        },
+        {
+          "count": 20
+        },
+        {
+          "count": 20
+        }
+      ],
+      "pendingRssBytes": 18385464
+    },
+    {
+      "mode": "local",
+      "streams": 32,
+      "result": "json",
+      "processes": 3,
+      "saturatedWallUs": 45712.084,
+      "saturatedCpuUs": 77054,
+      "pacedP95Us": 990.917,
+      "fsProbeUs": 712.625,
+      "pendingThreads": [
+        {
+          "count": 48
+        },
+        {
+          "count": 48
+        },
+        {
+          "count": 48
+        }
+      ],
+      "pendingRssBytes": 19319448
+    },
+    {
+      "mode": "local",
+      "streams": 32,
+      "result": "owned",
+      "processes": 3,
+      "saturatedWallUs": 50511.75,
+      "saturatedCpuUs": 85419,
+      "pacedP95Us": 1294.25,
+      "fsProbeUs": 847,
+      "pendingThreads": [
+        {
+          "count": 48
+        },
+        {
+          "count": 48
+        },
+        {
+          "count": 48
+        }
+      ],
+      "pendingRssBytes": 19122840
+    },
+    {
+      "mode": "local",
+      "streams": 128,
+      "result": "json",
+      "processes": 3,
+      "saturatedWallUs": 131150.375,
+      "saturatedCpuUs": 303275,
+      "pacedP95Us": 2717.583,
+      "fsProbeUs": 759.667,
+      "pendingThreads": [
+        {
+          "count": 144
+        },
+        {
+          "count": 144
+        },
+        {
+          "count": 144
+        }
+      ],
+      "pendingRssBytes": 21466088
+    },
+    {
+      "mode": "local",
+      "streams": 128,
+      "result": "owned",
+      "processes": 3,
+      "saturatedWallUs": 157014.959,
+      "saturatedCpuUs": 268982,
+      "pacedP95Us": 2603.667,
+      "fsProbeUs": 753.083,
+      "pendingThreads": [
+        {
+          "count": 144
+        },
+        {
+          "count": 144
+        },
+        {
+          "count": 144
+        }
+      ],
+      "pendingRssBytes": 21629928
+    },
+    {
+      "mode": "udp",
+      "streams": 1,
+      "result": "json",
+      "processes": 3,
+      "saturatedWallUs": 9271.083,
+      "saturatedCpuUs": 8363,
+      "pacedP95Us": 381.208,
+      "fsProbeUs": 734.75,
+      "pendingThreads": [
+        {
+          "count": 17
+        },
+        {
+          "count": 17
+        },
+        {
+          "count": 17
+        }
+      ],
+      "pendingRssBytes": 18909680
+    },
+    {
+      "mode": "udp",
+      "streams": 1,
+      "result": "owned",
+      "processes": 3,
+      "saturatedWallUs": 6374.416,
+      "saturatedCpuUs": 7624,
+      "pacedP95Us": 384.541,
+      "fsProbeUs": 738.875,
+      "pendingThreads": [
+        {
+          "count": 17
+        },
+        {
+          "count": 17
+        },
+        {
+          "count": 17
+        }
+      ],
+      "pendingRssBytes": 18876912
+    },
+    {
+      "mode": "udp",
+      "streams": 4,
+      "result": "json",
+      "processes": 3,
+      "saturatedWallUs": 14917.75,
+      "saturatedCpuUs": 20394,
+      "pacedP95Us": 424.125,
+      "fsProbeUs": 713.25,
+      "pendingThreads": [
+        {
+          "count": 20
+        },
+        {
+          "count": 20
+        },
+        {
+          "count": 20
+        }
+      ],
+      "pendingRssBytes": 19450472
+    },
+    {
+      "mode": "udp",
+      "streams": 4,
+      "result": "owned",
+      "processes": 3,
+      "saturatedWallUs": 16370.166,
+      "saturatedCpuUs": 23617,
+      "pacedP95Us": 393.583,
+      "fsProbeUs": 766.709,
+      "pendingThreads": [
+        {
+          "count": 20
+        },
+        {
+          "count": 20
+        },
+        {
+          "count": 20
+        }
+      ],
+      "pendingRssBytes": 19417584
+    },
+    {
+      "mode": "udp",
+      "streams": 32,
+      "result": "json",
+      "processes": 3,
+      "saturatedWallUs": 107402.625,
+      "saturatedCpuUs": 148453,
+      "pacedP95Us": 1683.542,
+      "fsProbeUs": 749.792,
+      "pendingThreads": [
+        {
+          "count": 48
+        },
+        {
+          "count": 48
+        },
+        {
+          "count": 48
+        }
+      ],
+      "pendingRssBytes": 22022784
+    },
+    {
+      "mode": "udp",
+      "streams": 32,
+      "result": "owned",
+      "processes": 3,
+      "saturatedWallUs": 127949.083,
+      "saturatedCpuUs": 156860,
+      "pacedP95Us": 1718.417,
+      "fsProbeUs": 754.25,
+      "pendingThreads": [
+        {
+          "count": 48
+        },
+        {
+          "count": 48
+        },
+        {
+          "count": 48
+        }
+      ],
+      "pendingRssBytes": 22268544
+    },
+    {
+      "mode": "udp",
+      "streams": 128,
+      "result": "json",
+      "processes": 3,
+      "saturatedWallUs": 605068.166,
+      "saturatedCpuUs": 352189,
+      "pacedP95Us": 3840.833,
+      "fsProbeUs": 767,
+      "pendingThreads": [
+        {
+          "count": 144
+        },
+        {
+          "count": 144
+        },
+        {
+          "count": 144
+        }
+      ],
+      "pendingRssBytes": 31001336
+    },
+    {
+      "mode": "udp",
+      "streams": 128,
+      "result": "owned",
+      "processes": 3,
+      "saturatedWallUs": 599901.542,
+      "saturatedCpuUs": 432079,
+      "pacedP95Us": 4003.291,
+      "fsProbeUs": 799.916,
+      "pendingThreads": [
+        {
+          "count": 144
+        },
+        {
+          "count": 144
+        },
+        {
+          "count": 144
+        }
+      ],
+      "pendingRssBytes": 30935680
+    }
+  ]
+}

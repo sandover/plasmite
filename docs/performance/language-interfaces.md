@@ -4,7 +4,7 @@ Owned views help when an application reads a few fields, retains encoded data
 or forwards a message. They keep Lite3 and its validation result instead of
 rebuilding a whole native object tree at each language boundary. An application
 that needs every field as ordinary language objects still pays for that copy.
-Existing message APIs remain available; views add a choice, not a new default.
+Existing message APIs remain available alongside the new view methods.
 
 ## Where the work went
 
@@ -26,6 +26,14 @@ Explicit batches amortize stream locks, calls and result handling. Python's
 `next_batch` waits for one accepted record, then takes available records within
 count and encoded-byte bounds. It does not wait to fill the batch. Ordinary
 iteration stays one record at a time; batching requires an application choice.
+
+Node keeps waiting off the runtime's shared filesystem/DNS workers. Local streams
+check for ready records on four private workers and park empty reads per handle;
+UDP waits directly on its socket. This keeps an idle reader from delaying a busy
+one. In the 128-reader alternative comparison, the rare active local reader's
+median wait falls from about 54 ms to 0.14 ms. The
+[integrated scheduling results](language-boundary-results/node-views/README.md#integrated-scheduling-checkpoint)
+also record the thread/memory cost and slower tiny-message view cases.
 
 ## Matched results
 
@@ -77,7 +85,7 @@ copy; Python compatibility buffers also require extra encoded copies. Larger
 batches retain more messages at once. Lite3 can occupy more bytes than compact
 JSON, so fewer conversions do not guarantee less wire traffic or CPU. HTTP
 binary tails keep their terminal-error limits, and UDP views keep arrival-order,
-duplicate and late-packet behavior. Views change representation, not delivery.
+duplicate and late-packet behavior. Views preserve the existing delivery rules.
 See the [migration guide](../record/upgrading-next-major.md#keep-encoded-data-with-owned-views)
 for exact-number rules, copy boundaries, cleanup and transport support.
 

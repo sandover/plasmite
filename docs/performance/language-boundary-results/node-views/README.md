@@ -494,5 +494,27 @@ and cold observations. Evidence (outside Git) contains the
 28 raw runs, exact package hashes and measured source overlay. This records a
 rejected default; it does not change the production input path.
 
+## Integrated scheduling checkpoint
+
+A release addon from the integrated source passes 48 fresh-process runs: local
+and UDP, one/four/32/128 handles, JSON and owned results, three alternating orders,
+100 records per handle. Every delivered value and sequence check passes. The
+[summary](integrated-scheduling-summary.json) and
+raw runs, exact sources and hashes (outside Git) retain
+the complete comparison. Both result paths use the same frozen core library.
+
+These tiny records expose wrapper costs. At 128 local handles, JSON takes
+131 ms elapsed and 303 ms process CPU; owned selected reads take 157 and 269 ms.
+At 128 UDP handles, JSON takes 605 ms elapsed and 352 ms consumer CPU; owned
+reads take 600 and 432 ms. UDP timing excludes the server's CPU. These results
+support no claim that views always beat full-message JSON parsing.
+
+Filesystem probes finish in about 0.7–0.9 ms while native reads wait. Pending
+128-handle runs use 144 threads and roughly 20.5 MiB resident memory locally or
+29.5 MiB for UDP. Thread samples and resident memory describe this harness,
+including its zero-timeout probes and runtime setup. The earlier alternative
+matrix isolates the scheduling decision and rare-active-reader latency; this
+checkpoint verifies the combined implementation and owned-result costs.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.
