@@ -1,0 +1,68 @@
+{
+  "source": "tmp/central-checkpoint/final-interfaces/go",
+  "child_comparison": {
+    "repeats": 7,
+    "iterations_per_lane": 2000,
+    "before_executable": "tmp/go-owned-stream-checkpoint/local.test",
+    "after_executable": "tmp/go-child-checkpoint/local.test"
+  },
+  "streams": {
+    "repeats": 3,
+    "iterations_per_lane": 500,
+    "local_executable": "tmp/go-child-checkpoint/local.test",
+    "udp_executable": "tmp/go-child-checkpoint/udp.test"
+  },
+  "library_policy": "Every process used DYLD_LIBRARY_PATH=tmp/go-owned-stream-checkpoint/lib. No Rust/C source/library change between Go variants. Parent central runner confirmed executable paths.",
+  "order": "Baseline/candidate paired processes alternate; fixture/lane order uses PLASMITE_GO_REVERSE=0/1 alternately.",
+  "artifacts": {
+    "baseline_local": {
+      "path": "tmp/go-owned-stream-checkpoint/local.test",
+      "sha256": "94ad82954ab8b5dcf174c3d61c4d9cd42257ae0624c3cf512fa9569507300647"
+    },
+    "baseline_udp": {
+      "path": "tmp/go-owned-stream-checkpoint/udp.test",
+      "sha256": "3856ae78cd3abdd65f5a43c153b9e8c985a3c4bd9d19027986cd4dc83a1545de"
+    },
+    "child_local": {
+      "path": "tmp/go-child-checkpoint/local.test",
+      "sha256": "28a825b638666c9932bd5dda02013412ef8958928f3fa0cb5364e09b3b1c9119"
+    },
+    "child_udp": {
+      "path": "tmp/go-child-checkpoint/udp.test",
+      "sha256": "a0678dcc04f8f59af61e899adf8af067fda9070c8a7b1359216631c18b3ae472"
+    },
+    "shared_library": {
+      "path": "tmp/go-owned-stream-checkpoint/lib/libplasmite.dylib",
+      "sha256": "930d0386a73e0ba8fc9a49a25aaa3a8780b0677b7e54effa1141832d06f6d619"
+    }
+  },
+  "source_records": [
+    "../manifest.json",
+    "../child-manifest.json",
+    "../source.tar.gz",
+    "../child-source.tar.gz"
+  ],
+  "raw_sha256": {
+    "BenchmarkOwnedStreams-0.txt": "b5c1d3619c4ca72d9b23019454df6e1b632d6354b4cfd43620ddcebd15e70e6f",
+    "BenchmarkOwnedStreams-1.txt": "3bac923eceea6384a70d230478fcc70dea4b55ec6f6b420657b63a873789af49",
+    "BenchmarkOwnedStreams-2.txt": "7ce3c2028c57ed9d52cad5afa4b74dc3fcff88564328c7fc58b3c73b9a92efa1",
+    "BenchmarkOwnedUDP-0.txt": "d85b4e516b0f49ea66ee16bb0a40777d0e8d8469ce96a9e571459033f72ffce0",
+    "BenchmarkOwnedUDP-1.txt": "7fe3b9db080d69941e5621103cf573db6fbc076497cc9f063908e9a02d5e7f80",
+    "BenchmarkOwnedUDP-2.txt": "d9bea7370d394dfe13749ab7dad6bde9bd64c2f944fa0b6bd57ebdf120abc247",
+    "baseline-0.txt": "8778316ebbcfe29e7e57051acb27408350fef6f1ae0b52ca52483133fc838f75",
+    "baseline-1.txt": "9dba007fbc74d6b6c04ecda48b9a45aeb2920d7d50600bb020cd173f3fbde692",
+    "baseline-2.txt": "ac622064e7242d9631ddb11e920d6f5b8c2db1ad8d4be51d1127b1c6cf53f4da",
+    "baseline-3.txt": "007610eb69284b9d7f7a2745784a0407b165780f93014bd11e994e2cf7d1d963",
+    "baseline-4.txt": "c7fa0592927a4a1728867d56821584f5920cd49284e9f835b1dd5fe0f8d32be8",
+    "baseline-5.txt": "954a17e4ce5308bacfab17aeddd116f16e3341509e91a16f3c3665be6e51d164",
+    "baseline-6.txt": "581e01e784cb864b90805c8cb9939db5e1e9c9ed31f11874e908e0dd09b3aa86",
+    "child-fixed-0.txt": "be3c4b16a3536eafc01747db18d203e9b54c29ebdcbc1b5af59824eb09df8855",
+    "child-fixed-1.txt": "dde11bef32eff71dbc41134237d9898b15e47d07c8c8a86e50d3260d43a65eaa",
+    "child-fixed-2.txt": "26eea4d4b038d969496d7332f53ac2899438e7779f53c4a32b8946afdfd289f8",
+    "child-fixed-3.txt": "1674620a3a05665ff6fdcaa3e68f5eeaa42e2b5a041ef047e3cad3ce48a484b0",
+    "child-fixed-4.txt": "bc90afd01537e97157b021915cc513b7964e92fb939591e9dc6da889b559bc5b",
+    "child-fixed-5.txt": "2c59b68a903427d1b8e011cfe3f70673ebdef357f588bce3efa18af07f3f64cb",
+    "child-fixed-6.txt": "89031b4c3df8d145183695a841e975ab50f076fa826d4185ef60141ef07fbb78"
+  },
+  "validation": "All20 processes printPASS; harness checks sequences, full converted data, raw bytes and forwarded results. Parent ran timed processes after other builds/tests stopped. All native call/allocation counts unchanged across65 child-binding lanes; selected result bytes increase80 for2 values."
+}

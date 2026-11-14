@@ -1,0 +1,50 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/sandover/plasmite/bindings/go/udp
+cpu: Apple M5 Pro
+BenchmarkOwnedUDP/small/raw-15     	     500	     36501 ns/op	         2.000 cgo/op	     496 B/op	       2 allocs/op
+BenchmarkOwnedUDP/small/view_selected-15         	     500	     27810 ns/op	         5.000 cgo/op	     656 B/op	       5 allocs/op
+BenchmarkOwnedUDP/small/view_full-15             	     500	     18007 ns/op	         6.000 cgo/op	     668 B/op	       7 allocs/op
+BenchmarkOwnedUDP/small/json_selected-15         	     500	     20758 ns/op	         4.000 cgo/op	     870 B/op	       7 allocs/op
+BenchmarkOwnedUDP/small/json_full-15             	     500	     20786 ns/op	         4.000 cgo/op	     942 B/op	       9 allocs/op
+BenchmarkOwnedUDP/small/raw_forward-15           	     500	     22448 ns/op	         3.000 cgo/op	     512 B/op	       4 allocs/op
+BenchmarkOwnedUDP/small/view_forward-15          	     500	     24797 ns/op	         5.000 cgo/op	     636 B/op	       5 allocs/op
+BenchmarkOwnedUDP/small/view_copy-15             	     500	     24399 ns/op	         6.000 cgo/op	    1244 B/op	       8 allocs/op
+BenchmarkOwnedUDP/small/json_forward-15          	     500	     28694 ns/op	         6.000 cgo/op	    1448 B/op	      10 allocs/op
+BenchmarkOwnedUDP/wide/raw-15                    	     500	     20205 ns/op	         2.000 cgo/op	   10928 B/op	       2 allocs/op
+BenchmarkOwnedUDP/wide/view_selected-15          	     500	     20130 ns/op	         5.000 cgo/op	   11088 B/op	       5 allocs/op
+BenchmarkOwnedUDP/wide/view_full-15              	     500	     57676 ns/op	         6.000 cgo/op	   39579 B/op	     621 allocs/op
+BenchmarkOwnedUDP/wide/json_selected-15          	     500	     59736 ns/op	         4.000 cgo/op	   17577 B/op	       7 allocs/op
+BenchmarkOwnedUDP/wide/json_full-15              	     500	     81614 ns/op	         4.000 cgo/op	   42956 B/op	     623 allocs/op
+BenchmarkOwnedUDP/wide/raw_forward-15            	     500	     34099 ns/op	         3.000 cgo/op	   10944 B/op	       4 allocs/op
+BenchmarkOwnedUDP/wide/view_forward-15           	     500	     34009 ns/op	         5.000 cgo/op	   11068 B/op	       5 allocs/op
+BenchmarkOwnedUDP/wide/view_copy-15              	     500	     46653 ns/op	         6.000 cgo/op	   22108 B/op	       8 allocs/op
+BenchmarkOwnedUDP/wide/json_forward-15           	     500	     70901 ns/op	         6.000 cgo/op	   28606 B/op	      10 allocs/op
+BenchmarkOwnedUDP/long/raw-15                    	     500	     20175 ns/op	         2.000 cgo/op	   32827 B/op	       2 allocs/op
+BenchmarkOwnedUDP/long/view_selected-15          	     500	     20204 ns/op	         5.000 cgo/op	   32976 B/op	       5 allocs/op
+BenchmarkOwnedUDP/long/view_full-15              	     500	     60726 ns/op	         6.000 cgo/op	   98654 B/op	       8 allocs/op
+BenchmarkOwnedUDP/long/json_selected-15          	     500	     90721 ns/op	         4.000 cgo/op	   98715 B/op	       7 allocs/op
+BenchmarkOwnedUDP/long/json_full-15              	     500	     94139 ns/op	         4.000 cgo/op	  131522 B/op	      10 allocs/op
+BenchmarkOwnedUDP/long/raw_forward-15            	     500	     34196 ns/op	         3.000 cgo/op	   32832 B/op	       4 allocs/op
+BenchmarkOwnedUDP/long/view_forward-15           	     500	     32565 ns/op	         5.000 cgo/op	   32956 B/op	       5 allocs/op
+BenchmarkOwnedUDP/long/view_copy-15              	     500	     37432 ns/op	         6.000 cgo/op	   65885 B/op	       8 allocs/op
+BenchmarkOwnedUDP/long/json_forward-15           	     500	    115697 ns/op	         6.000 cgo/op	  131657 B/op	      10 allocs/op
+BenchmarkOwnedUDP/array/raw-15                   	     500	     25997 ns/op	         2.000 cgo/op	   49201 B/op	       2 allocs/op
+BenchmarkOwnedUDP/array/view_selected-15         	     500	     31939 ns/op	         5.000 cgo/op	   49360 B/op	       5 allocs/op
+BenchmarkOwnedUDP/array/view_full-15             	     500	    109759 ns/op	         6.000 cgo/op	  104703 B/op	    2018 allocs/op
+BenchmarkOwnedUDP/array/json_selected-15         	     500	     81813 ns/op	         4.000 cgo/op	   57688 B/op	       7 allocs/op
+BenchmarkOwnedUDP/array/json_full-15             	     500	    143375 ns/op	         4.000 cgo/op	  108992 B/op	    2020 allocs/op
+BenchmarkOwnedUDP/array/raw_forward-15           	     500	     45706 ns/op	         3.000 cgo/op	   49216 B/op	       4 allocs/op
+BenchmarkOwnedUDP/array/view_forward-15          	     500	     37647 ns/op	         5.000 cgo/op	   49340 B/op	       5 allocs/op
+BenchmarkOwnedUDP/array/view_copy-15             	     500	     79385 ns/op	         6.000 cgo/op	   98654 B/op	       8 allocs/op
+BenchmarkOwnedUDP/array/json_forward-15          	     500	    115841 ns/op	         6.000 cgo/op	  107119 B/op	      10 allocs/op
+BenchmarkOwnedUDP/bytes/raw-15                   	     500	     37747 ns/op	         2.000 cgo/op	   32816 B/op	       2 allocs/op
+BenchmarkOwnedUDP/bytes/view_selected-15         	     500	     22064 ns/op	         5.000 cgo/op	   32976 B/op	       5 allocs/op
+BenchmarkOwnedUDP/bytes/view_full-15             	     500	     84920 ns/op	         6.000 cgo/op	  114977 B/op	       8 allocs/op
+BenchmarkOwnedUDP/bytes/json_selected-15         	     500	    149927 ns/op	         4.000 cgo/op	  131549 B/op	       7 allocs/op
+BenchmarkOwnedUDP/bytes/json_full-15             	     500	    161491 ns/op	         4.000 cgo/op	  164378 B/op	      10 allocs/op
+BenchmarkOwnedUDP/bytes/raw_forward-15           	     500	     93202 ns/op	         3.000 cgo/op	   32832 B/op	       4 allocs/op
+BenchmarkOwnedUDP/bytes/view_forward-15          	     500	     31737 ns/op	         5.000 cgo/op	   32956 B/op	       5 allocs/op
+BenchmarkOwnedUDP/bytes/view_copy-15             	     500	     36397 ns/op	         6.000 cgo/op	   65885 B/op	       8 allocs/op
+BenchmarkOwnedUDP/bytes/json_forward-15          	     500	    168334 ns/op	         6.000 cgo/op	  180981 B/op	      10 allocs/op
+PASS

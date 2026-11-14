@@ -1,0 +1,50 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/sandover/plasmite/bindings/go/local
+cpu: Apple M5 Pro
+BenchmarkOwnedStreams/small/raw-15     	     500	       973.0 ns/op	         2.012 cgo/op	     552 B/op	       4 allocs/op
+BenchmarkOwnedStreams/small/view_selected-15         	     500	      1458 ns/op	         4.012 cgo/op	     632 B/op	       4 allocs/op
+BenchmarkOwnedStreams/small/view_full-15             	     500	      1787 ns/op	         5.012 cgo/op	     655 B/op	       6 allocs/op
+BenchmarkOwnedStreams/small/json_selected-15         	     500	      2003 ns/op	         2.012 cgo/op	     406 B/op	       7 allocs/op
+BenchmarkOwnedStreams/small/json_full-15             	     500	      2097 ns/op	         2.012 cgo/op	     490 B/op	       9 allocs/op
+BenchmarkOwnedStreams/small/raw_forward-15           	     500	      3627 ns/op	         3.012 cgo/op	     568 B/op	       6 allocs/op
+BenchmarkOwnedStreams/small/view_forward-15          	     500	      3814 ns/op	         4.012 cgo/op	     612 B/op	       4 allocs/op
+BenchmarkOwnedStreams/small/view_copy-15             	     500	      4320 ns/op	         5.012 cgo/op	    1220 B/op	       7 allocs/op
+BenchmarkOwnedStreams/small/json_forward-15          	     500	      5172 ns/op	         4.012 cgo/op	    1004 B/op	      10 allocs/op
+BenchmarkOwnedStreams/wide/raw-15                    	     500	      2273 ns/op	         2.012 cgo/op	   10984 B/op	       4 allocs/op
+BenchmarkOwnedStreams/wide/view_selected-15          	     500	      5614 ns/op	         4.012 cgo/op	   11064 B/op	       4 allocs/op
+BenchmarkOwnedStreams/wide/view_full-15              	     500	     37726 ns/op	         5.012 cgo/op	   39556 B/op	     620 allocs/op
+BenchmarkOwnedStreams/wide/json_selected-15          	     500	     17576 ns/op	         2.012 cgo/op	    6672 B/op	       7 allocs/op
+BenchmarkOwnedStreams/wide/json_full-15              	     500	     39672 ns/op	         2.012 cgo/op	   32041 B/op	     623 allocs/op
+BenchmarkOwnedStreams/wide/raw_forward-15            	     500	      9862 ns/op	         3.012 cgo/op	   11000 B/op	       6 allocs/op
+BenchmarkOwnedStreams/wide/view_forward-15           	     500	     11344 ns/op	         4.012 cgo/op	   11045 B/op	       4 allocs/op
+BenchmarkOwnedStreams/wide/view_copy-15              	     500	     20904 ns/op	         5.012 cgo/op	   22085 B/op	       7 allocs/op
+BenchmarkOwnedStreams/wide/json_forward-15           	     500	     27105 ns/op	         4.012 cgo/op	   17699 B/op	      10 allocs/op
+BenchmarkOwnedStreams/long/raw-15                    	     500	      4140 ns/op	         2.012 cgo/op	   32872 B/op	       4 allocs/op
+BenchmarkOwnedStreams/long/view_selected-15          	     500	      6425 ns/op	         4.012 cgo/op	   32952 B/op	       4 allocs/op
+BenchmarkOwnedStreams/long/view_full-15              	     500	     35606 ns/op	         5.012 cgo/op	   98600 B/op	       7 allocs/op
+BenchmarkOwnedStreams/long/json_selected-15          	     500	     52499 ns/op	         2.012 cgo/op	   65860 B/op	       7 allocs/op
+BenchmarkOwnedStreams/long/json_full-15              	     500	     53766 ns/op	         2.012 cgo/op	   98753 B/op	      10 allocs/op
+BenchmarkOwnedStreams/long/raw_forward-15            	     500	     17748 ns/op	         3.012 cgo/op	   32888 B/op	       6 allocs/op
+BenchmarkOwnedStreams/long/view_forward-15           	     500	     17304 ns/op	         4.012 cgo/op	   32932 B/op	       4 allocs/op
+BenchmarkOwnedStreams/long/view_copy-15              	     500	     22968 ns/op	         5.012 cgo/op	   65862 B/op	       7 allocs/op
+BenchmarkOwnedStreams/long/json_forward-15           	     500	     61866 ns/op	         4.012 cgo/op	   98854 B/op	      11 allocs/op
+BenchmarkOwnedStreams/array/raw-15                   	     500	      7457 ns/op	         2.012 cgo/op	   49267 B/op	       4 allocs/op
+BenchmarkOwnedStreams/array/view_selected-15         	     500	     15695 ns/op	         4.012 cgo/op	   49337 B/op	       4 allocs/op
+BenchmarkOwnedStreams/array/view_full-15             	     500	     95299 ns/op	         5.012 cgo/op	  104678 B/op	    2017 allocs/op
+BenchmarkOwnedStreams/array/json_selected-15         	     500	     36068 ns/op	         2.012 cgo/op	    8465 B/op	       7 allocs/op
+BenchmarkOwnedStreams/array/json_full-15             	     500	     89657 ns/op	         2.012 cgo/op	   59813 B/op	    2020 allocs/op
+BenchmarkOwnedStreams/array/raw_forward-15           	     500	     16712 ns/op	         3.012 cgo/op	   49272 B/op	       6 allocs/op
+BenchmarkOwnedStreams/array/view_forward-15          	     500	     18515 ns/op	         4.012 cgo/op	   49328 B/op	       4 allocs/op
+BenchmarkOwnedStreams/array/view_copy-15             	     500	     57021 ns/op	         5.012 cgo/op	   98631 B/op	       7 allocs/op
+BenchmarkOwnedStreams/array/json_forward-15          	     500	     69824 ns/op	         4.012 cgo/op	   57828 B/op	      10 allocs/op
+BenchmarkOwnedStreams/bytes/raw-15                   	     500	      4250 ns/op	         2.012 cgo/op	   32872 B/op	       4 allocs/op
+BenchmarkOwnedStreams/bytes/view_selected-15         	     500	      4853 ns/op	         4.012 cgo/op	   32952 B/op	       4 allocs/op
+BenchmarkOwnedStreams/bytes/view_full-15             	     500	     60374 ns/op	         5.012 cgo/op	  114995 B/op	       7 allocs/op
+BenchmarkOwnedStreams/bytes/json_selected-15         	     500	     76184 ns/op	         2.012 cgo/op	   98758 B/op	       8 allocs/op
+BenchmarkOwnedStreams/bytes/json_full-15             	     500	     83356 ns/op	         2.012 cgo/op	  131518 B/op	      10 allocs/op
+BenchmarkOwnedStreams/bytes/raw_forward-15           	     500	     32953 ns/op	         3.012 cgo/op	   32888 B/op	       6 allocs/op
+BenchmarkOwnedStreams/bytes/view_forward-15          	     500	     16217 ns/op	         4.012 cgo/op	   32932 B/op	       4 allocs/op
+BenchmarkOwnedStreams/bytes/view_copy-15             	     500	     21593 ns/op	         5.012 cgo/op	   65861 B/op	       7 allocs/op
+BenchmarkOwnedStreams/bytes/json_forward-15          	     500	     79673 ns/op	         4.012 cgo/op	  148093 B/op	      11 allocs/op
+PASS
