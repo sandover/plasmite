@@ -310,7 +310,9 @@ and `JSON` format the data subtree and canonical complete envelope respectively;
 `Meta().JSON()` keeps all stored metadata fields. `Lite3()` returns a detached
 mutable copy. Strings and bytes extracted from selected values own their data.
 Closing a prepared selector waits for its active reads; message reads need no
-pool lock after acquisition.
+pool lock after acquisition. Children retain their original encoded/proof buffers
+when a caller reassigns `*MessageView`; copying a wrapper copies only immutable
+slice headers, not payload bytes.
 
 The [Go view measurements](../../docs/performance/language-boundary-results/owned-views/go/README.md)
 cover sparse reads, typed decoding, full conversion, cgo crossings, allocation

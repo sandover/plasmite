@@ -127,7 +127,7 @@ func (in *nativeInput) collect(value reflect.Value, parent uintptr, key string, 
 	}
 	if value.Type() == sourceValueType {
 		source := value.Interface().(Value)
-		if source.owner == nil || source.kind == KindMissing {
+		if len(source.owner.encoded) == 0 || source.kind == KindMissing {
 			return invalidArgumentError("cannot append a missing value")
 		}
 		index := in.add(parent, key, hasKey, depth, inputSource)

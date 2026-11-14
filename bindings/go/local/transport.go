@@ -21,7 +21,7 @@ func AdoptSnapshot(snapshot nativeview.Snapshot) *MessageView {
 	}
 	data, meta := snapshot.Offsets()
 	seq, timestamp := snapshot.Identity()
-	return &MessageView{seq: seq, timestampNs: timestamp, encoded: snapshot.Bytes(), dataNode: C.size_t(data), metaNode: C.size_t(meta), duplicates: duplicates}
+	return &MessageView{seq: seq, timestampNs: timestamp, valueSnapshot: valueSnapshot{encoded: snapshot.Bytes(), duplicates: duplicates}, dataNode: C.size_t(data), metaNode: C.size_t(meta)}
 }
 
 // forwardView shares immutable Go storage/proof and assigns destination identity.

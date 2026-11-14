@@ -123,7 +123,7 @@ func BenchmarkOwnedViews(b *testing.B) {
 							if e != nil {
 								b.Fatal(e)
 							}
-							v := &MessageView{encoded: frame.Payload, seq: frame.Seq, timestampNs: frame.TimestampNs}
+							v := &MessageView{valueSnapshot: valueSnapshot{encoded: frame.Payload}, seq: frame.Seq, timestampNs: frame.TimestampNs}
 							if e = v.validate(); e != nil {
 								b.Fatal(e)
 							}
@@ -283,7 +283,7 @@ func TestOwnedViewRetentionDiagnostics(t *testing.T) {
 				var frame *Lite3Frame
 				frame, err = pool.GetLite3(receipt.Seq)
 				if err == nil {
-					v = &MessageView{encoded: frame.Payload, seq: frame.Seq, timestampNs: frame.TimestampNs}
+					v = &MessageView{valueSnapshot: valueSnapshot{encoded: frame.Payload}, seq: frame.Seq, timestampNs: frame.TimestampNs}
 					err = v.validate()
 				}
 			}

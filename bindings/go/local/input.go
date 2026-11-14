@@ -96,5 +96,5 @@ func adoptNativeInput(result C.plsm_go_input_result_t) *MessageView {
 	copy(encoded, unsafe.Slice((*byte)(unsafe.Pointer(result.bytes)), int(result.len)))
 	// A checked builder already proved the immutable encoding. Copying preserves
 	// its unique-key layout, offsets and proof; no second validation is needed.
-	return &MessageView{seq: uint64(result.seq), timestampNs: uint64(result.timestamp), encoded: encoded, dataNode: result.data, metaNode: result.meta}
+	return &MessageView{seq: uint64(result.seq), timestampNs: uint64(result.timestamp), valueSnapshot: valueSnapshot{encoded: encoded}, dataNode: result.data, metaNode: result.meta}
 }

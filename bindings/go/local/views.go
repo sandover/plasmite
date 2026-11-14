@@ -15,17 +15,32 @@ import (
 	"unsafe"
 )
 
-// MessageView owns an immutable Lite3 snapshot in the Go heap. Children keep
-// their root alive. Closing the pool or replacing its records does not expire it.
+// MessageView owns an immutable Lite3 snapshot in the Go heap. Children retain
+// the original buffers even when callers reassign this message wrapper. Closing the pool or replacing its records does not expire it.
 // JSON, Decode and scalar/string extraction create independent requested values.
 // Ordinary messages need no Close.
 type MessageView struct {
 	seq         uint64
 	timestampNs uint64
-	encoded     []byte
-	dataNode    C.size_t
-	metaNode    C.size_t
-	duplicates  []C.size_t
+	valueSnapshot
+	dataNode C.size_t
+	metaNode C.size_t
+}
+
+// valueSnapshot copies immutable slice headers, not their bytes. Children bind
+// offsets to these buffers rather than to a caller-reassignable message wrapper.
+type valueSnapshot struct {
+	encoded    []byte
+	duplicates []C.size_t
+}
+
+func (v valueSnapshot) pointer() *C.uint8_t { return (*C.uint8_t)(unsafe.Pointer(&v.encoded[0])) }
+func (v valueSnapshot) bytes() []byte       { return v.encoded }
+func (v valueSnapshot) proofPointer() *C.size_t {
+	if len(v.duplicates) == 0 {
+		return nil
+	}
+	return &v.duplicates[0]
 }
 
 // GetView copies the record into aligned Go storage and validates it once.
@@ -108,18 +123,8 @@ func (p *Pool) copyViewCapacity(seq uint64, initialWords int) (*MessageView, err
 	if result.len == 0 {
 		return nil, &Error{Kind: ErrorCorrupt, Message: "empty encoded view"}
 	}
-	view := &MessageView{seq: seq, timestampNs: uint64(result.timestamp), encoded: unsafe.Slice((*byte)(unsafe.Pointer(&words[0])), int(result.len))}
+	view := &MessageView{seq: seq, timestampNs: uint64(result.timestamp), valueSnapshot: valueSnapshot{encoded: unsafe.Slice((*byte)(unsafe.Pointer(&words[0])), int(result.len))}}
 	return view, nil
-}
-
-func (v *MessageView) pointer() *C.uint8_t { return (*C.uint8_t)(unsafe.Pointer(&v.encoded[0])) }
-func (v *MessageView) bytes() []byte       { return v.encoded }
-
-func (v *MessageView) proofPointer() *C.size_t {
-	if len(v.duplicates) == 0 {
-		return nil
-	}
-	return &v.duplicates[0]
 }
 
 // Time constructs the UTC time only when requested.
@@ -137,7 +142,7 @@ func (v *MessageView) Data() Value {
 	if v == nil || len(v.encoded) == 0 {
 		return Value{}
 	}
-	return Value{owner: v, node: v.dataNode, kind: 7}
+	return Value{owner: v.valueSnapshot, node: v.dataNode, kind: 7}
 }
 
 // Meta returns the complete stored metadata, including unknown fields.
@@ -145,7 +150,7 @@ func (v *MessageView) Meta() Value {
 	if v == nil || len(v.encoded) == 0 {
 		return Value{}
 	}
-	return Value{owner: v, node: v.metaNode, kind: 7}
+	return Value{owner: v.valueSnapshot, node: v.metaNode, kind: 7}
 }
 
 // DataJSON formats the data object directly, without a native object tree.
@@ -204,8 +209,8 @@ func (s *Selector) Close() {
 	}
 	runtime.SetFinalizer(s, nil)
 }
-func (s *Selector) read(v *MessageView, root C.size_t) ([]C.plsm_go_value, error) {
-	if s == nil || v == nil {
+func (s *Selector) read(v valueSnapshot, root C.size_t) ([]C.plsm_go_value, error) {
+	if s == nil || len(v.encoded) == 0 {
 		return nil, invalidArgumentError("selector and view are required")
 	}
 	s.mu.RLock()
@@ -227,16 +232,17 @@ func (s *Selector) read(v *MessageView, root C.size_t) ([]C.plsm_go_value, error
 	return slots, nil
 }
 func (s *Selector) Read(v *MessageView) ([]Value, error) {
-	if v == nil {
+	if v == nil || len(v.encoded) == 0 {
 		return nil, invalidArgumentError("view is required")
 	}
-	slots, err := s.read(v, v.dataNode)
+	snapshot := v.valueSnapshot
+	slots, err := s.read(snapshot, v.dataNode)
 	if err != nil {
 		return nil, err
 	}
 	values := make([]Value, len(slots))
 	for i, slot := range slots {
-		values[i] = Value{owner: v, node: slot.node, kind: Kind(slot.kind), integer: int64(slot.integer), real: float64(slot.real), offset: int(slot.offset), length: int(slot.len)}
+		values[i] = Value{owner: snapshot, node: slot.node, kind: Kind(slot.kind), integer: int64(slot.integer), real: float64(slot.real), offset: int(slot.offset), length: int(slot.len)}
 	}
 	return values, nil
 }
@@ -256,10 +262,11 @@ const (
 	KindArray
 )
 
-// Value borrows its immutable root. Kind follows the C value kinds: missing,
+// Value retains its original immutable buffers through copied slice headers.
+// Kind follows the C value kinds: missing,
 // null, bool, integer, real, string, bytes, object and array (0 through 8).
 type Value struct {
-	owner          *MessageView
+	owner          valueSnapshot
 	node           C.size_t
 	kind           Kind
 	integer        int64
@@ -286,7 +293,7 @@ func (v Value) Bytes() ([]byte, bool) {
 	return output, true
 }
 func (v Value) JSON() ([]byte, error) {
-	if v.owner == nil || v.kind == 0 {
+	if len(v.owner.encoded) == 0 || v.kind == 0 {
 		return nil, invalidArgumentError("missing value")
 	}
 	result := C.plsm_go_json_result(v.owner.pointer(), C.size_t(len(v.owner.encoded)), v.node)
@@ -303,7 +310,7 @@ func (v Value) Decode(destination any) error {
 			return nil
 		}
 	}
-	if v.owner == nil || v.kind == 0 {
+	if len(v.owner.encoded) == 0 || v.kind == 0 {
 		return invalidArgumentError("missing value")
 	}
 	if handled, err := v.decodeStruct(destination); handled {
@@ -347,7 +354,7 @@ func (d *structDecoder) close() {
 	}
 	runtime.SetFinalizer(d, nil)
 }
-func (d *structDecoder) read(view *MessageView, root C.size_t) ([]C.plsm_go_value, bool, error) {
+func (d *structDecoder) read(view valueSnapshot, root C.size_t) ([]C.plsm_go_value, bool, error) {
 	slots := make([]C.plsm_go_value, d.count)
 	result := C.plsm_go_decode_result(view.pointer(), C.size_t(len(view.encoded)), view.proofPointer(), C.size_t(len(view.duplicates)), root, d.pointer, &slots[0], C.size_t(len(slots)))
 	runtime.KeepAlive(view)

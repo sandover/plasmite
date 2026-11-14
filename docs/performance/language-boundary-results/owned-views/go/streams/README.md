@@ -68,5 +68,30 @@ measurements include loopback and pacing overhead, not saturated packet rates.
 The mock peer sends direct opening PROGRESS outside timing. Both harnesses report
 Go allocations and cgo calls; native allocations require a separate probe.
 
+
+## Retained-child wrapper reassignment
+
+Children now copy the immutable encoded/proof slice headers into Value. Their
+node offsets stay bound to those buffers when the caller reassigns or clears
+`*MessageView`. This adds no per-message heap owner and copies no payload bytes.
+Container/scalar/byte/array children, wrapper aliases, duplicate-key proof and
+source-Value forwarding all pass reassignment tests after forced collection.
+
+The pre-fix executables and library above remain unchanged. The candidate local
+executable lives in `tmp/go-child-checkpoint/local.test` and uses that same frozen
+library. Existing complete point/typed/selected/full-array benchmark lanes remain
+the comparison harness; only two benchmark composite literals changed to name
+the embedded snapshot header. Focused allocation diagnostics keep acquisition
+at two allocations for small records and three for the array sizing retry.
+Warm typed and full-array allocation counts stay unchanged. Two returned selected
+Values allocate 80 more bytes in total, with the same allocation/cgo-call counts:
+each Value replaces an eight-byte mutable-wrapper pointer with 48 bytes of stable
+slice headers. Uncontrolled diagnostic times support no timing claim.
+
+[Candidate source/artifact hashes](child-manifest.json), the complete source
+overlay (outside Git), and [allocation diagnostics](child-allocation-probes.json)
+preserve this comparison. Use `BenchmarkOwnedViews` for point/typed/selected/full
+array controls, and the existing stream benchmarks for complete delivery paths.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.
