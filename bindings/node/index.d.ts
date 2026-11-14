@@ -33,6 +33,8 @@ export interface StreamWait {
   status: number
   message?: Buffer
   frame?: Lite3Frame
+  event?: UdpEvent
+  view?: NativeView
 }
 export interface UdpEvent {
   kind: string
@@ -95,6 +97,7 @@ export declare class Pool {
   getLite3(seq: number | bigint): Lite3Frame
   openStream(sinceSeq: number | bigint | undefined | null, maxMessages: number | bigint | undefined | null, timeoutMs: number | bigint | undefined | null, errorOnGap: boolean): Stream
   openLite3Stream(sinceSeq: number | bigint | undefined | null, maxMessages: number | bigint | undefined | null, timeoutMs: number | bigint | undefined | null, errorOnGap: boolean): Lite3Stream
+  openViewStream(sinceSeq: number | bigint | undefined | null, maxMessages: number | bigint | undefined | null, timeoutMs: number | bigint | undefined | null, errorOnGap: boolean, tags: Array<string>): Stream
   getView(seq: number | bigint): Promise<unknown>
   close(): void
 }
@@ -118,11 +121,13 @@ export declare class UdpClient {
 export declare class UdpPool {
   sendJson(payload: Buffer, tags: Array<string>): void
   sendLite3(payload: Buffer): void
-  follow(startKind: number, startValue: number | bigint, live: boolean): Promise<UdpFollow>
+  follow(startKind: number, startValue: number | bigint, live: boolean, owned?: boolean | undefined | null): Promise<UdpFollow>
   close(): void
 }
 export declare class UdpFollow {
-  nextEvent(timeoutMs: number | bigint): UdpWait
+  nextEvent(timeoutMs: number | bigint): StreamWait
+  nextEventWait(timeoutMs: number | bigint): Promise<UdpWait>
+  interruptRead(): void
   get isFinished(): boolean
   cancel(): void
   close(): void

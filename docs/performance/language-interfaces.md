@@ -80,3 +80,12 @@ binary tails keep their terminal-error limits, and UDP views keep arrival-order,
 duplicate and late-packet behavior. Views change representation, not delivery.
 See the [migration guide](../record/upgrading-next-major.md#keep-encoded-data-with-owned-views)
 for exact-number rules, copy boundaries, cleanup and transport support.
+
+## Integration checks
+
+The integrated owned-view and stream implementations pass `just check` and
+`just release-gate`, including language bindings, C interface checks, packaged
+native and addon-free Node installs, and native/fallback Python wheels. An
+additional Node run with explicit garbage collection checks retained children.
+[Recorded commands, wheel hashes and logs](language-boundary-results/owned-views/final-integration.json)
+identify this checkpoint; later measured changes need their affected checks.
