@@ -26,6 +26,7 @@ docs/
 │   ├── owned-views/go/streams/README.md       — Read when measuring Go view-stream ownership, delivery, and forwarding
 │   ├── node-views/README.md                  — Read when assessing JavaScript view access, conversion costs, and native ABI checks
 │   ├── portable-views/README.md              — Read when measuring portable Node startup, sparse/full work, copies, or retained WebAssembly (Wasm) memory
+│   ├── http-views/README.md                  — Read when comparing HTTP owned views, retained append encodings, receipts, and client/server CPU
 │   ├── c-json/README.md                      — Read when assessing direct JSON reads and stored-float correctness
 │   ├── wakeups/README.md                     — Read when assessing shared-address waits and independent-reader wakeups
 │   ├── append-descriptors/README.md           — Read when assessing borrowed append locking and removed descriptor calls

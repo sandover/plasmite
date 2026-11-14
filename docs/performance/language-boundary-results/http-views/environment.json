@@ -1,0 +1,12 @@
+{
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "node": "v26.13.0",
+  "baseline": "e973184 HTTP client with canonical portable artifact",
+  "candidate": "e7ac2ee plus retained RemotePool.appendView overlay in sources.tar.gz",
+  "server_sha256": "6dc3dd74e3ba0b713f0f7d17c5687772ebea2b9223e3f6ae0a985c16fb60306a",
+  "archive_sha256": {
+    "sources.tar.gz": "e2fcd26d06945ce1777cfd75b31184aa861abb8311f9724386ae5055e5fc824b",
+    "raw-runs.tar.gz": "71da17e6bc360eb4f450d95fb83fd0bc88895e0a69572dd0ea9dc594a2e4f48a"
+  },
+  "method": "Five alternating process pairs, 300 operations per lane, three alternating lane-order repeats; one fixed loopback server; no builds/tests during timing."
+}

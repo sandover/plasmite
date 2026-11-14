@@ -78,6 +78,17 @@ test('HTTP views preserve exact values, forwarding, transport limits and retaine
   const legacyRead = await pool.getView(legacyReceipt.seq);
   assert.equal(legacyReceipt.timestampNs, legacyRead.timestampNs);
   assert.deepEqual(toNative(legacyReceipt.data), toNative(first.data));
+  // A failed append frees only its unpublished encoding. Caller snapshots live on.
+  const portable = require(path.join(root, 'portable'));
+  const beforeFailure = portable.diagnostics();
+  global.fetch = async () => { throw new Error('deliberate transport failure'); };
+  try {
+    await assert.rejects(pool.appendView({ value: 1 }), /deliberate transport failure/);
+    await assert.rejects(pool.appendView(first), /deliberate transport failure/);
+  } finally { global.fetch = fetch; }
+  assert.equal(portable.diagnostics().ownerCount, beforeFailure.ownerCount);
+  assert.equal(portable.diagnostics().backingBytes, beforeFailure.backingBytes);
+  assert.equal(first.data.metrics.power, 42);
   const child = fetched.data.samples;
   await client.deletePool('views');
   assert.equal(child[0].value, 1);

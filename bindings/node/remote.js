@@ -209,24 +209,29 @@ class RemotePool {
   /** Encode once and retain the sent data with the server's committed identity. */
   async appendView(data, tags, durability = "fast") {
     const backend = require("./portable");
-    const payload = await backend.encodeMessage(data, tags);
-    const url = buildUrl(this.client.baseUrl, ["v0", "pools", this.pool, "append_lite3"]);
-    const policy = mapDurability(durability);
-    if (policy !== "fast") url.searchParams.set("durability", policy);
-    const response = await this.client._request("POST", url, {
-      body: payload, contentType: LITE3_TYPE, accept: "application/x-plasmite-identity",
-    });
-    let seq, timestampNs;
-    if (response.status === 204) {
-      seq = frameHeader(response.headers.get("plasmite-seq"), "plasmite-seq");
-      timestampNs = frameHeader(response.headers.get("plasmite-timestamp-ns"), "plasmite-timestamp-ns");
-    } else {
-      // Older v0 servers ignore the new Accept type and return the JSON receipt.
-      const receipt = parseMessageJson((await readBody(response)).toString("utf8"), "message").message;
-      seq = normalizeMessageSeq(receipt.seq);
-      timestampNs = receiptTimestamp(receipt.time);
+    const prepared = backend.prepareAppend(data, tags);
+    try {
+      const url = buildUrl(this.client.baseUrl, ["v0", "pools", this.pool, "append_lite3"]);
+      const policy = mapDurability(durability);
+      if (policy !== "fast") url.searchParams.set("durability", policy);
+      const response = await this.client._request("POST", url, {
+        body: prepared.payload, contentType: LITE3_TYPE, accept: "application/x-plasmite-identity",
+      });
+      let seq, timestampNs;
+      if (response.status === 204) {
+        seq = frameHeader(response.headers.get("plasmite-seq"), "plasmite-seq");
+        timestampNs = frameHeader(response.headers.get("plasmite-timestamp-ns"), "plasmite-timestamp-ns");
+      } else {
+        // Older v0 servers ignore the new Accept type and return the JSON receipt.
+        const receipt = parseMessageJson((await readBody(response)).toString("utf8"), "message").message;
+        seq = normalizeMessageSeq(receipt.seq);
+        timestampNs = receiptTimestamp(receipt.time);
+      }
+      return backend.messageWithIdentity(prepared.message, seq, timestampNs);
+    } catch (error) {
+      prepared.discard();
+      throw error;
     }
-    return backend.decodeMessage(payload, seq, timestampNs);
   }
 
   async getView(seq, options = {}) {
