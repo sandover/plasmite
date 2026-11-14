@@ -1,7 +1,7 @@
 {
   "abi": 1,
   "bytes": 114270,
-  "sha256": "96de040ab05a975eb2168e4777562edbe25c229ca1574303e11b50f799d5f6eb",
+  "sha256": "648b62f63d3e2cd196fcc2b3e85bd4c814afaeb19ea56bdca7a02d7907e01aff",
   "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
   "clang": "clang version 23.1.0-wasi-sdk (https://github.com/llvm/llvm-project 895aa2c896ada719451be2e3673c83da8ddf1141)",
   "libc_memchr_sha256": "bbe7854d4cc9dd7a30de7637b67c4cc2dc2fd437f594fb0cc8932437716100aa",
@@ -13,7 +13,7 @@
     "bindings/node/portable-core/src/core.rs": "0561a5e7d916ad6e5d1bc150d35737ba4d4a218daf0002202f5f5606e63dd8ae",
     "src/core/error.rs": "7ef3f0758577e99dfd422ab9c62d5847f894f54748e9269df361fe288f9c74e1",
     "src/abi_builder.rs": "cd367b25f5bcd8cd510d78ac98c9a010b4ae31bf107250019372f4f1e3b270f2",
-    "src/view.rs": "d1e5ad70fe63497c6f9a61e448bc8055fb39e400b53d1f3e9d5f9496fd87d8c3",
+    "src/view.rs": "44c83dbf7bad21ff9f240de027a0a049e231c8f814ba3fd962ededed9716b5dc",
     "src/interface_wire.rs": "7fe532a4d83c5023e0ebd0868a09e9a4b1b376a42865998634c231bcabf22579",
     "c/lite3_shim.c": "70010d2b8043f6481893e5a0e9eb9a058554d081019afbee784850d509298d18",
     "c/lite3_shim.h": "a8013d9fe97d21971cdbc6cd8a2ca0b15b8e298e269028cb80f0c06c0f6ad3c5",

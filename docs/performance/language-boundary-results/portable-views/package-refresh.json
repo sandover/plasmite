@@ -1,0 +1,22 @@
+{
+  "sourceCommit": "d12a3d9229fadf27773a9091da946288e9200bec",
+  "oldSha256": "96de040ab05a975eb2168e4777562edbe25c229ca1574303e11b50f799d5f6eb",
+  "sha256": "648b62f63d3e2cd196fcc2b3e85bd4c814afaeb19ea56bdca7a02d7907e01aff",
+  "bytes": 114270,
+  "independentCleanBuildMatches": true,
+  "byteChanges": [
+    {
+      "offset": 104717,
+      "before": 251,
+      "after": 255
+    }
+  ],
+  "explanation": "One data-section byte changes the panic source line for expect(\"unpublished owner\") from 251 to 255 after the Go duplicate-offset helper adds four source lines. All other sections, including executable code, match the prior measured artifact.",
+  "checks": [
+    "Artifact/source/import-free ABI verifier passes.",
+    "Two independent release target directories produce identical bytes.",
+    "Wasm release Clippy passes with warnings denied.",
+    "14 focused/package cases pass on Node 24, including native forwarding and addon-free tarball installation."
+  ],
+  "historicalEvidence": "central/* and source.tar.gz retain their original measured artifact identities."
+}

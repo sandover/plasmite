@@ -91,3 +91,11 @@ omitted tags shares its caller-owned backend, so `discard()` does nothing.
 Explicit tags rebuild one owner. Successful requests leave release to the
 returned view's lifetime. The encoded-only helper still releases its temporary
 owner immediately.
+
+The final shared-source refresh produces SHA
+`648b62f63d3e2cd196fcc2b3e85bd4c814afaeb19ea56bdca7a02d7907e01aff`.
+Two independent release builds produce the same 114,270 bytes. Compared with the
+measured `96de040...` artifact, one data byte changes the panic source line from
+251 to 255 after a shared helper adds four lines. Executable code and all other
+sections match. The package manifest now tracks the integrated shared source;
+historical performance evidence keeps its original artifact and source archive.
