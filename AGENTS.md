@@ -18,8 +18,8 @@ docs/
 ├── performance/windows-access-1.0.md          — Read when comparing local, HTTP, and MCP access costs on Windows
 ├── performance/consumer-latency.rs             — Read when reproducing the full-consumer latency measurements
 ├── performance/language-boundary-results/    — Read when reproducing per-binding ownership and conversion measurements
-│   ├── owned-views/README.md                 — Read when comparing owned views, append results, forwarding, and per-runtime baselines
-│   ├── owned-views/python/README.md          — Read when comparing Python views, native input, lock cadence, callback guards, or wheel coverage
+│   ├── owned-views/README.md                 — Read when comparing owned views, local/UDP streams, forwarding, and runtime costs
+│   ├── owned-views/python/README.md          — Read when comparing Python views, native input, owned UDP streams, or wheel coverage
 │   │   ├── batches/README.md                — Read when comparing explicit Python batches, forwarding, paced costs, or owner retention
 │   │   └── callback-guards/README.md        — Read when checking Python callback closure and physical byte-buffer lengths
 │   ├── owned-views/go/README.md              — Read when assessing Go snapshot ownership, typed decoding, sizing, or cgo costs

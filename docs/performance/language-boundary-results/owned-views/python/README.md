@@ -214,6 +214,49 @@ argument conversion and report the cost of the additional open-handle check.
 [Explicit view batches and forwarding](batches/README.md) reduce busy-reader lock
 handoffs and reuse immutable encoded input, with matched complete-delivery, paced,
 contention and retention measurements.
+## Owned UDP receiving: final central checkpoint
+
+Owned DATA now crosses C/Python as one checked message owner. Native Python
+adopts that owner directly; it builds neither a separate Python payload buffer
+nor a JSON/native tree before the caller asks for one. The fallback keeps its
+documented readonly-buffer copy. Skip/progress events retain their old meaning.
+
+Three fresh release processes per lane alternate lane order and verify all
+1,000 sequences and the complete final value. The peer sends one DATA at a time
+through a test queue; these figures include loopback delivery and pacing, and
+do not estimate UDP saturation throughput. The full-native view and legacy
+lanes return the same mutable Python data value.
+
+| Fixture | Raw bytes only | Legacy native data | View: one field | View: native data |
+| --- | ---: | ---: | ---: | ---: |
+| Small | 21.42 µs | 29.94 µs | 22.70 µs | 24.15 µs |
+| Wide | 27.62 µs | 71.26 µs | 28.84 µs | 40.25 µs |
+| 32 KiB text | 30.32 µs | 73.79 µs | 28.95 µs | 31.30 µs |
+| 1,000 integers | 33.29 µs | 97.17 µs | 34.27 µs | 62.20 µs |
+
+With the same requested native result, wide/text/array receiving takes
+44%/58%/36% less time. Reader-thread CPU falls from 57.79/59.00/81.36 µs to
+25.07/15.39/44.50 µs per message. Process CPU also includes the peer thread;
+[all raw repeats](udp.raw.json) keep both measures and the exact library,
+extension, source and worker fingerprints. Small full-native receiving takes
+19% less time. Selected reads avoid the requested native copy and therefore
+measure a different caller job from full-native conversion.
+
+The complete C/Python source overlay (outside Git) comes from `20eb53c`,
+which identifies the timed core and extension sources. Build the shared library
+in release mode, build the extension with CPython 3.13, and run one lane per
+process:
+
+```sh
+PLASMITE_LIB_DIR=/fixed/sdk/lib PYTHONPATH=bindings/python \
+  python3.13 bindings/python/benchmarks/udp_views.py view-native wide --count 1000
+```
+
+Lanes are `raw`, `legacy`, `view-selected`, and `view-native`; fixtures are
+`small`, `wide`, `text32k`, and `array`. Alternate lane order across repeats.
+Tests cover exact identity, duplicate/late arrival order, control events and
+retained owners after close in native and fallback Python. The timed native
+backend does not establish fallback performance.
 
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

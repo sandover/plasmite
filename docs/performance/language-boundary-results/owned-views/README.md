@@ -618,5 +618,36 @@ transport/lane combinations, including exact forwarded payloads; it supplies no
 performance claim. The mock peer uses the same 128 KiB send-buffer budget as the
 existing client, so large valid datagrams work on macOS.
 
+### Central Rust stream measurements
+
+The [verified central repeats](rust-streams.raw.json) run each fixed release lane
+in three fresh processes with alternating lane order. Local snapshots stay
+prefilled outside timing; UDP keeps the one-packet pacing described above. Every
+run verifies the requested output, identity/count and final forwarded bytes.
+
+| Local fixture | Raw frame | View: selected field | View: full native data | Legacy native message |
+| --- | ---: | ---: | ---: | ---: |
+| Small | 0.71 µs | 0.85 µs | 1.04 µs | 1.32 µs |
+| Wide | 3.25 µs | 4.36 µs | 18.12 µs | 17.91 µs |
+| 32 KiB text | 2.85 µs | 2.99 µs | 3.46 µs | 9.95 µs |
+| 1,000 integers | 6.85 µs | 8.00 µs | 23.81 µs | 24.04 µs |
+
+Selected access avoids constructing unrequested fields. Requesting all native
+data keeps the wide/array cost close to the legacy control, while long-text
+decoding benefits from avoiding JSON formatting and parsing. Legacy messages
+also construct metadata/time; view lanes construct only the requested data.
+Owned local forwarding takes 8.02/7.44/13.48 µs for wide/text/array, versus
+9.38/9.12/17.57 µs when raw forwarding validates the incoming mutable buffer.
+These controls have different input ownership guarantees.
+
+UDP selected/full-native wide delivery takes 34.51/50.17 µs versus 47.42 µs for
+legacy messages. Full wide conversion therefore regresses about 6% in this
+small paced run; array full conversion takes 41.58 versus 55.44 µs. Transport
+scheduling dominates several UDP controls: wide raw forwarding even comes out
+faster than raw receiving. Keep those raw repeats and their limits visible;
+they do not establish a general UDP throughput or tail-latency improvement.
+The [C/Python UDP checkpoint](python/README.md#owned-udp-receiving-final-central-checkpoint)
+separately measures its language-boundary and requested-conversion costs.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

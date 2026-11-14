@@ -1,0 +1,889 @@
+{
+  "matrix_manifest": {
+    "started": 1794615013.723041,
+    "node_harness_sha256": "62501d23faf18f991ae0c60b4bd078848250cfcb597e021ba44bb01e87a9b418",
+    "server_sha256": "2da2c10e2b526ac1c679a4cd6f52e1dfcf46bc49961a2a256487e8ae2aad6933",
+    "rust_worker_sha256": "c8c57dd16c814c38dd01ac66cb109bd51d73817a64ef12fbc6188e418c8cddbd",
+    "udp_library_sha256": "6a08cb2f48220adfbc3894d5108c097cd7ed60eb8300636f4a4f163f8b9280cc",
+    "repeats": 3,
+    "udp_server_capacity": 512
+  },
+  "host": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "runs": [
+    {
+      "file": "array-legacy-0.json",
+      "lane": "legacy",
+      "fixture": "array",
+      "count": 1000,
+      "encoded_bytes": 41641,
+      "ns_per_message": 97171.083,
+      "process_cpu_ns_per_message": 94826.0,
+      "reader_cpu_ns_per_message": 82051.0,
+      "checksum": 42000,
+      "payload_sha256": "ff262e35c38b4383e5c1cf6dcb90164053e78e170e768aca4e48185b985f4ad6",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "array-legacy-1.json",
+      "lane": "legacy",
+      "fixture": "array",
+      "count": 1000,
+      "encoded_bytes": 41641,
+      "ns_per_message": 96419.5,
+      "process_cpu_ns_per_message": 94040.0,
+      "reader_cpu_ns_per_message": 81255.0,
+      "checksum": 42000,
+      "payload_sha256": "ff262e35c38b4383e5c1cf6dcb90164053e78e170e768aca4e48185b985f4ad6",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "array-legacy-2.json",
+      "lane": "legacy",
+      "fixture": "array",
+      "count": 1000,
+      "encoded_bytes": 41641,
+      "ns_per_message": 98849.667,
+      "process_cpu_ns_per_message": 96559.0,
+      "reader_cpu_ns_per_message": 81363.833,
+      "checksum": 42000,
+      "payload_sha256": "ff262e35c38b4383e5c1cf6dcb90164053e78e170e768aca4e48185b985f4ad6",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "array-raw-0.json",
+      "lane": "raw",
+      "fixture": "array",
+      "count": 1000,
+      "encoded_bytes": 41641,
+      "ns_per_message": 34177.375,
+      "process_cpu_ns_per_message": 32000.0,
+      "reader_cpu_ns_per_message": 17758.75,
+      "checksum": 41641000,
+      "payload_sha256": "ff262e35c38b4383e5c1cf6dcb90164053e78e170e768aca4e48185b985f4ad6",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "array-raw-1.json",
+      "lane": "raw",
+      "fixture": "array",
+      "count": 1000,
+      "encoded_bytes": 41641,
+      "ns_per_message": 33289.334,
+      "process_cpu_ns_per_message": 31301.0,
+      "reader_cpu_ns_per_message": 17037.167,
+      "checksum": 41641000,
+      "payload_sha256": "ff262e35c38b4383e5c1cf6dcb90164053e78e170e768aca4e48185b985f4ad6",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "array-raw-2.json",
+      "lane": "raw",
+      "fixture": "array",
+      "count": 1000,
+      "encoded_bytes": 41641,
+      "ns_per_message": 33292.791,
+      "process_cpu_ns_per_message": 31311.0,
+      "reader_cpu_ns_per_message": 17102.416,
+      "checksum": 41641000,
+      "payload_sha256": "ff262e35c38b4383e5c1cf6dcb90164053e78e170e768aca4e48185b985f4ad6",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "array-view-native-0.json",
+      "lane": "view-native",
+      "fixture": "array",
+      "count": 1000,
+      "encoded_bytes": 41641,
+      "ns_per_message": 59940.125,
+      "process_cpu_ns_per_message": 57887.0,
+      "reader_cpu_ns_per_message": 42032.084,
+      "checksum": 42000,
+      "payload_sha256": "ff262e35c38b4383e5c1cf6dcb90164053e78e170e768aca4e48185b985f4ad6",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "array-view-native-1.json",
+      "lane": "view-native",
+      "fixture": "array",
+      "count": 1000,
+      "encoded_bytes": 41641,
+      "ns_per_message": 62200.708,
+      "process_cpu_ns_per_message": 60055.0,
+      "reader_cpu_ns_per_message": 44504.0,
+      "checksum": 42000,
+      "payload_sha256": "ff262e35c38b4383e5c1cf6dcb90164053e78e170e768aca4e48185b985f4ad6",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "array-view-native-2.json",
+      "lane": "view-native",
+      "fixture": "array",
+      "count": 1000,
+      "encoded_bytes": 41641,
+      "ns_per_message": 63056.333,
+      "process_cpu_ns_per_message": 61045.0,
+      "reader_cpu_ns_per_message": 45342.958,
+      "checksum": 42000,
+      "payload_sha256": "ff262e35c38b4383e5c1cf6dcb90164053e78e170e768aca4e48185b985f4ad6",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "array-view-selected-0.json",
+      "lane": "view-selected",
+      "fixture": "array",
+      "count": 1000,
+      "encoded_bytes": 41641,
+      "ns_per_message": 34268.0,
+      "process_cpu_ns_per_message": 32527.0,
+      "reader_cpu_ns_per_message": 17853.958,
+      "checksum": 42000,
+      "payload_sha256": "ff262e35c38b4383e5c1cf6dcb90164053e78e170e768aca4e48185b985f4ad6",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "array-view-selected-1.json",
+      "lane": "view-selected",
+      "fixture": "array",
+      "count": 1000,
+      "encoded_bytes": 41641,
+      "ns_per_message": 34266.917,
+      "process_cpu_ns_per_message": 32579.0,
+      "reader_cpu_ns_per_message": 17978.583,
+      "checksum": 42000,
+      "payload_sha256": "ff262e35c38b4383e5c1cf6dcb90164053e78e170e768aca4e48185b985f4ad6",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "array-view-selected-2.json",
+      "lane": "view-selected",
+      "fixture": "array",
+      "count": 1000,
+      "encoded_bytes": 41641,
+      "ns_per_message": 34238.417,
+      "process_cpu_ns_per_message": 32443.0,
+      "reader_cpu_ns_per_message": 18005.084,
+      "checksum": 42000,
+      "payload_sha256": "ff262e35c38b4383e5c1cf6dcb90164053e78e170e768aca4e48185b985f4ad6",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "small-legacy-0.json",
+      "lane": "legacy",
+      "fixture": "small",
+      "count": 1000,
+      "encoded_bytes": 688,
+      "ns_per_message": 34272.583,
+      "process_cpu_ns_per_message": 27037.0,
+      "reader_cpu_ns_per_message": 17298.917,
+      "checksum": 42000,
+      "payload_sha256": "b9989cc4424c23d456c31a8591a89b2c275628f61fd55b5004ddbe476ee0e56d",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "small-legacy-1.json",
+      "lane": "legacy",
+      "fixture": "small",
+      "count": 1000,
+      "encoded_bytes": 688,
+      "ns_per_message": 29942.958,
+      "process_cpu_ns_per_message": 27428.0,
+      "reader_cpu_ns_per_message": 18415.625,
+      "checksum": 42000,
+      "payload_sha256": "b9989cc4424c23d456c31a8591a89b2c275628f61fd55b5004ddbe476ee0e56d",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "small-legacy-2.json",
+      "lane": "legacy",
+      "fixture": "small",
+      "count": 1000,
+      "encoded_bytes": 688,
+      "ns_per_message": 29227.542,
+      "process_cpu_ns_per_message": 26875.0,
+      "reader_cpu_ns_per_message": 17604.916,
+      "checksum": 42000,
+      "payload_sha256": "b9989cc4424c23d456c31a8591a89b2c275628f61fd55b5004ddbe476ee0e56d",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "small-raw-0.json",
+      "lane": "raw",
+      "fixture": "small",
+      "count": 1000,
+      "encoded_bytes": 688,
+      "ns_per_message": 31755.291,
+      "process_cpu_ns_per_message": 20897.0,
+      "reader_cpu_ns_per_message": 9917.667,
+      "checksum": 688000,
+      "payload_sha256": "b9989cc4424c23d456c31a8591a89b2c275628f61fd55b5004ddbe476ee0e56d",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "small-raw-1.json",
+      "lane": "raw",
+      "fixture": "small",
+      "count": 1000,
+      "encoded_bytes": 688,
+      "ns_per_message": 21085.625,
+      "process_cpu_ns_per_message": 18809.0,
+      "reader_cpu_ns_per_message": 9979.417,
+      "checksum": 688000,
+      "payload_sha256": "b9989cc4424c23d456c31a8591a89b2c275628f61fd55b5004ddbe476ee0e56d",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "small-raw-2.json",
+      "lane": "raw",
+      "fixture": "small",
+      "count": 1000,
+      "encoded_bytes": 688,
+      "ns_per_message": 21424.917,
+      "process_cpu_ns_per_message": 19151.0,
+      "reader_cpu_ns_per_message": 10013.916,
+      "checksum": 688000,
+      "payload_sha256": "b9989cc4424c23d456c31a8591a89b2c275628f61fd55b5004ddbe476ee0e56d",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "small-view-native-0.json",
+      "lane": "view-native",
+      "fixture": "small",
+      "count": 1000,
+      "encoded_bytes": 688,
+      "ns_per_message": 24151.834,
+      "process_cpu_ns_per_message": 21994.0,
+      "reader_cpu_ns_per_message": 10796.875,
+      "checksum": 42000,
+      "payload_sha256": "b9989cc4424c23d456c31a8591a89b2c275628f61fd55b5004ddbe476ee0e56d",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "small-view-native-1.json",
+      "lane": "view-native",
+      "fixture": "small",
+      "count": 1000,
+      "encoded_bytes": 688,
+      "ns_per_message": 25007.959,
+      "process_cpu_ns_per_message": 22857.0,
+      "reader_cpu_ns_per_message": 11462.959,
+      "checksum": 42000,
+      "payload_sha256": "b9989cc4424c23d456c31a8591a89b2c275628f61fd55b5004ddbe476ee0e56d",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "small-view-native-2.json",
+      "lane": "view-native",
+      "fixture": "small",
+      "count": 1000,
+      "encoded_bytes": 688,
+      "ns_per_message": 23852.167,
+      "process_cpu_ns_per_message": 21735.0,
+      "reader_cpu_ns_per_message": 10905.625,
+      "checksum": 42000,
+      "payload_sha256": "b9989cc4424c23d456c31a8591a89b2c275628f61fd55b5004ddbe476ee0e56d",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "small-view-selected-0.json",
+      "lane": "view-selected",
+      "fixture": "small",
+      "count": 1000,
+      "encoded_bytes": 688,
+      "ns_per_message": 24557.333,
+      "process_cpu_ns_per_message": 21211.0,
+      "reader_cpu_ns_per_message": 9819.125,
+      "checksum": 42000,
+      "payload_sha256": "b9989cc4424c23d456c31a8591a89b2c275628f61fd55b5004ddbe476ee0e56d",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "small-view-selected-1.json",
+      "lane": "view-selected",
+      "fixture": "small",
+      "count": 1000,
+      "encoded_bytes": 688,
+      "ns_per_message": 22699.333,
+      "process_cpu_ns_per_message": 20670.0,
+      "reader_cpu_ns_per_message": 9685.667,
+      "checksum": 42000,
+      "payload_sha256": "b9989cc4424c23d456c31a8591a89b2c275628f61fd55b5004ddbe476ee0e56d",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "small-view-selected-2.json",
+      "lane": "view-selected",
+      "fixture": "small",
+      "count": 1000,
+      "encoded_bytes": 688,
+      "ns_per_message": 22432.792,
+      "process_cpu_ns_per_message": 20415.0,
+      "reader_cpu_ns_per_message": 9667.958,
+      "checksum": 42000,
+      "payload_sha256": "b9989cc4424c23d456c31a8591a89b2c275628f61fd55b5004ddbe476ee0e56d",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "text32k-legacy-0.json",
+      "lane": "legacy",
+      "fixture": "text32k",
+      "count": 1000,
+      "encoded_bytes": 33468,
+      "ns_per_message": 73786.041,
+      "process_cpu_ns_per_message": 71420.0,
+      "reader_cpu_ns_per_message": 58644.625,
+      "checksum": 42000,
+      "payload_sha256": "d468264ec8c771df44bf4154202798b60709875f17a1b4356a22695c6a5960b4",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "text32k-legacy-1.json",
+      "lane": "legacy",
+      "fixture": "text32k",
+      "count": 1000,
+      "encoded_bytes": 33468,
+      "ns_per_message": 73652.958,
+      "process_cpu_ns_per_message": 71223.0,
+      "reader_cpu_ns_per_message": 58995.542,
+      "checksum": 42000,
+      "payload_sha256": "d468264ec8c771df44bf4154202798b60709875f17a1b4356a22695c6a5960b4",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "text32k-legacy-2.json",
+      "lane": "legacy",
+      "fixture": "text32k",
+      "count": 1000,
+      "encoded_bytes": 33468,
+      "ns_per_message": 75757.375,
+      "process_cpu_ns_per_message": 73517.0,
+      "reader_cpu_ns_per_message": 60689.083,
+      "checksum": 42000,
+      "payload_sha256": "d468264ec8c771df44bf4154202798b60709875f17a1b4356a22695c6a5960b4",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "text32k-raw-0.json",
+      "lane": "raw",
+      "fixture": "text32k",
+      "count": 1000,
+      "encoded_bytes": 33468,
+      "ns_per_message": 29613.458,
+      "process_cpu_ns_per_message": 27466.0,
+      "reader_cpu_ns_per_message": 14302.5,
+      "checksum": 33468000,
+      "payload_sha256": "d468264ec8c771df44bf4154202798b60709875f17a1b4356a22695c6a5960b4",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "text32k-raw-1.json",
+      "lane": "raw",
+      "fixture": "text32k",
+      "count": 1000,
+      "encoded_bytes": 33468,
+      "ns_per_message": 30349.041,
+      "process_cpu_ns_per_message": 28149.0,
+      "reader_cpu_ns_per_message": 14203.625,
+      "checksum": 33468000,
+      "payload_sha256": "d468264ec8c771df44bf4154202798b60709875f17a1b4356a22695c6a5960b4",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "text32k-raw-2.json",
+      "lane": "raw",
+      "fixture": "text32k",
+      "count": 1000,
+      "encoded_bytes": 33468,
+      "ns_per_message": 30323.0,
+      "process_cpu_ns_per_message": 28145.0,
+      "reader_cpu_ns_per_message": 14414.041,
+      "checksum": 33468000,
+      "payload_sha256": "d468264ec8c771df44bf4154202798b60709875f17a1b4356a22695c6a5960b4",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "text32k-view-native-0.json",
+      "lane": "view-native",
+      "fixture": "text32k",
+      "count": 1000,
+      "encoded_bytes": 33468,
+      "ns_per_message": 31304.375,
+      "process_cpu_ns_per_message": 29259.0,
+      "reader_cpu_ns_per_message": 15368.458,
+      "checksum": 42000,
+      "payload_sha256": "d468264ec8c771df44bf4154202798b60709875f17a1b4356a22695c6a5960b4",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "text32k-view-native-1.json",
+      "lane": "view-native",
+      "fixture": "text32k",
+      "count": 1000,
+      "encoded_bytes": 33468,
+      "ns_per_message": 31970.875,
+      "process_cpu_ns_per_message": 30002.0,
+      "reader_cpu_ns_per_message": 15720.25,
+      "checksum": 42000,
+      "payload_sha256": "d468264ec8c771df44bf4154202798b60709875f17a1b4356a22695c6a5960b4",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "text32k-view-native-2.json",
+      "lane": "view-native",
+      "fixture": "text32k",
+      "count": 1000,
+      "encoded_bytes": 33468,
+      "ns_per_message": 31256.125,
+      "process_cpu_ns_per_message": 29222.0,
+      "reader_cpu_ns_per_message": 15390.042,
+      "checksum": 42000,
+      "payload_sha256": "d468264ec8c771df44bf4154202798b60709875f17a1b4356a22695c6a5960b4",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "text32k-view-selected-0.json",
+      "lane": "view-selected",
+      "fixture": "text32k",
+      "count": 1000,
+      "encoded_bytes": 33468,
+      "ns_per_message": 29247.042,
+      "process_cpu_ns_per_message": 27421.0,
+      "reader_cpu_ns_per_message": 13424.958,
+      "checksum": 42000,
+      "payload_sha256": "d468264ec8c771df44bf4154202798b60709875f17a1b4356a22695c6a5960b4",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "text32k-view-selected-1.json",
+      "lane": "view-selected",
+      "fixture": "text32k",
+      "count": 1000,
+      "encoded_bytes": 33468,
+      "ns_per_message": 28954.583,
+      "process_cpu_ns_per_message": 26997.0,
+      "reader_cpu_ns_per_message": 13628.917,
+      "checksum": 42000,
+      "payload_sha256": "d468264ec8c771df44bf4154202798b60709875f17a1b4356a22695c6a5960b4",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "text32k-view-selected-2.json",
+      "lane": "view-selected",
+      "fixture": "text32k",
+      "count": 1000,
+      "encoded_bytes": 33468,
+      "ns_per_message": 28620.375,
+      "process_cpu_ns_per_message": 26698.0,
+      "reader_cpu_ns_per_message": 13332.0,
+      "checksum": 42000,
+      "payload_sha256": "d468264ec8c771df44bf4154202798b60709875f17a1b4356a22695c6a5960b4",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "wide-legacy-0.json",
+      "lane": "legacy",
+      "fixture": "wide",
+      "count": 1000,
+      "encoded_bytes": 14492,
+      "ns_per_message": 70715.291,
+      "process_cpu_ns_per_message": 68148.0,
+      "reader_cpu_ns_per_message": 57370.917,
+      "checksum": 42000,
+      "payload_sha256": "50093304f9419dd9c8637f3d0d4bc266308be6af4902fd20fcaf1d75821ca339",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "wide-legacy-1.json",
+      "lane": "legacy",
+      "fixture": "wide",
+      "count": 1000,
+      "encoded_bytes": 14492,
+      "ns_per_message": 73067.583,
+      "process_cpu_ns_per_message": 70646.0,
+      "reader_cpu_ns_per_message": 57789.792,
+      "checksum": 42000,
+      "payload_sha256": "50093304f9419dd9c8637f3d0d4bc266308be6af4902fd20fcaf1d75821ca339",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "wide-legacy-2.json",
+      "lane": "legacy",
+      "fixture": "wide",
+      "count": 1000,
+      "encoded_bytes": 14492,
+      "ns_per_message": 71256.75,
+      "process_cpu_ns_per_message": 68749.0,
+      "reader_cpu_ns_per_message": 58061.083,
+      "checksum": 42000,
+      "payload_sha256": "50093304f9419dd9c8637f3d0d4bc266308be6af4902fd20fcaf1d75821ca339",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "wide-raw-0.json",
+      "lane": "raw",
+      "fixture": "wide",
+      "count": 1000,
+      "encoded_bytes": 14492,
+      "ns_per_message": 27540.042,
+      "process_cpu_ns_per_message": 25175.0,
+      "reader_cpu_ns_per_message": 13458.833,
+      "checksum": 14492000,
+      "payload_sha256": "50093304f9419dd9c8637f3d0d4bc266308be6af4902fd20fcaf1d75821ca339",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "wide-raw-1.json",
+      "lane": "raw",
+      "fixture": "wide",
+      "count": 1000,
+      "encoded_bytes": 14492,
+      "ns_per_message": 27621.084,
+      "process_cpu_ns_per_message": 25268.0,
+      "reader_cpu_ns_per_message": 14319.875,
+      "checksum": 14492000,
+      "payload_sha256": "50093304f9419dd9c8637f3d0d4bc266308be6af4902fd20fcaf1d75821ca339",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "wide-raw-2.json",
+      "lane": "raw",
+      "fixture": "wide",
+      "count": 1000,
+      "encoded_bytes": 14492,
+      "ns_per_message": 27899.916,
+      "process_cpu_ns_per_message": 25580.0,
+      "reader_cpu_ns_per_message": 14205.5,
+      "checksum": 14492000,
+      "payload_sha256": "50093304f9419dd9c8637f3d0d4bc266308be6af4902fd20fcaf1d75821ca339",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "wide-view-native-0.json",
+      "lane": "view-native",
+      "fixture": "wide",
+      "count": 1000,
+      "encoded_bytes": 14492,
+      "ns_per_message": 40707.0,
+      "process_cpu_ns_per_message": 38553.0,
+      "reader_cpu_ns_per_message": 25561.875,
+      "checksum": 42000,
+      "payload_sha256": "50093304f9419dd9c8637f3d0d4bc266308be6af4902fd20fcaf1d75821ca339",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "wide-view-native-1.json",
+      "lane": "view-native",
+      "fixture": "wide",
+      "count": 1000,
+      "encoded_bytes": 14492,
+      "ns_per_message": 39915.5,
+      "process_cpu_ns_per_message": 37716.0,
+      "reader_cpu_ns_per_message": 25074.375,
+      "checksum": 42000,
+      "payload_sha256": "50093304f9419dd9c8637f3d0d4bc266308be6af4902fd20fcaf1d75821ca339",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "wide-view-native-2.json",
+      "lane": "view-native",
+      "fixture": "wide",
+      "count": 1000,
+      "encoded_bytes": 14492,
+      "ns_per_message": 40254.5,
+      "process_cpu_ns_per_message": 38148.0,
+      "reader_cpu_ns_per_message": 24945.125,
+      "checksum": 42000,
+      "payload_sha256": "50093304f9419dd9c8637f3d0d4bc266308be6af4902fd20fcaf1d75821ca339",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "wide-view-selected-0.json",
+      "lane": "view-selected",
+      "fixture": "wide",
+      "count": 1000,
+      "encoded_bytes": 14492,
+      "ns_per_message": 28842.208,
+      "process_cpu_ns_per_message": 26703.0,
+      "reader_cpu_ns_per_message": 14658.459,
+      "checksum": 42000,
+      "payload_sha256": "50093304f9419dd9c8637f3d0d4bc266308be6af4902fd20fcaf1d75821ca339",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "wide-view-selected-1.json",
+      "lane": "view-selected",
+      "fixture": "wide",
+      "count": 1000,
+      "encoded_bytes": 14492,
+      "ns_per_message": 28776.667,
+      "process_cpu_ns_per_message": 26637.0,
+      "reader_cpu_ns_per_message": 14665.041,
+      "checksum": 42000,
+      "payload_sha256": "50093304f9419dd9c8637f3d0d4bc266308be6af4902fd20fcaf1d75821ca339",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    },
+    {
+      "file": "wide-view-selected-2.json",
+      "lane": "view-selected",
+      "fixture": "wide",
+      "count": 1000,
+      "encoded_bytes": 14492,
+      "ns_per_message": 29104.709,
+      "process_cpu_ns_per_message": 27062.0,
+      "reader_cpu_ns_per_message": 14722.625,
+      "checksum": 42000,
+      "payload_sha256": "50093304f9419dd9c8637f3d0d4bc266308be6af4902fd20fcaf1d75821ca339",
+      "backend": "native",
+      "limits": [
+        "one DATA in flight; test queue pacing included",
+        "process CPU includes the peer thread",
+        "raw lane requests bytes only; view-native and legacy request identical native output"
+      ]
+    }
+  ],
+  "note": "Three fresh processes per lane, alternating lane order; all outputs and identities verified. UDP includes one-packet queue/channel pacing and does not measure a saturation ceiling.",
+  "source_sha256": {
+    "bindings/python/native/views.c": "4dad9e330fd4c040d41358e960bbdea676563cc595adb09e2077f2041fe6e7ee",
+    "bindings/python/plasmite/__init__.py": "b715079b39b0e4a97a401b98dbf8f30f4f90ba04c5a052589700d0e9422086fe",
+    "bindings/python/plasmite/_views.py": "1666aa60d2342c541ca3b77416b6c51cad7181d2e924bede8e4cdaa5e5215fd4",
+    "bindings/python/plasmite/_views_fallback.py": "a5e851dd7006c3aabdcf5e85b122c8c68091cb401266cf855df1ad703674ff27",
+    "bindings/python/plasmite/_views_native.abi3.so": "04ff48304d676868d6f128c00d4dba57c66de024a579bbb5abedab06332d9c0b",
+    "bindings/python/benchmarks/udp_views.py": "1bd3292872b81ebbf3c4e9fae9444b1aab5c2c36acbfaefb0f6e6f5c6bbc5d62"
+  },
+  "core_source_commit": "20eb53c",
+  "extension_python": "CPython3.13 abi3; timed processes use CPython3.13 native backend"
+}
