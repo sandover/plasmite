@@ -18,6 +18,7 @@ mod completion;
 mod input;
 mod views;
 mod waits;
+pub use views::native_view_from_bytes;
 
 #[repr(C)]
 struct plsm_client_t {
@@ -1418,9 +1419,6 @@ impl Task for StreamReadTask {
                     result.view = Some(views::NativeView::new(env, owner)?)
                 }
                 StreamPayload::Udp(mut value) => {
-                    if let Some(owner) = value.owner.take() {
-                        result.view = Some(views::NativeView::new(env, owner)?);
-                    }
                     if let Some(payload) = value.payload.take() {
                         value.event.payload = Some(Buffer::from(payload.copy_bytes()));
                     }
@@ -1731,7 +1729,7 @@ impl UdpFollow {
         task.resolve(env, output)
     }
 
-    #[napi(js_name = "nextEventWait", ts_return_type = "Promise<UdpWait>")]
+    #[napi(js_name = "nextEventWait", ts_return_type = "Promise<StreamWait>")]
     pub fn next_event_wait(
         &self,
         env: Env,
@@ -1783,7 +1781,6 @@ impl Drop for UdpFollow {
 
 struct UdpOutput {
     event: UdpEvent,
-    owner: Option<views::Owned>,
     payload: Option<NativeBuf>,
     message: Option<NativeBuf>,
 }
@@ -1810,11 +1807,13 @@ fn read_udp(ptr: *mut plsm_udp_follow_t, timeout: u64, owned: bool) -> Result<St
     {
         status = -1;
     }
-    let bytes = if status == 1 {
+    let bytes = if status == 1 && !owner.is_null() {
+        // Owned DATA uses the same representation as a local owned message.
+        Some(StreamPayload::View(views::Owned::new(owner)))
+    } else if status == 1 {
         match udp_metadata(&event) {
             Ok(parsed) => Some(StreamPayload::Udp(Box::new(UdpOutput {
                 event: parsed,
-                owner: (!owner.is_null()).then(|| views::Owned::new(owner)),
                 payload: (!owned && event.kind == 1).then_some(NativeBuf(event.payload)),
                 message: (!owned && event.kind == 1).then_some(NativeBuf(message)),
             }))),

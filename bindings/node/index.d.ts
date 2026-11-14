@@ -126,7 +126,7 @@ export declare class UdpPool {
 }
 export declare class UdpFollow {
   nextEvent(timeoutMs: number | bigint): StreamWait
-  nextEventWait(timeoutMs: number | bigint): Promise<UdpWait>
+  nextEventWait(timeoutMs: number | bigint): Promise<StreamWait>
   interruptRead(): void
   get isFinished(): boolean
   cancel(): void
