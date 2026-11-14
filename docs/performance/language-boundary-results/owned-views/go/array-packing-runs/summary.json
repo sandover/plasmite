@@ -1,0 +1,542 @@
+[
+  {
+    "fixture": "small_map",
+    "operation": "append",
+    "before": [
+      5511.0,
+      2.0,
+      1212.0,
+      10.0
+    ],
+    "after": [
+      5350.0,
+      2.0,
+      1212.0,
+      10.0
+    ],
+    "before_json": [
+      5243.0,
+      2.0,
+      810.0,
+      15.0
+    ],
+    "after_json": [
+      5200.0,
+      2.0,
+      810.0,
+      15.0
+    ],
+    "native_time_change_pct": -2.9214298675376504,
+    "final_native_vs_json_pct": 2.8846153846153744
+  },
+  {
+    "fixture": "small_map",
+    "operation": "forward",
+    "before": [
+      4217.0,
+      2.0,
+      692.0,
+      5.0
+    ],
+    "after": [
+      4222.0,
+      2.0,
+      692.0,
+      5.0
+    ],
+    "before_json": [
+      4225.0,
+      4.0,
+      676.0,
+      5.0
+    ],
+    "after_json": [
+      4467.0,
+      4.0,
+      676.0,
+      5.0
+    ],
+    "native_time_change_pct": 0.11856770215792345,
+    "final_native_vs_json_pct": -5.484665323483318
+  },
+  {
+    "fixture": "small_map",
+    "operation": "pipeline",
+    "before": [
+      5744.0,
+      5.0,
+      2552.0,
+      15.0
+    ],
+    "after": [
+      5665.0,
+      5.0,
+      2552.0,
+      15.0
+    ],
+    "before_json": [
+      5992.0,
+      5.0,
+      2148.0,
+      20.0
+    ],
+    "after_json": [
+      6091.0,
+      5.0,
+      2148.0,
+      20.0
+    ],
+    "native_time_change_pct": -1.3753481894150377,
+    "final_native_vs_json_pct": -6.9939254637990445
+  },
+  {
+    "fixture": "small_struct",
+    "operation": "append",
+    "before": [
+      5368.0,
+      2.0,
+      1012.0,
+      6.0
+    ],
+    "after": [
+      4947.0,
+      2.0,
+      1012.0,
+      6.0
+    ],
+    "before_json": [
+      4936.0,
+      2.0,
+      709.0,
+      6.0
+    ],
+    "after_json": [
+      4942.0,
+      2.0,
+      709.0,
+      6.0
+    ],
+    "native_time_change_pct": -7.842771982116248,
+    "final_native_vs_json_pct": 0.10117361392147917
+  },
+  {
+    "fixture": "small_struct",
+    "operation": "forward",
+    "before": [
+      4212.0,
+      2.0,
+      692.0,
+      5.0
+    ],
+    "after": [
+      4422.0,
+      2.0,
+      692.0,
+      5.0
+    ],
+    "before_json": [
+      4571.0,
+      4.0,
+      676.0,
+      5.0
+    ],
+    "after_json": [
+      4620.0,
+      4.0,
+      676.0,
+      5.0
+    ],
+    "native_time_change_pct": 4.985754985754975,
+    "final_native_vs_json_pct": -4.285714285714281
+  },
+  {
+    "fixture": "small_struct",
+    "operation": "pipeline",
+    "before": [
+      5780.0,
+      5.0,
+      2352.0,
+      11.0
+    ],
+    "after": [
+      5498.0,
+      5.0,
+      2352.0,
+      11.0
+    ],
+    "before_json": [
+      5745.0,
+      5.0,
+      2050.0,
+      11.0
+    ],
+    "after_json": [
+      5779.0,
+      5.0,
+      2050.0,
+      11.0
+    ],
+    "native_time_change_pct": -4.878892733564011,
+    "final_native_vs_json_pct": -4.862432946876627
+  },
+  {
+    "fixture": "wide",
+    "operation": "append",
+    "before": [
+      44188.0,
+      2.0,
+      62829.0,
+      22.0
+    ],
+    "after": [
+      44160.0,
+      2.0,
+      62829.0,
+      22.0
+    ],
+    "before_json": [
+      39346.0,
+      2.0,
+      20819.0,
+      615.0
+    ],
+    "after_json": [
+      39466.0,
+      2.0,
+      20827.0,
+      615.0
+    ],
+    "native_time_change_pct": -0.06336561962523302,
+    "final_native_vs_json_pct": 11.893781989560637
+  },
+  {
+    "fixture": "wide",
+    "operation": "forward",
+    "before": [
+      12193.0,
+      2.0,
+      11092.0,
+      5.0
+    ],
+    "after": [
+      12142.0,
+      2.0,
+      11092.0,
+      5.0
+    ],
+    "before_json": [
+      18069.0,
+      4.0,
+      14228.0,
+      5.0
+    ],
+    "after_json": [
+      17619.0,
+      4.0,
+      14228.0,
+      5.0
+    ],
+    "native_time_change_pct": -0.4182727794636243,
+    "final_native_vs_json_pct": -31.08575969124241
+  },
+  {
+    "fixture": "wide",
+    "operation": "pipeline",
+    "before": [
+      49217.0,
+      6.0,
+      75049.0,
+      28.0
+    ],
+    "after": [
+      51724.0,
+      6.0,
+      75049.0,
+      28.0
+    ],
+    "before_json": [
+      50165.0,
+      6.0,
+      33058.0,
+      621.0
+    ],
+    "after_json": [
+      52138.0,
+      6.0,
+      33050.0,
+      621.0
+    ],
+    "native_time_change_pct": 5.093768413353117,
+    "final_native_vs_json_pct": -0.7940465687214737
+  },
+  {
+    "fixture": "long_string",
+    "operation": "append",
+    "before": [
+      13766.0,
+      2.0,
+      74461.0,
+      10.0
+    ],
+    "after": [
+      14075.0,
+      2.0,
+      74460.0,
+      10.0
+    ],
+    "before_json": [
+      54368.0,
+      2.0,
+      149356.0,
+      15.0
+    ],
+    "after_json": [
+      54306.0,
+      2.0,
+      149468.0,
+      15.0
+    ],
+    "native_time_change_pct": 2.2446607583902267,
+    "final_native_vs_json_pct": -74.08205354841087
+  },
+  {
+    "fixture": "long_string",
+    "operation": "forward",
+    "before": [
+      12349.0,
+      2.0,
+      73940.0,
+      5.0
+    ],
+    "after": [
+      12716.0,
+      2.0,
+      73940.0,
+      5.0
+    ],
+    "before_json": [
+      45903.0,
+      4.0,
+      147606.0,
+      5.0
+    ],
+    "after_json": [
+      45698.0,
+      4.0,
+      147606.0,
+      5.0
+    ],
+    "native_time_change_pct": 2.971900558749696,
+    "final_native_vs_json_pct": -72.1738369294061
+  },
+  {
+    "fixture": "long_string",
+    "operation": "pipeline",
+    "before": [
+      28801.0,
+      6.0,
+      215057.0,
+      16.0
+    ],
+    "after": [
+      27593.0,
+      6.0,
+      215057.0,
+      16.0
+    ],
+    "before_json": [
+      68331.0,
+      6.0,
+      292122.0,
+      21.0
+    ],
+    "after_json": [
+      68654.0,
+      6.0,
+      292043.0,
+      21.0
+    ],
+    "native_time_change_pct": -4.19429880906913,
+    "final_native_vs_json_pct": -59.80860547091211
+  },
+  {
+    "fixture": "bytes",
+    "operation": "append",
+    "before": [
+      16608.0,
+      2.0,
+      140541.0,
+      12.0
+    ],
+    "after": [
+      17117.0,
+      2.0,
+      140541.0,
+      12.0
+    ],
+    "before_json": [
+      57493.0,
+      2.0,
+      183777.0,
+      18.0
+    ],
+    "after_json": [
+      57527.0,
+      2.0,
+      183866.0,
+      18.0
+    ],
+    "native_time_change_pct": 3.064788053949896,
+    "final_native_vs_json_pct": -70.24527613120796
+  },
+  {
+    "fixture": "bytes",
+    "operation": "forward",
+    "before": [
+      12680.0,
+      2.0,
+      73940.0,
+      5.0
+    ],
+    "after": [
+      12409.0,
+      2.0,
+      73940.0,
+      5.0
+    ],
+    "before_json": [
+      73219.0,
+      4.0,
+      180377.0,
+      5.0
+    ],
+    "after_json": [
+      72714.0,
+      4.0,
+      180377.0,
+      5.0
+    ],
+    "native_time_change_pct": -2.1372239747634025,
+    "final_native_vs_json_pct": -82.93451054817504
+  },
+  {
+    "fixture": "bytes",
+    "operation": "pipeline",
+    "before": [
+      28003.0,
+      6.0,
+      281034.0,
+      18.0
+    ],
+    "after": [
+      29439.0,
+      6.0,
+      281034.0,
+      18.0
+    ],
+    "before_json": [
+      164628.0,
+      8.0,
+      436898.0,
+      26.0
+    ],
+    "after_json": [
+      164113.0,
+      8.0,
+      437352.0,
+      26.0
+    ],
+    "native_time_change_pct": 5.128021997643106,
+    "final_native_vs_json_pct": -82.06175013557731
+  },
+  {
+    "fixture": "array",
+    "operation": "append",
+    "before": [
+      79091.0,
+      2.0,
+      195454.0,
+      18.0
+    ],
+    "after": [
+      35083.0,
+      2.0,
+      58620.0,
+      12.0
+    ],
+    "before_json": [
+      45945.0,
+      2.0,
+      53826.0,
+      18.0
+    ],
+    "after_json": [
+      46442.0,
+      2.0,
+      53831.0,
+      18.0
+    ],
+    "native_time_change_pct": -55.64223489398288,
+    "final_native_vs_json_pct": -24.45846432108867
+  },
+  {
+    "fixture": "array",
+    "operation": "forward",
+    "before": [
+      40329.0,
+      2.0,
+      49364.0,
+      5.0
+    ],
+    "after": [
+      41066.0,
+      2.0,
+      49364.0,
+      5.0
+    ],
+    "before_json": [
+      48343.0,
+      4.0,
+      53396.0,
+      5.0
+    ],
+    "after_json": [
+      47278.0,
+      4.0,
+      53396.0,
+      5.0
+    ],
+    "native_time_change_pct": 1.8274690669245475,
+    "final_native_vs_json_pct": -13.13930369304962
+  },
+  {
+    "fixture": "array",
+    "operation": "pipeline",
+    "before": [
+      90702.0,
+      6.0,
+      245946.0,
+      24.0
+    ],
+    "after": [
+      45927.0,
+      6.0,
+      109113.0,
+      18.0
+    ],
+    "before_json": [
+      57553.0,
+      6.0,
+      104462.0,
+      24.0
+    ],
+    "after_json": [
+      59123.0,
+      6.0,
+      104464.0,
+      24.0
+    ],
+    "native_time_change_pct": -49.36495336376265,
+    "final_native_vs_json_pct": -22.319571063714626
+  }
+]

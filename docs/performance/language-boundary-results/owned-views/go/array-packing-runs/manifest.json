@@ -1,0 +1,46 @@
+{
+  "repeats": 7,
+  "iterations_per_lane": 2000,
+  "order": "Central runner alternated original/candidate process order and forward/reverse fixture/lane order.",
+  "library_policy": "Both original and candidate processes used DYLD_LIBRARY_PATH=tmp/go-array-checkpoint/packed-copy/lib.",
+  "artifacts": {
+    "tmp/go-input-checkpoint/input.test": "0822f18a978513a48d2191982276aca52500d17eb8b29826801badf25c90ec8d",
+    "tmp/go-array-checkpoint/packed-copy/input.test": "7ae6d1f9913799a6ce85c06d68d097cfe8e5b665462c5de7d460a6e715143b93",
+    "tmp/go-array-checkpoint/packed-copy/lib/libplasmite.dylib": "fba7456e9513cf877db864e441814a209087b7cd66cf73488c4a792d80b1a6b3"
+  },
+  "raw_sha256": {
+    "packed-copy-3.txt": "c76c1cd9e1f790053c38d7ab37bcc0a0c69fb70c33f7439281313258250076dd",
+    "packed-copy-2.txt": "f6af7810d4d3981fa744a546d5f115407c52f8cbaacbc56dbff3bdb555f96c06",
+    "packed-copy-0.txt": "169aceced9bffff1bdc7f83dacd911a11eb845b27f4282cf136df904027bdf1e",
+    "packed-copy-1.txt": "60488995c34089488ab7ea233664756d5459f5b70d53ea57e8eb5a62d88460cf",
+    "packed-copy-5.txt": "eadb7c9b98a21fb0e13a4278d08464450d23167dfff1d5e1578e180a94877c7e",
+    "packed-copy-4.txt": "417ec0268e38cbd6adbba186ef594b4b52adfaba19bd68dcda36e54524cae44c",
+    "packed-copy-6.txt": "82f2e0b67edaf5c010c75149b90de2d5dbb2e4528926632ea63e0e5a1e1a35f0",
+    "original-2.txt": "e34b4c2dd6f6388a1e9002393041a7ad959f0efe0e6555fe2bbe1064a743635f",
+    "original-3.txt": "2e8767ac97b6b21ce2689b069a36f268a3ec93a2071d73ac5e63953dfdfdbd0c",
+    "original-1.txt": "ce02b19daa33df127ef103d6358f922187c47d2deb3568d479e57b66d1242b6c",
+    "original-0.txt": "d2796a24aaeeaa67a18d7c0da8a142c5e25c5793ba656a2bcc3273dac05c11d2",
+    "original-4.txt": "907e96189ee9cf863eb41d35023e9882fbd52aa17655a392bc1d38dfb44dfecb",
+    "original-5.txt": "6642b09f87e4060f166625025d148268ac04c8fcaeb1e9a769f077db628c6ca6",
+    "original-6.txt": "b149ef2b91a224ba8195668f1429503c19014baa3bfc2234ca9c4f9d37cd1c13"
+  },
+  "native_metric_columns": [
+    "ns/op",
+    "cgo/op",
+    "Go B/op",
+    "Go allocations/op"
+  ],
+  "source_records": [
+    "producer-checkpoint.json",
+    "array-packing-checkpoint.json"
+  ],
+  "validation": "All14 processes printPASS; fixed harness verifies every fixture/lane output. Parent central checkpoint ran without competing builds/tests.",
+  "postrun_loaded_library_probe": {
+    "original": [
+      "dyld[79895]: <E6C22E83-6430-3C93-8981-1F3EBA1A8D8F> /Users/brandonharvey/src/plasmite/tmp/go-array-checkpoint/packed-copy/lib/libplasmite.dylib"
+    ],
+    "packed-copy": [
+      "dyld[79896]: <E6C22E83-6430-3C93-8981-1F3EBA1A8D8F> /Users/brandonharvey/src/plasmite/tmp/go-array-checkpoint/packed-copy/lib/libplasmite.dylib"
+    ]
+  }
+}

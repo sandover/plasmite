@@ -279,5 +279,54 @@ with each fixed executable and
 `PLASMITE_GO_REVERSE=0/1`; retain append, forwarding, pipeline and JSON controls.
 The existing harness verifies the final value in every lane.
 
+
+## Accepted array producer comparison
+
+[Seven paired central runs](array-packing-runs/manifest.json) compare the fixed
+original and compact-array Go executables with the **same release library**.
+Each process runs 2,000 iterations per lane and prints PASS after fixture/output
+checks. [The full summary](array-packing-runs/summary.json) retains all native and
+JSON controls, allocation counts and cgo calls. Post-run loader probes confirm
+the documented shared-library resolution; hashes identify unchanged artifacts.
+
+| 1,000-integer fixture | Original native | Compact native | Candidate JSON |
+| --- | ---: | ---: | ---: |
+| Append, owned result | 79.09 µs | 35.08 µs | 46.44 µs |
+| Append/read/typed decode | 90.70 µs | 45.93 µs | 59.12 µs |
+| Go bytes per append | 195,454 | 58,620 | 53,831 |
+| Go allocations per append | 18 | 12 | 18 |
+| Go bytes per pipeline | 245,946 | 109,113 | 104,464 |
+| Go allocations per pipeline | 24 | 18 | 24 |
+
+Array append takes 56% less time and the complete pipeline takes 49% less. Native
+now takes 24%/22% less time than the matching JSON append/pipeline. Crossing
+counts stay at two per append and six per pipeline. The gain removes the large
+per-element descriptor construction and growth copies; the boundary keeps one
+compact value-at-visit snapshot. It changes no storage format or callback order.
+
+Other producer medians retain the scope of the result:
+
+| Append fixture | Original native → compact native | Candidate JSON |
+| --- | ---: | ---: |
+| Small map | 5.51 → 5.35 µs | 5.20 µs |
+| Small struct | 5.37 → 4.95 µs | 4.94 µs |
+| Wide | 44.19 → 44.16 µs | 39.47 µs |
+| Long text | 13.77 → 14.08 µs | 54.31 µs |
+| Native bytes | 16.61 → 17.12 µs | 57.53 µs |
+
+Wide append remains 12% slower than JSON and allocates more Go bytes despite
+fewer allocations. Wide pipelines rise 5.1% while their JSON control rises 3.9%.
+The native-byte pipeline rises 5.1% while its JSON control stays near its earlier
+time. The report retains those regressions; this array change supports no
+universal producer speedup. Text/byte routes still beat the JSON controls
+substantially, with their previously documented stored-kind distinction.
+
+These fixtures use the existing subtree-copy forwarding path. They precede the
+new stream whole-message forwarding shortcut and the separate retained-child
+wrapper reassignment fix; their frozen executables never load later Go code.
+Together with consumer evidence and race/pointer/Go1.22 checks, this comparison
+completes QG7QZI's measured Go boundary implementation. The remaining wide
+producer gap stays visible for later work.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.
