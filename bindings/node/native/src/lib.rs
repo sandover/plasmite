@@ -17,7 +17,6 @@ use std::sync::Arc;
 mod completion;
 mod input;
 mod views;
-pub use views::native_view_from_bytes;
 mod waits;
 pub use views::native_view_from_bytes;
 

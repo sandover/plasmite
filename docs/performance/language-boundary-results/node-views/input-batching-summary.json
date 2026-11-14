@@ -1,0 +1,313 @@
+{
+  "method": "Steady: five alternating production/candidate process pairs,500untimedwarmups per lane,2000operations(500forarray),3alternatinglane repeats,naturalGC. Medians use per-process repeat medians. Short-burst stages and cold observations remain separate.",
+  "rows": [
+    {
+      "fixture": "small",
+      "lane": "append-field/native",
+      "beforeWallUs": 15.601729000000006,
+      "afterWallUs": 13.6365415,
+      "beforeCpuUs": 17.5465,
+      "afterCpuUs": 16.9915,
+      "pairedWallChangePercent": [
+        -12.29345062750209,
+        -13.738592690592233,
+        -13.151691240101758,
+        -2.2066878670925827,
+        -13.333308569794077
+      ]
+    },
+    {
+      "fixture": "small",
+      "lane": "append-consumer-field/native",
+      "beforeWallUs": 29.793916499999995,
+      "afterWallUs": 28.649395999999996,
+      "beforeCpuUs": 33.783,
+      "afterCpuUs": 32.915,
+      "pairedWallChangePercent": [
+        -4.025395750467076,
+        -6.570342975889032,
+        -3.529126387321757,
+        -3.3893126228925263,
+        -4.22694376779158
+      ]
+    },
+    {
+      "fixture": "small",
+      "lane": "append-field/stringify-json",
+      "beforeWallUs": 12.516291500000001,
+      "afterWallUs": 11.904374999999987,
+      "beforeCpuUs": 13.8415,
+      "afterCpuUs": 13.6625,
+      "pairedWallChangePercent": [
+        -2.1097263266092847,
+        12.906179118631101,
+        -9.007840854872306,
+        -3.224299065420566,
+        -0.04937949051900814
+      ]
+    },
+    {
+      "fixture": "small",
+      "lane": "append-consumer-field/stringify-json",
+      "beforeWallUs": 25.12439599999999,
+      "afterWallUs": 24.732687499999997,
+      "beforeCpuUs": 28.508,
+      "afterCpuUs": 27.3885,
+      "pairedWallChangePercent": [
+        -1.3507807312063913,
+        4.4461613008609735,
+        -3.6318703849448686,
+        2.6045936639981004,
+        -5.242581374999389
+      ]
+    },
+    {
+      "fixture": "wide",
+      "lane": "append-field/native",
+      "beforeWallUs": 113.11597899999992,
+      "afterWallUs": 84.18547899999999,
+      "beforeCpuUs": 118.3105,
+      "afterCpuUs": 89.2435,
+      "pairedWallChangePercent": [
+        -25.413634635818717,
+        -25.259511575261918,
+        -23.805415678716813,
+        -26.43664082296323,
+        -23.920509988871974
+      ]
+    },
+    {
+      "fixture": "wide",
+      "lane": "append-consumer-field/native",
+      "beforeWallUs": 139.02602100000013,
+      "afterWallUs": 112.55147899999997,
+      "beforeCpuUs": 145.832,
+      "afterCpuUs": 121.2375,
+      "pairedWallChangePercent": [
+        -20.686578034212978,
+        -18.813603403158453,
+        -18.324236126521665,
+        -19.47514957070837,
+        -19.085755896013247
+      ]
+    },
+    {
+      "fixture": "wide",
+      "lane": "append-field/stringify-json",
+      "beforeWallUs": 57.139854000000014,
+      "afterWallUs": 58.09772899999996,
+      "beforeCpuUs": 62.24,
+      "afterCpuUs": 63.058,
+      "pairedWallChangePercent": [
+        -6.349748476700956,
+        -0.20469975021785158,
+        1.676369351591167,
+        0.8300748861182372,
+        2.750436133829015
+      ]
+    },
+    {
+      "fixture": "wide",
+      "lane": "append-consumer-field/stringify-json",
+      "beforeWallUs": 79.84177050000005,
+      "afterWallUs": 80.48733349999998,
+      "beforeCpuUs": 87.556,
+      "afterCpuUs": 89.9965,
+      "pairedWallChangePercent": [
+        -1.235721120234201,
+        0.437037252824779,
+        0.9176487387638765,
+        3.3984832361165784,
+        0.09474252001966388
+      ]
+    },
+    {
+      "fixture": "text64k",
+      "lane": "append-field/native",
+      "beforeWallUs": 27.437645500000144,
+      "afterWallUs": 25.810041499999897,
+      "beforeCpuUs": 32.481,
+      "afterCpuUs": 31.1155,
+      "pairedWallChangePercent": [
+        -5.0613235016837566,
+        -5.656873525668904,
+        -6.319302102252955,
+        -8.516139215723884,
+        -7.72282390586364
+      ]
+    },
+    {
+      "fixture": "text64k",
+      "lane": "append-consumer-field/native",
+      "beforeWallUs": 44.90062499999999,
+      "afterWallUs": 41.79877050000004,
+      "beforeCpuUs": 52.4415,
+      "afterCpuUs": 50.7985,
+      "pairedWallChangePercent": [
+        -4.967691703109556,
+        -4.595407344671032,
+        -7.462572684558388,
+        -5.686121295639146,
+        -9.147859220027833
+      ]
+    },
+    {
+      "fixture": "text64k",
+      "lane": "append-field/stringify-json",
+      "beforeWallUs": 63.12133350000022,
+      "afterWallUs": 61.85608350000007,
+      "beforeCpuUs": 71.0075,
+      "afterCpuUs": 69.6615,
+      "pairedWallChangePercent": [
+        -2.004472861778417,
+        0.30747826123143085,
+        0.2085850683430701,
+        6.890571438512794,
+        -4.097675904149511
+      ]
+    },
+    {
+      "fixture": "text64k",
+      "lane": "append-consumer-field/stringify-json",
+      "beforeWallUs": 79.01572900000019,
+      "afterWallUs": 77.66291650000016,
+      "beforeCpuUs": 88.8305,
+      "afterCpuUs": 88.603,
+      "pairedWallChangePercent": [
+        -2.52193965077514,
+        0.8273593602902807,
+        2.463756423534358,
+        5.945744104746242,
+        -8.383780619975889
+      ]
+    },
+    {
+      "fixture": "array",
+      "lane": "append-field/native",
+      "beforeWallUs": 1214.8142499999994,
+      "afterWallUs": 530.1407500000005,
+      "beforeCpuUs": 1263.214,
+      "afterCpuUs": 573.372,
+      "pairedWallChangePercent": [
+        -56.13281944866068,
+        -56.45425061189319,
+        -56.21960312039469,
+        -56.773185430029294,
+        -56.84223843980269
+      ]
+    },
+    {
+      "fixture": "array",
+      "lane": "append-consumer-field/native",
+      "beforeWallUs": 1390.4665840000016,
+      "afterWallUs": 693.7246660000001,
+      "beforeCpuUs": 1473.896,
+      "afterCpuUs": 777.348,
+      "pairedWallChangePercent": [
+        -51.57949848545069,
+        -49.483579998652935,
+        -47.313425549582966,
+        -50.327356216163224,
+        -49.89198776746729
+      ]
+    },
+    {
+      "fixture": "array",
+      "lane": "append-field/stringify-json",
+      "beforeWallUs": 316.771499999999,
+      "afterWallUs": 318.14650000000074,
+      "beforeCpuUs": 366.326,
+      "afterCpuUs": 363.138,
+      "pairedWallChangePercent": [
+        0.4340668273508763,
+        -0.8027060656571772,
+        -1.36257215646719,
+        -1.088807733008712,
+        1.1993696468362902
+      ]
+    },
+    {
+      "fixture": "array",
+      "lane": "append-consumer-field/stringify-json",
+      "beforeWallUs": 475.8240000000005,
+      "afterWallUs": 471.76883399999866,
+      "beforeCpuUs": 550.85,
+      "afterCpuUs": 551.104,
+      "pairedWallChangePercent": [
+        -1.0740917985967768,
+        -0.4205301395613814,
+        -0.5094845993480424,
+        -1.9943833807605449,
+        0.3262385007288593
+      ]
+    }
+  ],
+  "cold": [
+    {
+      "fixture": "small",
+      "values": {
+        "production": {
+          "requireUs": 3313.667,
+          "firstUs": 1146.708,
+          "firstCpuUs": 1393
+        },
+        "candidate": {
+          "requireUs": 3355.792,
+          "firstUs": 1351,
+          "firstCpuUs": 1659
+        }
+      }
+    },
+    {
+      "fixture": "wide",
+      "values": {
+        "production": {
+          "requireUs": 3269.708,
+          "firstUs": 1245.916,
+          "firstCpuUs": 1442
+        },
+        "candidate": {
+          "requireUs": 3428.084,
+          "firstUs": 1554.875,
+          "firstCpuUs": 1831
+        }
+      }
+    },
+    {
+      "fixture": "text64k",
+      "values": {
+        "production": {
+          "requireUs": 3262.625,
+          "firstUs": 1163.25,
+          "firstCpuUs": 1402
+        },
+        "candidate": {
+          "requireUs": 3377.459,
+          "firstUs": 1352.041,
+          "firstCpuUs": 1610
+        }
+      }
+    },
+    {
+      "fixture": "array",
+      "values": {
+        "production": {
+          "requireUs": 3376.208,
+          "firstUs": 2606.875,
+          "firstCpuUs": 3054
+        },
+        "candidate": {
+          "requireUs": 3349.375,
+          "firstUs": 2378.5,
+          "firstCpuUs": 3557
+        }
+      }
+    }
+  ],
+  "limits": [
+    "Short-burst runs use200operations and20warmups with forcedGC before rows; small and CPU regressions remain in raw evidence.",
+    "Longer steady runs change warmup, duration and GC policy together; they establish the steady workload without isolating which VM stage explains each short-run difference.",
+    "Cold refined harness times only package require; clean-stage require also included loading node:assert/strict.",
+    "Array/wide explicit-JSON producer controls remain faster than the candidate; payloads and returned selected values match within each lane."
+  ]
+}

@@ -44,6 +44,7 @@ The linked reports preserve fixed artifacts, verification, raw runs and controls
 
 | Change | Matched work | Before → after | CPU or allocation context |
 | --- | --- | ---: | --- |
+| [Node shared input traversal](language-boundary-results/node-views/README.md#shared-input-traversal-and-bounded-native-writes) | 4,096 objects: append, read, selected field | 1,390 → 694 µs | Same-process producer/consumer CPU: 1,474 → 777 µs; first-call and short-run costs remain separate |
 | [Go compact scalar spans](language-boundary-results/owned-views/go/README.md#accepted-array-producer-comparison) | 1,000 integers: append, read, typed decode | 90.70 → 45.93 µs | 24 → 18 Go allocations; 245,946 → 109,113 Go bytes per pipeline |
 | [Python explicit batches](language-boundary-results/owned-views/python/batches/README.md#final-central-confirmation) | Complete message JSON/dataclass result, count 16 | 70,945 → 120,865 messages/s | Combined producer/reader CPU: 87.407 → 71.957 ms per 5,000 messages |
 | [Python explicit batches](language-boundary-results/owned-views/python/batches/README.md#final-central-confirmation) | Native data result, count 16 | 102,241 → 134,932 messages/s | Combined producer/reader CPU: 67.997 → 60.480 ms per 5,000 messages |
@@ -95,5 +96,7 @@ The integrated owned-view and stream implementations pass `just check` and
 `just release-gate`, including language bindings, C interface checks, packaged
 native and addon-free Node installs, and native/fallback Python wheels. An
 additional Node run with explicit garbage collection checks retained children.
+The final accepted implementation passes all 127 Node cases on both Node 24
+and Node 26, including actual portable-to-native forwarding.
 [Recorded commands, wheel hashes and logs](language-boundary-results/owned-views/final-integration.json)
 identify this checkpoint; later measured changes need their affected checks.

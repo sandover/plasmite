@@ -1,0 +1,89 @@
+{
+  "runtimeCommit": "9629739",
+  "method": "Five alternating release-process pairs per case,100records/handle; same core6a08/server6dc. ConsumerCPU excludesUDPserver. IncludeslegacyJSONnegativecontrol.",
+  "rows": [
+    {
+      "handles": 1,
+      "result": "owned",
+      "values": {
+        "baseline": {
+          "wallMs": 8.652417,
+          "cpuMs": 7.442,
+          "cpuRangeMs": [
+            6.537,
+            8.026
+          ],
+          "pacedP95Us": 316.708,
+          "pacedCpuMs": 26.208
+        },
+        "candidate": {
+          "wallMs": 7.527,
+          "cpuMs": 6.309,
+          "cpuRangeMs": [
+            3.278,
+            8.567
+          ],
+          "pacedP95Us": 371.791,
+          "pacedCpuMs": 25.525
+        }
+      }
+    },
+    {
+      "handles": 128,
+      "result": "owned",
+      "values": {
+        "baseline": {
+          "wallMs": 558.31175,
+          "cpuMs": 432.672,
+          "cpuRangeMs": [
+            320.871,
+            626.598
+          ],
+          "pacedP95Us": 3840.958,
+          "pacedCpuMs": 708.781
+        },
+        "candidate": {
+          "wallMs": 591.131292,
+          "cpuMs": 473.552,
+          "cpuRangeMs": [
+            378.038,
+            503.719
+          ],
+          "pacedP95Us": 3887.875,
+          "pacedCpuMs": 705.106
+        }
+      }
+    },
+    {
+      "handles": 128,
+      "result": "json",
+      "values": {
+        "baseline": {
+          "wallMs": 578.432625,
+          "cpuMs": 484.823,
+          "cpuRangeMs": [
+            342.459,
+            623.612
+          ],
+          "pacedP95Us": 3797.5,
+          "pacedCpuMs": 708.897
+        },
+        "candidate": {
+          "wallMs": 581.7379159999999,
+          "cpuMs": 461.684,
+          "cpuRangeMs": [
+            457.095,
+            610.897
+          ],
+          "pacedP95Us": 3875.208,
+          "pacedCpuMs": 721.134
+        }
+      }
+    }
+  ],
+  "limits": [
+    "One-handle saturated CPU median falls, but paced tails and128-handle results vary. No general fanout throughput or latency gain follows.",
+    "128-handle owned CPU median rises432.67\u2192473.55ms while beforeCPU spans320.88\u2013626.64ms; rawJSONcontrol also varies widely. Preserve the regression observation.",
+    "The change removes one intermediate Rust allocation and an unused Node identity event per owned DATA result; controls/raw retaintheirrepresentation."
+  ]
+}

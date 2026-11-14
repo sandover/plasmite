@@ -516,5 +516,71 @@ including its zero-timeout probes and runtime setup. The earlier alternative
 matrix isolates the scheduling decision and rare-active-reader latency; this
 checkpoint verifies the combined implementation and owned-result costs.
 
+## Shared input traversal and bounded native writes
+
+JavaScript now observes input objects in one shared walker for native and portable
+encoding. The native sink sends at most 512 primitive operations per call through
+10 KiB of reusable staging storage. Native code feeds those operations to the
+existing Lite3 builder. It creates no intermediate native object tree or encoded
+message copy. Bytes and checked subtrees reach the builder at their visit; later
+hooks cannot change them. A small record combines initialization, its final span
+and commit in one native call. The obsolete Rust object walker has retired.
+
+The [five-pair steady summary](input-batching-summary.json) uses 500 untimed
+warmups per lane, 2,000 operations (500 for the array), three alternating lane
+orders and natural garbage collection. Medians first combine repeats within a
+process, then combine process medians. Raw data and exact sources (outside Git)
+also preserve the earlier start/write/finish prototype, the one-call refinement,
+three final confirmation pairs after retirement, cold observations and portable
+controls. All measured payload and identity checks pass.
+
+| Input | Append + field before/after µs | Append CPU before/after µs | Append/read + field before/after µs |
+| --- | ---: | ---: | ---: |
+| Small | 15.60 / 13.64 | 17.55 / 16.99 | 29.79 / 28.65 |
+| Wide | 113.12 / 84.19 | 118.31 / 89.24 | 139.03 / 112.55 |
+| 64 KiB string | 27.44 / 25.81 | 32.48 / 31.12 | 44.90 / 41.80 |
+| 4,096 objects | 1,214.81 / 530.14 | 1,263.21 / 573.37 | 1,390.47 / 693.72 |
+
+The array saves about 56% of append time and 50% of producer/consumer time.
+Its producer/consumer CPU falls from 1,474 to 777 µs. JSON producer controls stay
+flat. JSON input still wins wide and object-array construction on these JSON-safe
+fixtures; the string favors native input. Exact integers and native bytes have
+their own checks and cannot use lossy JSON substitutions as equivalent controls.
+
+Short runs tell a different story. With 20 warmups, 200 operations and forced GC
+before each timed row, the one-call candidate's small append takes 21.90 versus
+20.45 µs, and some CPU rows lose despite lower elapsed time. Longer steady runs
+change warmup, duration and GC policy together. They establish that workload;
+they do not isolate which VM stage causes each short-run difference.
+
+Fresh-process first append takes about 1.35 versus 1.15 ms for small input and
+1.55 versus 1.25 ms for wide input. The first array takes 2.38 versus 2.61 ms.
+Cold costs include runtime initialization and first use; they remain separate
+from steady throughput. Memory observations include runtime allocations and do
+not establish exact peaks. The sink clears string references and retains one
+10 KiB idle packet; reentrant captures use independent packets.
+
+Actual portable views now import correctly into native pools. The bridge checks
+the configured NativeView constructor and caches one checked native import per
+foreign backend. A portable owner no longer passes as a native owner. Tests cover
+whole/root/mixed/retagged inputs with exact integers, bytes and retained children.
+Resource and encoded-size errors can surface at a flush or finish; deterministic
+type/key/depth checks keep visit order, and failures publish no partial message.
+
+## Reuse owned completion for UDP DATA
+
+Owned UDP DATA now uses the local owned-message completion case. This removes an
+intermediate Rust allocation and a second identity event that JavaScript
+discarded. Legacy DATA and control events retain their existing representation.
+
+[Five paired comparisons](udp-owned-completion-summary.json), with
+raw runs and source (outside Git), show one-handle
+saturated consumer CPU at 7.44 versus 6.31 ms per 100 messages. At 128 handles,
+elapsed time changes from 558 to 591 ms and consumer CPU from 433 to 474 ms.
+The before CPU range spans 321–627 ms; the unchanged JSON control also varies
+widely. The one-handle paced p95 median rises from 317 to 372 µs. Keep these higher
+median costs visible. This simplification establishes no general fanout performance gain. The benchmark
+measures the complete producer/consumer process and excludes the UDP server CPU.
+
 Historical source snapshots and full build logs stay outside Git. This report
 keeps the scripts, summaries and readable results.

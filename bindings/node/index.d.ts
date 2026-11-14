@@ -58,10 +58,13 @@ export interface UdpWait {
 }
 export declare class NativeAppendTarget {
   discard(): void
+  write(ops: unknown, numbers: unknown, strings: Array<string>, count: number, tags?: Array<string> | undefined | null): void
+  writeBytes(key: string | undefined | null, bytes: unknown): void
+  writeCopy(source: NativeView, node: number, key: string | undefined | null, root: boolean): void
+  finish(ops: unknown, numbers: unknown, strings: Array<string>, count: number, tags?: Array<string> | undefined | null): Promise<unknown>
   copy(source: NativeView, node: number, tags: Array<string>): Promise<unknown>
   json(value: unknown, tags: Array<string>): Promise<unknown>
   forward(source: NativeView): Promise<unknown>
-  encode(value: unknown, tags: Array<string>, helpers: object): Promise<unknown>
 }
 export declare class NativeView {
   encodedBytes(): Buffer

@@ -10,6 +10,10 @@ const root = path.resolve(process.env.PLASMITE_BENCH_BINDING || path.join(__dirn
 const { Client, Durability, toNative, toJson, toLite3 } = require(root);
 const { createNativeMessage, createMessageView, messageReference, valueReference } = require(path.join(root, 'views'));
 const iterations = Number(process.argv[2] || 200), repeats = Number(process.argv[3] || 5);
+const warmup = Number(process.env.PLASMITE_BENCH_WARMUP || 20);
+const selectedLanes = process.env.PLASMITE_BENCH_LANES ? new Set(process.env.PLASMITE_BENCH_LANES.split(',')) : null;
+const forceGc = process.env.PLASMITE_BENCH_NO_GC !== '1';
+if (!Number.isSafeInteger(warmup) || warmup < 0) throw new Error('warmup must be a nonnegative integer');
 if (!Number.isSafeInteger(iterations) || iterations <= 0 || !Number.isSafeInteger(repeats) || repeats <= 0) throw new Error('positive counts required');
 const fixtures = {
   small: { metrics: { power: 42 }, samples: Array.from({ length: 4 }, (_, value) => ({ value })) },
@@ -27,7 +31,7 @@ function jsonAppend(pool, text, tags = []) {
   return target.json(text, tags).then(createNativeMessage);
 }
 async function measure(name, n, fn) {
-  global.gc?.();
+  if (forceGc) global.gc?.();
   await pause();
   const lag = monitorEventLoopDelay({ resolution: 1 });
   lag.enable();
@@ -104,10 +108,12 @@ async function main() {
         );
       }
       if (toLite3) lanes.push(['encoded-export/copy', async () => toLite3(source).length]);
-      for (const [, fn] of lanes) for (let i = 0; i < 20; i++) sink += await fn();
+      const measured = selectedLanes ? lanes.filter(([name]) => selectedLanes.has(name)) : lanes;
+      if (!measured.length) throw new Error('selected lanes match no operations');
+      for (const [, fn] of measured) for (let i = 0; i < warmup; i++) sink += await fn();
       const rows = [];
       for (let repeat = 0; repeat < repeats; repeat++) {
-        for (const [name, fn] of repeat % 2 ? [...lanes].reverse() : lanes) rows.push({ repeat, ...await measure(name, n, fn) });
+        for (const [name, fn] of repeat % 2 ? [...measured].reverse() : measured) rows.push({ repeat, ...await measure(name, n, fn) });
       }
       measurements.push({ fixture, jsonBytes: Buffer.byteLength(sourceJson), rows, retention: await retention(destination, data) });
     }
@@ -125,7 +131,7 @@ async function main() {
     const files = ['index.js', 'views.js', 'input.js', `native/${process.platform}-${process.arch}/index.node`,
       `native/${process.platform}-${process.arch}/${process.platform === 'darwin' ? 'libplasmite.dylib' : process.platform === 'win32' ? 'plasmite.dll' : 'libplasmite.so'}`];
     const result = { node: process.version, platform: process.platform, arch: process.arch, iterations, repeats,
-      sink, measurements, exact, nativeBytes, hashes: Object.fromEntries(files.map(file => [file,
+      sink, warmup, selectedLanes: selectedLanes ? [...selectedLanes] : null, forceGc, measurements, exact, nativeBytes, hashes: Object.fromEntries(files.map(file => [file,
         crypto.createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex')])),
       limits: ['All JSON comparisons use safe finite numeric fixtures without bytes and return owned views.',
         'The legacy Message lane decodes the complete message synchronously; it has a different interface cost.',

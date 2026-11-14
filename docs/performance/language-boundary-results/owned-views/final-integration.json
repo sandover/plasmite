@@ -19,15 +19,63 @@
     }
   },
   "limits": [
-    "Gate covered integrated owned stream adapter7373432 and portable95588f5; later doc-only commits do not change runtime.",
-    "Node default test skips explicit-GC case; separate exposed-GC run passes all23cases.",
+    "Initial checkpoint: Gate covered integrated owned stream adapter7373432 and portable95588f5; later doc-only commits do not change runtime.",
     "Python skips Windows profile-directory policy on this macOS host.",
-    "No release or push occurred. Final input experiment remains uncommitted and will require affected-lane checks if adopted."
+    "The accepted section supersedes the initial checkpoint after JavaScript batching and UDP completion integration."
   ],
   "wheels": {
     "plasmite-1.3.0.tar.gz": "98f89ebea9790a2b9b3e3a8a51c70e1a84e1b0d9f04780c457df2fcc930b469c",
     "plasmite-1.3.0-cp310-cp310-macosx_11_0_arm64.whl": "4476eaaf152d7b3224d792e2696d85e9da0467b475443b0f5bd15664975893c3",
     "plasmite-1.3.0-cp311-abi3-macosx_11_0_arm64.whl": "d56d9b5b38f3d4ea2ba1cdb698d8806e895c56fce9441ed2e76d5a037d932be6",
     "plasmite-1.3.0-py3-none-macosx_11_0_arm64.whl": "4cbd7d2900f50665a8ef2d75e9ecd5cdebfe7e657f13bb73afaea7a624d58605"
+  },
+  "accepted": {
+    "runtimeHead": "0976777638f56a2b128f4c99c90b1c859693d74f",
+    "integrationCorrection": "Remove duplicate byte-import re-export after joining the independently tested branches.",
+    "commands": {
+      "just release-gate": {
+        "exit": 0,
+        "log": "accepted-release-gate.log.gz",
+        "sha256": "7892156e36ea04120c8b504f622c2fedae12edb357b644cd5aaa04bf91b55e1c"
+      },
+      "PLASMITE_LIB_DIR=frozen-library cargo clippy --manifest-path bindings/node/native/Cargo.toml --all-targets -- -D warnings": {
+        "exit": 0,
+        "log": "accepted-native-clippy.log.gz",
+        "sha256": "df31d069b62541e421014f1795cf8a13739787c5154cfbf4c7c465f97ce5f9da"
+      },
+      "node --expose-gc --test bindings/node/test/*.test.js": {
+        "exit": 0,
+        "log": "accepted-node26.log.gz",
+        "sha256": "56f753475628fc827866ebe6c8e4f70da9f36f2839dc68c2f2e91c9fd99d16f7"
+      },
+      "node24 --expose-gc --test bindings/node/test/*.test.js": {
+        "exit": 0,
+        "log": "accepted-node24.log.gz",
+        "sha256": "dd285db076756ecc2af0ee32982c6928fc287c768e8d04448ae7ffbc2b3a6b38"
+      }
+    },
+    "sourceSha256": {
+      "bindings/node/index.js": "69ec807f3b2735ae8fee50e2d207c4720c2bf99c6c50f7d28782b5953c62175d",
+      "bindings/node/input.js": "68824040844618d12b50df36695f91dd7e3ec16d7d3da3d086cc9df69487a2d2",
+      "bindings/node/portable.js": "0187d78561fd0e48cf79afc725c66ac0662e447ccbaa70c39faddd177b668ae5",
+      "bindings/node/native/src/input.rs": "abdd696da335bd2ed838fadd437fcd8b0c649c47ab3606567d7c59032c4af018",
+      "bindings/node/native/src/lib.rs": "656ac2612f20bf96f0e3093a6ba075ba19b931cf3773fcfce82db5512f1f3670",
+      "bindings/node/native/src/views.rs": "031e01a5fce6578d538151c413f48f7e81efde0dfffd1700a1eb5df60e8b1e77",
+      "bindings/node/portable/plasmite_core.wasm": "648b62f63d3e2cd196fcc2b3e85bd4c814afaeb19ea56bdca7a02d7907e01aff",
+      "include/plasmite.h": "735ea4eb60e82846bc5ab41488fc535597d3f714b2ad338ae28b0d25c5ef5cf9"
+    },
+    "wheels": {
+      "plasmite-1.3.0.tar.gz": "27d3f4cc596d19feff28547091f0dd3c3a861d6e3f0b81d57e8a712b2b80f48b",
+      "plasmite-1.3.0-cp310-cp310-macosx_11_0_arm64.whl": "1f1aa5d5f7f4ada2192aa84ea9b9d5738267a010d7eec894fcc6b6a1d2b88048",
+      "plasmite-1.3.0-cp311-abi3-macosx_11_0_arm64.whl": "32ae39267adb383b56edb3815c32e1bdcb81707a98c3b4e94567bf25a82f7820",
+      "plasmite-1.3.0-py3-none-macosx_11_0_arm64.whl": "428dd58d35bd8d8fdb819407af4b61a485316402faf77400966a921ea7012fc4"
+    },
+    "coverage": [
+      "release-gate includes final cargo fmt/clippy/check and all language/ABI/package/wheel checks.",
+      "127/127 Node cases pass on actualNode24 andNode26 with GC; no Node skips in these final runs.",
+      "Python96 cases pass with Windows-only account policy skipped on macOS.",
+      "Native all-target Clippy and native Rust formatting check pass with no new warning suppressions.",
+      "No publish or push."
+    ]
   }
 }
