@@ -141,13 +141,99 @@ while true; do
   sleep 1
 done
 
-# on a laptop — alert when the CPU thermal zone exceeds 80°C
-pls follow telemetry --tag sensor --where '.data.value > 80000'
+# on a laptop, after saving access to the Pi's shared server:
+pls follow https://pi.example.net:9743/telemetry --tag sensor --where '.data.value > 80000'
 
 # replay the last hour of readings to see the trend
-pls follow telemetry --tag sensor --since 1h --no-follow \
+pls follow https://pi.example.net:9743/telemetry --tag sensor --since 1h --no-follow \
   | jq '.data | [.ts, .value]'
 ```
+
+Use the [sharing walkthrough](record/serving.md#share-your-first-pool) to serve
+the Pi's pool and save the laptop's connection. A local name such as `telemetry`
+refers to that machine's pool directory; use the shared URL from another machine.
+
+### Check receipt, time and retained history
+
+Send an identifiable reading, then read it at the destination:
+
+```sh
+pls feed https://pi.example.net:9743/telemetry \
+  '{"reading_id":"check-001","measured_at":"2026-11-16T20:00:00Z","temperature_c":21.5}'
+pls follow https://pi.example.net:9743/telemetry --tail 1 --no-follow
+```
+
+Check `data.reading_id` and the value. The destination assigns `seq` and `time`
+while handling the append. Keep the sensor's measurement time in `data`, as
+`measured_at` does here. An earlier measurement can reach the pool later.
+
+Each successful `feed` output confirms one append. `--durability flush` requests
+the destination's storage flush before success; the default is `fast`.
+An I/O error can occur after storage but before the sender receives the result.
+Inspect the pool for the reading's application ID before sending it again.
+A manual resend can create another message with the same data and a new sequence.
+
+`feed --retry` retries busy-pool errors. A connection failure ends `feed` and
+leaves later input unsent; it creates no offline backlog. A full input pipe
+slows the producer, and closing it exposes a broken pipe to upstream writers.
+When a downstream stdout failure ends `feed`, completed appends remain stored.
+For shell pipelines, use `set -o pipefail` in Bash to preserve failure status.
+
+On the pool machine, inspect capacity with `pls pool info telemetry`. Feed
+representative readings through a small test pool until it wraps, then divide
+its retained message count by the sampling rate to estimate history. Header,
+index and message framing consume space too. In the
+[Debian check](record/debian-vm-validation.md), a 64 KiB pool retained 74 of the
+1,000 test readings: about 18.5 seconds at four readings per second. Different
+readings change that estimate. Choose a larger pool for longer history;
+`--since 1h` can only return history the pool still holds.
+
+### Run a Linux collector at boot
+
+Let systemd start and monitor the collector. Use the account that owns the pools
+and absolute paths. This example uses `brandon`; replace the account and paths
+with your own. `collect-to-pool.py` represents your collector program: it sends
+readings through `feed` and exits nonzero when that child fails. The
+[tested fixture and reboot record](record/debian-vm-validation.md) show a complete
+synthetic collector using Python's standard library.
+
+Save `/etc/systemd/system/sensor-collector.service`:
+
+```ini
+[Unit]
+Description=Sensor collector
+After=network.target
+RequiresMountsFor=/home/brandon/pools
+
+[Service]
+Type=simple
+User=brandon
+Environment=HOME=/home/brandon
+ExecStart=/usr/bin/python3 /home/brandon/sensors/collect-to-pool.py
+Restart=on-failure
+RestartSec=1
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now sensor-collector.service
+sudo journalctl -u sensor-collector.service -n 30 --no-pager
+```
+
+The service runs before sign-in when its executable and pool storage are
+available at boot. `After=network.target` orders startup; a remote destination
+can still be unavailable. `Restart=on-failure` starts a new collector process
+after failure. Restarting a process does not recover its previous unread input
+or establish whether an uncertain write succeeded. Keep that choice in the
+application. For a remote destination, save access as the service account.
+
+Use [Plasmite's server installer](record/serving.md#start-a-server-at-boot) for
+the shared server itself. After reboot, read a fresh identifiable sample from
+another machine and fetch an acknowledged older sample to check retained data.
 
 ### Send small messages over UDP
 

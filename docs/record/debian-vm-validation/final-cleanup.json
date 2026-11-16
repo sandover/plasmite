@@ -1,0 +1,8 @@
+{
+  "temporary_units_absent": true,
+  "temporary_guest_state_removed": true,
+  "temporary_guest_source_removed": true,
+  "previous_checkout_revision": "ddcc67fd4db281b101f1c2b099242dfabccd3a79",
+  "previous_checkout_clean": true,
+  "host_test_credentials_removed": true
+}

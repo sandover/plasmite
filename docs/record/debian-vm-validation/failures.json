@@ -1,0 +1,39 @@
+{
+  "warmup_seq": 1642,
+  "lost_event_id": "b40d1675-6200-45b1-8aed-d40e26cb3a2b",
+  "stored_before_response_drop": true,
+  "withheld_tls_bytes": 316,
+  "feed_exit": 8,
+  "feed_error": {
+    "error": {
+      "causes": [
+        "https://127.0.0.1:61346/v0/pools/readings/append_lite3: Network Error: Network Error: Error encountered in the status line: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof",
+        "Network Error: Error encountered in the status line: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof",
+        "peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
+      ],
+      "hint": "I/O error. Check the path, filesystem, and disk space.",
+      "kind": "Io",
+      "message": "request failed"
+    }
+  },
+  "accepted_pipe_bytes": 65536,
+  "pipe_backpressure": true,
+  "upstream_broken_pipe": true,
+  "later_record_absent": true,
+  "stored_copies_before_manual_retry": 1,
+  "stored_copies_after_manual_retry": 2,
+  "manual_retry_seq": 1647,
+  "connection_refused_exit": 8,
+  "connection_refused_error": {
+    "error": {
+      "causes": [
+        "https://127.0.0.1:61346/v0/pools/open: Connection Failed: Connect error: Connection refused (os error 61)",
+        "Connection refused (os error 61)"
+      ],
+      "hint": "I/O error. Check the path, filesystem, and disk space.",
+      "kind": "Io",
+      "message": "request failed",
+      "path": "readings"
+    }
+  }
+}

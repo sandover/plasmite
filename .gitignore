@@ -48,3 +48,12 @@ flamegraph.svg
 *.profraw
 *.profdata
 criterion/
+
+# Local experiment output belongs outside version control.
+/docs/**/*.tar
+/docs/**/*.tar.gz
+/docs/**/*.tgz
+/docs/**/*.zip
+/docs/**/*.gz
+/docs/**/*.log
+/docs/**/*.pstats

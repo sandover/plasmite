@@ -1,0 +1,79 @@
+{
+  "first_post_reboot": {
+    "data": {
+      "boot_id": "5528158e-4a32-4620-ae0c-7c834d81cced",
+      "measured_at_ns": 1794859747571325710,
+      "run_id": "427722a8-ba2a-48bb-b403-96d71638b184",
+      "sample": 3,
+      "source": "debian-vm-check",
+      "value": 3
+    },
+    "meta": {
+      "tags": [
+        "vm-collector"
+      ]
+    },
+    "seq": 1253,
+    "time": "2026-11-16T20:09:07.571428501Z"
+  },
+  "retained_pre_reboot": {
+    "data": {
+      "boot_id": "7c2006e7-19ac-432a-a8f2-f74356aca369",
+      "measured_at_ns": 1794859680135903394,
+      "run_id": "276743c7-fa5b-427f-a9cc-16374e4a69a3",
+      "sample": 1,
+      "source": "debian-vm-check",
+      "value": 1
+    },
+    "meta": {
+      "tags": [
+        "vm-collector"
+      ]
+    },
+    "seq": 1020,
+    "time": "2026-11-16T20:08:00.13603431Z"
+  },
+  "read_before_any_ssh": true,
+  "units": {
+    "plasmite-vm-check-collector-20261116.service": {
+      "MainPID": "1028",
+      "NRestarts": "0",
+      "ExecMainStartTimestamp": "Mon 2026-11-16 12:09:06 PST",
+      "ExecMainStartTimestampMonotonic": "3357574",
+      "User": "brandon",
+      "ActiveState": "active",
+      "SubState": "running",
+      "UnitFileState": "enabled"
+    },
+    "net.plasmite.6321bc28852d178e02def37895217b26c65d903a75eb69b24acf67088b20cc4b.service": {
+      "MainPID": "1027",
+      "NRestarts": "0",
+      "ExecMainStartTimestamp": "Mon 2026-11-16 12:09:06 PST",
+      "ExecMainStartTimestampMonotonic": "3356750",
+      "User": "brandon",
+      "ActiveState": "active",
+      "SubState": "running",
+      "UnitFileState": "enabled"
+    }
+  },
+  "access_after_reboot": {
+    "accepted": true,
+    "browser_trust": {
+      "certificate_sha256": "859d711c2a0aa01edb3270317d215a8874c23780f3949e0d704d78969d344731",
+      "expires_at": 67090118400,
+      "installed": false,
+      "names": [
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "192.168.175.132"
+      ]
+    },
+    "browser_trust_problem": null,
+    "credentials_saved": true,
+    "destination": "https://192.168.175.132:21943/",
+    "mcp_setup_commands": null,
+    "problem": null,
+    "reachable": true
+  }
+}

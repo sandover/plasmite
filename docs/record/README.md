@@ -17,6 +17,8 @@ For task guides and specifications, start with the [docs index](../README.md).
   setting browser trust, or operating a server.
 - [Windows boot validation](windows-boot-validation.md): read when assessing
   the native service tests and their support boundary.
+- [Debian VM validation](debian-vm-validation.md): read when checking Linux
+  service startup, reboot recovery, failed writes and sensor guidance.
 - C ABI header + stability contract: `../../include/plasmite.h`
 
 Do not place proposals, exploratory design drafts, or roadmap notes here.

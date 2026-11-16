@@ -69,6 +69,8 @@ docs/
 ├── record/distribution.md                      — Supported platforms, install channels, and SDK layout; read when adding a channel or platform
 ├── ../include/plasmite.h                       — C ABI header; read for stability contract, ownership rules, linking
 ├── record/windows-boot-validation.md           — Read when assessing native Windows service checks and their support boundary
+├── record/debian-vm-validation/               — Read when inspecting collector code and raw VM observations
+├── record/debian-vm-validation.md              — Read when checking Linux service startup, reboot recovery, failed writes, and sensor guidance
 ├── record/serving.md                           — Read when sharing pools, setting browser trust, or operating a secure server
 │
 ├── images/README.md                            — Read when reproducing README diagrams or terminal/browser recordings
@@ -103,4 +105,5 @@ When you add, rename, move, or delete a doc in `docs/` or `spec/`, update the tr
 - Preserve release evidence, active Ergo state, and all source changes during cleanup.
 
 # Guidance
+- Keep source and runnable benchmarks in Git. Keep source snapshots, experiment archives, build logs, and profiler dumps outside the repository. Keep useful measurements in readable files.
 - no pip in this project -- uv only

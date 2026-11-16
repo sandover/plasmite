@@ -1,0 +1,122 @@
+{
+  "connect": {
+    "accepted": true,
+    "browser_trust": {
+      "certificate_sha256": "859d711c2a0aa01edb3270317d215a8874c23780f3949e0d704d78969d344731",
+      "expires_at": 67090118400,
+      "installed": false,
+      "names": [
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "192.168.175.132"
+      ]
+    },
+    "browser_trust_problem": null,
+    "credentials_saved": true,
+    "destination": "https://192.168.175.132:21943/",
+    "mcp_setup_commands": [
+      "claude mcp add --scope user --transport http plasmite 'https://192.168.175.132:21943/mcp'",
+      "codex mcp add plasmite --url 'https://192.168.175.132:21943/mcp' --oauth-client-registration dcr --oauth-resource 'https://192.168.175.132:21943/mcp'"
+    ],
+    "problem": null,
+    "reachable": true
+  },
+  "units": {
+    "plasmite-vm-check-collector-20261116.service": {
+      "MainPID": "4579",
+      "NRestarts": "0",
+      "ExecMainStartTimestamp": "Mon 2026-11-16 12:03:41 PST",
+      "ExecMainStartTimestampMonotonic": "830158905",
+      "User": "brandon",
+      "ActiveState": "active",
+      "SubState": "running",
+      "UnitFileState": "enabled"
+    },
+    "net.plasmite.6321bc28852d178e02def37895217b26c65d903a75eb69b24acf67088b20cc4b.service": {
+      "MainPID": "4470",
+      "NRestarts": "0",
+      "ExecMainStartTimestamp": "Mon 2026-11-16 12:03:40 PST",
+      "ExecMainStartTimestampMonotonic": "829889541",
+      "User": "brandon",
+      "ActiveState": "active",
+      "SubState": "running",
+      "UnitFileState": "enabled"
+    }
+  },
+  "initial": {
+    "boot_id": "7c2006e7-19ac-432a-a8f2-f74356aca369",
+    "run_id": "ad33a7d1-0c15-40bb-87ca-101a45bb3fe4",
+    "pid": 4579,
+    "sample": 1016,
+    "seq": 1017,
+    "time": "2026-11-16T20:07:58.271826797Z"
+  },
+  "after_kill": {
+    "boot_id": "7c2006e7-19ac-432a-a8f2-f74356aca369",
+    "run_id": "276743c7-fa5b-427f-a9cc-16374e4a69a3",
+    "pid": 4700,
+    "sample": 1,
+    "seq": 1020,
+    "time": "2026-11-16T20:08:00.13603431Z"
+  },
+  "units_after_kill": {
+    "plasmite-vm-check-collector-20261116.service": {
+      "MainPID": "4700",
+      "NRestarts": "1",
+      "ExecMainStartTimestamp": "Mon 2026-11-16 12:07:59 PST",
+      "ExecMainStartTimestampMonotonic": "1088836267",
+      "User": "brandon",
+      "ActiveState": "active",
+      "SubState": "running",
+      "UnitFileState": "enabled"
+    },
+    "net.plasmite.6321bc28852d178e02def37895217b26c65d903a75eb69b24acf67088b20cc4b.service": {
+      "MainPID": "4470",
+      "NRestarts": "0",
+      "ExecMainStartTimestamp": "Mon 2026-11-16 12:03:40 PST",
+      "ExecMainStartTimestampMonotonic": "829889541",
+      "User": "brandon",
+      "ActiveState": "active",
+      "SubState": "running",
+      "UnitFileState": "enabled"
+    }
+  },
+  "pre_reboot_message": {
+    "data": {
+      "boot_id": "7c2006e7-19ac-432a-a8f2-f74356aca369",
+      "measured_at_ns": 1794859680135903394,
+      "run_id": "276743c7-fa5b-427f-a9cc-16374e4a69a3",
+      "sample": 1,
+      "source": "debian-vm-check",
+      "value": 1
+    },
+    "meta": {
+      "tags": [
+        "vm-collector"
+      ]
+    },
+    "seq": 1020,
+    "time": "2026-11-16T20:08:00.13603431Z"
+  },
+  "access_before_reboot": {
+    "accepted": true,
+    "browser_trust": {
+      "certificate_sha256": "859d711c2a0aa01edb3270317d215a8874c23780f3949e0d704d78969d344731",
+      "expires_at": 67090118400,
+      "installed": false,
+      "names": [
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "192.168.175.132"
+      ]
+    },
+    "browser_trust_problem": null,
+    "credentials_saved": true,
+    "destination": "https://192.168.175.132:21943/",
+    "mcp_setup_commands": null,
+    "problem": null,
+    "reachable": true
+  }
+}

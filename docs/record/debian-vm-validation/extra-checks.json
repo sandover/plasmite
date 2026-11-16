@@ -1,0 +1,60 @@
+{
+  "timestamp": {
+    "measured_at": "2026-11-16T20:16:21.345291+00:00",
+    "arrival": "2026-11-16T20:17:21.347377683Z",
+    "difference_seconds": 60.002086
+  },
+  "stdout_failure": {
+    "exit": 8,
+    "error": {
+      "error": {
+        "causes": [
+          "No space left on device (os error 28)",
+          "No space left on device (os error 28)"
+        ],
+        "hint": "Check the destination of stdout; completed appends remain stored.",
+        "kind": "Io",
+        "message": "failed to write stdout"
+      }
+    },
+    "first_stored": true,
+    "second_absent": true
+  },
+  "retention": {
+    "file_bytes": 65536,
+    "sent": 1000,
+    "retained": 74,
+    "oldest_seq": 927,
+    "newest_seq": 1000,
+    "seconds_at_four_per_second": 18.5,
+    "info": {
+      "bounds": {
+        "newest": 1000,
+        "oldest": 927
+      },
+      "file_size": 65536,
+      "index_capacity": 256,
+      "index_offset": 4096,
+      "index_size_bytes": 4096,
+      "metrics": {
+        "age": {
+          "newest_age_ms": 1,
+          "newest_time": "2026-11-16T20:17:21.376206478Z",
+          "oldest_age_ms": 1,
+          "oldest_time": "2026-11-16T20:17:21.375744969Z"
+        },
+        "message_count": 74,
+        "seq_span": 74,
+        "utilization": {
+          "free_bytes": 0,
+          "used_bytes": 57344,
+          "used_percent": 100.0
+        }
+      },
+      "name": "retention",
+      "path": "/home/brandon/.local/state/plasmite-vm-check-20261116/pools/retention.plasmite",
+      "ring_offset": 8192,
+      "ring_size": 57344
+    }
+  }
+}
