@@ -104,6 +104,11 @@ When you add, rename, move, or delete a doc in `docs/` or `spec/`, update the tr
 - Run `cargo clean` after release work. `just check` cleans `target/` itself when it exceeds 2 GB.
 - Preserve release evidence, active Ergo state, and all source changes during cleanup.
 
+# Git hygiene
+- Keep the repository small, readable, and useful to future contributors.
+- Use Git history to preserve source versions. Keep disposable experiment and build output outside the repository.
+- Performance evidence should support review and reproduction through runnable benchmarks, concise measurements, and source revision references.
+- Each commit should express one coherent change and preserve unrelated work.
+
 # Guidance
-- Keep source and runnable benchmarks in Git. Keep source snapshots, experiment archives, build logs, and profiler dumps outside the repository. Keep useful measurements in readable files.
 - no pip in this project -- uv only
