@@ -1,94 +1,29 @@
-# Plasmite docs
+# Plasmite documentation
 
-Start with the task you want to do:
+## Use Plasmite
 
-| I want to… | Read |
+| Goal | Read |
 | --- | --- |
-| Send and read messages on one machine | [Cookbook](cookbook.md) |
-| Send and follow through UDP | [UDP messages](record/serving.md#send-udp-messages) |
-| Share a pool with another machine | [Share your first pool](record/serving.md#share-your-first-pool) |
-| Share through a Tailscale network | [Tailscale setup](record/serving.md#use-tailscale) |
-| Use shared pools in a browser | [Browser setup](record/serving.md#open-pools-in-a-browser) |
-| Give Claude Code or Codex CLI access to pools | [AI client setup](record/serving.md#connect-an-ai-client) |
-| Revoke access or remove a saved connection | [Manage access](record/serving.md#manage-access) |
-| Run a server with my own certificate or proxy | [Deploy a server](record/serving.md#deploy-a-server) |
-| Fix a connection | [Troubleshooting](record/serving.md#troubleshoot-a-connection) |
-| Prepare for the next major release | [Next major upgrade](record/upgrading-next-major.md) |
-| Upgrade from an earlier release | [Upgrade to 1.0](record/upgrading-1.0.md) |
-| Install Plasmite | [Install channels](record/distribution.md#install-matrix) |
-| Install on Raspberry Pi or Linux ARM | [Published ARM SDK installation (preview)](record/distribution.md#linux-arm-sdk-preview-install) |
-| Build from this checkout | [Source installation](building.md#install-the-cli-from-source) |
+| Install the CLI or SDK | [Distribution](record/distribution.md) |
+| Send, read, filter or replay messages | [Cookbook](cookbook.md) |
+| Understand command inputs, outputs and errors | [CLI guide](cli.md) |
+| Share pools, connect a browser or AI client, or fix access | [Serving](record/serving.md) |
+| Choose an interface or understand performance | [Performance](performance/README.md) |
+| Upgrade existing applications | [Next major](record/upgrading-next-major.md), [1.2](record/upgrading-1.2.md), [1.0](record/upgrading-1.0.md) |
 
-## Guides and reference
+Language SDK READMEs describe their APIs and examples:
+[Rust](../README-crate.md), [C](../include/plasmite.h),
+[Python](../bindings/python/README.md), [JavaScript](../bindings/node/README.md),
+and [Go](../bindings/go/README.md).
 
-- [CLI guide](cli.md): pool references, input, output, and exit behavior.
-- [Serving guide](record/serving.md): secure sharing, browser trust, server
-  operation, and recovery.
-- [Distribution](record/distribution.md): supported platforms, install
-  channels, and software development kit (SDK) layout.
-- [UDP versus HTTP measurements](performance/udp-transport.md): compare measured
-  delivery, latency, and datagram-size support.
-- [Transport measurements](performance/transport-comparison.md): compare
-  native and Model Context Protocol (MCP) performance.
-- [Windows access measurements](performance/windows-access-1.0.md): compare
-  local libraries, command-line tools, HTTP, and MCP in Plasmite 1.0.0.
-- [1.0 performance measurements](performance/1.0-release.md): measured writer
-  improvements, small-read costs and consumer latency on one Mac.
-- [Language interfaces and performance](performance/language-interfaces.md):
-  read when choosing owned views, native copies or explicit batches and checking their measured tradeoffs.
-- [Native wake-up investigation](performance/language-boundary-results/wakeups/README.md):
-  read when checking cross-process shared-address waits and the remaining integration work.
-- [Borrowed append locking](performance/language-boundary-results/append-descriptors/README.md):
-  read when comparing descriptor operations with complete append costs.
-- [Parse-once encoding measurements](performance/language-boundary-results/encoding/README.md):
-  read when assessing bounded growth, structural sizing and native allocation costs.
-- [Numeric append receipts](performance/language-boundary-results/append-receipts/README.md):
-  read when choosing confirmation-only producer results and comparing their cost.
-- [Binary validation and writer handles](performance/language-boundary-results/core-binary/README.md):
-  Read when comparing complete binary forwarding and notification costs.
-- [Node buffer ownership measurements](performance/language-boundary-results/node-owned/README.md):
-  read when choosing raw buffer transfer or JSON compaction.
-- [JSON pipe comparison](performance/pipe-comparison.md): compare a Python
-  producer and reader with ordinary Plasmite calls and measure append savings.
+## Develop Plasmite
 
-For exact contracts, start with the [specifications](../spec/README.md):
+[Vision](record/vision.md) defines scope. [Architecture](record/architecture.md)
+explains responsibilities, ownership and lasting design choices.
+[Building](building.md), [testing](record/testing.md), and
+[releasing](record/releasing.md) cover development and delivery.
+The [specifications](../spec/README.md) define exact behavior.
 
-- [CLI](../spec/v0/SPEC.md)
-- [UDP input](../spec/udp/v0/SPEC.md)
-- [UDP transport](../spec/udp/v1/SPEC.md)
-- [Public API](../spec/api/v0/SPEC.md)
-- [Remote HTTP protocol](../spec/remote/v0/SPEC.md)
-- [MCP](../spec/mcp/2025-11-25/SPEC.md)
-- [C interface and ownership rules](../include/plasmite.h)
-
-## Work on Plasmite
-
-The [docs of record](record/README.md) describe the current design and
-policies. Start with [vision](record/vision.md) for product scope and
-[architecture](record/architecture.md) for internal structure. Use
-[building](building.md), [testing](record/testing.md), and
-[releasing](record/releasing.md) when changing or shipping code.
-
-Proposals record design history. Current setup and behavior live in the guides
-and specifications above:
-
-- [Language-boundary performance](proposals/language-boundary-performance.md):
-  read when assessing conversions, memory ownership and runtime costs across bindings.
-  The [Opus review](proposals/language-boundary-performance-review.md) records
-  checked findings, ticket revisions and remaining uncertainty.
-- [Measured implementation distillation](proposals/implementation-distillation/README.md):
-  compare five prototypes, their measured savings and costs, and the resulting
-  implementation recommendations.
-- [Secure sharing design history](proposals/serve-mcp-native.md)
-- [Earlier invitation design](proposals/serve-access-mvp.md)
-- [MCP server design](proposals/mcp-server.md)
-- [CLI and help audit](proposals/cli-help-system.md)
-- [Proposed CLI surface design history](proposals/cli-surface.md)
-- [UDP input design](proposals/udp-input.md): read when designing a small
-  datagram input for an existing pool.
-- [Full UDP transport proposal](proposals/udp-transport.md): read when designing
-  UDP feed and follow through the CLI and native APIs.
-
-The repository's `.ergo/` backlog and journal track planned work and results.
-
-CLI script migration: [Upgrading to 1.2.0](record/upgrading-1.2.md).
+[Validation reports](validation/README.md) record dated platform checks and their
+limits. The Ergo backlog tracks unfinished work. Git history retains superseded
+proposals and investigations.

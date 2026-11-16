@@ -183,7 +183,7 @@ On the pool machine, inspect capacity with `pls pool info telemetry`. Feed
 representative readings through a small test pool until it wraps, then divide
 its retained message count by the sampling rate to estimate history. Header,
 index and message framing consume space too. In the
-[Debian check](record/debian-vm-validation.md), a 64 KiB pool retained 74 of the
+[Debian check](validation/debian-vm-validation.md), a 64 KiB pool retained 74 of the
 1,000 test readings: about 18.5 seconds at four readings per second. Different
 readings change that estimate. Choose a larger pool for longer history;
 `--since 1h` can only return history the pool still holds.
@@ -194,7 +194,7 @@ Let systemd start and monitor the collector. Use the account that owns the pools
 and absolute paths. This example uses `brandon`; replace the account and paths
 with your own. `collect-to-pool.py` represents your collector program: it sends
 readings through `feed` and exits nonzero when that child fails. The
-[tested fixture and reboot record](record/debian-vm-validation.md) show a complete
+[tested fixture and reboot record](validation/debian-vm-validation.md) show a complete
 synthetic collector using Python's standard library.
 
 Save `/etc/systemd/system/sensor-collector.service`:

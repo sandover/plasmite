@@ -1,33 +1,9 @@
-# Python native views
+# Python views and input performance
 
-The native extension makes selected cold reads 2–8 times faster than the
-existing complete-message JSON API on these fixtures. It keeps one independent
-Lite3 snapshot and crosses the C boundary directly from Python's native
-container slots. Reading a child creates a small wrapper; it does not decode
-its siblings. Native dictionaries and lists still win repeated lookup and
-arithmetic scans after someone has paid to construct them.
-
-## Method and scope
-
-These measurements use CPython 3.15.2 on macOS/Apple M5 Pro. The extension
-build uses uv-managed CPython 3.14.6 headers, `Py_LIMITED_API=0x030b0000`,
-Apple Clang and `-O3`; the same artifact passes protocol checks under 3.11.
-Seven repeats
-alternate lane order inside each fixture. Storage pages stay warm; “cold” means
-fresh message acquisition. Builds and other agents' tests stopped during timing.
-The native and fallback runs use the same frozen span-lookup core library:
-`e3f59f98c9f6055f0786b584add6dcfabde43395968993dd0a2bfcee134eeae0`.
-The core still performs the older duplicate-normalization pass at acquisition.
-Later core constructor changes do not appear in these numbers.
-
-The [native](native.raw.json) and [fallback](fallback.raw.json) files record
-all samples, interpreter details and source/library/extension hashes.
-Exact measured Python sources (outside Git) preserve the native
-extension before later formatting and diagnostic-wording changes. The core source
-and binary correspond to the span lookup checkpoint (outside Git).
-The common small fixture has three fields, a nested metric and three samples;
-wide adds 200 nested objects; string adds 64 KiB; array has 1,000 integers.
-Each lane verifies its result outside the timed loop.
+The native extension supplies Mapping and Sequence access over immutable Lite3.
+Selected fields and unchanged forwarding avoid a complete Python object tree.
+Native containers can win repeated lookups and full-object work. The ctypes
+fallback preserves the API with extra boundary and buffer costs.
 
 ## Native extension results
 
@@ -70,150 +46,6 @@ and readonly-buffer checks survive pool closure. Encoded byte lengths identify
 the snapshot each child retains; peak process RSS does not measure live retained
 owner memory. A small child keeps the entire encoded message alive.
 
-## Reproduce
-
-Build the extension, then run each backend separately against the same frozen
-library, with no concurrent builds or tests:
-
-```sh
-cd bindings/python
-uv run --no-project --with setuptools --with wheel python setup.py build_ext --inplace
-cd ../..
-PLASMITE_LIB_DIR=/path/to/frozen/library PYTHONPATH=bindings/python \
-  python3 bindings/python/benchmarks/views.py --output native.raw.json
-PLASMITE_PYTHON_VIEWS=0 PLASMITE_LIB_DIR=/path/to/frozen/library PYTHONPATH=bindings/python \
-  python3 bindings/python/benchmarks/views.py --output fallback.raw.json
-```
-
-Use `--allocations --scale .01 --repeats 1` in separate diagnostic processes.
-
-## Build and runtime checks
-
-[Support checks and exact SDK/wheel hashes](support-checks.json) and the
-three-wheel build/install log (outside Git) record the packaging result.
-The wheel smoke builds all three variants from the standalone source archive,
-checks extension/CLI/library architecture and deployment tags, compares bundled
-SDK bytes, installs each wheel and exercises view/native/JSON/buffer lifetime.
-The ABI3 installation also passes the bundled secure-server restart smoke.
-The full Python suite passes 60 tests with one skip. Actual free-threaded 3.14t
-passes eight view tests without importing the extension or enabling the GIL.
-CPython 3.10 native wheel and 3.11 ABI3 protocol tests pass. These local checks
-cover macOS arm64; existing release CI runs the same wheel smoke on its Linux,
-Windows and Intel macOS hosts. Local PyPy execution remains untested.
-
-## Native input and complete delivery
-
-`append_view` encodes exact Python builtin input directly into Lite3 and returns
-that retained encoding. It removes the outgoing JSON text and its decode pass.
-The C stack tracks ancestors for cycle detection, so nested dictionaries do not
-create Python tracking objects. The encoding grows without rerunning hooks.
-Custom types/subclasses fail explicitly; the existing JSON/dataclass API stays
-available. Byte buffers copy into the encoding before storage work releases the
-GIL. The compatibility backend snapshots input, then uses bulk JSON for ordinary
-data or the checked ctypes builder for byte values and NUL tags.
-
-The next measurements use the newer shared constructor/JSON-capability core,
-not the earlier read baseline. Its frozen library hash is
-`ea3e5ab7c5bb262a86fcd88140c38a332074157d023fb084a28e0a004f798984`;
-core sources (outside Git),
-Python/runner sources (outside Git) and
-[summary/checks](producer-summary.json) identify the exact artifacts. The
-extension uses CPython 3.11.15 headers and the stable 3.11 ABI; runs use 3.15.2.
-Seven repeats alternate lane order. Builds/tests stopped during timing.
-
-Median microseconds, new / existing API:
-
-| Requested result | Small | 200 nested fields | 64 KiB string | 1,000 integers |
-| --- | ---: | ---: | ---: | ---: |
-| Retained encoding / identity-only control | 4.65 / 5.88 | 43.84 / 48.11 | 13.67 / 54.04 | 44.38 / 74.84 |
-| Sequence + complete native data | 5.69 / 9.19 | 88.99 / 100.16 | 17.15 / 108.83 | 64.96 / 104.80 |
-| Complete JSON string / compact JSON control | 5.70 / 7.16 | 64.82 / 63.92 | 34.02 / 89.30 | 53.84 / 78.67 |
-
-The first row includes additional result ownership on the new path; both
-callers can read the committed identity. Native-data and JSON rows compare the
-same requested final value. The existing native-data API also creates its
-required dataclass, datetime and raw JSON. The compact controls include builtin
-JSON serialization and UTF-8 conversion. Wide complete JSON costs about 1%
-more on the native path. [Raw native runs](producer-native.raw.json) keep every
-sample; [fallback runs](producer-fallback.raw.json) show compatibility costs
-separately. A 64 KiB native byte value takes 9.16 µs to append and retain; that
-lane has no equivalent JSON value control.
-
-[Native](producer-native.allocations.json) and
-[fallback](producer-fallback.allocations.json) allocation diagnostics run in
-separate processes with null timings. They exclude native allocations and do
-not establish total allocation counts. Retained builder storage can keep spare
-capacity beyond the encoded byte length.
-
-### Why faster sending can lower delivery throughput
-
-Five paired runs use independent writer/reader processes. Both writers check
-committed identity; the native writer retains and discards its view. The same
-JSON consumer decodes and verifies every complete record. These pipeline
-fixtures differ from the table above: the small record has 17 metrics, context
-and an empty note; wide adds 200 flat integer fields; large adds a 64 KiB note.
-
-| Pipeline | Existing records/s | Native records/s | Combined CPU change |
-| --- | ---: | ---: | ---: |
-| [Small](producer-pipeline-small.json) | 99,378 | 92,509 | −8.7% |
-| [Wide](producer-pipeline-wide.json) | 27,952 | 26,952 | +0.5% |
-| [Large](producer-pipeline-large.json) | 14,089 | 14,221 | −33.3% |
-
-The small regression comes from changed file-lock handoffs. Three controls
-separate the mechanism from encoder and frame costs:
-
-- [Prefilled readers](producer-prefilled-reader.json), with no concurrent
-  writer, consume new/old frames in 8.04/8.13 µs. Encoded frame lengths also match.
-- Adding only [1.5 µs of sender work](producer-cadence-1500.json) outside the lock
-  raises native delivery from [93k](producer-cadence-0.json) to 107k records/s.
-  [3 µs](producer-cadence-3000.json) slows it to 90.5k as the writer becomes the
-  limit. Payload, publication and consumer result stay the same.
-- A [separate diagnostic](producer-locks-0.json) measures 5.24 ms of writer
-  exclusive-lock acquisition and 10.46 ms of reader shared-lock acquisition per
-  5,000 records. With [1.5 µs spacing](producer-locks-1500.json), those budgets
-  fall to 2.42/6.42 ms. Lock counts remain about 5,000 each. Wake counts remain
-  5,000 and wake budgets stay close; the native reader records zero address waits.
-
-Faster encoding makes the writer request the pool lock more often while both
-processes run. Their acquisition/handoff cost grows enough to erase the small
-encoding gain. These inclusive diagnostic budgets combine syscall execution,
-waiting and descheduling. They are separate from ordinary throughput timings;
-do not add their medians to reconstruct an uninstrumented operation.
-The delay serves only as a diagnostic. The next bounded-batch experiment will
-test fewer lock handoffs. Ordinary calls remain unbuffered.
-
-[Probe source](producer-lock-probe.c) targets this macOS host. Compile it with
-`cc -dynamiclib -O2` and pass `--native-counts /absolute/path/to/probe.dylib` to
-the pipeline runner. Use `--producer-work-ns 1500` for the spacing control and
-`--no-pipe --receipt native-view --baseline-receipt identity` for these paired
-Plasmite runs. The source archive includes the earlier unpadded pipeline runner
-whose hash appears in the first three pipeline files.
-
-### UDP copy removal and final checks
-
-The retained UDP cleanup pins immutable payload bytes instead of building a
-ctypes array copy. Mutable inputs still snapshot. Seven independent tracemalloc
-samples show Python peak allocation dropping from 8,368 to 4,131 bytes for the
-small record, and 270,350 to 200,538 bytes for the 64 KiB string. The removed
-buffer and its ctypes array bookkeeping explain this reduction. These
-[before](producer-udp-baseline.allocations.json)/
-[after](producer-udp-candidate.allocations.json) diagnostics contain null timings
-and exclude C/Rust memory. No UDP throughput gain follows from them.
-
-The full Python suite passes 70 tests with one skip. The installed native 3.10
-wheel and actual free-threaded 3.14t fallback each pass 18 view/input cases.
-Free-threaded Python keeps its GIL disabled. Cases cover cycles, aliases, exact
-integers, negative zero, Unicode/NUL rules, rejected hooks, mutable byte input,
-growth, canonical timestamps/metadata and blocked-storage thread progress.
-The three-wheel log (outside Git) also verifies native input,
-byte values and NUL tags in every installed wheel, plus the packaged server.
-
-[Callback ordering checks](callback-guards/README.md) cover reentrant closure during
-argument conversion and report the cost of the additional open-handle check.
-
-[Explicit view batches and forwarding](batches/README.md) reduce busy-reader lock
-handoffs and reuse immutable encoded input, with matched complete-delivery, paced,
-contention and retention measurements.
 ## Owned UDP receiving: final central checkpoint
 
 Owned DATA now crosses C/Python as one checked message owner. Native Python
@@ -242,10 +74,9 @@ extension, source and worker fingerprints. Small full-native receiving takes
 19% less time. Selected reads avoid the requested native copy and therefore
 measure a different caller job from full-native conversion.
 
-The complete C/Python source overlay (outside Git) comes from `20eb53c`,
-which identifies the timed core and extension sources. Build the shared library
-in release mode, build the extension with CPython 3.13, and run one lane per
-process:
+Build the shared library in release mode and build the native extension for the
+selected interpreter. The recorded UDP runs used CPython 3.13. Run one lane
+per process:
 
 ```sh
 PLASMITE_LIB_DIR=/fixed/sdk/lib PYTHONPATH=bindings/python \
@@ -258,5 +89,16 @@ Tests cover exact identity, duplicate/late arrival order, control events and
 retained owners after close in native and fallback Python. The timed native
 backend does not establish fallback performance.
 
-Historical source snapshots and full build logs stay outside Git. This report
-keeps the scripts, summaries and readable results.
+## Reproduce
+
+Use [bindings/python/benchmarks](../../../../../bindings/python/benchmarks/)
+for view access, native input, complete pipelines and streams. The
+[native raw runs](native.raw.json), [fallback runs](fallback.raw.json),
+[producer summary](producer-summary.json), and [UDP runs](udp.raw.json)
+record interpreter, backend and artifact identity. Initial view comparisons
+used CPython 3.15.2 on macOS/Apple M5 Pro; they precede later core constructor
+changes. Rebuild both candidates and compare matching requested results before
+applying those historical numbers to a new change.
+
+[Explicit batch results](batches/README.md) cover complete consumer work,
+including the cases where batching adds idle cost or retains more owners.

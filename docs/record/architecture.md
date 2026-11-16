@@ -85,6 +85,31 @@ Adapters select a representation without duplicating those policies. Node's
 HTTP adapter runs the checked core in bundled WebAssembly and uses the same
 Proxy interface. It retains the binary transport's existing delivery limits.
 
+## Ownership and abstraction choices
+
+Shared code belongs with the invariant it enforces. Storage and readability
+checks have common owners; interface-specific progress and delivery policies
+stay at their boundaries. CLI follow and API tails retain their distinct rules.
+Browser pages own displayed rows and progress; their shared reader handles
+stream framing. A universal message or subscription model adds state without
+removing these responsibilities.
+
+Checked input encoders capture mutable values when they visit them. Later user
+callbacks cannot change already encoded values. Retain validation proof with
+immutable bytes; exposed mutable buffers require their own copy or validation.
+Measure sparse reads, full conversion and forwarding separately, including
+runtime allocation, retained owners and complete producer/consumer work.
+
+Installed services preserve listener spelling where it identifies the native
+job. Shared normalization owns defaults and validation; an additional settings
+model must remove a concrete source of duplication to justify itself.
+
+Ordinary HTTP handlers propagate errors through the shared response policy.
+Each handler keeps its authorization, extraction and storage-admission order
+explicit. Cancellation and revocation retain their existing owners. Binary CLI
+tag filters reuse metadata/readability checks without constructing unused data
+trees; JSON output and jq request full decoding.
+
 ## CLI ownership
 
 The `plasmite` binary uses ordinary Rust modules with one-way dependencies:
@@ -96,7 +121,10 @@ main.rs → cli::args + cli::dispatch → command-family modules → API/core
 
 `main.rs` owns process concerns only: normalized argument parsing, construction
 of the small `CliContext`, final error presentation, and process exit.
-`cli::args` owns the clap syntax and help contract. `cli::dispatch` converts
+`cli::args` owns the clap syntax and help contract. Root help
+orients the reader, the CLI guide explains shared operating rules, and command
+help describes each invocation. These surfaces should form one complete manual
+with clear ownership. `cli::dispatch` converts
 parsed variants into explicit argument structures for these command families:
 
 - `pool` and `doctor` for lifecycle, metadata, and diagnostics;

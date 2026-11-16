@@ -10,6 +10,7 @@ docs/
 ├── building.md                                — Build system + vendoring; read when touching build/release tooling
 ├── cli.md                                     — CLI operating model; read when resolving pool refs, input/output modes, or exits
 ├── cookbook.md                                — Task-oriented examples; read when you want copy/paste CLI workflows
+├── performance/README.md                      — Read when choosing a performance report or measuring a change
 ├── performance/udp-transport.md               — Read when assessing UDP versus HTTP delivery, measured latency, or maximum datagram support
 ├── performance/udp-transport-bench.rs          — Read when reproducing the matched UDP and HTTP transport measurements
 ├── performance/udp-transport-results/          — Read when checking the raw runs and host setup behind the UDP measurements
@@ -38,25 +39,6 @@ docs/
 ├── performance/pipe-comparison.md              — Read when comparing a Python pipe with ordinary Plasmite calls
 ├── performance/pipe-comparison-results/         — Read when checking the raw pipe runs and append timing evidence
 │
-│   Design audits and proposals
-├── proposals/language-boundary-performance.md — Read when removing conversion and runtime costs across bindings
-├── proposals/language-boundary-performance-review.md — Read when checking Opus feedback and ticket revisions
-├── proposals/implementation-distillation/      — Read when judging measured implementation simplification proposals
-├── proposals/implementation-distillation/implementation.md — Read when checking review decisions and validation of the two implemented follow-ups
-│   ├── README.md                              — Read when comparing the five recommendations and their limits
-│   ├── service-settings.md                    — Read when considering complete persisted service settings
-│   ├── message-path.md                        — Read when evaluating message models or tag-only binary filtering
-│   ├── browser-state.md                       — Read when evaluating shared browser subscription state
-│   ├── ordered-follow.md                      — Read when evaluating shared local and remote follow processing
-│   └── http-handlers.md                       — Read when simplifying ordinary web-handler error propagation
-├── proposals/cli-help-system.md               — CLI/help audit and reform model; read before redesigning command discovery
-├── proposals/cli-surface.md                   — Proposed command surface; read when reviewing CLI naming, shared rules, or help
-├── proposals/mcp-server.md                    — MCP design history; read when revisiting the MCP surface
-├── proposals/serve-mcp-native.md              — Secure sharing; read when designing access keys, native connections, or MCP authorization
-├── proposals/serve-access-mvp.md              — Earlier access proposal; read when tracing the preceding invitation design
-├── proposals/udp-input.md                     — Read when designing User Datagram Protocol (UDP) input, its CLI, or delivery limits
-├── proposals/udp-transport.md                 — Read when designing UDP feed and follow across the CLI and native APIs
-│
 │   Docs of record
 ├── record/README.md                           — Docs of record index; start here for stable policies and runbooks
 ├── record/vision.md                           — Product scope + principles; read when breaking scope ties
@@ -68,10 +50,13 @@ docs/
 ├── record/upgrading-1.0.md                     — Read when updating scripts, remote configuration, or Rust clients to 1.0
 ├── record/distribution.md                      — Supported platforms, install channels, and SDK layout; read when adding a channel or platform
 ├── ../include/plasmite.h                       — C ABI header; read for stability contract, ownership rules, linking
-├── record/windows-boot-validation.md           — Read when assessing native Windows service checks and their support boundary
-├── record/debian-vm-validation/               — Read when inspecting collector code and raw VM observations
-├── record/debian-vm-validation.md              — Read when checking Linux service startup, reboot recovery, failed writes, and sensor guidance
 ├── record/serving.md                           — Read when sharing pools, setting browser trust, or operating a secure server
+│
+│   Dated platform checks
+├── validation/README.md                       — Read when finding dated platform checks and their support limits
+├── validation/windows-boot-validation.md           — Read when assessing native Windows service checks and their support boundary
+├── validation/debian-vm-validation/               — Read when inspecting collector code and raw VM observations
+├── validation/debian-vm-validation.md              — Read when checking Linux service startup, reboot recovery, failed writes, and sensor guidance
 │
 ├── images/README.md                            — Read when reproducing README diagrams or terminal/browser recordings
 └── images/ui/                                  — UI screenshots; read when updating docs/UI references
@@ -87,6 +72,11 @@ spec/
 ```
 
 ## Maintaining the Docs Map
+
+Documentation should help readers use or change the current system. Keep lasting
+design decisions with the architecture, exact behavior in specifications, and
+performance claims beside useful measurements and runnable benchmarks. Git
+history preserves superseded plans and investigation diaries.
 When you add, rename, move, or delete a doc in `docs/` or `spec/`, update the tree above.
 
 - Descriptions must answer “read this when…”, not restate the filename.

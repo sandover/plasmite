@@ -1,7 +1,7 @@
 # Windows boot service validation
 
 This report records the Windows service checks from October 5, 2026.
-Read [serving](serving.md) for installation and operation.
+Read [serving](../record/serving.md) for installation and operation.
 
 ## Candidate and environment
 

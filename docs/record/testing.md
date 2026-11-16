@@ -91,7 +91,7 @@ server after the owner restarted and signed in normally with FileVault
 enabled. This establishes recovery after disk unlock and login. The Windows
 service also passed a fresh guest reboot before interactive sign-in, including
 automatic recovery when its selected network address appeared late. See the
-[Windows and Mac validation report](windows-boot-validation.md) for source,
+[Windows and Mac validation report](../validation/windows-boot-validation.md) for source,
 artifact and environment boundaries. No physical Linux or Raspberry Pi boot
 trial has passed yet.
 
